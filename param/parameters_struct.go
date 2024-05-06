@@ -25,1226 +25,543 @@ import (
 
 type Config struct {
 	Cache struct {
-		Concurrency         int
-		DataLocation        string
-		DataLocations       []string
-		EnableLotman        bool
-		EnableOIDC          bool
-		EnableVoms          bool
-		ExportLocation      string
-		HighWaterMark       string
-		LocalRoot           string
-		LowWatermark        string
-		MetaLocations       []string
+		Concurrency int
+		DataLocation string
+		DataLocations []string
+		EnableLotman bool
+		EnableOIDC bool
+		EnableVoms bool
+		ExportLocation string
+		HighWaterMark string
+		LocalRoot string
+		LowWatermark string
+		MetaLocations []string
 		PermittedNamespaces []string
-		Port                int
-		RunLocation         string
-		SelfTest            bool
-		SelfTestInterval    time.Duration
-		SentinelLocation    string
-		Url                 string
-		XRootDPrefix        string
+		Port int
+		RunLocation string
+		SelfTest bool
+		SelfTestInterval time.Duration
+		SentinelLocation string
+		Url string
+		XRootDPrefix string
 	}
 	Client struct {
-		DisableHttpProxy       bool
-		DisableProxyFallback   bool
-		MaximumDownloadSpeed   int
-		MinimumDownloadSpeed   int
+		DisableHttpProxy bool
+		DisableProxyFallback bool
+		MaximumDownloadSpeed int
+		MinimumDownloadSpeed int
 		SlowTransferRampupTime int
-		SlowTransferWindow     int
+		SlowTransferWindow int
 		StoppedTransferTimeout int
-		WorkerCount            int
+		WorkerCount int
 	}
 	ConfigDir string
-	Debug     bool
-	Director  struct {
-		AdvertisementTTL              time.Duration
-		CacheResponseHostnames        []string
-		CacheSortMethod               string
-		DefaultResponse               string
-		EnableBroker                  bool
-		EnableOIDC                    bool
-		FilteredServers               []string
-		GeoIPLocation                 string
-		MaxMindKeyFile                string
-		MaxStatResponse               int
-		MinStatResponse               int
+	Debug bool
+	Director struct {
+		AdvertisementTTL time.Duration
+		CacheResponseHostnames []string
+		CacheSortMethod string
+		DefaultResponse string
+		EnableBroker bool
+		EnableOIDC bool
+		FilteredServers []string
+		GeoIPLocation string
+		MaxMindKeyFile string
+		MaxStatResponse int
+		MinStatResponse int
 		OriginCacheHealthTestInterval time.Duration
-		OriginResponseHostnames       []string
-		StatConcurrencyLimit          int
-		StatTimeout                   time.Duration
-		SupportContactEmail           string
-		SupportContactUrl             string
+		OriginResponseHostnames []string
+		StatConcurrencyLimit int
+		StatTimeout time.Duration
+		SupportContactEmail string
+		SupportContactUrl string
 	}
-	DisableHttpProxy     bool
+	DisableHttpProxy bool
 	DisableProxyFallback bool
-	Federation           struct {
-		BrokerUrl              string
-		DirectorUrl            string
-		DiscoveryUrl           string
-		JwkUrl                 string
-		RegistryUrl            string
-		TopologyNamespaceUrl   string
+	Federation struct {
+		BrokerUrl string
+		DirectorUrl string
+		DiscoveryUrl string
+		JwkUrl string
+		RegistryUrl string
+		TopologyNamespaceUrl string
 		TopologyReloadInterval time.Duration
-		TopologyUrl            string
+		TopologyUrl string
 	}
 	GeoIPOverrides interface{}
-	Issuer         struct {
-		AuthenticationSource           string
-		AuthorizationTemplates         interface{}
-		GroupFile                      string
-		GroupRequirements              []string
-		GroupSource                    string
+	Issuer struct {
+		AuthenticationSource string
+		AuthorizationTemplates interface{}
+		GroupFile string
+		GroupRequirements []string
+		GroupSource string
 		OIDCAuthenticationRequirements interface{}
-		OIDCAuthenticationUserClaim    string
-		QDLLocation                    string
-		ScitokensServerLocation        string
-		TomcatLocation                 string
+		OIDCAuthenticationUserClaim string
+		QDLLocation string
+		ScitokensServerLocation string
+		TomcatLocation string
 	}
-	IssuerKey  string
+	IssuerKey string
 	LocalCache struct {
-		DataLocation            string
+		DataLocation string
 		HighWaterMarkPercentage int
-		LowWaterMarkPercentage  int
-		RunLocation             string
-		Size                    string
-		Socket                  string
+		LowWaterMarkPercentage int
+		RunLocation string
+		Size string
+		Socket string
 	}
 	Logging struct {
 		Cache struct {
-			Http      string
-			Ofs       string
-			Pfc       string
-			Pss       string
+			Http string
+			Ofs string
+			Pfc string
+			Pss string
 			Scitokens string
-			Xrd       string
-			Xrootd    string
+			Xrd string
+			Xrootd string
 		}
 		DisableProgressBars bool
-		Level               string
-		LogLocation         string
-		Origin              struct {
-			Cms       string
-			Http      string
-			Ofs       string
-			Oss       string
+		Level string
+		LogLocation string
+		Origin struct {
+			Cms string
+			Http string
+			Ofs string
+			Oss string
 			Scitokens string
-			Xrd       string
-			Xrootd    string
+			Xrd string
+			Xrootd string
 		}
 	}
 	Lotman struct {
-		DbLocation  string
-		EnableAPI   bool
+		DbLocation string
+		EnableAPI bool
 		LibLocation string
-		Lots        interface{}
+		Lots interface{}
 	}
 	MinimumDownloadSpeed int
-	Monitoring           struct {
-		AggregatePrefixes    []string
-		DataLocation         string
-		MetricAuthorization  bool
-		PortHigher           int
-		PortLower            int
-		PromQLAuthorization  bool
-		TokenExpiresIn       time.Duration
+	Monitoring struct {
+		AggregatePrefixes []string
+		DataLocation string
+		MetricAuthorization bool
+		PortHigher int
+		PortLower int
+		PromQLAuthorization bool
+		TokenExpiresIn time.Duration
 		TokenRefreshInterval time.Duration
 	}
 	OIDC struct {
-		AuthorizationEndpoint  string
-		ClientID               string
-		ClientIDFile           string
+		AuthorizationEndpoint string
+		ClientID string
+		ClientIDFile string
 		ClientRedirectHostname string
-		ClientSecretFile       string
-		DeviceAuthEndpoint     string
-		Issuer                 string
-		TokenEndpoint          string
-		UserInfoEndpoint       string
+		ClientSecretFile string
+		DeviceAuthEndpoint string
+		Issuer string
+		TokenEndpoint string
+		UserInfoEndpoint string
 	}
 	Origin struct {
-		EnableBroker             bool
-		EnableCmsd               bool
-		EnableDirListing         bool
-		EnableDirectReads        bool
-		EnableFallbackRead       bool
-		EnableIssuer             bool
-		EnableListings           bool
-		EnableOIDC               bool
-		EnablePublicReads        bool
-		EnableReads              bool
-		EnableUI                 bool
-		EnableVoms               bool
-		EnableWrite              bool
-		EnableWrites             bool
-		ExportVolume             string
-		ExportVolumes            []string
-		Exports                  interface{}
-		FederationPrefix         string
-		HttpServiceUrl           string
-		Mode                     string
-		Multiuser                bool
-		NamespacePrefix          string
-		Port                     int
-		RunLocation              string
-		S3AccessKeyfile          string
-		S3Bucket                 string
-		S3Region                 string
-		S3SecretKeyfile          string
-		S3ServiceName            string
-		S3ServiceUrl             string
-		S3UrlStyle               string
-		ScitokensDefaultUser     string
-		ScitokensMapSubject      bool
-		ScitokensNameMapFile     string
+		EnableBroker bool
+		EnableCmsd bool
+		EnableDirListing bool
+		EnableDirectReads bool
+		EnableFallbackRead bool
+		EnableIssuer bool
+		EnableListings bool
+		EnableOIDC bool
+		EnablePublicReads bool
+		EnableReads bool
+		EnableUI bool
+		EnableVoms bool
+		EnableWrite bool
+		EnableWrites bool
+		ExportVolume string
+		ExportVolumes []string
+		Exports interface{}
+		FederationPrefix string
+		HttpServiceUrl string
+		Mode string
+		Multiuser bool
+		NamespacePrefix string
+		Port int
+		RunLocation string
+		S3AccessKeyfile string
+		S3Bucket string
+		S3Region string
+		S3SecretKeyfile string
+		S3ServiceName string
+		S3ServiceUrl string
+		S3UrlStyle string
+		ScitokensDefaultUser string
+		ScitokensMapSubject bool
+		ScitokensNameMapFile string
 		ScitokensRestrictedPaths []string
-		ScitokensUsernameClaim   string
-		SelfTest                 bool
-		SelfTestInterval         time.Duration
-		StoragePrefix            string
-		StorageType              string
-		Url                      string
-		XRootDPrefix             string
+		ScitokensUsernameClaim string
+		SelfTest bool
+		SelfTestInterval time.Duration
+		StoragePrefix string
+		StorageType string
+		Url string
+		XRootDPrefix string
 	}
 	Plugin struct {
 		Token string
 	}
 	Registry struct {
-		AdminUsers                   []string
-		CustomRegistrationFields     interface{}
-		DbLocation                   string
-		Institutions                 interface{}
-		InstitutionsUrl              string
+		AdminUsers []string
+		CustomRegistrationFields interface{}
+		DbLocation string
+		Institutions interface{}
+		InstitutionsUrl string
 		InstitutionsUrlReloadMinutes time.Duration
-		RequireCacheApproval         bool
-		RequireKeyChaining           bool
-		RequireOriginApproval        bool
+		RequireCacheApproval bool
+		RequireKeyChaining bool
+		RequireOriginApproval bool
 	}
 	Server struct {
-		EnableUI                  bool
-		ExternalWebUrl            string
-		Hostname                  string
-		IssuerHostname            string
-		IssuerJwks                string
-		IssuerPort                int
-		IssuerUrl                 string
-		Modules                   []string
+		EnableUI bool
+		ExternalWebUrl string
+		Hostname string
+		IssuerHostname string
+		IssuerJwks string
+		IssuerPort int
+		IssuerUrl string
+		Modules []string
 		RegistrationRetryInterval time.Duration
-		SessionSecretFile         string
+		SessionSecretFile string
 		TLSCACertificateDirectory string
-		TLSCACertificateFile      string
-		TLSCAKey                  string
-		TLSCertificate            string
-		TLSKey                    string
-		UIActivationCodeFile      string
-		UIAdminUsers              []string
-		UILoginRateLimit          int
-		UIPasswordFile            string
-		WebConfigFile             string
-		WebHost                   string
-		WebPort                   int
+		TLSCACertificateFile string
+		TLSCAKey string
+		TLSCertificate string
+		TLSKey string
+		UIActivationCodeFile string
+		UIAdminUsers []string
+		UILoginRateLimit int
+		UIPasswordFile string
+		WebConfigFile string
+		WebHost string
+		WebPort int
 	}
 	Shoveler struct {
-		AMQPExchange         string
-		AMQPTokenLocation    string
-		Enable               bool
-		IPMapping            interface{}
+		AMQPExchange string
+		AMQPTokenLocation string
+		Enable bool
+		IPMapping interface{}
 		MessageQueueProtocol string
-		OutputDestinations   []string
-		PortHigher           int
-		PortLower            int
-		QueueDirectory       string
-		StompCert            string
-		StompCertKey         string
-		StompPassword        string
-		StompUsername        string
-		Topic                string
-		URL                  string
-		VerifyHeader         bool
+		OutputDestinations []string
+		PortHigher int
+		PortLower int
+		QueueDirectory string
+		StompCert string
+		StompCertKey string
+		StompPassword string
+		StompUsername string
+		Topic string
+		URL string
+		VerifyHeader bool
 	}
 	StagePlugin struct {
-		Hook               bool
-		MountPrefix        string
-		OriginPrefix       string
+		Hook bool
+		MountPrefix string
+		OriginPrefix string
 		ShadowOriginPrefix string
 	}
 	TLSSkipVerify bool
-	Transport     struct {
-		DialerKeepAlive       time.Duration
-		DialerTimeout         time.Duration
+	Transport struct {
+		DialerKeepAlive time.Duration
+		DialerTimeout time.Duration
 		ExpectContinueTimeout time.Duration
-		IdleConnTimeout       time.Duration
-		MaxIdleConns          int
+		IdleConnTimeout time.Duration
+		MaxIdleConns int
 		ResponseHeaderTimeout time.Duration
-		TLSHandshakeTimeout   time.Duration
+		TLSHandshakeTimeout time.Duration
 	}
 	Xrootd struct {
-		Authfile               string
-		ConfigFile             string
+		Authfile string
+		ConfigFile string
 		DetailedMonitoringHost string
-		LocalMonitoringHost    string
-		MacaroonsKeyFile       string
-		ManagerHost            string
-		Mount                  string
-		Port                   int
-		RobotsTxtFile          string
-		RunLocation            string
-		ScitokensConfig        string
-		Sitename               string
-		SummaryMonitoringHost  string
+		LocalMonitoringHost string
+		MacaroonsKeyFile string
+		ManagerHost string
+		Mount string
+		Port int
+		RobotsTxtFile string
+		RunLocation string
+		ScitokensConfig string
+		Sitename string
+		SummaryMonitoringHost string
 	}
 }
 
+
 type configWithType struct {
 	Cache struct {
-		Concurrency struct {
-			Type  string
-			Value int
-		}
-		DataLocation struct {
-			Type  string
-			Value string
-		}
-		DataLocations struct {
-			Type  string
-			Value []string
-		}
-		EnableLotman struct {
-			Type  string
-			Value bool
-		}
-		EnableOIDC struct {
-			Type  string
-			Value bool
-		}
-		EnableVoms struct {
-			Type  string
-			Value bool
-		}
-		ExportLocation struct {
-			Type  string
-			Value string
-		}
-		HighWaterMark struct {
-			Type  string
-			Value string
-		}
-		LocalRoot struct {
-			Type  string
-			Value string
-		}
-		LowWatermark struct {
-			Type  string
-			Value string
-		}
-		MetaLocations struct {
-			Type  string
-			Value []string
-		}
-		PermittedNamespaces struct {
-			Type  string
-			Value []string
-		}
-		Port struct {
-			Type  string
-			Value int
-		}
-		RunLocation struct {
-			Type  string
-			Value string
-		}
-		SelfTest struct {
-			Type  string
-			Value bool
-		}
-		SelfTestInterval struct {
-			Type  string
-			Value time.Duration
-		}
-		SentinelLocation struct {
-			Type  string
-			Value string
-		}
-		Url struct {
-			Type  string
-			Value string
-		}
-		XRootDPrefix struct {
-			Type  string
-			Value string
-		}
+		Concurrency struct { Type string; Value int }
+		DataLocation struct { Type string; Value string }
+		DataLocations struct { Type string; Value []string }
+		EnableLotman struct { Type string; Value bool }
+		EnableOIDC struct { Type string; Value bool }
+		EnableVoms struct { Type string; Value bool }
+		ExportLocation struct { Type string; Value string }
+		HighWaterMark struct { Type string; Value string }
+		LocalRoot struct { Type string; Value string }
+		LowWatermark struct { Type string; Value string }
+		MetaLocations struct { Type string; Value []string }
+		PermittedNamespaces struct { Type string; Value []string }
+		Port struct { Type string; Value int }
+		RunLocation struct { Type string; Value string }
+		SelfTest struct { Type string; Value bool }
+		SelfTestInterval struct { Type string; Value time.Duration }
+		SentinelLocation struct { Type string; Value string }
+		Url struct { Type string; Value string }
+		XRootDPrefix struct { Type string; Value string }
 	}
 	Client struct {
-		DisableHttpProxy struct {
-			Type  string
-			Value bool
-		}
-		DisableProxyFallback struct {
-			Type  string
-			Value bool
-		}
-		MaximumDownloadSpeed struct {
-			Type  string
-			Value int
-		}
-		MinimumDownloadSpeed struct {
-			Type  string
-			Value int
-		}
-		SlowTransferRampupTime struct {
-			Type  string
-			Value int
-		}
-		SlowTransferWindow struct {
-			Type  string
-			Value int
-		}
-		StoppedTransferTimeout struct {
-			Type  string
-			Value int
-		}
-		WorkerCount struct {
-			Type  string
-			Value int
-		}
+		DisableHttpProxy struct { Type string; Value bool }
+		DisableProxyFallback struct { Type string; Value bool }
+		MaximumDownloadSpeed struct { Type string; Value int }
+		MinimumDownloadSpeed struct { Type string; Value int }
+		SlowTransferRampupTime struct { Type string; Value int }
+		SlowTransferWindow struct { Type string; Value int }
+		StoppedTransferTimeout struct { Type string; Value int }
+		WorkerCount struct { Type string; Value int }
 	}
-	ConfigDir struct {
-		Type  string
-		Value string
-	}
-	Debug struct {
-		Type  string
-		Value bool
-	}
+	ConfigDir struct { Type string; Value string }
+	Debug struct { Type string; Value bool }
 	Director struct {
-		AdvertisementTTL struct {
-			Type  string
-			Value time.Duration
-		}
-		CacheResponseHostnames struct {
-			Type  string
-			Value []string
-		}
-		CacheSortMethod struct {
-			Type  string
-			Value string
-		}
-		DefaultResponse struct {
-			Type  string
-			Value string
-		}
-		EnableBroker struct {
-			Type  string
-			Value bool
-		}
-		EnableOIDC struct {
-			Type  string
-			Value bool
-		}
-		FilteredServers struct {
-			Type  string
-			Value []string
-		}
-		GeoIPLocation struct {
-			Type  string
-			Value string
-		}
-		MaxMindKeyFile struct {
-			Type  string
-			Value string
-		}
-		MaxStatResponse struct {
-			Type  string
-			Value int
-		}
-		MinStatResponse struct {
-			Type  string
-			Value int
-		}
-		OriginCacheHealthTestInterval struct {
-			Type  string
-			Value time.Duration
-		}
-		OriginResponseHostnames struct {
-			Type  string
-			Value []string
-		}
-		StatConcurrencyLimit struct {
-			Type  string
-			Value int
-		}
-		StatTimeout struct {
-			Type  string
-			Value time.Duration
-		}
-		SupportContactEmail struct {
-			Type  string
-			Value string
-		}
-		SupportContactUrl struct {
-			Type  string
-			Value string
-		}
+		AdvertisementTTL struct { Type string; Value time.Duration }
+		CacheResponseHostnames struct { Type string; Value []string }
+		CacheSortMethod struct { Type string; Value string }
+		DefaultResponse struct { Type string; Value string }
+		EnableBroker struct { Type string; Value bool }
+		EnableOIDC struct { Type string; Value bool }
+		FilteredServers struct { Type string; Value []string }
+		GeoIPLocation struct { Type string; Value string }
+		MaxMindKeyFile struct { Type string; Value string }
+		MaxStatResponse struct { Type string; Value int }
+		MinStatResponse struct { Type string; Value int }
+		OriginCacheHealthTestInterval struct { Type string; Value time.Duration }
+		OriginResponseHostnames struct { Type string; Value []string }
+		StatConcurrencyLimit struct { Type string; Value int }
+		StatTimeout struct { Type string; Value time.Duration }
+		SupportContactEmail struct { Type string; Value string }
+		SupportContactUrl struct { Type string; Value string }
 	}
-	DisableHttpProxy struct {
-		Type  string
-		Value bool
-	}
-	DisableProxyFallback struct {
-		Type  string
-		Value bool
-	}
+	DisableHttpProxy struct { Type string; Value bool }
+	DisableProxyFallback struct { Type string; Value bool }
 	Federation struct {
-		BrokerUrl struct {
-			Type  string
-			Value string
-		}
-		DirectorUrl struct {
-			Type  string
-			Value string
-		}
-		DiscoveryUrl struct {
-			Type  string
-			Value string
-		}
-		JwkUrl struct {
-			Type  string
-			Value string
-		}
-		RegistryUrl struct {
-			Type  string
-			Value string
-		}
-		TopologyNamespaceUrl struct {
-			Type  string
-			Value string
-		}
-		TopologyReloadInterval struct {
-			Type  string
-			Value time.Duration
-		}
-		TopologyUrl struct {
-			Type  string
-			Value string
-		}
+		BrokerUrl struct { Type string; Value string }
+		DirectorUrl struct { Type string; Value string }
+		DiscoveryUrl struct { Type string; Value string }
+		JwkUrl struct { Type string; Value string }
+		RegistryUrl struct { Type string; Value string }
+		TopologyNamespaceUrl struct { Type string; Value string }
+		TopologyReloadInterval struct { Type string; Value time.Duration }
+		TopologyUrl struct { Type string; Value string }
 	}
-	GeoIPOverrides struct {
-		Type  string
-		Value interface{}
-	}
+	GeoIPOverrides struct { Type string; Value interface{} }
 	Issuer struct {
-		AuthenticationSource struct {
-			Type  string
-			Value string
-		}
-		AuthorizationTemplates struct {
-			Type  string
-			Value interface{}
-		}
-		GroupFile struct {
-			Type  string
-			Value string
-		}
-		GroupRequirements struct {
-			Type  string
-			Value []string
-		}
-		GroupSource struct {
-			Type  string
-			Value string
-		}
-		OIDCAuthenticationRequirements struct {
-			Type  string
-			Value interface{}
-		}
-		OIDCAuthenticationUserClaim struct {
-			Type  string
-			Value string
-		}
-		QDLLocation struct {
-			Type  string
-			Value string
-		}
-		ScitokensServerLocation struct {
-			Type  string
-			Value string
-		}
-		TomcatLocation struct {
-			Type  string
-			Value string
-		}
+		AuthenticationSource struct { Type string; Value string }
+		AuthorizationTemplates struct { Type string; Value interface{} }
+		GroupFile struct { Type string; Value string }
+		GroupRequirements struct { Type string; Value []string }
+		GroupSource struct { Type string; Value string }
+		OIDCAuthenticationRequirements struct { Type string; Value interface{} }
+		OIDCAuthenticationUserClaim struct { Type string; Value string }
+		QDLLocation struct { Type string; Value string }
+		ScitokensServerLocation struct { Type string; Value string }
+		TomcatLocation struct { Type string; Value string }
 	}
-	IssuerKey struct {
-		Type  string
-		Value string
-	}
+	IssuerKey struct { Type string; Value string }
 	LocalCache struct {
-		DataLocation struct {
-			Type  string
-			Value string
-		}
-		HighWaterMarkPercentage struct {
-			Type  string
-			Value int
-		}
-		LowWaterMarkPercentage struct {
-			Type  string
-			Value int
-		}
-		RunLocation struct {
-			Type  string
-			Value string
-		}
-		Size struct {
-			Type  string
-			Value string
-		}
-		Socket struct {
-			Type  string
-			Value string
-		}
+		DataLocation struct { Type string; Value string }
+		HighWaterMarkPercentage struct { Type string; Value int }
+		LowWaterMarkPercentage struct { Type string; Value int }
+		RunLocation struct { Type string; Value string }
+		Size struct { Type string; Value string }
+		Socket struct { Type string; Value string }
 	}
 	Logging struct {
 		Cache struct {
-			Http struct {
-				Type  string
-				Value string
-			}
-			Ofs struct {
-				Type  string
-				Value string
-			}
-			Pfc struct {
-				Type  string
-				Value string
-			}
-			Pss struct {
-				Type  string
-				Value string
-			}
-			Scitokens struct {
-				Type  string
-				Value string
-			}
-			Xrd struct {
-				Type  string
-				Value string
-			}
-			Xrootd struct {
-				Type  string
-				Value string
-			}
+			Http struct { Type string; Value string }
+			Ofs struct { Type string; Value string }
+			Pfc struct { Type string; Value string }
+			Pss struct { Type string; Value string }
+			Scitokens struct { Type string; Value string }
+			Xrd struct { Type string; Value string }
+			Xrootd struct { Type string; Value string }
 		}
-		DisableProgressBars struct {
-			Type  string
-			Value bool
-		}
-		Level struct {
-			Type  string
-			Value string
-		}
-		LogLocation struct {
-			Type  string
-			Value string
-		}
+		DisableProgressBars struct { Type string; Value bool }
+		Level struct { Type string; Value string }
+		LogLocation struct { Type string; Value string }
 		Origin struct {
-			Cms struct {
-				Type  string
-				Value string
-			}
-			Http struct {
-				Type  string
-				Value string
-			}
-			Ofs struct {
-				Type  string
-				Value string
-			}
-			Oss struct {
-				Type  string
-				Value string
-			}
-			Scitokens struct {
-				Type  string
-				Value string
-			}
-			Xrd struct {
-				Type  string
-				Value string
-			}
-			Xrootd struct {
-				Type  string
-				Value string
-			}
+			Cms struct { Type string; Value string }
+			Http struct { Type string; Value string }
+			Ofs struct { Type string; Value string }
+			Oss struct { Type string; Value string }
+			Scitokens struct { Type string; Value string }
+			Xrd struct { Type string; Value string }
+			Xrootd struct { Type string; Value string }
 		}
 	}
 	Lotman struct {
-		DbLocation struct {
-			Type  string
-			Value string
-		}
-		EnableAPI struct {
-			Type  string
-			Value bool
-		}
-		LibLocation struct {
-			Type  string
-			Value string
-		}
-		Lots struct {
-			Type  string
-			Value interface{}
-		}
+		DbLocation struct { Type string; Value string }
+		EnableAPI struct { Type string; Value bool }
+		LibLocation struct { Type string; Value string }
+		Lots struct { Type string; Value interface{} }
 	}
-	MinimumDownloadSpeed struct {
-		Type  string
-		Value int
-	}
+	MinimumDownloadSpeed struct { Type string; Value int }
 	Monitoring struct {
-		AggregatePrefixes struct {
-			Type  string
-			Value []string
-		}
-		DataLocation struct {
-			Type  string
-			Value string
-		}
-		MetricAuthorization struct {
-			Type  string
-			Value bool
-		}
-		PortHigher struct {
-			Type  string
-			Value int
-		}
-		PortLower struct {
-			Type  string
-			Value int
-		}
-		PromQLAuthorization struct {
-			Type  string
-			Value bool
-		}
-		TokenExpiresIn struct {
-			Type  string
-			Value time.Duration
-		}
-		TokenRefreshInterval struct {
-			Type  string
-			Value time.Duration
-		}
+		AggregatePrefixes struct { Type string; Value []string }
+		DataLocation struct { Type string; Value string }
+		MetricAuthorization struct { Type string; Value bool }
+		PortHigher struct { Type string; Value int }
+		PortLower struct { Type string; Value int }
+		PromQLAuthorization struct { Type string; Value bool }
+		TokenExpiresIn struct { Type string; Value time.Duration }
+		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}
 	OIDC struct {
-		AuthorizationEndpoint struct {
-			Type  string
-			Value string
-		}
-		ClientID struct {
-			Type  string
-			Value string
-		}
-		ClientIDFile struct {
-			Type  string
-			Value string
-		}
-		ClientRedirectHostname struct {
-			Type  string
-			Value string
-		}
-		ClientSecretFile struct {
-			Type  string
-			Value string
-		}
-		DeviceAuthEndpoint struct {
-			Type  string
-			Value string
-		}
-		Issuer struct {
-			Type  string
-			Value string
-		}
-		TokenEndpoint struct {
-			Type  string
-			Value string
-		}
-		UserInfoEndpoint struct {
-			Type  string
-			Value string
-		}
+		AuthorizationEndpoint struct { Type string; Value string }
+		ClientID struct { Type string; Value string }
+		ClientIDFile struct { Type string; Value string }
+		ClientRedirectHostname struct { Type string; Value string }
+		ClientSecretFile struct { Type string; Value string }
+		DeviceAuthEndpoint struct { Type string; Value string }
+		Issuer struct { Type string; Value string }
+		TokenEndpoint struct { Type string; Value string }
+		UserInfoEndpoint struct { Type string; Value string }
 	}
 	Origin struct {
-		EnableBroker struct {
-			Type  string
-			Value bool
-		}
-		EnableCmsd struct {
-			Type  string
-			Value bool
-		}
-		EnableDirListing struct {
-			Type  string
-			Value bool
-		}
-		EnableDirectReads struct {
-			Type  string
-			Value bool
-		}
-		EnableFallbackRead struct {
-			Type  string
-			Value bool
-		}
-		EnableIssuer struct {
-			Type  string
-			Value bool
-		}
-		EnableListings struct {
-			Type  string
-			Value bool
-		}
-		EnableOIDC struct {
-			Type  string
-			Value bool
-		}
-		EnablePublicReads struct {
-			Type  string
-			Value bool
-		}
-		EnableReads struct {
-			Type  string
-			Value bool
-		}
-		EnableUI struct {
-			Type  string
-			Value bool
-		}
-		EnableVoms struct {
-			Type  string
-			Value bool
-		}
-		EnableWrite struct {
-			Type  string
-			Value bool
-		}
-		EnableWrites struct {
-			Type  string
-			Value bool
-		}
-		ExportVolume struct {
-			Type  string
-			Value string
-		}
-		ExportVolumes struct {
-			Type  string
-			Value []string
-		}
-		Exports struct {
-			Type  string
-			Value interface{}
-		}
-		FederationPrefix struct {
-			Type  string
-			Value string
-		}
-		HttpServiceUrl struct {
-			Type  string
-			Value string
-		}
-		Mode struct {
-			Type  string
-			Value string
-		}
-		Multiuser struct {
-			Type  string
-			Value bool
-		}
-		NamespacePrefix struct {
-			Type  string
-			Value string
-		}
-		Port struct {
-			Type  string
-			Value int
-		}
-		RunLocation struct {
-			Type  string
-			Value string
-		}
-		S3AccessKeyfile struct {
-			Type  string
-			Value string
-		}
-		S3Bucket struct {
-			Type  string
-			Value string
-		}
-		S3Region struct {
-			Type  string
-			Value string
-		}
-		S3SecretKeyfile struct {
-			Type  string
-			Value string
-		}
-		S3ServiceName struct {
-			Type  string
-			Value string
-		}
-		S3ServiceUrl struct {
-			Type  string
-			Value string
-		}
-		S3UrlStyle struct {
-			Type  string
-			Value string
-		}
-		ScitokensDefaultUser struct {
-			Type  string
-			Value string
-		}
-		ScitokensMapSubject struct {
-			Type  string
-			Value bool
-		}
-		ScitokensNameMapFile struct {
-			Type  string
-			Value string
-		}
-		ScitokensRestrictedPaths struct {
-			Type  string
-			Value []string
-		}
-		ScitokensUsernameClaim struct {
-			Type  string
-			Value string
-		}
-		SelfTest struct {
-			Type  string
-			Value bool
-		}
-		SelfTestInterval struct {
-			Type  string
-			Value time.Duration
-		}
-		StoragePrefix struct {
-			Type  string
-			Value string
-		}
-		StorageType struct {
-			Type  string
-			Value string
-		}
-		Url struct {
-			Type  string
-			Value string
-		}
-		XRootDPrefix struct {
-			Type  string
-			Value string
-		}
+		EnableBroker struct { Type string; Value bool }
+		EnableCmsd struct { Type string; Value bool }
+		EnableDirListing struct { Type string; Value bool }
+		EnableDirectReads struct { Type string; Value bool }
+		EnableFallbackRead struct { Type string; Value bool }
+		EnableIssuer struct { Type string; Value bool }
+		EnableListings struct { Type string; Value bool }
+		EnableOIDC struct { Type string; Value bool }
+		EnablePublicReads struct { Type string; Value bool }
+		EnableReads struct { Type string; Value bool }
+		EnableUI struct { Type string; Value bool }
+		EnableVoms struct { Type string; Value bool }
+		EnableWrite struct { Type string; Value bool }
+		EnableWrites struct { Type string; Value bool }
+		ExportVolume struct { Type string; Value string }
+		ExportVolumes struct { Type string; Value []string }
+		Exports struct { Type string; Value interface{} }
+		FederationPrefix struct { Type string; Value string }
+		HttpServiceUrl struct { Type string; Value string }
+		Mode struct { Type string; Value string }
+		Multiuser struct { Type string; Value bool }
+		NamespacePrefix struct { Type string; Value string }
+		Port struct { Type string; Value int }
+		RunLocation struct { Type string; Value string }
+		S3AccessKeyfile struct { Type string; Value string }
+		S3Bucket struct { Type string; Value string }
+		S3Region struct { Type string; Value string }
+		S3SecretKeyfile struct { Type string; Value string }
+		S3ServiceName struct { Type string; Value string }
+		S3ServiceUrl struct { Type string; Value string }
+		S3UrlStyle struct { Type string; Value string }
+		ScitokensDefaultUser struct { Type string; Value string }
+		ScitokensMapSubject struct { Type string; Value bool }
+		ScitokensNameMapFile struct { Type string; Value string }
+		ScitokensRestrictedPaths struct { Type string; Value []string }
+		ScitokensUsernameClaim struct { Type string; Value string }
+		SelfTest struct { Type string; Value bool }
+		SelfTestInterval struct { Type string; Value time.Duration }
+		StoragePrefix struct { Type string; Value string }
+		StorageType struct { Type string; Value string }
+		Url struct { Type string; Value string }
+		XRootDPrefix struct { Type string; Value string }
 	}
 	Plugin struct {
-		Token struct {
-			Type  string
-			Value string
-		}
+		Token struct { Type string; Value string }
 	}
 	Registry struct {
-		AdminUsers struct {
-			Type  string
-			Value []string
-		}
-		CustomRegistrationFields struct {
-			Type  string
-			Value interface{}
-		}
-		DbLocation struct {
-			Type  string
-			Value string
-		}
-		Institutions struct {
-			Type  string
-			Value interface{}
-		}
-		InstitutionsUrl struct {
-			Type  string
-			Value string
-		}
-		InstitutionsUrlReloadMinutes struct {
-			Type  string
-			Value time.Duration
-		}
-		RequireCacheApproval struct {
-			Type  string
-			Value bool
-		}
-		RequireKeyChaining struct {
-			Type  string
-			Value bool
-		}
-		RequireOriginApproval struct {
-			Type  string
-			Value bool
-		}
+		AdminUsers struct { Type string; Value []string }
+		CustomRegistrationFields struct { Type string; Value interface{} }
+		DbLocation struct { Type string; Value string }
+		Institutions struct { Type string; Value interface{} }
+		InstitutionsUrl struct { Type string; Value string }
+		InstitutionsUrlReloadMinutes struct { Type string; Value time.Duration }
+		RequireCacheApproval struct { Type string; Value bool }
+		RequireKeyChaining struct { Type string; Value bool }
+		RequireOriginApproval struct { Type string; Value bool }
 	}
 	Server struct {
-		EnableUI struct {
-			Type  string
-			Value bool
-		}
-		ExternalWebUrl struct {
-			Type  string
-			Value string
-		}
-		Hostname struct {
-			Type  string
-			Value string
-		}
-		IssuerHostname struct {
-			Type  string
-			Value string
-		}
-		IssuerJwks struct {
-			Type  string
-			Value string
-		}
-		IssuerPort struct {
-			Type  string
-			Value int
-		}
-		IssuerUrl struct {
-			Type  string
-			Value string
-		}
-		Modules struct {
-			Type  string
-			Value []string
-		}
-		RegistrationRetryInterval struct {
-			Type  string
-			Value time.Duration
-		}
-		SessionSecretFile struct {
-			Type  string
-			Value string
-		}
-		TLSCACertificateDirectory struct {
-			Type  string
-			Value string
-		}
-		TLSCACertificateFile struct {
-			Type  string
-			Value string
-		}
-		TLSCAKey struct {
-			Type  string
-			Value string
-		}
-		TLSCertificate struct {
-			Type  string
-			Value string
-		}
-		TLSKey struct {
-			Type  string
-			Value string
-		}
-		UIActivationCodeFile struct {
-			Type  string
-			Value string
-		}
-		UIAdminUsers struct {
-			Type  string
-			Value []string
-		}
-		UILoginRateLimit struct {
-			Type  string
-			Value int
-		}
-		UIPasswordFile struct {
-			Type  string
-			Value string
-		}
-		WebConfigFile struct {
-			Type  string
-			Value string
-		}
-		WebHost struct {
-			Type  string
-			Value string
-		}
-		WebPort struct {
-			Type  string
-			Value int
-		}
+		EnableUI struct { Type string; Value bool }
+		ExternalWebUrl struct { Type string; Value string }
+		Hostname struct { Type string; Value string }
+		IssuerHostname struct { Type string; Value string }
+		IssuerJwks struct { Type string; Value string }
+		IssuerPort struct { Type string; Value int }
+		IssuerUrl struct { Type string; Value string }
+		Modules struct { Type string; Value []string }
+		RegistrationRetryInterval struct { Type string; Value time.Duration }
+		SessionSecretFile struct { Type string; Value string }
+		TLSCACertificateDirectory struct { Type string; Value string }
+		TLSCACertificateFile struct { Type string; Value string }
+		TLSCAKey struct { Type string; Value string }
+		TLSCertificate struct { Type string; Value string }
+		TLSKey struct { Type string; Value string }
+		UIActivationCodeFile struct { Type string; Value string }
+		UIAdminUsers struct { Type string; Value []string }
+		UILoginRateLimit struct { Type string; Value int }
+		UIPasswordFile struct { Type string; Value string }
+		WebConfigFile struct { Type string; Value string }
+		WebHost struct { Type string; Value string }
+		WebPort struct { Type string; Value int }
 	}
 	Shoveler struct {
-		AMQPExchange struct {
-			Type  string
-			Value string
-		}
-		AMQPTokenLocation struct {
-			Type  string
-			Value string
-		}
-		Enable struct {
-			Type  string
-			Value bool
-		}
-		IPMapping struct {
-			Type  string
-			Value interface{}
-		}
-		MessageQueueProtocol struct {
-			Type  string
-			Value string
-		}
-		OutputDestinations struct {
-			Type  string
-			Value []string
-		}
-		PortHigher struct {
-			Type  string
-			Value int
-		}
-		PortLower struct {
-			Type  string
-			Value int
-		}
-		QueueDirectory struct {
-			Type  string
-			Value string
-		}
-		StompCert struct {
-			Type  string
-			Value string
-		}
-		StompCertKey struct {
-			Type  string
-			Value string
-		}
-		StompPassword struct {
-			Type  string
-			Value string
-		}
-		StompUsername struct {
-			Type  string
-			Value string
-		}
-		Topic struct {
-			Type  string
-			Value string
-		}
-		URL struct {
-			Type  string
-			Value string
-		}
-		VerifyHeader struct {
-			Type  string
-			Value bool
-		}
+		AMQPExchange struct { Type string; Value string }
+		AMQPTokenLocation struct { Type string; Value string }
+		Enable struct { Type string; Value bool }
+		IPMapping struct { Type string; Value interface{} }
+		MessageQueueProtocol struct { Type string; Value string }
+		OutputDestinations struct { Type string; Value []string }
+		PortHigher struct { Type string; Value int }
+		PortLower struct { Type string; Value int }
+		QueueDirectory struct { Type string; Value string }
+		StompCert struct { Type string; Value string }
+		StompCertKey struct { Type string; Value string }
+		StompPassword struct { Type string; Value string }
+		StompUsername struct { Type string; Value string }
+		Topic struct { Type string; Value string }
+		URL struct { Type string; Value string }
+		VerifyHeader struct { Type string; Value bool }
 	}
 	StagePlugin struct {
-		Hook struct {
-			Type  string
-			Value bool
-		}
-		MountPrefix struct {
-			Type  string
-			Value string
-		}
-		OriginPrefix struct {
-			Type  string
-			Value string
-		}
-		ShadowOriginPrefix struct {
-			Type  string
-			Value string
-		}
+		Hook struct { Type string; Value bool }
+		MountPrefix struct { Type string; Value string }
+		OriginPrefix struct { Type string; Value string }
+		ShadowOriginPrefix struct { Type string; Value string }
 	}
-	TLSSkipVerify struct {
-		Type  string
-		Value bool
-	}
+	TLSSkipVerify struct { Type string; Value bool }
 	Transport struct {
-		DialerKeepAlive struct {
-			Type  string
-			Value time.Duration
-		}
-		DialerTimeout struct {
-			Type  string
-			Value time.Duration
-		}
-		ExpectContinueTimeout struct {
-			Type  string
-			Value time.Duration
-		}
-		IdleConnTimeout struct {
-			Type  string
-			Value time.Duration
-		}
-		MaxIdleConns struct {
-			Type  string
-			Value int
-		}
-		ResponseHeaderTimeout struct {
-			Type  string
-			Value time.Duration
-		}
-		TLSHandshakeTimeout struct {
-			Type  string
-			Value time.Duration
-		}
+		DialerKeepAlive struct { Type string; Value time.Duration }
+		DialerTimeout struct { Type string; Value time.Duration }
+		ExpectContinueTimeout struct { Type string; Value time.Duration }
+		IdleConnTimeout struct { Type string; Value time.Duration }
+		MaxIdleConns struct { Type string; Value int }
+		ResponseHeaderTimeout struct { Type string; Value time.Duration }
+		TLSHandshakeTimeout struct { Type string; Value time.Duration }
 	}
 	Xrootd struct {
-		Authfile struct {
-			Type  string
-			Value string
-		}
-		ConfigFile struct {
-			Type  string
-			Value string
-		}
-		DetailedMonitoringHost struct {
-			Type  string
-			Value string
-		}
-		LocalMonitoringHost struct {
-			Type  string
-			Value string
-		}
-		MacaroonsKeyFile struct {
-			Type  string
-			Value string
-		}
-		ManagerHost struct {
-			Type  string
-			Value string
-		}
-		Mount struct {
-			Type  string
-			Value string
-		}
-		Port struct {
-			Type  string
-			Value int
-		}
-		RobotsTxtFile struct {
-			Type  string
-			Value string
-		}
-		RunLocation struct {
-			Type  string
-			Value string
-		}
-		ScitokensConfig struct {
-			Type  string
-			Value string
-		}
-		Sitename struct {
-			Type  string
-			Value string
-		}
-		SummaryMonitoringHost struct {
-			Type  string
-			Value string
-		}
+		Authfile struct { Type string; Value string }
+		ConfigFile struct { Type string; Value string }
+		DetailedMonitoringHost struct { Type string; Value string }
+		LocalMonitoringHost struct { Type string; Value string }
+		MacaroonsKeyFile struct { Type string; Value string }
+		ManagerHost struct { Type string; Value string }
+		Mount struct { Type string; Value string }
+		Port struct { Type string; Value int }
+		RobotsTxtFile struct { Type string; Value string }
+		RunLocation struct { Type string; Value string }
+		ScitokensConfig struct { Type string; Value string }
+		Sitename struct { Type string; Value string }
+		SummaryMonitoringHost struct { Type string; Value string }
 	}
 }
