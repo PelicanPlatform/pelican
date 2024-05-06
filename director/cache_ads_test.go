@@ -233,7 +233,7 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.True(t, hasServerAdWithName(cAds, "cache2"))
 }
 
-func TestConfigCacheEviction(t *testing.T) {
+func TestLaunchTTLCache(t *testing.T) {
 	mockPelicanOriginServerAd := server_structs.ServerAd{
 		Name:    "test-origin-server",
 		AuthURL: url.URL{},
@@ -266,7 +266,7 @@ func TestConfigCacheEviction(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 		egrp, ctx := errgroup.WithContext(shutdownCtx)
-		ConfigTTLCache(ctx, egrp)
+		LaunchTTLCache(ctx, egrp)
 		defer func() {
 			shutdownCancel()
 			err := egrp.Wait()
@@ -328,7 +328,7 @@ func TestServerAdsCacheEviction(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 		egrp, ctx := errgroup.WithContext(shutdownCtx)
-		ConfigTTLCache(ctx, egrp)
+		LaunchTTLCache(ctx, egrp)
 		defer func() {
 			shutdownCancel()
 			err := egrp.Wait()

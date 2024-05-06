@@ -72,7 +72,19 @@ const AuthenticatedContent = ({promptLogin = false, redirect = false, children, 
     }
 
     if(data === undefined){
-        return <Skeleton variant="rounded" height={"95vh"} width={"100%"} />
+        return <Box sx={{
+            sx: {
+                height: "95vh",
+                width: "100%",
+                ...boxProps?.sx
+            },
+            ...boxProps
+        }}>
+            <Skeleton variant="rounded" height={"100%"} width={"100%"}>
+                {children}
+            </Skeleton>
+        </Box>
+
     }
 
     if(authenticated === false && promptLogin){
