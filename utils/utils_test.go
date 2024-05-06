@@ -33,7 +33,7 @@ func TestValidQuery(t *testing.T) {
 		transferUrl, err := url.Parse(transferStr)
 		assert.NoError(t, err)
 
-		err = CheckValidQuery(transferUrl, true)
+		err = CheckValidQuery(transferUrl)
 		assert.NoError(t, err)
 	})
 
@@ -43,7 +43,7 @@ func TestValidQuery(t *testing.T) {
 		transferUrl, err := url.Parse(transferStr)
 		assert.NoError(t, err)
 
-		err = CheckValidQuery(transferUrl, false)
+		err = CheckValidQuery(transferUrl)
 		assert.NoError(t, err)
 	})
 
@@ -53,7 +53,7 @@ func TestValidQuery(t *testing.T) {
 		transferUrl, err := url.Parse(transferStr)
 		assert.NoError(t, err)
 
-		err = CheckValidQuery(transferUrl, false)
+		err = CheckValidQuery(transferUrl)
 		assert.NoError(t, err)
 	})
 
@@ -63,7 +63,7 @@ func TestValidQuery(t *testing.T) {
 		transferUrl, err := url.Parse(transferStr)
 		assert.NoError(t, err)
 
-		err = CheckValidQuery(transferUrl, false)
+		err = CheckValidQuery(transferUrl)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid query parameter(s) recrustive=true provided in url pelican://something/here?recrustive=true")
 	})
@@ -74,20 +74,9 @@ func TestValidQuery(t *testing.T) {
 		transferUrl, err := url.Parse(transferStr)
 		assert.NoError(t, err)
 
-		err = CheckValidQuery(transferUrl, true)
+		err = CheckValidQuery(transferUrl)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot have both recursive and pack query parameters")
-	})
-
-	// Test that a recursive query fails when not the plugin
-	t.Run("testBothPackAndRecursiveFailure", func(t *testing.T) {
-		transferStr := "pelican://something/here?recursive=true"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = CheckValidQuery(transferUrl, false)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "recursive query parameter is not yet supported in URLs outside of the plugin")
 	})
 
 	// Test we pass with both pack and directread
@@ -96,7 +85,7 @@ func TestValidQuery(t *testing.T) {
 		transferUrl, err := url.Parse(transferStr)
 		assert.NoError(t, err)
 
-		err = CheckValidQuery(transferUrl, false)
+		err = CheckValidQuery(transferUrl)
 		assert.NoError(t, err)
 	})
 
@@ -106,7 +95,7 @@ func TestValidQuery(t *testing.T) {
 		transferUrl, err := url.Parse(transferStr)
 		assert.NoError(t, err)
 
-		err = CheckValidQuery(transferUrl, true)
+		err = CheckValidQuery(transferUrl)
 		assert.NoError(t, err)
 	})
 
@@ -116,7 +105,7 @@ func TestValidQuery(t *testing.T) {
 		transferUrl, err := url.Parse(transferStr)
 		assert.NoError(t, err)
 
-		err = CheckValidQuery(transferUrl, false)
+		err = CheckValidQuery(transferUrl)
 		assert.NoError(t, err)
 	})
 }
