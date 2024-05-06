@@ -21,6 +21,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"path"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	config "github.com/pelicanplatform/pelican/config"
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
 	oauth2 "github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	oauth2_upstream "golang.org/x/oauth2"
 )
@@ -245,7 +247,8 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts con
 					AuthURL:  issuerInfo.AuthURL,
 					TokenURL: issuerInfo.TokenURL,
 				}}
-			ctx := context.Background()
+			client := &http.Client{Transport: config.GetTransport()}
+			ctx := context.WithValue(context.Background(), oauth2_upstream.HTTPClient, client)
 			source := upstreamConfig.TokenSource(ctx, &upstreamToken)
 			newToken, err := source.Token()
 			if err != nil {
@@ -265,7 +268,23 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts con
 	}
 
 	token, err := oauth2.AcquireToken(issuer, prefixEntry, namespace.CredentialGen, destination.Path, opts)
-	if err != nil {
+	if errors.Is(err, oauth2.ErrUnknownClient) {
+		// We use anonymously-registered clients; OA4MP can periodically garbage collect these to prevent DoS
+		// In this case, we register a new client and try to acquire again.
+		log.Infof("Identity provider does not know the client for %s; registering a new one", namespace.Path)
+		prefixEntry, err = RegisterClient(namespace)
+		if err != nil {
+			return "", errors.Wrap(err, "re-registration error (identity provider does not recognize our client)")
+		}
+		osdfConfig.OSDF.OauthClient[prefixIdx] = *prefixEntry
+		if err = config.SaveConfigContents(&osdfConfig); err != nil {
+			log.Warningln("Failed to save new token to configuration file:", err)
+		}
+
+		if token, err = oauth2.AcquireToken(issuer, prefixEntry, namespace.CredentialGen, destination.Path, opts); err != nil {
+			return "", err
+		}
+	} else if err != nil {
 		return "", err
 	}
 
