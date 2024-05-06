@@ -24,6 +24,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -612,5 +613,53 @@ func TestDirectReads(t *testing.T) {
 		_, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "No origins on specified endpoint have direct reads enabled")
+	})
+}
+
+// Test the functionality of NewTransferJob, checking we return at the correct locations for certain errors
+func TestNewTransferJob(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	server_utils.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
+	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
+
+	te := client.NewTransferEngine(fed.Ctx)
+
+	// Test when we have a failure during namespace lookup (here we will get a 404)
+	t.Run("testFailureToGetNamespaceInfo", func(t *testing.T) {
+		tc, err := te.NewClient()
+		assert.NoError(t, err)
+
+		// have a file/namespace that does not exist
+		mockRemoteUrl, err := url.Parse("/first/something/file.txt")
+		require.NoError(t, err)
+		_, err = tc.NewTransferJob(context.Background(), mockRemoteUrl, "/dest", false, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get namespace information for remote URL /first/something/file.txt")
+	})
+
+	// Test when we fail to get a token on our auth required namespace
+	t.Run("testFailureToGetToken", func(t *testing.T) {
+		tc, err := te.NewClient()
+		assert.NoError(t, err)
+
+		// use our auth required namespace
+		mockRemoteUrl, err := url.Parse("/second/namespace/hello_world.txt")
+		require.NoError(t, err)
+		_, err = tc.NewTransferJob(context.Background(), mockRemoteUrl, "/dest", false, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get token for transfer: failed to find or generate a token as required for /second/namespace/hello_world.txt")
+	})
+
+	// Test success
+	t.Run("testSuccess", func(t *testing.T) {
+		tc, err := te.NewClient()
+		assert.NoError(t, err)
+
+		remoteUrl, err := url.Parse("/first/namespace/hello_world.txt")
+		require.NoError(t, err)
+		_, err = tc.NewTransferJob(context.Background(), remoteUrl, t.TempDir(), false, false)
+		assert.NoError(t, err)
 	})
 }

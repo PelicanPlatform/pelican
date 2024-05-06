@@ -37,6 +37,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -44,6 +45,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/classads"
+	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/launchers"
@@ -435,6 +437,138 @@ func TestPluginDirectRead(t *testing.T) {
 	}
 }
 
+// Test the functionality of the failTransfer function, ensuring the proper classads are being set and returned
+func TestFailTransfer(t *testing.T) {
+	// Test when we call failTransfer with an upload
+	t.Run("TestWithUpload", func(t *testing.T) {
+		results := make(chan *classads.ClassAd, 1)
+		failTransfer("pelican://some/example.txt", "/path/to/local.txt", results, true, errors.New("test error"))
+		result := <-results
+
+		// Check TransferUrl set
+		transferUrl, _ := result.Get("TransferUrl")
+		transferUrlStr, ok := transferUrl.(string)
+		require.True(t, ok)
+		assert.Equal(t, "pelican://some/example.txt", transferUrlStr)
+
+		// Check TransferType set
+		transferType, _ := result.Get("TransferType")
+		transferTypeStr, ok := transferType.(string)
+		require.True(t, ok)
+		assert.Equal(t, "upload", transferTypeStr)
+
+		// Check TransferFileName set
+		transferFileName, _ := result.Get("TransferFileName")
+		transferFileNameStr, ok := transferFileName.(string)
+		require.True(t, ok)
+		assert.Equal(t, "local.txt", transferFileNameStr)
+
+		// Check TransferRetryable set
+		transferRetryable, _ := result.Get("TransferRetryable")
+		transferRetryableBool, ok := transferRetryable.(bool)
+		require.True(t, ok)
+		assert.False(t, transferRetryableBool)
+
+		// Check TransferSuccess set
+		transferSuccess, _ := result.Get("TransferSuccess")
+		transferSuccessBool, ok := transferSuccess.(bool)
+		require.True(t, ok)
+		assert.False(t, transferSuccessBool)
+
+		// Check TransferError set
+		transferError, _ := result.Get("TransferError")
+		transferErrorStr, ok := transferError.(string)
+		require.True(t, ok)
+		assert.Equal(t, "test error", transferErrorStr)
+	})
+
+	// Test when we call failTransfer with a download
+	t.Run("TestWithDownload", func(t *testing.T) {
+		results := make(chan *classads.ClassAd, 1)
+		failTransfer("pelican://some/example.txt", "/path/to/local.txt", results, false, errors.New("test error"))
+		result := <-results
+
+		// Check TransferUrl set
+		transferUrl, _ := result.Get("TransferUrl")
+		transferUrlStr, ok := transferUrl.(string)
+		require.True(t, ok)
+		assert.Equal(t, "pelican://some/example.txt", transferUrlStr)
+
+		// Check TransferType set
+		transferType, _ := result.Get("TransferType")
+		transferTypeStr, ok := transferType.(string)
+		require.True(t, ok)
+		assert.Equal(t, "download", transferTypeStr)
+
+		// Check TransferFileName set
+		transferFileName, _ := result.Get("TransferFileName")
+		transferFileNameStr, ok := transferFileName.(string)
+		require.True(t, ok)
+		assert.Equal(t, "example.txt", transferFileNameStr)
+
+		// Check TransferRetryable set
+		transferRetryable, _ := result.Get("TransferRetryable")
+		transferRetryableBool, ok := transferRetryable.(bool)
+		require.True(t, ok)
+		assert.False(t, transferRetryableBool)
+
+		// Check TransferSuccess set
+		transferSuccess, _ := result.Get("TransferSuccess")
+		transferSuccessBool, ok := transferSuccess.(bool)
+		require.True(t, ok)
+		assert.False(t, transferSuccessBool)
+
+		// Check TransferError set
+		transferError, _ := result.Get("TransferError")
+		transferErrorStr, ok := transferError.(string)
+		require.True(t, ok)
+		assert.Equal(t, "test error", transferErrorStr)
+	})
+
+	// Test when we call failTransfer with a retryable error
+	t.Run("TestWithRetry", func(t *testing.T) {
+		results := make(chan *classads.ClassAd, 1)
+		failTransfer("pelican://some/example.txt", "/path/to/local.txt", results, false, &client.SlowTransferError{})
+		result := <-results
+
+		// Check TransferUrl set
+		transferUrl, _ := result.Get("TransferUrl")
+		transferUrlStr, ok := transferUrl.(string)
+		require.True(t, ok)
+		assert.Equal(t, "pelican://some/example.txt", transferUrlStr)
+
+		// Check TransferType set
+		transferType, _ := result.Get("TransferType")
+		transferTypeStr, ok := transferType.(string)
+		require.True(t, ok)
+		assert.Equal(t, "download", transferTypeStr)
+
+		// Check TransferFileName set
+		transferFileName, _ := result.Get("TransferFileName")
+		transferFileNameStr, ok := transferFileName.(string)
+		require.True(t, ok)
+		assert.Equal(t, "example.txt", transferFileNameStr)
+
+		// Check TransferRetryable set
+		transferRetryable, _ := result.Get("TransferRetryable")
+		transferRetryableBool, ok := transferRetryable.(bool)
+		require.True(t, ok)
+		assert.True(t, transferRetryableBool)
+
+		// Check TransferSuccess set
+		transferSuccess, _ := result.Get("TransferSuccess")
+		transferSuccessBool, ok := transferSuccess.(bool)
+		require.True(t, ok)
+		assert.False(t, transferSuccessBool)
+
+		// Check TransferError set
+		transferError, _ := result.Get("TransferError")
+		transferErrorStr, ok := transferError.(string)
+		require.True(t, ok)
+		assert.Equal(t, "cancelled transfer, too slow.  Detected speed: 0 B/s, total transferred: 0 B, total transfer time: 0s", transferErrorStr)
+	})
+}
+
 func TestWriteOutfile(t *testing.T) {
 	t.Run("TestOutfileSuccess", func(t *testing.T) {
 		// Drop the testFileContent into the origin directory
@@ -455,7 +589,8 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
-		success, retryable := writeOutfile(nil, resultAds, tempFile)
+		success, retryable, err := writeOutfile(nil, resultAds, tempFile)
+		assert.NoError(t, err)
 		assert.True(t, success, "writeOutfile failed :(")
 		assert.False(t, retryable, "writeOutfile returned retryable true when it should be false")
 		tempFileContent, err := os.ReadFile(tempFile.Name())
@@ -466,6 +601,40 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferTotalBytes = 27538253;")
 		assert.Contains(t, string(tempFileContent), "TransferSuccess = true;")
 		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
+	})
+
+	t.Run("TestOutfileAlwaysIncludeUrlAndFileName", func(t *testing.T) {
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(t.TempDir(), "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		assert.NoError(t, err, "Error writing to temp file")
+		defer tempFile.Close()
+		defer os.Remove(tempFile.Name())
+
+		// Set up test result ads
+		var resultAds []*classads.ClassAd
+		for i := 0; i < 4; i++ {
+			resultAd := classads.NewClassAd()
+			resultAd.Set("TransferSuccess", true)
+			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
+			resultAd.Set("TransferFileBytes", 12)
+			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAds = append(resultAds, resultAd)
+		}
+		success, retryable, err := writeOutfile(nil, resultAds, tempFile)
+		assert.NoError(t, err)
+		assert.True(t, success, "writeOutfile failed :(")
+		assert.False(t, retryable, "writeOutfile returned retryable true when it should be false")
+		tempFileContent, err := os.ReadFile(tempFile.Name())
+		assert.NoError(t, err)
+
+		// assert the output file contains some of our result ads
+		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
+		assert.Contains(t, string(tempFileContent), "TransferTotalBytes = 27538253;")
+		assert.Contains(t, string(tempFileContent), "TransferSuccess = true;")
+		// Ensure we get empty strings for these classads
+		assert.Contains(t, string(tempFileContent), "TransferUrl = \"\";")
+		assert.Contains(t, string(tempFileContent), "TransferFileName = \"\";")
 	})
 
 	t.Run("TestOutfileFailureNoRetry", func(t *testing.T) {
@@ -488,7 +657,8 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
-		success, retryable := writeOutfile(nil, resultAds, tempFile)
+		success, retryable, err := writeOutfile(nil, resultAds, tempFile)
+		assert.NoError(t, err)
 		assert.False(t, success, "writeOutfile failed :(")
 		assert.False(t, retryable, "writeOutfile returned retryable true when it should be false")
 		tempFileContent, err := os.ReadFile(tempFile.Name())
@@ -521,7 +691,8 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
-		success, retryable := writeOutfile(nil, resultAds, tempFile)
+		success, retryable, err := writeOutfile(nil, resultAds, tempFile)
+		assert.NoError(t, err)
 		assert.False(t, success, "writeOutfile failed :(")
 		assert.True(t, retryable, "writeOutfile returned retryable true when it should be true")
 		tempFileContent, err := os.ReadFile(tempFile.Name())
@@ -532,6 +703,65 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
 		assert.Contains(t, string(tempFileContent), "TransferRetryable = true;")
 		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
+	})
+
+	// Test the check in writeOutfile if we have an error sent to the function and have an error in our resultAds
+	// In this case, the TransferError should not be overwritten
+	t.Run("TestAlreadyFailed", func(t *testing.T) {
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(t.TempDir(), "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		assert.NoError(t, err, "Error writing to temp file")
+		defer tempFile.Close()
+		defer os.Remove(tempFile.Name())
+
+		// Set up test result ads
+		var resultAds []*classads.ClassAd
+		for i := 0; i < 4; i++ {
+			resultAd := classads.NewClassAd()
+			resultAd.Set("TransferSuccess", false)
+			resultAd.Set("TransferError", "This is some error here")
+			resultAds = append(resultAds, resultAd)
+		}
+		writeErr := errors.New("This is the error that is passed to writeOutfile")
+		success, _, err := writeOutfile(writeErr, resultAds, tempFile)
+		assert.NoError(t, err)
+		assert.False(t, success, "writeOutfile failed :(")
+		tempFileContent, err := os.ReadFile(tempFile.Name())
+		assert.NoError(t, err)
+
+		// assert the output file contains some of our result ads
+		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
+		assert.Contains(t, string(tempFileContent), "TransferError = \"This is some error here\";")
+	})
+
+	// In this case, we have an error sent to writeOutFile but no errors in the resultAds, we want to ensure
+	// TransferSuccess is false and TransferError is populated with the error
+	t.Run("TestNotAlreadyFailed", func(t *testing.T) {
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(t.TempDir(), "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		assert.NoError(t, err, "Error writing to temp file")
+		defer tempFile.Close()
+		defer os.Remove(tempFile.Name())
+
+		// Set up test result ads
+		var resultAds []*classads.ClassAd
+		for i := 0; i < 4; i++ {
+			resultAd := classads.NewClassAd()
+			resultAd.Set("TransferSuccess", true)
+			resultAds = append(resultAds, resultAd)
+		}
+		writeErr := errors.New("This is the error that is passed to writeOutfile")
+		success, _, err := writeOutfile(writeErr, resultAds, tempFile)
+		assert.NoError(t, err)
+		assert.False(t, success, "writeOutfile failed :(")
+		tempFileContent, err := os.ReadFile(tempFile.Name())
+		assert.NoError(t, err)
+
+		// assert the output file contains some of our result ads
+		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
+		assert.Contains(t, string(tempFileContent), "TransferError = \"This is the error that is passed to writeOutfile\";")
 	})
 
 }
