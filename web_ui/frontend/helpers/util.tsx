@@ -32,6 +32,14 @@ export const getOauthEnabledServers = async () => {
     }
 }
 
+export function getObjectValue<T>(obj: any, keys: string[]): T | undefined {
+    const currentValue = obj?.[keys[0]]
+    if(keys.length == 1){
+        return currentValue
+    }
+    return getObjectValue(currentValue, keys.slice(1))
+}
+
 export const getErrorMessage = async (response: Response) : Promise<string> =>  {
     let message;
     try {
