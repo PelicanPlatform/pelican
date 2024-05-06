@@ -82,6 +82,20 @@ type (
 	CheckNamespaceStatusRes struct {
 		Approved bool `json:"approved"`
 	}
+
+	CheckNamespaceCompleteReq struct {
+		Prefixes []string `json:"prefixes"`
+	}
+
+	NamespaceCompletenessResult struct {
+		EditUrl   string `json:"edit_url"`
+		Completed bool   `json:"complete"`
+		Msg       string `json:"msg"`
+	}
+
+	CheckNamespaceCompleteRes struct {
+		Results map[string]NamespaceCompletenessResult `json:"results"`
+	}
 )
 
 const (

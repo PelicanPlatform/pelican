@@ -1,4 +1,5 @@
-# Origin export configuration to test full multi-export capabilities
+# Origin export configuration to test direct read functionality,
+# testing how we handle origin direct reads enabled but namespace direct reads disabled
 
 Origin:
   # Things that configure the origin itself
@@ -9,7 +10,4 @@ Origin:
     - StoragePrefix: /<SHOULD BE OVERRIDDEN>
       FederationPrefix: /first/namespace
       # Don't set Reads -- it should be toggled true by setting PublicReads
-      Capabilities: ["PublicReads", "Writes", "DirectReads", "Listings"]
-    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
-      FederationPrefix: /second/namespace
-      Capabilities: ["PublicReads", "Writes", "DirectReads", "Listings"]
+      Capabilities: ["PublicReads", "Writes"]

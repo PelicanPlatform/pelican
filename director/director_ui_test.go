@@ -37,43 +37,61 @@ func TestListServers(t *testing.T) {
 	router.GET("/servers", listServers)
 
 	serverAds.DeleteAll()
+	mockOriginNamespace := mockNamespaceAds(5, "origin1")
+	mockCacheNamespace := mockNamespaceAds(4, "cache1")
 	serverAds.Set(mockOriginServerAd.URL.String(),
 		&server_structs.Advertisement{
 			ServerAd:     mockOriginServerAd,
-			NamespaceAds: mockNamespaceAds(5, "origin1"),
+			NamespaceAds: mockOriginNamespace,
 		}, ttlcache.DefaultTTL)
-	serverAds.Set(mockCacheServerAd.URL.String(), &server_structs.Advertisement{
-		ServerAd:     mockCacheServerAd,
-		NamespaceAds: mockNamespaceAds(4, "cache1"),
-	}, ttlcache.DefaultTTL)
+	serverAds.Set(mockCacheServerAd.URL.String(),
+		&server_structs.Advertisement{
+			ServerAd:     mockCacheServerAd,
+			NamespaceAds: mockCacheNamespace,
+		}, ttlcache.DefaultTTL)
+
 	require.True(t, serverAds.Has(mockOriginServerAd.URL.String()))
 	require.True(t, serverAds.Has(mockCacheServerAd.URL.String()))
 
-	mocklistOriginRes := listServerResponse{
-		Name:        mockOriginServerAd.Name,
-		BrokerURL:   mockOriginServerAd.BrokerURL.String(),
-		AuthURL:     mockOriginServerAd.URL.String(),
-		URL:         mockOriginServerAd.URL.String(),
-		WebURL:      mockOriginServerAd.WebURL.String(),
-		Type:        mockOriginServerAd.Type,
-		Latitude:    mockOriginServerAd.Latitude,
-		Longitude:   mockOriginServerAd.Longitude,
-		Writes:      mockOriginServerAd.Writes,
-		DirectReads: mockOriginServerAd.DirectReads,
-		Status:      HealthStatusUnknown,
+	expectedListOriginResNss := []string{}
+	for _, ns := range mockOriginNamespace {
+		expectedListOriginResNss = append(expectedListOriginResNss, ns.Path)
 	}
-	mocklistCacheRes := listServerResponse{
-		Name:        mockCacheServerAd.Name,
-		BrokerURL:   mockCacheServerAd.BrokerURL.String(),
-		AuthURL:     mockCacheServerAd.URL.String(),
-		URL:         mockCacheServerAd.URL.String(),
-		WebURL:      mockCacheServerAd.WebURL.String(),
-		Type:        mockCacheServerAd.Type,
-		Latitude:    mockCacheServerAd.Latitude,
-		Longitude:   mockCacheServerAd.Longitude,
-		Writes:      mockCacheServerAd.Writes,
-		DirectReads: mockCacheServerAd.DirectReads,
-		Status:      HealthStatusUnknown,
+
+	expectedListCacheResNss := []string{}
+	for _, ns := range mockCacheNamespace {
+		expectedListCacheResNss = append(expectedListCacheResNss, ns.Path)
+	}
+
+	expectedlistOriginRes := listServerResponse{
+		Name:              mockOriginServerAd.Name,
+		BrokerURL:         mockOriginServerAd.BrokerURL.String(),
+		AuthURL:           mockOriginServerAd.URL.String(),
+		URL:               mockOriginServerAd.URL.String(),
+		WebURL:            mockOriginServerAd.WebURL.String(),
+		Type:              mockOriginServerAd.Type,
+		Latitude:          mockOriginServerAd.Latitude,
+		Longitude:         mockOriginServerAd.Longitude,
+		Writes:            mockOriginServerAd.Writes,
+		DirectReads:       mockOriginServerAd.DirectReads,
+		Listings:          mockOriginServerAd.Listings,
+		Status:            HealthStatusUnknown,
+		NamespacePrefixes: expectedListOriginResNss,
+	}
+
+	expectedlistCacheRes := listServerResponse{
+		Name:              mockCacheServerAd.Name,
+		BrokerURL:         mockCacheServerAd.BrokerURL.String(),
+		AuthURL:           mockCacheServerAd.URL.String(),
+		URL:               mockCacheServerAd.URL.String(),
+		WebURL:            mockCacheServerAd.WebURL.String(),
+		Type:              mockCacheServerAd.Type,
+		Latitude:          mockCacheServerAd.Latitude,
+		Longitude:         mockCacheServerAd.Longitude,
+		Writes:            mockCacheServerAd.Writes,
+		DirectReads:       mockCacheServerAd.DirectReads,
+		Status:            HealthStatusUnknown,
+		NamespacePrefixes: expectedListCacheResNss,
 	}
 
 	t.Run("query-origin", func(t *testing.T) {
@@ -87,11 +105,9 @@ func TestListServers(t *testing.T) {
 
 		var got []listServerResponse
 		err := json.Unmarshal(w.Body.Bytes(), &got)
-		if err != nil {
-			t.Fatalf("Failed to unmarshal response body: %v", err)
-		}
+		require.NoError(t, err)
 		require.Equal(t, 1, len(got))
-		assert.Equal(t, mocklistOriginRes, got[0], "Response data does not match expected")
+		assert.Equal(t, expectedlistOriginRes, got[0], "Response data does not match expected")
 	})
 
 	t.Run("query-cache", func(t *testing.T) {
@@ -105,11 +121,10 @@ func TestListServers(t *testing.T) {
 
 		var got []listServerResponse
 		err := json.Unmarshal(w.Body.Bytes(), &got)
-		if err != nil {
-			t.Fatalf("Failed to unmarshal response body: %v", err)
-		}
+
+		require.NoError(t, err)
 		require.Equal(t, 1, len(got))
-		assert.Equal(t, mocklistCacheRes, got[0], "Response data does not match expected")
+		assert.Equal(t, expectedlistCacheRes, got[0], "Response data does not match expected")
 	})
 
 	t.Run("query-all-with-empty-server-type", func(t *testing.T) {
@@ -123,9 +138,8 @@ func TestListServers(t *testing.T) {
 
 		var got []listServerResponse
 		err := json.Unmarshal(w.Body.Bytes(), &got)
-		if err != nil {
-			t.Fatalf("Failed to unmarshal response body: %v", err)
-		}
+
+		require.NoError(t, err)
 		require.Equal(t, 2, len(got))
 	})
 
@@ -140,9 +154,8 @@ func TestListServers(t *testing.T) {
 
 		var got []listServerResponse
 		err := json.Unmarshal(w.Body.Bytes(), &got)
-		if err != nil {
-			t.Fatalf("Failed to unmarshal response body: %v", err)
-		}
+
+		require.NoError(t, err)
 		require.Equal(t, 2, len(got))
 	})
 

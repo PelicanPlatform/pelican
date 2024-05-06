@@ -38,6 +38,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-playground/locales/en"
+	ut "github.com/go-playground/universal-translator"
+	en_translations "github.com/go-playground/validator/v10/translations/en"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
@@ -159,6 +163,14 @@ var (
 	// Global struct validator
 	validate *validator.Validate
 
+	// Global translator for the validator
+	uni *ut.UniversalTranslator
+
+	onceValidate sync.Once
+
+	// English translator
+	translator *ut.Translator
+
 	// A variable indicating enabled Pelican servers in the current process
 	enabledServers ServerType
 	setServerOnce  sync.Once
@@ -213,6 +225,12 @@ func (e *MetadataErr) Unwrap() error {
 }
 
 func init() {
+	en := en.New()
+	uni = ut.New(en, en)
+
+	trans, _ := uni.GetTranslator("en")
+	translator = &trans
+
 	validate = validator.New(validator.WithRequiredStructEnabled())
 }
 
@@ -746,6 +764,10 @@ func GetValidate() *validator.Validate {
 	return validate
 }
 
+func GetEnTranslator() ut.Translator {
+	return *translator
+}
+
 func handleDeprecatedConfig() {
 	deprecatedMap := param.GetDeprecated()
 	for deprecated, replacement := range deprecatedMap {
@@ -809,6 +831,20 @@ func checkWatermark(wmStr string) (bool, int64, error) {
 			return false, 0, errors.Errorf("watermark value %s is neither a percentage integer (e.g. 95) or a valid byte. Bytes representation is missing unit (k|m|g|t). Refer to parameter page for details: https://docs.pelicanplatform.org/parameters#Cache-HighWatermark", wmStr)
 		}
 	}
+}
+
+func setupTranslation() error {
+	err := en_translations.RegisterDefaultTranslations(validate, GetEnTranslator())
+	if err != nil {
+		return err
+	}
+
+	return validate.RegisterTranslation("required", GetEnTranslator(), func(ut ut.Translator) error {
+		return ut.Add("required", "{0} is required.", true)
+	}, func(ut ut.Translator, fe validator.FieldError) string {
+		t, _ := ut.T("required", fe.Field())
+		return t
+	})
 }
 
 func InitConfig() {
@@ -897,6 +933,14 @@ func InitConfig() {
 		os.Exit(1)
 	}
 	handleDeprecatedConfig()
+
+	onceValidate.Do(func() {
+		err = setupTranslation()
+	})
+	if err != nil {
+		log.Errorln("Failed to set up translation for the validator: ", err.Error())
+		os.Exit(1)
+	}
 }
 
 func initConfigDir() error {
@@ -1040,7 +1084,14 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		if currentServers.IsEnabled(CacheType) {
 			viper.SetDefault("Cache.RunLocation", filepath.Join("/run", "pelican", "xrootd", "cache"))
 		}
-		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")
+		viper.SetDefault("Cache.LocalRoot", "/run/pelican/cache")
+		if viper.IsSet("Cache.DataLocation") {
+			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "data")})
+			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "meta")})
+		} else {
+			viper.SetDefault("Cache.DataLocations", []string{"/run/pelican/cache/data"})
+			viper.SetDefault("Cache.MetaLocations", []string{"/run/pelican/cache/meta"})
+		}
 		viper.SetDefault("LocalCache.RunLocation", filepath.Join("/run", "pelican", "localcache"))
 
 		viper.SetDefault("Origin.Multiuser", true)
@@ -1084,7 +1135,14 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			}
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
-		viper.SetDefault("Cache.DataLocation", filepath.Join(runtimeDir, "xcache"))
+		viper.SetDefault("Cache.LocalRoot", filepath.Join(runtimeDir, "cache"))
+		if viper.IsSet("Cache.DataLocation") {
+			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "data")})
+			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "meta")})
+		} else {
+			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(runtimeDir, "pelican/cache/data")})
+			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(runtimeDir, "pelican/cache/meta")})
+		}
 		viper.SetDefault("LocalCache.RunLocation", filepath.Join(runtimeDir, "cache"))
 		viper.SetDefault("Origin.Multiuser", false)
 	}

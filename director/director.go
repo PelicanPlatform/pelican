@@ -321,10 +321,15 @@ func redirectToCache(ginCtx *gin.Context) {
 	}
 
 	var colUrl string
-	if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
-		colUrl = originAds[0].AuthURL.String()
-	} else {
-		colUrl = originAds[0].URL.String()
+	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
+	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
+	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
+	if namespaceAd.Caps.Listings && originAds[0].Listings {
+		if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
+			colUrl = originAds[0].AuthURL.String()
+		} else {
+			colUrl = originAds[0].URL.String()
+		}
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
 		namespaceAd.Path, !namespaceAd.PublicRead, colUrl)}
@@ -407,15 +412,56 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
 
 	var colUrl string
-	if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
-		colUrl = originAds[0].AuthURL.String()
-	} else {
-		colUrl = originAds[0].URL.String()
+	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
+	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
+	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
+	if namespaceAd.Caps.Listings && originAds[0].Listings {
+		if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
+			colUrl = originAds[0].AuthURL.String()
+		} else {
+			colUrl = originAds[0].URL.String()
+		}
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
 		namespaceAd.Path, !namespaceAd.PublicRead, colUrl)}
 
 	var redirectURL url.URL
+
+	// If we are doing a PROPFIND, check if origins enable dirlistings
+	if ginCtx.Request.Method == "PROPFIND" {
+		for idx, ad := range originAds {
+			if ad.Listings && namespaceAd.Caps.Listings {
+				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
+					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
+				}
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+				return
+			}
+		}
+		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint allow directory listings"})
+	}
+
+	// We know this can be easily bypassed, we need to eventually enforce this
+	// Origin should only be redirected to if it allows direct reads or the cache is the one it is talking to.
+	// Any client that uses this api that doesn't set directreads can talk directly to an origin
+
+	// Check if we are doing a DirectRead and if it is allowed
+	if ginCtx.Request.URL.Query().Has("directread") {
+		for idx, originAd := range originAds {
+			if originAd.DirectReads && namespaceAd.Caps.DirectReads {
+				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
+					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
+				}
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+				return
+			}
+		}
+		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint have direct reads enabled"})
+		return
+	}
+
 	// If we are doing a PUT, check to see if any origins are writeable
 	if ginCtx.Request.Method == "PUT" {
 		for idx, ad := range originAds {
@@ -428,7 +474,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				return
 			}
 		}
-		ginCtx.String(http.StatusMethodNotAllowed, "No origins on specified endpoint are writeable")
+		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint have direct reads enabled"})
 		return
 	} else { // Otherwise, we are doing a GET
 		redirectURL := getRedirectURL(reqPath, originAds[0], !namespaceAd.PublicRead)
@@ -499,6 +545,25 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			checkHostnameRedirects(c, host[0])
 		} else if xForwardedHostPresent {
 			checkHostnameRedirects(c, xForwardedHost[0])
+		}
+
+		// If we are doing a PROPFIND, we should always redirect to the origin
+		if c.Request.Method == "PROPFIND" {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "PROPFIND" || c.Request.Method == "HEAD") {
+				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
+				redirectToOrigin(c)
+				c.Abort()
+				return
+			}
+		}
+
+		// Check for the DirectRead query paramater and redirect to the origin if it's set if the origin allows DirectReads
+		if c.Request.URL.Query().Has("directread") {
+			log.Debugln("directread query parameter detected, redirecting to origin")
+			// We'll redirect to origin here and the origin will decide if it can serve the request (if direct reads are enabled)
+			redirectToOrigin(c)
+			c.Abort()
+			return
 		}
 
 		// If we're configured for cache mode or we haven't set the flag,
@@ -666,6 +731,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		Type:        sType,
 		Writes:      adV2.Caps.Writes,
 		DirectReads: adV2.Caps.DirectReads,
+		Listings:    adV2.Caps.Listings,
 	}
 
 	recordAd(sAd, &adV2.Namespaces)
@@ -927,6 +993,11 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
 		directorAPIV1.HEAD("/healthTest/*path", getHealthTestFile)
+		directorAPIV1.Any("/origin", func(gctx *gin.Context) { // Need to do this for PROPFIND since gin does not support it
+			if gctx.Request.Method == "PROPFIND" {
+				redirectToOrigin(gctx)
+			}
+		})
 
 		// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
 		// so that director can be our point of contact for collecting system-level metrics.

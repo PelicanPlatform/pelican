@@ -118,6 +118,10 @@ type (
 		Err error
 	}
 
+	dirListingNotSupportedError struct {
+		Err error
+	}
+
 	// Transfer attempt error wraps an error with information about the service/proxy used
 	TransferAttemptError struct {
 		serviceHost string
@@ -214,6 +218,7 @@ type (
 		skipAcquire   bool
 		caches        []*url.URL
 		useDirector   bool
+		directorUrl   string
 		tokenLocation string
 		token         string
 		project       string
@@ -334,6 +339,19 @@ func (e *allocateMemoryError) Unwrap() error {
 
 func (e *allocateMemoryError) Is(target error) bool {
 	_, ok := target.(*allocateMemoryError)
+	return ok
+}
+
+func (e *dirListingNotSupportedError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *dirListingNotSupportedError) Unwrap() error {
+	return e.Err
+}
+
+func (e *dirListingNotSupportedError) Is(target error) bool {
+	_, ok := target.(*dirListingNotSupportedError)
 	return ok
 }
 
@@ -1054,11 +1072,15 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
-	tj.useDirector = pelicanURL.directorUrl != ""
-	ns, err := getNamespaceInfo(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload)
+	if pelicanURL.directorUrl != "" {
+		tj.useDirector = true
+		tj.directorUrl = pelicanURL.directorUrl
+	}
+	ns, err := getNamespaceInfo(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload, remoteUrl.RawQuery)
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
+		return
 	}
 	tj.namespace = ns
 
@@ -1066,6 +1088,46 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		tj.token, err = getToken(remoteUrl, ns, true, "", tc.tokenLocation, !tj.skipAcquire)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get token for transfer: %v", err)
+		}
+	}
+
+	// If we are a recursive download and using the director, we want to attempt to get directory listings from
+	// PROPFINDing the director
+	if recursive && !upload && tj.useDirector {
+		// Query the director a PROPFIND to see if we can get our directory listing
+		resp, err := queryDirector(tj.ctx, "PROPFIND", remoteUrl.Path, tj.directorUrl)
+		if err != nil {
+			return nil, err
+		}
+		// If the director responds with 405 (method not allowed), we're working with an old Director.
+		// In that event, we try to fallback and use the deprecated dirlisthost
+		if resp.StatusCode == http.StatusMethodNotAllowed {
+			log.Debugln("Failed to find collections url from director, attempting to find directory listings host in namespace")
+			// Check for a dir list host in namespace
+			if tj.namespace.DirListHost == "" {
+				// Both methods to get directory listings failed
+				err = &dirListingNotSupportedError{Err: errors.New("origin and/or namespace does not support directory listings")}
+				return nil, err
+			}
+		} else if resp.StatusCode == http.StatusTemporaryRedirect {
+			// If the director responds with a 307 (temporary redirect), we're working with a new Director.
+			// In that event, we can get the collections URL from our redirect
+			collections := resp.Header.Get("Location")
+			if collections == "" {
+				return nil, errors.New("collections URL not found in director response")
+			}
+			// The resp redirect includes the full path to the object from the origin, we are only interested in the scheme and host
+			collectionsURL, err := url.Parse(collections)
+			if err != nil {
+				return nil, err
+			}
+			dirlisthost := url.URL{
+				Scheme: collectionsURL.Scheme,
+				Host:   collectionsURL.Host,
+			}
+			tj.namespace.DirListHost = dirlisthost.String()
+		} else {
+			return nil, fmt.Errorf("unexpected response from director when requesting collections url from origin: %v", resp.Status)
 		}
 	}
 
@@ -1303,8 +1365,6 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		if err != nil {
 			log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
 		}
-
-		log.Debugln("Matched caches:", closestNamespaceCaches)
 
 		// Make sure we only try as many caches as we have
 		cachesToTry := CachesToTry

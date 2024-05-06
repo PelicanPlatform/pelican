@@ -67,7 +67,7 @@ Origin:
   EnablePublicReads: false
   EnableReads: true
   EnableWrites: true
-  EnableListings: false
+  EnableListings: true
   EnableDirectReads: false
   SelfTest: true
   Port: 8443
