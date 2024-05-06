@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/youmark/pkcs8"
 	"golang.org/x/crypto/curve25519"
@@ -73,11 +74,13 @@ func EncryptedConfigExists() (bool, error) {
 	return true, nil
 }
 
+// Return the PEM-formatted contents of the encrypted configuration file
 func GetEncryptedContents() (string, error) {
 	filename, err := GetEncryptedConfigName()
 	if err != nil {
 		return "", err
 	}
+	log.Debugln("Will read credential configuration from", filename)
 
 	buf, err := os.ReadFile(filename)
 	if err != nil {
@@ -180,7 +183,9 @@ func GetPassword(newFile bool) ([]byte, error) {
 	return term.ReadPassword(stdin)
 }
 
-func GetConfigContents() (OSDFConfig, error) {
+// Returns the current contents of the credential configuration
+// from disk.
+func GetCredentialConfigContents() (OSDFConfig, error) {
 	config := OSDFConfig{}
 
 	encContents, err := GetEncryptedContents()
@@ -266,7 +271,7 @@ func GetConfigContents() (OSDFConfig, error) {
 }
 
 func ResetPassword() error {
-	input_config, err := GetConfigContents()
+	input_config, err := GetCredentialConfigContents()
 	if err != nil {
 		return err
 	}

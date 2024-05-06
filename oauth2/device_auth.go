@@ -67,6 +67,10 @@ const (
 	errInvalidScope         = "invalid_scope"
 )
 
+var (
+	ErrUnknownClient error = errors.New("unknown OAuth2 Client ID")
+)
+
 type DeviceAuth struct {
 	DeviceCode              string `json:"device_code"`
 	UserCode                string `json:"user_code"`
@@ -75,6 +79,11 @@ type DeviceAuth struct {
 	ExpiresIn               int    `json:"expires_in"`
 	Interval                int    `json:"interval,omitempty"`
 	raw                     map[string]interface{}
+}
+
+type oauth2Err struct {
+	Error       string `json:"error"`
+	Description string `json:"error_description"`
 }
 
 type Config struct {
@@ -109,7 +118,7 @@ func retrieveDeviceAuth(ctx context.Context, c *Config, v url.Values) (*DeviceAu
 	req.SetBasicAuth(url.QueryEscape(c.ClientID), url.QueryEscape(c.ClientSecret))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	r, err := ctxhttp.Do(ctx, nil, req)
+	r, err := ctxhttp.Do(ctx, ContextClient(ctx), req)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +128,21 @@ func retrieveDeviceAuth(ctx context.Context, c *Config, v url.Values) (*DeviceAu
 		return nil, fmt.Errorf("oauth2: cannot auth device: %v", err)
 	}
 	if code := r.StatusCode; code < 200 || code > 299 {
+		if code == 400 {
+			contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			if err != nil {
+				contentType = ""
+			}
+			if contentType == "application/json" {
+				var errMsg oauth2Err
+				if err := json.Unmarshal(body, &errMsg); err == nil {
+					if errMsg.Error == "unauthorized_client" && errMsg.Description == "unknown client" {
+						return nil, ErrUnknownClient
+					}
+				}
+			}
+		}
+
 		return nil, &oauth2_upstream.RetrieveError{
 			Response: r,
 			Body:     body,

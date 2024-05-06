@@ -1604,6 +1604,13 @@ type: string
 default: /opt/qdl
 components: ["origin"]
 ---
+name: Issuer.IssuerClaimValue
+description: |+
+  Contents of the issuer (`iss`) claim in the generated tokens
+type: string
+default: $(Server.ExternalWebUrl)
+components: ["origin"]
+---
 name: Issuer.AuthenticationSource
 description: |+
   How users should authenticate with the issuer.  Currently-supported values are:
@@ -1637,6 +1644,16 @@ type: string
 default: sub
 components: ["origin"]
 ---
+name: Issuer.UserStripDomain
+description: |+
+  Some OIDC issuers generate a username of the form user@domain (such as `john.doe@gmail.com`); when
+  `UserStripDomain` is enabled, Pelican will strip the domain when determining the username.
+
+  For example, the OIDC identity `john.doe@gmail.com` would map to `john.doe`.
+type: bool
+default: false
+components: ["origin"]
+---
 name: Issuer.GroupSource
 description: |+
   How the issuer should determine group information based on the authenticated identity.  Valid values are:
@@ -1644,8 +1661,20 @@ description: |+
   - `file`: Read groups from an external, JSON-formatted file.  The file should contain a single JSON object
     with keys corresponding to the "user" name and the value a list of strings that are interpreted as the
     user's groups.
+  - `oidc`: Take group information from the identity token provided by the OIDC identity provider.  Parses
+    the value of the claim specified by `Issuer.OIDCGroupClaim` (defaults to "groups") as a list of groups.
+    The value may either be a comma-separated string or an array of strings.
 type: string
 default: none
+components: ["origin"]
+---
+name: Issuer.OIDCGroupClaim
+description: |+
+  The claim in the OIDC ID token to be used as the group for the issuer.  If the value is a string,
+  it is assumed that a comma is used as a group delimiter; otherwise, an array of strings is assumed.
+  Check the documentation of your OIDC provider to determine the appropriate claim name.
+type: string
+default: "groups"
 components: ["origin"]
 ---
 name: Issuer.GroupFile

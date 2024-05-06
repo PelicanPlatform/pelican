@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"text/template"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -155,10 +156,9 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		}
 	}
 
-	oidcIssuerURL := param.OIDC_Issuer.GetString()
+	oidcIssuerURL := param.Issuer_IssuerClaimValue.GetString()
 	if oidcIssuerURL == "" {
-		err = errors.New("OIDC.Issuer not set in the configuration")
-		return
+		oidcIssuerURL = param.Server_ExternalWebUrl.GetString()
 	}
 	oidcAuthzURL, err := config.GetOIDCAuthorizationEndpoint()
 	if err != nil {
@@ -295,6 +295,13 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 
 	user, err := config.GetOA4MPUser()
 	if err != nil {
+		return
+	}
+
+	// If the HTTP socket already exists then tomcat will refuse to configure.
+	socketName := filepath.Join(param.Issuer_ScitokensServerLocation.GetString(), "var", "http.sock")
+	if err = os.Remove(socketName); err != nil && !errors.Is(err, syscall.ENOENT) {
+		err = errors.Wrap(err, "failed to remove old tomcat communication socket")
 		return
 	}
 

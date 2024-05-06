@@ -52,12 +52,10 @@
         <JSONWebKey>
             <path>{{- .JwksLocation -}}</path>
         </JSONWebKey>
-        <!-- Remove the next authorizationServlet if using a proxy -->
-        <!--<authorizationServlet authorizationURI="https://{HOSTNAME}/scitokens-server/authorize"/>-->
-       <authorizationServlet
-                useProxy="true"
-                cfgFile="{{- .ScitokensServerLocation -}}/etc/proxy-config.xml"
-                cfgName="proxy-client"
+        <authorizationServlet
+            useHeader="true"
+            requireHeader="true"
+            headerFieldName="X-Pelican-User"
         />
         <deviceFlowServlet
                 verificationURI="{{- .IssuerURL -}}/device"

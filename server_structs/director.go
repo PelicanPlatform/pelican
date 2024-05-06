@@ -119,8 +119,16 @@ type (
 	}
 
 	OpenIdDiscoveryResponse struct {
-		Issuer  string `json:"issuer"`
-		JwksUri string `json:"jwks_uri"`
+		Issuer               string   `json:"issuer"`
+		JwksUri              string   `json:"jwks_uri"`
+		TokenEndpoint        string   `json:"token_endpoint,omitempty"`
+		UserInfoEndpoint     string   `json:"userinfo_endpoint,omitempty"`
+		RevocationEndpoint   string   `json:"revocation_endpoint,omitempty"`
+		GrantTypesSupported  []string `json:"grant_types_supported,omitempty"`
+		ScopesSupported      []string `json:"scopes_supported,omitempty"`
+		TokenAuthMethods     []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+		RegistrationEndpoint string   `json:"registration_endpoint,omitempty"`
+		DeviceEndpoint       string   `json:"device_authorization_endpoint,omitempty"`
 	}
 )
 

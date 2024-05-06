@@ -29,6 +29,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 const (
@@ -131,97 +132,7 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 	ctx.Data(http.StatusOK, "application/json", jsonData)
 }
 
-// Director metadata discovery endpoint for OpenID style
-// token authentication, providing issuer endpoint and director's jwks endpoint
-func oidcDiscoveryHandler(ctx *gin.Context) {
-	fedInfo, err := config.GetFederation(ctx)
-	if err != nil {
-		log.Error("Bad server configuration: Federation discovery could not resolve:", err)
-		ctx.JSON(http.StatusInternalServerError,
-			server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Bad server configuration: Federation discovery could not resolve",
-			})
-		return
-	}
-	directorUrlStr := fedInfo.DirectorEndpoint
-	if directorUrlStr == "" {
-		log.Error("Bad server configuration: Federation.DirectorUrl is not set")
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Bad server configuration: director URL is not set",
-		})
-		return
-	}
-	directorUrl, err := url.Parse(directorUrlStr)
-	if err != nil {
-		log.Error("Bad server configuration: invalid URL from Federation.DirectorUrl: ", err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Bad server configuration: director URL is not valid",
-		})
-		return
-	}
-	if directorUrl.Scheme != "https" {
-		directorUrl.Scheme = "https"
-	}
-	if directorUrl.Port() == "443" {
-		directorUrl.Host = strings.TrimSuffix(directorUrl.Host, ":443")
-	}
-	jwskUrl, err := url.JoinPath(directorUrl.String(), directorJWKSPath)
-	if err != nil {
-		log.Errorf("Bad server configuration: cannot join %s to Federation.DirectorUrl: %s for jwks URL: %v", directorJWKSPath, directorUrl.String(), err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Bad server configuration: cannot generate JWKs URL",
-		})
-		return
-	}
-	rs := server_structs.OpenIdDiscoveryResponse{
-		Issuer:  directorUrl.String(),
-		JwksUri: jwskUrl,
-	}
-	jsonData, err := json.MarshalIndent(rs, "", "  ")
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to marshal director's discovery response",
-		})
-		return
-	}
-	// Append a new line to the JSON data
-	jsonData = append(jsonData, '\n')
-	ctx.Header("Content-Disposition", "attachment; filename=pelican-director-configuration.json")
-	ctx.Data(200, "application/json", jsonData)
-}
-
-// Returns director's public key
-func jwksHandler(ctx *gin.Context) {
-	key, err := config.GetIssuerPublicJWKS()
-	if err != nil {
-		log.Errorf("Failed to load director's public key: %v", err)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to load director's public key",
-		})
-	} else {
-		jsonData, err := json.MarshalIndent(key, "", "  ")
-		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Failed to marshal director's public key",
-			})
-			return
-		}
-		// Append a new line to the JSON data
-		jsonData = append(jsonData, '\n')
-		ctx.Header("Content-Disposition", "attachment; filename=public-signing-key.jwks")
-		ctx.Data(200, "application/json", jsonData)
-	}
-}
-
 func RegisterDirectorOIDCAPI(router *gin.RouterGroup) {
 	router.GET(federationDiscoveryPath, federationDiscoveryHandler)
-	router.GET(oidcDiscoveryPath, oidcDiscoveryHandler)
-	router.GET(directorJWKSPath, jwksHandler)
+	server_utils.RegisterOIDCAPI(router, true)
 }

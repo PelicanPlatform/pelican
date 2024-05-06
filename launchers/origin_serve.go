@@ -68,7 +68,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 
 	// Director also registers this metadata URL; avoid registering twice.
 	if !modules.IsEnabled(config.DirectorType) {
-		server_utils.RegisterOIDCAPI(engine)
+		server_utils.RegisterOIDCAPI(engine.Group("/"), false)
 	}
 
 	if param.Origin_EnableIssuer.GetBool() {
