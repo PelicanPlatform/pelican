@@ -1,11 +1,12 @@
 import {
     Box,
-    Button
+    Button,
+    Alert
 } from "@mui/material";
 import React, {useEffect, useState, Dispatch, SetStateAction} from "react";
 import useSWR from "swr";
 
-import {Alert, Namespace} from "@/components/Main";
+import {Namespace} from "@/components/Main";
 import CustomRegistrationField from "@/app/registry/components/CustomRegistrationField/index";
 import {calculateKeys, deleteKey, getValue, populateKey, submitNamespaceForm} from "@/app/registry/components/util";
 import {CustomRegistrationPropsEnum} from "./CustomRegistrationField/index.d";
@@ -21,8 +22,16 @@ const getRegistrationFields = async (): Promise<CustomRegistrationPropsEnum[]> =
     })
     if (response.ok) {
         return await response.json()
+    } else {
+        let message;
+        try {
+            let data = await response.json()
+            message = data['msg']
+        } catch (e) {
+            message = response.statusText
+        }
+        throw new Error(`${response.status}: ${message}`)
     }
-    return []
 }
 
 const onChange = (
@@ -52,7 +61,7 @@ const Form = ({
 
     const [data, setData] = useState<Partial<Namespace> | undefined>(namespace || {})
 
-    const {data: fields} = useSWR<CustomRegistrationPropsEnum[]>(
+    const {data: fields, error} = useSWR<CustomRegistrationPropsEnum[]>(
         "getRegistrationFields",
         getRegistrationFields,
         {fallbackData: []}
@@ -69,6 +78,7 @@ const Form = ({
                 onSubmit(data)
             }}
         >
+            {error && <Alert severity={"error"}>{error.message}; Retry is automatic.</Alert>}
             {fields && fields.map((field, index) => {
                 return <Box key={field.name} pt={index == 0 ? 0 : 2}>
 
