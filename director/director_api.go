@@ -32,29 +32,25 @@ import (
 
 // List all namespaces from origins registered at the director
 func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
-
-	serverAdMutex.RLock()
-	defer serverAdMutex.RUnlock()
-
 	serverAdItems := serverAds.Items()
 	namespaces := make([]server_structs.NamespaceAdV2, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
-		if item.Key().Type == server_structs.OriginType {
-			namespaces = append(namespaces, item.Value()...)
+		ad := item.Value()
+		if ad.Type == server_structs.OriginType {
+			namespaces = append(namespaces, ad.NamespaceAds...)
 		}
 	}
 	return namespaces
 }
 
-// List all serverAds in the cache that matches the serverType array
-func listServerAds(serverTypes []server_structs.ServerType) []server_structs.ServerAd {
-	serverAdMutex.RLock()
-	defer serverAdMutex.RUnlock()
-	ads := make([]server_structs.ServerAd, 0)
-	for _, ad := range serverAds.Keys() {
+// List all advertisements in the TTL cache that match the serverType array
+func listAdvertisement(serverTypes []server_structs.ServerType) []server_structs.Advertisement {
+	ads := make([]server_structs.Advertisement, 0)
+	for _, item := range serverAds.Items() {
+		ad := item.Value()
 		for _, serverType := range serverTypes {
 			if ad.Type == serverType {
-				ads = append(ads, ad)
+				ads = append(ads, *ad)
 			}
 		}
 	}
@@ -89,42 +85,44 @@ func checkFilter(serverName string) (bool, filterType) {
 
 // Configure TTL caches to enable cache eviction and other additional cache events handling logic
 //
-// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
-// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction goroutine
 func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	// Start automatic expired item deletion
 	go serverAds.Start()
 	go namespaceKeys.Start()
 
-	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[server_structs.ServerAd, []server_structs.NamespaceAdV2]) {
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *server_structs.Advertisement]) {
 		healthTestUtilsMutex.RLock()
 		defer healthTestUtilsMutex.RUnlock()
-		if util, exists := healthTestUtils[i.Key()]; exists {
+		serverAd := i.Value().ServerAd
+		serverUrl := i.Key()
+
+		if util, exists := healthTestUtils[serverAd]; exists {
 			util.Cancel()
 			if util.ErrGrp != nil {
 				err := util.ErrGrp.Wait()
 				if err != nil {
-					log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(i.Key().Type), i.Key().Name, err.Error())
+					log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(serverAd.Type), serverAd.Name, err.Error())
 				} else {
-					log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(i.Key().Type), i.Key().Name)
+					log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(serverAd.Type), serverAd.Name)
 				}
 			} else {
-				log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(i.Key().Type), i.Key().Name)
+				log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(serverAd.Type), serverAd.Name)
 			}
 		} else {
-			log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", i.Key().Name)
+			log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", serverAd.Name)
 		}
 
-		if i.Key().Type == server_structs.OriginType {
+		if serverAd.Type == server_structs.OriginType {
 			originStatUtilsMutex.Lock()
 			defer originStatUtilsMutex.Unlock()
-			statUtil, ok := originStatUtils[i.Key().URL]
+			statUtil, ok := originStatUtils[serverUrl]
 			if ok {
 				statUtil.Cancel()
 				if err := statUtil.Errgroup.Wait(); err != nil {
-					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", i.Key().Name, err))
+					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", serverAd.Name, err))
 				}
-				delete(originStatUtils, i.Key().URL)
+				delete(originStatUtils, serverUrl)
 			}
 		}
 	})
@@ -133,8 +131,6 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	egrp.Go(func() error {
 		<-ctx.Done()
 		log.Info("Gracefully stopping director TTL cache eviction...")
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
 		serverAds.DeleteAll()
 		serverAds.Stop()
 		namespaceKeys.DeleteAll()

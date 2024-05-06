@@ -85,7 +85,7 @@ var (
 	healthTestUtils      = make(map[server_structs.ServerAd]*healthTestUtil)
 	healthTestUtilsMutex = sync.RWMutex{}
 
-	originStatUtils      = make(map[url.URL]originStatUtil)
+	originStatUtils      = make(map[string]originStatUtil)
 	originStatUtilsMutex = sync.RWMutex{}
 )
 
@@ -103,7 +103,10 @@ func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth boo
 	if requiresAuth {
 		redirectURL.Scheme = "https"
 	} else {
-		redirectURL.Scheme = "http"
+		redirectURL.Scheme = "https"
+		if ad.FromTopology {
+			redirectURL.Scheme = "http"
+		}
 	}
 	redirectURL.Host = serverURL.Host
 	redirectURL.Path = reqPath
@@ -318,10 +321,15 @@ func redirectToCache(ginCtx *gin.Context) {
 	}
 
 	var colUrl string
-	if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
-		colUrl = originAds[0].AuthURL.String()
-	} else {
-		colUrl = originAds[0].URL.String()
+	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
+	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
+	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
+	if namespaceAd.Caps.Listings && originAds[0].Listings {
+		if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
+			colUrl = originAds[0].AuthURL.String()
+		} else {
+			colUrl = originAds[0].URL.String()
+		}
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
 		namespaceAd.Path, !namespaceAd.PublicRead, colUrl)}
@@ -404,15 +412,56 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
 
 	var colUrl string
-	if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
-		colUrl = originAds[0].AuthURL.String()
-	} else {
-		colUrl = originAds[0].URL.String()
+	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
+	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
+	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
+	if namespaceAd.Caps.Listings && originAds[0].Listings {
+		if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
+			colUrl = originAds[0].AuthURL.String()
+		} else {
+			colUrl = originAds[0].URL.String()
+		}
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
 		namespaceAd.Path, !namespaceAd.PublicRead, colUrl)}
 
 	var redirectURL url.URL
+
+	// If we are doing a PROPFIND, check if origins enable dirlistings
+	if ginCtx.Request.Method == "PROPFIND" {
+		for idx, ad := range originAds {
+			if ad.Listings && namespaceAd.Caps.Listings {
+				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
+					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
+				}
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+				return
+			}
+		}
+		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint allow directory listings"})
+	}
+
+	// We know this can be easily bypassed, we need to eventually enforce this
+	// Origin should only be redirected to if it allows direct reads or the cache is the one it is talking to.
+	// Any client that uses this api that doesn't set directreads can talk directly to an origin
+
+	// Check if we are doing a DirectRead and if it is allowed
+	if ginCtx.Request.URL.Query().Has("directread") {
+		for idx, originAd := range originAds {
+			if originAd.DirectReads && namespaceAd.Caps.DirectReads {
+				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
+					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
+				}
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+				return
+			}
+		}
+		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint have direct reads enabled"})
+		return
+	}
+
 	// If we are doing a PUT, check to see if any origins are writeable
 	if ginCtx.Request.Method == "PUT" {
 		for idx, ad := range originAds {
@@ -425,7 +474,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				return
 			}
 		}
-		ginCtx.String(http.StatusMethodNotAllowed, "No origins on specified endpoint are writeable")
+		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint have direct reads enabled"})
 		return
 	} else { // Otherwise, we are doing a GET
 		redirectURL := getRedirectURL(reqPath, originAds[0], !namespaceAd.PublicRead)
@@ -498,6 +547,25 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			checkHostnameRedirects(c, xForwardedHost[0])
 		}
 
+		// If we are doing a PROPFIND, we should always redirect to the origin
+		if c.Request.Method == "PROPFIND" {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "PROPFIND" || c.Request.Method == "HEAD") {
+				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
+				redirectToOrigin(c)
+				c.Abort()
+				return
+			}
+		}
+
+		// Check for the DirectRead query paramater and redirect to the origin if it's set if the origin allows DirectReads
+		if c.Request.URL.Query().Has("directread") {
+			log.Debugln("directread query parameter detected, redirecting to origin")
+			// We'll redirect to origin here and the origin will decide if it can serve the request (if direct reads are enabled)
+			redirectToOrigin(c)
+			c.Abort()
+			return
+		}
+
 		// If we're configured for cache mode or we haven't set the flag,
 		// we should use cache middleware
 		if defaultResponse == "cache" {
@@ -566,6 +634,35 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	ctx.Set("serverName", adV2.Name)
 	ctx.Set("serverWebUrl", adV2.WebURL)
 
+	adUrl, err := url.Parse(adV2.DataURL)
+	if err != nil {
+		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid %s registration. %s.URL %s is not a valid URL", sType, sType, adV2.DataURL), // Origin.URL / Cache.URL
+		})
+		return
+	}
+
+	adWebUrl, err := url.Parse(adV2.WebURL)
+	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
+		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid %s registration. Server.ExternalWebUrl %s is not a valid URL", sType, adV2.WebURL),
+		})
+		return
+	}
+
+	brokerUrl, err := url.Parse(adV2.BrokerURL)
+	if err != nil {
+		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid %s registration. BrokerURL %s is not a valid URL", sType, adV2.BrokerURL),
+		})
+	}
+
 	if sType == server_structs.OriginType {
 		for _, namespace := range adV2.Namespaces {
 			// We're assuming there's only one token in the slice
@@ -597,7 +694,10 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		}
 	} else {
 		token := strings.TrimPrefix(tokens[0], "Bearer ")
-		prefix := path.Join("/caches", adV2.Name)
+		// Use hostname from adv2.DataUrl instead of adv2.Name as Name is the site name
+		hostname := adUrl.Hostname()
+
+		prefix := path.Join("/caches", hostname)
 		ok, err := verifyAdvertiseToken(engineCtx, token, prefix)
 		if err != nil {
 			if err == adminApprovalErr {
@@ -623,43 +723,15 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		}
 	}
 
-	ad_url, err := url.Parse(adV2.DataURL)
-	if err != nil {
-		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration", sType),
-		})
-		return
-	}
-
-	adWebUrl, err := url.Parse(adV2.WebURL)
-	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
-		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Invalid server Web URL",
-		})
-		return
-	}
-
-	brokerUrl, err := url.Parse(adV2.BrokerURL)
-	if err != nil {
-		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Invalid broker URL",
-		})
-	}
-
 	sAd := server_structs.ServerAd{
 		Name:        adV2.Name,
-		URL:         *ad_url,
+		URL:         *adUrl,
 		WebURL:      *adWebUrl,
 		BrokerURL:   *brokerUrl,
 		Type:        sType,
 		Writes:      adV2.Caps.Writes,
 		DirectReads: adV2.Caps.DirectReads,
+		Listings:    adV2.Caps.Listings,
 	}
 
 	recordAd(sAd, &adV2.Namespaces)
@@ -732,7 +804,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	if sType == server_structs.OriginType {
 		originStatUtilsMutex.Lock()
 		defer originStatUtilsMutex.Unlock()
-		statUtil, ok := originStatUtils[sAd.URL]
+		statUtil, ok := originStatUtils[sAd.URL.String()]
 		if !ok || statUtil.Errgroup == nil {
 			baseCtx, cancel := context.WithCancel(engineCtx)
 			concLimit := param.Director_StatConcurrencyLimit.GetInt()
@@ -743,14 +815,14 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				Cancel:   cancel,
 				Context:  baseCtx,
 			}
-			originStatUtils[sAd.URL] = newUtil
+			originStatUtils[sAd.URL.String()] = newUtil
 		}
 	}
 
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Successful registration"})
 }
 
-func registerServeAdMetric(ctx *gin.Context) {
+func serverAdMetricMiddleware(ctx *gin.Context) {
 	ctx.Next()
 
 	serverName := "Unknown"
@@ -792,32 +864,30 @@ func discoverOriginCache(ctx *gin.Context) {
 		return
 	}
 
-	serverAdMutex.RLock()
-	defer serverAdMutex.RUnlock()
-	serverAds := serverAds.Keys()
 	promDiscoveryRes := make([]PromDiscoveryItem, 0)
-	for _, ad := range serverAds {
-		if ad.WebURL.String() == "" {
+	for _, ad := range serverAds.Items() {
+		serverAd := ad.Value()
+		if serverAd.WebURL.String() == "" {
 			// Origins and caches fetched from topology can't be scraped as they
 			// don't have a WebURL
 			continue
 		}
 		var auth_url string
-		if ad.AuthURL == (url.URL{}) {
-			auth_url = ad.URL.String()
+		if serverAd.AuthURL == (url.URL{}) {
+			auth_url = serverAd.URL.String()
 		} else {
-			auth_url = ad.AuthURL.String()
+			auth_url = serverAd.AuthURL.String()
 		}
 		promDiscoveryRes = append(promDiscoveryRes, PromDiscoveryItem{
-			Targets: []string{ad.WebURL.Hostname() + ":" + ad.WebURL.Port()},
+			Targets: []string{serverAd.WebURL.Hostname() + ":" + serverAd.WebURL.Port()},
 			Labels: map[string]string{
-				"server_type":     string(ad.Type),
-				"server_name":     ad.Name,
+				"server_type":     string(serverAd.Type),
+				"server_name":     serverAd.Name,
 				"server_auth_url": auth_url,
-				"server_url":      ad.URL.String(),
-				"server_web_url":  ad.WebURL.String(),
-				"server_lat":      fmt.Sprintf("%.4f", ad.Latitude),
-				"server_long":     fmt.Sprintf("%.4f", ad.Longitude),
+				"server_url":      serverAd.URL.String(),
+				"server_web_url":  serverAd.WebURL.String(),
+				"server_lat":      fmt.Sprintf("%.4f", serverAd.Latitude),
+				"server_long":     fmt.Sprintf("%.4f", serverAd.Longitude),
 			},
 		})
 	}
@@ -917,12 +987,17 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/origin/*any", redirectToOrigin)
 		directorAPIV1.HEAD("/origin/*any", redirectToOrigin)
 		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
-		directorAPIV1.POST("/registerOrigin", registerServeAdMetric, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
-		directorAPIV1.POST("/registerCache", registerServeAdMetric, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
+		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
+		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
 		directorAPIV1.HEAD("/healthTest/*path", getHealthTestFile)
+		directorAPIV1.Any("/origin", func(gctx *gin.Context) { // Need to do this for PROPFIND since gin does not support it
+			if gctx.Request.Method == "PROPFIND" {
+				redirectToOrigin(gctx)
+			}
+		})
 
 		// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
 		// so that director can be our point of contact for collecting system-level metrics.

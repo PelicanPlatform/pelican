@@ -23,35 +23,36 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pkg/errors"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
-
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/glebarez/sqlite"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func setupMockRegistryDB(t *testing.T) {
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	db = mockDB
 	require.NoError(t, err, "Error setting up mock namespace DB")
-	err = db.AutoMigrate(&Namespace{})
+	err = db.AutoMigrate(&server_structs.Namespace{})
 	require.NoError(t, err, "Failed to migrate DB for namespace table")
 	err = createTopologyTable()
 	require.NoError(t, err, "Error creating topology table")
 }
 
 func resetNamespaceDB(t *testing.T) {
-	err := db.Where("1 = 1").Delete(&Namespace{}).Error
+	err := db.Where("1 = 1").Delete(&server_structs.Namespace{}).Error
 	require.NoError(t, err, "Error resetting namespace DB")
 	err = db.Where("1 = 1").Delete(&Topology{}).Error
 	require.NoError(t, err, "Error resetting topology DB")
@@ -62,12 +63,12 @@ func teardownMockNamespaceDB(t *testing.T) {
 	require.NoError(t, err, "Error tearing down mock namespace DB")
 }
 
-func insertMockDBData(nss []Namespace) error {
+func insertMockDBData(nss []server_structs.Namespace) error {
 	return db.Create(&nss).Error
 }
 
 func getLastNamespaceId() (int, error) {
-	var namespace Namespace
+	var namespace server_structs.Namespace
 	result := db.Select("id").Order("id DESC").First(&namespace)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -80,19 +81,19 @@ func getLastNamespaceId() (int, error) {
 }
 
 // Compares expected Namespace slice against either a slice of Namespace ptr or just Namespace
-func compareNamespaces(execpted []Namespace, returned interface{}, woPubkey bool) bool {
-	var normalizedReturned []Namespace
+func compareNamespaces(execpted []server_structs.Namespace, returned interface{}, woPubkey bool) bool {
+	var normalizedReturned []server_structs.Namespace
 
 	switch v := returned.(type) {
-	case []Namespace:
+	case []server_structs.Namespace:
 		normalizedReturned = v
-	case []*Namespace:
+	case []*server_structs.Namespace:
 		for _, ptr := range v {
 			if ptr != nil {
 				normalizedReturned = append(normalizedReturned, *ptr)
 			} else {
 				// Handle nil pointers if necessary
-				normalizedReturned = append(normalizedReturned, Namespace{}) // or some default value
+				normalizedReturned = append(normalizedReturned, server_structs.Namespace{}) // or some default value
 			}
 		}
 	default:
@@ -114,8 +115,8 @@ func compareNamespaces(execpted []Namespace, returned interface{}, woPubkey bool
 	return true
 }
 
-func mockNamespace(prefix, pubkey, identity string, adminMetadata AdminMetadata) Namespace {
-	return Namespace{
+func mockNamespace(prefix, pubkey, identity string, adminMetadata server_structs.AdminMetadata) server_structs.Namespace {
+	return server_structs.Namespace{
 		Prefix:        prefix,
 		Pubkey:        pubkey,
 		Identity:      identity,
@@ -126,29 +127,29 @@ func mockNamespace(prefix, pubkey, identity string, adminMetadata AdminMetadata)
 // Some genertic mock data function to be shared with other test
 // functinos in this package. Please treat them as "constants"
 var (
-	mockNssWithOrigins []Namespace = []Namespace{
-		mockNamespace("/test1", "pubkey1", "", AdminMetadata{Status: Approved}),
-		mockNamespace("/test2", "pubkey2", "", AdminMetadata{Status: Approved}),
+	mockNssWithOrigins []server_structs.Namespace = []server_structs.Namespace{
+		mockNamespace("/test1", "pubkey1", "", server_structs.AdminMetadata{Status: server_structs.RegApproved}),
+		mockNamespace("/test2", "pubkey2", "", server_structs.AdminMetadata{Status: server_structs.RegApproved}),
 	}
-	mockNssWithCaches []Namespace = []Namespace{
-		mockNamespace("/caches/random1", "pubkey1", "", AdminMetadata{Status: Approved}),
-		mockNamespace("/caches/random2", "pubkey2", "", AdminMetadata{Status: Approved}),
+	mockNssWithCaches []server_structs.Namespace = []server_structs.Namespace{
+		mockNamespace("/caches/random1", "pubkey1", "", server_structs.AdminMetadata{Status: server_structs.RegApproved}),
+		mockNamespace("/caches/random2", "pubkey2", "", server_structs.AdminMetadata{Status: server_structs.RegApproved}),
 	}
-	mockNssWithOriginsNotApproved []Namespace = []Namespace{
-		mockNamespace("/pending1", "pubkey1", "", AdminMetadata{Status: Pending}),
-		mockNamespace("/pending2", "pubkey2", "", AdminMetadata{Status: Pending}),
+	mockNssWithOriginsNotApproved []server_structs.Namespace = []server_structs.Namespace{
+		mockNamespace("/pending1", "pubkey1", "", server_structs.AdminMetadata{Status: server_structs.RegPending}),
+		mockNamespace("/pending2", "pubkey2", "", server_structs.AdminMetadata{Status: server_structs.RegPending}),
 	}
-	mockNssWithCachesNotApproved []Namespace = []Namespace{
-		mockNamespace("/caches/pending1", "pubkey1", "", AdminMetadata{Status: Pending}),
-		mockNamespace("/caches/pending2", "pubkey2", "", AdminMetadata{Status: Pending}),
+	mockNssWithCachesNotApproved []server_structs.Namespace = []server_structs.Namespace{
+		mockNamespace("/caches/pending1", "pubkey1", "", server_structs.AdminMetadata{Status: server_structs.RegPending}),
+		mockNamespace("/caches/pending2", "pubkey2", "", server_structs.AdminMetadata{Status: server_structs.RegPending}),
 	}
-	mockNssWithMixed []Namespace = func() (mixed []Namespace) {
+	mockNssWithMixed []server_structs.Namespace = func() (mixed []server_structs.Namespace) {
 		mixed = append(mixed, mockNssWithOrigins...)
 		mixed = append(mixed, mockNssWithCaches...)
 		return
 	}()
 
-	mockNssWithMixedNotApproved []Namespace = func() (mixed []Namespace) {
+	mockNssWithMixedNotApproved []server_structs.Namespace = func() (mixed []server_structs.Namespace) {
 		mixed = append(mixed, mockNssWithOriginsNotApproved...)
 		mixed = append(mixed, mockNssWithCachesNotApproved...)
 		return
@@ -180,9 +181,9 @@ func TestGetNamespaceById(t *testing.T) {
 
 	t.Run("return-namespace-with-correct-id", func(t *testing.T) {
 		defer resetNamespaceDB(t)
-		mockNs := mockNamespace("/test", "", "", AdminMetadata{UserID: "foo"})
+		mockNs := mockNamespace("/test", "", "", server_structs.AdminMetadata{UserID: "foo"})
 		mockNs.CustomFields = mockCustomFields
-		err := insertMockDBData([]Namespace{mockNs})
+		err := insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 		nss, err := getAllNamespaces()
 		require.NoError(t, err)
@@ -221,24 +222,24 @@ func TestGetNamespaceStatusById(t *testing.T) {
 
 	t.Run("valid-id-empty-admin-metadata", func(t *testing.T) {
 		resetNamespaceDB(t)
-		err := insertMockDBData([]Namespace{mockNamespace("/foo", "", "", AdminMetadata{})})
+		err := insertMockDBData([]server_structs.Namespace{mockNamespace("/foo", "", "", server_structs.AdminMetadata{})})
 		require.NoError(t, err)
 		lastId, err := getLastNamespaceId()
 		require.NoError(t, err)
 		status, err := getNamespaceStatusById(lastId)
 		require.NoError(t, err)
-		assert.Equal(t, Unknown, status)
+		assert.Equal(t, server_structs.RegUnknown, status)
 	})
 
 	t.Run("valid-id-non-empty-admin-metadata", func(t *testing.T) {
 		resetNamespaceDB(t)
-		err := insertMockDBData([]Namespace{mockNamespace("/foo", "", "", AdminMetadata{Status: Approved})})
+		err := insertMockDBData([]server_structs.Namespace{mockNamespace("/foo", "", "", server_structs.AdminMetadata{Status: server_structs.RegApproved})})
 		require.NoError(t, err)
 		lastId, err := getLastNamespaceId()
 		require.NoError(t, err)
 		status, err := getNamespaceStatusById(lastId)
 		require.NoError(t, err)
-		assert.Equal(t, Approved, status)
+		assert.Equal(t, server_structs.RegApproved, status)
 	})
 }
 
@@ -248,7 +249,7 @@ func TestAddNamespace(t *testing.T) {
 
 	t.Run("set-default-fields", func(t *testing.T) {
 		defer resetNamespaceDB(t)
-		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone"})
+		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone"})
 		err := AddNamespace(&mockNs)
 		require.NoError(t, err)
 		got, err := getAllNamespaces()
@@ -266,7 +267,7 @@ func TestAddNamespace(t *testing.T) {
 		defer resetNamespaceDB(t)
 		mockCreateAt := time.Now().Add(time.Hour * 10)
 		mockUpdatedAt := time.Now().Add(time.Minute * 20)
-		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone", CreatedAt: mockCreateAt, UpdatedAt: mockUpdatedAt})
+		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone", CreatedAt: mockCreateAt, UpdatedAt: mockUpdatedAt})
 		err := AddNamespace(&mockNs)
 		require.NoError(t, err)
 		got, err := getAllNamespaces()
@@ -285,7 +286,16 @@ func TestAddNamespace(t *testing.T) {
 
 	t.Run("insert-data-integrity", func(t *testing.T) {
 		defer resetNamespaceDB(t)
-		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone", Description: "Some description", SiteName: "OSG", SecurityContactUserID: "security-001"})
+		mockNs := mockNamespace(
+			"/test",
+			"pubkey",
+			"identity",
+			server_structs.AdminMetadata{
+				UserID:                "someone",
+				Description:           "Some description",
+				SiteName:              "OSG",
+				SecurityContactUserID: "security-001",
+			})
 		mockNs.CustomFields = mockCustomFields
 		err := AddNamespace(&mockNs)
 		require.NoError(t, err)
@@ -308,15 +318,15 @@ func TestUpdateNamespace(t *testing.T) {
 
 	t.Run("update-on-dne-entry-returns-error", func(t *testing.T) {
 		defer resetNamespaceDB(t)
-		mockNs := mockNamespace("/test", "", "", AdminMetadata{})
+		mockNs := mockNamespace("/test", "", "", server_structs.AdminMetadata{})
 		err := updateNamespace(&mockNs)
 		assert.Error(t, err)
 	})
 
 	t.Run("update-preserve-internal-fields", func(t *testing.T) {
 		defer resetNamespaceDB(t)
-		mockNs := mockNamespace("/test", "", "", AdminMetadata{UserID: "foo"})
-		err := insertMockDBData([]Namespace{mockNs})
+		mockNs := mockNamespace("/test", "", "", server_structs.AdminMetadata{UserID: "foo"})
+		err := insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 		initialNss, err := getAllNamespaces()
 		require.NoError(t, err)
@@ -326,7 +336,7 @@ func TestUpdateNamespace(t *testing.T) {
 		initialNs.AdminMetadata.UserID = "bar"
 		initialNs.AdminMetadata.CreatedAt = time.Now().Add(10 * time.Hour)
 		initialNs.AdminMetadata.UpdatedAt = time.Now().Add(10 * time.Hour)
-		initialNs.AdminMetadata.Status = Approved
+		initialNs.AdminMetadata.Status = server_structs.RegApproved
 		initialNs.AdminMetadata.ApproverID = "hacker"
 		initialNs.AdminMetadata.ApprovedAt = time.Now().Add(10 * time.Hour)
 		err = updateNamespace(initialNs)
@@ -336,7 +346,7 @@ func TestUpdateNamespace(t *testing.T) {
 		require.Equal(t, 1, len(finalNss))
 		finalNs := finalNss[0]
 		assert.Equal(t, mockNs.Prefix, finalNs.Prefix)
-		assert.Equal(t, mockNs.AdminMetadata.UserID, finalNs.AdminMetadata.UserID)
+		assert.Equal(t, initialNs.AdminMetadata.UserID, finalNs.AdminMetadata.UserID) // we now allow changes to UserID
 		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.Unix(), finalNs.AdminMetadata.CreatedAt.Unix())
 		assert.Equal(t, mockNs.AdminMetadata.Status, finalNs.AdminMetadata.Status)
 		assert.Equal(t, mockNs.AdminMetadata.ApprovedAt.Unix(), finalNs.AdminMetadata.ApprovedAt.Unix())
@@ -353,41 +363,41 @@ func TestUpdateNamespaceStatusById(t *testing.T) {
 		defer resetNamespaceDB(t)
 		err := insertMockDBData(mockNssWithOrigins)
 		require.NoError(t, err)
-		err = updateNamespaceStatusById(100, Approved, "random")
+		err = updateNamespaceStatusById(100, server_structs.RegApproved, "random")
 		assert.Error(t, err)
 	})
 
 	t.Run("return-error-if-invalid-approver-userId", func(t *testing.T) {
 		defer resetNamespaceDB(t)
 
-		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone"})
-		err := insertMockDBData([]Namespace{mockNs})
+		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone"})
+		err := insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 		got, err := getAllNamespaces()
 		require.NoError(t, err)
 		require.Equal(t, 1, len(got))
 		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
-		err = updateNamespaceStatusById(got[0].ID, Approved, "")
+		err = updateNamespaceStatusById(got[0].ID, server_structs.RegApproved, "")
 		assert.Error(t, err)
 	})
 
 	t.Run("update-status-with-valid-input-for-approval", func(t *testing.T) {
 		defer resetNamespaceDB(t)
 
-		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone"})
-		err := insertMockDBData([]Namespace{mockNs})
+		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone"})
+		err := insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 		got, err := getAllNamespaces()
 		require.NoError(t, err)
 		require.Equal(t, 1, len(got))
 		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
-		err = updateNamespaceStatusById(got[0].ID, Approved, "approver1")
+		err = updateNamespaceStatusById(got[0].ID, server_structs.RegApproved, "approver1")
 		assert.NoError(t, err)
 		got, err = getAllNamespaces()
 		assert.NoError(t, err)
 		require.Equal(t, 1, len(got))
 		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
-		assert.Equal(t, Approved, got[0].AdminMetadata.Status)
+		assert.Equal(t, server_structs.RegApproved, got[0].AdminMetadata.Status)
 		assert.Equal(t, "approver1", got[0].AdminMetadata.ApproverID)
 		assert.NotEqual(t, time.Time{}, got[0].AdminMetadata.ApprovedAt)
 	})
@@ -395,20 +405,20 @@ func TestUpdateNamespaceStatusById(t *testing.T) {
 	t.Run("deny-does-not-modify-approval-fields", func(t *testing.T) {
 		defer resetNamespaceDB(t)
 
-		mockNs := mockNamespace("/test", "pubkey", "identity", AdminMetadata{UserID: "someone"})
-		err := insertMockDBData([]Namespace{mockNs})
+		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone"})
+		err := insertMockDBData([]server_structs.Namespace{mockNs})
 		assert.NoError(t, err)
 		got, err := getAllNamespaces()
 		assert.NoError(t, err)
 		require.Equal(t, 1, len(got))
 		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
-		err = updateNamespaceStatusById(got[0].ID, Denied, "approver1")
+		err = updateNamespaceStatusById(got[0].ID, server_structs.RegDenied, "approver1")
 		assert.NoError(t, err)
 		got, err = getAllNamespaces()
 		assert.NoError(t, err)
 		require.Equal(t, 1, len(got))
 		assert.Equal(t, mockNs.Prefix, got[0].Prefix)
-		assert.Equal(t, Denied, got[0].AdminMetadata.Status)
+		assert.Equal(t, server_structs.RegDenied, got[0].AdminMetadata.Status)
 		assert.Equal(t, "", got[0].AdminMetadata.ApproverID)
 		assert.Equal(t, time.Time{}, got[0].AdminMetadata.ApprovedAt)
 	})
@@ -423,27 +433,27 @@ func TestGetNamespacesByFilter(t *testing.T) {
 	defer teardownMockNamespaceDB(t)
 
 	t.Run("return-error-for-unsupported-operations", func(t *testing.T) {
-		filterNsID := Namespace{
+		filterNsID := server_structs.Namespace{
 			ID: 123,
 		}
 
 		_, err := getNamespacesByFilter(filterNsID, "")
 		require.Error(t, err, "Should return error for filtering against unsupported field ID")
 
-		filterNsCF := Namespace{
+		filterNsCF := server_structs.Namespace{
 			CustomFields: mockCustomFields,
 		}
 		_, err = getNamespacesByFilter(filterNsCF, "")
 		require.Error(t, err, "Should return error for filtering against unsupported custom fields")
 
-		filterNsIdentity := Namespace{
+		filterNsIdentity := server_structs.Namespace{
 			Identity: "someIdentity",
 		}
 
 		_, err = getNamespacesByFilter(filterNsIdentity, "")
 		require.Error(t, err, "Should return error for filtering against unsupported field Identity")
 
-		filterNsPubKey := Namespace{
+		filterNsPubKey := server_structs.Namespace{
 			Pubkey: "somePubkey",
 		}
 
@@ -452,21 +462,21 @@ func TestGetNamespacesByFilter(t *testing.T) {
 
 		// Now, for AdminMetadata filters to work, we need to have a valid object
 		resetNamespaceDB(t)
-		err = insertMockDBData([]Namespace{{
+		err = insertMockDBData([]server_structs.Namespace{{
 			Prefix: "/bar",
-			AdminMetadata: AdminMetadata{
+			AdminMetadata: server_structs.AdminMetadata{
 				Description:           "Mock description",
 				SiteName:              "UW-Madison",
 				Institution:           "123456",
 				SecurityContactUserID: "contactUserID",
 				ApproverID:            "mockApproverID",
-				Status:                Pending,
+				Status:                server_structs.RegPending,
 			},
 		}})
 		require.NoError(t, err)
 
-		filterNsCreateAt := Namespace{
-			AdminMetadata: AdminMetadata{
+		filterNsCreateAt := server_structs.Namespace{
+			AdminMetadata: server_structs.AdminMetadata{
 				CreatedAt: time.Now(),
 			},
 		}
@@ -474,8 +484,8 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		_, err = getNamespacesByFilter(filterNsCreateAt, "")
 		require.Error(t, err, "Should return error for filtering against unsupported field CreatedAt")
 
-		filterNsUpdateAt := Namespace{
-			AdminMetadata: AdminMetadata{
+		filterNsUpdateAt := server_structs.Namespace{
+			AdminMetadata: server_structs.AdminMetadata{
 				UpdatedAt: time.Now(),
 			},
 		}
@@ -483,8 +493,8 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		_, err = getNamespacesByFilter(filterNsUpdateAt, "")
 		require.Error(t, err, "Should return error for filtering against unsupported field UpdatedAt")
 
-		filterNsApproveAt := Namespace{
-			AdminMetadata: AdminMetadata{
+		filterNsApproveAt := server_structs.Namespace{
+			AdminMetadata: server_structs.AdminMetadata{
 				ApprovedAt: time.Now(),
 			},
 		}
@@ -499,7 +509,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		err := insertMockDBData(append(mockNssWithOrigins, mockNssWithCaches...))
 		require.NoError(t, err)
 
-		filterNs := Namespace{}
+		filterNs := server_structs.Namespace{}
 		nssOrigins, err := getNamespacesByFilter(filterNs, OriginType)
 		require.NoError(t, err)
 		assert.NotEmpty(t, nssOrigins, "Should return non-empty result for OriginType")
@@ -513,22 +523,22 @@ func TestGetNamespacesByFilter(t *testing.T) {
 
 	t.Run("filter-by-admin-metadata", func(t *testing.T) {
 		resetNamespaceDB(t)
-		err := insertMockDBData([]Namespace{{
+		err := insertMockDBData([]server_structs.Namespace{{
 			Prefix: "/bar",
-			AdminMetadata: AdminMetadata{
+			AdminMetadata: server_structs.AdminMetadata{
 				Description:           "Mock description",
 				SiteName:              "UW-Madison",
 				UserID:                "mockUserID",
 				Institution:           "123456",
 				SecurityContactUserID: "contactUserID",
 				ApproverID:            "mockApproverID",
-				Status:                Pending,
+				Status:                server_structs.RegPending,
 			},
 		}})
 		require.NoError(t, err)
 
-		filterNs := Namespace{
-			AdminMetadata: AdminMetadata{
+		filterNs := server_structs.Namespace{
+			AdminMetadata: server_structs.AdminMetadata{
 				Description: "description",
 			},
 		}
@@ -537,8 +547,8 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for Description")
 
-		filterNs = Namespace{
-			AdminMetadata: AdminMetadata{
+		filterNs = server_structs.Namespace{
+			AdminMetadata: server_structs.AdminMetadata{
 				SiteName: "Madison",
 			},
 		}
@@ -546,8 +556,8 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for SiteName")
 
-		filterNs = Namespace{
-			AdminMetadata: AdminMetadata{
+		filterNs = server_structs.Namespace{
+			AdminMetadata: server_structs.AdminMetadata{
 				Institution: "123456",
 			},
 		}
@@ -555,8 +565,8 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for Institution")
 
-		filterNs = Namespace{
-			AdminMetadata: AdminMetadata{
+		filterNs = server_structs.Namespace{
+			AdminMetadata: server_structs.AdminMetadata{
 				SecurityContactUserID: "contactUserID",
 			},
 		}
@@ -564,8 +574,8 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for SecurityContactUserID")
 
-		filterNs = Namespace{
-			AdminMetadata: AdminMetadata{
+		filterNs = server_structs.Namespace{
+			AdminMetadata: server_structs.AdminMetadata{
 				ApproverID: "mockApproverID",
 			},
 		}
@@ -573,17 +583,17 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for ApproverID")
 
-		filterNs = Namespace{
-			AdminMetadata: AdminMetadata{
-				Status: Pending,
+		filterNs = server_structs.Namespace{
+			AdminMetadata: server_structs.AdminMetadata{
+				Status: server_structs.RegPending,
 			},
 		}
 		namespaces, err = getNamespacesByFilter(filterNs, "")
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for Status")
 
-		filterNs = Namespace{
-			AdminMetadata: AdminMetadata{
+		filterNs = server_structs.Namespace{
+			AdminMetadata: server_structs.AdminMetadata{
 				UserID: "mockUserID",
 			},
 		}
@@ -594,25 +604,25 @@ func TestGetNamespacesByFilter(t *testing.T) {
 
 	t.Run("multiple-AND-match", func(t *testing.T) {
 		resetNamespaceDB(t)
-		err := insertMockDBData([]Namespace{{
+		err := insertMockDBData([]server_structs.Namespace{{
 			Prefix: "/bar",
-			AdminMetadata: AdminMetadata{
+			AdminMetadata: server_structs.AdminMetadata{
 				Description:           "Mock description",
 				SiteName:              "UW-Madison",
 				Institution:           "123456",
 				SecurityContactUserID: "contactUserID",
 				ApproverID:            "mockApproverID",
-				Status:                Pending,
+				Status:                server_structs.RegPending,
 			},
 		}})
 		require.NoError(t, err)
 
-		filterNs := Namespace{
+		filterNs := server_structs.Namespace{
 			Prefix: "/bar",
-			AdminMetadata: AdminMetadata{
+			AdminMetadata: server_structs.AdminMetadata{
 				SecurityContactUserID: "contactUserID",
 				ApproverID:            "mockApproverID",
-				Status:                Pending,
+				Status:                server_structs.RegPending,
 			},
 		}
 		namespaces, err := getNamespacesByFilter(filterNs, "")
@@ -622,19 +632,19 @@ func TestGetNamespacesByFilter(t *testing.T) {
 
 	t.Run("fully-match", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockNs := Namespace{
+		mockNs := server_structs.Namespace{
 			Prefix: "/bar",
-			AdminMetadata: AdminMetadata{
+			AdminMetadata: server_structs.AdminMetadata{
 				Description:           "Mock description",
 				SiteName:              "UW-Madison",
 				UserID:                "mockUserID",
 				Institution:           "123456",
 				SecurityContactUserID: "contactUserID",
 				ApproverID:            "mockApproverID",
-				Status:                Pending,
+				Status:                server_structs.RegPending,
 			},
 		}
-		err := insertMockDBData([]Namespace{mockNs})
+		err := insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 
 		filterNs := mockNs
@@ -645,23 +655,23 @@ func TestGetNamespacesByFilter(t *testing.T) {
 
 	t.Run("no-match", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockNs := Namespace{
+		mockNs := server_structs.Namespace{
 			Prefix: "/bar",
-			AdminMetadata: AdminMetadata{
+			AdminMetadata: server_structs.AdminMetadata{
 				Description:           "Mock description",
 				UserID:                "mockUserID",
 				SiteName:              "UW-Madison",
 				Institution:           "123456",
 				SecurityContactUserID: "contactUserID",
 				ApproverID:            "mockApproverID",
-				Status:                Pending,
+				Status:                server_structs.RegPending,
 			},
 		}
-		err := insertMockDBData([]Namespace{mockNs})
+		err := insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 
 		filterNs := mockNs
-		filterNs.AdminMetadata.Status = Denied
+		filterNs.AdminMetadata.Status = server_structs.RegDenied
 		namespaces, err := getNamespacesByFilter(filterNs, "")
 		require.NoError(t, err)
 		assert.Empty(t, namespaces, "Should return non-empty result for non-empty database without condition")
@@ -670,7 +680,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 	t.Run("empty-db-returns-empty-results", func(t *testing.T) {
 		resetNamespaceDB(t)
 
-		filterNs := Namespace{}
+		filterNs := server_structs.Namespace{}
 		namespaces, err := getNamespacesByFilter(filterNs, "")
 		require.NoError(t, err)
 		assert.Empty(t, namespaces, "Should return empty result for empty database")
@@ -693,11 +703,11 @@ func TestGetNamespaceJwksByPrefix(t *testing.T) {
 		jwksByte, err := json.Marshal(mockJwks)
 		require.NoError(t, err)
 
-		err = insertMockDBData([]Namespace{mockNamespace("/foo", string(jwksByte), "", AdminMetadata{})})
+		err = insertMockDBData([]server_structs.Namespace{mockNamespace("/foo", string(jwksByte), "", server_structs.AdminMetadata{})})
 		require.NoError(t, err)
 		_, admin_meta, err := getNamespaceJwksByPrefix("/foo")
 		require.NoError(t, err)
-		assert.Equal(t, AdminMetadata{}, *admin_meta)
+		assert.Equal(t, server_structs.AdminMetadata{}, *admin_meta)
 	})
 
 	t.Run("valid-prefix-non-empty-admin-metadata", func(t *testing.T) {
@@ -706,11 +716,11 @@ func TestGetNamespaceJwksByPrefix(t *testing.T) {
 		jwksByte, err := json.Marshal(mockJwks)
 		require.NoError(t, err)
 
-		err = insertMockDBData([]Namespace{mockNamespace("/foo", string(jwksByte), "", AdminMetadata{Status: Approved})})
+		err = insertMockDBData([]server_structs.Namespace{mockNamespace("/foo", string(jwksByte), "", server_structs.AdminMetadata{Status: server_structs.RegApproved})})
 		require.NoError(t, err)
 		_, admin_meta, err := getNamespaceJwksByPrefix("/foo")
 		require.NoError(t, err)
-		assert.Equal(t, Approved, admin_meta.Status)
+		assert.Equal(t, server_structs.RegApproved, admin_meta.Status)
 	})
 }
 
@@ -779,12 +789,12 @@ func TestRegistryTopology(t *testing.T) {
 	require.True(t, exists)
 
 	// Add a test namespace so we can test that checkExists still works
-	ns := Namespace{
+	ns := server_structs.Namespace{
 		ID:            0,
 		Prefix:        "/regular/foo",
 		Pubkey:        "",
 		Identity:      "",
-		AdminMetadata: AdminMetadata{},
+		AdminMetadata: server_structs.AdminMetadata{},
 	}
 	err = AddNamespace(&ns)
 	require.NoError(t, err)

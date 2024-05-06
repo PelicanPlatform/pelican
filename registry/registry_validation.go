@@ -23,10 +23,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // This file has all custom validator logic for registry struct
@@ -128,9 +130,12 @@ func validateKeyChaining(prefix string, pubkey jwk.Key) (inTopo bool, topoNss []
 }
 
 func validateJwks(jwksStr string) (jwk.Key, error) {
+	if jwksStr == "" {
+		return nil, errors.New("public key is empty")
+	}
 	clientJwks, err := jwk.ParseString(jwksStr)
 	if err != nil {
-		return nil, errors.Wrap(err, "Couldn't parse the pubkey from the request")
+		return nil, errors.Wrap(err, "couldn't parse the pubkey from the request")
 	}
 
 	if log.IsLevelEnabled(log.DebugLevel) {
@@ -157,27 +162,30 @@ func validateJwks(jwksStr string) (jwk.Key, error) {
 }
 
 // Validates if the instID, the id of the institution, matches institution options
-// provided through Registry.InstitutionsUrl or Registy.Institutions. If both are set,
+// provided through Registry.InstitutionsUrl or Registry.Institutions. If both are set,
 // content of Registry.InstitutionsUrl will be ignored
 func validateInstitution(instID string) (bool, error) {
-	institutions := []Institution{}
+	if instID == "" {
+		return false, errors.New("Institution ID is required")
+	}
+
+	institutions := []registrationFieldOption{}
 	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
 		return false, err
 	}
 
 	if len(institutions) == 0 {
-		if institutionsCache == nil || institutionsCache.Len() == 0 {
+		instUrl := param.Registry_InstitutionsUrl.GetString()
+		instUrlTTL := param.Registry_InstitutionsUrlReloadMinutes.GetDuration()
+		if instUrl == "" {
 			// We don't check if config and Registry.InstitutionsUrl was both unpopulated
 			return true, nil
 		} else {
-			cachedInsts, intErr, extErr := getCachedInstitutions()
-			if intErr != nil {
-				log.Warning(intErr)
+			insts, err := getCachedOptions(instUrl, instUrlTTL)
+			if err != nil {
+				return false, errors.Wrap(err, "Error fetching instituions from TTL cache")
 			}
-			if extErr != nil {
-				return false, errors.Wrap(extErr, "Error fetching instituions from TTL cache")
-			}
-			for _, availableInst := range cachedInsts {
+			for _, availableInst := range insts {
 				// We required full equality, as we expect the value is from the institution API
 				if instID == availableInst.ID {
 					return true, nil
@@ -255,7 +263,7 @@ func validateCustomFields(customFields map[string]interface{}) (bool, error) {
 					// and update the registrationFields accordingly
 					options := regField.Options
 					if regField.OptionsUrl != "" {
-						fetchedOptions, err := getCachedOptions(regField.OptionsUrl)
+						fetchedOptions, err := getCachedOptions(regField.OptionsUrl, ttlcache.DefaultTTL)
 						if err != nil {
 							log.Errorf("Error getting/fetching options for the field %s. Use cached options instead", regField.DisplayedName)
 						} else {

@@ -30,6 +30,7 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/mock"
@@ -56,6 +57,108 @@ func TestGetIps(t *testing.T) {
 		}
 	}
 
+}
+
+func TestGetCachesFromNamespace(t *testing.T) {
+	// Get our list of caches for our namespace:
+	directorCaches := make([]namespaces.DirectorCache, 3)
+	for i := 0; i < 3; i++ {
+		directorCache := namespaces.DirectorCache{
+			EndpointUrl: "https://some/cache/" + strconv.Itoa(i),
+			Priority:    0,
+			AuthedReq:   false,
+		}
+		directorCaches[i] = directorCache
+	}
+
+	// Make our namespace:
+	namespace := namespaces.Namespace{
+		SortedDirectorCaches: directorCaches,
+		ReadHTTPS:            false,
+		UseTokenOnRead:       false,
+	}
+
+	// Check getCachesFromNamespace works with a director
+	t.Run("testNoPreferredCache", func(t *testing.T) {
+		caches, err := getCachesFromNamespace(namespace, true, nil)
+		assert.NoError(t, err)
+		require.Len(t, caches, 3)
+		assert.Equal(t, "https://some/cache/0", caches[0].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/1", caches[1].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/2", caches[2].(namespaces.DirectorCache).EndpointUrl)
+	})
+
+	// Test that the function fails if the preferred cache is ""
+	t.Run("testPreferredCacheEmpty", func(t *testing.T) {
+		preferredCacheURL, _ := url.Parse("")
+		someEmptyUrlList := []*url.URL{preferredCacheURL}
+		_, err := getCachesFromNamespace(namespace, true, someEmptyUrlList)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Preferred cache was specified as an empty string")
+	})
+
+	// Test we work with multiple preferred caches
+	t.Run("testMultiplePreferredCaches", func(t *testing.T) {
+		preferredCache1, _ := url.Parse("https://I/like/this/cache")
+		preferredCache2, _ := url.Parse("https://I/like/this/cache/too")
+		preferredCacheList := []*url.URL{preferredCache1, preferredCache2}
+		caches, err := getCachesFromNamespace(namespace, true, preferredCacheList)
+		assert.NoError(t, err)
+		require.Len(t, caches, 2)
+		assert.Equal(t, "https://I/like/this/cache", caches[0].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://I/like/this/cache/too", caches[1].(namespaces.DirectorCache).EndpointUrl)
+	})
+
+	// Test our prepend works with multiple preferred caches
+	t.Run("testMutliPreferredCachesPrepend", func(t *testing.T) {
+		preferredCache1, _ := url.Parse("https://I/like/this/cache")
+		preferredCache2, _ := url.Parse("https://I/like/this/cache/too")
+		preferredCache3, _ := url.Parse("+")
+		preferredCacheList := []*url.URL{preferredCache1, preferredCache2, preferredCache3}
+		caches, err := getCachesFromNamespace(namespace, true, preferredCacheList)
+		assert.NoError(t, err)
+		require.Len(t, caches, 5)
+		assert.Equal(t, "https://I/like/this/cache", caches[0].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://I/like/this/cache/too", caches[1].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/0", caches[2].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/1", caches[3].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/2", caches[4].(namespaces.DirectorCache).EndpointUrl)
+	})
+
+	// Test the function fails if the + character is not at the end of the list
+	t.Run("testPlusNotAtEnd", func(t *testing.T) {
+		preferredCache1, _ := url.Parse("https://I/like/this/cache")
+		preferredCache2, _ := url.Parse("+")
+		preferredCache3, _ := url.Parse("https://I/like/this/cache/too")
+		preferredCacheList := []*url.URL{preferredCache1, preferredCache2, preferredCache3}
+		_, err := getCachesFromNamespace(namespace, true, preferredCacheList)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "The special character '+' must be the last item in the list of preferred caches")
+	})
+
+	// Test that the list of caches we get back has more than just the preferred cache when a + is at the end of the list
+	t.Run("testPreferredCachePrepend", func(t *testing.T) {
+		preferredCacheURL, _ := url.Parse("https://I/Like/This/Cache/The/Most")
+		preferredPlusURL, _ := url.Parse("+")
+		preferredCacheList := []*url.URL{preferredCacheURL, preferredPlusURL}
+		caches, err := getCachesFromNamespace(namespace, true, preferredCacheList)
+		assert.NoError(t, err)
+		require.Len(t, caches, 4)
+		assert.Equal(t, "https://I/Like/This/Cache/The/Most", caches[0].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/0", caches[1].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/1", caches[2].(namespaces.DirectorCache).EndpointUrl)
+		assert.Equal(t, "https://some/cache/2", caches[3].(namespaces.DirectorCache).EndpointUrl)
+	})
+
+	// Test that we only get the preferred cache back when it is specified without a "+" at the end
+	t.Run("testPreferredCacheNoPrepend", func(t *testing.T) {
+		preferredCacheURL, _ := url.Parse("https://I/Like/This/Cache/The/Most")
+		preferredCacheList := []*url.URL{preferredCacheURL}
+		caches, err := getCachesFromNamespace(namespace, true, preferredCacheList)
+		assert.NoError(t, err)
+		require.Len(t, caches, 1)
+		assert.Equal(t, "https://I/Like/This/Cache/The/Most", caches[0].(namespaces.DirectorCache).EndpointUrl)
+	})
 }
 
 // TestGetToken tests getToken
@@ -322,36 +425,6 @@ func TestCorrectURLWithUnderscore(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Test that the project name is correctly extracted from the job ad file
-func TestGetProjectName(t *testing.T) {
-	// Create a temporary file
-	tempFile, err := os.CreateTemp("", "test")
-	assert.NoError(t, err)
-	defer os.Remove(tempFile.Name())
-
-	// Write a project name to the file
-	_, err = tempFile.WriteString("ProjectName = \"testProject\"")
-	assert.NoError(t, err)
-	tempFile.Close()
-	t.Run("TestNoJobAd", func(t *testing.T) {
-		// Unset this environment var
-		os.Unsetenv("_CONDOR_JOB_AD")
-		// Call GetProjectName and check the result
-		projectName := GetProjectName()
-		assert.Equal(t, "", projectName)
-	})
-
-	t.Run("TestJobAd", func(t *testing.T) {
-		// Set the _CONDOR_JOB_AD environment variable to the temp file's name
-		os.Setenv("_CONDOR_JOB_AD", tempFile.Name())
-		defer os.Unsetenv("_CONDOR_JOB_AD")
-
-		// Call GetProjectName and check the result
-		projectName := GetProjectName()
-		assert.Equal(t, "testProject", projectName)
-	})
 }
 
 func TestSchemeUnderstood(t *testing.T) {

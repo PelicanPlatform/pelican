@@ -38,19 +38,21 @@ type (
 	}
 
 	listServerResponse struct {
-		Name         string                    `json:"name"`
-		AuthURL      string                    `json:"authUrl"`
-		BrokerURL    string                    `json:"brokerUrl"`
-		URL          string                    `json:"url"`    // This is server's XRootD URL for file transfer
-		WebURL       string                    `json:"webUrl"` // This is server's Web interface and API
-		Type         server_structs.ServerType `json:"type"`
-		Latitude     float64                   `json:"latitude"`
-		Longitude    float64                   `json:"longitude"`
-		Writes       bool                      `json:"enableWrite"`
-		DirectReads  bool                      `json:"enableFallbackRead"`
-		Filtered     bool                      `json:"filtered"`
-		FilteredType filterType                `json:"filteredType"`
-		Status       HealthTestStatus          `json:"status"`
+		Name              string                    `json:"name"`
+		AuthURL           string                    `json:"authUrl"`
+		BrokerURL         string                    `json:"brokerUrl"`
+		URL               string                    `json:"url"`    // This is server's XRootD URL for file transfer
+		WebURL            string                    `json:"webUrl"` // This is server's Web interface and API
+		Type              server_structs.ServerType `json:"type"`
+		Latitude          float64                   `json:"latitude"`
+		Longitude         float64                   `json:"longitude"`
+		Writes            bool                      `json:"enableWrite"`
+		DirectReads       bool                      `json:"enableFallbackRead"`
+		Listings          bool                      `json:"enableListing"`
+		Filtered          bool                      `json:"filtered"`
+		FilteredType      filterType                `json:"filteredType"`
+		Status            HealthTestStatus          `json:"status"`
+		NamespacePrefixes []string                  `json:"namespacePrefixes"`
 	}
 
 	statResponse struct {
@@ -89,7 +91,7 @@ func listServers(ctx *gin.Context) {
 		})
 		return
 	}
-	var servers []server_structs.ServerAd
+	var servers []server_structs.Advertisement
 	if queryParams.ServerType != "" {
 		if !strings.EqualFold(queryParams.ServerType, string(server_structs.OriginType)) && !strings.EqualFold(queryParams.ServerType, string(server_structs.CacheType)) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -98,16 +100,16 @@ func listServers(ctx *gin.Context) {
 			})
 			return
 		}
-		servers = listServerAds([]server_structs.ServerType{server_structs.ServerType(queryParams.ToInternalServerType())})
+		servers = listAdvertisement([]server_structs.ServerType{server_structs.ServerType(queryParams.ToInternalServerType())})
 	} else {
-		servers = listServerAds([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
+		servers = listAdvertisement([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
 	}
 	healthTestUtilsMutex.RLock()
 	defer healthTestUtilsMutex.RUnlock()
 	resList := make([]listServerResponse, 0)
 	for _, server := range servers {
 		healthStatus := HealthStatusUnknown
-		healthUtil, ok := healthTestUtils[server]
+		healthUtil, ok := healthTestUtils[server.ServerAd]
 		if ok {
 			healthStatus = healthUtil.Status
 		}
@@ -129,9 +131,13 @@ func listServers(ctx *gin.Context) {
 			Longitude:    server.Longitude,
 			Writes:       server.Writes,
 			DirectReads:  server.DirectReads,
+			Listings:     server.Listings,
 			Filtered:     filtered,
 			FilteredType: ft,
 			Status:       healthStatus,
+		}
+		for _, ns := range server.NamespaceAds {
+			res.NamespacePrefixes = append(res.NamespacePrefixes, ns.Path)
 		}
 		resList = append(resList, res)
 	}

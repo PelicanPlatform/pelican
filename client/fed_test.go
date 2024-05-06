@@ -24,6 +24,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -54,6 +55,12 @@ var (
 
 	//go:embed resources/one-pub-one-auth.yml
 	mixedAuthOriginCfg string
+
+	//go:embed resources/pub-export-no-directread.yml
+	pubExportNoDirectRead string
+
+	//go:embed resources/pub-origin-no-directread.yml
+	pubOriginNoDirectRead string
 )
 
 // A test that spins up a federation, and tests object get and put
@@ -503,5 +510,156 @@ func TestStatHttp(t *testing.T) {
 		assert.Error(t, err)
 		assert.Equal(t, uint64(0), objectSize)
 		assert.Contains(t, err.Error(), "Do not understand the destination scheme: some. Permitted values are file, osdf, pelican, stash, ")
+	})
+}
+
+// Test the functionality of the direct reads feature (?directread)
+func TestDirectReads(t *testing.T) {
+	defer viper.Reset()
+	t.Run("testDirectReadsSuccess", func(t *testing.T) {
+		viper.Reset()
+		server_utils.ResetOriginExports()
+		viper.Set("Origin.EnableDirectReads", true)
+		fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
+		export := fed.Exports[0]
+		testFileContent := "test file content"
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(export.StoragePrefix, "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		defer os.Remove(tempFile.Name())
+		_, err = tempFile.WriteString(testFileContent)
+		assert.NoError(t, err, "Error writing to temp file")
+		tempFile.Close()
+
+		viper.Set("Logging.DisableProgressBars", true)
+
+		// Set path for object to upload/download
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s?directread", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix, fileName)
+
+		// Download the file with GET. Shouldn't need a token to succeed
+		transferResults, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
+		require.NoError(t, err)
+		assert.Equal(t, transferResults[0].TransferredBytes, int64(17))
+
+		// Assert that the file was not cached
+		cacheDataLocation := param.Cache_DataLocation.GetString() + export.FederationPrefix
+		filepath := filepath.Join(cacheDataLocation, filepath.Base(tempFile.Name()))
+		_, err = os.Stat(filepath)
+		assert.True(t, os.IsNotExist(err))
+
+		// Assert our endpoint was the origin and not the cache
+		for _, attempt := range transferResults[0].Attempts {
+			assert.Equal(t, "https://"+attempt.Endpoint, param.Origin_Url.GetString())
+		}
+	})
+
+	// Test that direct reads fail if DirectReads=false is set for origin config but true for namespace/export
+	t.Run("testDirectReadsDirectReadFalseByOrigin", func(t *testing.T) {
+		viper.Reset()
+		server_utils.ResetOriginExports()
+		fed := fed_test_utils.NewFedTest(t, pubOriginNoDirectRead)
+		export := fed.Exports[0]
+		testFileContent := "test file content"
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(export.StoragePrefix, "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		defer os.Remove(tempFile.Name())
+		_, err = tempFile.WriteString(testFileContent)
+		assert.NoError(t, err, "Error writing to temp file")
+		tempFile.Close()
+
+		viper.Set("Logging.DisableProgressBars", true)
+
+		// Set path for object to upload/download
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s?directread", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix, fileName)
+
+		// Download the file with GET. Shouldn't need a token to succeed
+		_, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "No origins on specified endpoint have direct reads enabled")
+	})
+
+	// Test that direct reads fail if DirectReads=false is set for namespace/export config but true for origin
+	t.Run("testDirectReadsDirectReadFalseByNamespace", func(t *testing.T) {
+		viper.Reset()
+		server_utils.ResetOriginExports()
+		fed := fed_test_utils.NewFedTest(t, pubExportNoDirectRead)
+		export := fed.Exports[0]
+		export.Capabilities.DirectReads = false
+		testFileContent := "test file content"
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(export.StoragePrefix, "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		defer os.Remove(tempFile.Name())
+		_, err = tempFile.WriteString(testFileContent)
+		assert.NoError(t, err, "Error writing to temp file")
+		tempFile.Close()
+
+		viper.Set("Logging.DisableProgressBars", true)
+
+		// Set path for object to upload/download
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s?directread", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix, fileName)
+
+		// Download the file with GET. Shouldn't need a token to succeed
+		_, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "No origins on specified endpoint have direct reads enabled")
+	})
+}
+
+// Test the functionality of NewTransferJob, checking we return at the correct locations for certain errors
+func TestNewTransferJob(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	server_utils.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
+	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
+
+	te := client.NewTransferEngine(fed.Ctx)
+
+	// Test when we have a failure during namespace lookup (here we will get a 404)
+	t.Run("testFailureToGetNamespaceInfo", func(t *testing.T) {
+		tc, err := te.NewClient()
+		assert.NoError(t, err)
+
+		// have a file/namespace that does not exist
+		mockRemoteUrl, err := url.Parse("/first/something/file.txt")
+		require.NoError(t, err)
+		_, err = tc.NewTransferJob(context.Background(), mockRemoteUrl, "/dest", false, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get namespace information for remote URL /first/something/file.txt")
+	})
+
+	// Test when we fail to get a token on our auth required namespace
+	t.Run("testFailureToGetToken", func(t *testing.T) {
+		tc, err := te.NewClient()
+		assert.NoError(t, err)
+
+		// use our auth required namespace
+		mockRemoteUrl, err := url.Parse("/second/namespace/hello_world.txt")
+		require.NoError(t, err)
+		_, err = tc.NewTransferJob(context.Background(), mockRemoteUrl, "/dest", false, false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to get token for transfer: failed to find or generate a token as required for /second/namespace/hello_world.txt")
+	})
+
+	// Test success
+	t.Run("testSuccess", func(t *testing.T) {
+		tc, err := te.NewClient()
+		assert.NoError(t, err)
+
+		remoteUrl, err := url.Parse("/first/namespace/hello_world.txt")
+		require.NoError(t, err)
+		_, err = tc.NewTransferJob(context.Background(), remoteUrl, t.TempDir(), false, false)
+		assert.NoError(t, err)
 	})
 }

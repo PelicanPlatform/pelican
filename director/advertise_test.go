@@ -155,17 +155,16 @@ func TestAdvertiseOSDF(t *testing.T) {
 	err := AdvertiseOSDF()
 	require.NoError(t, err)
 
-	var foundServer server_structs.ServerAd
+	var foundServer server_structs.Advertisement
 	for _, item := range serverAds.Items() {
-		if item.Key().URL.Host == "origin1-endpoint.com" {
-			foundServer = item.Key()
+		if item.Value().URL.Host == "origin1-endpoint.com" {
+			foundServer = *item.Value()
 		}
 	}
 	require.NotNil(t, foundServer)
 	assert.True(t, foundServer.FromTopology)
-	nss := serverAds.Get(foundServer)
-	require.NotNil(t, nss)
-	assert.True(t, nss.Value()[0].FromTopology)
+	require.NotNil(t, foundServer.NamespaceAds)
+	assert.True(t, foundServer.NamespaceAds[0].FromTopology)
 
 	// Test a few values. If they're correct, it indicates the whole process likely succeeded
 	nsAd, oAds, cAds := getAdsForPath("/my/server/path/to/file")

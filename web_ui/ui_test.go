@@ -29,9 +29,13 @@ import (
 	"path"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -133,7 +137,7 @@ func TestHandleWebUIAuth(t *testing.T) {
 	route := gin.New()
 	route.GET("/view/*requestPath", handleWebUIAuth, func(ctx *gin.Context) { ctx.Status(200) })
 
-	t.Run("html-redirect-to-init-without-db", func(t *testing.T) {
+	t.Run("redirect-to-init-without-db", func(t *testing.T) {
 		cleanupAuthDB()
 		r := httptest.NewRecorder()
 		req, err := http.NewRequest("GET", "/view/test.html", nil)
@@ -143,16 +147,148 @@ func TestHandleWebUIAuth(t *testing.T) {
 		assert.Equal(t, "/view/initialization/code/", r.Result().Header.Get("Location"))
 	})
 
-	t.Run("html-redirect-to-login-with-db", func(t *testing.T) {
+	t.Run("init-page-no-redirct-without-db", func(t *testing.T) {
+		cleanupAuthDB()
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/initialization/code/", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+
+		r = httptest.NewRecorder()
+		req, err = http.NewRequest("GET", "/view/initialization/password/", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+	})
+
+	t.Run("no-redirect-without-db-on-init-page", func(t *testing.T) {
+		cleanupAuthDB()
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/initialization/code/", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+	})
+
+	t.Run("no-redirect-to-login-with-db-initialzied", func(t *testing.T) {
+		// We let the frontend to handle unauthorized user (if the password is initialzied)
 		setupTestAuthDB(t)
 		t.Cleanup(cleanupAuthDB)
 
 		r := httptest.NewRecorder()
+		// This route is not in ui.go/adminAccessPages, so we will pass the admin check and return 200
 		req, err := http.NewRequest("GET", "/view/test.html", nil)
 		require.NoError(t, err)
 		route.ServeHTTP(r, req)
 
-		assert.Equal(t, "/view/login/", r.Result().Header.Get("Location"))
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+
+		r = httptest.NewRecorder()
+		// This route is not in ui.go/adminAccessPages, so we will pass the admin check and return 200
+		req, err = http.NewRequest("GET", "/view/registry/origin", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		r = httptest.NewRecorder()
+		// This route **is** in ui.go/adminAccessPages,
+		// but the user is not logged in, so we will hand it over to the frontend for the redirect
+		req, err = http.NewRequest("GET", "/view/origin", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+
+		authDB.Store(nil)
+	})
+
+	t.Run("403-for-logged-in-non-admin-user", func(t *testing.T) {
+		viper.Reset()
+		// We let the frontend to handle unauthorized user (if the password is initialzied)
+		setupTestAuthDB(t)
+		t.Cleanup(func() {
+			cleanupAuthDB()
+			viper.Reset()
+		})
+
+		tmpDir := t.TempDir()
+		issuerFile := filepath.Join(tmpDir, "issuer.key")
+		viper.Set(param.IssuerKey.GetName(), issuerFile)
+		viper.Set(param.Server_ExternalWebUrl.GetName(), "https://example.com")
+
+		_, err := config.GetIssuerPrivateJWK()
+		require.NoError(t, err)
+
+		tk := token.NewWLCGToken()
+		tk.Issuer = "https://example.com"
+		tk.Subject = "regular-user"
+		tk.Lifetime = 5 * time.Minute
+		tk.AddAudiences("https://example.com")
+		tk.AddScopes(token_scopes.WebUi_Access)
+		tok, err := tk.CreateToken()
+		require.NoError(t, err)
+
+		r := httptest.NewRecorder()
+		// This route is not in ui.go/adminAccessPages
+		req, err := http.NewRequest("GET", "/view/test.html", nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+
+		r = httptest.NewRecorder()
+		// This route is not in ui.go/adminAccessPages
+		req, err = http.NewRequest("GET", "/view/registry/", nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+
+		r = httptest.NewRecorder()
+		// This route **is** in ui.go/adminAccessPages, and the user is not logged in, so we return 403
+		req, err = http.NewRequest("GET", "/view/origin", nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusForbidden, r.Result().StatusCode)
+
+		r = httptest.NewRecorder()
+		req, err = http.NewRequest("GET", "/view/cache/", nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusForbidden, r.Result().StatusCode)
+
+		r = httptest.NewRecorder()
+		req, err = http.NewRequest("GET", "/view/config/", nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusForbidden, r.Result().StatusCode)
+
+		authDB.Store(nil)
+	})
+
+	t.Run("init-page-redirect-to-root-with-db-initialized", func(t *testing.T) {
+		setupTestAuthDB(t)
+		t.Cleanup(cleanupAuthDB)
+
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("GET", "/view/initialization/code/", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, "/view/", r.Result().Header.Get("Location"))
+
+		r = httptest.NewRecorder()
+		req, err = http.NewRequest("GET", "/view/initialization/password/", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+
+		assert.Equal(t, "/view/", r.Result().Header.Get("Location"))
 
 		authDB.Store(nil)
 	})

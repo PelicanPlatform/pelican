@@ -164,6 +164,7 @@ func TestDirectorRegistration(t *testing.T) {
 	defer ts.Close()
 
 	viper.Set("Federation.RegistryUrl", ts.URL)
+	viper.Set("Director.CacheSortMethod", "distance")
 
 	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
 		// Setup httptest recorder and context for the the unit test
@@ -248,8 +249,6 @@ func TestDirectorRegistration(t *testing.T) {
 	}
 
 	teardown := func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
 		serverAds.DeleteAll()
 		namespaceKeys.DeleteAll()
 	}
@@ -429,8 +428,8 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
-		assert.Equal(t, "https://localhost:8844", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
+		assert.NotNil(t, serverAds.Get("https://or-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://or-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
 		teardown()
 	})
 
@@ -444,7 +443,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{DataURL: "https://or-url.org", WebURL: "https://localhost:8844", Namespaces: []server_structs.NamespaceAdV2{{
+		ad := server_structs.OriginAdvertiseV2{DataURL: "https://data-url.org", WebURL: "https://localhost:8844", Namespaces: []server_structs.NamespaceAdV2{{
 			Path:   "/foo/bar",
 			Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 		}}}
@@ -457,8 +456,8 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
-		assert.Equal(t, "https://localhost:8844", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
+		assert.NotNil(t, serverAds.Get("https://data-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://data-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
 		teardown()
 	})
 
@@ -483,8 +482,8 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
-		assert.Equal(t, "", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
+		assert.NotNil(t, 1, serverAds.Get("https://or-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "", serverAds.Get("https://or-url.org").Value().WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
 		teardown()
 	})
 
@@ -509,8 +508,8 @@ func TestDirectorRegistration(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
-		assert.Equal(t, 1, len(serverAds.Keys()), "Origin fail to register at serverAds")
-		assert.Equal(t, "", serverAds.Keys()[0].WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
+		assert.NotNil(t, serverAds.Get("https://or-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "", serverAds.Get("https://or-url.org").Value().WebURL.String(), "WebURL in serverAds isn't empty with no WebURL provided in registration")
 		teardown()
 	})
 
@@ -781,15 +780,20 @@ func TestDiscoverOriginCache(t *testing.T) {
 			t.Fatalf("Could not make a GET request: %v", err)
 		}
 
-		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
-			serverAds.DeleteAll()
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			// Server fetched from topology should not be present in SD response
-			serverAds.Set(mockTopoOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockCacheServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-		}()
+		serverAds.DeleteAll()
+		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockPelicanOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		// Server fetched from topology should not be present in SD response
+		serverAds.Set(mockTopoOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockTopoOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		serverAds.Set(mockCacheServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockCacheServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
 
 		expectedRes := []PromDiscoveryItem{{
 			Targets: []string{mockCacheServerAd.WebURL.Hostname() + ":" + mockCacheServerAd.WebURL.Port()},
@@ -835,17 +839,25 @@ func TestDiscoverOriginCache(t *testing.T) {
 			t.Fatalf("Could not make a GET request: %v", err)
 		}
 
-		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
-			serverAds.DeleteAll()
-			// Add multiple same serverAds
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-			// Server fetched from topology should not be present in SD response
-			serverAds.Set(mockTopoOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
-		}()
+		serverAds.DeleteAll()
+		// Add multiple same serverAds
+		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockPelicanOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockPelicanOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockPelicanOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
+		// Server fetched from topology should not be present in SD response
+		serverAds.Set(mockTopoOriginServerAd.URL.String(), &server_structs.Advertisement{
+			ServerAd:     mockTopoOriginServerAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+		}, ttlcache.DefaultTTL)
 
 		expectedRes := []PromDiscoveryItem{{
 			Targets: []string{mockPelicanOriginServerAd.WebURL.Hostname() + ":" + mockPelicanOriginServerAd.WebURL.Port()},
@@ -972,6 +984,19 @@ func TestRedirects(t *testing.T) {
 		req = httptest.NewRequest("PUT", "/foo/bar", nil)
 		c.Request = req
 		ShortcutMiddleware("cache")(c)
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		// Test PROPFIND works for both base path and API path
+		req = httptest.NewRequest("PROPFIND", "/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("origin")(c)
+		expectedPath = "/api/v1.0/director/origin/foo/bar"
+		assert.Equal(t, expectedPath, c.Request.URL.Path)
+
+		req = httptest.NewRequest("PROPFIND", "/api/v1.0/director/origin/foo/bar", nil)
+		c.Request = req
+		ShortcutMiddleware("origin")(c)
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
@@ -1245,5 +1270,62 @@ func TestHandleAllowServer(t *testing.T) {
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
 		assert.Contains(t, string(resB), "'name' is a required path parameter")
+	})
+}
+
+func TestGetRedirectUrl(t *testing.T) {
+	adFromTopo := server_structs.ServerAd{
+		URL: url.URL{
+			Host: "fake-topology-ad.org:8443",
+		},
+		AuthURL: url.URL{
+			Host: "fake-topology-ad.org:8444",
+		},
+		FromTopology: true,
+	}
+	adFromPelican := server_structs.ServerAd{
+		URL: url.URL{
+			Host: "fake-pelican-ad.org:8443",
+		},
+		AuthURL: url.URL{
+			Host: "fake-pelican-ad.org:8444",
+		},
+		FromTopology: false,
+	}
+	adWithTopoNotSet := server_structs.ServerAd{
+		URL: url.URL{
+			Host: "fake-ad.org:8443",
+		},
+		AuthURL: url.URL{
+			Host: "fake-ad.org:8444",
+		},
+		FromTopology: false,
+	}
+
+	t.Run("get-redirect-url-topology", func(t *testing.T) {
+		// Public object from topology
+		url := getRedirectURL("/some/path", adFromTopo, false)
+		assert.Equal(t, "http://fake-topology-ad.org:8443/some/path", url.String())
+
+		// Protected object from topology
+		url = getRedirectURL("/some/path", adFromTopo, true)
+		assert.Equal(t, "https://fake-topology-ad.org:8444/some/path", url.String())
+	})
+	t.Run("get-redirect-url-pelican", func(t *testing.T) {
+		// Public object from pelican
+		url := getRedirectURL("/some/path", adFromPelican, false)
+		assert.Equal(t, "https://fake-pelican-ad.org:8443/some/path", url.String())
+
+		// Protected object from pelican
+		url = getRedirectURL("/some/path", adFromPelican, true)
+		assert.Equal(t, "https://fake-pelican-ad.org:8444/some/path", url.String())
+	})
+	t.Run("get-redirect-url-topo-not-set", func(t *testing.T) {
+		// When the FromTopology field is not set, we assume the ad is from Pelican
+		url := getRedirectURL("/some/path", adWithTopoNotSet, false)
+		assert.Equal(t, "https://fake-ad.org:8443/some/path", url.String())
+
+		url = getRedirectURL("/some/path", adWithTopoNotSet, true)
+		assert.Equal(t, "https://fake-ad.org:8444/some/path", url.String())
 	})
 }

@@ -95,14 +95,14 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	keysetBytes, err := json.Marshal(keyset)
 	require.NoError(t, err)
 
-	err = registry.AddNamespace(&registry.Namespace{
+	err = registry.AddNamespace(&server_structs.Namespace{
 		ID:       1,
 		Prefix:   "/caches/" + param.Server_Hostname.GetString(),
 		Pubkey:   string(keysetBytes),
 		Identity: "test_data",
 	})
 	require.NoError(t, err)
-	err = registry.AddNamespace(&registry.Namespace{
+	err = registry.AddNamespace(&server_structs.Namespace{
 		ID:       2,
 		Prefix:   "/foo",
 		Pubkey:   string(keysetBytes),

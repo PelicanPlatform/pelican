@@ -56,10 +56,10 @@ import (
 var (
 
 	//go:embed frontend/out/*
-	webAssets           embed.FS
-	serverPages         = []string{"director", "registry", "origin", "cache"}
-	publicAccessPages   = []string{"director", "registry"} // UI pages that allow unauthenticated users to access.
-	nonAdminAccessPages = []string{"director", "registry"} // UI pages that allow non-admin users to access. Note that this is different from "publicView" where unauthenticated users can access the page
+	webAssets         embed.FS
+	serverPages       = []string{"director", "registry", "origin", "cache"}
+	publicAccessPages = []string{"director", "registry"}      // UI pages that allow unauthenticated users to access.
+	adminAccessPages  = []string{"config", "origin", "cache"} // UI pages that allow non-admin users to access. Note that this is different from "publicView" where unauthenticated users can access the page
 )
 
 const notFoundFilePath = "frontend/out/404/index.html"
@@ -168,6 +168,11 @@ func getEnabledServers(ctx *gin.Context) {
 }
 
 func handleWebUIRedirect(ctx *gin.Context) {
+	query := ctx.Request.URL.Query().Encode()
+	if query != "" {
+		query = "?" + query
+	}
+
 	requestPath := ctx.Param("requestPath")
 
 	// If the requestPath is a directory indicate that we are looking for the index.html file
@@ -181,7 +186,7 @@ func handleWebUIRedirect(ctx *gin.Context) {
 	// If requestPath doesn't have extension, is not a directory, and has a index file, redirect to index file
 	if !strings.Contains(requestPath, ".") && !strings.HasSuffix(requestPath, "/") {
 		if _, err := webAssets.ReadFile("frontend/out" + requestPath + "/index.html"); err == nil {
-			ctx.Redirect(http.StatusMovedPermanently, "/view/"+requestPath+"/")
+			ctx.Redirect(http.StatusMovedPermanently, "/view/"+requestPath+"/"+query)
 			ctx.Abort()
 			return
 		}
@@ -189,7 +194,7 @@ func handleWebUIRedirect(ctx *gin.Context) {
 
 	// If only one server is enabled, and user is requesting "/", redirect to that server
 	if len(config.GetEnabledServerString(true)) == 1 && requestPath == "/index.html" {
-		ctx.Redirect(http.StatusFound, "/view/"+config.GetEnabledServerString(true)[0]+"/")
+		ctx.Redirect(http.StatusFound, "/view/"+config.GetEnabledServerString(true)[0]+"/"+query)
 		ctx.Abort()
 		return
 	}
@@ -219,19 +224,22 @@ func handleWebUIAuth(ctx *gin.Context) {
 	user, err := GetUser(ctx)
 
 	// Skip auth check for static files other than html pages
-	if path.Ext(requestPath) != ".html" {
+	if path.Ext(requestPath) != "" && path.Ext(requestPath) != ".html" {
 		ctx.Next()
 		return
 	}
 
 	// Handle initialization. If db is nill, then redirect user to the initialization page
 	if strings.HasPrefix(requestPath, "/initialization") {
-		if db != nil {
+		if db != nil { // Password initialized, redirect away from the init page
 			ctx.Redirect(http.StatusFound, "/view/")
 			ctx.Abort()
 			return
+		} else { // If not init, pass the auth handler and render the page
+			ctx.Next()
+			return
 		}
-	} else if db == nil {
+	} else if db == nil { // For all other paths, if the password is not initialized
 		ctx.Redirect(http.StatusFound, "/view/initialization/code/")
 		ctx.Abort()
 		return
@@ -239,21 +247,28 @@ func handleWebUIAuth(ctx *gin.Context) {
 
 	// Redirect authenticated users from login pages
 	if strings.HasPrefix(requestPath, "/login") && err == nil && user != "" {
-		ctx.Redirect(http.StatusFound, "/view/")
+		returnUrl := ctx.Query("returnURL")
+		if returnUrl == "" {
+			returnUrl = "/view/"
+		}
+		ctx.Redirect(http.StatusFound, returnUrl)
 		ctx.Abort()
 		return
 	}
 
 	// For all routes other than /login and /initialization,
 	if !strings.HasPrefix(requestPath, "/login") {
-		rootPage := strings.Split(strings.TrimPrefix(requestPath, "/"), "/")[0]
+		// / -> ""
+		// /origin/ -> origin
+		// /registry/origin/edit/ -> registry/origin/edit
+		rootPage := strings.TrimPrefix(strings.TrimSuffix(requestPath, "/"), "/")
 		// If the page is a public page, pass the check
 		if slices.Contains(publicAccessPages, rootPage) {
 			ctx.Next()
 			return
 		}
 
-		// For non-public pages, redirect unauthenticated users to login page
+		// If user is not logged in
 		if err != nil || user == "" {
 			// If director or registry server is up and user is at /view/
 			// then we allow them to choose the server without logging in
@@ -263,13 +278,13 @@ func handleWebUIAuth(ctx *gin.Context) {
 				ctx.Next()
 				return
 			}
-			ctx.Redirect(http.StatusFound, "/view/login/")
-			ctx.Abort()
+			// For other pages, pass the check so that the frontend can handle it
+			ctx.Next()
 			return
 		}
 
 		// If rootPage requires admin privilege
-		if !slices.Contains(nonAdminAccessPages, rootPage) {
+		if slices.Contains(adminAccessPages, rootPage) {
 			// If director or registry server is up and user is at /view/
 			// then we allow them to choose the server without being an admin
 			if (config.IsServerEnabled(config.DirectorType) ||

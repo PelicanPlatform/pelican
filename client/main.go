@@ -25,7 +25,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -40,6 +39,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Number of caches to attempt to use in any invocation
@@ -194,7 +194,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return 0, errors.Wrap(err, "Failed to generate pelicanURL object")
 	}
 
-	ns, err := getNamespaceInfo(ctx, destUri.Path, pelicanURL.directorUrl, false)
+	ns, err := getNamespaceInfo(ctx, destUri.Path, pelicanURL.directorUrl, false, "")
 	if err != nil {
 		return 0, err
 	}
@@ -231,7 +231,7 @@ func GetCacheHostnames(ctx context.Context, testFile string) (urls []string, err
 	if err != nil {
 		return
 	}
-	ns, err := getNamespaceInfo(ctx, testFile, fedInfo.DirectorEndpoint, false)
+	ns, err := getNamespaceInfo(ctx, testFile, fedInfo.DirectorEndpoint, false, "")
 	if err != nil {
 		return
 	}
@@ -268,26 +268,56 @@ func getUserAgent(project string) (agent string) {
 }
 
 func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, preferredCaches []*url.URL) (caches []CacheInterface, err error) {
-
+	var appendCaches bool
 	// The global cache override is set
 	if len(preferredCaches) > 0 {
-		if preferredCaches[0].String() == "" {
-			err = errors.New("Preferred cache was specified as an empty string")
+		var preferredCacheList []CacheInterface
+		for idx, preferredCache := range preferredCaches {
+			cacheUrl := preferredCache.String()
+			// If the preferred cache is empty, return an error
+			if cacheUrl == "" {
+				err = errors.New("Preferred cache was specified as an empty string")
+				return
+			} else if cacheUrl == "+" {
+				// If we have a '+' in our list, the user wants to prepend the preferred caches to the "normal" list of caches
+				// if the cache is a '+', verify it is at the end of our list, if not, return an error
+				if idx != len(preferredCaches)-1 {
+					err = errors.New("The special character '+' must be the last item in the list of preferred caches")
+					return
+				}
+				// We want to signify that we want to append the "normal" cache list
+				appendCaches = true
+			} else {
+				// We have a normal item in the preferred cache list
+				log.Debugf("Using the cache (%s) from the config override\n", preferredCache)
+				cache := namespaces.DirectorCache{
+					EndpointUrl: cacheUrl,
+				}
+				// append to our list of preferred caches
+				preferredCacheList = append(preferredCacheList, cache)
+			}
+		}
+
+		// If we are not appending any more caches, we return with the caches we have
+		if !appendCaches {
+			caches = preferredCacheList
 			return
 		}
-		log.Debugf("Using the cache (%s) from the config override\n", preferredCaches[0])
-		cache := namespaces.DirectorCache{
-			EndpointUrl: preferredCaches[0].String(),
-		}
-		caches = []CacheInterface{cache}
-		return
+		caches = preferredCacheList
 	}
 
 	if useDirector {
 		log.Debugln("Using the returned sources from the director")
-		caches = make([]CacheInterface, len(namespace.SortedDirectorCaches))
+		directorCaches := make([]CacheInterface, len(namespace.SortedDirectorCaches))
 		for idx, val := range namespace.SortedDirectorCaches {
-			caches[idx] = val
+			directorCaches[idx] = val
+		}
+
+		// If appendCaches is set, prepend it to the list of caches and return
+		if appendCaches {
+			caches = append(caches, directorCaches...)
+		} else {
+			caches = directorCaches
 		}
 		log.Debugln("Matched caches:", caches)
 		return
@@ -311,9 +341,16 @@ func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, pr
 
 	matchedCaches := namespace.MatchCaches(bestCaches)
 	log.Debugln("Matched caches:", matchedCaches)
-	caches = make([]CacheInterface, len(matchedCaches))
+	matchedCachesList := make([]CacheInterface, len(matchedCaches))
 	for idx, val := range matchedCaches {
-		caches[idx] = val
+		matchedCachesList[idx] = val
+	}
+
+	// If usingPreferredCache is set, prepend it to the list of caches and return
+	if appendCaches {
+		caches = append(caches, matchedCachesList...)
+	} else {
+		caches = matchedCachesList
 	}
 
 	return
@@ -368,13 +405,16 @@ func discoverHTCondorToken(tokenName string) string {
 // Retrieve federation namespace information for a given URL.
 // If OSDFDirectorUrl is non-empty, then the namespace information will be pulled from the director;
 // otherwise, it is pulled from topology.
-func getNamespaceInfo(ctx context.Context, resourcePath, OSDFDirectorUrl string, isPut bool) (ns namespaces.Namespace, err error) {
+func getNamespaceInfo(ctx context.Context, resourcePath, OSDFDirectorUrl string, isPut bool, query string) (ns namespaces.Namespace, err error) {
 	// If we have a director set, go through that for namespace info, otherwise use topology
 	if OSDFDirectorUrl != "" {
 		log.Debugln("Will query director at", OSDFDirectorUrl, "for object", resourcePath)
 		verb := "GET"
 		if isPut {
 			verb = "PUT"
+		}
+		if query != "" {
+			resourcePath += "?" + query
 		}
 		var dirResp *http.Response
 		dirResp, err = queryDirector(ctx, verb, resourcePath, OSDFDirectorUrl)
@@ -449,6 +489,13 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		log.Errorln("Failed to parse remote destination URL:", err)
 		return nil, err
 	}
+
+	// Check if we have a query and that it is understood
+	err = utils.CheckValidQuery(remoteDestUrl, false)
+	if err != nil {
+		return
+	}
+
 	remoteDestUrl.Scheme = remoteDestScheme
 
 	remoteDestScheme, _ = getTokenName(remoteDestUrl)
@@ -458,8 +505,6 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	if err != nil {
 		return nil, err
 	}
-
-	project := GetProjectName()
 
 	te := NewTransferEngine(ctx)
 	defer func() {
@@ -471,7 +516,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := client.NewTransferJob(context.Background(), remoteDestUrl, localObject, true, recursive, project)
+	tj, err := client.NewTransferJob(context.Background(), remoteDestUrl, localObject, true, recursive)
 	if err != nil {
 		return
 	}
@@ -515,6 +560,13 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		log.Errorln("Failed to parse source URL:", err)
 		return nil, err
 	}
+
+	// Check if we have a query and that it is understood
+	err = utils.CheckValidQuery(remoteObjectUrl, false)
+	if err != nil {
+		return
+	}
+
 	remoteObjectUrl.Scheme = remoteObjectScheme
 
 	// This is for condor cases:
@@ -547,7 +599,6 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		localDestination = path.Join(localDestPath, remoteObjectFilename)
 	}
 
-	project := GetProjectName()
 	success := false
 
 	te := NewTransferEngine(ctx)
@@ -560,7 +611,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(context.Background(), remoteObjectUrl, localDestination, false, recursive, project)
+	tj, err := tc.NewTransferJob(context.Background(), remoteObjectUrl, localDestination, false, recursive)
 	if err != nil {
 		return
 	}
@@ -636,6 +687,11 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		log.Errorln("Failed to parse source URL:", err)
 		return nil, err
 	}
+	// Check if we have a query and that it is understood
+	err = utils.CheckValidQuery(sourceURL, false)
+	if err != nil {
+		return
+	}
 	sourceURL.Scheme = source_scheme
 
 	destination, dest_scheme := correctURLWithUnderscore(destination)
@@ -644,13 +700,18 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		log.Errorln("Failed to parse destination URL:", err)
 		return nil, err
 	}
+
+	// Check if we have a query and that it is understood
+	err = utils.CheckValidQuery(destURL, false)
+	if err != nil {
+		return
+	}
+
 	destURL.Scheme = dest_scheme
 
 	// Check for scheme here for when using condor
 	sourceScheme, _ := getTokenName(sourceURL)
 	destScheme, _ := getTokenName(destURL)
-
-	project := GetProjectName()
 
 	isPut := destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican"
 
@@ -712,7 +773,7 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(context.Background(), remoteURL, localPath, isPut, recursive, project)
+	tj, err := tc.NewTransferJob(context.Background(), remoteURL, localPath, isPut, recursive)
 	if err != nil {
 		return
 	}
@@ -787,48 +848,4 @@ func getIPs(name string) []string {
 	// Always prefer IPv4
 	return append(ipv4s, ipv6s...)
 
-}
-
-// This function parses a condor job ad and returns the project name if defined
-func GetProjectName() string {
-	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
-
-	condorJobAd, isPresent := os.LookupEnv("_CONDOR_JOB_AD")
-	var filename string
-	if isPresent {
-		filename = condorJobAd
-	} else if _, err := os.Stat(".job.ad"); err == nil {
-		filename = ".job.ad"
-	} else {
-		return ""
-	}
-
-	// https://stackoverflow.com/questions/28574609/how-to-apply-regexp-to-content-in-file-go
-
-	b, err := os.ReadFile(filename)
-	if err != nil {
-		log.Warningln("Can not read .job.ad file", err)
-	}
-
-	// Get all matches from file
-	// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
-	classadRegex, e := regexp.Compile(`^*\s*(ProjectName)\s=\s"*(.*)"*`)
-	if e != nil {
-		log.Fatal(e)
-	}
-
-	matches := classadRegex.FindAll(b, -1)
-	for _, match := range matches {
-		matchString := strings.TrimSpace(string(match))
-		if strings.HasPrefix(matchString, "ProjectName") {
-			matchParts := strings.Split(strings.TrimSpace(matchString), "=")
-
-			if len(matchParts) == 2 { // just confirm we get 2 parts of the string
-				matchValue := strings.TrimSpace(matchParts[1])
-				matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
-				return matchValue
-			}
-		}
-	}
-	return ""
 }

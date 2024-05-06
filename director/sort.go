@@ -57,8 +57,8 @@ var (
 
 type (
 	SwapMap struct {
-		Distance float64
-		Index    int
+		Weight float64
+		Index  int
 	}
 
 	SwapMaps []SwapMap
@@ -82,7 +82,7 @@ func (me SwapMaps) Len() int {
 }
 
 func (me SwapMaps) Less(left, right int) bool {
-	return me[left].Distance < me[right].Distance
+	return me[left].Weight < me[right].Weight
 }
 
 func (me SwapMaps) Swap(left, right int) {
@@ -165,29 +165,60 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	return
 }
 
+func getClientLatLong(addr netip.Addr) (coord Coordinate, ok bool) {
+	var err error
+	coord.Lat, coord.Long, err = getLatLong(addr)
+	ok = (err == nil && !(coord.Lat == 0 && coord.Long == 0))
+	if err != nil {
+		log.Warningf("failed to resolve lat/long for address %s: %v", addr, err)
+	}
+	return
+}
+
 // Sort serverAds based on the IP address of the client with shorter distance between
 // server IP and client having higher priority
 func sortServerAdsByIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server_structs.ServerAd, error) {
-	distances := make(SwapMaps, len(ads))
-	lat, long, err := getLatLong(addr)
-	// If we don't get a valid coordinate set for the incoming address, either because
-	// of an error or the null address, we randomize the output
-	isInvalid := (err != nil || (lat == 0 && long == 0))
+	// Each entry in weights will map a priority to an index in the original ads slice.
+	// A larger weight is a higher priority.
+	weights := make(SwapMaps, len(ads))
+	sortMethod := param.Director_CacheSortMethod.GetString()
+
+	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {
-		if isInvalid || (ad.Latitude == 0 && ad.Longitude == 0) {
-			// Unable to compute distances for this server; just do random distances.
-			// Note that valid distances are between 0 and 1, hence (1 + random) is always
-			// going to be sorted after valid distances.
-			distances[idx] = SwapMap{1 + rand.Float64(), idx}
-		} else {
-			distances[idx] = SwapMap{distanceOnSphere(lat, long, ad.Latitude, ad.Longitude),
-				idx}
+		switch sortMethod {
+		case "distance":
+			clientCoord, ok := getClientLatLong(addr)
+			if !ok {
+				// Unable to compute distances for this server; just do random distances.
+				// Below we sort weights in descending order, so we assign negative value here,
+				// causing them to always be at the end of the sorted list.
+				weights[idx] = SwapMap{0 - rand.Float64(), idx}
+			} else {
+				weights[idx] = SwapMap{distanceWeight(clientCoord, ad),
+					idx}
+			}
+		case "distanceAndLoad":
+			clientCoord, ok := getClientLatLong(addr)
+			if !ok {
+				weights[idx] = SwapMap{0 - rand.Float64(), idx}
+			} else {
+				// Each server ad will have a load value that we can use for sorting
+				weights[idx] = SwapMap{distanceAndLoadWeight(clientCoord, ad),
+					idx}
+			}
+		case "random":
+			weights[idx] = SwapMap{rand.Float64(), idx}
+		default:
+			return nil, errors.Errorf("Invalid sort method '%s' set in Director.CacheSortMethod. Valid methods are 'distance',"+
+				"'distanceAndLoad', and 'random.'", param.Director_CacheSortMethod.GetString())
 		}
 	}
-	sort.Sort(distances)
+
+	// Larger weight = higher priority, so we reverse the sort (which would otherwise default to ascending)
+	sort.Sort(sort.Reverse(weights))
 	resultAds := make([]server_structs.ServerAd, len(ads))
-	for idx, distance := range distances {
-		resultAds[idx] = ads[distance.Index]
+	for idx, weight := range weights {
+		resultAds[idx] = ads[weight.Index]
 	}
 	return resultAds, nil
 }
@@ -195,8 +226,8 @@ func sortServerAdsByIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server
 // Sort a list of ServerAds with the following rule:
 // * if a ServerAds has FromTopology = true, then it will be moved to the end of the list
 // * if two ServerAds has the SAME FromTopology value (both true or false), then
-func sortServerAdsByTopo(ads []server_structs.ServerAd) []server_structs.ServerAd {
-	slices.SortStableFunc(ads, func(a, b server_structs.ServerAd) int {
+func sortServerAdsByTopo(ads []*server_structs.Advertisement) []*server_structs.Advertisement {
+	slices.SortStableFunc(ads, func(a, b *server_structs.Advertisement) int {
 		if a.FromTopology && !b.FromTopology {
 			return 1
 		} else if !a.FromTopology && b.FromTopology {

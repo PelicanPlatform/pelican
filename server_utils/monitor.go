@@ -87,11 +87,12 @@ func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
 		Issuers: []token.TokenIssuer{token.FederationIssuer},
 		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorTestReport},
 	})
-	if !ok {
+	if !ok || err != nil {
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    err.Error(),
+			Msg:    fmt.Sprint("Failed to verify the token: ", err),
 		})
+		return
 	}
 
 	dt := server_structs.DirectorTestResult{}

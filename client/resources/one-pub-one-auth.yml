@@ -9,7 +9,7 @@ Origin:
     - StoragePrefix: /<SHOULD BE OVERRIDDEN>
       FederationPrefix: /first/namespace
       # Don't set Reads -- it should be toggled true by setting PublicReads
-      Capabilities: ["PublicReads", "Writes", "DirectReads"]
+      Capabilities: ["PublicReads", "Writes", "DirectReads", "Listings"]
     - StoragePrefix: /<SHOULD BE OVERRIDDEN>
       FederationPrefix: /second/namespace
-      Capabilities: ["Reads", "Writes", "DirectReads"]
+      Capabilities: ["Reads", "Writes", "DirectReads", "Listings"]
