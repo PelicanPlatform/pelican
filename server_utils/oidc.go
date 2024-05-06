@@ -127,17 +127,17 @@ func createOidcConfigExporter(isDirector bool) func(ctx *gin.Context) {
 func exportIssuerJWKS(ctx *gin.Context) {
 	key, err := config.GetIssuerPublicJWKS()
 	if err != nil {
-		log.Errorf("Failed to load director's public key: %v", err)
+		log.Errorf("Failed to load server's public key: %v", err)
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Failed to load director's public key",
+			Msg:    "Failed to load server's public key",
 		})
 	} else {
 		jsonData, err := json.MarshalIndent(key, "", "  ")
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "Failed to marshal director's public key",
+				Msg:    "Failed to marshal server's public key",
 			})
 			return
 		}

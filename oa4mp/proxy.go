@@ -62,6 +62,12 @@ func getTransport() *http.Transport {
 	return transport
 }
 
+// Proxy a HTTP request from the Pelican server to the OA4MP server
+//
+// Maps a request to /api/v1.0/issuer/foo to /scitokens-server/foo.  Most
+// headers are forwarded as well.  The `X-Pelican-User` header is added
+// to the request, using data from the Pelican login session, allowing
+// the OA4MP server to base its logic on the Pelican authentication.
 func oa4mpProxy(ctx *gin.Context) {
 	var userEncoded string
 	var user string
