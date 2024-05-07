@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -33,7 +32,6 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 // List all namespaces from origins registered at the director
@@ -199,70 +197,66 @@ func ConfigFilterdServers() {
 
 // Start a goroutine to query director's Prometheus endpoint for origin/cache server I/O stats
 // and save the value to the corresponding serverAd
-func ConfigServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
-	egrp.Go(func() error {
+func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
+	serverIOQueryLoop := func(ctx context.Context) error {
+		tick := time.NewTicker(15 * time.Second)
+		defer tick.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return nil
-			case <-time.After(15 * time.Second):
+			case <-tick.C:
 				// Requests expires before the next round starts
 				ddlCtx, cancel := context.WithDeadline(ctx, time.Now().Add(10*time.Second))
-				items := serverAds.Items()
-				wg := sync.WaitGroup{}
-				// We want to wait until all gorountines finish their work
-				wg.Add(len(items))
-				for _, item := range items {
-					if item.IsExpired() {
-						wg.Done()
-						continue
-					}
-					serverUrl := item.Key()
-					serverAd := item.Value()
-					if serverAd.FromTopology {
-						// Topology servers have no Prometheus metrics
-						wg.Done()
-						continue
-					}
-					// Run the queries in parallel, in hope that Prometheus is strong enough to handle ~100 concurrent requests
-					go func(ctx context.Context, wg *sync.WaitGroup, sUrl string, sAd *server_structs.Advertisement) {
-						defer wg.Done()
-						query := fmt.Sprintf(`deriv(xrootd_server_io{job="origin_cache_servers", type="total", server_auth_url="%s"}[5m])`, serverUrl)
-						queryResult, err := queryPromtheus(ddlCtx, query, true)
-						if err != nil {
-							log.Debugf("Failed to update IO stat for server %s: %v", serverUrl, err)
-							return
-						}
-						if queryResult.ResultType != "vector" {
-							log.Debugf("Failed to update IO stat for server %s: Prometheus response returns type %s not vector", serverUrl, queryResult.ResultType)
-							return
-						}
-						if len(queryResult.Result) != 1 {
-							log.Debugf("Failed to update IO stat for server %s: Prometheus response contains more or less than 1 result: %d", serverUrl, len(queryResult.Result))
-							return
-						}
-						ioDerivStr := queryResult.Result[0].Values[0].Value
-						if ioDerivStr == "" {
-							return
-						} else {
-							ioDeriv, err := strconv.ParseFloat(ioDerivStr, 64)
-							if err != nil {
-								log.Debugf("Failed to update IO stat for server %s: failed to convert Prometheus response to a float number: %s", serverUrl, ioDerivStr)
-								return
-							}
-							// We scale down the derivative to avoid sensitive metric
-							// but this is a magic number and we need to figure out a heuristic for getting a reliable number
-							ioDeriv /= 100
-							// Here we use a sigmoid activate function to bound the value between [0,1]
-							sigmoidIO := utils.Sigmoid(ioDeriv)
-							serverAd.IOLoad = sigmoidIO
-						}
-					}(ddlCtx, &wg, serverUrl, serverAd)
+				defer cancel()
+
+				// query all the servers and filter them out later
+				query := `deriv(xrootd_server_io{job="origin_cache_servers", type="total"}[5m])`
+				queryResult, err := queryPromtheus(ddlCtx, query, true)
+				if err != nil {
+					log.Debugf("Failed to update IO stat: querying Prometheus responded with an error: %v", err)
+					continue
 				}
-				wg.Wait()
-				cancel()
+				if queryResult.ResultType != "vector" {
+					log.Debugf("Failed to update IO stat: Prometheus response returns %s type, expected a vector", queryResult.ResultType)
+					continue
+				}
+
+				for _, result := range queryResult.Result {
+					serverUrlRaw, ok := result.Metric["server_url"]
+					if !ok {
+						log.Debugf("Failed to update IO stat. Prometheus query response does not contain server_url metric: %#v", result)
+						continue
+					}
+					serverUrl, ok := serverUrlRaw.(string)
+					if !ok {
+						log.Debugf("Failed to update IO stat. Prometheus query response contains invalid server_url: %#v", result)
+						continue
+					}
+					ioDerivStr := result.Values[0].Value
+					if ioDerivStr == "" {
+						log.Debugf("Skipped updating IO stat for server %s: Prometheus query responded with empty I/O value: %#v", serverUrl, result)
+						continue
+					} else {
+						ioDeriv, err := strconv.ParseFloat(ioDerivStr, 64)
+						if err != nil {
+							log.Debugf("Failed to update IO stat for server %s: failed to convert Prometheus response to a float number: %s", serverUrl, ioDerivStr)
+							continue
+						}
+						serverAd := serverAds.Get(serverUrl)
+						if serverAd == nil {
+							log.Debugf("Failed to update IO stat for server %s: server does not exist in the director", serverUrl)
+							continue
+						}
+						serverAd.Value().IOLoad = ioDeriv
+					}
+				}
 				log.Debug("Successfully updated server IO stat")
 			}
 		}
+	}
+
+	egrp.Go(func() error {
+		return serverIOQueryLoop(ctx)
 	})
 }
