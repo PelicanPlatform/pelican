@@ -694,11 +694,13 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		}
 	} else {
 		token := strings.TrimPrefix(tokens[0], "Bearer ")
-		// Use hostname from adv2.DataUrl instead of adv2.Name as Name is the site name
-		hostname := adUrl.Hostname()
 
-		prefix := path.Join("/caches", hostname)
-		ok, err := verifyAdvertiseToken(engineCtx, token, prefix)
+		registryPrefix := adV2.RegistryPrefix
+		if registryPrefix == "" { // For caches <= 7.8.1
+			registryPrefix = path.Join("/caches", adV2.Name)
+		}
+
+		ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
 		if err != nil {
 			if err == adminApprovalErr {
 				log.Warningf("Failed to verify token. Cache %q was not approved", adV2.Name)
