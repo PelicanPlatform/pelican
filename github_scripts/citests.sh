@@ -98,6 +98,20 @@ if [ ! -e "$SOCKET_DIR/data/ospool/uc-shared/public/OSG-Staff/validation/test.tx
   exit 1
 fi
 
+# Test we work with PELICAN_NEAREST_CACHE as well
+PELICAN_NEAREST_CACHE="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt /dev/null
+exit_status=$?
+
+if ! [[ "$exit_status" = 0 ]]; then
+  echo "Cache plugin download failed"
+  exit 1
+fi
+
+if [ ! -e "$SOCKET_DIR/data/ospool/uc-shared/public/OSG-Staff/validation/test.txt.DONE" ]; then
+  echo "Test file not in local cache"
+  exit 1
+fi
+
 ########################################
 # Test we return 0 when HOME is not set
 ########################################

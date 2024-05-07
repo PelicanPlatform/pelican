@@ -399,6 +399,11 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 		if err != nil {
 			return
 		}
+	} else if nearestCache, ok := os.LookupEnv("PELICAN_NEAREST_CACHE"); ok && nearestCache != "" {
+		caches, err = utils.GetPreferredCaches(nearestCache)
+		if err != nil {
+			return
+		}
 	}
 
 	tc, err := te.NewClient(client.WithAcquireToken(false))
