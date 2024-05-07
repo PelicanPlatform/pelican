@@ -74,8 +74,11 @@ const namespaceFormNodeToJSON = (formData: FormData) => {
 
 export const namespaceToCache = (data: Namespace) => {
     // Build the cache prefix
-    data['prefix'] = `/caches/${data.prefix}`
+    if (data.prefix.startsWith("/caches")) {
+        return data
+    }
 
+    data['prefix'] = `/caches/${data.prefix}`
     return data
 }
 
