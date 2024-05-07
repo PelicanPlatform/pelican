@@ -64,6 +64,7 @@ popd
 git clone --depth=1 https://github.com/xrootd/xrootd.git
 pushd xrootd
 patch -p1 < $scriptdir/pelican_protocol.patch
+patch -p1 < $scriptdir/gstream.patch
 mkdir build
 cd build
 cmake .. -GNinja
