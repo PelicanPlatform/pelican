@@ -57,7 +57,7 @@ func (server *OriginServer) GetPids() (pids []int) {
 	return
 }
 
-func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrlStr, err := config.GetServerIssuerURL()
 	if err != nil {
@@ -112,10 +112,11 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 	// PublicReads implies reads
 	reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
 	ad := server_structs.OriginAdvertiseV2{
-		Name:       name,
-		DataURL:    originUrlStr,
-		WebURL:     originWebUrl,
-		Namespaces: nsAds,
+		Name:           name,
+		RegistryPrefix: "", // TODO: set origin's RegistryPrefix to /origins/{xrootd.sitename} once we support registering origins
+		DataURL:        originUrlStr,
+		WebURL:         originWebUrl,
+		Namespaces:     nsAds,
 		Caps: server_structs.Capabilities{
 			PublicReads: param.Origin_EnablePublicReads.GetBool(),
 			Reads:       reads,
