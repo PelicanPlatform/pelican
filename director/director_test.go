@@ -145,6 +145,15 @@ func TestDirectorRegistration(t *testing.T) {
 	// Mock registry server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Method == "POST" && req.URL.Path == "/api/v1.0/registry/checkNamespaceStatus" {
+			reqBody, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			reqJson := server_structs.CheckNamespaceStatusReq{}
+			err = json.Unmarshal(reqBody, &reqJson)
+			require.NoError(t, err)
+			if reqJson.Prefix != "test" && reqJson.Prefix != "/caches/test" { // we expect the registration to use test for namespace and /caches/test for cache
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 			res := server_structs.CheckNamespaceStatusRes{Approved: true}
 			resByte, err := json.Marshal(res)
 			if err != nil {
@@ -222,8 +231,8 @@ func TestDirectorRegistration(t *testing.T) {
 		return tok
 	}
 
-	setupRequest := func(c *gin.Context, r *gin.Engine, bodyByt []byte, token string) {
-		r.POST("/", func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
+	setupRequest := func(c *gin.Context, r *gin.Engine, bodyByt []byte, token string, stype server_structs.ServerType) {
+		r.POST("/", func(gctx *gin.Context) { registerServeAd(ctx, gctx, stype) })
 		c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(bodyByt))
 		c.Request.Header.Set("Authorization", "Bearer "+token)
 		c.Request.Header.Set("Content-Type", "application/json")
@@ -276,7 +285,7 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
-		setupRequest(c, r, jsonad, token)
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -313,7 +322,7 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
-		setupRequest(c, r, jsonad, token)
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -353,7 +362,7 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
-		setupRequest(c, r, jsonad, token)
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -387,7 +396,7 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
-		setupRequest(c, r, jsonad, token)
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -423,7 +432,7 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
-		setupRequest(c, r, jsonad, token)
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -451,7 +460,7 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
-		setupRequest(c, r, jsonad, token)
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -477,7 +486,7 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
-		setupRequest(c, r, jsonad, token)
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -503,7 +512,7 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
-		setupRequest(c, r, jsonad, token)
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -540,7 +549,7 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
-		setupRequest(c, r, jsonad, token)
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -560,6 +569,72 @@ func TestDirectorRegistration(t *testing.T) {
 			assert.Fail(t, "Error when generating redirect: "+string(body))
 		}
 		assert.Equal(t, brokerUrl, w.Result().Header.Get("X-Pelican-Broker"))
+	})
+
+	t.Run("cache-with-registryname", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/caches/test", publicKey)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name", // This is for web UI to display
+			RegistryPrefix: "/caches/test",        // This one should be used to look up status at the registry
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.CacheType)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.NotNil(t, serverAds.Get("https://data-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://data-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
+		teardown()
+	})
+
+	t.Run("cache-without-registry-name", func(t *testing.T) { // For Pelican <7.8.1
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/caches/test", publicKey)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "test", // XrootD.Sitename
+			RegistryPrefix: "",     // For Pelican <7.8.1, there's no such field
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.CacheType)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.NotNil(t, serverAds.Get("https://data-url.org"), "Origin fail to register at serverAds")
+		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://data-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in origin registration request")
+		teardown()
 	})
 
 }

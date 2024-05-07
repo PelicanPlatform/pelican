@@ -39,12 +39,14 @@ type (
 	}
 )
 
-func (server *CacheServer) CreateAdvertisement(name string, originUrl string, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+func (server *CacheServer) CreateAdvertisement(name, originUrl, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+	registryPrefix := "/caches/" + param.Xrootd_Sitename.GetString()
 	ad := server_structs.OriginAdvertiseV2{
-		Name:       name,
-		DataURL:    originUrl,
-		WebURL:     originWebUrl,
-		Namespaces: server.GetNamespaceAds(),
+		Name:           name,
+		RegistryPrefix: registryPrefix,
+		DataURL:        originUrl,
+		WebURL:         originWebUrl,
+		Namespaces:     server.GetNamespaceAds(),
 	}
 
 	return &ad, nil

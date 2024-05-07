@@ -369,10 +369,6 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			}
 		}
 
-		// Since CLI/auto-registered namespace did not have site name as part of their registration
-		// Use their IP for an educated guess
-		ns.AdminMetadata.SiteName = ctx.ClientIP()
-
 		// Overwrite status to Pending to filter malicious request
 		ns.AdminMetadata.Status = server_structs.RegPending
 
