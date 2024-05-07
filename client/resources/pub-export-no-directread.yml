@@ -1,0 +1,13 @@
+# Origin export configuration to test direct read functionality,
+# testing how we handle origin direct reads enabled but namespace direct reads disabled
+
+Origin:
+  # Things that configure the origin itself
+  StorageType: "posix"
+  EnableDirectReads: true
+  # The actual namespaces we export
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /first/namespace
+      # Don't set Reads -- it should be toggled true by setting PublicReads
+      Capabilities: ["PublicReads", "Writes"]

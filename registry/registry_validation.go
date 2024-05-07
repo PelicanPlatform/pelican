@@ -25,9 +25,10 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // This file has all custom validator logic for registry struct
@@ -129,9 +130,12 @@ func validateKeyChaining(prefix string, pubkey jwk.Key) (inTopo bool, topoNss []
 }
 
 func validateJwks(jwksStr string) (jwk.Key, error) {
+	if jwksStr == "" {
+		return nil, errors.New("public key is empty")
+	}
 	clientJwks, err := jwk.ParseString(jwksStr)
 	if err != nil {
-		return nil, errors.Wrap(err, "Couldn't parse the pubkey from the request")
+		return nil, errors.Wrap(err, "couldn't parse the pubkey from the request")
 	}
 
 	if log.IsLevelEnabled(log.DebugLevel) {
@@ -161,6 +165,10 @@ func validateJwks(jwksStr string) (jwk.Key, error) {
 // provided through Registry.InstitutionsUrl or Registry.Institutions. If both are set,
 // content of Registry.InstitutionsUrl will be ignored
 func validateInstitution(instID string) (bool, error) {
+	if instID == "" {
+		return false, errors.New("Institution ID is required")
+	}
+
 	institutions := []registrationFieldOption{}
 	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
 		return false, err

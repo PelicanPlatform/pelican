@@ -6,7 +6,7 @@ import {Config} from "./Config/index.d";
 import {Box, Typography} from "@mui/material";
 import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
 import Link from "next/link";
-
+import {getErrorMessage, getObjectValue} from "@/helpers/util";
 
 const LinkBox = ({href, text} : {href: string, text: string}) => {
     return (
@@ -23,24 +23,40 @@ const LinkBox = ({href, text} : {href: string, text: string}) => {
     )
 }
 
+const UrlData = [
+    {key: ["Federation", "NamespaceUrl", "Value"], text: "Namespace Registry"},
+    {key: ["Federation", "DirectorUrl", "Value"], text: "Director"},
+    {key: ["Federation", "RegistryUrl", "Value"], text: "Registry"},
+    {key: ["Federation", "TopologyNamespaceUrl", "Value"], text: "Topology Namespace"},
+    {key: ["Federation", "DiscoveryUrl", "Value"], text: "Discovery"},
+    {key: ["Federation", "JwkUrl", "Value"], text: "JWK"}
+]
+
 const FederationOverview = () => {
 
-    const [config, setConfig] = useState<{ [key: string] : string | undefined} | undefined>(undefined)
+    const [config, setConfig] = useState<{text: string, url: string | undefined}[]>([])
 
     let getConfig = async () => {
         let response = await fetch("/api/v1.0/config")
         if(response.ok) {
             const responseData = await response.json() as Config
 
-            setConfig({
-                JwkUrl: (responseData?.Federation as Config)?.NamespaceUrl?.Value as undefined | string,
-                NamespaceUrl: (responseData?.Federation as Config)?.NamespaceUrl?.Value as undefined | string,
-                DirectorUrl: (responseData?.Federation as Config)?.DirectorUrl?.Value as undefined | string,
-                TopologyNamespaceUrl: (responseData?.Federation as Config)?.TopologyNamespaceUrl?.Value as undefined | string,
-                DiscoveryUrl: (responseData?.Federation as Config)?.DiscoveryUrl?.Value as undefined | string,
+            const federationUrls = UrlData.map(({key, text}) => {
+                let url = getObjectValue<string>(responseData, key)
+                if(url && !url?.startsWith("http://") && !url?.startsWith("https://")) {
+                    url = "http://" + url
+                }
+
+                return {
+                    text,
+                    url
+                }
             })
+
+            setConfig(federationUrls)
+
         } else {
-            console.error("Failed to fetch config for Federation Overview, response status: " + response.status)
+            console.error(await getErrorMessage(response))
         }
     }
 
@@ -56,21 +72,11 @@ const FederationOverview = () => {
 
         <AuthenticatedContent redirect={true} checkAuthentication={(u) => u?.role == "admin"}>
             {!Object.values(config).every(x => x == undefined) ? <Typography variant={"h4"} component={"h2"}  mb={2}>Federation Overview</Typography> : null}
-            {config?.NamespaceUrl ?
-                <LinkBox href={config?.NamespaceUrl} text={"Namespace Registry"}/> : null
-            }
-            {config?.DirectorUrl ?
-                <LinkBox href={config?.DirectorUrl} text={"Director"}/> : null
-            }
-            {config?.TopologyNamespaceUrl ?
-                <LinkBox href={config?.TopologyNamespaceUrl} text={"Topology Namespace"}/> : null
-            }
-            {config?.DiscoveryUrl ?
-                <LinkBox href={config?.DiscoveryUrl} text={"Discovery"}/> : null
-            }
-            {config?.JwkUrl ?
-                <LinkBox href={config?.JwkUrl} text={"JWK"}/> : null
-            }
+            {config.map(({text, url}) => {
+                if(url) {
+                    return <LinkBox key={text} href={url} text={text}></LinkBox>
+                }
+            })}
         </AuthenticatedContent>
     )
 }

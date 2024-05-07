@@ -1076,10 +1076,11 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		tj.useDirector = true
 		tj.directorUrl = pelicanURL.directorUrl
 	}
-	ns, err := getNamespaceInfo(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload)
+	ns, err := getNamespaceInfo(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload, remoteUrl.RawQuery)
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
+		return
 	}
 	tj.namespace = ns
 
@@ -2287,7 +2288,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	}
 	infos, err := client.ReadDir(remotePath)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to read remote directory")
 	}
 	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {

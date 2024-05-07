@@ -51,6 +51,7 @@ type (
 		Subject      string            // Subject is 'sub' claim
 		Claims       map[string]string // Additional claims
 		scope        string            // scope is a string with space-delimited list of scopes. To enforce type check, use AddRawScope or AddScopes to add scopes to your token
+		group        []string          // List of groups to include in the token
 	}
 
 	openIdConfiguration struct {
@@ -178,6 +179,14 @@ func (config *TokenConfig) AddAudiences(audiences ...string) {
 
 func (config *TokenConfig) GetAudiences() []string {
 	return config.audience
+}
+
+func (config *TokenConfig) AddGroups(groups ...string) {
+	config.group = append(config.group, groups...)
+}
+
+func (config *TokenConfig) GetGroups() []string {
+	return config.group
 }
 
 // Verify if the token matches scitoken2 profile requirement
@@ -315,8 +324,14 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 
 	if tokenConfig.tokenProfile == TokenProfileScitokens2 {
 		builder.Claim("ver", tokenConfig.version)
-	} else if tokenConfig.tokenProfile == TokenProfileWLCG {
+	}
+	if tokenConfig.tokenProfile == TokenProfileWLCG {
 		builder.Claim("wlcg.ver", tokenConfig.version)
+		if len(tokenConfig.group) > 0 {
+			builder.Claim("wlcg.groups", tokenConfig.group)
+		}
+	} else if len(tokenConfig.group) > 0 {
+		builder.Claim("groups", tokenConfig.group)
 	}
 
 	if tokenConfig.Claims != nil {

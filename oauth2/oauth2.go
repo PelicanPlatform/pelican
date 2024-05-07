@@ -21,6 +21,7 @@ package oauth2
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"path"
 	"strings"
@@ -76,7 +77,7 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *na
 	}
 
 	if !deviceCodeSupported(&issuerInfo.GrantTypes) {
-		return nil, fmt.Errorf("Issuer at %s for prefix %s does not support device flow", issuerUrl, entry.Prefix)
+		return nil, fmt.Errorf("issuer at %s for prefix %s does not support device flow", issuerUrl, entry.Prefix)
 	}
 
 	// Always trim the filename off the path
@@ -115,7 +116,8 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *na
 		Scopes: []string{"wlcg", "offline_access", storageScope},
 	}
 
-	ctx := context.Background()
+	client := &http.Client{Transport: config.GetTransport()}
+	ctx := context.WithValue(context.Background(), HTTPClient, client)
 	deviceAuth, err := oauth2Config.AuthDevice(ctx)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Failed to perform device code flow with URL %s", issuerInfo.DeviceAuthURL)

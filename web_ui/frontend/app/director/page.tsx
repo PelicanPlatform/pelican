@@ -26,6 +26,8 @@ import {Server} from "@/components/Main";
 import CardList from "@/components/Namespace/CardList";
 import DirectorCard, {DirectorCardProps} from "@/components/Namespace/DirectorCard";
 import {getUser} from "@/helpers/login";
+import FederationOverview from "@/components/FederationOverview";
+import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
 
 
 const getServers = async () => {
@@ -75,6 +77,11 @@ export default function Home() {
                             <Skeleton variant="rectangular" height={118} />
                         </Box>
                     }
+                </Grid>
+                <Grid item xs={12} lg={8} xl={6}>
+                    <AuthenticatedContent>
+                        <FederationOverview/>
+                    </AuthenticatedContent>
                 </Grid>
             </Grid>
         </Box>

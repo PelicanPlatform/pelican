@@ -26,9 +26,11 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
@@ -89,9 +91,8 @@ func checkFilter(serverName string) (bool, filterType) {
 
 // Configure TTL caches to enable cache eviction and other additional cache events handling logic
 //
-// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
-// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
-func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction goroutine
+func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	// Start automatic expired item deletion
 	go serverAds.Start()
 	go namespaceKeys.Start()
@@ -142,6 +143,43 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		namespaceKeys.Stop()
 		log.Info("Director TTL cache eviction has been stopped")
 		return nil
+	})
+
+}
+
+// Launch a goroutine to scrape metrics from various TTL caches and maps in the director
+func LaunchMapMetrics(ctx context.Context, egrp *errgroup.Group) {
+	// Scrape TTL cache and map metrics for Prometheus
+	egrp.Go(func() error {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				// serverAds
+				sAdMetrics := serverAds.Metrics()
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "serverAds", "type": "insersions"}).Set(float64(sAdMetrics.Insertions))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "serverAds", "type": "evictions"}).Set(float64(sAdMetrics.Evictions))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "serverAds", "type": "hits"}).Set(float64(sAdMetrics.Hits))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "serverAds", "type": "misses"}).Set(float64(sAdMetrics.Misses))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "serverAds", "type": "total"}).Set(float64(serverAds.Len()))
+
+				// JWKS
+				jwksMetrics := namespaceKeys.Metrics()
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "jwks", "type": "insersions"}).Set(float64(jwksMetrics.Insertions))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "jwks", "type": "evictions"}).Set(float64(jwksMetrics.Evictions))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "jwks", "type": "hits"}).Set(float64(jwksMetrics.Hits))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "jwks", "type": "misses"}).Set(float64(jwksMetrics.Misses))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "jwks", "type": "total"}).Set(float64(namespaceKeys.Len()))
+
+				// Maps
+				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("filteredServers").Set(float64(len(filteredServers)))
+				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("healthTestUtils").Set(float64(len(healthTestUtils)))
+				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("originStatUtils").Set(float64(len(originStatUtils)))
+			}
+		}
 	})
 }
 

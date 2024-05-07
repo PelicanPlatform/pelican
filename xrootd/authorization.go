@@ -75,19 +75,6 @@ type (
 		Global    GlobalCfg
 		IssuerMap map[string]Issuer
 	}
-
-	openIdConfig struct {
-		Issuer               string   `json:"issuer"`
-		JWKSURI              string   `json:"jwks_uri"`
-		TokenEndpoint        string   `json:"token_endpoint,omitempty"`
-		UserInfoEndpoint     string   `json:"userinfo_endpoint,omitempty"`
-		RevocationEndpoint   string   `json:"revocation_endpoint,omitempty"`
-		GrantTypesSupported  []string `json:"grant_types_supported,omitempty"`
-		ScopesSupported      []string `json:"scopes_supported,omitempty"`
-		TokenAuthMethods     []string `json:"token_endpoint_auth_methods_supported,omitempty"`
-		RegistrationEndpoint string   `json:"registration_endpoint,omitempty"`
-		DeviceEndpoint       string   `json:"device_authorization_endpoint,omitempty"`
-	}
 )
 
 var (
@@ -669,9 +656,9 @@ func EmitIssuerMetadata(exportPath string, xServeUrl string) error {
 	}
 	jwksUrl.Path = "/.well-known/issuer.jwks"
 
-	cfg := openIdConfig{
+	cfg := server_structs.OpenIdDiscoveryResponse{
 		Issuer:  xServeUrl,
-		JWKSURI: jwksUrl.String(),
+		JwksUri: jwksUrl.String(),
 	}
 
 	// If we have the built-in issuer enabled, fill in the URLs for OA4MP

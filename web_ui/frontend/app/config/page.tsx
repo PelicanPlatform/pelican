@@ -294,7 +294,7 @@ function Config() {
                     message: "Unauthorized",
                     action: {
                         label: "Login",
-                        onClick: () => router.push("/login/?returnURL=/config/")
+                        onClick: () => router.push("/login/?returnURL=/view/config/")
                     }
                 })
             }

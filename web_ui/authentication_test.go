@@ -297,7 +297,9 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
+	dirName := t.TempDir()
 	viper.Reset()
+	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, config.OriginType)

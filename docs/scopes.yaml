@@ -58,6 +58,15 @@ issuedBy: ["*"]
 acceptedBy: ["*"]
 ---
 ############################
+#     Registry Scopes      #
+############################
+name: registry.edit_registration
+description: >-
+  For origin admin to edit namespace registration at the registry
+issuedBy: ["origin"]
+acceptedBy: ["registry"]
+---
+############################
 #    Monitoring Scopes     #
 ############################
 name: monitoring.scrape

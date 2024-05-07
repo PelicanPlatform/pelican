@@ -23,22 +23,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pkg/errors"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
-
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 
+	"github.com/glebarez/sqlite"
+	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/pkg/errors"
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/spf13/viper"
 )
 
 func setupMockRegistryDB(t *testing.T) {
@@ -346,7 +346,7 @@ func TestUpdateNamespace(t *testing.T) {
 		require.Equal(t, 1, len(finalNss))
 		finalNs := finalNss[0]
 		assert.Equal(t, mockNs.Prefix, finalNs.Prefix)
-		assert.Equal(t, mockNs.AdminMetadata.UserID, finalNs.AdminMetadata.UserID)
+		assert.Equal(t, initialNs.AdminMetadata.UserID, finalNs.AdminMetadata.UserID) // we now allow changes to UserID
 		assert.Equal(t, mockNs.AdminMetadata.CreatedAt.Unix(), finalNs.AdminMetadata.CreatedAt.Unix())
 		assert.Equal(t, mockNs.AdminMetadata.Status, finalNs.AdminMetadata.Status)
 		assert.Equal(t, mockNs.AdminMetadata.ApprovedAt.Unix(), finalNs.AdminMetadata.ApprovedAt.Unix())

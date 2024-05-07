@@ -28,6 +28,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -161,7 +162,7 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 
 func TestOidcDiscoveryHandler(t *testing.T) {
 	router := gin.Default()
-	router.GET("/test", oidcDiscoveryHandler)
+	server_utils.RegisterOIDCAPI(router.Group("/test"), true)
 
 	tests := []struct {
 		name           string
@@ -216,7 +217,7 @@ func TestOidcDiscoveryHandler(t *testing.T) {
 			require.NoError(t, config.InitClient())
 
 			w := httptest.NewRecorder()
-			req, _ := http.NewRequest("GET", "/test", nil)
+			req, _ := http.NewRequest("GET", "/test"+oidcDiscoveryPath, nil)
 			router.ServeHTTP(w, req)
 
 			require.Equal(t, tc.statusCode, w.Result().StatusCode)

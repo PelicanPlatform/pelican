@@ -20,6 +20,8 @@ package oa4mp
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -32,6 +34,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -59,14 +62,70 @@ func getTransport() *http.Transport {
 	return transport
 }
 
+// Proxy a HTTP request from the Pelican server to the OA4MP server
+//
+// Maps a request to /api/v1.0/issuer/foo to /scitokens-server/foo.  Most
+// headers are forwarded as well.  The `X-Pelican-User` header is added
+// to the request, using data from the Pelican login session, allowing
+// the OA4MP server to base its logic on the Pelican authentication.
 func oa4mpProxy(ctx *gin.Context) {
+	var userEncoded string
+	var user string
+	var groupsList []string
+	if ctx.Request.URL.Path == "/api/v1.0/issuer/device" {
+		web_ui.RequireAuthMiddleware(ctx)
+		if ctx.IsAborted() {
+			return
+		}
+		user = ctx.GetString("User")
+		if user == "" {
+			// Should be impossible; proxy ought to be called via a middleware which always
+			// sets this variable
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "User authentication not set",
+			})
+			return
+		}
+		groupsList = ctx.GetStringSlice("Groups")
+		if groupsList == nil {
+			groupsList = make([]string, 0)
+		}
+		// WORKAROUND: OA4MP 5.4.x does not provide a mechanism to pass data through headers (the
+		// existing mechanism only works with the authorization code grant, not the device authorization
+		// grant).  Therefore, all the data we want passed we stuff into the username (which *is* copied
+		// through); a small JSON struct is created and base64-encoded.  The policy files on the other
+		// side will appropriately unwrap this information.
+		userInfo := make(map[string]interface{})
+		userInfo["u"] = user
+		userInfo["g"] = groupsList
+		userBytes, err := json.Marshal(userInfo)
+		if err != nil {
+			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Unable to serialize user authentication",
+			})
+			return
+		}
+		userEncoded = base64.StdEncoding.EncodeToString(userBytes)
+	}
+
 	origPath := ctx.Request.URL.Path
 	origPath = strings.TrimPrefix(origPath, "/api/v1.0/issuer")
 	ctx.Request.URL.Path = "/scitokens-server" + origPath
 	ctx.Request.URL.Scheme = "http"
 	ctx.Request.URL.Host = "localhost"
+	if userEncoded == "" {
+		ctx.Request.Header.Del("X-Pelican-User")
+	} else {
+		ctx.Request.Header.Set("X-Pelican-User", userEncoded)
+	}
 
-	log.Debugln("Will proxy request to URL", ctx.Request.URL.String())
+	if user != "" {
+		log.Debugf("Will proxy request to URL %s with user '%s' and groups '%s'", ctx.Request.URL.String(), user, strings.Join(groupsList, ","))
+	} else {
+		log.Debugln("Will proxy request to URL", ctx.Request.URL.String())
+	}
 	transport = getTransport()
 	resp, err := transport.RoundTrip(ctx.Request)
 	if err != nil {

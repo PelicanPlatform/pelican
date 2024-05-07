@@ -402,10 +402,9 @@ func updateNamespace(ns *server_structs.Namespace) error {
 
 	existingNsAdmin := existingNs.AdminMetadata
 	// We prevent the following fields from being modified by the user for now.
-	// They are meant for "internal" use only and we don't support changing
-	// UserID on the fly. We also don't allow changing Status other than explicitly
+	// They are meant for "internal" use only.
+	// We also don't allow changing Status other than explicitly
 	// call updateNamespaceStatusById
-	ns.AdminMetadata.UserID = existingNsAdmin.UserID
 	ns.AdminMetadata.CreatedAt = existingNsAdmin.CreatedAt
 	ns.AdminMetadata.Status = existingNsAdmin.Status
 	ns.AdminMetadata.ApprovedAt = existingNsAdmin.ApprovedAt

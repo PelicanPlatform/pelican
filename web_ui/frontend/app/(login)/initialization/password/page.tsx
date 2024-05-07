@@ -25,6 +25,7 @@ import { useState } from "react";
 import LoadingButton from "../../components/LoadingButton";
 
 import PasswordInput from "../../components/PasswordInput";
+import {getErrorMessage} from "@/helpers/util";
 
 export default function Home() {
 
@@ -52,15 +53,8 @@ export default function Home() {
             if(response.ok){
                 router.push("/")
             } else {
-                try {
-                    let data = await response.json()
-
-                    setLoading(false)
-                    setError(response.status + ": " + data['error'])
-                } catch {
-                    setLoading(false)
-                    setError(response.status + ": " + response.statusText)
-                }
+                setLoading(false)
+                setError(await getErrorMessage(response))
             }
         } catch {
             setLoading(false)
