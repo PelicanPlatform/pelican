@@ -138,8 +138,5 @@ func CacheServeFinish(ctx context.Context, egrp *errgroup.Group, cacheServer ser
 		return err
 	}
 
-	log.Debug("Advertise Cache")
-	servers := make([]server_structs.XRootDServer, 1)
-	servers[0] = cacheServer
-	return launcher_utils.Advertise(ctx, servers)
+	return nil
 }
