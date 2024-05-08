@@ -1,8 +1,8 @@
 "use client"
 
-import React, {ReactNode, useEffect, useState} from "react";
+import React, {ReactNode, useState} from "react";
 import {Box, BoxProps, Button, Grow, IconButton, Paper, Tooltip} from "@mui/material";
-import Link from "next/link";
+import Link from '@mui/material/Link';
 import {BugReport, Description, HelpOutline, Api} from "@mui/icons-material";
 import GitHubIcon from "@mui/icons-material/GitHub";
 import {ClickAwayListener} from "@mui/base";
@@ -39,7 +39,7 @@ const SpeedDialButton = ({open, order, icon, title, onClick, href, boxProps} : S
                 <Tooltip title={title} arrow>
                     <Paper elevation={2} sx={{ borderRadius: "50%", bgcolor: "#ffffff00"}}>
                         { href != undefined ?
-                            <Link href={href} rel={"noopener noreferrer"} target={"_blank"}>
+                            <Link href={href} underline="none" rel={"noopener noreferrer"} target={"_blank"}>
                                 <IconButton sx={{bgcolor: "primary.light", "&:hover": {bgcolor: "white"}}}>
                                     {icon}
                                 </IconButton>
@@ -58,13 +58,19 @@ const SpeedDialButton = ({open, order, icon, title, onClick, href, boxProps} : S
 }
 
 const PelicanSpeedDial = () => {
+    const [open, setOpen] = useState(false);
 
-    const initialActions = [
+    const actions = [
         {
             boxProps: {pl: 3},
             icon: <Description/>,
             title: 'Documentation',
             href: "https://docs.pelicanplatform.org"
+        },
+        {
+            icon: <Api/>,
+            title: 'Pelican Server API',
+            href: "/api/v1.0/docs"
         },
         {
             icon: <GitHubIcon/>,
@@ -77,20 +83,6 @@ const PelicanSpeedDial = () => {
             href: "https://github.com/PelicanPlatform/pelican/issues/new"
         }
     ];
-
-    const [open, setOpen] = useState(false);
-    const [actions, setActions] = useState(initialActions);
-
-    useEffect(() => {
-        const apiElement = {
-            icon: <Api/>,
-            title: 'Pelican Server API',
-            href: window.location.origin+"/api/v1.0/docs"
-        };
-        const copiedActions = [...actions]
-        copiedActions.splice(1, 0, apiElement)
-        setActions(copiedActions);
-    }, [])
 
     return (
         <ClickAwayListener onClickAway={() => setOpen(false)}>
