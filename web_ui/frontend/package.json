@@ -3,12 +3,13 @@
   "version": "7.2.0",
   "private": true,
   "scripts": {
-    "dev": "export NODE_ENV=development && next dev",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "export": "next export",
     "lint": "next lint",
-    "clean": "rm -rf .next & rm -rf out"
+    "clean": "rm -rf .next & rm -rf out",
+    "analyze": "ANALYZE=true NODE_ENV=development next build"
   },
   "dependencies": {
     "@emotion/react": "^11.11.1",
@@ -36,6 +37,7 @@
     "yaml": "^2.3.4"
   },
   "devDependencies": {
+    "@next/bundle-analyzer": "^14.2.3",
     "@types/lodash": "^4.14.202",
     "@types/luxon": "^3.3.2",
     "@types/swagger-ui-react": "^4.18.3"
