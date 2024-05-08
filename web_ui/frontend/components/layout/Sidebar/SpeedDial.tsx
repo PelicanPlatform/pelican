@@ -1,9 +1,9 @@
 "use client"
 
-import React, {ReactNode, useState} from "react";
+import React, {ReactNode, useEffect, useState} from "react";
 import {Box, BoxProps, Button, Grow, IconButton, Paper, Tooltip} from "@mui/material";
 import Link from "next/link";
-import {BugReport, Description, HelpOutline} from "@mui/icons-material";
+import {BugReport, Description, HelpOutline, Api} from "@mui/icons-material";
 import GitHubIcon from "@mui/icons-material/GitHub";
 import {ClickAwayListener} from "@mui/base";
 
@@ -58,9 +58,8 @@ const SpeedDialButton = ({open, order, icon, title, onClick, href, boxProps} : S
 }
 
 const PelicanSpeedDial = () => {
-    const [open, setOpen] = useState(false);
 
-    const actions = [
+    const initialActions = [
         {
             boxProps: {pl: 3},
             icon: <Description/>,
@@ -78,6 +77,20 @@ const PelicanSpeedDial = () => {
             href: "https://github.com/PelicanPlatform/pelican/issues/new"
         }
     ];
+
+    const [open, setOpen] = useState(false);
+    const [actions, setActions] = useState(initialActions);
+
+    useEffect(() => {
+        const apiElement = {
+            icon: <Api/>,
+            title: 'Pelican Server API',
+            href: window.location.origin+"/api/v1.0/docs"
+        };
+        const copiedActions = [...actions]
+        copiedActions.splice(1, 0, apiElement)
+        setActions(copiedActions);
+    }, [])
 
     return (
         <ClickAwayListener onClickAway={() => setOpen(false)}>
