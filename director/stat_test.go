@@ -97,21 +97,21 @@ func TestQueryServersForObject(t *testing.T) {
 	}
 
 	cleanupMock := func() {
-		originStatUtilsMutex.Lock()
-		defer originStatUtilsMutex.Unlock()
+		statUtilsMutex.Lock()
+		defer statUtilsMutex.Unlock()
 		serverAds.DeleteAll()
-		for sa := range originStatUtils {
-			delete(originStatUtils, sa)
+		for sa := range statUtils {
+			delete(statUtils, sa)
 		}
 	}
 
 	initMockStatUtils := func() {
-		originStatUtilsMutex.Lock()
-		defer originStatUtilsMutex.Unlock()
+		statUtilsMutex.Lock()
+		defer statUtilsMutex.Unlock()
 
 		for _, key := range serverAds.Keys() {
 			ctx, cancel := context.WithCancel(context.Background())
-			originStatUtils[key] = originStatUtil{
+			statUtils[key] = serverStatUtil{
 				Context:  ctx,
 				Cancel:   cancel,
 				Errgroup: &errgroup.Group{},
@@ -282,13 +282,13 @@ func TestQueryServersForObject(t *testing.T) {
 
 		mockCacheServer := []server_structs.ServerAd{{Name: "cache-overwrite", URL: url.URL{Host: "cache-overwrites.com", Scheme: "https"}}}
 
-		originStatUtilsMutex.Lock()
-		originStatUtils[mockCacheServer[0].URL.String()] = originStatUtil{
+		statUtilsMutex.Lock()
+		statUtils[mockCacheServer[0].URL.String()] = serverStatUtil{
 			Context:  ctx,
 			Cancel:   cancel,
 			Errgroup: &errgroup.Group{},
 		}
-		originStatUtilsMutex.Unlock()
+		statUtilsMutex.Unlock()
 
 		result, msg, err := stat.queryServersForObject(ctx, "/overwrites/test.txt", config.CacheType, 0, 0, withCacheAds(mockCacheServer))
 
@@ -311,13 +311,13 @@ func TestQueryServersForObject(t *testing.T) {
 
 		mockOrigin := []server_structs.ServerAd{{Name: "origin-overwrite", URL: url.URL{Host: "origin-overwrites.com", Scheme: "https"}}}
 
-		originStatUtilsMutex.Lock()
-		originStatUtils[mockOrigin[0].URL.String()] = originStatUtil{
+		statUtilsMutex.Lock()
+		statUtils[mockOrigin[0].URL.String()] = serverStatUtil{
 			Context:  ctx,
 			Cancel:   cancel,
 			Errgroup: &errgroup.Group{},
 		}
-		originStatUtilsMutex.Unlock()
+		statUtilsMutex.Unlock()
 
 		result, msg, err := stat.queryServersForObject(ctx, "/overwrites/test.txt", config.OriginType, 0, 0, withOriginAds(mockOrigin))
 

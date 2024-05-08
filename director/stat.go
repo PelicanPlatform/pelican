@@ -254,11 +254,11 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 		return nil, "", NoPrefixMatchError
 	}
 
-	originStatUtilsMutex.RLock()
-	defer originStatUtilsMutex.RUnlock()
+	statUtilsMutex.RLock()
+	defer statUtilsMutex.RUnlock()
 
 	for _, originAd := range ads {
-		originUtil, ok := originStatUtils[originAd.URL.String()]
+		originUtil, ok := statUtils[originAd.URL.String()]
 		if !ok {
 			numTotalReq += 1
 			log.Warningf("Origin %q is missing data for stat call, skip querying...", originAd.Name)

@@ -63,8 +63,8 @@ type (
 		Cancel        context.CancelFunc
 		Status        HealthTestStatus
 	}
-	// Util struct to keep track of `stat` call the director made to the origins
-	originStatUtil struct {
+	// Utility struct to keep track of the `stat` call the director made to the origin/cache servers
+	serverStatUtil struct {
 		Context  context.Context
 		Cancel   context.CancelFunc
 		Errgroup *errgroup.Group
@@ -85,8 +85,8 @@ var (
 	healthTestUtils      = make(map[server_structs.ServerAd]*healthTestUtil)
 	healthTestUtilsMutex = sync.RWMutex{}
 
-	originStatUtils      = make(map[string]originStatUtil)
-	originStatUtilsMutex = sync.RWMutex{}
+	statUtils      = make(map[string]serverStatUtil)
+	statUtilsMutex = sync.RWMutex{}
 )
 
 func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth bool) (redirectURL url.URL) {
@@ -803,22 +803,21 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		}
 	}
 
-	if sType == server_structs.OriginType {
-		originStatUtilsMutex.Lock()
-		defer originStatUtilsMutex.Unlock()
-		statUtil, ok := originStatUtils[sAd.URL.String()]
-		if !ok || statUtil.Errgroup == nil {
-			baseCtx, cancel := context.WithCancel(engineCtx)
-			concLimit := param.Director_StatConcurrencyLimit.GetInt()
-			statErrGrp := errgroup.Group{}
-			statErrGrp.SetLimit(concLimit)
-			newUtil := originStatUtil{
-				Errgroup: &statErrGrp,
-				Cancel:   cancel,
-				Context:  baseCtx,
-			}
-			originStatUtils[sAd.URL.String()] = newUtil
+	// Prepare `stat` call utilities
+	statUtilsMutex.Lock()
+	defer statUtilsMutex.Unlock()
+	statUtil, ok := statUtils[sAd.URL.String()]
+	if !ok || statUtil.Errgroup == nil {
+		baseCtx, cancel := context.WithCancel(engineCtx)
+		concLimit := param.Director_StatConcurrencyLimit.GetInt()
+		statErrGrp := errgroup.Group{}
+		statErrGrp.SetLimit(concLimit)
+		newUtil := serverStatUtil{
+			Errgroup: &statErrGrp,
+			Cancel:   cancel,
+			Context:  baseCtx,
 		}
+		statUtils[sAd.URL.String()] = newUtil
 	}
 
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Successful registration"})
