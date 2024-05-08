@@ -131,6 +131,7 @@ func stashPluginMain(args []string) {
 			// Print classad and exit
 			fmt.Println("MultipleFileSupport = true")
 			fmt.Println("PelicanPluginVersion = \"" + config.GetVersion() + "\"")
+			fmt.Println("PluginVersion = \"" + config.GetVersion() + "\"")
 			fmt.Println("PluginType = \"FileTransfer\"")
 			fmt.Println("ProtocolVersion = 2")
 			fmt.Println("SupportedMethods = \"stash, osdf\"")
