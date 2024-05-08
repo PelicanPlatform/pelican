@@ -16,11 +16,12 @@
  *
  ***************************************************************/
 
-// server_structs pacakge shares struct and their methods used across multiple server pacakges (origin/cache/registry/director).
-// It should only import lower level packages (config/param/etc).
-// It should NEVER import any server pacakges (origin/cache/registry/director) or server_utils package.
+// Package server_structs shares structs and their methods used across multiple server packages (origin/cache/registry/director).
 //
-// For functions used across multiple server pacakges, put them in server_utils pacakge instead
+// It should only import lower level packages (config/param/etc).
+// It should NEVER import any server packages (origin/cache/registry/director) or server_utils package.
+//
+// For functions used across multiple server packages, put them in server_utils package instead
 package server_structs
 
 type (

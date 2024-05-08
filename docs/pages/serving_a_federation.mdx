@@ -6,7 +6,7 @@ A federation in Pelican refers to an instance of a data sharing ecosystem where 
 allow such an exchange of data to work, Pelican has two top-level *central server components* to coordinate origins and caches in the
 federation, direct client requests to the proper storage server, and manage namespace registration. They are the *director* and the *registry*.
 A Pelican federation requires both a *director* and a *registry* to be set up first before any origin or cache server can join
-the federation or any client can access objects in the federaiton.
+the federation or any client can access objects in the federation.
 
 ## Before Starting
 
@@ -30,7 +30,7 @@ For Pelican registry to work, you need to obtain a client id and associated clie
 
 * **`Client Name`**: a human-readable name of your service. For example: Pelican Data Federation
 * **`Callback URLs`**: fill in `https://<hostname>:<server_port>/api/v1.0/auth/oauth/callback` where `<hostname>:<server_port>` is your server's public endpoint. For example, `https://example-origin.org:8444/api/v1.0/auth/oauth/callback`
-* **`Client Type`**: select `Confedential`
+* **`Client Type`**: select `Confidential`
 * **`Scopes`**: select `email`, `openid`, `org.cilogon.userinfo`, and `profile`
 * **`Refresh Tokens`**: select `No`
 
@@ -94,17 +94,17 @@ The homepage of the registry web UI is also publicly accessible, meaning users c
 
 There are a couple of configuration parameters you could use to customize the behavior of your registry. Here we highlight the ones that are most frequently set for an admin. You may refer to the full set of registry parameters in the [Parameters page](./parameters.mdx#Registry-DbLocation).
 
-#### `Registry.AdminUsers` [Deprecated]
+#### `Server.UIAdminUsers`
 
-> `Registry.AdminUsers` is deprecated in Pelican `v7.7.0`. Use `OIDC.AdminUsers` instead.
+> `Registry.AdminUsers` is deprecated in Pelican `v7.7.0`. Use `Server.UIAdminUsers` instead.
 
 By default, Pelican registry only has one user with admin privilege, which is whoever starts the registry service and initializes the web UI with the admin password.
 
 However, Pelican also allows you to pass a list of CILogon user identities and grant them the admin privilege. This requires you have your CILogon `client_id` and `client_secret` set up. The user identity of each admin user can be found on their https://cilogon.org/ user page, under "User Attributes", `CILogon User Identifier`, which looks something like `http://cilogon.org/serverA/users/123456`. Once you have the identifiers, simply pass them as an array to `Registry.AdminUsers`:
 
 ```yaml
-Registry:
-  AdminUsers: ["http://cilogon.org/serverA/users/123456"]
+Server:
+  UIAdminUsers: ["http://cilogon.org/serverA/users/123456"]
 ```
 
 

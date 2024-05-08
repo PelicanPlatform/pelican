@@ -86,7 +86,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	engine, err := web_ui.GetEngine()
 	require.NoError(t, err)
 
-	server_utils.RegisterOIDCAPI(engine)
+	server_utils.RegisterOIDCAPI(engine.Group("/"), false)
 
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer func() {
@@ -269,7 +269,7 @@ func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
 	// At this point, a 403 means the server is running, which means its ready to grab objects from
 	err := server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403, true)
 	if err != nil {
-		t.Fatalf("Unsucessful test: Server encountered an error: %v", err)
+		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
 
 	// Now try to get the object

@@ -50,6 +50,16 @@ var (
 
 	PelicanDirectorTotalAdvertisementsReceived = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_total_advertisements_received",
-		Help: "The total number of advertisement the director received from the origin and cache servers. Labled by status_code, server_name, serve_type: Origin|Cache, server_web_url",
+		Help: "The total number of advertisement the director received from the origin and cache servers. Labelled by status_code, server_name, serve_type: Origin|Cache, server_web_url",
 	}, []string{"server_name", "server_web_url", "server_type", "status_code"})
+
+	PelicanDirectorMapItemsTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pelican_director_map_items_total",
+		Help: "The total number of map items in the director, by the name of the map",
+	}, []string{"name"}) // name: healthTestUtils, filteredServers, originStatUtils
+
+	PelicanDirectorTTLCache = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pelican_director_ttl_cache",
+		Help: "The statistics of various TTL caches",
+	}, []string{"name", "type"}) // name: serverAds, jwks; type: evictions, insersions, hits, misses, total
 )

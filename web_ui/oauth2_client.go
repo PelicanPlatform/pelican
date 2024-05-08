@@ -28,6 +28,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/gin-contrib/sessions"
@@ -51,15 +52,10 @@ type (
 		State string `form:"state"`
 		Code  string `form:"code"`
 	}
-
-	cilogonUserInfo struct {
-		Email string `json:"email,omitempty"`
-		Sub   string `json:"sub"`
-		SubID string `json:"subject_id,omitempty"`
-	}
 )
 
 const (
+	oauthLoginPath    = "/api/v1.0/auth/oauth/login"
 	oauthCallbackPath = "/api/v1.0/auth/oauth/callback"
 )
 
@@ -118,6 +114,90 @@ func handleOAuthLogin(ctx *gin.Context) {
 
 	redirectUrl := oauthConfig.AuthCodeURL(csrfState)
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectUrl)
+}
+
+// Given a user name, return the list of groups they belong to
+func generateGroupInfo(user string) (groups []string, err error) {
+	// Currently, only file-based lookup is supported
+	if param.Issuer_GroupSource.GetString() != "file" {
+		return
+	}
+	groupFile := param.Issuer_GroupFile.GetString()
+	if groupFile == "" {
+		return
+	}
+	groupBytes, err := os.ReadFile(groupFile)
+	if err != nil {
+		err = errors.Wrap(err, "failed to read Issuer.GroupFile for group information")
+		return
+	}
+	var groupTable map[string][]string
+	if err = json.Unmarshal(groupBytes, &groupTable); err != nil {
+		err = errors.Wrapf(err, "failed to parse Issuer.GroupFile (%s) as JSON", groupFile)
+		return
+	}
+	groups = groupTable[user]
+	return
+}
+
+// Given a map from a JSON object, generate user/group information according to
+// the current policy.
+func generateUserGroupInfo(userInfo map[string]interface{}) (user string, groups []string, err error) {
+	userClaim := param.Issuer_OIDCAuthenticationUserClaim.GetString()
+	if userClaim == "" {
+		userClaim = "sub"
+	}
+	userIdentifierIface, ok := userInfo[userClaim]
+	if !ok {
+		log.Errorln("User info endpoint did not return a value for the user claim", userClaim)
+		err = errors.New("identity provider did not return an identity for logged-in user")
+		return
+	}
+	userIdentifier, ok := userIdentifierIface.(string)
+	if !ok {
+		log.Errorln("User info endpoint did not return a string for the user claim", userClaim)
+		err = errors.New("identity provider did not return an identity for logged-in user")
+		return
+	}
+	if param.Issuer_UserStripDomain.GetBool() {
+		lastAt := strings.LastIndex(userIdentifier, "@")
+		if lastAt >= 0 {
+			userIdentifier = userIdentifier[:strings.LastIndex(userIdentifier, "@")]
+		}
+	}
+	if userIdentifier == "" {
+		log.Errorf("'%s' field of user info response from auth provider is empty. Can't determine user identity", userClaim)
+		err = errors.New("identity provider returned an empty username")
+		return
+	}
+	user = userIdentifier
+
+	if param.Issuer_GroupSource.GetString() == "oidc" {
+		groupClaim := param.Issuer_OIDCGroupClaim.GetString()
+		groupList, ok := userInfo[groupClaim]
+		if ok {
+			if groupsStr, ok := groupList.(string); ok {
+				groupsInfo := strings.Split(groupsStr, ",")
+				groups = make([]string, 0, len(groupsInfo))
+				for _, groupRaw := range groupsInfo {
+					group := strings.TrimSpace(groupRaw)
+					if group != "" {
+						groups = append(groups, group)
+					}
+				}
+			} else if groupsTmp, ok := groupList.([]interface{}); ok {
+				groups = make([]string, 0, len(groupsTmp))
+				for _, groupObj := range groupsTmp {
+					if groupStr, ok := groupObj.(string); ok {
+						groups = append(groups, groupStr)
+					}
+				}
+			}
+		}
+	} else {
+		groups, err = generateGroupInfo(user)
+	}
+	return
 }
 
 // Handle the callback request from CILogon when user is successfully authenticated
@@ -240,8 +320,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	userInfo := cilogonUserInfo{}
-
+	var userInfo map[string]interface{}
 	if err := json.Unmarshal(body, &userInfo); err != nil {
 		log.Errorf("Error parsing user info from auth provider at %s. %v", oauthUserInfoUrl, err)
 		ctx.JSON(http.StatusInternalServerError,
@@ -252,13 +331,12 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	userIdentifier := userInfo.Sub
-	if userIdentifier == "" {
-		log.Errorf("sub field of user info response from auth provider is empty. Can't determine user identity")
+	user, groups, err := generateUserGroupInfo(userInfo)
+	if err != nil {
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "Error setting login cookie: can't find valid user id from CILogon",
+				Msg:    err.Error(),
 			})
 		return
 	}
@@ -269,7 +347,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 	}
 
 	// Issue our own JWT for web UI access
-	setLoginCookie(ctx, userIdentifier)
+	setLoginCookie(ctx, user, groups)
 
 	// Redirect user to where they were or root path
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation)

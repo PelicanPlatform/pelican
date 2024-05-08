@@ -19,9 +19,12 @@
 package utils
 
 import (
+	"net/url"
 	"strings"
 	"unicode"
 
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -50,4 +53,52 @@ func SnakeCaseToHumanReadable(input string) string {
 		words[i] = cases.Title(language.English).String(word)
 	}
 	return strings.Join(words, " ")
+}
+
+// GetPreferredCaches parses the caches it is given and returns it as a list of url's
+func GetPreferredCaches(preferredCaches string) (caches []*url.URL, err error) {
+	if preferredCaches != "" {
+		cacheList := strings.Split(preferredCaches, ",")
+		for _, cache := range cacheList {
+			if preferredCacheURL, err := url.Parse(cache); err != nil {
+				return nil, errors.Errorf("Unable to parse preferred cache (%s) as URL: %s", cache, err.Error())
+			} else {
+				caches = append(caches, preferredCacheURL)
+				log.Debugln("Preferred cache for transfer:", preferredCacheURL)
+			}
+		}
+	}
+	return
+}
+
+// This function checks if we have a valid query (or no query) for the transfer URL
+func CheckValidQuery(transferUrl *url.URL) (err error) {
+	query := transferUrl.Query()
+	recursive, hasRecursive := query["recursive"]
+	_, hasPack := query["pack"]
+	directRead, hasDirectRead := query["directread"]
+
+	// If we have both recursive and pack, we should return a failure
+	if hasRecursive && hasPack {
+		return errors.New("cannot have both recursive and pack query parameters")
+	}
+
+	// If there is an argument in the directread query param, inform the user this is deprecated and their argument will be ignored
+	if hasDirectRead && directRead[0] != "" {
+		log.Warnln("Arguments (true/false) for the ?directread query have been deprecated and will be disallowed in a future release. The argument provided will be ignored")
+		return nil
+	}
+
+	// If there is an argument in the recursive query param, inform the user this is deprecated and their argument will be ignored
+	if hasRecursive && recursive[0] != "" {
+		log.Warnln("Arguments (true/false) for the ?recursive query have been deprecated and will be disallowed in a future release. The argument provided will be ignored")
+		return nil
+	}
+
+	// If we have no query, or we have recursive or pack, we are good
+	if len(query) == 0 || hasRecursive || hasPack || hasDirectRead {
+		return nil
+	}
+
+	return errors.New("invalid query parameter(s) " + transferUrl.RawQuery + " provided in url " + transferUrl.String())
 }

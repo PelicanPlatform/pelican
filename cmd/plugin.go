@@ -36,6 +36,7 @@ import (
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -130,13 +131,14 @@ func stashPluginMain(args []string) {
 			// Print classad and exit
 			fmt.Println("MultipleFileSupport = true")
 			fmt.Println("PelicanPluginVersion = \"" + config.GetVersion() + "\"")
+			fmt.Println("PluginVersion = \"" + config.GetVersion() + "\"")
 			fmt.Println("PluginType = \"FileTransfer\"")
 			fmt.Println("ProtocolVersion = 2")
 			fmt.Println("SupportedMethods = \"stash, osdf\"")
 			fmt.Println("StartdAttrs = \"PelicanPluginVersion\"")
 			os.Exit(0)
 		} else if args[0] == "-version" || args[0] == "-v" {
-			config.PrintPelicanVersion()
+			config.PrintPelicanVersion(os.Stdout)
 			os.Exit(0)
 		} else if args[0] == "-upload" {
 			log.Debugln("Upload detected")
@@ -309,7 +311,9 @@ func stashPluginMain(args []string) {
 			transferSuccess, err := resultAd.Get("TransferSuccess")
 			if err != nil {
 				log.Errorln("Failed to get TransferSuccess:", err)
+				resultAd.Set("TransferSuccess", false)
 				success = false
+				transferSuccess = false
 			}
 			// If we are not uploading and we fail, we want to abort
 			if !upload && !transferSuccess.(bool) {
@@ -332,7 +336,10 @@ func stashPluginMain(args []string) {
 		err = waitErr
 	}
 
-	tmpSuccess, retryable := writeOutfile(err, resultAds, outputFile)
+	tmpSuccess, retryable, err := writeOutfile(err, resultAds, outputFile)
+	if err != nil {
+		os.Exit(FailedOutfile)
+	}
 	success = tmpSuccess && success
 
 	if success {
@@ -362,7 +369,10 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
 	}
 
 	// We'll exit 3 in here if anything fails to write the file
-	_, retryable := writeOutfile(nil, resultAds, outputFile)
+	_, retryable, err := writeOutfile(nil, resultAds, outputFile)
+	if err != nil {
+		exitCode = FailedOutfile
+	}
 
 	if retryable {
 		exitCode = 11
@@ -383,15 +393,17 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 		}
 	}()
 
-	caches := make([]*url.URL, 0, 1)
+	// Check for local cache
+	var caches []*url.URL
 	if nearestCache, ok := os.LookupEnv("NEAREST_CACHE"); ok && nearestCache != "" {
-		var nearestCacheURL *url.URL
-		if nearestCacheURL, err = url.Parse(nearestCache); err != nil {
-			err = errors.Wrapf(err, "unable to parse preferred cache (%s) as URL", nearestCacheURL)
+		caches, err = utils.GetPreferredCaches(nearestCache)
+		if err != nil {
 			return
-		} else {
-			caches = append(caches, nearestCacheURL)
-			log.Debugln("Setting nearest cache to", nearestCacheURL.String())
+		}
+	} else if nearestCache, ok := os.LookupEnv("PELICAN_NEAREST_CACHE"); ok && nearestCache != "" {
+		caches, err = utils.GetPreferredCaches(nearestCache)
+		if err != nil {
+			return
 		}
 	}
 
@@ -408,6 +420,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 
 	jobMap := make(map[string]PluginTransfer)
 	var recursive bool
+	var tj *client.TransferJob
 
 	for {
 		select {
@@ -419,13 +432,15 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				workChan = nil
 				break
 			}
+
 			// Check we have valid query parameters
-			err := checkValidQuery(transfer.url)
+			err := utils.CheckValidQuery(transfer.url)
 			if err != nil {
+				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return err
 			}
 
-			if transfer.url.Query().Get("recursive") != "" {
+			if transfer.url.Query().Has("recursive") {
 				recursive = true
 			} else {
 				recursive = false
@@ -444,21 +459,27 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				transfer.localFile = parseDestination(transfer)
 			}
 
-			var tj *client.TransferJob
 			urlCopy := *transfer.url
-			project := client.GetProjectName()
-			tj, err = tc.NewTransferJob(context.Background(), &urlCopy, transfer.localFile, upload, recursive, project, client.WithAcquireToken(false), client.WithCaches(caches...))
+			tj, err = tc.NewTransferJob(context.Background(), &urlCopy, transfer.localFile, upload, recursive, client.WithAcquireToken(false), client.WithCaches(caches...))
 			if err != nil {
+				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return errors.Wrap(err, "Failed to create new transfer job")
 			}
 			jobMap[tj.ID()] = transfer
 
 			if err = tc.Submit(tj); err != nil {
+				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return err
 			}
 		case result, ok := <-tc.Results():
 			if !ok {
 				log.Debugln("Client has no more results")
+				// Check to be sure we did not have a lookup error
+				ok, err = tj.GetLookupStatus()
+				// If we did not complete lookup, something went wrong
+				if !ok {
+					err = errors.New("error occurred during job lookup")
+				}
 				return
 			}
 			log.Debugln("Got result from transfer client")
@@ -522,6 +543,29 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 	}
 }
 
+// This function is to be called to populate the result ads for a failed transfer
+// This ensures that the needed classads are populated and sent to the results channel
+func failTransfer(remoteUrl string, localFile string, results chan<- *classads.ClassAd, upload bool, err error) {
+	resultAd := classads.NewClassAd()
+	resultAd.Set("TransferUrl", remoteUrl)
+	if upload {
+		resultAd.Set("TransferType", "upload")
+		resultAd.Set("TransferFileName", path.Base(localFile))
+	} else {
+		resultAd.Set("TransferType", "download")
+		resultAd.Set("TransferFileName", path.Base(remoteUrl))
+	}
+	if client.IsRetryable(err) {
+		resultAd.Set("TransferRetryable", true)
+	} else {
+		resultAd.Set("TransferRetryable", false)
+	}
+	resultAd.Set("TransferSuccess", false)
+	resultAd.Set("TransferError", err.Error())
+
+	results <- resultAd
+}
+
 // Gets the absolute path for the local destination. This is important
 // especially for downloaded directories so that the downloaded files end up
 // in the directory specified for download.
@@ -540,36 +584,17 @@ func parseDestination(transfer PluginTransfer) (parsedDest string) {
 	return transfer.localFile
 }
 
-// This function checks if we have a valid query (or no query) for the transfer URL
-func checkValidQuery(transferUrl *url.URL) (err error) {
-	query := transferUrl.Query()
-	_, hasRecursive := query["recursive"]
-	_, hasPack := query["pack"]
-
-	// If we have both recursive and pack, we should return a failure
-	if hasRecursive && hasPack {
-		return fmt.Errorf("Cannot have both recursive and pack query parameters")
-	}
-
-	// If we have no query, or we have recursive or pack, we are good
-	if len(query) == 0 || hasRecursive || hasPack {
-		return nil
-	}
-
-	return fmt.Errorf("Invalid query parameters procided in url: %s", transferUrl)
-}
-
 // WriteOutfile takes in the result ads from the job and the file to be outputted, it returns a boolean indicating:
 // true: all result ads indicate transfer success
 // false: at least one result ad has failed
 // As well as a boolean letting us know if errors are retryable
-func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File) (success bool, retryable bool) {
+func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File) (success bool, retryable bool, writeErr error) {
 
 	if err != nil {
 		alreadyFailed := false
 		for _, ad := range resultAds {
-			failed, getErr := ad.Get("TransferSuccess")
-			if getErr != nil || failed.(bool) {
+			succeeded, getErr := ad.Get("TransferSuccess")
+			if getErr != nil || !(succeeded.(bool)) {
 				alreadyFailed = true
 				break
 			}
@@ -578,16 +603,32 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 			resultAd := classads.NewClassAd()
 			resultAd.Set("TransferSuccess", false)
 			resultAd.Set("TransferError", err.Error())
+			if client.ShouldRetry(err) {
+				resultAd.Set("TransferRetryable", true)
+			} else {
+				resultAd.Set("TransferRetryable", false)
+			}
 			resultAds = append(resultAds, resultAd)
 		}
 	}
 	success = true
 	retryable = false
 	for _, resultAd := range resultAds {
-		_, err := outputFile.WriteString(resultAd.String() + "\n")
+		// Condor expects the plugin to always return a TransferUrl and TransferFileName. Therefore,
+		// we should populate them even if they are empty. If empty, the url/filename is most likely
+		// included in the error stack already or it is not relevant to the error
+		if url, _ := resultAd.Get("TransferUrl"); url == nil {
+			log.Debugln("No URL found in result ad")
+			resultAd.Set("TransferUrl", "")
+		}
+		if fileName, _ := resultAd.Get("TransferFileName"); fileName == nil {
+			log.Debugln("No TransferFileName found in result ad")
+			resultAd.Set("TransferFileName", "")
+		}
+
+		_, err = outputFile.WriteString(resultAd.String() + "\n")
 		if err != nil {
-			log.Errorln("Failed to write to outfile:", err)
-			os.Exit(FailedOutfile)
+			return false, false, errors.Wrap(err, "failed to write to outfile")
 		}
 		transferSuccess, err := resultAd.Get("TransferSuccess")
 		if err != nil {
@@ -621,10 +662,10 @@ func writeOutfile(err error, resultAds []*classads.ClassAd, outputFile *os.File)
 			} else {
 				log.Errorf("Failed to sync output file (%s): %s", outputFile.Name(), err)
 			}
-			os.Exit(FailedOutfile) // Unique error code to let us know the outfile could not be created
+			return false, false, errors.Wrap(err, "failed to sync output file")
 		}
 	}
-	return success, retryable
+	return success, retryable, nil
 }
 
 // readMultiTransfers reads the transfers from a Reader, such as stdin
@@ -640,12 +681,13 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 	for _, ad := range ads {
 		adUrlStr, err := ad.Get("Url")
 		if err != nil {
-			return nil, err
+			// If we don't find a URL, we are assuming it is a classad used for other purposes
+			// so keep searching for URL
+			log.Debugln("Url attribute not set for transfer, skipping...")
+			continue
 		}
 
 		if adUrlStr == nil {
-			// If we don't find a URL, we are assuming it is a classad used for other purposes
-			// so keep searching for URL
 			log.Debugln("Url attribute not set for transfer, skipping...")
 			continue
 		}
@@ -657,11 +699,13 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 
 		destination, err := ad.Get("LocalFileName")
 		if err != nil {
-			return nil, err
-		}
-		if destination == nil {
 			// If we don't find a local filename, we are assuming it is a classad used for other purposes
 			// so keep searching for local filename
+			log.Debugln("LocalFileName attribute not set for transfer, skipping...")
+			continue
+		}
+
+		if destination == nil {
 			log.Debugln("LocalFileName attribute not set for transfer, skipping...")
 			continue
 		}

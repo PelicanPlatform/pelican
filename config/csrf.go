@@ -60,7 +60,7 @@ func GetCSRFHandler() (gin.HandlerFunc, error) {
 		setupCSRFHandler()
 	})
 	if csrfHanlder == nil {
-		return nil, errors.New("Error setting up the CSRF hanlder")
+		return nil, errors.New("Error setting up the CSRF handler")
 	}
 	return csrfHanlder, nil
 }

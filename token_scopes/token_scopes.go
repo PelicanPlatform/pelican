@@ -32,6 +32,7 @@ const (
 	Pelican_DirectorServiceDiscovery TokenScope = "pelican.director_service_discovery"
 	Pelican_NamespaceDelete TokenScope = "pelican.namespace_delete"
 	WebUi_Access TokenScope = "web_ui.access"
+	Registry_EditRegistration TokenScope = "registry.edit_registration"
 	Monitoring_Scrape TokenScope = "monitoring.scrape"
 	Monitoring_Query TokenScope = "monitoring.query"
 	Broker_Reverse TokenScope = "broker.reverse"

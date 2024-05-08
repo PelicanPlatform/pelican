@@ -38,19 +38,22 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
 )
 
 var OIDC struct {
@@ -303,7 +306,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			return false, nil, sysErr
 		}
 
-		var ns Namespace
+		var ns server_structs.Namespace
 		ns.Prefix = data.Prefix
 
 		pubkeyData, err := json.Marshal(data.Pubkey)
@@ -366,12 +369,8 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			}
 		}
 
-		// Since CLI/auto-registered namespace did not have site name as part of their registration
-		// Use their IP for an educated guess
-		ns.AdminMetadata.SiteName = ctx.ClientIP()
-
 		// Overwrite status to Pending to filter malicious request
-		ns.AdminMetadata.Status = Pending
+		ns.AdminMetadata.Status = server_structs.RegPending
 
 		err = AddNamespace(&ns)
 		if err != nil {
@@ -660,7 +659,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    "server encountered unknown error waiting for token"})
-				log.Errorf("Token endpoint did not provide a token, and responded with unkown error: %s", string(body))
+				log.Errorf("Token endpoint did not provide a token, and responded with unknown error: %s", string(body))
 				return
 			}
 		} else {
@@ -823,13 +822,13 @@ func wildcardHandler(ctx *gin.Context) {
 
 		jwks, adminMetadata, err := getNamespaceJwksByPrefix(prefix)
 		if err != nil {
+			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "server encountered an error trying to get jwks for prefix"})
-			log.Errorf("Failed to load jwks for prefix %s: %v", prefix, err)
 			return
 		}
-		if adminMetadata != nil && adminMetadata.Status != Approved {
+		if adminMetadata != nil && adminMetadata.Status != server_structs.RegApproved {
 			if strings.HasPrefix(prefix, "/caches/") { // Caches
 				if param.Registry_RequireCacheApproval.GetBool() {
 					// Use 403 to distinguish between server error
@@ -888,10 +887,38 @@ func wildcardHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, nsCfg)
 		return
 	} else {
-
-		ctx.String(http.StatusNotFound, "404 Page not found")
+		// Default to get the namespace by its prefix
+		getNamespaceHandler(ctx)
 		return
 	}
+}
+
+func getNamespaceHandler(ctx *gin.Context) {
+	param := ctx.Param("wildcard")
+	prefix := path.Clean(param)
+	exists, err := namespaceExistsByPrefix(prefix)
+	if err != nil {
+		log.Error("Error checking if prefix ", prefix, " exists: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server encountered an error when checking if the namespace exists"})
+		return
+	}
+	if !exists {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("namespace prefix '%s', was not found", prefix)})
+		return
+	}
+	ns, err := getNamespaceByPrefix(prefix)
+	if err != nil {
+		log.Errorf("Failed to load namespace for prefix %s: %v", prefix, err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "server encountered an error trying to get the namespace registration for the prefix " + prefix})
+		return
+	}
+	ctx.JSON(http.StatusOK, ns)
 }
 
 // Check if a namespace prefix exists and its public key matches the registry record
@@ -979,7 +1006,8 @@ func checkNamespaceExistsHandler(ctx *gin.Context) {
 	}
 }
 
-func checkNamespaceStatusHandler(ctx *gin.Context) {
+// Check the approval status of namespace registration
+func checkApprovalHandler(ctx *gin.Context) {
 	req := server_structs.CheckNamespaceStatusReq{}
 	if err := ctx.ShouldBind(&req); err != nil {
 		log.Debug("Failed to parse request body for namespace status check: ", err)
@@ -1023,13 +1051,13 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 			Msg:    fmt.Sprintf("Error getting namespace %s: %s", req.Prefix, err.Error())})
 		return
 	}
-	emptyMetadata := AdminMetadata{}
+	emptyMetadata := server_structs.AdminMetadata{}
 	// If Registry.RequireCacheApproval or Registry.RequireOriginApproval is false
 	// we return Approved == true
 	if ns.AdminMetadata != emptyMetadata {
 		// Caches
 		if strings.HasPrefix(req.Prefix, "/caches") && param.Registry_RequireCacheApproval.GetBool() {
-			res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+			res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == server_structs.RegApproved}
 			ctx.JSON(http.StatusOK, res)
 			return
 		} else if !param.Registry_RequireCacheApproval.GetBool() {
@@ -1039,7 +1067,7 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 		} else {
 			// Origins
 			if param.Registry_RequireOriginApproval.GetBool() {
-				res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == Approved}
+				res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == server_structs.RegApproved}
 				ctx.JSON(http.StatusOK, res)
 				return
 			} else {
@@ -1055,6 +1083,70 @@ func checkNamespaceStatusHandler(ctx *gin.Context) {
 	}
 }
 
+// Check namespace registration completeness
+func checkStatusHandler(ctx *gin.Context) {
+	nssReq := server_structs.CheckNamespaceCompleteReq{}
+	results := map[string]server_structs.NamespaceCompletenessResult{}
+
+	err := ctx.BindJSON(&nssReq)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "failed to parse request body: " + err.Error()})
+	}
+	for _, prefix := range nssReq.Prefixes {
+		isCache := false
+		if strings.HasPrefix(prefix, "/caches") {
+			isCache = true
+		}
+		complete := server_structs.NamespaceCompletenessResult{}
+		exists, err := namespaceExistsByPrefix(prefix)
+		if err != nil {
+			complete.Msg = fmt.Sprintf("Failed to check if %s exists: %v", prefix, err)
+			results[prefix] = complete
+			continue
+		}
+		if !exists {
+			complete.Msg = fmt.Sprintf("Namespace %s does not exist", prefix)
+			results[prefix] = complete
+			continue
+		}
+		ns, err := getNamespaceByPrefix(prefix)
+		if err != nil {
+			complete.Msg = fmt.Sprintf("Failed to retrieve namespace %s: %v", prefix, err)
+			results[prefix] = complete
+			continue
+		}
+		fed, err := config.GetFederation(ctx)
+		if err != nil {
+			log.Error("checkNamespaceCompleteHandler: failed to get federaion:", err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Server error when getting federation information: " + err.Error(),
+			})
+		}
+		if isCache {
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/cache/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
+		} else {
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/origin/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
+		}
+		err = config.GetValidate().Struct(ns)
+		if err != nil {
+			// translate validation error to human readable
+			errs := err.(validator.ValidationErrors)
+			complete.Msg = "Incomplete registration: "
+			for _, err := range errs {
+				complete.Msg += err.Translate(config.GetEnTranslator()) + "\n"
+			}
+			results[prefix] = complete
+			continue
+		} else {
+			complete.Completed = true
+			results[prefix] = complete
+			continue
+		}
+	}
+	ctx.JSON(http.StatusOK, server_structs.CheckNamespaceCompleteRes{Results: results})
+}
+
 func RegisterRegistryAPI(router *gin.RouterGroup) {
 	registryAPI := router.Group("/api/v1.0/registry")
 
@@ -1068,7 +1160,16 @@ func RegisterRegistryAPI(router *gin.RouterGroup) {
 		// Handle everything under "/" route with GET method
 		registryAPI.GET("/*wildcard", wildcardHandler)
 		registryAPI.POST("/checkNamespaceExists", checkNamespaceExistsHandler)
-		registryAPI.POST("/checkNamespaceStatus", checkNamespaceStatusHandler)
+		registryAPI.POST("/checkNamespaceStatus", checkApprovalHandler)
+
 		registryAPI.DELETE("/*wildcard", deleteNamespaceHandler)
+	}
+
+	checkApis := registryAPI.Group("/namespaces/check")
+	{
+		// We should deprecate the above /checkNamespace* routes and replace them by the following
+		// endpoints to comply to RESTful spec
+		checkApis.POST("/status", checkStatusHandler)     // registration completeness status
+		checkApis.POST("/approval", checkApprovalHandler) // approval status
 	}
 }

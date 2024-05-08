@@ -76,21 +76,33 @@ type (
 		Latitude     float64    `json:"latitude"`
 		Longitude    float64    `json:"longitude"`
 		Writes       bool       `json:"enable_write"`
+		Listings     bool       `json:"enable_listing"`       // True if the origin allows directory listings
 		DirectReads  bool       `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
 		FromTopology bool       `json:"from_topology"`
+	}
+
+	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
+	Advertisement struct {
+		ServerAd
+		NamespaceAds []NamespaceAdV2
 	}
 
 	ServerType   string
 	StrategyType string
 
 	OriginAdvertiseV2 struct {
-		Name       string          `json:"name"`
-		BrokerURL  string          `json:"broker-url,omitempty"`
-		DataURL    string          `json:"data-url" binding:"required"`
-		WebURL     string          `json:"web-url,omitempty"`
-		Caps       Capabilities    `json:"capabilities"`
-		Namespaces []NamespaceAdV2 `json:"namespaces"`
-		Issuer     []TokenIssuer   `json:"token-issuer"`
+		// The displayed name of the server.
+		// The value is from the Sitename of the server registration in the registry if set, or Xrootd.Sitename if not
+		Name string `json:"name"`
+		// The namespace prefix to register/look up the server in the registry.
+		// The value is /caches/{Xrootd.Sitename} for cache servers and /origins/{Xrootd.Sitename} for the origin servers
+		RegistryPrefix string          `json:"registry-prefix"`
+		BrokerURL      string          `json:"broker-url,omitempty"`
+		DataURL        string          `json:"data-url" binding:"required"`
+		WebURL         string          `json:"web-url,omitempty"`
+		Caps           Capabilities    `json:"capabilities"`
+		Namespaces     []NamespaceAdV2 `json:"namespaces"`
+		Issuer         []TokenIssuer   `json:"token-issuer"`
 	}
 
 	OriginAdvertiseV1 struct {
@@ -112,8 +124,16 @@ type (
 	}
 
 	OpenIdDiscoveryResponse struct {
-		Issuer  string `json:"issuer"`
-		JwksUri string `json:"jwks_uri"`
+		Issuer               string   `json:"issuer"`
+		JwksUri              string   `json:"jwks_uri"`
+		TokenEndpoint        string   `json:"token_endpoint,omitempty"`
+		UserInfoEndpoint     string   `json:"userinfo_endpoint,omitempty"`
+		RevocationEndpoint   string   `json:"revocation_endpoint,omitempty"`
+		GrantTypesSupported  []string `json:"grant_types_supported,omitempty"`
+		ScopesSupported      []string `json:"scopes_supported,omitempty"`
+		TokenAuthMethods     []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+		RegistrationEndpoint string   `json:"registration_endpoint,omitempty"`
+		DeviceEndpoint       string   `json:"device_authorization_endpoint,omitempty"`
 	}
 )
 

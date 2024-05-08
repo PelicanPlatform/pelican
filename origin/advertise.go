@@ -57,7 +57,7 @@ func (server *OriginServer) GetPids() (pids []int) {
 	return
 }
 
-func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrlStr, err := config.GetServerIssuerURL()
 	if err != nil {
@@ -73,12 +73,6 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 	issuerUrl, err := url.Parse(issuerUrlStr)
 	if err != nil {
 		err = errors.Wrap(err, "Unable to parse issuer url")
-		return nil, err
-	}
-
-	originUrlURL, err := url.Parse(originUrlStr)
-	if err != nil {
-		err = errors.Wrap(err, "Invalid Origin Url")
 		return nil, err
 	}
 
@@ -98,12 +92,14 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 				PublicReads: export.Capabilities.PublicReads,
 				Reads:       reads,
 				Writes:      export.Capabilities.Writes,
+				Listings:    export.Capabilities.Listings,
+				DirectReads: export.Capabilities.DirectReads,
 			},
 			Path: export.FederationPrefix,
 			Generation: []server_structs.TokenGen{{
 				Strategy:         server_structs.StrategyType("OAuth2"),
 				MaxScopeDepth:    3,
-				CredentialIssuer: *originUrlURL,
+				CredentialIssuer: *issuerUrl,
 			}},
 			Issuer: []server_structs.TokenIssuer{{
 				BasePaths: []string{export.FederationPrefix},
@@ -116,15 +112,17 @@ func (server *OriginServer) CreateAdvertisement(name string, originUrlStr string
 	// PublicReads implies reads
 	reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
 	ad := server_structs.OriginAdvertiseV2{
-		Name:       name,
-		DataURL:    originUrlStr,
-		WebURL:     originWebUrl,
-		Namespaces: nsAds,
+		Name:           name,
+		RegistryPrefix: "", // TODO: set origin's RegistryPrefix to /origins/{xrootd.sitename} once we support registering origins
+		DataURL:        originUrlStr,
+		WebURL:         originWebUrl,
+		Namespaces:     nsAds,
 		Caps: server_structs.Capabilities{
 			PublicReads: param.Origin_EnablePublicReads.GetBool(),
 			Reads:       reads,
 			Writes:      param.Origin_EnableWrites.GetBool(),
 			DirectReads: param.Origin_EnableDirectReads.GetBool(),
+			Listings:    param.Origin_EnableListings.GetBool(),
 		},
 		Issuer: []server_structs.TokenIssuer{{
 			BasePaths: prefixes,

@@ -27,17 +27,21 @@ type Config struct {
 	Cache struct {
 		Concurrency int
 		DataLocation string
+		DataLocations []string
 		EnableLotman bool
 		EnableOIDC bool
 		EnableVoms bool
 		ExportLocation string
 		HighWaterMark string
+		LocalRoot string
 		LowWatermark string
+		MetaLocations []string
 		PermittedNamespaces []string
 		Port int
 		RunLocation string
 		SelfTest bool
 		SelfTestInterval time.Duration
+		SentinelLocation string
 		Url string
 		XRootDPrefix string
 	}
@@ -56,6 +60,7 @@ type Config struct {
 	Director struct {
 		AdvertisementTTL time.Duration
 		CacheResponseHostnames []string
+		CacheSortMethod string
 		DefaultResponse string
 		EnableBroker bool
 		EnableOIDC bool
@@ -90,11 +95,14 @@ type Config struct {
 		GroupFile string
 		GroupRequirements []string
 		GroupSource string
+		IssuerClaimValue string
 		OIDCAuthenticationRequirements interface{}
 		OIDCAuthenticationUserClaim string
+		OIDCGroupClaim string
 		QDLLocation string
 		ScitokensServerLocation string
 		TomcatLocation string
+		UserStripDomain bool
 	}
 	IssuerKey string
 	LocalCache struct {
@@ -294,17 +302,21 @@ type configWithType struct {
 	Cache struct {
 		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
+		DataLocations struct { Type string; Value []string }
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
 		HighWaterMark struct { Type string; Value string }
+		LocalRoot struct { Type string; Value string }
 		LowWatermark struct { Type string; Value string }
+		MetaLocations struct { Type string; Value []string }
 		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
+		SentinelLocation struct { Type string; Value string }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 	}
@@ -323,6 +335,7 @@ type configWithType struct {
 	Director struct {
 		AdvertisementTTL struct { Type string; Value time.Duration }
 		CacheResponseHostnames struct { Type string; Value []string }
+		CacheSortMethod struct { Type string; Value string }
 		DefaultResponse struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
@@ -357,11 +370,14 @@ type configWithType struct {
 		GroupFile struct { Type string; Value string }
 		GroupRequirements struct { Type string; Value []string }
 		GroupSource struct { Type string; Value string }
+		IssuerClaimValue struct { Type string; Value string }
 		OIDCAuthenticationRequirements struct { Type string; Value interface{} }
 		OIDCAuthenticationUserClaim struct { Type string; Value string }
+		OIDCGroupClaim struct { Type string; Value string }
 		QDLLocation struct { Type string; Value string }
 		ScitokensServerLocation struct { Type string; Value string }
 		TomcatLocation struct { Type string; Value string }
+		UserStripDomain struct { Type string; Value bool }
 	}
 	IssuerKey struct { Type string; Value string }
 	LocalCache struct {

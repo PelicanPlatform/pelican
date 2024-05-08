@@ -18,10 +18,12 @@ import {Language} from "@mui/icons-material";
 import {NamespaceIcon} from "@/components/Namespace/index";
 import useSWR from "swr";
 import Link from "next/link";
+import {User} from "@/index";
+import {getErrorMessage} from "@/helpers/util";
 
 export interface DirectorCardProps {
     server: Server
-    authenticated?: Authenticated
+    authenticated?: User
 }
 
 export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
@@ -135,7 +137,7 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
     )
 }
 
-const filterServer = async (name: string) => {
+const filterServer = async (name: string) : Promise<string | undefined> => {
     try {
         const response = await secureFetch(
             `/api/v1.0/director_ui/servers/filter/${name}`,
@@ -146,15 +148,17 @@ const filterServer = async (name: string) => {
         if (response.ok) {
             return
         } else {
-            const data = await response.json()
-            return data?.error
+            return await getErrorMessage(response)
         }
     } catch (e) {
-        return e
+        if(e instanceof Error){
+            return e.message
+        }
+        return "Could not connect to server"
     }
 }
 
-const allowServer = async (name: string) => {
+const allowServer = async (name: string) : Promise<string | undefined> => {
     try {
         const response = await secureFetch(
             `/api/v1.0/director_ui/servers/allow/${name}`,
@@ -165,11 +169,13 @@ const allowServer = async (name: string) => {
         if (response.ok) {
             return
         } else {
-            const data = await response.json()
-            return data?.error
+            return await getErrorMessage(response)
         }
     } catch (e) {
-        return e
+        if(e instanceof Error){
+            return e.message
+        }
+        return "Could not connect to server"
     }
 }
 

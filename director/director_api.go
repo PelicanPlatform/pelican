@@ -21,40 +21,39 @@ package director
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // List all namespaces from origins registered at the director
 func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
-
-	serverAdMutex.RLock()
-	defer serverAdMutex.RUnlock()
-
 	serverAdItems := serverAds.Items()
 	namespaces := make([]server_structs.NamespaceAdV2, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
-		if item.Key().Type == server_structs.OriginType {
-			namespaces = append(namespaces, item.Value()...)
+		ad := item.Value()
+		if ad.Type == server_structs.OriginType {
+			namespaces = append(namespaces, ad.NamespaceAds...)
 		}
 	}
 	return namespaces
 }
 
-// List all serverAds in the cache that matches the serverType array
-func listServerAds(serverTypes []server_structs.ServerType) []server_structs.ServerAd {
-	serverAdMutex.RLock()
-	defer serverAdMutex.RUnlock()
-	ads := make([]server_structs.ServerAd, 0)
-	for _, ad := range serverAds.Keys() {
+// List all advertisements in the TTL cache that match the serverType array
+func listAdvertisement(serverTypes []server_structs.ServerType) []server_structs.Advertisement {
+	ads := make([]server_structs.Advertisement, 0)
+	for _, item := range serverAds.Items() {
+		ad := item.Value()
 		for _, serverType := range serverTypes {
 			if ad.Type == serverType {
-				ads = append(ads, ad)
+				ads = append(ads, *ad)
 			}
 		}
 	}
@@ -89,42 +88,44 @@ func checkFilter(serverName string) (bool, filterType) {
 
 // Configure TTL caches to enable cache eviction and other additional cache events handling logic
 //
-// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
-// goroutine and `wg` is the wait group to notify when the clean up goroutine finishes
-func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
+// The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction goroutine
+func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	// Start automatic expired item deletion
 	go serverAds.Start()
 	go namespaceKeys.Start()
 
-	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[server_structs.ServerAd, []server_structs.NamespaceAdV2]) {
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *server_structs.Advertisement]) {
 		healthTestUtilsMutex.RLock()
 		defer healthTestUtilsMutex.RUnlock()
-		if util, exists := healthTestUtils[i.Key()]; exists {
+		serverAd := i.Value().ServerAd
+		serverUrl := i.Key()
+
+		if util, exists := healthTestUtils[serverAd]; exists {
 			util.Cancel()
 			if util.ErrGrp != nil {
 				err := util.ErrGrp.Wait()
 				if err != nil {
-					log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(i.Key().Type), i.Key().Name, err.Error())
+					log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(serverAd.Type), serverAd.Name, err.Error())
 				} else {
-					log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(i.Key().Type), i.Key().Name)
+					log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(serverAd.Type), serverAd.Name)
 				}
 			} else {
-				log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(i.Key().Type), i.Key().Name)
+				log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(serverAd.Type), serverAd.Name)
 			}
 		} else {
-			log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", i.Key().Name)
+			log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", serverAd.Name)
 		}
 
-		if i.Key().Type == server_structs.OriginType {
+		if serverAd.Type == server_structs.OriginType {
 			originStatUtilsMutex.Lock()
 			defer originStatUtilsMutex.Unlock()
-			statUtil, ok := originStatUtils[i.Key().URL]
+			statUtil, ok := originStatUtils[serverUrl]
 			if ok {
 				statUtil.Cancel()
 				if err := statUtil.Errgroup.Wait(); err != nil {
-					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", i.Key().Name, err))
+					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", serverAd.Name, err))
 				}
-				delete(originStatUtils, i.Key().URL)
+				delete(originStatUtils, serverUrl)
 			}
 		}
 	})
@@ -133,14 +134,49 @@ func ConfigTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	egrp.Go(func() error {
 		<-ctx.Done()
 		log.Info("Gracefully stopping director TTL cache eviction...")
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
 		serverAds.DeleteAll()
 		serverAds.Stop()
 		namespaceKeys.DeleteAll()
 		namespaceKeys.Stop()
 		log.Info("Director TTL cache eviction has been stopped")
 		return nil
+	})
+
+}
+
+// Launch a goroutine to scrape metrics from various TTL caches and maps in the director
+func LaunchMapMetrics(ctx context.Context, egrp *errgroup.Group) {
+	// Scrape TTL cache and map metrics for Prometheus
+	egrp.Go(func() error {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				// serverAds
+				sAdMetrics := serverAds.Metrics()
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "serverAds", "type": "insersions"}).Set(float64(sAdMetrics.Insertions))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "serverAds", "type": "evictions"}).Set(float64(sAdMetrics.Evictions))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "serverAds", "type": "hits"}).Set(float64(sAdMetrics.Hits))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "serverAds", "type": "misses"}).Set(float64(sAdMetrics.Misses))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "serverAds", "type": "total"}).Set(float64(serverAds.Len()))
+
+				// JWKS
+				jwksMetrics := namespaceKeys.Metrics()
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "jwks", "type": "insersions"}).Set(float64(jwksMetrics.Insertions))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "jwks", "type": "evictions"}).Set(float64(jwksMetrics.Evictions))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "jwks", "type": "hits"}).Set(float64(jwksMetrics.Hits))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "jwks", "type": "misses"}).Set(float64(jwksMetrics.Misses))
+				metrics.PelicanDirectorTTLCache.With(prometheus.Labels{"name": "jwks", "type": "total"}).Set(float64(namespaceKeys.Len()))
+
+				// Maps
+				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("filteredServers").Set(float64(len(filteredServers)))
+				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("healthTestUtils").Set(float64(len(healthTestUtils)))
+				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("originStatUtils").Set(float64(len(originStatUtils)))
+			}
+		}
 	})
 }
 

@@ -53,7 +53,7 @@ function CardList<T>({ data, Card, cardProps }: CardListProps<T>) {
                                 ...o
                             } as T
 
-                            return <Box pb={1} key={JSON.stringify(o)}>
+                            return <Box pb={1} key={JSON.stringify(props)}>
                                 <Card {...props} />
                             </Box>
                         })}

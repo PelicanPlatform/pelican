@@ -51,6 +51,10 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 
+	if err := cache.CheckCacheSentinelLocation(); err != nil {
+		return nil, err
+	}
+
 	cache.RegisterCacheAPI(engine, ctx, egrp)
 
 	cacheServer := &cache.CacheServer{}
@@ -99,7 +103,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 	// Director and origin also registers this metadata URL; avoid registering twice.
 	if !modules.IsEnabled(config.DirectorType) && !modules.IsEnabled(config.OriginType) {
-		server_utils.RegisterOIDCAPI(engine)
+		server_utils.RegisterOIDCAPI(engine.Group("/"), false)
 	}
 
 	log.Info("Launching cache")
@@ -134,8 +138,5 @@ func CacheServeFinish(ctx context.Context, egrp *errgroup.Group, cacheServer ser
 		return err
 	}
 
-	log.Debug("Advertise Cache")
-	servers := make([]server_structs.XRootDServer, 1)
-	servers[0] = cacheServer
-	return launcher_utils.Advertise(ctx, servers)
+	return nil
 }

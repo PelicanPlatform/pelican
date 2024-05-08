@@ -459,7 +459,9 @@ description: |+
       where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
       given export. If "PublicReads" is included, "Reads" is inferred.
   - SentinelLocation: A filename under `StoragePrefix` path for Pelican to check the storage directory exists and is correctly mounted.
-      Leave it empty to skip the check. You should always choose a distinguished name for `SentinelLocation`. It should not be reused for other servers.
+      The value must be a file and contain no directory. Leave it empty to skip the check.
+
+      You should always choose a distinct name for `SentinelLocation`. It should not be reused for other servers.
       If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
       You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`. Note that this parameter will be ignored
       if the origin StorageType is S3.
@@ -912,11 +914,20 @@ components: ["localcache"]
 ############################
 name: Cache.DataLocation
 description: |+
-  The directory for the location of the cache data files - this is where the actual data in the cache is stored.
-  This should *not* be in the same path as XRootD.Mount or else it will expose the data files as part of the files within the cache.
+  [Deprecated] Cache.DataLocation is being deprecated and will be removed in a future release. It is replaced by a combination of Cache.DataLocations and Cache.MetaLocations
 type: string
 root_default: /run/pelican/xcache
 default: $XDG_RUNTIME_DIR/pelican/xcache
+deprecated: true
+replacedby: Cache.LocalRoot
+components: ["cache"]
+---
+name: Cache.LocalRoot
+description: |+
+  The location where the filesystem namespace is actually rooted
+type: string
+root_default: /run/pelican/cache
+default: $XDG_RUNTIME_DIR/pelican/cache
 components: ["cache"]
 ---
 name: Cache.ExportLocation
@@ -925,6 +936,24 @@ description: |+
   relative to the mount location.
 type: string
 default: /
+components: ["cache"]
+---
+name: Cache.DataLocations
+description: |+
+  A list of directories for the locations of the cache data files - this is where the actual data in the cache is stored.
+  These paths should *not* be in same path as XrootD.Mount or else it will expose the data files as part of the files within the cache.
+type: stringSlice
+root_default: ["/run/pelican/cache/data"]
+default: ["$XDG_RUNTIME_DIR/pelican/cache/data"]
+components: ["cache"]
+---
+name: Cache.MetaLocations
+description: |+
+  A list of directories for the locations of the cache metadata. These paths should *not* be in the same path as XrootD.Mount or else it
+  will expose the metadata files as part of the files within the cache
+type: stringSlice
+root_default: ["/run/pelican/cache/meta"]
+default: ["$XDG_RUNTIME_DIR/pelican/cache/meta"]
 components: ["cache"]
 ---
 name: Cache.RunLocation
@@ -937,6 +966,18 @@ description: |+
 type: filename
 root_default: /run/pelican/xrootd/cache
 default: $XDG_RUNTIME_DIR/pelican/cache
+components: ["cache"]
+---
+name: Cache.SentinelLocation
+description: |+
+  A filename under `Cache.DataLocation` path for Pelican to check the storage directory exists and is correctly mounted.
+  The value must be a file and contain no directory. Leave it empty to skip the check.
+
+  You should always choose a distinct name for `Cache.SentinelLocation`. It should not be reused for other servers.
+  If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
+  You need to manually create a file under path to `Cache.DataLocation` with the same name as `Cache.SentinelLocation`.
+type: filename
+default: none
 components: ["cache"]
 ---
 name: Cache.XRootDPrefix
@@ -1066,6 +1107,21 @@ description: |+
   If present, the hostname is taken from the X-Forwarded-Host header in the request. Otherwise, Host is used.
 type: stringSlice
 default: none
+components: ["director"]
+---
+name: Director.CacheSortMethod
+description: |+
+  When the director recieves a client request that needs to be redirected to a cache, it will use this method to
+  determine the ordering of the caches. The default method is "distance", which sorts caches by their spherical distance
+  from the client.
+
+  Available methods include:
+  - "distance": Sorts caches by their spherical distance from the client.
+  - "distanceAndLoad": Sorts caches according to both their distance and a calculated load. This is currently a placeholder,
+    and returns the same ordering as "distance".
+  - "random": Sorts caches randomly.
+type: string
+default: distance
 components: ["director"]
 ---
 name: Director.OriginResponseHostnames
@@ -1548,6 +1604,13 @@ type: string
 default: /opt/qdl
 components: ["origin"]
 ---
+name: Issuer.IssuerClaimValue
+description: |+
+  Contents of the issuer (`iss`) claim in the generated tokens
+type: string
+default: $(Server.ExternalWebUrl)
+components: ["origin"]
+---
 name: Issuer.AuthenticationSource
 description: |+
   How users should authenticate with the issuer.  Currently-supported values are:
@@ -1581,6 +1644,16 @@ type: string
 default: sub
 components: ["origin"]
 ---
+name: Issuer.UserStripDomain
+description: |+
+  Some OIDC issuers generate a username of the form user@domain (such as `john.doe@gmail.com`); when
+  `UserStripDomain` is enabled, Pelican will strip the domain when determining the username.
+
+  For example, the OIDC identity `john.doe@gmail.com` would map to `john.doe`.
+type: bool
+default: false
+components: ["origin"]
+---
 name: Issuer.GroupSource
 description: |+
   How the issuer should determine group information based on the authenticated identity.  Valid values are:
@@ -1588,8 +1661,20 @@ description: |+
   - `file`: Read groups from an external, JSON-formatted file.  The file should contain a single JSON object
     with keys corresponding to the "user" name and the value a list of strings that are interpreted as the
     user's groups.
+  - `oidc`: Take group information from the identity token provided by the OIDC identity provider.  Parses
+    the value of the claim specified by `Issuer.OIDCGroupClaim` (defaults to "groups") as a list of groups.
+    The value may either be a comma-separated string or an array of strings.
 type: string
 default: none
+components: ["origin"]
+---
+name: Issuer.OIDCGroupClaim
+description: |+
+  The claim in the OIDC ID token to be used as the group for the issuer.  If the value is a string,
+  it is assumed that a comma is used as a group delimiter; otherwise, an array of strings is assumed.
+  Check the documentation of your OIDC provider to determine the appropriate claim name.
+type: string
+default: "groups"
 components: ["origin"]
 ---
 name: Issuer.GroupFile

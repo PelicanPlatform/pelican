@@ -21,15 +21,19 @@ package director
 import (
 	"bytes"
 	_ "embed"
+	"math/rand"
 	"net"
+	"net/netip"
+	"reflect"
 	"strings"
 	"testing"
 
-	"github.com/pelicanplatform/pelican/server_structs"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // Geo Override Yaml mockup
@@ -129,35 +133,142 @@ func TestCheckOverrides(t *testing.T) {
 }
 
 func TestSortServerAdsByTopo(t *testing.T) {
-	mock1 := server_structs.ServerAd{
-		FromTopology: true,
-		Name:         "alpha",
+	mock1 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: true,
+			Name:         "alpha",
+		},
 	}
-	mock2 := server_structs.ServerAd{
-		FromTopology: true,
-		Name:         "bravo",
+	mock2 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: true,
+			Name:         "bravo",
+		},
 	}
-	mock3 := server_structs.ServerAd{
-		FromTopology: true,
-		Name:         "charlie",
+	mock3 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: true,
+			Name:         "charlie",
+		},
 	}
-	mock4 := server_structs.ServerAd{
-		FromTopology: false,
-		Name:         "alpha",
+	mock4 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: false,
+			Name:         "alpha",
+		},
 	}
-	mock5 := server_structs.ServerAd{
-		FromTopology: false,
-		Name:         "bravo",
+	mock5 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: false,
+			Name:         "bravo",
+		},
 	}
-	mock6 := server_structs.ServerAd{
-		FromTopology: false,
-		Name:         "charlie",
+	mock6 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: false,
+			Name:         "charlie",
+		},
 	}
 
-	randomList := []server_structs.ServerAd{mock6, mock1, mock2, mock4, mock5, mock3}
-	expectedList := []server_structs.ServerAd{mock4, mock5, mock6, mock1, mock2, mock3}
+	randomList := []*server_structs.Advertisement{&mock6, &mock1, &mock2, &mock4, &mock5, &mock3}
+	expectedList := []*server_structs.Advertisement{&mock4, &mock5, &mock6, &mock1, &mock2, &mock3}
 
 	sortedList := sortServerAdsByTopo(randomList)
 
 	assert.EqualValues(t, expectedList, sortedList)
+}
+
+func TestSortServerAdsByIP(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+	})
+
+	// A random IP that should geo-resolve to roughly the same location as the Madison server
+	clientIP := netip.MustParseAddr("128.104.153.60")
+	// We need to provide a geo-ip override so that our sorting functions know where this is located
+	viper.SetConfigType("yaml")
+	err := viper.ReadConfig(strings.NewReader(yamlMockup))
+	if err != nil {
+		t.Fatalf("Error reading config: %v", err)
+	}
+
+	// These are listed in order of increasing distance from the clientIP
+	madisonServer := server_structs.ServerAd{
+		Latitude:  43.0753,
+		Longitude: -89.4114,
+	}
+	sdscServer := server_structs.ServerAd{
+		Latitude:  32.8761,
+		Longitude: -117.2318,
+	}
+	bigBenServer := server_structs.ServerAd{
+		Latitude:  51.5103,
+		Longitude: -0.1167,
+	}
+	kremlinServer := server_structs.ServerAd{
+		Latitude:  55.752121,
+		Longitude: 37.617664,
+	}
+	daejeonServer := server_structs.ServerAd{
+		Latitude:  36.3213,
+		Longitude: 127.4200,
+	}
+	mcMurdoServer := server_structs.ServerAd{
+		Latitude:  -77.8500,
+		Longitude: 166.6666,
+	}
+
+	randAds := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
+		daejeonServer, mcMurdoServer}
+	// Shuffle so that we don't give the sort function an already-sorted slice!
+	rand.Shuffle(len(randAds), func(i, j int) {
+		randAds[i], randAds[j] = randAds[j], randAds[i]
+	})
+
+	t.Run("test-distance-sort", func(t *testing.T) {
+		viper.Set("Director.CacheSortMethod", "distance")
+		expected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
+			daejeonServer, mcMurdoServer}
+		sorted, err := sortServerAdsByIP(clientIP, randAds)
+		require.NoError(t, err)
+		assert.EqualValues(t, expected, sorted)
+	})
+
+	t.Run("test-distanceAndLoad-sort", func(t *testing.T) {
+		// For now, this test should return the same ordering as the distance test
+		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
+		expected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
+			daejeonServer, mcMurdoServer}
+		sorted, err := sortServerAdsByIP(clientIP, randAds)
+		require.NoError(t, err)
+		assert.EqualValues(t, expected, sorted)
+	})
+
+	t.Run("test-random-sort", func(t *testing.T) {
+		viper.Set("Director.CacheSortMethod", "random")
+
+		var sorted []server_structs.ServerAd
+		var err error
+
+		// We don't expect to get back the sorted slice, but it's possible
+		notExpected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer, daejeonServer,
+			mcMurdoServer}
+
+		// The probability this test fails the first time due to randomly sorting into ascending distances is (1/6!) = 1/720
+		// To mitigate risk of this failing because of that, we'll run the sort 3 times to get a 1/720^3 = 1/373,248,000 chance
+		// of failure. If you run thrice and you still get the distance-sorted slice, you might consider buying a powerball ticket
+		// (1/292,201,338 chance of winning).
+		for i := 0; i < 3; i++ {
+			sorted, err = sortServerAdsByIP(clientIP, randAds)
+			require.NoError(t, err)
+
+			// If the values are not equal, break the loop
+			if !reflect.DeepEqual(notExpected, sorted) {
+				break
+			}
+		}
+
+		assert.NotEqualValues(t, notExpected, sorted)
+	})
 }

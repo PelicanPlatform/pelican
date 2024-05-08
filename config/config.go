@@ -38,6 +38,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-playground/locales/en"
+	ut "github.com/go-playground/universal-translator"
+	en_translations "github.com/go-playground/validator/v10/translations/en"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
@@ -159,6 +163,14 @@ var (
 	// Global struct validator
 	validate *validator.Validate
 
+	// Global translator for the validator
+	uni *ut.UniversalTranslator
+
+	onceValidate sync.Once
+
+	// English translator
+	translator *ut.Translator
+
 	// A variable indicating enabled Pelican servers in the current process
 	enabledServers ServerType
 	setServerOnce  sync.Once
@@ -213,6 +225,12 @@ func (e *MetadataErr) Unwrap() error {
 }
 
 func init() {
+	en := en.New()
+	uni = ut.New(en, en)
+
+	trans, _ := uni.GetTranslator("en")
+	translator = &trans
+
 	validate = validator.New(validator.WithRequiredStructEnabled())
 }
 
@@ -241,7 +259,7 @@ func (sType *ServerType) Clear() {
 
 // setEnabledServer sets the global variable config.EnabledServers to include newServers.
 // Since this function should only be called in config package, we mark it "private" to avoid
-// reset value in other pacakge
+// reset value in other package
 //
 // This will only be called once in a single process
 func setEnabledServer(newServers ServerType) {
@@ -471,7 +489,7 @@ func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (
 			err = MetadataTimeoutErr.Wrap(err)
 			return
 		} else {
-			err = NewMetadataError(err, "Error occured when querying for metadata")
+			err = NewMetadataError(err, "Error occurred when querying for metadata")
 			return
 		}
 	}
@@ -588,6 +606,12 @@ func discoverFederationImpl(ctx context.Context) (fedInfo FederationDiscovery, e
 	}
 
 	return
+}
+
+// Reset the fedDiscoveryOnce to update federation metadata values for GetFederation().
+// Should only used for unit tests
+func ResetFederationForTest() {
+	fedDiscoveryOnce = &sync.Once{}
 }
 
 // Retrieve the federation service information from the configuration.
@@ -740,6 +764,10 @@ func GetValidate() *validator.Validate {
 	return validate
 }
 
+func GetEnTranslator() ut.Translator {
+	return *translator
+}
+
 func handleDeprecatedConfig() {
 	deprecatedMap := param.GetDeprecated()
 	for deprecated, replacement := range deprecatedMap {
@@ -805,6 +833,20 @@ func checkWatermark(wmStr string) (bool, int64, error) {
 	}
 }
 
+func setupTranslation() error {
+	err := en_translations.RegisterDefaultTranslations(validate, GetEnTranslator())
+	if err != nil {
+		return err
+	}
+
+	return validate.RegisterTranslation("required", GetEnTranslator(), func(ut ut.Translator) error {
+		return ut.Add("required", "{0} is required.", true)
+	}, func(ut ut.Translator, fe validator.FieldError) string {
+		t, _ := ut.T("required", fe.Field())
+		return t
+	})
+}
+
 func InitConfig() {
 	viper.SetConfigType("yaml")
 	// 1) Set up defaults.yaml
@@ -844,7 +886,9 @@ func InitConfig() {
 		viper.SetConfigName("pelican")
 	}
 
-	viper.SetEnvPrefix(string(prefix))
+	bindNonPelicanEnv() // Deprecate OSDF env prefix but be compatible for now
+
+	viper.SetEnvPrefix("pelican")
 	viper.AutomaticEnv()
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
@@ -889,6 +933,14 @@ func InitConfig() {
 		os.Exit(1)
 	}
 	handleDeprecatedConfig()
+
+	onceValidate.Do(func() {
+		err = setupTranslation()
+	})
+	if err != nil {
+		log.Errorln("Failed to set up translation for the validator: ", err.Error())
+		os.Exit(1)
+	}
 }
 
 func initConfigDir() error {
@@ -950,11 +1002,11 @@ func setXrootdRunLocations(currentServers ServerType, dir string) error {
 	return nil
 }
 
-func PrintPelicanVersion() {
-	fmt.Fprintln(os.Stderr, "Version:", GetVersion())
-	fmt.Fprintln(os.Stderr, "Build Date:", GetBuiltDate())
-	fmt.Fprintln(os.Stderr, "Build Commit:", GetBuiltCommit())
-	fmt.Fprintln(os.Stderr, "Built By:", GetBuiltBy())
+func PrintPelicanVersion(out *os.File) {
+	fmt.Fprintln(out, "Version:", GetVersion())
+	fmt.Fprintln(out, "Build Date:", GetBuiltDate())
+	fmt.Fprintln(out, "Build Commit:", GetBuiltCommit())
+	fmt.Fprintln(out, "Built By:", GetBuiltBy())
 }
 
 // Print Pelican configuration to stderr
@@ -1032,7 +1084,14 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		if currentServers.IsEnabled(CacheType) {
 			viper.SetDefault("Cache.RunLocation", filepath.Join("/run", "pelican", "xrootd", "cache"))
 		}
-		viper.SetDefault("Cache.DataLocation", "/run/pelican/xcache")
+		viper.SetDefault("Cache.LocalRoot", "/run/pelican/cache")
+		if viper.IsSet("Cache.DataLocation") {
+			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "data")})
+			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "meta")})
+		} else {
+			viper.SetDefault("Cache.DataLocations", []string{"/run/pelican/cache/data"})
+			viper.SetDefault("Cache.MetaLocations", []string{"/run/pelican/cache/meta"})
+		}
 		viper.SetDefault("LocalCache.RunLocation", filepath.Join("/run", "pelican", "localcache"))
 
 		viper.SetDefault("Origin.Multiuser", true)
@@ -1076,7 +1135,14 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			}
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
-		viper.SetDefault("Cache.DataLocation", filepath.Join(runtimeDir, "xcache"))
+		viper.SetDefault("Cache.LocalRoot", filepath.Join(runtimeDir, "cache"))
+		if viper.IsSet("Cache.DataLocation") {
+			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "data")})
+			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "meta")})
+		} else {
+			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(runtimeDir, "pelican/cache/data")})
+			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(runtimeDir, "pelican/cache/meta")})
+		}
 		viper.SetDefault("LocalCache.RunLocation", filepath.Join(runtimeDir, "cache"))
 		viper.SetDefault("Origin.Multiuser", false)
 	}
@@ -1104,11 +1170,12 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	if err != nil {
 		return err
 	}
-	viper.SetDefault("Server.Hostname", hostname)
-	viper.SetDefault("Xrootd.Sitename", hostname)
+	viper.SetDefault(param.Server_Hostname.GetName(), hostname)
 	// For the rest of the function, use the hostname provided by the admin if
 	// they have overridden the defaults.
-	hostname = viper.GetString("Server.Hostname")
+	hostname = param.Server_Hostname.GetString()
+	// We default to the value of Server.Hostname, which defaults to os.Hostname but can be overwritten
+	viper.SetDefault(param.Xrootd_Sitename.GetName(), hostname)
 
 	// XRootD port usage logic:
 	// - Origin.Port and Cache.Port take precedence for their respective types

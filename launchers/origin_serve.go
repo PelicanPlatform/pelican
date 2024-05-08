@@ -64,9 +64,11 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	// Set up the APIs for the origin UI
 	origin.RegisterOriginWebAPI(engine)
 
+	origin.ConfigOriginTTLCache(ctx, egrp)
+
 	// Director also registers this metadata URL; avoid registering twice.
 	if !modules.IsEnabled(config.DirectorType) {
-		server_utils.RegisterOIDCAPI(engine)
+		server_utils.RegisterOIDCAPI(engine.Group("/"), false)
 	}
 
 	if param.Origin_EnableIssuer.GetBool() {

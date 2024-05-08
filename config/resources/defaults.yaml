@@ -42,6 +42,7 @@ Server:
   UILoginRateLimit: 1
 Director:
   DefaultResponse: cache
+  CacheSortMethod: "distance"
   MinStatResponse: 1
   MaxStatResponse: 1
   StatTimeout: 200ms
@@ -66,7 +67,7 @@ Origin:
   EnablePublicReads: false
   EnableReads: true
   EnableWrites: true
-  EnableListings: false
+  EnableListings: true
   EnableDirectReads: false
   SelfTest: true
   Port: 8443
@@ -102,6 +103,7 @@ Transport:
   ExpectContinueTimeout: 1s
   ResponseHeaderTimeout: 10s
 OIDC:
+  Issuer: "https://cilogon.org"
   AuthorizationEndpoint: "https://cilogon.org/authorize"
   DeviceAuthEndpoint: "https://cilogon.org/oauth2/device_authorization"
   TokenEndpoint: "https://cilogon.org/oauth2/token"
@@ -111,4 +113,5 @@ Issuer:
   ScitokensServerLocation: /opt/scitokens-server
   QDLLocation: /opt/qdl
   OIDCAuthenticationUserClaim: sub
+  OIDCGroupClaim: groups
   AuthenticationSource: OIDC

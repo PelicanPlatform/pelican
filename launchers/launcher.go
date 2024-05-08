@@ -58,7 +58,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 
 	ctx, shutdownCancel = context.WithCancel(ctx)
 
-	config.PrintPelicanVersion()
+	config.PrintPelicanVersion(os.Stderr) // Print Pelican version to stderr at server start
 
 	// Print Pelican config at server start if it's in debug or info level
 	if log.GetLevel() >= log.InfoLevel {
@@ -162,7 +162,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 			return
 		}
 
-		ok, err = server_utils.CheckSentinelLocation(originExports)
+		ok, err = server_utils.CheckOriginSentinelLocations(originExports)
 		if err != nil && !ok {
 			return
 		}
@@ -212,6 +212,13 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	if err = server_utils.WaitUntilWorking(ctx, "GET", healthCheckUrl, "Web UI", http.StatusOK, true); err != nil {
 		log.Errorln("Web engine check failed: ", err)
 		return
+	}
+	if param.Origin_EnableIssuer.GetBool() {
+		oa4mpHealthCheckUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer/.well-known/openid-configuration"
+		if err = server_utils.WaitUntilWorking(ctx, "GET", oa4mpHealthCheckUrl, "Issuer", http.StatusOK, true); err != nil {
+			log.Errorln("Failed to startup issuer component: ", err)
+			return
+		}
 	}
 
 	if modules.IsEnabled(config.OriginType) {
@@ -307,16 +314,16 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		servers = append(servers, cacheServer)
 	}
 
-	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
-		log.Debug("Launching periodic advertise of origin/cache server to the director")
-		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
+	if modules.IsEnabled(config.CacheType) {
+		log.Debug("Finishing cache server configuration")
+		if err = CacheServeFinish(ctx, egrp, cacheServer); err != nil {
 			return
 		}
 	}
 
-	if modules.IsEnabled(config.CacheType) {
-		log.Debug("Finishing cache server configuration")
-		if err = CacheServeFinish(ctx, egrp, cacheServer); err != nil {
+	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
+		log.Debug("Launching periodic advertise of origin/cache server to the director")
+		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
 			return
 		}
 	}

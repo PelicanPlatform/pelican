@@ -30,6 +30,7 @@ import (
 
 func TestGetNSIssuerURL(t *testing.T) {
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	require.NoError(t, config.InitClient())
 
@@ -42,6 +43,7 @@ func TestGetNSIssuerURL(t *testing.T) {
 
 func TestGetJWKSURLFromIssuerURL(t *testing.T) {
 	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	require.NoError(t, config.InitClient())
 

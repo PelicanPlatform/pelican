@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -63,6 +64,7 @@ func TestPrometheusUnprotected(t *testing.T) {
 	kfile := filepath.Join(tDir, "testKey")
 	//Setup a private key
 	viper.Set("IssuerKey", kfile)
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
@@ -108,6 +110,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	kfile := filepath.Join(tDir, "testKey")
 	//Setup a private key
 	viper.Set("IssuerKey", kfile)
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err := config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
@@ -148,7 +151,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	assert.Equal(t, 404, w.Result().StatusCode, "Expected status code of 404 representing failure due to minimal server setup, not token check")
 }
 
-// Tests that the prometheus protections are behind the server issuer token and tests that the token is accessable from
+// Tests that the prometheus protections are behind the server issuer token and tests that the token is accessible from
 // the header function. It signs a token with the issuer's jwks key and adds it to the header before attempting
 // to access the prometheus metrics. It then attempts to access the metrics with a token with an invalid scope.
 // It attempts to do so again with a token signed by a bad key. Both these are expected to fail.
@@ -170,8 +173,16 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	//Setup a private key and a token
 	viper.Set("IssuerKey", kfile)
 
+	// Setting the ConfigDir to t.TempDir() causes issues with this test on Windows because
+	// the process tries to clean up the directory before the test is done with it.
+	configDir, err := os.MkdirTemp("", "tmpDir")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		os.RemoveAll(configDir)
+	})
+	viper.Set("ConfigDir", configDir)
 	config.InitConfig()
-	err := config.InitServer(ctx, config.OriginType)
+	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
 	issuerUrl := param.Server_ExternalWebUrl.GetString()

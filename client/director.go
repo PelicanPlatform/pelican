@@ -100,7 +100,7 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 	}
 
 	// Create the caches slice
-	namespace.SortedDirectorCaches, err = GetCachesFromDirectorResponse(dirResp, namespace.UseTokenOnRead || namespace.ReadHTTPS)
+	namespace.SortedDirectorCaches, err = getCachesFromDirectorResponse(dirResp, namespace.UseTokenOnRead || namespace.ReadHTTPS)
 	if err != nil {
 		log.Errorln("Unable to construct ordered cache list:", err)
 		return
@@ -112,8 +112,8 @@ func CreateNsFromDirectorResp(dirResp *http.Response) (namespace namespaces.Name
 
 // Make a request to the director for a given verb/resource; return the
 // HTTP response object only if a 307 is returned.
-func queryDirector(ctx context.Context, verb, source, directorUrl string) (resp *http.Response, err error) {
-	resourceUrl := directorUrl + source
+func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (resp *http.Response, err error) {
+	resourceUrl := directorUrl + sourcePath
 	// Here we use http.Transport to prevent the client from following the director's
 	// redirect. We use the Location url elsewhere (plus we still need to do the token
 	// dance!)
@@ -154,18 +154,21 @@ func queryDirector(ctx context.Context, verb, source, directorUrl string) (resp 
 	// If we get a 404, the director will hopefully tell us why. It might be that the namespace doesn't exist
 	if resp.StatusCode == 404 {
 		return nil, errors.New("404: " + string(body))
+	} else if resp.StatusCode == http.StatusMethodNotAllowed && verb == "PROPFIND" {
+		// If we get a 405 with a PROPFIND, the client will handle it
+		return
 	} else if resp.StatusCode != 307 {
 		var respErr directorResponse
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			return nil, errors.Wrap(unmarshalErr, "Could not unmarshall the director's response")
 		}
-		return resp, errors.Errorf("The director reported an error: %s", respErr.Error)
+		return resp, errors.New(respErr.Error)
 	}
 
 	return
 }
 
-func GetCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches []namespaces.DirectorCache, err error) {
+func getCachesFromDirectorResponse(resp *http.Response, needsToken bool) (caches []namespaces.DirectorCache, err error) {
 	// Get the Link header
 	linkHeader := resp.Header.Values("Link")
 	if len(linkHeader) == 0 {

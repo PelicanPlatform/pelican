@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -52,11 +54,11 @@ func ConfigureXrootdMonitoringDir() error {
 
 	err = config.MkdirAll(pelicanMonitoringPath, 0755, uid, gid)
 	if err != nil {
-		return errors.Wrapf(err, "Unable to create pelican file trasnfer monitoring directory %v",
+		return errors.Wrapf(err, "Unable to create pelican file transfer monitoring directory %v",
 			pelicanMonitoringPath)
 	}
 	if err = os.Chown(pelicanMonitoringPath, uid, -1); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of pelican file trasnfer monitoring directory %v"+
+		return errors.Wrapf(err, "Unable to change ownership of pelican file transfer monitoring directory %v"+
 			" to desired daemon user %v", pelicanMonitoringPath, username)
 	}
 
@@ -114,4 +116,17 @@ func LaunchOriginFileTestMaintenance(ctx context.Context) {
 			return nil
 		},
 	)
+}
+
+func ConfigOriginTTLCache(ctx context.Context, egrp *errgroup.Group) {
+	go registrationsStatus.Start()
+
+	egrp.Go(func() error {
+		<-ctx.Done()
+		log.Info("Gracefully stopping origin TTL cache eviction...")
+		registrationsStatus.DeleteAll()
+		registrationsStatus.Stop()
+		log.Info("Origin TTL cache eviction has been stopped")
+		return nil
+	})
 }

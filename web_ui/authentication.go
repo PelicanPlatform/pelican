@@ -22,6 +22,7 @@ import (
 	"bufio"
 	"context"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -130,40 +131,55 @@ func configureAuthDB() error {
 
 // Get the "subject" claim from the JWT that "login" cookie stores,
 // where subject is set to be the username. Return empty string if no "login" cookie is present
-func GetUser(ctx *gin.Context) (string, error) {
+func GetUserGroups(ctx *gin.Context) (user string, groups []string, err error) {
 	token, err := ctx.Cookie("login")
 	if err != nil {
 		if err == http.ErrNoCookie {
-			return "", nil
+			err = nil
+			return
 		} else {
-			return "", err
+			return
 		}
 	}
 	if token == "" {
-		return "", errors.New("Login cookie is empty")
+		err = errors.New("Login cookie is empty")
+		return
 	}
 	jwks, err := config.GetIssuerPublicJWKS()
 	if err != nil {
-		return "", err
+		return
 	}
 	parsed, err := jwt.Parse([]byte(token), jwt.WithKeySet(jwks))
 	if err != nil {
-		return "", err
+		return
 	}
 	if err = jwt.Validate(parsed); err != nil {
-		return "", err
+		return
 	}
-	return parsed.Subject(), nil
+	user = parsed.Subject()
+	groupsIface, ok := parsed.Get("wlcg.groups")
+	if ok {
+		if groupsTmp, ok := groupsIface.([]interface{}); ok {
+			groups = make([]string, 0, len(groupsTmp))
+			for _, groupObj := range groupsTmp {
+				if groupStr, ok := groupObj.(string); ok {
+					groups = append(groups, groupStr)
+				}
+			}
+		}
+	}
+	return
 }
 
 // Create a JWT and set the "login" cookie to store that JWT
-func setLoginCookie(ctx *gin.Context, user string) {
+func setLoginCookie(ctx *gin.Context, user string, groups []string) {
 	loginCookieTokenCfg := token.NewWLCGToken()
 	loginCookieTokenCfg.Lifetime = 30 * time.Minute
 	loginCookieTokenCfg.Issuer = param.Server_ExternalWebUrl.GetString()
 	loginCookieTokenCfg.AddAudiences(param.Server_ExternalWebUrl.GetString())
 	loginCookieTokenCfg.Subject = user
 	loginCookieTokenCfg.AddScopes(token_scopes.WebUi_Access, token_scopes.Monitoring_Query, token_scopes.Monitoring_Scrape)
+	loginCookieTokenCfg.AddGroups(groups...)
 
 	// CreateToken also handles validation for us
 	tok, err := loginCookieTokenCfg.CreateToken()
@@ -184,7 +200,7 @@ func setLoginCookie(ctx *gin.Context, user string) {
 
 // Check if user is authenticated by checking if the "login" cookie is present and set the user identity to ctx
 func AuthHandler(ctx *gin.Context) {
-	user, err := GetUser(ctx)
+	user, groups, err := GetUserGroups(ctx)
 	if user == "" {
 		if err != nil {
 			log.Errorln("Invalid user cookie or unable to parse user cookie:", err)
@@ -196,6 +212,28 @@ func AuthHandler(ctx *gin.Context) {
 			})
 	} else {
 		ctx.Set("User", user)
+		ctx.Set("Groups", groups)
+		ctx.Next()
+	}
+}
+
+// Require auth; if missing, redirect to the login endpoint.
+//
+// The current implementation forces the OAuth2 endpoint; future work may instead use a generic
+// login page.
+func RequireAuthMiddleware(ctx *gin.Context) {
+	user, groups, err := GetUserGroups(ctx)
+	if user == "" || err != nil {
+		origPath := ctx.Request.URL.RequestURI()
+		redirUrl := url.URL{
+			Path:     oauthLoginPath,
+			RawQuery: "next_url=" + url.QueryEscape(origPath),
+		}
+		ctx.Redirect(http.StatusTemporaryRedirect, redirUrl.String())
+		ctx.Abort()
+	} else {
+		ctx.Set("User", user)
+		ctx.Set("Groups", groups)
 		ctx.Next()
 	}
 }
@@ -292,7 +330,12 @@ func loginHandler(ctx *gin.Context) {
 		return
 	}
 
-	setLoginCookie(ctx, login.User)
+	groups, err := generateGroupInfo(login.User)
+	if err != nil {
+		log.Errorf("Failed to generate group info for user %s: %s", login.User, err)
+		groups = nil
+	}
+	setLoginCookie(ctx, login.User, groups)
 	ctx.JSON(http.StatusOK,
 		server_structs.SimpleApiResp{
 			Status: server_structs.RespOK,
@@ -341,7 +384,12 @@ func initLoginHandler(ctx *gin.Context) {
 		return
 	}
 
-	setLoginCookie(ctx, "admin")
+	groups, err := generateGroupInfo("admin")
+	if err != nil {
+		log.Errorln("Failed to generate group info for admin:", err)
+		groups = nil
+	}
+	setLoginCookie(ctx, "admin", groups)
 }
 
 // Handle reset password
@@ -392,7 +440,7 @@ func logoutHandler(ctx *gin.Context) {
 // Returns the authentication status of the current user, including user id and role
 func whoamiHandler(ctx *gin.Context) {
 	res := WhoAmIRes{}
-	if user, err := GetUser(ctx); err != nil || user == "" {
+	if user, _, err := GetUserGroups(ctx); err != nil || user == "" {
 		res.Authenticated = false
 		ctx.JSON(http.StatusOK, res)
 	} else {

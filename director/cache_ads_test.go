@@ -107,7 +107,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "cache1",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "cache1.wisc.edu",
 		},
 		Type: server_structs.CacheType,
 	}
@@ -116,7 +116,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "cache2",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "cache2.wisc.edu",
 		},
 		Type: server_structs.CacheType,
 	}
@@ -125,7 +125,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "origin1",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "origin1.wisc.edu",
 		},
 		Type: server_structs.OriginType,
 	}
@@ -134,7 +134,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "origin2",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "origin2.wisc.edu",
 		},
 		Type: server_structs.OriginType,
 	}
@@ -143,7 +143,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Name: "topology origin 1",
 		URL: url.URL{
 			Scheme: "https",
-			Host:   "wisc.edu",
+			Host:   "topology.wisc.edu",
 		},
 		Type:         server_structs.OriginType,
 		FromTopology: true,
@@ -233,7 +233,7 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.True(t, hasServerAdWithName(cAds, "cache2"))
 }
 
-func TestConfigCacheEviction(t *testing.T) {
+func TestLaunchTTLCache(t *testing.T) {
 	mockPelicanOriginServerAd := server_structs.ServerAd{
 		Name:    "test-origin-server",
 		AuthURL: url.URL{},
@@ -266,7 +266,7 @@ func TestConfigCacheEviction(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 		egrp, ctx := errgroup.WithContext(shutdownCtx)
-		ConfigTTLCache(ctx, egrp)
+		LaunchTTLCache(ctx, egrp)
 		defer func() {
 			shutdownCancel()
 			err := egrp.Wait()
@@ -277,10 +277,11 @@ func TestConfigCacheEviction(t *testing.T) {
 		ctx, cancelFunc := context.WithDeadline(errgrpCtx, time.Now().Add(time.Second*5))
 
 		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
-			serverAds.Set(mockPelicanOriginServerAd, []server_structs.NamespaceAdV2{mockNamespaceAd}, ttlcache.DefaultTTL)
+			serverAds.Set(mockPelicanOriginServerAd.URL.String(), &server_structs.Advertisement{
+				ServerAd:     mockPelicanOriginServerAd,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNamespaceAd},
+			}, ttlcache.DefaultTTL)
 			healthTestUtilsMutex.Lock()
 			defer healthTestUtilsMutex.Unlock()
 			// Clear the map for the new test
@@ -291,7 +292,7 @@ func TestConfigCacheEviction(t *testing.T) {
 				ErrGrpContext: errgrpCtx,
 			}
 
-			require.True(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds failed to register the originAd")
+			require.True(t, serverAds.Has(mockPelicanOriginServerAd.URL.String()), "serverAds failed to register the originAd")
 		}()
 
 		cancelChan := make(chan int)
@@ -303,11 +304,9 @@ func TestConfigCacheEviction(t *testing.T) {
 		}()
 
 		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
-			serverAds.Delete(mockPelicanOriginServerAd) // This should call onEviction handler and close the context
+			serverAds.Delete(mockPelicanOriginServerAd.URL.String()) // This should call onEviction handler and close the context
 
-			require.False(t, serverAds.Has(mockPelicanOriginServerAd), "serverAds didn't delete originAd")
+			require.False(t, serverAds.Has(mockPelicanOriginServerAd.URL.String()), "serverAds didn't delete originAd")
 		}()
 
 		// OnEviction is handled on a different goroutine than the cache management
@@ -323,13 +322,13 @@ func TestConfigCacheEviction(t *testing.T) {
 }
 
 func TestServerAdsCacheEviction(t *testing.T) {
-	mockServerAd := server_structs.ServerAd{Name: "foo", Type: server_structs.OriginType, URL: url.URL{}}
+	mockServerAd := server_structs.ServerAd{Name: "foo", Type: server_structs.OriginType, URL: url.URL{Host: "mock.server.org"}}
 
 	t.Run("evict-after-expire-time", func(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 		egrp, ctx := errgroup.WithContext(shutdownCtx)
-		ConfigTTLCache(ctx, egrp)
+		LaunchTTLCache(ctx, egrp)
 		defer func() {
 			shutdownCancel()
 			err := egrp.Wait()
@@ -340,12 +339,13 @@ func TestServerAdsCacheEviction(t *testing.T) {
 		cancelChan := make(chan int)
 
 		func() {
-			serverAdMutex.Lock()
-			defer serverAdMutex.Unlock()
 			serverAds.DeleteAll()
 
-			serverAds.Set(mockServerAd, []server_structs.NamespaceAdV2{}, time.Second*2)
-			require.True(t, serverAds.Has(mockServerAd), "Failed to register server Ad")
+			serverAds.Set(mockServerAd.URL.String(), &server_structs.Advertisement{
+				ServerAd:     mockServerAd,
+				NamespaceAds: []server_structs.NamespaceAdV2{},
+			}, time.Second*2)
+			require.True(t, serverAds.Has(mockServerAd.URL.String()), "Failed to register server Ad")
 		}()
 
 		// Keep checking if the cache item is present until absent or cancelled
@@ -355,7 +355,7 @@ func TestServerAdsCacheEviction(t *testing.T) {
 				case <-cancelChan:
 					return
 				default:
-					if !serverAds.Has(mockServerAd) {
+					if !serverAds.Has(mockServerAd.URL.String()) {
 						deletedChan <- 1
 						return
 					}
@@ -371,5 +371,64 @@ func TestServerAdsCacheEviction(t *testing.T) {
 			cancelChan <- 1
 			require.False(t, true, "Cache didn't evict expired item")
 		}
+	})
+}
+
+func TestRecordAd(t *testing.T) {
+	serverAds.DeleteAll()
+	t.Cleanup(func() {
+		serverAds.DeleteAll()
+	})
+
+	topologyServerUrl := url.URL{Scheme: "http", Host: "origin.chtc.wisc.edu"} // Topology server URL is always in http
+	pelicanServerUrl := url.URL{Scheme: "https", Host: "origin.chtc.wisc.edu"} // Pelican server URL is always in https
+
+	mockTopology := &server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			URL:          topologyServerUrl,
+			FromTopology: true,
+		},
+		NamespaceAds: []server_structs.NamespaceAdV2{},
+	}
+	mockPelican := &server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			URL:          pelicanServerUrl,
+			FromTopology: false,
+		},
+		NamespaceAds: []server_structs.NamespaceAdV2{},
+	}
+
+	t.Run("topology-server-added-if-no-duplicate", func(t *testing.T) {
+		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
+		assert.Len(t, serverAds.Items(), 1)
+		assert.True(t, serverAds.Has(topologyServerUrl.String()))
+	})
+
+	t.Run("pelican-server-added-if-no-duplicate", func(t *testing.T) {
+		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
+		assert.Len(t, serverAds.Items(), 1)
+		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
+	})
+
+	t.Run("pelican-server-overwrites-topology", func(t *testing.T) {
+		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
+		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
+
+		assert.Len(t, serverAds.Items(), 1)
+		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
+		getAd := serverAds.Get(pelicanServerUrl.String())
+		assert.NotNil(t, getAd)
+		assert.False(t, getAd.Value().FromTopology) // it's updated
+	})
+
+	t.Run("topology-server-is-ignored-with-dup-pelican-server", func(t *testing.T) {
+		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
+		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
+
+		assert.Len(t, serverAds.Items(), 1)
+		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
+		getAd := serverAds.Get(pelicanServerUrl.String())
+		assert.NotNil(t, getAd)
+		assert.False(t, getAd.Value().FromTopology) // topology ad is ignored
 	})
 }

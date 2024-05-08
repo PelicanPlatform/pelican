@@ -80,7 +80,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 
 	// Mock cached jwks
 	viper.Set("Federation.RegistryUrl", ts.URL)
-
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err := config.InitServer(ctx, config.DirectorType)
 	require.NoError(t, err)
@@ -142,7 +142,7 @@ func TestNamespaceKeysCacheEviction(t *testing.T) {
 		// Start cache eviction
 		shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 		egrp, ctx := errgroup.WithContext(shutdownCtx)
-		ConfigTTLCache(ctx, egrp)
+		LaunchTTLCache(ctx, egrp)
 		defer func() {
 			shutdownCancel()
 			err := egrp.Wait()

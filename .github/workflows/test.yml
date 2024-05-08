@@ -7,7 +7,7 @@ jobs:
     strategy:
       matrix:
         go-version: [1.21.x]
-        os: [macos-latest, windows-latest]
+        os: [macos-12, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
     - name: Checkout code
@@ -144,3 +144,5 @@ jobs:
       run: ./github_scripts/get_put_test.sh
     - name: Run End-to-End Test for Director stat
       run: ./github_scripts/stat_test.sh
+    - name: Run End-to-End Test for --version flag
+      run: ./github_scripts/version_test.sh

@@ -14,6 +14,7 @@ import Link from "next/link";
 
 import DataTable, {Record} from "@/components/DataTable";
 import {TableCellOverflow} from "@/components/Cell";
+import {getErrorMessage} from "@/helpers/util";
 
 
 interface ExportData extends Record {
@@ -91,7 +92,7 @@ export const ServerTable = ({type} : ServerTableProps) => {
             setData(responseData)
 
         } else {
-            setError("Failed to fetch config, response status: " + response.status)
+            setError(await getErrorMessage(response))
         }
     }, [type])
 

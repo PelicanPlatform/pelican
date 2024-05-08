@@ -26,6 +26,15 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// Make a mock net timeout error
+type timeoutError struct {
+	msg string
+}
+
+func (e *timeoutError) Error() string   { return e.msg }
+func (e *timeoutError) Timeout() bool   { return true }
+func (e *timeoutError) Temporary() bool { return false }
+
 // TestErrorAccum tests simple adding and removing from the accumulator
 func TestErrorAccum(t *testing.T) {
 	te := NewTransferErrors()
@@ -48,13 +57,20 @@ func TestErrorsRetryableFalse(t *testing.T) {
 	te.AddError(&SlowTransferError{})
 	te.AddError(&SlowTransferError{})
 	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.resetErrors()
 
 	te.AddError(&ConnectionSetupError{})
 	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.resetErrors()
 
 	// Now add a non-retryable error
 	te.AddError(errors.New("Non retryable error"))
 	assert.False(t, te.AllErrorsRetryable(), "ErrorsRetryable should be false")
+	te.resetErrors()
+
+	te.AddError(&dirListingNotSupportedError{})
+	assert.False(t, te.AllErrorsRetryable(), "ErrorsRetryable should be false")
+	te.resetErrors()
 
 }
 
@@ -76,6 +92,10 @@ func TestErrorsRetryableTrue(t *testing.T) {
 	te.resetErrors()
 
 	te.AddError(&allocateMemoryError{})
+	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
+	te.resetErrors()
+
+	te.AddError(&timeoutError{msg: "test timeout error"})
 	assert.True(t, te.AllErrorsRetryable(), "ErrorsRetryable should be true")
 	te.resetErrors()
 

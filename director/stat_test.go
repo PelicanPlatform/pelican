@@ -54,15 +54,9 @@ func TestQueryServersForObject(t *testing.T) {
 	// The OnEviction function is added to serverAds, which will clear deleted cache item
 	// but will have dead-lock for our test cases. Bypass the onEviction function
 	// by re-init serverAds
-	func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
-		serverAds = ttlcache.New(ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
-	}()
+	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
 
 	mockTTLCache := func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
 		mockServerAd1 := server_structs.ServerAd{Name: "origin1", URL: url.URL{Host: "example1.com", Scheme: "https"}, Type: server_structs.OriginType}
 		mockServerAd2 := server_structs.ServerAd{Name: "origin2", URL: url.URL{Host: "example2.com", Scheme: "https"}, Type: server_structs.OriginType}
 		mockServerAd3 := server_structs.ServerAd{Name: "origin3", URL: url.URL{Host: "example3.com", Scheme: "https"}, Type: server_structs.OriginType}
@@ -75,16 +69,34 @@ func TestQueryServersForObject(t *testing.T) {
 		mockNsAd4 := server_structs.NamespaceAdV2{Path: "/unrelated"}
 		mockNsAd5 := server_structs.NamespaceAdV2{Path: "/caches/hostname"}
 		mockNsCacheOnly := server_structs.NamespaceAdV2{Path: "/foo/cache/only"}
-		serverAds.Set(mockServerAd1, []server_structs.NamespaceAdV2{mockNsAd0}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd2, []server_structs.NamespaceAdV2{mockNsAd1}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd3, []server_structs.NamespaceAdV2{mockNsAd1, mockNsAd4}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd4, []server_structs.NamespaceAdV2{mockNsAd2, mockNsAd3}, ttlcache.DefaultTTL)
-		serverAds.Set(mockServerAd5, []server_structs.NamespaceAdV2{mockNsAd5, mockNsAd0, mockNsAd1, mockNsCacheOnly}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd1.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockServerAd1,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd0},
+			}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd2.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockServerAd2,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd1},
+			}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd3.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockServerAd3,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd1, mockNsAd4},
+			}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd4.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockServerAd4,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd2, mockNsAd3},
+			}, ttlcache.DefaultTTL)
+		serverAds.Set(mockServerAd5.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockServerAd5,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd5, mockNsAd0, mockNsAd1, mockNsCacheOnly},
+			}, ttlcache.DefaultTTL)
 	}
 
 	cleanupMock := func() {
-		serverAdMutex.Lock()
-		defer serverAdMutex.Unlock()
 		originStatUtilsMutex.Lock()
 		defer originStatUtilsMutex.Unlock()
 		serverAds.DeleteAll()
@@ -94,14 +106,12 @@ func TestQueryServersForObject(t *testing.T) {
 	}
 
 	initMockStatUtils := func() {
-		serverAdMutex.RLock()
-		defer serverAdMutex.RUnlock()
 		originStatUtilsMutex.Lock()
 		defer originStatUtilsMutex.Unlock()
 
 		for _, key := range serverAds.Keys() {
 			ctx, cancel := context.WithCancel(context.Background())
-			originStatUtils[key.URL] = originStatUtil{
+			originStatUtils[key] = originStatUtil{
 				Context:  ctx,
 				Cancel:   cancel,
 				Errgroup: &errgroup.Group{},
@@ -273,7 +283,7 @@ func TestQueryServersForObject(t *testing.T) {
 		mockCacheServer := []server_structs.ServerAd{{Name: "cache-overwrite", URL: url.URL{Host: "cache-overwrites.com", Scheme: "https"}}}
 
 		originStatUtilsMutex.Lock()
-		originStatUtils[mockCacheServer[0].URL] = originStatUtil{
+		originStatUtils[mockCacheServer[0].URL.String()] = originStatUtil{
 			Context:  ctx,
 			Cancel:   cancel,
 			Errgroup: &errgroup.Group{},
@@ -302,7 +312,7 @@ func TestQueryServersForObject(t *testing.T) {
 		mockOrigin := []server_structs.ServerAd{{Name: "origin-overwrite", URL: url.URL{Host: "origin-overwrites.com", Scheme: "https"}}}
 
 		originStatUtilsMutex.Lock()
-		originStatUtils[mockOrigin[0].URL] = originStatUtil{
+		originStatUtils[mockOrigin[0].URL.String()] = originStatUtil{
 			Context:  ctx,
 			Cancel:   cancel,
 			Errgroup: &errgroup.Group{},
@@ -521,6 +531,7 @@ func TestSendHeadReq(t *testing.T) {
 	kfile := filepath.Join(tDir, "testKey")
 	viper.Set("IssuerKey", kfile)
 
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 
 	t.Run("correct-input-gives-no-error", func(t *testing.T) {

@@ -77,6 +77,8 @@ var (
 
 	globalConfig    config.Config
 	globalConfigMtx sync.RWMutex
+
+	onceCABundle = sync.Once{}
 )
 
 func init() {
@@ -144,6 +146,13 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 	return api_v1.RuntimeInfo{}, nil
 }
 
+func onceLaunchCABundleUpdate(ctx context.Context, caBundle string) (certCtn int, err error) {
+	onceCABundle.Do(func() {
+		certCtn, err = utils.LaunchPeriodicWriteCABundle(ctx, caBundle, 2*time.Minute)
+	})
+	return
+}
+
 // Configure director's Prometheus scraper to use HTTP service discovery for origins/caches
 // and carry the token for scraping origin/caches' /metrics endpoint
 func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error) {
@@ -186,7 +195,7 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 	// This will cause the director to maintain a CA bundle, including the custom CA, at
 	// the given location.  Makes up for the fact we can't provide Prometheus with a transport
 	caBundle := filepath.Join(param.Monitoring_DataLocation.GetString(), "ca-bundle.crt")
-	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, caBundle, 2*time.Minute)
+	caCount, err := onceLaunchCABundleUpdate(ctx, caBundle)
 	if err != nil {
 		return nil, errors.Wrap(err, "Unable to generate CA bundle for prometheus")
 	}

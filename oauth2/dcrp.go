@@ -33,6 +33,9 @@ type DCRPConfig struct {
 	// This is a constant specific to each server.
 	ClientRegistrationEndpointURL string
 
+	// HTTP Transport to use; if nil, then the default one is used.
+	Transport http.RoundTripper
+
 	// Metadata specifies client metadata to be used for client registration
 	Metadata
 }
@@ -165,7 +168,7 @@ func (c *DCRPConfig) Register() (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
-	return doRoundTrip(req)
+	return c.doRoundTrip(req)
 }
 
 // RegistrationError describes errors returned by auth server during client registration process
@@ -193,8 +196,11 @@ func newHTTPRequest(registrationURL, initialAccessToken string, body []byte) (*h
 }
 
 // doRoundTrip performs communication with authorization server for client registration
-func doRoundTrip(req *http.Request) (*Response, error) {
+func (c *DCRPConfig) doRoundTrip(req *http.Request) (*Response, error) {
 	client := http.Client{}
+	if c.Transport != nil {
+		client.Transport = c.Transport
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

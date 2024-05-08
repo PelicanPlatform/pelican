@@ -188,7 +188,9 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 		if err != nil {
 			return errors.Wrapf(err, "Server responded with an error: %s. %s", respData.Message, respData.Error)
 		}
-		log.Errorf("Server responded with an error: %v. %s. %s", respData.Message, respData.Error, err)
+		if respData.Message != "" {
+			log.Debugf("Server responded to registration confirmation successfully with message: %s", respData.Message)
+		}
 	} else { // Error decoding JSON
 		if err != nil {
 			return errors.Wrapf(err, "Server responded with an error and failed to parse JSON response from the server. Raw response is %s", resp)

@@ -44,9 +44,9 @@ const (
 )
 
 var (
-	serverAds            = ttlcache.New(ttlcache.WithTTL[server_structs.ServerAd, []server_structs.NamespaceAdV2](15 * time.Minute))
-	serverAdMutex        = sync.RWMutex{}
-	filteredServers      = map[string]filterType{}
+	// The in-memory cache of xrootd server advertisement, with the key being ServerAd.URL.String()
+	serverAds            = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
+	filteredServers      = map[string]filterType{} // The map holds servers that are disabled, with the key being the ServerAd.Name
 	filteredServersMutex = sync.RWMutex{}
 )
 
@@ -54,14 +54,50 @@ func recordAd(ad server_structs.ServerAd, namespaceAds *[]server_structs.Namespa
 	if err := updateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
-	serverAdMutex.Lock()
-	defer serverAdMutex.Unlock()
+
+	if ad.URL.String() == "" {
+		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", ad)
+		return
+	}
+	// Since servers from topology always use http, while servers from Pelican always use https
+	// we want to ignore the scheme difference when checking duplicates (only consider hostname:port)
+	rawURL := ad.URL.String() // could be http (topology) or https (Pelican or some topology ones)
+	httpURL := ad.URL.String()
+	httpsURL := ad.URL.String()
+	if strings.HasPrefix(rawURL, "https") {
+		httpURL = "http" + strings.TrimPrefix(rawURL, "https")
+	}
+	if strings.HasPrefix(rawURL, "http://") {
+		httpsURL = "https://" + strings.TrimPrefix(rawURL, "http://")
+	}
+
+	existing := serverAds.Get(httpURL)
+	if existing == nil {
+		existing = serverAds.Get(httpsURL)
+	}
+	if existing == nil {
+		existing = serverAds.Get(rawURL)
+	}
+
+	// There's an existing ad in the cache
+	if existing != nil {
+		if ad.FromTopology && !existing.Value().FromTopology {
+			// if the incoming is from topology but the existing is from Pelican
+			log.Debugf("The ServerAd generated from topology with name %s and URL %s was ignored because there's already a Pelican ad for this server", ad.Name, ad.URL.String())
+			return
+		}
+		if !ad.FromTopology && existing.Value().FromTopology {
+			// Pelican server will overwrite topology one. We leave a message to let admin know
+			log.Debugf("The existing ServerAd generated from topology with name %s and URL %s is replaced by the Pelican server with name %s", existing.Value().Name, existing.Value().URL.String(), ad.Name)
+			serverAds.Delete(existing.Value().URL.String())
+		}
+	}
 
 	customTTL := param.Director_AdvertisementTTL.GetDuration()
 	if customTTL == 0 {
-		serverAds.Set(ad, *namespaceAds, ttlcache.DefaultTTL)
+		serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: *namespaceAds}, ttlcache.DefaultTTL)
 	} else {
-		serverAds.Set(ad, *namespaceAds, customTTL)
+		serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: *namespaceAds}, customTTL)
 	}
 }
 
@@ -140,31 +176,28 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 	// is the server ad itself (either cache or origin), and the value
 	// is a slice of namespace prefixes are supported by that server
 	var best *server_structs.NamespaceAdV2
-	ads := serverAds.Keys()
+	ads := []*server_structs.Advertisement{}
+	for _, item := range serverAds.Items() {
+		ads = append(ads, item.Value())
+	}
 	sortedAds := sortServerAdsByTopo(ads)
-	for _, serverAd := range sortedAds {
-		var namespaces []server_structs.NamespaceAdV2
-		if serverAds.Has(serverAd) {
-			namespaces = serverAds.Get(serverAd).Value()
-		} else {
+	for _, ad := range sortedAds {
+		if filtered, ft := checkFilter(ad.Name); filtered {
+			log.Debugf("Skipping %s server %s as it's in the filtered server list with type %s", ad.Type, ad.Name, ft)
 			continue
 		}
-		if filtered, ft := checkFilter(serverAd.Name); filtered {
-			log.Debugf("Skipping %s server %s as it's in the filtered server list with type %s", serverAd.Type, serverAd.Name, ft)
-			continue
-		}
-		if ns := matchesPrefix(reqPath, namespaces); ns != nil {
+		if ns := matchesPrefix(reqPath, ad.NamespaceAds); ns != nil {
 			if best == nil || len(ns.Path) > len(best.Path) {
 				best = ns
 				// If anything was previously set by a namespace that constituted a shorter
 				// prefix, we overwrite that here because we found a better ns. We also clear
 				// the other slice of server ads, because we know those aren't good anymore
-				if serverAd.Type == server_structs.OriginType {
-					originAds = []server_structs.ServerAd{serverAd}
+				if ad.Type == server_structs.OriginType {
+					originAds = []server_structs.ServerAd{ad.ServerAd}
 					cacheAds = []server_structs.ServerAd{}
-				} else if serverAd.Type == server_structs.CacheType {
+				} else if ad.Type == server_structs.CacheType {
 					originAds = []server_structs.ServerAd{}
-					cacheAds = []server_structs.ServerAd{serverAd}
+					cacheAds = []server_structs.ServerAd{ad.ServerAd}
 				}
 			} else if ns.Path == best.Path {
 				// If the current is from Pelican but the best is from topology
@@ -173,28 +206,28 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 					best = ns
 				}
 				// We treat serverAds differently from namespace
-				if serverAd.Type == server_structs.OriginType {
+				if ad.Type == server_structs.OriginType {
 					// For origin, if there's no origin in the list yet, and there's a matched one from topology, then add it
 					// However, if the first one is from Topology but the second matched one is from Pelican, replace it (repeat this process)
 					if len(originAds) == 0 {
-						originAds = append(originAds, serverAd)
+						originAds = append(originAds, ad.ServerAd)
 					} else {
-						if originAds[len(originAds)-1].FromTopology == serverAd.FromTopology {
-							originAds = append(originAds, serverAd)
-						} else if !serverAd.FromTopology {
+						if originAds[len(originAds)-1].FromTopology == ad.FromTopology {
+							originAds = append(originAds, ad.ServerAd)
+						} else if !ad.FromTopology {
 							// Incoming ad is from Pelican and current last item in originAd is from Topology:
 							// clear originAds and put Pelican server in
 							skippedServers = append(skippedServers, originAds...)
-							originAds = []server_structs.ServerAd{serverAd}
+							originAds = []server_structs.ServerAd{ad.ServerAd}
 						} else {
 							// Incoming ad is from Topology but current last item in originAd is from Pelican: skip
-							skippedServers = append(skippedServers, serverAd)
+							skippedServers = append(skippedServers, ad.ServerAd)
 							continue
 						}
 					}
-				} else if serverAd.Type == server_structs.CacheType {
+				} else if ad.Type == server_structs.CacheType {
 					// For caches, we allow both server from Topology and Pelican to serve the same namespace
-					cacheAds = append(cacheAds, serverAd)
+					cacheAds = append(cacheAds, ad.ServerAd)
 				}
 			}
 		}

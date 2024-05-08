@@ -37,6 +37,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -44,6 +45,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/classads"
+	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/launchers"
@@ -362,6 +364,323 @@ func TestPluginMulti(t *testing.T) {
 	}
 }
 
+// Test multiple downloads from the plugin
+func TestPluginDirectRead(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	defer server_utils.ResetOriginExports()
+	server_utils.ResetOriginExports()
+
+	dirName := t.TempDir()
+
+	viper.Set("Logging.Level", "debug")
+	viper.Set("Origin.StorageType", "posix")
+	viper.Set("Origin.FederationPrefix", "/test")
+	viper.Set("Origin.StoragePrefix", "/<SOMETHING THAT WILL BE OVERRIDDEN>")
+	viper.Set("Origin.EnablePublicReads", true)
+	viper.Set("Origin.EnableDirectReads", true)
+	fed := fed_test_utils.NewFedTest(t, "")
+	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
+
+	log.Debugln("Will create origin file at", fed.Exports[0].StoragePrefix)
+	err := os.WriteFile(filepath.Join(fed.Exports[0].StoragePrefix, "test.txt"), []byte("test file content"), fs.FileMode(0644))
+	require.NoError(t, err)
+	downloadUrl := url.URL{
+		Scheme:   "pelican",
+		Host:     host,
+		Path:     "/test/test.txt",
+		RawQuery: "directread",
+	}
+	localPath := filepath.Join(dirName, "test.txt")
+
+	workChan := make(chan PluginTransfer, 2)
+	workChan <- PluginTransfer{url: &downloadUrl, localFile: localPath}
+	close(workChan)
+
+	results := make(chan *classads.ClassAd, 5)
+	fed.Egrp.Go(func() error {
+		return runPluginWorker(fed.Ctx, false, workChan, results)
+	})
+
+	var developerData map[string]interface{}
+	done := false
+	for !done {
+		select {
+		case <-fed.Ctx.Done():
+			break
+		case resultAd, ok := <-results:
+			if !ok {
+				done = true
+				break
+			}
+			// Process results as soon as we get them
+			transferSuccess, err := resultAd.Get("TransferSuccess")
+			assert.NoError(t, err)
+			boolVal, ok := transferSuccess.(bool)
+			require.True(t, ok)
+			assert.True(t, boolVal)
+
+			// Assert that our endpoint is always the origin and not the cache
+			data, err := resultAd.Get("DeveloperData")
+			assert.NoError(t, err)
+			developerData, ok = data.(map[string]interface{})
+			require.True(t, ok)
+
+			attempts, ok := developerData["Attempts"].(int)
+			require.True(t, ok)
+
+			for i := 0; i < attempts; i++ {
+				key := fmt.Sprintf("Endpoint%d", i)
+				endpoint, ok := developerData[key].(string)
+				require.True(t, ok)
+				assert.Equal(t, param.Origin_Url.GetString(), "https://"+endpoint)
+			}
+		}
+	}
+}
+
+// Test the functionality of the failTransfer function, ensuring the proper classads are being set and returned
+func TestFailTransfer(t *testing.T) {
+	// Test when we call failTransfer with an upload
+	t.Run("TestWithUpload", func(t *testing.T) {
+		results := make(chan *classads.ClassAd, 1)
+		failTransfer("pelican://some/example.txt", "/path/to/local.txt", results, true, errors.New("test error"))
+		result := <-results
+
+		// Check TransferUrl set
+		transferUrl, _ := result.Get("TransferUrl")
+		transferUrlStr, ok := transferUrl.(string)
+		require.True(t, ok)
+		assert.Equal(t, "pelican://some/example.txt", transferUrlStr)
+
+		// Check TransferType set
+		transferType, _ := result.Get("TransferType")
+		transferTypeStr, ok := transferType.(string)
+		require.True(t, ok)
+		assert.Equal(t, "upload", transferTypeStr)
+
+		// Check TransferFileName set
+		transferFileName, _ := result.Get("TransferFileName")
+		transferFileNameStr, ok := transferFileName.(string)
+		require.True(t, ok)
+		assert.Equal(t, "local.txt", transferFileNameStr)
+
+		// Check TransferRetryable set
+		transferRetryable, _ := result.Get("TransferRetryable")
+		transferRetryableBool, ok := transferRetryable.(bool)
+		require.True(t, ok)
+		assert.False(t, transferRetryableBool)
+
+		// Check TransferSuccess set
+		transferSuccess, _ := result.Get("TransferSuccess")
+		transferSuccessBool, ok := transferSuccess.(bool)
+		require.True(t, ok)
+		assert.False(t, transferSuccessBool)
+
+		// Check TransferError set
+		transferError, _ := result.Get("TransferError")
+		transferErrorStr, ok := transferError.(string)
+		require.True(t, ok)
+		assert.Equal(t, "test error", transferErrorStr)
+	})
+
+	// Test when we call failTransfer with a download
+	t.Run("TestWithDownload", func(t *testing.T) {
+		results := make(chan *classads.ClassAd, 1)
+		failTransfer("pelican://some/example.txt", "/path/to/local.txt", results, false, errors.New("test error"))
+		result := <-results
+
+		// Check TransferUrl set
+		transferUrl, _ := result.Get("TransferUrl")
+		transferUrlStr, ok := transferUrl.(string)
+		require.True(t, ok)
+		assert.Equal(t, "pelican://some/example.txt", transferUrlStr)
+
+		// Check TransferType set
+		transferType, _ := result.Get("TransferType")
+		transferTypeStr, ok := transferType.(string)
+		require.True(t, ok)
+		assert.Equal(t, "download", transferTypeStr)
+
+		// Check TransferFileName set
+		transferFileName, _ := result.Get("TransferFileName")
+		transferFileNameStr, ok := transferFileName.(string)
+		require.True(t, ok)
+		assert.Equal(t, "example.txt", transferFileNameStr)
+
+		// Check TransferRetryable set
+		transferRetryable, _ := result.Get("TransferRetryable")
+		transferRetryableBool, ok := transferRetryable.(bool)
+		require.True(t, ok)
+		assert.False(t, transferRetryableBool)
+
+		// Check TransferSuccess set
+		transferSuccess, _ := result.Get("TransferSuccess")
+		transferSuccessBool, ok := transferSuccess.(bool)
+		require.True(t, ok)
+		assert.False(t, transferSuccessBool)
+
+		// Check TransferError set
+		transferError, _ := result.Get("TransferError")
+		transferErrorStr, ok := transferError.(string)
+		require.True(t, ok)
+		assert.Equal(t, "test error", transferErrorStr)
+	})
+
+	// Test when we call failTransfer with a retryable error
+	t.Run("TestWithRetry", func(t *testing.T) {
+		results := make(chan *classads.ClassAd, 1)
+		failTransfer("pelican://some/example.txt", "/path/to/local.txt", results, false, &client.SlowTransferError{})
+		result := <-results
+
+		// Check TransferUrl set
+		transferUrl, _ := result.Get("TransferUrl")
+		transferUrlStr, ok := transferUrl.(string)
+		require.True(t, ok)
+		assert.Equal(t, "pelican://some/example.txt", transferUrlStr)
+
+		// Check TransferType set
+		transferType, _ := result.Get("TransferType")
+		transferTypeStr, ok := transferType.(string)
+		require.True(t, ok)
+		assert.Equal(t, "download", transferTypeStr)
+
+		// Check TransferFileName set
+		transferFileName, _ := result.Get("TransferFileName")
+		transferFileNameStr, ok := transferFileName.(string)
+		require.True(t, ok)
+		assert.Equal(t, "example.txt", transferFileNameStr)
+
+		// Check TransferRetryable set
+		transferRetryable, _ := result.Get("TransferRetryable")
+		transferRetryableBool, ok := transferRetryable.(bool)
+		require.True(t, ok)
+		assert.True(t, transferRetryableBool)
+
+		// Check TransferSuccess set
+		transferSuccess, _ := result.Get("TransferSuccess")
+		transferSuccessBool, ok := transferSuccess.(bool)
+		require.True(t, ok)
+		assert.False(t, transferSuccessBool)
+
+		// Check TransferError set
+		transferError, _ := result.Get("TransferError")
+		transferErrorStr, ok := transferError.(string)
+		require.True(t, ok)
+		assert.Equal(t, "cancelled transfer, too slow.  Detected speed: 0 B/s, total transferred: 0 B, total transfer time: 0s", transferErrorStr)
+	})
+}
+
+// Test recursive downloads from the plugin
+func TestPluginRecursiveDownload(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	defer server_utils.ResetOriginExports()
+	server_utils.ResetOriginExports()
+
+	dirName := t.TempDir()
+
+	viper.Set("Logging.Level", "debug")
+	viper.Set("Origin.StorageType", "posix")
+	viper.Set("Origin.FederationPrefix", "/test")
+	viper.Set("Origin.StoragePrefix", "/<THIS WILL BE OVERRIDDEN>")
+	viper.Set("Origin.EnablePublicReads", true)
+	fed := fed_test_utils.NewFedTest(t, "")
+	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
+
+	// Drop the testFileContent into the origin directory
+	destDir := filepath.Join(fed.Exports[0].StoragePrefix, "test")
+	require.NoError(t, os.MkdirAll(destDir, os.FileMode(0755)))
+	log.Debugln("Will create origin file at", destDir)
+	err := os.WriteFile(filepath.Join(destDir, "test.txt"), []byte("test file content"), fs.FileMode(0644))
+	require.NoError(t, err)
+	downloadUrl1 := url.URL{
+		Scheme:   "pelican",
+		Host:     host,
+		Path:     "/test/test",
+		RawQuery: "recursive=true",
+	}
+	localPath1 := filepath.Join(dirName, "test.txt")
+	err = os.WriteFile(filepath.Join(destDir, "test2.txt"), []byte("second test file content"), fs.FileMode(0644))
+	require.NoError(t, err)
+
+	// Test recursive download succeeds
+	t.Run("TestRecursiveSuccess", func(t *testing.T) {
+		workChan := make(chan PluginTransfer, 1)
+		workChan <- PluginTransfer{url: &downloadUrl1, localFile: localPath1}
+		//workChan <- PluginTransfer{url: &downloadUrl2, localFile: localPath2}
+		close(workChan)
+
+		results := make(chan *classads.ClassAd, 5)
+		fed.Egrp.Go(func() error {
+			return runPluginWorker(fed.Ctx, false, workChan, results)
+		})
+
+		resultAds := []*classads.ClassAd{}
+		done := false
+		for !done {
+			select {
+			case <-fed.Ctx.Done():
+				break
+			case resultAd, ok := <-results:
+				if !ok {
+					done = true
+					break
+				}
+				// Process results as soon as we get them
+				transferSuccess, err := resultAd.Get("TransferSuccess")
+				assert.NoError(t, err)
+				boolVal, ok := transferSuccess.(bool)
+				require.True(t, ok)
+				assert.True(t, boolVal)
+				resultAds = append(resultAds, resultAd)
+			}
+		}
+		// Check we get 2 result ads back (each file has been downloaded)
+		assert.Equal(t, 2, len(resultAds))
+	})
+
+	// Check to make sure the plugin properly fails when setting recursive=true on a file
+	// instead of a directory
+	t.Run("TestRecursiveFailureOnRecursiveSetForFile", func(t *testing.T) {
+		// Change the downloadUrl to be a path to a file instead of a directory
+		downloadUrl1 := url.URL{
+			Scheme:   "pelican",
+			Host:     host,
+			Path:     "/test/test/test.txt",
+			RawQuery: "recursive=true",
+		}
+
+		workChan := make(chan PluginTransfer, 1)
+		workChan <- PluginTransfer{url: &downloadUrl1, localFile: localPath1}
+		close(workChan)
+
+		results := make(chan *classads.ClassAd, 5)
+		err = runPluginWorker(fed.Ctx, false, workChan, results)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read remote directory: PROPFIND /test/test/test.txt/: 500")
+	})
+
+	t.Run("TestRecursiveFailureDirNotFound", func(t *testing.T) {
+		// Change the downloadUrl to be a path to a file instead of a directory
+		downloadUrl1 := url.URL{
+			Scheme:   "pelican",
+			Host:     host,
+			Path:     "/test/SomeDirectoryThatDoesNotExist:)",
+			RawQuery: "recursive=true",
+		}
+
+		workChan := make(chan PluginTransfer, 1)
+		workChan <- PluginTransfer{url: &downloadUrl1, localFile: localPath1}
+		close(workChan)
+
+		results := make(chan *classads.ClassAd, 5)
+		err = runPluginWorker(fed.Ctx, false, workChan, results)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to read remote directory: PROPFIND /test/SomeDirectoryThatDoesNotExist:)/: 404")
+	})
+}
+
 func TestWriteOutfile(t *testing.T) {
 	t.Run("TestOutfileSuccess", func(t *testing.T) {
 		// Drop the testFileContent into the origin directory
@@ -382,7 +701,8 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
-		success, retryable := writeOutfile(nil, resultAds, tempFile)
+		success, retryable, err := writeOutfile(nil, resultAds, tempFile)
+		assert.NoError(t, err)
 		assert.True(t, success, "writeOutfile failed :(")
 		assert.False(t, retryable, "writeOutfile returned retryable true when it should be false")
 		tempFileContent, err := os.ReadFile(tempFile.Name())
@@ -393,6 +713,40 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferTotalBytes = 27538253;")
 		assert.Contains(t, string(tempFileContent), "TransferSuccess = true;")
 		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
+	})
+
+	t.Run("TestOutfileAlwaysIncludeUrlAndFileName", func(t *testing.T) {
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(t.TempDir(), "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		assert.NoError(t, err, "Error writing to temp file")
+		defer tempFile.Close()
+		defer os.Remove(tempFile.Name())
+
+		// Set up test result ads
+		var resultAds []*classads.ClassAd
+		for i := 0; i < 4; i++ {
+			resultAd := classads.NewClassAd()
+			resultAd.Set("TransferSuccess", true)
+			resultAd.Set("TransferLocalMachineName", "abcdefghijk")
+			resultAd.Set("TransferFileBytes", 12)
+			resultAd.Set("TransferTotalBytes", 27538253)
+			resultAds = append(resultAds, resultAd)
+		}
+		success, retryable, err := writeOutfile(nil, resultAds, tempFile)
+		assert.NoError(t, err)
+		assert.True(t, success, "writeOutfile failed :(")
+		assert.False(t, retryable, "writeOutfile returned retryable true when it should be false")
+		tempFileContent, err := os.ReadFile(tempFile.Name())
+		assert.NoError(t, err)
+
+		// assert the output file contains some of our result ads
+		assert.Contains(t, string(tempFileContent), "TransferFileBytes = 12;")
+		assert.Contains(t, string(tempFileContent), "TransferTotalBytes = 27538253;")
+		assert.Contains(t, string(tempFileContent), "TransferSuccess = true;")
+		// Ensure we get empty strings for these classads
+		assert.Contains(t, string(tempFileContent), "TransferUrl = \"\";")
+		assert.Contains(t, string(tempFileContent), "TransferFileName = \"\";")
 	})
 
 	t.Run("TestOutfileFailureNoRetry", func(t *testing.T) {
@@ -415,7 +769,8 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
-		success, retryable := writeOutfile(nil, resultAds, tempFile)
+		success, retryable, err := writeOutfile(nil, resultAds, tempFile)
+		assert.NoError(t, err)
 		assert.False(t, success, "writeOutfile failed :(")
 		assert.False(t, retryable, "writeOutfile returned retryable true when it should be false")
 		tempFileContent, err := os.ReadFile(tempFile.Name())
@@ -448,7 +803,8 @@ func TestWriteOutfile(t *testing.T) {
 			resultAd.Set("TransferUrl", "foo.txt")
 			resultAds = append(resultAds, resultAd)
 		}
-		success, retryable := writeOutfile(nil, resultAds, tempFile)
+		success, retryable, err := writeOutfile(nil, resultAds, tempFile)
+		assert.NoError(t, err)
 		assert.False(t, success, "writeOutfile failed :(")
 		assert.True(t, retryable, "writeOutfile returned retryable true when it should be true")
 		tempFileContent, err := os.ReadFile(tempFile.Name())
@@ -461,48 +817,65 @@ func TestWriteOutfile(t *testing.T) {
 		assert.Contains(t, string(tempFileContent), "TransferUrl = \"foo.txt\";")
 	})
 
-}
+	// Test the check in writeOutfile if we have an error sent to the function and have an error in our resultAds
+	// In this case, the TransferError should not be overwritten
+	t.Run("TestAlreadyFailed", func(t *testing.T) {
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(t.TempDir(), "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		assert.NoError(t, err, "Error writing to temp file")
+		defer tempFile.Close()
+		defer os.Remove(tempFile.Name())
 
-// This test checks if query parameters in the url are correct
-// We want invalid or > 1 query to cause an error
-func TestQuery(t *testing.T) {
-	t.Run("TestValidRecursive", func(t *testing.T) {
-		transferStr := "pelican://something/here?recursive=true"
-		transferUrl, err := url.Parse(transferStr)
+		// Set up test result ads
+		var resultAds []*classads.ClassAd
+		for i := 0; i < 4; i++ {
+			resultAd := classads.NewClassAd()
+			resultAd.Set("TransferSuccess", false)
+			resultAd.Set("TransferError", "This is some error here")
+			resultAds = append(resultAds, resultAd)
+		}
+		writeErr := errors.New("This is the error that is passed to writeOutfile")
+		success, _, err := writeOutfile(writeErr, resultAds, tempFile)
+		assert.NoError(t, err)
+		assert.False(t, success, "writeOutfile failed :(")
+		tempFileContent, err := os.ReadFile(tempFile.Name())
 		assert.NoError(t, err)
 
-		err = checkValidQuery(transferUrl)
-		assert.NoError(t, err)
+		// assert the output file contains some of our result ads
+		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
+		assert.Contains(t, string(tempFileContent), "TransferError = \"This is some error here\";")
 	})
 
-	t.Run("TestValidPack", func(t *testing.T) {
-		transferStr := "pelican://something/here?pack=tar.gz"
-		transferUrl, err := url.Parse(transferStr)
+	// In this case, we have an error sent to writeOutFile but no errors in the resultAds, we want to ensure
+	// TransferSuccess is false and TransferError is populated with the error
+	t.Run("TestNotAlreadyFailed", func(t *testing.T) {
+		// Drop the testFileContent into the origin directory
+		tempFile, err := os.Create(filepath.Join(t.TempDir(), "test.txt"))
+		assert.NoError(t, err, "Error creating temp file")
+		assert.NoError(t, err, "Error writing to temp file")
+		defer tempFile.Close()
+		defer os.Remove(tempFile.Name())
+
+		// Set up test result ads
+		var resultAds []*classads.ClassAd
+		for i := 0; i < 4; i++ {
+			resultAd := classads.NewClassAd()
+			resultAd.Set("TransferSuccess", true)
+			resultAds = append(resultAds, resultAd)
+		}
+		writeErr := errors.New("This is the error that is passed to writeOutfile")
+		success, _, err := writeOutfile(writeErr, resultAds, tempFile)
+		assert.NoError(t, err)
+		assert.False(t, success, "writeOutfile failed :(")
+		tempFileContent, err := os.ReadFile(tempFile.Name())
 		assert.NoError(t, err)
 
-		err = checkValidQuery(transferUrl)
-		assert.NoError(t, err)
+		// assert the output file contains some of our result ads
+		assert.Contains(t, string(tempFileContent), "TransferSuccess = false;")
+		assert.Contains(t, string(tempFileContent), "TransferError = \"This is the error that is passed to writeOutfile\";")
 	})
 
-	t.Run("TestInvalidQuery", func(t *testing.T) {
-		transferStr := "pelican://something/here?recrustive=true"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Invalid query parameters procided in url: pelican://something/here?recrustive=true")
-	})
-
-	t.Run("TestBothQueryCheckFailure", func(t *testing.T) {
-		transferStr := "pelican://something/here?pack=tar.gz&recursive=true"
-		transferUrl, err := url.Parse(transferStr)
-		assert.NoError(t, err)
-
-		err = checkValidQuery(transferUrl)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Cannot have both recursive and pack query parameters")
-	})
 }
 
 // This test checks if the destination (local file) is parsed correctly

@@ -40,8 +40,8 @@ type (
 	queryConfig struct {
 		originAds         []server_structs.ServerAd
 		cacheAds          []server_structs.ServerAd
-		originAdsProvided bool // Explictly mark the originAds are provided, not based on the length of the array
-		cacheAdsProvided  bool // Explictly mark the cacheAds are provided, not based on the length of the array
+		originAdsProvided bool // Explicitly mark the originAds are provided, not based on the length of the array
+		cacheAdsProvided  bool // Explicitly mark the cacheAds are provided, not based on the length of the array
 	}
 
 	queryOption    func(*queryConfig)
@@ -258,7 +258,7 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 	defer originStatUtilsMutex.RUnlock()
 
 	for _, originAd := range ads {
-		originUtil, ok := originStatUtils[originAd.URL]
+		originUtil, ok := originStatUtils[originAd.URL.String()]
 		if !ok {
 			numTotalReq += 1
 			log.Warningf("Origin %q is missing data for stat call, skip querying...", originAd.Name)

@@ -110,37 +110,20 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 	batchTest := func(t *testing.T, arguments []string, expected string) {
 		got := ""
 
-		if expected == mockVersionOutput {
-			// Redirect output to a pip
-			oldStderr := os.Stderr
-			r, w, _ := os.Pipe()
-			os.Stderr = w
+		// Redirect output to a pipe
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
 
-			err := handleCLI(arguments)
-			require.NoError(t, err)
+		err := handleCLI(arguments)
+		require.NoError(t, err)
 
-			// Close the write of pip and redirect output back to Stderr
-			w.Close()
-			out, _ := io.ReadAll(r)
-			os.Stderr = oldStderr
+		// Close the write of pipe and redirect output back to Stderr
+		w.Close()
+		out, _ := io.ReadAll(r)
+		os.Stdout = oldStdout
 
-			got = strings.TrimSpace(string(out))
-		} else {
-			// Redirect output to a pip
-			oldStdout := os.Stdout
-			r, w, _ := os.Pipe()
-			os.Stdout = w
-
-			err := handleCLI(arguments)
-			require.NoError(t, err)
-
-			// Close the write of pip and redirect output back to Stderr
-			w.Close()
-			out, _ := io.ReadAll(r)
-			os.Stdout = oldStdout
-
-			got = strings.TrimSpace(string(out))
-		}
+		got = strings.TrimSpace(string(out))
 
 		if expected != mockVersionOutput {
 			// If the expected string is not the version output, use Contains to check

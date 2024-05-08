@@ -37,11 +37,14 @@ var (
 	rootConfigCmd = &cobra.Command{
 		Use:   "credentials",
 		Short: "Interact with the credential configuration file",
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			return config.InitClient()
+		},
 	}
 )
 
 func printConfig() {
-	config, err := config.GetConfigContents()
+	config, err := config.GetCredentialConfigContents()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to get credential configuration contents:", err)
 		os.Exit(1)
@@ -108,7 +111,7 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 }
 
 func printOauthConfig() {
-	config, err := config.GetConfigContents()
+	config, err := config.GetCredentialConfigContents()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to get configuration contents:", err)
 		os.Exit(1)
@@ -181,7 +184,7 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 		Long:  "Add a new oauth client",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			input_config, err := config.GetConfigContents()
+			input_config, err := config.GetCredentialConfigContents()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get configuration contents:", err)
 				os.Exit(1)
@@ -216,7 +219,7 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 		Long:  "Set the oauth client attributes (client_id or client_secret)",
 		Args:  cobra.ExactArgs(3),
 		Run: func(cmd *cobra.Command, args []string) {
-			input_config, err := config.GetConfigContents()
+			input_config, err := config.GetCredentialConfigContents()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get configuration contents:", err)
 				os.Exit(1)
@@ -258,7 +261,7 @@ func addPrefixSubcommands(prefixCmd *cobra.Command) {
 		Long:  "Delete the oauth client",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			input_config, err := config.GetConfigContents()
+			input_config, err := config.GetCredentialConfigContents()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get configuration contents:", err)
 				os.Exit(1)

@@ -138,7 +138,7 @@ func init() {
 	}
 
 	// The -w flag is used if we want the origin to be writeable.
-	originServeCmd.Flags().BoolP("writeable", "", true, "Allow/disable writting to the origin")
+	originServeCmd.Flags().BoolP("writeable", "", true, "Allow/disable writing to the origin")
 	if err := viper.BindPFlag("Origin.EnableWrites", originServeCmd.Flags().Lookup("writeable")); err != nil {
 		panic(err)
 	}

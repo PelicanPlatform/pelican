@@ -35,25 +35,20 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/pelicanplatform/pelican/token"
-	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-)
 
-// Mock wrong data fields for Institution
-type mockBadInstitutionFormat struct {
-	RORID string `yaml:"ror_id"`
-	Inst  string `yaml:"institution"`
-}
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
+)
 
 func GenerateMockJWKS() (string, error) {
 	// Create a private key to use for the test
@@ -134,14 +129,14 @@ func TestListNamespaces(t *testing.T) {
 		emptyDB      bool
 		notApproved  bool
 		authUser     bool
-		expectedData []Namespace
+		expectedData []server_structs.Namespace
 	}{
 		{
 			description:  "valid-request-with-empty-db",
 			serverType:   string(OriginType),
 			expectedCode: http.StatusOK,
 			emptyDB:      true,
-			expectedData: []Namespace{},
+			expectedData: []server_structs.Namespace{},
 		},
 		{
 			description:  "valid-request-with-origin-type",
@@ -163,14 +158,14 @@ func TestListNamespaces(t *testing.T) {
 		{
 			description:  "unauthed-not-approved-without-type-returns-empty",
 			expectedCode: http.StatusOK,
-			expectedData: []Namespace{},
+			expectedData: []server_structs.Namespace{},
 			notApproved:  true,
 		},
 		{
 			description:  "unauthed-with-status-pending-returns-403",
 			expectedCode: http.StatusForbidden,
 			status:       "Pending",
-			expectedData: []Namespace{},
+			expectedData: []server_structs.Namespace{},
 			notApproved:  true,
 			authUser:     false,
 		},
@@ -185,7 +180,7 @@ func TestListNamespaces(t *testing.T) {
 			description:  "authed-returns-filtered-approved-status",
 			expectedCode: http.StatusOK,
 			status:       "Approved",
-			expectedData: []Namespace{},
+			expectedData: []server_structs.Namespace{},
 			notApproved:  true,
 			authUser:     true,
 		},
@@ -252,7 +247,7 @@ func TestListNamespaces(t *testing.T) {
 			assert.Equal(t, tc.expectedCode, w.Code)
 
 			if tc.expectedCode == http.StatusOK {
-				var got []Namespace
+				var got []server_structs.Namespace
 				err := json.Unmarshal(w.Body.Bytes(), &got)
 				if err != nil {
 					t.Fatalf("Failed to unmarshal response body: %v", err)
@@ -273,10 +268,10 @@ func TestListNamespacesForUser(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
-	mockUserNss := func() []Namespace {
-		return []Namespace{
-			mockNamespace("/foo", "", "", AdminMetadata{UserID: "mockUser", Status: Pending}),
-			mockNamespace("/bar", "", "", AdminMetadata{UserID: "mockUser", Status: Approved}),
+	mockUserNss := func() []server_structs.Namespace {
+		return []server_structs.Namespace{
+			mockNamespace("/foo", "", "", server_structs.AdminMetadata{UserID: "mockUser", Status: server_structs.RegPending}),
+			mockNamespace("/bar", "", "", server_structs.AdminMetadata{UserID: "mockUser", Status: server_structs.RegApproved}),
 		}
 	}()
 
@@ -286,18 +281,18 @@ func TestListNamespacesForUser(t *testing.T) {
 		emptyDB      bool
 		authUser     bool
 		queryParam   string
-		expectedData []Namespace
+		expectedData []server_structs.Namespace
 	}{
 		{
 			description:  "unauthed-return-401",
 			expectedCode: http.StatusUnauthorized,
-			expectedData: []Namespace{},
+			expectedData: []server_structs.Namespace{},
 		},
 		{
 			description:  "valid-request-with-empty-db",
 			expectedCode: http.StatusOK,
 			emptyDB:      true,
-			expectedData: []Namespace{},
+			expectedData: []server_structs.Namespace{},
 			authUser:     true,
 		},
 		{
@@ -347,7 +342,7 @@ func TestListNamespacesForUser(t *testing.T) {
 			assert.Equal(t, tc.expectedCode, w.Code)
 
 			if tc.expectedCode == http.StatusOK {
-				var got []Namespace
+				var got []server_structs.Namespace
 				err := json.Unmarshal(w.Body.Bytes(), &got)
 				require.NoErrorf(t, err, "Failed to unmarshal response body: %v", err)
 				assert.True(t, compareNamespaces(tc.expectedData, got, true), "Response data does not match expected")
@@ -365,7 +360,7 @@ func TestGetNamespace(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
-	mockUserNs := mockNamespace("/mockUser", "", "", AdminMetadata{UserID: "mockUser"})
+	mockUserNs := mockNamespace("/mockUser", "", "", server_structs.AdminMetadata{UserID: "mockUser"})
 
 	tests := []struct {
 		description  string
@@ -432,7 +427,7 @@ func TestGetNamespace(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.description, func(t *testing.T) {
 			if tc.checkAdmin {
-				err := insertMockDBData([]Namespace{mockUserNs})
+				err := insertMockDBData([]server_structs.Namespace{mockUserNs})
 				require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
 			} else {
 				err := insertMockDBData(mockNssWithMixed)
@@ -468,14 +463,14 @@ func TestGetNamespace(t *testing.T) {
 			require.Equal(t, tc.expectedCode, w.Code)
 
 			if tc.expectedCode == 200 {
-				getNs := Namespace{}
+				getNs := server_structs.Namespace{}
 
 				bytes, err := io.ReadAll(w.Body)
 				require.NoError(t, err)
 				err = json.Unmarshal(bytes, &getNs)
 				require.NoError(t, err)
 
-				require.NotEqual(t, Namespace{}, getNs)
+				require.NotEqual(t, server_structs.Namespace{}, getNs)
 			}
 		})
 	}
@@ -542,7 +537,7 @@ func TestGetNamespaceJWKS(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.description, func(t *testing.T) {
 			if !tc.emptyDB {
-				err := insertMockDBData([]Namespace{
+				err := insertMockDBData([]server_structs.Namespace{
 					{
 						ID:     1,
 						Prefix: "/origin1",
@@ -581,7 +576,7 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)
 
-	mockUserNs := mockNamespace("/mockUser", "", "", AdminMetadata{UserID: "mockUser"})
+	mockUserNs := mockNamespace("/mockUser", "", "", server_structs.AdminMetadata{UserID: "mockUser"})
 
 	tests := []struct {
 		description  string
@@ -623,18 +618,18 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.description, func(t *testing.T) {
-			err := insertMockDBData([]Namespace{mockUserNs})
+			err := insertMockDBData([]server_structs.Namespace{mockUserNs})
 			require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
 			defer resetNamespaceDB(t)
 
 			router := gin.Default()
 			router.PATCH("/test/:id/approve", func(ctx *gin.Context) {
 				ctx.Set("User", "admin")
-				updateNamespaceStatus(ctx, Approved)
+				updateNamespaceStatus(ctx, server_structs.RegApproved)
 			})
 			router.PATCH("/test/:id/deny", func(ctx *gin.Context) {
 				ctx.Set("User", "admin")
-				updateNamespaceStatus(ctx, Denied)
+				updateNamespaceStatus(ctx, server_structs.RegDenied)
 			})
 
 			finalId := tc.requestId
@@ -664,7 +659,7 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 					require.NoError(t, err)
 					ns, err := getNamespaceById(intId)
 					require.NoError(t, err)
-					assert.True(t, ns.AdminMetadata.Status == Approved)
+					assert.True(t, ns.AdminMetadata.Status == server_structs.RegApproved)
 					assert.NotEqual(t, time.Time{}, ns.AdminMetadata.ApprovedAt)
 					assert.Equal(t, "admin", ns.AdminMetadata.ApproverID)
 				}
@@ -675,6 +670,12 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 
 func TestCreateNamespace(t *testing.T) {
 	viper.Reset()
+
+	t.Cleanup(func() {
+		viper.Reset()
+		customRegFieldsConfigs = []customRegFieldsConfig{}
+	})
+
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -717,10 +718,10 @@ func TestCreateNamespace(t *testing.T) {
 		assert.JSONEq(t, `{"msg":"Invalid create or update namespace request", "status":"error"}`, string(body))
 	})
 
-	t.Run("missing-required-fields-returns-400", func(t *testing.T) {
+	t.Run("missing-prefix-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
 
-		mockEmptyNs := Namespace{}
+		mockEmptyNs := server_structs.Namespace{}
 		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -732,15 +733,54 @@ func TestCreateNamespace(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
-		assert.Contains(t, string(body), "Field validation for 'Prefix' failed on the 'required' tag")
-		assert.Contains(t, string(body), "Field validation for 'Pubkey' failed on the 'required' tag")
-		assert.Contains(t, string(body), "Field validation for 'Institution' failed on the 'required' tag")
+		assert.Contains(t, string(body), "Validation for Prefix failed:")
+	})
+
+	t.Run("missing-public-key-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockEmptyNs := server_structs.Namespace{Prefix: "/test"} // Missing public key
+		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockEmptyNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "Validation for Pubkey failed:")
+	})
+
+	t.Run("missing-institution-returns-400", func(t *testing.T) {
+		viper.Reset()
+		viper.Set("Registry.Institutions", []map[string]string{{"name": "Mock School", "id": "123"}})
+		resetNamespaceDB(t)
+		jwks, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		mockEmptyNs := server_structs.Namespace{Prefix: "/test", Pubkey: jwks} // Missing institution
+		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockEmptyNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+		require.NoError(t, err)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "Validation for Institution failed:")
+		viper.Reset()
 	})
 
 	t.Run("invalid-prefix-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
 
-		mockEmptyNs := Namespace{Prefix: "/", Pubkey: "badKey", AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockEmptyNs := server_structs.Namespace{Prefix: "/", Pubkey: "badKey", AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -752,16 +792,16 @@ func TestCreateNamespace(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
-		assert.Contains(t, string(body), "Error: Field validation for prefix failed:")
+		assert.Contains(t, string(body), "Validation for Prefix failed:")
 	})
 
 	t.Run("existing-prefix-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
-		err := insertMockDBData([]Namespace{{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: AdminMetadata{Status: Pending}}})
+		err := insertMockDBData([]server_structs.Namespace{{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: server_structs.AdminMetadata{Status: server_structs.RegPending}}})
 		require.NoError(t, err)
 		defer resetNamespaceDB(t)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -779,7 +819,7 @@ func TestCreateNamespace(t *testing.T) {
 	t.Run("bad-pubkey-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -791,7 +831,7 @@ func TestCreateNamespace(t *testing.T) {
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
-		assert.Contains(t, string(body), "Error: Field validation for pubkey failed:")
+		assert.Contains(t, string(body), "Validation for Pubkey failed:")
 	})
 
 	t.Run("duplicated-key-returns-400", func(t *testing.T) {
@@ -800,14 +840,14 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		err = insertMockDBData([]Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Status: Pending}}})
+		err = insertMockDBData([]server_structs.Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Status: server_structs.RegPending}}})
 		require.NoError(t, err)
 		defer resetNamespaceDB(t)
 
 		diffPubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: diffPubKeyStr, AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: diffPubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -830,14 +870,14 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		err = insertMockDBData([]Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Status: Pending}}})
+		err = insertMockDBData([]server_structs.Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Status: server_structs.RegPending}}})
 		require.NoError(t, err)
 		defer resetNamespaceDB(t)
 
 		diffPubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/foo/bar", Pubkey: diffPubKeyStr, AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo/bar", Pubkey: diffPubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -855,13 +895,13 @@ func TestCreateNamespace(t *testing.T) {
 
 	t.Run("inst-failure-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "001"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -878,13 +918,13 @@ func TestCreateNamespace(t *testing.T) {
 
 	t.Run("valid-request-gives-200", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -903,7 +943,64 @@ func TestCreateNamespace(t *testing.T) {
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/foo", nss[0].Prefix)
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
-		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
+		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
+		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
+	})
+
+	t.Run("valid-request-w/-custom-fields-gives-200", func(t *testing.T) {
+		resetNamespaceDB(t)
+		defer func() {
+			customRegFieldsConfigs = []customRegFieldsConfig{}
+		}()
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
+		customFieldsConf := []map[string]interface{}{
+			{"name": "boolean_field", "type": "bool", "required": true},
+			{"name": "integer", "type": "int", "required": true},
+			{"name": "string_field", "type": "string", "required": true},
+			{"name": "datetime_field", "type": "datetime", "required": true},
+		}
+		viper.Set("Registry.Institutions", mockInsts)
+		viper.Set("Registry.CustomRegistrationFields", customFieldsConf)
+		err := InitCustomRegistrationFields()
+		require.NoError(t, err)
+		defer func() {
+			customRegFieldsConfigs = []customRegFieldsConfig{}
+		}()
+
+		pubKeyStr, err := GenerateMockJWKS()
+		require.NoError(t, err)
+
+		customFieldsVals := map[string]interface{}{
+			"boolean_field":  false,
+			"integer":        1,
+			"string_field":   "random",
+			"datetime_field": 1696255200,
+		}
+		mockNs := server_structs.Namespace{
+			Prefix:        "/foo",
+			Pubkey:        pubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{Institution: "1000"},
+			CustomFields:  customFieldsVals,
+		}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+		assert.JSONEq(t, `{"msg":"Prefix /foo successfully registered", "status":"success"}`, string(body))
+
+		nss, err := getAllNamespaces()
+		require.NoError(t, err)
+		require.Equal(t, 1, len(nss))
+		assert.Equal(t, "/foo", nss[0].Prefix)
+		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
+		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 	})
 
@@ -919,13 +1016,13 @@ func TestCreateNamespace(t *testing.T) {
 		err = PopulateTopology()
 		require.NoError(t, err)
 
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/topo/foo/bar", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Namespace{Prefix: "/topo/foo/bar", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -944,7 +1041,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/topo/foo/bar", nss[0].Prefix)
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
-		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
+		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 		viper.Reset()
 	})
@@ -961,13 +1058,13 @@ func TestCreateNamespace(t *testing.T) {
 		err = PopulateTopology()
 		require.NoError(t, err)
 
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/topo/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Namespace{Prefix: "/topo/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -986,7 +1083,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/topo/foo", nss[0].Prefix)
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
-		assert.Equal(t, Pending, nss[0].AdminMetadata.Status)
+		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
 		viper.Reset()
 	})
@@ -994,6 +1091,9 @@ func TestCreateNamespace(t *testing.T) {
 
 func TestUpdateNamespaceHandler(t *testing.T) {
 	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+	})
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -1051,13 +1151,13 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 	t.Run("valid-request-but-ns-dne-returns-404", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -1072,17 +1172,17 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		assert.JSONEq(t, `{"msg":"Can't update namespace: namespace not found", "status":"error"}`, string(body))
 	})
 
-	t.Run("valid-request-not-owner-gives-404", func(t *testing.T) {
+	t.Run("valid-request-not-owner-gives-403", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: AdminMetadata{Institution: "1000", UserID: "notYourNs"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", UserID: "notYourNs"}}
 
-		err = insertMockDBData([]Namespace{mockNs})
+		err = insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 
 		id, err := getLastNamespaceId()
@@ -1098,29 +1198,29 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 		body, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
-		assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
-		assert.JSONEq(t, `{"msg":"Namespace not found. Check the id or if you own the namespace", "status":"error"}`, string(body))
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+		assert.JSONEq(t, `{"msg":"You do not have permissions to access this namespace registration. Check the id or if you own the namespace", "status":"error"}`, string(body))
 	})
 
 	t.Run("reg-user-cant-change-after-approv", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{
+		mockNs := server_structs.Namespace{
 			Prefix: "/foo",
 			Pubkey: pubKeyStr,
-			AdminMetadata: AdminMetadata{
+			AdminMetadata: server_structs.AdminMetadata{
 				Institution: "1000",
-				UserID:      "mockUser", // same as currently sign-in user
-				Status:      Approved,   // but it's approved
+				UserID:      "mockUser",                 // same as currently sign-in user
+				Status:      server_structs.RegApproved, // but it's approved
 			},
 		}
 
-		err = insertMockDBData([]Namespace{mockNs})
+		err = insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 
 		id, err := getLastNamespaceId()
@@ -1142,24 +1242,24 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 	t.Run("reg-user-success-change", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{
+		mockNs := server_structs.Namespace{
 			Prefix: "/foo",
 			Pubkey: pubKeyStr,
-			AdminMetadata: AdminMetadata{
+			AdminMetadata: server_structs.AdminMetadata{
 				Description: "oldDescription",
 				Institution: "1000",
-				UserID:      "mockUser", // same as currently sign-in user
-				Status:      Pending,    // but it's approved
+				UserID:      "mockUser",                // same as currently sign-in user
+				Status:      server_structs.RegPending, // but it's approved
 			},
 		}
 
-		err = insertMockDBData([]Namespace{mockNs})
+		err = insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 
 		id, err := getLastNamespaceId()
@@ -1187,24 +1287,24 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 	t.Run("admin-can-change-anybody", func(t *testing.T) {
 		resetNamespaceDB(t)
-		mockInsts := []Institution{{ID: "1000"}}
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
 		pubKeyStr, err := GenerateMockJWKS()
 		require.NoError(t, err)
 
-		mockNs := Namespace{
+		mockNs := server_structs.Namespace{
 			Prefix: "/foo",
 			Pubkey: pubKeyStr,
-			AdminMetadata: AdminMetadata{
+			AdminMetadata: server_structs.AdminMetadata{
 				Description: "oldDescription",
 				Institution: "1000",
-				UserID:      "mockUser", // same as currently sign-in user
-				Status:      Approved,   // but it's approved
+				UserID:      "mockUser",                 // same as currently sign-in user
+				Status:      server_structs.RegApproved, // but it's approved
 			},
 		}
 
-		err = insertMockDBData([]Namespace{mockNs})
+		err = insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 
 		id, err := getLastNamespaceId()
@@ -1242,7 +1342,7 @@ func TestListInsitutions(t *testing.T) {
 	router.GET("/institutions", listInstitutions)
 
 	t.Run("nil-cache-with-nil-config-returns-error", func(t *testing.T) {
-		institutionsCache = nil
+		optionsCache.DeleteAll()
 
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
@@ -1253,17 +1353,16 @@ func TestListInsitutions(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
-		assert.JSONEq(t, `{"msg":"Server didn't configure Registry.Institutions", "status":"error"}`, string(bytes))
+		assert.JSONEq(t, `{"status":"error", "msg": "Server didn't configure Registry.Institutions and Registry.InstitutionsUrl"}`, string(bytes))
 	})
 
 	t.Run("cache-hit-returns", func(t *testing.T) {
 		viper.Reset()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
-		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
-		institutionsCache = ttlcache.New[string, []Institution]()
+		mockInsts := []registrationFieldOption{{Name: "Foo", ID: "001"}}
 		// Expired but never evicted, so Has() still returns true
-		institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
+		optionsCache.Set(mockUrl.String(), mockInsts, time.Second)
 
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
@@ -1274,7 +1373,7 @@ func TestListInsitutions(t *testing.T) {
 		bytes, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 
-		getInsts := []Institution{}
+		getInsts := []registrationFieldOption{}
 		err = json.Unmarshal(bytes, &getInsts)
 		require.NoError(t, err)
 
@@ -1283,9 +1382,9 @@ func TestListInsitutions(t *testing.T) {
 
 	t.Run("nil-cache-with-nonnil-config-returns", func(t *testing.T) {
 		viper.Reset()
-		institutionsCache = nil
+		optionsCache.DeleteAll()
 
-		mockInstsConfig := []Institution{{Name: "foo", ID: "bar"}}
+		mockInstsConfig := []registrationFieldOption{{Name: "foo", ID: "bar"}}
 		viper.Set("Registry.Institutions", mockInstsConfig)
 
 		// Create a request to the endpoint
@@ -1298,7 +1397,7 @@ func TestListInsitutions(t *testing.T) {
 		bytes, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 
-		getInsts := []Institution{}
+		getInsts := []registrationFieldOption{}
 		err = json.Unmarshal(bytes, &getInsts)
 		require.NoError(t, err)
 
@@ -1309,12 +1408,11 @@ func TestListInsitutions(t *testing.T) {
 		viper.Reset()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
-		mockInsts := []Institution{{Name: "Foo", ID: "001"}}
-		institutionsCache = ttlcache.New[string, []Institution]()
+		mockInsts := []registrationFieldOption{{Name: "Foo", ID: "001"}}
 		// Expired but never evicted, so Has() still returns true
-		institutionsCache.Set(mockUrl.String(), mockInsts, time.Second)
+		optionsCache.Set(mockUrl.String(), mockInsts, time.Second)
 
-		mockInstsConfig := []Institution{{Name: "foo", ID: "bar"}}
+		mockInstsConfig := []registrationFieldOption{{Name: "foo", ID: "bar"}}
 		viper.Set("Registry.Institutions", mockInstsConfig)
 
 		// Create a request to the endpoint
@@ -1327,7 +1425,7 @@ func TestListInsitutions(t *testing.T) {
 		bytes, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 
-		getInsts := []Institution{}
+		getInsts := []registrationFieldOption{}
 		err = json.Unmarshal(bytes, &getInsts)
 		require.NoError(t, err)
 
@@ -1336,6 +1434,6 @@ func TestListInsitutions(t *testing.T) {
 }
 
 func TestPopulateRegistrationFields(t *testing.T) {
-	result := populateRegistrationFields("", Namespace{})
+	result := populateRegistrationFields("", server_structs.Namespace{})
 	assert.NotEqual(t, 0, len(result))
 }

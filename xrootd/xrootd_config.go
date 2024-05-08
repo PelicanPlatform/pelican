@@ -110,7 +110,9 @@ type (
 		LowWatermark   string
 		ExportLocation string
 		RunLocation    string
-		DataLocation   string
+		DataLocations  []string
+		MetaLocations  []string
+		LocalRoot      string
 		PSSOrigin      string
 		Concurrency    int
 	}
@@ -274,19 +276,37 @@ func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, 
 		return "", errors.Wrapf(err, "Unable to create export directory %v",
 			filepath.Dir(exportPath))
 	}
-	dataPath := filepath.Join(param.Cache_DataLocation.GetString(), "data/")
-	dataPath = filepath.Clean(dataPath)
-	err = config.MkdirAll(dataPath, 0775, uid, gid)
+
+	localRoot := param.Cache_LocalRoot.GetString()
+
+	localRoot = filepath.Clean(localRoot)
+	err = config.MkdirAll(localRoot, 0775, uid, gid)
+
 	if err != nil {
-		return "", errors.Wrapf(err, "Unable to create data directory %v",
-			filepath.Dir(dataPath))
+		return "", errors.Wrapf(err, "Unable to create local root %v",
+			filepath.Dir(localRoot))
 	}
-	metaPath := filepath.Join(param.Cache_DataLocation.GetString(), "meta/")
-	metaPath = filepath.Clean(metaPath)
-	err = config.MkdirAll(metaPath, 0775, uid, gid)
-	if err != nil {
-		return "", errors.Wrapf(err, "Unable to create meta directory %v",
-			filepath.Dir(metaPath))
+
+	dataPaths := param.Cache_DataLocations.GetStringSlice()
+	for _, dPath := range dataPaths {
+		dataPath := filepath.Clean(dPath)
+		err = config.MkdirAll(dataPath, 0775, uid, gid)
+
+		if err != nil {
+			return "", errors.Wrapf(err, "Unable to create data directory %v",
+				filepath.Dir(dataPath))
+		}
+	}
+
+	metaPaths := param.Cache_MetaLocations.GetStringSlice()
+	for _, mPath := range metaPaths {
+		metaPath := filepath.Clean(mPath)
+		err = config.MkdirAll(metaPath, 0775, uid, gid)
+
+		if err != nil {
+			return "", errors.Wrapf(err, "Unable to create meta directory %v",
+				filepath.Dir(metaPath))
+		}
 	}
 
 	fedInfo, err := config.GetFederation(context.Background())
@@ -671,9 +691,8 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 				return "", errors.Wrapf(err, "Failed to parse external web URL: %s", externalWebUrl)
 			}
 
-			// Strip the port number from the URL
-			externalWebUrl.Host = externalWebUrl.Hostname()
-			if err := os.Setenv("XRDHOST", externalWebUrl.String()); err != nil {
+			// Strip the scheme and port number from the URL and use to set XRDHOST
+			if err := os.Setenv("XRDHOST", externalWebUrl.Hostname()); err != nil {
 				return "", err
 			}
 		}
@@ -833,9 +852,9 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	// https://github.com/xrootd/xrootd/blob/8f8498d66aa583c54c0875bb1cfe432f4be040f4/src/XrdSciTokens/XrdSciTokensAccess.cc#L951-L963
 	xrdConfig.Logging.OriginScitokens, err = genLoggingConfig("scitokens", xrdConfig, param.Logging_Origin_Scitokens.GetString(), loggingMap{
 		Trace: "all",
-		Debug: "debug",
-		Info:  "info",
-		Warn:  "warning",
+		Debug: "debug info warning error",
+		Info:  "info warning error",
+		Warn:  "warning error",
 		Error: "error",
 		Fatal: "none",
 	})
