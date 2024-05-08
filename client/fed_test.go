@@ -804,6 +804,7 @@ func TestObjectList(t *testing.T) {
 			assert.NotContains(t, buf.String(), "hello_world.txt")
 		}
 	})
+
 	// Test that fileonly works and only lists files
 	t.Run("testPelicanObjectLsFileOnly", func(t *testing.T) {
 		// Set path for object to upload/download
@@ -872,5 +873,31 @@ func TestObjectList(t *testing.T) {
 		err := client.DoList(fed.Ctx, uploadURL, nil, client.WithTokenLocation(tempToken.Name()))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "404: No namespace found for path. Either it doesn't exist, or the Director is experiencing problems")
+	})
+
+	// Test we don't fail when we 'ls' a file instead of a directory
+	t.Run("testPelicanObjectLsOnFile", func(t *testing.T) {
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix, "hello_world.txt")
+
+			// Create a pipe for output
+			r, w, _ := os.Pipe()
+			originalStdout := os.Stdout
+			os.Stdout = w
+
+			flags := map[string]bool{"fileonly": true}
+
+			go func() {
+				err := client.DoList(fed.Ctx, uploadURL, flags, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				w.Close()
+			}()
+			var buf bytes.Buffer
+			io.Copy(&buf, r)
+			os.Stdout = originalStdout
+
+			assert.Contains(t, buf.String(), "hello_world.txt")
+		}
 	})
 }
