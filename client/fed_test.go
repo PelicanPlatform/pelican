@@ -770,7 +770,8 @@ func TestObjectList(t *testing.T) {
 				w.Close()
 			}()
 			var buf bytes.Buffer
-			io.Copy(&buf, r)
+			_, err = io.Copy(&buf, r)
+			require.NoError(t, err)
 			os.Stdout = originalStdout
 
 			assert.Contains(t, buf.String(), "hello_world.txt")
@@ -797,7 +798,8 @@ func TestObjectList(t *testing.T) {
 				w.Close()
 			}()
 			var buf bytes.Buffer
-			io.Copy(&buf, r)
+			_, err = io.Copy(&buf, r)
+			require.NoError(t, err)
 			os.Stdout = originalStdout
 
 			assert.Contains(t, buf.String(), "test")
@@ -824,7 +826,8 @@ func TestObjectList(t *testing.T) {
 				w.Close()
 			}()
 			var buf bytes.Buffer
-			io.Copy(&buf, r)
+			_, err = io.Copy(&buf, r)
+			require.NoError(t, err)
 			os.Stdout = originalStdout
 
 			assert.NotContains(t, buf.String(), "test")
@@ -851,7 +854,8 @@ func TestObjectList(t *testing.T) {
 				w.Close()
 			}()
 			var buf bytes.Buffer
-			io.Copy(&buf, r)
+			_, err = io.Copy(&buf, r)
+			require.NoError(t, err)
 			os.Stdout = originalStdout
 
 			assert.Contains(t, buf.String(), "test")
@@ -894,7 +898,8 @@ func TestObjectList(t *testing.T) {
 				w.Close()
 			}()
 			var buf bytes.Buffer
-			io.Copy(&buf, r)
+			_, err = io.Copy(&buf, r)
+			require.NoError(t, err)
 			os.Stdout = originalStdout
 
 			assert.Contains(t, buf.String(), "hello_world.txt")
