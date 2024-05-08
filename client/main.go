@@ -469,6 +469,77 @@ func schemeUnderstood(scheme string) error {
 	return nil
 }
 
+// TODO function header
+func DoList(ctx context.Context, remoteObject string, flagOptions map[string]bool, options ...TransferOption) (err error) { //TODO change from TransferOption to something with ls
+	// First, create a handler for any panics that occur
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugln("Panic captured while attempting to perform transfer (DoList):", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoList: %v", r)
+			err = errors.New(ret)
+		}
+	}()
+
+	remoteObjectUrl, err := url.Parse(remoteObject)
+	if err != nil {
+		return errors.Wrap(err, "failed to parse remote object URL")
+	}
+
+	remoteObjectScheme := remoteObjectUrl.Scheme
+
+	// Check if we understand the found url scheme
+	err = schemeUnderstood(remoteObjectScheme)
+	if err != nil {
+		return err
+	}
+	te := NewTransferEngine(ctx)
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+
+	pelicanURL, err := te.newPelicanURL(remoteObjectUrl)
+	if err != nil {
+		return errors.Wrap(err, "Failed to generate pelicanURL object")
+	}
+
+	ns, err := getNamespaceInfo(ctx, remoteObjectUrl.Path, pelicanURL.directorUrl, false, "")
+	if err != nil {
+		return err
+	}
+
+	// Get our token if needed
+	tokenLocation := ""
+	acquire := true
+	token := ""
+	for _, option := range options {
+		switch option.Ident() {
+		case identTransferOptionTokenLocation{}:
+			tokenLocation = option.Value().(string)
+		case identTransferOptionAcquireToken{}:
+			acquire = option.Value().(bool)
+		case identTransferOptionToken{}:
+			token = option.Value().(string)
+		}
+	}
+
+	if ns.UseTokenOnRead && token == "" {
+		token, err = getToken(remoteObjectUrl, ns, true, "", tokenLocation, acquire)
+		if err != nil {
+			return errors.Errorf("failed to get token for transfer: %v", err)
+		}
+	}
+
+	err = listHttp(ctx, remoteObjectUrl, pelicanURL.directorUrl, ns, token, flagOptions)
+	if err != nil {
+		return
+	}
+
+	return nil
+}
+
 /*
 	Start of transfer for pelican object put, gets information from the target destination before doing our HTTP PUT request
 

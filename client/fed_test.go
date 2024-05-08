@@ -21,9 +21,11 @@
 package client_test
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -695,5 +697,180 @@ func TestNewTransferJob(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tc.NewTransferJob(context.Background(), remoteUrl, t.TempDir(), false, false)
 		assert.NoError(t, err)
+	})
+}
+
+// A test that spins up a federation, and tests object list
+func TestObjectList(t *testing.T) {
+	viper.Reset()
+	server_utils.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
+	defer viper.Reset()
+	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
+
+	// Other set-up items:
+	testFileContent := "test file content"
+	// Create the temporary file to upload
+	tempFile, err := os.CreateTemp(t.TempDir(), "test")
+	assert.NoError(t, err, "Error creating temp file")
+	defer os.Remove(tempFile.Name())
+	_, err = tempFile.WriteString(testFileContent)
+	assert.NoError(t, err, "Error writing to temp file")
+	tempFile.Close()
+
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+
+	// Create a token file
+	tokenConfig := token.NewWLCGToken()
+	tokenConfig.Lifetime = time.Minute
+	tokenConfig.Issuer = issuer
+	tokenConfig.Subject = "origin"
+	tokenConfig.AddAudienceAny()
+
+	scopes := []token_scopes.TokenScope{}
+	readScope, err := token_scopes.Storage_Read.Path("/")
+	assert.NoError(t, err)
+	scopes = append(scopes, readScope)
+	modScope, err := token_scopes.Storage_Modify.Path("/")
+	assert.NoError(t, err)
+	scopes = append(scopes, modScope)
+	tokenConfig.AddScopes(scopes...)
+	token, err := tokenConfig.CreateToken()
+	assert.NoError(t, err)
+	tempToken, err := os.CreateTemp(t.TempDir(), "token")
+	assert.NoError(t, err, "Error creating temp token file")
+	defer os.Remove(tempToken.Name())
+	_, err = tempToken.WriteString(token)
+	assert.NoError(t, err, "Error writing to temp token file")
+	tempToken.Close()
+	// Disable progress bars to not reuse the same mpb instance
+	viper.Set("Logging.DisableProgressBars", true)
+
+	// Make directories for test within origin exports
+	destDir1 := filepath.Join(fed.Exports[0].StoragePrefix, "test")
+	require.NoError(t, os.MkdirAll(destDir1, os.FileMode(0755)))
+	destDir2 := filepath.Join(fed.Exports[1].StoragePrefix, "test")
+	require.NoError(t, os.MkdirAll(destDir2, os.FileMode(0755)))
+
+	// This tests object ls with no flags set
+	t.Run("testPelicanObjectLsNoFlags", func(t *testing.T) {
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
+
+			// Create a pipe for output
+			r, w, _ := os.Pipe()
+			originalStdout := os.Stdout
+			os.Stdout = w
+
+			go func() {
+				err := client.DoList(fed.Ctx, uploadURL, nil, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				w.Close()
+			}()
+			var buf bytes.Buffer
+			io.Copy(&buf, r)
+			os.Stdout = originalStdout
+
+			assert.Contains(t, buf.String(), "hello_world.txt")
+			assert.Contains(t, buf.String(), "test")
+		}
+	})
+
+	// Test that dironly works and does not list files
+	t.Run("testPelicanObjectLsDirOnly", func(t *testing.T) {
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
+
+			// Create a pipe for output
+			r, w, _ := os.Pipe()
+			originalStdout := os.Stdout
+			os.Stdout = w
+
+			flags := map[string]bool{"dironly": true}
+
+			go func() {
+				err := client.DoList(fed.Ctx, uploadURL, flags, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				w.Close()
+			}()
+			var buf bytes.Buffer
+			io.Copy(&buf, r)
+			os.Stdout = originalStdout
+
+			assert.Contains(t, buf.String(), "test")
+			assert.NotContains(t, buf.String(), "hello_world.txt")
+		}
+	})
+	// Test that fileonly works and only lists files
+	t.Run("testPelicanObjectLsFileOnly", func(t *testing.T) {
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
+
+			// Create a pipe for output
+			r, w, _ := os.Pipe()
+			originalStdout := os.Stdout
+			os.Stdout = w
+
+			flags := map[string]bool{"fileonly": true}
+
+			go func() {
+				err := client.DoList(fed.Ctx, uploadURL, flags, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				w.Close()
+			}()
+			var buf bytes.Buffer
+			io.Copy(&buf, r)
+			os.Stdout = originalStdout
+
+			assert.NotContains(t, buf.String(), "test")
+			assert.Contains(t, buf.String(), "hello_world.txt")
+		}
+	})
+
+	// Test that long works
+	t.Run("testPelicanObjectLsLong", func(t *testing.T) {
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
+
+			// Create a pipe for output
+			r, w, _ := os.Pipe()
+			originalStdout := os.Stdout
+			os.Stdout = w
+
+			flags := map[string]bool{"long": true}
+
+			go func() {
+				err := client.DoList(fed.Ctx, uploadURL, flags, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				w.Close()
+			}()
+			var buf bytes.Buffer
+			io.Copy(&buf, r)
+			os.Stdout = originalStdout
+
+			assert.Contains(t, buf.String(), "test")
+			// permissions for test
+			assert.Contains(t, buf.String(), "drwxrwxr-x")
+
+			assert.Contains(t, buf.String(), "hello_world.txt")
+			// permissions for hello_world.txt
+			assert.Contains(t, buf.String(), "-rw-rw-r--")
+		}
+	})
+
+	// Test we fail when we have an incorrect path
+	t.Run("testPelicanObjectLsFailWhenPathIncorrect", func(t *testing.T) {
+		// set the prefix to /first instead of /first/namespace
+		federationPrefix := "/first/"
+		uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), federationPrefix)
+
+		err := client.DoList(fed.Ctx, uploadURL, nil, client.WithTokenLocation(tempToken.Name()))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "404: No namespace found for path. Either it doesn't exist, or the Director is experiencing problems")
 	})
 }
