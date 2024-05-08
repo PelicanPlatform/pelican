@@ -1097,11 +1097,15 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		// Query the director a PROPFIND to see if we can get our directory listing
 		resp, err := queryDirector(tj.ctx, "PROPFIND", remoteUrl.Path, tj.directorUrl)
 		if err != nil {
-			return nil, err
-		}
-		// If the director responds with 405 (method not allowed), we're working with an old Director.
-		// In that event, we try to fallback and use the deprecated dirlisthost
-		if resp.StatusCode == http.StatusMethodNotAllowed {
+			// If we have an issue querying the director, we want to fallback to the deprecated dirlisthost from the namespace
+			// At this point, we have already queried the director (and it should have succeeded if we are here) so the error
+			// we get is most likely an issue with PROPFIND (and an outdated director). So we should try to continue.
+			if tj.namespace.DirListHost == "" {
+				return nil, err
+			}
+		} else if resp.StatusCode == http.StatusMethodNotAllowed {
+			// If the director responds with 405 (method not allowed), we're working with an old Director.
+			// In that event, we try to fallback and use the deprecated dirlisthost
 			log.Debugln("Failed to find collections url from director, attempting to find directory listings host in namespace")
 			// Check for a dir list host in namespace
 			if tj.namespace.DirListHost == "" {
