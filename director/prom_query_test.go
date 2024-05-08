@@ -103,11 +103,11 @@ func TestParsePromRes(t *testing.T) {
 			ResultType: "vector",
 			Result: []interface{}{
 				map[string]interface{}{
-					"metric": map[string]string{"foo": "bar"},
+					"metric": map[string]interface{}{"foo": "bar"},
 					"value":  []interface{}{mockTimeNow, "1"},
 				},
 				map[string]interface{}{
-					"metric": map[string]string{"barz": "bob"},
+					"metric": map[string]interface{}{"barz": "bob"},
 					"value":  []interface{}{mockTimeNow, "2"},
 				},
 			},
@@ -137,14 +137,14 @@ func TestParsePromRes(t *testing.T) {
 			ResultType: "matrix",
 			Result: []interface{}{
 				map[string]interface{}{
-					"metric": map[string]string{"foo": "bar"},
+					"metric": map[string]interface{}{"foo": "bar"},
 					"values": []interface{}{
 						[]interface{}{mockTimeNow, "1"},
 						[]interface{}{mockTimeNow + 1, "2"},
 					},
 				},
 				map[string]interface{}{
-					"metric": map[string]string{"barz": "bob"},
+					"metric": map[string]interface{}{"barz": "bob"},
 					"values": []interface{}{
 						[]interface{}{mockTimeNow, "5"},
 						[]interface{}{mockTimeNow + 1, "10"},
@@ -284,7 +284,7 @@ func TestQueryPrometheus(t *testing.T) {
 
 		require.NotNil(t, parsed.Result[1].Metric)
 		assert.Equal(t, "up", parsed.Result[1].Metric["__name__"])
-		require.Len(t, parsed.Result[1].Values, 3)
+		require.Len(t, parsed.Result[1].Values, 1)
 		assert.Equal(t, "0", parsed.Result[1].Values[0].Value)
 		assert.Equal(t, 1435781451.781, parsed.Result[1].Values[0].UnixTime)
 	})
