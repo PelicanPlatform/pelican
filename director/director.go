@@ -736,7 +736,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		Listings:    adV2.Caps.Listings,
 	}
 
-	recordAd(sAd, &adV2.Namespaces)
+	recordAd(engineCtx, sAd, &adV2.Namespaces)
 
 	// Start director periodic test of origin's health status if origin AD
 	// has WebURL field AND it's not already been registered
@@ -801,23 +801,6 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				return nil
 			})
 		}
-	}
-
-	// Prepare `stat` call utilities
-	statUtilsMutex.Lock()
-	defer statUtilsMutex.Unlock()
-	statUtil, ok := statUtils[sAd.URL.String()]
-	if !ok || statUtil.Errgroup == nil {
-		baseCtx, cancel := context.WithCancel(engineCtx)
-		concLimit := param.Director_StatConcurrencyLimit.GetInt()
-		statErrGrp := errgroup.Group{}
-		statErrGrp.SetLimit(concLimit)
-		newUtil := serverStatUtil{
-			Errgroup: &statErrGrp,
-			Cancel:   cancel,
-			Context:  baseCtx,
-		}
-		statUtils[sAd.URL.String()] = newUtil
 	}
 
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "Successful registration"})

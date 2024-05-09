@@ -19,6 +19,7 @@
 package director
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -152,7 +153,7 @@ func TestAdvertiseOSDF(t *testing.T) {
 	defer topoServer.Close()
 	viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 
-	err := AdvertiseOSDF()
+	err := AdvertiseOSDF(context.Background())
 	require.NoError(t, err)
 
 	var foundServer server_structs.Advertisement

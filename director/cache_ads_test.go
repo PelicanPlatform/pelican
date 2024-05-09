@@ -153,12 +153,12 @@ func TestGetAdsForPath(t *testing.T) {
 	o2Slice := []server_structs.NamespaceAdV2{nsAd2, nsAd3}
 	c1Slice := []server_structs.NamespaceAdV2{nsAd1, nsAd2}
 	topoSlice := []server_structs.NamespaceAdV2{nsAdTopo1}
-	recordAd(originAd2, &o2Slice)
-	recordAd(originAd1, &o1Slice)
+	recordAd(context.Background(), originAd2, &o2Slice)
+	recordAd(context.Background(), originAd1, &o1Slice)
 	// Add a server from Topology that serves /chtc namespace
-	recordAd(originAdTopo1, &topoSlice)
-	recordAd(cacheAd1, &c1Slice)
-	recordAd(cacheAd2, &o1Slice)
+	recordAd(context.Background(), originAdTopo1, &topoSlice)
+	recordAd(context.Background(), cacheAd1, &c1Slice)
+	recordAd(context.Background(), cacheAd2, &o1Slice)
 
 	// If /chtc is served both from topology and Pelican, the Topology server/namespace should be ignored
 	nsAd, oAds, cAds := getAdsForPath("/chtc")
@@ -399,20 +399,20 @@ func TestRecordAd(t *testing.T) {
 	}
 
 	t.Run("topology-server-added-if-no-duplicate", func(t *testing.T) {
-		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
+		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(topologyServerUrl.String()))
 	})
 
 	t.Run("pelican-server-added-if-no-duplicate", func(t *testing.T) {
-		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
+		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
 	})
 
 	t.Run("pelican-server-overwrites-topology", func(t *testing.T) {
-		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
-		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
+		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
+		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
 
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
@@ -422,8 +422,8 @@ func TestRecordAd(t *testing.T) {
 	})
 
 	t.Run("topology-server-is-ignored-with-dup-pelican-server", func(t *testing.T) {
-		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
-		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
+		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
+		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
 
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))

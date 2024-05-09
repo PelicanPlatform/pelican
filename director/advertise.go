@@ -71,8 +71,8 @@ func parseServerAd(server utils.Server, serverType server_structs.ServerType) se
 }
 
 // Populate internal cache with origin/cache ads
-func AdvertiseOSDF() error {
-	namespaces, err := utils.GetTopologyJSON()
+func AdvertiseOSDF(ctx context.Context) error {
+	namespaces, err := utils.GetTopologyJSON(ctx)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
@@ -156,11 +156,11 @@ func AdvertiseOSDF() error {
 	}
 
 	for originAd, namespacesSlice := range originAdMap {
-		recordAd(originAd, &namespacesSlice)
+		recordAd(ctx, originAd, &namespacesSlice)
 	}
 
 	for cacheAd, namespacesSlice := range cacheAdMap {
-		recordAd(cacheAd, &namespacesSlice)
+		recordAd(ctx, cacheAd, &namespacesSlice)
 	}
 
 	return nil
@@ -174,7 +174,7 @@ func PeriodicCacheReload(ctx context.Context) {
 			// The ad cache times out every 15 minutes, so update it every
 			// 10. If a key isn't updated, it will survive for 5 minutes
 			// and then disappear
-			err := AdvertiseOSDF()
+			err := AdvertiseOSDF(ctx)
 			if err != nil {
 				log.Warningf("Failed to re-advertise: %s. Will try again later",
 					err)
