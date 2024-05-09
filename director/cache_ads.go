@@ -61,6 +61,8 @@ func (f filterType) String() string {
 		return "Disabled via the Topology policy"
 	case tempAllowed:
 		return "Temporarily enabled via the admin website"
+	case "": // Here is to simplify the empty value at the UI side
+		return ""
 	default:
 		return "Unknown Type"
 	}
