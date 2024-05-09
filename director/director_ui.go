@@ -164,12 +164,18 @@ func queryOrigins(ctx *gin.Context) {
 		})
 		return
 	}
+	token := ""
+	authHeader := ctx.Request.Header.Get("Authorization")
+	if authHeader != "" {
+		token = strings.TrimPrefix(authHeader, "Bearer ")
+	}
 	qr := NewObjectStat().Query(
 		ctx,
 		path,
 		config.OriginType,
 		queryParams.MinResponses,
 		queryParams.MaxResponses,
+		WithToken(token),
 	)
 	if qr.Status == querySuccessful {
 		ctx.JSON(http.StatusOK, qr)

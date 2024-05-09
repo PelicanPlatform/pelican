@@ -58,11 +58,31 @@ func TestQueryServersForObject(t *testing.T) {
 	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
 
 	mockTTLCache := func() {
-		mockServerAd1 := server_structs.ServerAd{Name: "origin1", URL: url.URL{Host: "example1.com", Scheme: "https"}, Type: server_structs.OriginType}
-		mockServerAd2 := server_structs.ServerAd{Name: "origin2", URL: url.URL{Host: "example2.com", Scheme: "https"}, Type: server_structs.OriginType}
-		mockServerAd3 := server_structs.ServerAd{Name: "origin3", URL: url.URL{Host: "example3.com", Scheme: "https"}, Type: server_structs.OriginType}
-		mockServerAd4 := server_structs.ServerAd{Name: "origin4", URL: url.URL{Host: "example4.com", Scheme: "https"}, Type: server_structs.OriginType}
-		mockServerAd5 := server_structs.ServerAd{Name: "cache1", URL: url.URL{Host: "cache1.com", Scheme: "https"}, Type: server_structs.CacheType}
+		mockServerAd1 := server_structs.ServerAd{
+			Name:    "origin1",
+			URL:     url.URL{Host: "example1.com", Scheme: "https"},
+			AuthURL: url.URL{Host: "example1.com:8444", Scheme: "https"},
+			Type:    server_structs.OriginType}
+		mockServerAd2 := server_structs.ServerAd{
+			Name:    "origin2",
+			URL:     url.URL{Host: "example2.com", Scheme: "https"},
+			AuthURL: url.URL{Host: "example2.com:8444", Scheme: "https"},
+			Type:    server_structs.OriginType}
+		mockServerAd3 := server_structs.ServerAd{
+			Name:    "origin3",
+			URL:     url.URL{Host: "example3.com", Scheme: "https"},
+			AuthURL: url.URL{Host: "example3.com:8444", Scheme: "https"},
+			Type:    server_structs.OriginType}
+		mockServerAd4 := server_structs.ServerAd{
+			Name:    "origin4",
+			URL:     url.URL{Host: "example4.com", Scheme: "https"},
+			AuthURL: url.URL{Host: "example4.com:8444", Scheme: "https"},
+			Type:    server_structs.OriginType}
+		mockServerAd5 := server_structs.ServerAd{
+			Name:    "cache1",
+			URL:     url.URL{Host: "cache1.com", Scheme: "https"},
+			AuthURL: url.URL{Host: "cache1.com:8444", Scheme: "https"},
+			Type:    server_structs.CacheType}
 		mockNsAd0 := server_structs.NamespaceAdV2{Path: "/foo"}
 		mockNsAd1 := server_structs.NamespaceAdV2{Path: "/foo/bar"}
 		mockNsAd2 := server_structs.NamespaceAdV2{Path: "/foo/x"}

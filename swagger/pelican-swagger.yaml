@@ -320,6 +320,37 @@ definitions:
               description: The unique identifier of the option that will be stored in db
               example: "option1"
           minItems: 0
+  ObjectStatResponse:
+    type: object
+    properties:
+      status:
+        type: string
+        example: "success"
+        description: The status of the stat call. Will be either "success" or "error"
+      msg:
+        type: string
+        example: "Stat finished with required number of responses."
+        description: The detailed message of the status
+      errorType:
+        type: string
+        example: "ParameterError"
+        description: |
+          The type of the error if status == "error".
+          Will be one of "ParameterError" | "NoPrefixMatchError" | "InsufficientResError" |  "CancelledError"
+      objects:
+        type: array
+        description: The metadata of objects if status == "success"
+        items:
+          type: object
+          $ref: "#/definitions/ObjectStatMetadata"
+      deniedServers:
+        type: array
+        description: |
+          A list of issuer URLs from servers who responded with 403 to the stat request.
+          Used for obtaining a token to access the object.
+        items:
+          type: string
+          example: "https://pelican-origin.org:8444"
   ObjectStatMetadata:
     type: object
     properties:
@@ -1583,7 +1614,10 @@ paths:
       tags:
         - "director_ui"
       summary: Get a list of origins willing to serve an object
-      description: "`Authentication Required`"
+      description: |
+        To stat protected origins, you may pass a valid bearer token via the `Authorization` header.
+
+        You need to obtain the token from one of the origins willing to serve this file first.
       produces:
         - application/json
       parameters:
@@ -1606,30 +1640,11 @@ paths:
       responses:
         "200":
           description: Object is found in active origins and at least one origin responses successfully.
-            It returns 200 even if min_responses wasn't reached but it will mark `ok` field to `false`.
           schema:
             type: object
-            properties:
-              ok:
-                type: boolean
-                description: If the min_responses is satistifed.
-                example: true
-              message:
-                type: string
-                description: Additional message when a query returns
-                example: "Maximum responses reached for stat. Return result and cancel ongoing requests."
-              metadata:
-                type: array
-                items:
-                  $ref: "#/definitions/ObjectStatMetadata"
-                  minItems: 1
+            $ref: "#/definitions/ObjectStatResponse"
         "400":
           description: Bad request. Either min_responses > max_responses, or invalid path to the object.
-          schema:
-            type: object
-            $ref: "#/definitions/ErrorModelV2"
-        "401":
-          description: Authentication required to perform this action
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
@@ -1647,7 +1662,10 @@ paths:
       tags:
         - "director_ui"
       summary: Get a list of origins willing to serve an object
-      description: "`Authentication Required`"
+      description: |
+        To stat protected origins, you may pass a valid bearer token via the `Authorization` header.
+
+        You need to obtain the token from one of the origins willing to serve this file first.
       produces:
         - application/json
       parameters:
@@ -1670,23 +1688,9 @@ paths:
       responses:
         "200":
           description: Object is found in active origins and at least one origin responses successfully.
-            It returns 200 even if min_responses wasn't reached but it will mark `ok` field to `false`.
           schema:
             type: object
-            properties:
-              ok:
-                type: boolean
-                description: If the min_responses is satistifed.
-                example: true
-              message:
-                type: string
-                description: Additional message when a query returns
-                example: "Maximum responses reached for stat. Return result and cancel ongoing requests."
-              metadata:
-                type: array
-                items:
-                  $ref: "#/definitions/ObjectStatMetadata"
-                  minItems: 1
+            $ref: "#/definitions/ObjectStatResponse"
         "400":
           description: Bad request. Either min_responses > max_responses, or invalid path to the object.
           schema:
@@ -1694,11 +1698,6 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Object namespace not found in active origins, or no origin responses successfully.
-          schema:
-            type: object
-            $ref: "#/definitions/ErrorModelV2"
-        "401":
-          description: Authentication required to perform this action
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
