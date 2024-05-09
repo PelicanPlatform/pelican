@@ -572,7 +572,7 @@ func PopulateTopology() error {
 	}
 
 	// Next, get the values from topology
-	namespaces, err := utils.GetTopologyJSON()
+	namespaces, err := utils.GetTopologyJSON(false)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}

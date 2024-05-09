@@ -38,9 +38,10 @@ import (
 type filterType string
 
 const (
-	permFiltered filterType = "permFiltered" // Read from Director.FilteredServers
-	tempFiltered filterType = "tempFiltered" // Filtered by web UI
-	tempAllowed  filterType = "tempAllowed"  // Read from Director.FilteredServers but mutated by web UI
+	permFiltered filterType = "permFiltered"     // Read from Director.FilteredServers
+	tempFiltered filterType = "tempFiltered"     // Filtered by web UI
+	topoFiltered filterType = "topologyFiltered" // Filtered by Topology
+	tempAllowed  filterType = "tempAllowed"      // Read from Director.FilteredServers but mutated by web UI
 )
 
 var (
@@ -49,6 +50,21 @@ var (
 	filteredServers      = map[string]filterType{} // The map holds servers that are disabled, with the key being the ServerAd.Name
 	filteredServersMutex = sync.RWMutex{}
 )
+
+func (f filterType) String() string {
+	switch f {
+	case permFiltered:
+		return "Permanently Disabled via the director configuration"
+	case tempFiltered:
+		return "Temporarily disabled via the admin website"
+	case topoFiltered:
+		return "Disabled via the Topology policy"
+	case tempAllowed:
+		return "Temporarily enabled via the admin website"
+	default:
+		return "Unknown Type"
+	}
+}
 
 func recordAd(ad server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) {
 	if err := updateLatLong(&ad); err != nil {
