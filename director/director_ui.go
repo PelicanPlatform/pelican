@@ -164,48 +164,55 @@ func queryOrigins(ctx *gin.Context) {
 		})
 		return
 	}
-	meta, msg, err := NewObjectStat().Query(ctx, path, config.OriginType, queryParams.MinResponses, queryParams.MaxResponses)
-	if err != nil {
-		if err == NoPrefixMatchError {
-			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    err.Error(),
-			})
-			return
-		} else if err == ParameterError {
-			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    err.Error(),
-			})
-			return
-		} else if err == InsufficientResError {
-			// Insufficient response does not cause a 500 error, but OK field in response is false
-			if len(meta) < 1 {
-				ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    msg + " If no object is available, please check if the object is in a public namespace.",
-				})
-				return
-			}
-			res := statResponse{Message: msg, Metadata: meta, OK: false}
-			ctx.JSON(http.StatusOK, res)
-		} else {
-			log.Errorf("Error in NewObjectStat with path: %s, min responses: %d, max responses: %d. %v", path, queryParams.MinResponses, queryParams.MaxResponses, err)
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    err.Error(),
-			})
-			return
-		}
-	}
-	if len(meta) < 1 {
-		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+	qr := NewObjectStat().Query(
+		ctx,
+		path,
+		config.OriginType,
+		queryParams.MinResponses,
+		queryParams.MaxResponses,
+	)
+	if qr.Status == querySuccessful {
+		ctx.JSON(http.StatusOK, qr)
+		return
+	} else if qr.Status != queryFailed {
+		log.Errorf("Unknown stat call status: %#v", qr)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    err.Error() + " If no object is available, please check if the object is in a public namespace.",
+			Msg:    "Server error with stat call. Unknown stat call status: " + string(qr.Status),
+		})
+		return
+	}
+	// qr.Status == queryFailed
+	if qr.ErrorType == "" {
+		log.Errorf("A failed stat call doesn't contain error: %#v", qr)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server error with stat call. A failed stat call doesn't contain error.",
 		})
 	}
-	res := statResponse{Message: msg, Metadata: meta, OK: true}
-	ctx.JSON(http.StatusOK, res)
+	switch qr.ErrorType {
+	case queryNoPrefixMatchErr:
+		ctx.JSON(http.StatusNotFound, qr)
+		return
+	case queryParameterErr:
+		ctx.JSON(http.StatusBadRequest, qr)
+		return
+	case queryInsufficientResErr:
+		if len(qr.Objects) == 0 {
+			ctx.JSON(http.StatusNotFound, qr)
+			return
+		}
+		ctx.JSON(http.StatusOK, qr)
+		return
+	default:
+		errMsg := fmt.Sprintf("Unknown error type %q from the stat call with path: %s, min responses: %d, max responses: %d.", qr.ErrorType, path, queryParams.MinResponses, queryParams.MaxResponses)
+		log.Error(errMsg)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    errMsg,
+		})
+		return
+	}
 }
 
 // A gin route handler that given a server hostname through path variable `name`,

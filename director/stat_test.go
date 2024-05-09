@@ -29,12 +29,13 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 func TestQueryServersForObject(t *testing.T) {
@@ -47,7 +48,7 @@ func TestQueryServersForObject(t *testing.T) {
 	oldAds := serverAds
 
 	stat := NewObjectStat()
-	stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error) {
+	stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, token string, timeout time.Duration) (*objectMetadata, error) {
 		return &objectMetadata{URL: *dataUrl.JoinPath(objectName)}, nil
 	}
 
@@ -130,24 +131,24 @@ func TestQueryServersForObject(t *testing.T) {
 		defer cancel()
 		cleanupMock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
-		require.Error(t, err)
-		assert.Empty(t, msg)
-		assert.Equal(t, NoPrefixMatchError, err)
-		assert.Equal(t, 0, len(result))
+		assert.Equal(t, queryFailed, result.Status)
+		require.NotEmpty(t, result.Msg)
+		assert.Equal(t, queryNoPrefixMatchErr, result.ErrorType)
+		assert.Nil(t, result.Objects)
 	})
 
 	t.Run("invalid-min-max", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 3, 1)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 3, 1)
 
-		require.Error(t, err)
-		assert.Empty(t, msg)
-		assert.Equal(t, ParameterError, err)
-		assert.Equal(t, 0, len(result))
+		assert.Equal(t, queryFailed, result.Status)
+		require.NotEmpty(t, result.Msg)
+		assert.Equal(t, queryParameterErr, result.ErrorType)
+		assert.Nil(t, result.Objects)
 	})
 
 	t.Run("unmatched-prefix-returns", func(t *testing.T) {
@@ -157,12 +158,12 @@ func TestQueryServersForObject(t *testing.T) {
 		mockTTLCache()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/dne/random.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/dne/random.txt", config.OriginType, 0, 0)
 
-		require.Error(t, err)
-		assert.Empty(t, msg)
-		assert.Equal(t, NoPrefixMatchError, err)
-		assert.Equal(t, 0, len(result))
+		assert.Equal(t, queryFailed, result.Status)
+		require.NotEmpty(t, result.Msg)
+		assert.Equal(t, queryNoPrefixMatchErr, result.ErrorType)
+		assert.Nil(t, result.Objects)
 	})
 
 	t.Run("matched-prefixes-without-utils-returns-err", func(t *testing.T) {
@@ -172,12 +173,12 @@ func TestQueryServersForObject(t *testing.T) {
 		mockTTLCache()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
-		require.Error(t, err)
-		assert.Contains(t, msg, "Number of success response: 0 is less than MinStatRespons")
-		require.NotNil(t, result)
-		require.Equal(t, 0, len(result))
+		assert.Equal(t, queryFailed, result.Status)
+		assert.Equal(t, queryInsufficientResErr, result.ErrorType)
+		assert.Equal(t, "Number of success response: 0 is less than MinStatResponse (1) required.", result.Msg)
+		assert.Nil(t, result.Objects)
 	})
 
 	t.Run("matched-prefixes-with-max-1-returns-response", func(t *testing.T) {
@@ -188,15 +189,17 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
-		require.NoError(t, err)
+		assert.Equal(t, querySuccessful, result.Status)
+		assert.Empty(t, result.ErrorType)
 		// By default maxReq is set to 1. Therefore, although there's 2 matched prefixes,
 		// only one will be returned
-		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
-		require.NotNil(t, result)
-		require.Equal(t, 1, len(result))
-		assert.True(t, result[0].URL.String() == "https://example2.com/foo/bar/test.txt" || result[0].URL.String() == "https://example3.com/foo/bar/test.txt", "Return value is not expected:", result[0].URL.String())
+		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.Equal(t, 1, len(result.Objects))
+		assert.True(t, result.Objects[0].URL.String() == "https://example2.com/foo/bar/test.txt" ||
+			result.Objects[0].URL.String() == "https://example3.com/foo/bar/test.txt",
+			"Return value is not expected:", result.Objects[0].URL.String())
 	})
 
 	t.Run("prefix-only-in-cache-return-nil-when-only-querying-origin", func(t *testing.T) {
@@ -207,12 +210,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", config.OriginType, 0, 0)
 
-		require.Error(t, err)
-		assert.Empty(t, msg)
-		assert.Equal(t, NoPrefixMatchError, err)
-		assert.Equal(t, 0, len(result))
+		assert.Equal(t, queryFailed, result.Status)
+		require.NotEmpty(t, result.Msg)
+		assert.Equal(t, result.ErrorType, queryNoPrefixMatchErr)
+		assert.Nil(t, result.Objects)
 	})
 
 	t.Run("prefix-only-in-origin-return-nil-when-only-querying-cache", func(t *testing.T) {
@@ -223,12 +226,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/barz/test.txt", config.CacheType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/barz/test.txt", config.CacheType, 0, 0)
 
-		require.Error(t, err)
-		assert.Empty(t, msg)
-		assert.Equal(t, NoPrefixMatchError, err)
-		assert.Equal(t, 0, len(result))
+		assert.Equal(t, queryFailed, result.Status)
+		require.NotEmpty(t, result.Msg)
+		assert.Equal(t, result.ErrorType, queryNoPrefixMatchErr)
+		assert.Nil(t, result.Objects)
 	})
 
 	t.Run("prefix-only-in-cache-returns-when-only-querying-cache", func(t *testing.T) {
@@ -239,15 +242,17 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", config.CacheType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", config.CacheType, 0, 0)
 
-		require.NoError(t, err)
+		assert.Equal(t, querySuccessful, result.Status)
+		assert.Empty(t, result.ErrorType)
 		// By default maxReq is set to 1. Therefore, although there's 2 matched prefixes,
 		// only one will be returned
-		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
 		require.NotNil(t, result)
-		require.Equal(t, 1, len(result))
-		assert.Equal(t, "https://cache1.com/foo/cache/only/test.txt", result[0].URL.String(), "Return value is not expected:", result[0].URL.String())
+		require.Len(t, result.Objects, 1)
+		assert.Equal(t, "https://cache1.com/foo/cache/only/test.txt", result.Objects[0].URL.String(),
+			"Return value is not expected:", result.Objects[0].URL.String())
 	})
 
 	t.Run("prefix-only-in-cache-returns-when-querying-both", func(t *testing.T) {
@@ -261,15 +266,20 @@ func TestQueryServersForObject(t *testing.T) {
 		sType := config.CacheType
 		sType.Set(config.OriginType)
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", sType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", sType, 0, 0)
 
-		require.NoError(t, err)
+		assert.Equal(t, querySuccessful, result.Status)
+		assert.Empty(t, result.ErrorType)
 		// By default maxReq is set to 1. Therefore, although there's 2 matched prefixes,
 		// only one will be returned
-		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
-		require.NotNil(t, result)
-		require.Equal(t, 1, len(result))
-		assert.Equal(t, "https://cache1.com/foo/cache/only/test.txt", result[0].URL.String(), "Return value is not expected:", result[0].URL.String())
+		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.Len(t, result.Objects, 1)
+		assert.Equal(
+			t,
+			"https://cache1.com/foo/cache/only/test.txt",
+			result.Objects[0].URL.String(),
+			"Return value is not expected:", result.Objects[0].URL.String(),
+		)
 	})
 
 	t.Run("provided-cacheAd-overwrite-cached-ads", func(t *testing.T) {
@@ -290,15 +300,20 @@ func TestQueryServersForObject(t *testing.T) {
 		}
 		statUtilsMutex.Unlock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/overwrites/test.txt", config.CacheType, 0, 0, withCacheAds(mockCacheServer))
+		result := stat.queryServersForObject(ctx, "/overwrites/test.txt", config.CacheType, 0, 0, withCacheAds(mockCacheServer))
 
-		require.NoError(t, err)
+		assert.Equal(t, querySuccessful, result.Status)
+		assert.Empty(t, result.ErrorType)
 		// By default maxReq is set to 1. Therefore, although there's 2 matched prefixes,
 		// only one will be returned
-		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
-		require.NotNil(t, result)
-		require.Equal(t, 1, len(result))
-		assert.Equal(t, "https://cache-overwrites.com/overwrites/test.txt", result[0].URL.String(), "Return value is not expected:", result[0].URL.String())
+		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.Len(t, result.Objects, 1)
+		assert.Equal(
+			t,
+			"https://cache-overwrites.com/overwrites/test.txt",
+			result.Objects[0].URL.String(),
+			"Return value is not expected:", result.Objects[0].URL.String(),
+		)
 	})
 
 	t.Run("provided-originAds-overwrite-cached-ads", func(t *testing.T) {
@@ -319,15 +334,20 @@ func TestQueryServersForObject(t *testing.T) {
 		}
 		statUtilsMutex.Unlock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/overwrites/test.txt", config.OriginType, 0, 0, withOriginAds(mockOrigin))
+		result := stat.queryServersForObject(ctx, "/overwrites/test.txt", config.OriginType, 0, 0, withOriginAds(mockOrigin))
 
-		require.NoError(t, err)
+		assert.Equal(t, querySuccessful, result.Status)
+		assert.Empty(t, result.ErrorType)
 		// By default maxReq is set to 1. Therefore, although there's 2 matched prefixes,
 		// only one will be returned
-		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
-		require.NotNil(t, result)
-		require.Equal(t, 1, len(result))
-		assert.Equal(t, "https://origin-overwrites.com/overwrites/test.txt", result[0].URL.String(), "Return value is not expected:", result[0].URL.String())
+		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.Len(t, result.Objects, 1)
+		assert.Equal(
+			t,
+			"https://origin-overwrites.com/overwrites/test.txt",
+			result.Objects[0].URL.String(),
+			"Return value is not expected:", result.Objects[0].URL.String(),
+		)
 	})
 
 	t.Run("matched-prefixes-with-max-2-returns-response", func(t *testing.T) {
@@ -341,14 +361,14 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
-		require.NoError(t, err)
-		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
-		require.NotNil(t, result)
-		require.Equal(t, 2, len(result))
-		assert.True(t, result[0].URL.String() == "https://example2.com/foo/bar/test.txt" || result[0].URL.String() == "https://example3.com/foo/bar/test.txt")
-		assert.True(t, result[1].URL.String() == "https://example2.com/foo/bar/test.txt" || result[1].URL.String() == "https://example3.com/foo/bar/test.txt")
+		assert.Equal(t, querySuccessful, result.Status)
+		assert.Empty(t, result.ErrorType)
+		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.Len(t, result.Objects, 2)
+		assert.True(t, result.Objects[0].URL.String() == "https://example2.com/foo/bar/test.txt" || result.Objects[0].URL.String() == "https://example3.com/foo/bar/test.txt")
+		assert.True(t, result.Objects[1].URL.String() == "https://example2.com/foo/bar/test.txt" || result.Objects[1].URL.String() == "https://example3.com/foo/bar/test.txt")
 	})
 
 	t.Run("matched-prefixes-with-max-3-returns-response", func(t *testing.T) {
@@ -362,15 +382,15 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
-		require.NoError(t, err)
+		assert.Equal(t, querySuccessful, result.Status)
+		assert.Empty(t, result.ErrorType)
 		// Response =2 < maxreq, so there won't be any message
-		assert.Empty(t, msg)
-		require.NotNil(t, result)
-		require.Equal(t, 2, len(result))
-		assert.True(t, result[0].URL.String() == "https://example2.com/foo/bar/test.txt" || result[0].URL.String() == "https://example3.com/foo/bar/test.txt")
-		assert.True(t, result[1].URL.String() == "https://example2.com/foo/bar/test.txt" || result[1].URL.String() == "https://example3.com/foo/bar/test.txt")
+		assert.Equal(t, "Stat finished with required number of responses.", result.Msg)
+		require.Len(t, result.Objects, 2)
+		assert.True(t, result.Objects[0].URL.String() == "https://example2.com/foo/bar/test.txt" || result.Objects[0].URL.String() == "https://example3.com/foo/bar/test.txt")
+		assert.True(t, result.Objects[1].URL.String() == "https://example2.com/foo/bar/test.txt" || result.Objects[1].URL.String() == "https://example3.com/foo/bar/test.txt")
 	})
 
 	t.Run("matched-prefixes-with-min-3-returns-error", func(t *testing.T) {
@@ -386,12 +406,11 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
-		require.Error(t, err)
-		assert.Equal(t, "Number of success response: 2 is less than MinStatResponse (3) required.", msg)
-		require.NotNil(t, result)
-		require.Equal(t, 2, len(result))
+		assert.Equal(t, queryFailed, result.Status)
+		require.NotEmpty(t, result.Msg)
+		assert.Equal(t, "Number of success response: 2 is less than MinStatResponse (3) required.", result.Msg)
 	})
 
 	t.Run("param-overwrites-config", func(t *testing.T) {
@@ -407,13 +426,13 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 1, 1)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 1, 1)
 
-		require.NoError(t, err)
-		assert.Contains(t, msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
-		require.NotNil(t, result)
-		require.Equal(t, 1, len(result))
-		assert.True(t, result[0].URL.String() == "https://example2.com/foo/bar/test.txt" || result[0].URL.String() == "https://example3.com/foo/bar/test.txt")
+		assert.Equal(t, querySuccessful, result.Status)
+		assert.Empty(t, result.ErrorType)
+		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.Len(t, result.Objects, 1)
+		assert.True(t, result.Objects[0].URL.String() == "https://example2.com/foo/bar/test.txt" || result.Objects[0].URL.String() == "https://example3.com/foo/bar/test.txt")
 	})
 
 	t.Run("cancel-cancels-query", func(t *testing.T) {
@@ -422,7 +441,7 @@ func TestQueryServersForObject(t *testing.T) {
 			stat.ReqHandler = oldHandler
 		}()
 
-		stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error) {
+		stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, token string, timeout time.Duration) (*objectMetadata, error) {
 			time.Sleep(time.Second * 30)
 			return &objectMetadata{URL: *dataUrl.JoinPath(objectName)}, nil
 		}
@@ -436,8 +455,8 @@ func TestQueryServersForObject(t *testing.T) {
 		msgChan := make(chan string)
 
 		go func() {
-			_, msg, _ := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
-			msgChan <- msg
+			result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+			msgChan <- result.Msg
 		}()
 
 		cancel()
@@ -465,12 +484,12 @@ func TestQueryServersForObject(t *testing.T) {
 			stat.ReqHandler = oldHandler
 		}()
 
-		stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, timeout time.Duration) (*objectMetadata, error) {
+		stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, token string, timeout time.Duration) (*objectMetadata, error) {
 			if dataUrl.Host == "example2.com" {
-				return nil, timeoutError{}
+				return nil, headReqTimeoutErr{}
 			}
 			if dataUrl.Host == "example3.com" {
-				return nil, notFoundError{}
+				return nil, headReqNotFoundErr{}
 			}
 			return nil, errors.New("Default error")
 		}
@@ -482,12 +501,11 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result, msg, err := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
 
-		require.Error(t, err)
-		assert.Equal(t, "Number of success response: 0 is less than MinStatResponse (1) required.", msg)
-		require.NotNil(t, result)
-		assert.Len(t, result, 0)
+		assert.Equal(t, queryFailed, result.Status)
+		assert.Equal(t, "Number of success response: 0 is less than MinStatResponse (1) required.", result.Msg)
+		assert.Nil(t, result.Objects)
 	})
 }
 
@@ -539,7 +557,7 @@ func TestSendHeadReq(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReq(ctx, "/foo/bar/test.txt", mockOriginAd.URL, time.Second)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/test.txt", mockOriginAd.URL, "", time.Second)
 		require.NoError(t, err)
 		assert.NotNil(t, meta)
 		assert.Equal(t, 1, meta.ContentLength)
@@ -551,9 +569,9 @@ func TestSendHeadReq(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReq(ctx, "/foo/bar/dne", mockOriginAd.URL, time.Second)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/dne", mockOriginAd.URL, "", time.Second)
 		require.Error(t, err)
-		_, ok := err.(notFoundError)
+		_, ok := err.(headReqNotFoundErr)
 		assert.True(t, ok)
 		assert.Nil(t, meta)
 	})
@@ -563,9 +581,9 @@ func TestSendHeadReq(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReq(ctx, "/foo/bar/timeout.txt", mockOriginAd.URL, 200*time.Millisecond)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/timeout.txt", mockOriginAd.URL, "", 200*time.Millisecond)
 		require.Error(t, err)
-		_, ok := err.(timeoutError)
+		_, ok := err.(headReqTimeoutErr)
 		assert.True(t, ok)
 		assert.Nil(t, meta)
 	})
@@ -579,10 +597,10 @@ func TestSendHeadReq(t *testing.T) {
 			cancel()
 		}()
 
-		meta, err := stat.sendHeadReq(ctx, "/foo/bar/timeout.txt", mockOriginAd.URL, 5*time.Second)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/timeout.txt", mockOriginAd.URL, "", 5*time.Second)
 
 		require.Error(t, err)
-		_, ok := err.(cancelledError)
+		_, ok := err.(headReqCancelledErr)
 		assert.True(t, ok)
 		assert.Nil(t, meta)
 	})
@@ -592,9 +610,9 @@ func TestSendHeadReq(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReq(ctx, "/foo/bar/error.txt", mockOriginAd.URL, 200*time.Millisecond)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/error.txt", mockOriginAd.URL, "", 200*time.Millisecond)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Unknown origin response with status code 500")
+		assert.Contains(t, err.Error(), "unknown origin response with status code 500")
 		assert.Nil(t, meta)
 	})
 }
