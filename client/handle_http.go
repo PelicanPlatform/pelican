@@ -585,7 +585,12 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 // Returns a new transfer engine object whose lifetime is tied
 // to the provided context.  Will launcher worker goroutines to
 // handle the underlying transfers
-func NewTransferEngine(ctx context.Context) *TransferEngine {
+func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
+	// If we did not initClient yet, we should fail to avoid unexpected/undesired behavior
+	if !config.IsClientInitialized() {
+		return nil, errors.New("client has not been initialized, unable to create transfer engine")
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	egrp, _ := errgroup.WithContext(ctx)
 	work := make(chan *clientTransferJob, 5)
@@ -601,7 +606,7 @@ func NewTransferEngine(ctx context.Context) *TransferEngine {
 	// This is stopped in the `Shutdown` method
 	go pelicanURLCache.Start()
 
-	te := &TransferEngine{
+	te = &TransferEngine{
 		ctx:             ctx,
 		cancel:          cancel,
 		egrp:            egrp,
@@ -620,8 +625,7 @@ func NewTransferEngine(ctx context.Context) *TransferEngine {
 	}
 	workerCount := param.Client_WorkerCount.GetInt()
 	if workerCount <= 0 {
-		log.Errorln("Worker count must be a positive integer")
-		return nil
+		return nil, errors.New("worker count must be a positive integer")
 	}
 	for idx := 0; idx < workerCount; idx++ {
 		egrp.Go(func() error {
@@ -631,7 +635,7 @@ func NewTransferEngine(ctx context.Context) *TransferEngine {
 	te.workersActive = workerCount
 	egrp.Go(te.runMux)
 	egrp.Go(te.runJobHandler)
-	return te
+	return
 }
 
 // Create an option that provides a callback for a TransferClient

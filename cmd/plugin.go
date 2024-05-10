@@ -386,7 +386,11 @@ func writeClassadOutputAndBail(exitCode int, resultAds []*classads.ClassAd) {
 // writes the resultAds for each transfer
 // Returns: resultAds and if an error given is retryable
 func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTransfer, results chan<- *classads.ClassAd) (err error) {
-	te := client.NewTransferEngine(ctx)
+	te, err := client.NewTransferEngine(ctx)
+	if err != nil {
+		return
+	}
+
 	defer func() {
 		if shutdownErr := te.Shutdown(); shutdownErr != nil && err == nil {
 			err = shutdownErr

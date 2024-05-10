@@ -223,7 +223,8 @@ func TestCopyAuth(t *testing.T) {
 	server_utils.ResetOriginExports()
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 
-	te := client.NewTransferEngine(fed.Ctx)
+	te, err := client.NewTransferEngine(fed.Ctx)
+	require.NoError(t, err)
 
 	// Other set-up items:
 	testFileContent := "test file content"
@@ -624,7 +625,8 @@ func TestNewTransferJob(t *testing.T) {
 	defer server_utils.ResetOriginExports()
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 
-	te := client.NewTransferEngine(fed.Ctx)
+	te, err := client.NewTransferEngine(fed.Ctx)
+	require.NoError(t, err)
 
 	// Test when we have a failure during namespace lookup (here we will get a 404)
 	t.Run("testFailureToGetNamespaceInfo", func(t *testing.T) {

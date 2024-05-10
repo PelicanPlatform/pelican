@@ -602,7 +602,9 @@ func TestNewPelicanURL(t *testing.T) {
 		// Init config to get proper timeouts
 		config.InitConfig()
 
-		te := NewTransferEngine(ctx)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
+
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -631,8 +633,8 @@ func TestNewPelicanURL(t *testing.T) {
 		config.InitConfig()
 		require.NoError(t, config.InitClient())
 
-		te := NewTransferEngine(ctx)
-		require.NotNil(t, te)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -655,14 +657,14 @@ func TestNewPelicanURL(t *testing.T) {
 		viper.Set("ConfigDir", t.TempDir())
 		config.InitConfig()
 		require.NoError(t, config.InitClient())
-		te := NewTransferEngine(ctx)
-		require.NotNil(t, te)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
 
 		mock.MockOSDFDiscovery(t, config.GetTransport())
-		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		_, err = config.SetPreferredPrefix(config.PelicanPrefix)
 		config.InitConfig()
 		assert.NoError(t, err)
 		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
@@ -686,8 +688,8 @@ func TestNewPelicanURL(t *testing.T) {
 		err := config.InitClient()
 		require.NoError(t, err)
 
-		te := NewTransferEngine(ctx)
-		require.NotNil(t, te)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -737,8 +739,8 @@ func TestNewPelicanURL(t *testing.T) {
 		viper.Set("ConfigDir", t.TempDir())
 		config.InitConfig()
 
-		te := NewTransferEngine(ctx)
-		require.NotNil(t, te)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -762,7 +764,8 @@ func TestNewPelicanURL(t *testing.T) {
 		err := config.InitClient()
 		require.NoError(t, err)
 
-		te := NewTransferEngine(ctx)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -849,5 +852,25 @@ func TestSearchJobAd(t *testing.T) {
 		// Call GetProjectName and check the result
 		jobId := searchJobAd(jobId)
 		assert.Equal(t, "12345", jobId)
+	})
+}
+
+func TestNewTransferEngine(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	// Test we fail if we do not call initclient() before
+	t.Run("TestInitClientNotCalled", func(t *testing.T) {
+		config.ResetClientInitialized()
+		ctx := context.Background()
+		_, err := NewTransferEngine(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "client has not been initialized, unable to create transfer engine")
+	})
+
+	t.Run("TestInitClientCalled", func(t *testing.T) {
+		config.InitClient()
+		ctx := context.Background()
+		_, err := NewTransferEngine(ctx)
+		assert.NoError(t, err)
 	})
 }
