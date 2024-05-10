@@ -77,6 +77,8 @@ func checkFilter(serverName string) (bool, filterType) {
 			return true, permFiltered
 		case tempFiltered:
 			return true, tempFiltered
+		case topoFiltered:
+			return true, topoFiltered
 		case tempAllowed:
 			return false, tempAllowed
 		default:
