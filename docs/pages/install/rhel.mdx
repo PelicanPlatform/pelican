@@ -10,11 +10,9 @@ You can install Pelican from the standalone RPM, or with the binary `.tar.gz` fi
 
 1. Navigate to [Pelican download page](../install.mdx) and select the Pelican RPM you want to install.
 
-2. In **Operating System** section, select **Linux**. In **Architechtures** section, select **X84_64** (Intel/AMD) or **AARCH64** (ARM) depending on the architecture of your machine.
+2. In **Operating System** section, select **Linux**. In **Architechtures** section, select **AMD64** or **ARM64** depending on the architecture of your machine.
 
-3. In the list of download candidates, copy the link to `pelican-x.x.x-aarch64.rpm` if you select **AARCH64** (ARM), or `pelican-x.x.x-1.x86_64.rpm` if you select **X84_64** (Intel/AMD). Where `x.x.x` is the version number.
-
-> Note that there are other candidates with `.rpm` extension in the list. If you are downloading a Pelican RPM to run a **Pelican server**, copy the link to `pelican-server-x.x.-aarch64.rpm` or `pelican-server-x.x.x-1.x86_64.rpm` instead. The `pelican-server` RPMs contains config files and systemd service files for pelican servers to help you get started.
+3. In the list of download candidates, copy the link to `pelican-x.x.x-1.x86_64.rpm` if you select **AMD64**, or `pelican-x.x.x-aarch64.rpm` if you select **ARM64** (ARM), where `x.x.x` is the version number.
 
 4. Change the following command with the link to the binary you copied in the previous step and run the command
 
@@ -22,7 +20,7 @@ You can install Pelican from the standalone RPM, or with the binary `.tar.gz` fi
     sudo yum install -y <replace-with-the-link-you-copied>
     ```
 
-    Example to install Pelican `v7.5.8` RPM for Intel/AMD machine:
+    Example to install Pelican `v7.5.8` RPM for AMD64/X86_64 machine:
 
     ```bash
     sudo yum install -y https://github.com/PelicanPlatform/pelican/releases/download/v7.5.8/pelican-7.5.8-1.x86_64.rpm
@@ -32,9 +30,9 @@ You can install Pelican from the standalone RPM, or with the binary `.tar.gz` fi
 
 1. Navigate to [Pelican download page](../install.mdx) and select the Pelican RPM you want to install.
 
-2. In **Operating System** section, select **Linux**. In **Architechtures** section, select **X84_64** (Intel/AMD) or **AARCH64** (ARM) depending on the architecture of your machine.
+2. In **Operating System** section, select **Linux**. In **Architechtures** section, select **AMD64** or **AMR64** depending on the architecture of your machine.
 
-3. In the list of candidates, copy the link to `pelican_Linux_arm64.tar.gz` if you select **AARCH64** (ARM), or `pelican_Linux_x86_64.tar.gz` if you select **X84_64** (Intel/AMD).
+3. In the list of candidates, copy the link to `pelican_Linux_x86_64.tar.gz` if you select **AMD64**, or `pelican_Linux_arm64.tar.gz` if you select **ARM64**.
 
 4. Change the following command with the link to the binary you copied in the previous step and run the command
 
@@ -45,14 +43,53 @@ You can install Pelican from the standalone RPM, or with the binary `.tar.gz` fi
 
     Note that you need to replace `pelican_Linux_arm64.tar.gz` with `pelican_Linux_x86_64.tar.gz` if you are running an Intel/AMD machine.
 
-    Example to install Pelican binary for an Intel/AMD machine:
+    Example to install Pelican binary for an ARM machine:
 
     ```bash
-    wget https://github.com/PelicanPlatform/pelican/releases/download/v7.5.8/pelican_Linux_x86_64.tar.gz
-    tar -zxvf pelican_Linux_x86_64.tar.gz
+    wget https://github.com/PelicanPlatform/pelican/releases/download/v7.5.8/pelican_Linux_arm64.tar.gz
+    tar -zxvf pelican_Linux_arm64.tar.gz
     ```
 
-5. At this step, you don't actually install Pelican, you just extract the binary. It is recommended that you add Pelican binary to your `PATH` environment variable to allow Pelican to be called from your command line.
+5. The above command extracted the binary from the tar file. You may run the binary in the current folder, but it is recommended that you add Pelican binary to your `PATH` environment variable to allow `pelican` to be called directly from your command line.
+
+    * Run Pelican binary from the downloaded folder:
+
+    ```bash
+    $ cd pelican_Linux_arm64 # Go to the binary folder
+    $ ./pelican --version # Run Pelican binary
+
+    Version: 7.5.8
+    Build Date: 2024-03-01T18:13:00Z
+    Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
+    Built By: goreleaser
+    ```
+
+    * Add Pelican binary to your `PATH` for the current terminal
+
+    ```bash
+    $ cd pelican_Linux_arm64 # Go to the binary folder
+    $ export PATH=$PWD:$PATH # Add current folder to the PATH
+    $ pelican --version # Run Pelican binary
+
+    Version: 7.5.8
+    Build Date: 2024-03-01T18:13:00Z
+    Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
+    Built By: goreleaser
+    ```
+
+    * Add Pelican binary to your `PATH` permanently
+
+    ```bash
+    $ cd pelican_Linux_arm64 # Go to the binary folder
+    $ echo 'export PATH=$PWD:$PATH' >> ~/.bashrc # Add the current folder to your .bashrc file
+    $ source ~/.bashrc # Apply the change
+    $ pelican --version # Run Pelican binary
+
+    Version: 7.5.8
+    Build Date: 2024-03-01T18:13:00Z
+    Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
+    Built By: goreleaser
+    ```
 
 ## Uninstall on CentOS, Fedora, or openSUSE
 
@@ -68,29 +105,9 @@ You can install Pelican from the standalone RPM, or with the binary `.tar.gz` fi
   sudo dnf remove replican
   ```
 
-## Verify Pelican is installed
-
-If you installed Pelican as a standalone binary, you need to add Pelican to your `PATH` environment variable before proceeding.
-
-1. Run the following command after you installed Pelican RPM
-
-    ```bash
-    which pelican
-    ```
-
-    It should output
-
-    ```console
-    /bin/pelican
-    ```
-
-2. Test Pelican client function by running an **object copy** command that download a test file from Pelican OSG federation to your current directory
-
-    ```bash
-    $ pelican -f osg-htc.org object copy /ospool/uc-shared/public/OSG-Staff/validation/test.txt .
-    test.txt 14.00b / 14.00b [=============================================================================================] Done!
-    ```
-
 ## Next steps
 
-If you want to use Pelican client to download or upload files, refer to [Client Usage](../client-usage.mdx) to get started. If you want to serve a Pelican server, refer to [Serve a Pelican Origin](../serving_an_origin.mdx) and [Serve a Pelican Federation](../serving_a_federation.mdx).
+* [Verify Pelican is installed](../install.mdx#verify-pelican-is-installed)
+* [Access data with Pelican client](../client-usage.mdx)
+* [Serve your data with Pelican Origin server](../serving_an_origin.mdx)
+* [Serve a new Pelican Pelican federation](../serving_a_federation.mdx)
