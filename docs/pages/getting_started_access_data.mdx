@@ -1,5 +1,6 @@
 
-# Quick Start Guide
+
+# Getting Started: Accessing Data
 The developers of the Pelican Platform believe data is the lifeblood of science. That's why Pelican provides a suite of tools that make it easy for researchers to federate their data, giving them the ability to share objects from a broad range of data repositories and allowing them to connect their data with distributed computational capacity, such as the OSPool. For more information on Pelican, visit the [About Pelican](./index.mdx) page.
 
 ### Assumptions
@@ -14,18 +15,11 @@ which pelican
 which should output a path to the executable. If there is no output to this command, refer to the [Pelican installation docs](./install.mdx) to acquire a working installation.
 
 ### Useful Terminology
+**Core Concepts:**
+To learn our terminology and the basics of Pelican, we recommend you read through our [Core Concepts](./index.mdx) page to learn how Pelican works and how it can be useful to you.
+
 **Objects:**
 Pelican should be thought of as a tool that works with federated *objects* as opposed to *files*. The reason for this is that calling something a file carries with it the connotation of a filesystem. Filesystems have extra features such as owners, permissions, etc. which Pelican does not implement. In addition, a *file* gives the connotation that the file is mutable, i.e. its contents can change without requiring a new name. Objects in a Pelican federation, however, should be treated as **immutable**, especially in any case where objects are pulled through a cache (which will be the case for almost all files in the [Open Science Data Federation](https://osg-htc.org/services/osdf), or OSDF). This is because the underlying cache mechanism, powered by [XRootD](https://xrootd.slac.stanford.edu/), will deliver whatever object it already has access to; if an object's contents change at the origin, the cache will remain unaware and continue to deliver the old object. In the worst case, when the cache only has a partial object, it may attempt to combine its stale version with whatever exists at the origin. Use object names wisely!
-
-**Federations:**
-Objects in Pelican belong to *federations*, which are aggregations of data that are exposed to other individuals in the federation. Each Pelican federation constitutes its own global namespace of objects and each object within a federation has its own path, much like files on a computer. Fetching any object from a federation requires at minimum two pieces of information: a URL indicating the object's federation and the path to the object within that federation (there is the potential that some objects require access tokens as well, but more on that later). For example, the OSDF’s federation URL is https://osg-htc.org and an example object from the federation can be found at the following path:
-```bash
-/ospool/uc-shared/public/OSG-Staff/validation/test.txt
-```
-Combining these two pieces of information, we say the the **object's URL** is:
-```bash
-https://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt
-```
 
 **Namespace Prefixes:**
 Each origin supports one or more *namespace prefixes*, which are analogous to the folders or directories from your computer that you use to organize files. Below is an example object:
@@ -40,10 +34,23 @@ However, things can get a little tricky when you add a longer namespace prefix a
 ```
 In this example, the namespace prefix is `/ospool/uc-shared/public/`, and the actual object is named `/OSG-Staff/validation/test.txt`. While the namespace prefix always comes before the object name, it can get a little confusing once paths and names get longer.
 
-**How to differenciate namespace prefix and object name?**
-To discover where the namespace prefix ends and the object name begins, there are a few options. One way is to access your federation's registry (i.e. [https://osdf-registry.osg-htc.org/view/registry/](https://osdf-registry.osg-htc.org/view/registry/)) which should list the namespaces available in the federation. Another option is also asking your federation administrator for how to access the registry.
->We are currently working to improve user experience exploring federations which includes better ways to differentiate namespace prefix and object name.
+>**How to differentiate namespace prefix and object name?**
+To discover where the namespace prefix ends and the object name begins, there are a few options. One way is to access your federation's registry (i.e. [https://osdf-registry.osg-htc.org/view/registry/](https://osdf-registry.osg-htc.org/view/registry/)) which should list the namespaces available in the federation. Another option is also asking your federation administrator for how to access the registry. We are currently working to improve user experience exploring federations which includes better ways to differentiate namespace prefix and object name.
 
+**Federations:**
+Objects in Pelican belong to *federations*, which are aggregations of data that are exposed to other individuals in the federation. Each Pelican federation constitutes its own global namespace of objects and each object within a federation has its own path, much like files on a computer. Fetching any object from a federation requires at minimum three pieces of information: a URL indicating the object's federation, a namespace prefix, and the path to the object within that federation (there is the potential that some objects require access tokens as well, but more on that later). For example, the OSDF’s federation URL is https://osg-htc.org, an example namespace-prefix from the federation is:
+```bash
+/ospool/uc-shared/public
+```
+and the location of the object can be found at:
+```bash
+/OSG-Staff/validation/test.txt
+```
+
+Combining these three pieces of information, we say the the **object's URL** is:
+```bash
+https://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt
+```
 
 ## Your First Pelican Client Command
 Accessing objects from a Pelican federation requires the use of the Pelican client commands. Here we will be using the `pelican object get` command to get an object from a federation. This command is formatted like so:

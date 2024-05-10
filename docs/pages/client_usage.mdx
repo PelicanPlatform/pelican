@@ -14,24 +14,17 @@ Before using the Pelican client to interact with objects from your federation, t
 which pelican
 ```
 which should output a path to the executable. If there is no output to this command, refer to the [Pelican installation docs](./install.mdx) to acquire a working installation.
-- You are roughly familiar with Pelican client commands and terminology as demonstrated with the [Quick Start Guide](./user-quickstart-guide.mdx)
+- You are roughly familiar with Pelican client commands and terminology as demonstrated with the [Getting Started: Accessing Data](./getting_started_access_data.mdx) page.
 
 
 ### Useful Terminology
 
 **Notes on Federations:**
-Below are some notes on federations on top of their terminology. Here is the example URL we used previously in the quick start guide:
+Below are some notes on federations on top of their terminology. Here is the example URL we used in the [Getting Started: Accessing Data](./getting_started_access_data.mdx) page:
 ```console
 /ospool/uc-shared/public/OSG-Staff/validation/test.txt
 ```
 **Note:** All object paths in a federation begin with a preceding `/`, and no relative paths are allowed.
-
-**Origins:**
-<<<<<<< HEAD
-All objects in a federation live in some *origin*. Origins act like a flexible plugin mechanism that exposes different type of storage backends to the federation. For example, the POSIX filesystem on most Linux computers is one type of storage backend an origin can expose to the federation. Other types of backends include S3 or HTTP servers, and Pelican plans to add many more. In most cases, a user does not need to know the particular backend used to store the object to download it from the federation.
-=======
-Objects in a Pelican federation are made accessible by *origins*, which act like a flexible plugin mechanism to expose different types of storage backends to the federation. For example, the POSIX filesystem on most Linux computers is one type of storage backend an origin can expose to the federation. Other types of backends include S3 or HTTP servers, and Pelican plans to add many more. In most cases, a user does not need to know the particular backend used to store the object to download it from the federation.
->>>>>>> d5312b91 (Updated documentation based on feedback)
 
 **Tokens and JWT:**
 Some namespace prefixes are public, like `/ospool/uc-shared/public`, while others are protected (i.e. they require authorization). Objects in public namespaces can be downloaded by anybody, but downloading objects from protected namespaces requires you prove to the origin supporting that namespace that you are allowed to access the object. In Pelican, this is done using signed JSON Web Tokens, or *JWT*s for short. In many cases, these tokens can be generated automatically.
@@ -44,12 +37,12 @@ When using the `pelican://` scheme, pelican does not know what federation to com
 
 >**Note:** When you set a federation discovery URL within a `pelican://` URL, within configuration files, or with the `-f` flag, do not expect the client to work if the discovery URL contains a path (e.g. `osg-htc.org/PathToMyFederation`). The client will assume that the path provided is the namespace prefix for the object which will end in failure.
 
-### The` osdf:///` URL Scheme:
+### The `osdf:///` URL Scheme:
 When using the `osdf:///` scheme, pelican will load in the federation metadata automatically with the Open Science Data Federation (OSDF)  defaults. This scheme should only be used if your federation or data can be accessed through the OSDF. When using this scheme, you should not specify the federation URL at all, as Pelican will handle this automatically. For example:
 ```bash
 pelican object get osdf:///<namespace-prefix></path/to/file> <local/path/to/file>
 ```
->This scheme has three slashes (`///`) after the `osdf` because the hostname is left empty to be automatically populated. Therefore, just start the URL with the namespace prefix. Pelican also supports the `osdf://` scheme (with two slashes) in case the user forgets to pass the third slash, but this is not recommended.
+>This scheme has three slashes (`///`) after the `osdf` because the hostname is left empty to be automatically populated therefore, just start the URL with the namespace prefix. Pelican also supports the `osdf://` scheme (with two slashes) in case the user forgets to pass the third slash, but this is not recommended.
 
 ### The `stash:///` URL Scheme:
 This URL scheme comes from legacy code called `stashcp` that Pelican was built off of and is still accepted for backwards compatibility. This URL scheme functions identically to the `osdf:///` URL scheme, loading in OSDF defaults. Here is an example:
@@ -57,7 +50,7 @@ This URL scheme comes from legacy code called `stashcp` that Pelican was built o
 pelican object get stash:///<namespace-prefix></path/to/file> <local/path/to/file>
 ```
 
-## Get A Public Object From Your Federation
+## Get a Public Object from your Federation
 
 To use the pelican client to get public objects from a federation, use Pelican's `object get` sub-command
 
@@ -86,7 +79,7 @@ More specifically, it breaks into these components:
 - Federation URL: `osg-htc.org`
 - Namespace: `/ospool/uc-shared/public`
 - Object name: `/OSG-Staff/validation/test.txt`
-- Destination: `./downloaded-testfile.txt`
+- Destination: `downloaded-testfile.txt`
 
 
 ## Get A Protected Object From Your Federation
@@ -97,11 +90,7 @@ Protected namespaces require that a Pelican client prove it is allowed to access
 
 Some origins support authentication with CILogon's OIDC client. In these cases, the Pelican client is capable of handling authentication with the origin automatically, once you logged in via CILogon. To download protected objects from origins that support CILogon, run the same command as for downloading a public object:
 ```bash
-pelican object get pelican://<federation-url>/<federation/path/to/file> <local/path/to/file>
-```
-Or:
-```bash
-pelican object get -f <federation-url> pelican:///</federation/path/to/file> </local/path/to/file>
+pelican object get pelican://<federation-url></namespace-prefix></path/to/file> <local/path/to/file>
 ```
 
 If you're doing this for the very first time, Pelican will create an encrypted token wallet on your system and you will be required to provide Pelican with a password for the wallet. If this isn't your first time, you will be asked to provide your already-configured password to unlock the token wallet.
@@ -120,6 +109,7 @@ To approve credentials for this operation, please navigate to the following URL 
 ```
 Pelican will display a URL in your terminal and indicate that you should visit the URL in your browser. After copying/pasting the URL to your browser, follow all the instructions there for logging in with CILogon. Once everything is successful, you should see a page like this:
 
+<ExportedImage src={"/pelican/cilogon.png"} alt={"Screenshot of CILogon success page"} />
 
 Finally, if the login is successful, Pelican will automatically fetch the token from the CILogon service and continue with the download.
 
@@ -134,25 +124,11 @@ Contact your federation administrator to get a token for downloading a protected
 Once you have the token, copy and paste it into a file on your machine, and pass the path to the file containing the token to the Pelican client with `-t` flag.
 ```bash
 # Pass the path to the file containing the token using -t flag
-pelican object get pelican://<federation-url>/<federation/path/to/file> </local/path/to/file> -t </path/to/token/file>
-```
-Or:
-```bash
-pelican object get -f <federation-url> <namespace-prefix><path/to/file> </local/path/to/file> -t </path/to/token/file>
+pelican object get pelican://<federation-url></namespace-prefix></path/to/file> </local/path/to/file> -t </path/to/token/file>
 ```
 
-For example, if we assume the following token grants read access to the `/ospool/PROTECTED` namespace:
-
+For example, if a token is saved in a file named `my-token`, it can be used to get the object `/ospool/PROTECTED/auth-test.txt` by running:
 ```bash
-eyJhbGciOiJSUzI1NiIsImtpZCI6ImtleS1yczI1NiIsInR5cCI6IkpXVCJ9.eyJ2ZXIiOiJzY2l0b2tlbjoyLjAiLCJhdWQiOiJodHRwczovL2RlbW8uc2NpdG9rZW5zLm9yZyIsImlzcyI6Imh0dHBzOi8vZGVtby5zY2l0b2tlbnMub3JnIiwiZXhwIjoxNjk3NDgzNTU5LCJpYXQiOjE2OTc0ODI5NTksIm5iZiI6MTY5NzQ4Mjk1OSwianRpIjoiOGIzNjQ5MTUtMjM4MC00MzM2LWI1OTktN2NmYzhiNGJmNTk3In0.hCf8oi3BRoWnUrBxSKST8p8czSChetMFID4FRXiQQ6RnwhWFZD3grZ2dvdYIYYDuW-1iATN9OujHBbO8TOxTnjJd7acE7la5rZscQwY_DAr_6rLKRTSU_Tpgg8uBMQB-U45nGWJVuYS6RZ3JZ2vE5lTtvPjZjExkJOkfvVp9Kzq445UGlK4dNkvTS3SYd9QYiZPkjA_Z-u57DesOOhsgrLSXyrRCtxBD8mRe5MiRtVAFHxIXS_ZQ7B2XlmNPiR6PBb9r38qHUlYe9y824hmBW-VzR2xiJd5wLWFZOv2Ec-q2NCAqDQfGYl4UsWKinW-35OGEULQWAQgHwxKJMSEH8A
-```
-> Do not share your token to others as it may contain sensitive information. Note that this token is for demonstration purposes only, and would not grant access to any files in the `/ospool/PROTECTED` namespace.
-
-Then the token can be used to get the object `/ospool/PROTECTED/auth-test.txt` by saving the token in a file called `my-token` and running
-```bash
-# Save the token to a file named “my-token”
-$ echo <token> > my-token
-
 # Get the object with the path to token file provided via -t flag
 $ pelican object get -f https://osg-htc.org /ospool/PROTECTED/auth-test.txt downloaded-auth-test.txt -t my-token
 ```
@@ -161,29 +137,32 @@ $ pelican object get -f https://osg-htc.org /ospool/PROTECTED/auth-test.txt down
 Another powerful Pelican client command is the `pelican object put` command. This command does a simple PUT request to add your object to your federation. Since the vast majority of federations will not allow public writes, we will assume for the example that we will need a token to perform these requests. Here is how you can use `pelican object put`:
 
 ```bash
-pelican object put <path/to/local/file> pelican://<federation-url></namespace-prefix><path/to/file> -t </path/to/token/file>
+pelican object put <path/to/local/file> pelican://<federation-url></namespace-prefix></path/to/file> -t </path/to/token/file>
 ```
 > **Note:** you can also specify the federation url here with the `-f` flag, just be sure not to include it in the request URL as the host name if you decide to do so.
 
 ## Pelican Object Copy
 As well with Pelican's `object get` and `object put` commands, there is also an older command called `pelican object copy`. This functions the same as the `pelican object get/put` except that it works for both gets and puts. For example, to do an `object get`:
 ```bash
-pelican object copy pelican://<federation-url></namespace-prefix><path/to/file> <local/path/to/file>
+pelican object copy pelican://<federation-url></namespace-prefix></path/to/file> <local/path/to/file>
 ```
 and to do an `object put`:
 
 ```bash
-pelican object copy <path/to/local/file> pelican://<federation-url></namespace-prefix><path/to/destination> -t </path/to/token/file>
+pelican object copy <path/to/local/file> pelican://<federation-url></namespace-prefix></path/to/destination> -t </path/to/token/file>
 ```
 
-## Automatically Packing/Unpacking Tarballs
-The Pelican client also has the ability to automatically compress/unpack tarballs when uploading and downloading to and from a federation. The user just needs to supply their request URL with a query. For example, to automatically unpack a tarball on downloading, run:
+## Utilizing Queries with your URL
+The Pelican client has the ability to select various amount of queries specified in the remote path to an object. The queries the current Pelican client accepts are: ?pack, ?recursive, and ?directread
+
+### ?pack Query
+The Pelican client has the ability to automatically compress/unpack tarballs when uploading and downloading to and from a federation. The user just needs to supply their request URL with a query. For example, to automatically unpack a tarball on downloading, run:
 ```bash
-pelican object copy pelican://<federation-url></namespace-prefix><path/to/file/file.tar.gz>?pack=tar.gz <local/path/to/file>
+pelican object get pelican://<federation-url></namespace-prefix></path/to/file/file.tar.gz>?pack=tar.gz <local/path/to/file>
 ```
 To upload, specify a directory and Pelican will compress it for you:
 ```bash
-pelican object copy <local/path/to/directory> pelican://<federation-url></namespace-prefix><path/to/directory.tar.gz>?pack=tar.gz
+pelican object put <local/path/to/directory> pelican://<federation-url></namespace-prefix></path/to/directory.tar.gz>?pack=tar.gz
 ```
 
 Pelican accepts the following values for the `pack` query:
@@ -193,6 +172,29 @@ Pelican accepts the following values for the `pack` query:
 - `pack=tar`, `pack=tar.gz`, `pack=tar.xz`, `pack=zip` :
 	- For downloading, throws an error if the specified object is not in the specified format (`tar`, `tar.gz`, `tar.xz`, `zip`, respectively).
 	- For uploading, create the object in the specified format (`tar`, `tar.gz`, `tar.xz`, `zip`, respectively).
+
+### ?recursive Query
+The ?recursive query can be utilized if the desired remote object is a directory. When this query is enabled, Pelican will recursively download all files and subdirectories within the specified directory in the URL. To use this query, run:
+```bash
+pelican object get pelican://<federation-url></namespace-prefix></path/to/directory>?recursive <local/path/to/file>
+```
+
+To upload, you can run something similar but with an `object put`:
+```bash
+pelican object put <local/path/to/directory> pelican://<federation-url></namespace-prefix></path/to/directory>?recursive
+```
+
+>**Note:** This query functions the same as specifying the `-r` flag described below.
+
+### ?directread Query
+The ?directread query is used if you would like to download an object without utilizing a cache. This way, the object will come directly from the origin each time and never use the cache. To use this query, you can run:
+```bash
+pelican object get pelican://<federation-url></namespace-prefix></path/to/file>?directread <local/path/to/file>
+```
+This query does not make sense to use for uploads since uploads go directly to the origin anyway. If you use this query by mistake, you should not run into any issues and your upload will function as normal.
+
+> **Note about Queries:** the ?recursive and the ?directread queries do **not** require any sort of values assigned to them (i.e. pelican://some/object?recursive=true). If a value is assigned to these queries, that value will be ignored and Pelican will act as if there was no value assigned to that query (i.e. pelican://some/object?recursive=false acts the same as pelican://some/object?recursive meaning the recursive query **will** be set even if the value is set to false).
+
 
 ## Additional Flags
 
@@ -228,7 +230,7 @@ When the name of the Pelican binary begins with `osdf`, Pelican will assume that
 ```bash
 osdf object copy osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-testfile.txt
 ```
-**NOTE:** When using client commands with the OSDF binary, be careful when using it with `pelican://` URL schemes. When using the `pelican://` URL scheme, you are still required to provide a federation URL no matter what binary name you are using.
+>**Note:** When using client commands with the OSDF binary, be careful when using it with `pelican://` URL schemes. When using the `pelican://` URL scheme, you are still required to provide a federation URL no matter what binary name you are using.
 
 ### Naming The Binary `stashcp` Or `stash_plugin`
 
