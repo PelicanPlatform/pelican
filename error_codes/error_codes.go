@@ -34,140 +34,140 @@ type PelicanError struct {
 func NewParameterError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Parameter",
-		exitCode: 4,
-		code: 100,
+		exitCode:  4,
+		code:      1000,
 		retryable: false,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewResolutionError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Resolution",
-		exitCode: 5,
-		code: 200,
+		exitCode:  5,
+		code:      2000,
 		retryable: false,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewContactError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Contact",
-		exitCode: 6,
-		code: 300,
+		exitCode:  6,
+		code:      3000,
 		retryable: false,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewContact_DirectorError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Contact.Director",
-		exitCode: 6,
-		code: 301,
+		exitCode:  6,
+		code:      3001,
 		retryable: false,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewContact_CacheError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Contact.Cache",
-		exitCode: 11,
-		code: 302,
+		exitCode:  11,
+		code:      3002,
 		retryable: true,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewContact_OriginError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Contact.Origin",
-		exitCode: 6,
-		code: 303,
+		exitCode:  6,
+		code:      3003,
 		retryable: false,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewContact_RegistryError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Contact.Registry",
-		exitCode: 6,
-		code: 304,
+		exitCode:  6,
+		code:      3004,
 		retryable: false,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewAuthorizationError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Authorization",
-		exitCode: 7,
-		code: 400,
+		exitCode:  7,
+		code:      4000,
 		retryable: false,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewSpecificationError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Specification",
-		exitCode: 8,
-		code: 500,
+		exitCode:  8,
+		code:      5000,
 		retryable: false,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewSpecification_FileNotFoundError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Specification.FileNotFound",
-		exitCode: 8,
-		code: 501,
+		exitCode:  8,
+		code:      5001,
 		retryable: false,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewSpecification_FileNotCreatedError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Specification.FileNotCreated",
-		exitCode: 8,
-		code: 502,
+		exitCode:  8,
+		code:      5002,
 		retryable: false,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewTransferError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Transfer",
-		exitCode: 9,
-		code: 600,
+		exitCode:  9,
+		code:      6000,
 		retryable: true,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewTransfer_StoppedTransferError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Transfer.StoppedTransfer",
-		exitCode: 11,
-		code: 601,
+		exitCode:  11,
+		code:      6001,
 		retryable: true,
-		err: err,
+		err:       err,
 	}
 }
 
 func NewTransfer_SlowTransferError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Transfer.SlowTransfer",
-		exitCode: 11,
-		code: 602,
+		exitCode:  11,
+		code:      6002,
 		retryable: true,
-		err: err,
+		err:       err,
 	}
 }
 

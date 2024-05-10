@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+# Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -27,7 +27,7 @@
 ############################
 ---
 type: Parameter
-code: 100
+code: 1000
 clientExitCode: 4
 description: >-
   If the client failed to start, or was started with invalid parameters, or otherwise believes what it
@@ -39,7 +39,7 @@ retryable: false
 ############################
 ---
 type: Resolution
-code: 200
+code: 2000
 clientExitCode: 5
 description: >-
   Indicates that the client failed to even attempt to contact the server
@@ -50,35 +50,35 @@ retryable: false
 ############################
 ---
 type: Contact
-code: 300
+code: 3000
 clientExitCode: 6
 description: >-
   The client attempted to contact the server at its resolved address and failed to do so
 retryable: false
 ---
-type: contact.director
-code: 301
+type: Contact.Director
+code: 3001
 clientExitCode: 6
 description: >-
   The client attempted to contact the director at its found address but failed to do so
 retryable: false
 ---
 type: Contact.Cache
-code: 302
+code: 3002
 clientExitCode: 11
 description: >-
   The client attempted to contact the cache but failed to do so
 retryable: true
 ---
 type: Contact.Origin
-code: 303
+code: 3003
 clientExitCode: 6
 description: >-
   The client attempted to contact the origin but failed to do so
 retryable: false
 ---
 type: Contact.Registry
-code: 304
+code: 3004
 clientExitCode: 6
 description: >-
   The client attempted to contact the registry (usually through the director) but failed to do so
@@ -89,7 +89,7 @@ retryable: false
 ############################
 ---
 type: Authorization
-code: 400
+code: 4000
 clientExitCode: 7
 description: >-
   The client contacted the server but failed to authenticate, or failed to authorize, or if
@@ -102,24 +102,22 @@ retryable: false
 ############################
 ---
 type: Specification
-code: 500
+code: 5000
 clientExitCode: 8
 description: >-
   If the client successfully contacted the server and received a definitive response that the
-  desired file was not present or could not be created. Basically an HTTP/404 error. Usually
-  the submitters fault
+  desired file was not present or could not be created. Usually the submitters fault
 retryable: false
 ---
 type: Specification.FileNotFound
-code: 501
+code: 5001
 clientExitCode: 8
 description: >-
   If the client successfully contacted the server but the desired file does not exist for download.
-  Basically an HTTP/404 error.
 retryable: false
 ---
 type: Specification.FileNotCreated # TODO: this might not be needed
-code: 502
+code: 5002
 clientExitCode: 8
 description: >-
   If the client successfully contacted the server but the desired file for upload could not be created
@@ -131,7 +129,7 @@ retryable: false
 ############################
 ---
 type: Transfer
-code: 600
+code: 6000
 clientExitCode: 9
 description: >-
   The client started transferring the file but did not complete it for some reason, or if the file
@@ -139,16 +137,15 @@ description: >-
 retryable: true
 ---
 type: Transfer.StoppedTransfer
-code: 601
+code: 6001
 clientExitCode: 11
 description: >-
-  The client started transferring file(s) but it got cancelled by Pelican as it seemed to have stopped
-  transferring data
+  The client started transferring file(s) but it got cancelled by Pelican as stopped transferring data
 retryable: true
 ---
 type: Transfer.SlowTransfer
-code: 602
+code: 6002
 clientExitCode: 11
 description: >-
-  The client started transferring data but the transfer takes longer than the configured timeout
+  The client started transferring data but the transfer was slower than the minumum configured timeout rate
 retryable: true

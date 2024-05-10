@@ -87,7 +87,7 @@ var (
 		},
 	)
 
-	PelicanError    error_codes.PelicanError
+	PelicanError error_codes.PelicanError
 )
 
 type (

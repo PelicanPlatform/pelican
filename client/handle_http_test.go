@@ -41,8 +41,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/error_codes"
+	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -227,12 +227,12 @@ func TestSlowTransfers(t *testing.T) {
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
 	// Check we have an overlapping PelicanError type
-	pelicanError, ok := err.(*error_codes.PelicanError)
+	_, ok := err.(*error_codes.PelicanError)
 	if ok {
-		assert.Contains(t, err.Error(), "Transfer.SlowTransfer Error: Error code 602:")
+		var slowTransferError *SlowTransferError
+		assert.Contains(t, err.Error(), "Transfer.SlowTransfer Error: Error code 6002:")
 		// Check we successfully wrapped an already defined SlowTransferError
-		unwrappedErr := pelicanError.Unwrap()
-		assert.IsType(t, &SlowTransferError{}, unwrappedErr)
+		assert.True(t, errors.As(err, &slowTransferError))
 	} else {
 		t.Fatal("Error is not of type PelicanError")
 	}

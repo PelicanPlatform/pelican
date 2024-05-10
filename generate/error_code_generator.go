@@ -41,6 +41,7 @@ type ErrorType struct {
 // TODO: change to 5 (for minor codes)
 var requiredErrorKeys = [4]string{"code", "clientExitCode", "description", "retryable"}
 
+// GenErrorCodes takes the error_codes.yaml file (located: ../docs/error_codes.yaml) and generates the error_codes/error_codes.go file
 func GenErrorCodes() {
 	filename, _ := filepath.Abs("../docs/error_codes.yaml")
 	yamlFile, err := os.Open(filename)
@@ -162,10 +163,10 @@ type PelicanError struct {
 func New{{$pelicanError.Display}}Error(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "{{$pelicanError.Raw}}",
-		exitCode: {{$pelicanError.ExitCode}},
-		code: {{$pelicanError.Code}},
+		exitCode:  {{$pelicanError.ExitCode}},
+		code:      {{$pelicanError.Code}},
 		retryable: {{$pelicanError.Retryable}},
-		err: err,
+		err:       err,
 	}
 }
 {{end}}
