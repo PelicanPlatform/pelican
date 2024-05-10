@@ -868,9 +868,10 @@ func TestNewTransferEngine(t *testing.T) {
 	})
 
 	t.Run("TestInitClientCalled", func(t *testing.T) {
-		config.InitClient()
+		err := config.InitClient()
+		require.NoError(t, err)
 		ctx := context.Background()
-		_, err := NewTransferEngine(ctx)
+		_, err = NewTransferEngine(ctx)
 		assert.NoError(t, err)
 	})
 }
