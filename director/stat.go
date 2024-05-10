@@ -20,6 +20,7 @@ package director
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -48,7 +49,7 @@ type (
 	objectMetadata struct {
 		URL           url.URL `json:"url"` // The URL to the object
 		Checksum      string  `json:"checksum"`
-		ContentLength int     `json:"content_length"`
+		ContentLength int     `json:"contentLength"`
 	}
 
 	queryStatus    string
@@ -67,8 +68,16 @@ type (
 	//
 	// **Note**: Currently it only returns successful result when the file is under a public namespace.
 	ObjectStat struct {
-		ReqHandler func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, token string, timeout time.Duration) (*objectMetadata, error)      // Handle the request to test if an object exists on a server
-		Query      func(cancelContext context.Context, objectName string, sType config.ServerType, mininum, maximum int, options ...queryOption) queryResult // Manage a `stat` request to origin servers given an objectName
+		// Handle the request to test if an object exists on a server
+		//
+		// dataUrl: the base url to access data on the server. This is usally the url pointed at the XRootD instance on the server
+		//
+		// digest: requst digest for object checkusm. XRootD responds with 403 if digest feature is turned off on the server
+		//
+		// token: a bearer token to be used when issuing the request
+		ReqHandler func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error)
+		// Manage a `stat` request to origin servers given an objectName
+		Query func(cancelContext context.Context, objectName string, sType config.ServerType, mininum, maximum int, options ...queryOption) queryResult
 	}
 )
 
@@ -128,6 +137,17 @@ func (meta objectMetadata) String() string {
 	)
 }
 
+func (m *objectMetadata) MarshalJSON() ([]byte, error) {
+	type Alias objectMetadata
+	return json.Marshal(&struct {
+		URL string `json:"url"`
+		*Alias
+	}{
+		URL:   m.URL.String(),
+		Alias: (*Alias)(m),
+	})
+}
+
 // Initialize a new stat instance and set default method implementations
 func NewObjectStat() *ObjectStat {
 	stat := &ObjectStat{}
@@ -137,7 +157,7 @@ func NewObjectStat() *ObjectStat {
 }
 
 // Implementation of sending a HEAD request to an origin for an object
-func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, dataUrl url.URL, token string, timeout time.Duration) (*objectMetadata, error) {
+func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error) {
 	client := http.Client{Transport: config.GetTransport(), Timeout: timeout}
 	reqUrl := dataUrl.JoinPath(objectName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, reqUrl.String(), nil)
@@ -147,8 +167,10 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	// Request checksum
-	req.Header.Set("Want-Digest", "crc32c")
+	if digest {
+		// Request checksum
+		req.Header.Set("Want-Digest", "crc32c")
+	}
 
 	res, err := client.Do(req)
 	if err != nil {
@@ -298,7 +320,13 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 		// Use an anonymous func to pass variable safely to the goroutine
 		func(sAdInt server_structs.ServerAd) {
 			statUtil.Errgroup.Go(func() error {
-				metadata, err := stat.ReqHandler(maxCancelCtx, objectName, sAdInt.URL, cfg.token, timeout)
+				metadata, err := stat.ReqHandler(maxCancelCtx, objectName, sAdInt.URL, true, cfg.token, timeout)
+
+				if _, ok := err.(headReqForbiddenErr); ok {
+					// If the request returns 403, it could be because we request digest
+					// Retry without digest
+					metadata, err = stat.ReqHandler(maxCancelCtx, objectName, sAdInt.URL, false, cfg.token, timeout)
+				}
 
 				if err != nil {
 					switch e := err.(type) {
