@@ -70,6 +70,11 @@ func parseServerAd(server utils.Server, serverType server_structs.ServerType) se
 	return serverAd
 }
 
+// Do a subtraction of excludeDowned set from the includeDowned set to find cache servers
+// that are in downtime
+//
+// The excludeDowned is a list of running OSDF topology servers
+// The includeDowned is a list of running and downed OSDF topology servers
 func findDownedTopologyCache(excludeDowned, includeDowned []utils.Server) (caches []utils.Server) {
 	for _, included := range includeDowned {
 		found := false

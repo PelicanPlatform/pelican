@@ -39,8 +39,8 @@ type filterType string
 
 const (
 	permFiltered filterType = "permFiltered"     // Read from Director.FilteredServers
-	tempFiltered filterType = "tempFiltered"     // Filtered by web UI
-	topoFiltered filterType = "topologyFiltered" // Filtered by Topology
+	tempFiltered filterType = "tempFiltered"     // Filtered by web UI, e.g. the server is put in downtime via the director website
+	topoFiltered filterType = "topologyFiltered" // Filtered by Topology, e.g. the server is put in downtime via the OSDF Topology change
 	tempAllowed  filterType = "tempAllowed"      // Read from Director.FilteredServers but mutated by web UI
 )
 
