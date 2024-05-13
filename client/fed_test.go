@@ -765,9 +765,15 @@ func TestObjectList(t *testing.T) {
 			os.Stdout = w
 
 			go func() {
-				err := client.DoList(fed.Ctx, uploadURL, nil, client.WithTokenLocation(tempToken.Name()))
-				require.NoError(t, err)
-				w.Close()
+				if export.Capabilities.PublicReads {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithTokenLocation(""))
+					require.NoError(t, err)
+					w.Close()
+				} else {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithTokenLocation(tempToken.Name()))
+					require.NoError(t, err)
+					w.Close()
+				}
 			}()
 			var buf bytes.Buffer
 			_, err = io.Copy(&buf, r)
@@ -790,12 +796,16 @@ func TestObjectList(t *testing.T) {
 			originalStdout := os.Stdout
 			os.Stdout = w
 
-			flags := map[string]bool{"dironly": true}
-
 			go func() {
-				err := client.DoList(fed.Ctx, uploadURL, flags, client.WithTokenLocation(tempToken.Name()))
-				require.NoError(t, err)
-				w.Close()
+				if export.Capabilities.PublicReads {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithDirOnlyOption(true))
+					require.NoError(t, err)
+					w.Close()
+				} else {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithDirOnlyOption(true), client.WithTokenLocation(tempToken.Name()))
+					require.NoError(t, err)
+					w.Close()
+				}
 			}()
 			var buf bytes.Buffer
 			_, err = io.Copy(&buf, r)
@@ -818,12 +828,16 @@ func TestObjectList(t *testing.T) {
 			originalStdout := os.Stdout
 			os.Stdout = w
 
-			flags := map[string]bool{"fileonly": true}
-
 			go func() {
-				err := client.DoList(fed.Ctx, uploadURL, flags, client.WithTokenLocation(tempToken.Name()))
-				require.NoError(t, err)
-				w.Close()
+				if export.Capabilities.PublicReads {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithFileOnlyOption(true))
+					require.NoError(t, err)
+					w.Close()
+				} else {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithFileOnlyOption(true), client.WithTokenLocation(tempToken.Name()))
+					require.NoError(t, err)
+					w.Close()
+				}
 			}()
 			var buf bytes.Buffer
 			_, err = io.Copy(&buf, r)
@@ -846,12 +860,16 @@ func TestObjectList(t *testing.T) {
 			originalStdout := os.Stdout
 			os.Stdout = w
 
-			flags := map[string]bool{"long": true}
-
 			go func() {
-				err := client.DoList(fed.Ctx, uploadURL, flags, client.WithTokenLocation(tempToken.Name()))
-				require.NoError(t, err)
-				w.Close()
+				if export.Capabilities.PublicReads {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithLongOption(true))
+					require.NoError(t, err)
+					w.Close()
+				} else {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithLongOption(true), client.WithTokenLocation(tempToken.Name()))
+					require.NoError(t, err)
+					w.Close()
+				}
 			}()
 			var buf bytes.Buffer
 			_, err = io.Copy(&buf, r)
@@ -890,12 +908,16 @@ func TestObjectList(t *testing.T) {
 			originalStdout := os.Stdout
 			os.Stdout = w
 
-			flags := map[string]bool{"fileonly": true}
-
 			go func() {
-				err := client.DoList(fed.Ctx, uploadURL, flags, client.WithTokenLocation(tempToken.Name()))
-				require.NoError(t, err)
-				w.Close()
+				if export.Capabilities.PublicReads {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithFileOnlyOption(true))
+					require.NoError(t, err)
+					w.Close()
+				} else {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithFileOnlyOption(true), client.WithTokenLocation(tempToken.Name()))
+					require.NoError(t, err)
+					w.Close()
+				}
 			}()
 			var buf bytes.Buffer
 			_, err = io.Copy(&buf, r)

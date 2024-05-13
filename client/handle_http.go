@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -37,7 +38,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"text/tabwriter"
 	"time"
 
 	"github.com/VividCortex/ewma"
@@ -288,6 +288,9 @@ type (
 	identTransferOptionTokenLocation struct{}
 	identTransferOptionAcquireToken  struct{}
 	identTransferOptionToken         struct{}
+	identTransferOptionLong          struct{}
+	identTransferOptionDirOnly       struct{}
+	identTransferOptionFileOnly      struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -675,6 +678,21 @@ func WithToken(token string) TransferOption {
 // disabled with this options
 func WithAcquireToken(enable bool) TransferOption {
 	return option.New(identTransferOptionAcquireToken{}, enable)
+}
+
+// Create an option to specify more information to be displayed with a 'list' command
+func WithLongOption(enable bool) TransferOption {
+	return option.New(identTransferOptionLong{}, enable)
+}
+
+// Create an option to specify that only directories should be listed with a 'list' command
+func WithDirOnlyOption(enable bool) TransferOption {
+	return option.New(identTransferOptionDirOnly{}, enable)
+}
+
+// Create an option to specify that only files should be listed with a 'list' command
+func WithFileOnlyOption(enable bool) TransferOption {
+	return option.New(identTransferOptionFileOnly{}, enable)
 }
 
 // Create a new client to work with an engine
@@ -2257,25 +2275,16 @@ func getDirListHost(ctx context.Context, remoteObjectUrl *url.URL, namespace nam
 		// Query the director a PROPFIND to see if we can get our directory listing
 		resp, err := queryDirector(ctx, "PROPFIND", remoteObjectUrl.Path, directorUrl)
 		if err != nil {
-			if resp.StatusCode == http.StatusNotFound {
-				// If we have an issue querying the director, we want to fallback to the deprecated dirlisthost from the namespace
-				// At this point, we have already queried the director (and it should have succeeded if we are here) so the error
-				// we get is most likely an issue with PROPFIND (and an outdated director). So we should try to continue.
-				if namespace.DirListHost == "" {
-					err = &dirListingNotSupportedError{Err: errors.New("origin and/or namespace does not support directory listings")}
-					return nil, err
-				} else {
-					dirListHost, err = url.Parse(namespace.DirListHost)
-					if err != nil {
-						return nil, err
-					}
-					return dirListHost, nil
-				}
-			} else {
+			// If we have an issue querying the director, we want to fallback to the deprecated dirlisthost from the namespace
+			// At this point, we have already queried the director (and it should have succeeded if we are here) so the error
+			// we get is most likely an issue with PROPFIND (and an outdated director). Therefore, we should continue if we get a 404
+			if !(resp.StatusCode == http.StatusNotFound) {
+				// We did not get a 404 so we should return the error
 				return nil, err
 			}
-		} else if resp.StatusCode == http.StatusMethodNotAllowed {
-			// If the director responds with 405 (method not allowed), we're working with an old Director.
+		}
+		if resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotFound {
+			// If the director responds with 405 (method not allowed) or a 404 (not found), we're working with an old Director.
 			// In that event, we try to fallback and use the deprecated dirlisthost
 			log.Debugln("Failed to find collections url from director, attempting to find directory listings host in namespace")
 			// Check for a dir list host in namespace
@@ -2346,7 +2355,6 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 	auth := &bearerAuth{token: job.job.token}
 	client := gowebdav.NewAuthClient(rootUrl.String(), auth)
 
-	// XRootD does not like keep alives and kills things, so turn them off.
 	transport := config.GetTransport()
 	client.SetTransport(transport)
 	return te.walkDirDownloadHelper(job, transfers, files, url.Path, client)
@@ -2449,8 +2457,25 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	return err
 }
 
+// Implement the fs.FileInfo interface for a file. This is needed in the case where we call ls on a file instead of a directory.
+// In this case, the FileInfo we get back from stat does not have a name attatched to it so we need to make our own object to return
+type fileInfo struct {
+	name    string
+	size    int64
+	mode    os.FileMode
+	modTime time.Time
+	isDir   bool
+}
+
+func (f *fileInfo) Name() string       { return f.name }
+func (f *fileInfo) Size() int64        { return f.size }
+func (f *fileInfo) Mode() os.FileMode  { return f.mode }
+func (f *fileInfo) ModTime() time.Time { return f.modTime }
+func (f *fileInfo) IsDir() bool        { return f.isDir }
+func (f *fileInfo) Sys() interface{}   { return nil } // Return nil or a suitable value
+
 // This function performs the ls command by walking through the specified directory and printing the contents of the files
-func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string, namespace namespaces.Namespace, token string, flagOptions map[string]bool) (err error) {
+func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string, namespace namespaces.Namespace, token string, options ...TransferOption) (fileInfos []fs.FileInfo, err error) {
 	// Get our directory listing host
 	dirListHost, err := getDirListHost(ctx, remoteObjectUrl, namespace, directorUrl)
 	if err != nil {
@@ -2461,7 +2486,6 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 	auth := &bearerAuth{token: token}
 	client := gowebdav.NewAuthClient(dirListHost.String(), auth)
 
-	// XRootD does not like keep alives and kills things, so turn them off.
 	transport := config.GetTransport()
 	client.SetTransport(transport)
 	remotePath := remoteObjectUrl.Path
@@ -2475,66 +2499,49 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
 			info, err := client.Stat(remotePath)
 			if err != nil {
-				return errors.Wrap(err, "failed to stat remote path")
+				return nil, errors.Wrap(err, "failed to stat remote path")
 			}
-			// If the path leads to a file and not a directory, just print the filename
+			// If the path leads to a file and not a directory, just add the filename
 			if !info.IsDir() {
-				// Note: for some reason info.Name() returns nothing, so just printing base of the provided path since it should be the same
-				fmt.Println(path.Base(remotePath))
-				return nil
+				// NOTE: we implement our own FileInfo here because the one we get back from stat() does not have a .name field for some reason
+				file := &fileInfo{
+					name:    path.Base(remotePath),
+					size:    info.Size(),
+					mode:    info.Mode(),
+					modTime: info.ModTime(),
+					isDir:   false,
+				}
+				fileInfos = append(fileInfos, file)
+				return fileInfos, nil
 			}
 		}
 		// Otherwise, a different error occurred and we should return it
-		return errors.Wrap(err, "failed to read remote directory")
+		return nil, errors.Wrap(err, "failed to read remote directory")
 	}
 
-	// if the -L flag was set, we print more information
-	if flagOptions["long"] {
-		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
-		for _, info := range infos {
-			if info.IsDir() && flagOptions["fileonly"] {
-				// If the object is a directory and we have fileonly (-F) set, ignore it
-				continue
-			} else if !info.IsDir() && flagOptions["dironly"] {
-				// If the object is a file and we have dironly (-D) set, ignore it
-				continue
-			}
-			fmt.Fprintln(w, info.Name()+"\t"+strconv.FormatInt(info.Size(), 10)+"\t"+info.ModTime().Format("2006-01-02 15:04:05")+"\t"+info.Mode().String())
+	var dironly, fileonly = false, false
+	for _, option := range options {
+		switch option.Ident() {
+		case identTransferOptionDirOnly{}:
+			dironly = option.Value().(bool)
+		case identTransferOptionFileOnly{}:
+			fileonly = option.Value().(bool)
 		}
-		w.Flush()
-	} else {
-		totalColumns := 4
-		// column is a counter letting us know what item/column we are on (can't use index in loop below since we have continues on conditions)
-		var column int
-		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
-		var line string
-		for _, info := range infos {
-			if info.IsDir() && flagOptions["fileonly"] {
-				// If the object is a directory and we have fileonly (-F) set, ignore it
-				continue
-			} else if !info.IsDir() && flagOptions["dironly"] {
-				// If the object is a file and we have dironly (-D) set, ignore it
-				continue
-			}
-			line += info.Name()
-			//increase our counter
-			column++
-
-			// This section just checks if we go thru <numColumns> times, we print a newline. Otherwise, add the object to the current line with a tab after
-			if column%totalColumns == 0 {
-				fmt.Fprintln(w, line)
-				line = ""
-			} else {
-				line += "\t"
-			}
-		}
-		// If we have anything remaining in line, print it
-		if line != "" {
-			fmt.Fprintln(w, line)
-		}
-		w.Flush()
 	}
-	return nil
+
+	for _, info := range infos {
+		if info.IsDir() && fileonly {
+			// If the object is a directory and we have fileonly (-F) set, ignore it
+			continue
+		} else if !info.IsDir() && dironly {
+			// If the object is a file and we have dironly (-D) set, ignore it
+			continue
+		}
+		// Create a FileInfo for the file and append it to the slice
+		fileInfos = append(fileInfos, info)
+	}
+
+	return fileInfos, nil
 }
 
 // Invoke HEAD against a remote URL, using the provided namespace information

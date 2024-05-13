@@ -28,6 +28,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 
 	"math/rand"
 	"os"
@@ -470,7 +471,7 @@ func schemeUnderstood(scheme string) error {
 }
 
 // TODO function header
-func DoList(ctx context.Context, remoteObject string, flagOptions map[string]bool, options ...TransferOption) (err error) { //TODO change from TransferOption to something with ls
+func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (err error) { //TODO change from TransferOption to something with ls
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -514,6 +515,9 @@ func DoList(ctx context.Context, remoteObject string, flagOptions map[string]boo
 	tokenLocation := ""
 	acquire := true
 	token := ""
+	long := false
+	dironly := false
+	fileonly := false
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -522,6 +526,12 @@ func DoList(ctx context.Context, remoteObject string, flagOptions map[string]boo
 			acquire = option.Value().(bool)
 		case identTransferOptionToken{}:
 			token = option.Value().(string)
+		case identTransferOptionLong{}:
+			long = option.Value().(bool)
+		case identTransferOptionDirOnly{}:
+			dironly = option.Value().(bool)
+		case identTransferOptionFileOnly{}:
+			fileonly = option.Value().(bool)
 		}
 	}
 
@@ -532,9 +542,56 @@ func DoList(ctx context.Context, remoteObject string, flagOptions map[string]boo
 		}
 	}
 
-	err = listHttp(ctx, remoteObjectUrl, pelicanURL.directorUrl, ns, token, flagOptions)
+	fileInfos, err := listHttp(ctx, remoteObjectUrl, pelicanURL.directorUrl, ns, token, WithLongOption(long), WithDirOnlyOption(dironly), WithFileOnlyOption(fileonly))
 	if err != nil {
-		return
+		return err
+	}
+
+	// if the -L flag was set, we print more information
+	if long {
+		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
+		for _, info := range fileInfos {
+			if info.IsDir() && fileonly {
+				// If the object is a directory and we have fileonly (-F) set, ignore it
+				continue
+			} else if !info.IsDir() && dironly {
+				// If the object is a file and we have dironly (-D) set, ignore it
+				continue
+			}
+			fmt.Fprintln(w, info.Name()+"\t"+strconv.FormatInt(info.Size(), 10)+"\t"+info.ModTime().Format("2006-01-02 15:04:05")+"\t"+info.Mode().String())
+		}
+		w.Flush()
+	} else {
+		totalColumns := 4
+		// column is a counter letting us know what item/column we are on (can't use index in loop below since we have continues on conditions)
+		var column int
+		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
+		var line string
+		for _, info := range fileInfos {
+			if info.IsDir() && fileonly {
+				// If the object is a directory and we have fileonly (-F) set, ignore it
+				continue
+			} else if !info.IsDir() && dironly {
+				// If the object is a file and we have dironly (-D) set, ignore it
+				continue
+			}
+			line += info.Name()
+			//increase our counter
+			column++
+
+			// This section just checks if we go thru <numColumns> times, we print a newline. Otherwise, add the object to the current line with a tab after
+			if column%totalColumns == 0 {
+				fmt.Fprintln(w, line)
+				line = ""
+			} else {
+				line += "\t"
+			}
+		}
+		// If we have anything remaining in line, print it
+		if line != "" {
+			fmt.Fprintln(w, line)
+		}
+		w.Flush()
 	}
 
 	return nil

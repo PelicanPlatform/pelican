@@ -43,7 +43,6 @@ func init() {
 	flagSet.BoolP("dironly", "D", false, "List directories only")
 	flagSet.BoolP("fileonly", "F", false, "List files only")
 
-	//flagSet.BoolP("recursive", "r", false, "Recursively list a directory. Will list all nested directories within specified directory")
 	objectCmd.AddCommand(lsCmd)
 }
 
@@ -79,14 +78,8 @@ func listMain(cmd *cobra.Command, args []string) {
 	dirOnly, _ := cmd.Flags().GetBool("dironly")
 	fileOnly, _ := cmd.Flags().GetBool("fileonly")
 
-	options := map[string]bool{
-		"long":     long,
-		"dironly":  dirOnly,
-		"fileonly": fileOnly,
-	}
-
-	//isRecursive, _ := cmd.Flags().GetBool("recursive")
-	result := client.DoList(ctx, object, options, client.WithTokenLocation(tokenLocation))
+	result := client.DoList(ctx, object, client.WithTokenLocation(tokenLocation), client.WithLongOption(long),
+		client.WithDirOnlyOption(dirOnly), client.WithFileOnlyOption(fileOnly))
 
 	// Exit with failure
 	if result != nil {
