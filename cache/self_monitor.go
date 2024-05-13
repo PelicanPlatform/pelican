@@ -74,6 +74,9 @@ func InitSelfTestDir() error {
 
 func generateTestFile() (string, error) {
 	basePath := param.Cache_DataLocation.GetString()
+	if basePath == "" {
+		return "", errors.New("failed to generate self-test file for cache: Cache.DataLocation is not set.")
+	}
 	monitoringPath := filepath.Join(basePath, selfTestDir)
 	_, err := os.Stat(monitoringPath)
 	if err != nil {
@@ -120,6 +123,7 @@ func generateTestFile() (string, error) {
 		return "", errors.Wrapf(err, "failed to create self-test file %s", finalFilePath)
 	}
 	defer file.Close()
+	defer log.Debug("Cache self-test file created at: ", finalFilePath)
 
 	cinfoFile, err := os.OpenFile(tmpFileCinfoPath, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
@@ -207,7 +211,7 @@ func downloadTestFile(ctx context.Context, fileUrl string) error {
 		return errors.Wrap(err, "failed to get response body from cache self-test download")
 	}
 	if string(body) != selfTestBody {
-		return errors.Errorf("contents of cache self-test file do not match the one uploaded: %v", body)
+		return errors.Errorf("contents of cache self-test file do not match the one uploaded. Expected: %s \nGot: %s", selfTestBody, string(body))
 	}
 
 	return nil
