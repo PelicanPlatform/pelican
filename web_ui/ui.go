@@ -36,21 +36,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/spf13/viper"
-
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
-	"github.com/pelicanplatform/pelican/metrics"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	ginprometheus "github.com/zsais/go-gin-prometheus"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/term"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 var (
@@ -371,12 +371,52 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	return nil
 }
 
+// Map gin routes for Prometheus metrics to reduce metric cardinality
+func mapPrometheusPath(c *gin.Context) string {
+	url := c.Request.URL.Path
+	// Frontend static resources
+	if strings.HasPrefix(url, "/view/_next/") {
+		url = "/view/_next/:resource"
+		return url
+	}
+	if strings.HasPrefix(url, "/api/v1.0/director/healthTest/") {
+		url = "/api/v1.0/director/healthTest/:testfile"
+		return url
+	}
+	// Only keeps two level depth for object access
+	if strings.HasPrefix(url, "/api/v1.0/director/object/") {
+		objectPath := strings.TrimPrefix(path.Clean(url), "/api/v1.0/director/object/")
+		twoLevels := strings.Split(objectPath, "/")
+		if len(twoLevels) <= 2 {
+			return url
+		} else {
+			aggPrefix := fmt.Sprintf("/%s/%s", twoLevels[0], twoLevels[1])
+			url := "/api/v1.0/director/object" + aggPrefix + "/:path"
+			return url
+		}
+	}
+	// Only keeps two level depth for object access
+	if strings.HasPrefix(url, "/api/v1.0/director/origin/") {
+		objectPath := strings.TrimPrefix(path.Clean(url), "/api/v1.0/director/origin/")
+		twoLevels := strings.Split(objectPath, "/")
+		if len(twoLevels) <= 2 {
+			return url
+		} else {
+			aggPrefix := fmt.Sprintf("/%s/%s", twoLevels[0], twoLevels[1])
+			url := "/api/v1.0/director/origin" + aggPrefix + "/:path"
+			return url
+		}
+	}
+	return url
+}
+
 // Configure metrics related endpoints, including Prometheus and /health API
 func configureMetrics(engine *gin.Engine) error {
 	// Add authorization to /metric endpoint
 	engine.Use(promMetricAuthHandler)
 
 	prometheusMonitor := ginprometheus.NewPrometheus("gin")
+	prometheusMonitor.ReqCntURLLabelMappingFn = mapPrometheusPath
 	prometheusMonitor.Use(engine)
 
 	engine.GET("/api/v1.0/metrics/health", AuthHandler, AdminAuthHandler, func(ctx *gin.Context) {
