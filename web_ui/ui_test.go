@@ -330,3 +330,69 @@ func TestHandleWebUIAuth(t *testing.T) {
 		assert.Equal(t, "", r.Result().Header.Get("Location"))
 	})
 }
+
+func TestMapPrometheusPath(t *testing.T) {
+	t.Run("aggregate-frontend-path", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		req := httptest.NewRequest("GET", "/view/_next/static/123.js", nil)
+		c.Request = req
+
+		get := mapPrometheusPath(c)
+		assert.Equal(t, "/view/_next/:resource", get)
+	})
+
+	t.Run("aggregate-healthtest-path", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		req := httptest.NewRequest("GET", "/api/v1.0/director/healthTest/pelican/self-test-monitoring-123-456.txt", nil)
+		c.Request = req
+
+		get := mapPrometheusPath(c)
+		assert.Equal(t, "/api/v1.0/director/healthTest/:testfile", get)
+	})
+
+	t.Run("aggregate-two-level-origin-redirect-path", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		req := httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar/barz", nil)
+		c.Request = req
+
+		get := mapPrometheusPath(c)
+		assert.Equal(t, "/api/v1.0/director/object/foo/bar/:path", get)
+
+		c, _ = gin.CreateTestContext(httptest.NewRecorder())
+		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar.txt", nil)
+		c.Request = req
+
+		get = mapPrometheusPath(c)
+		assert.Equal(t, "/api/v1.0/director/object/foo/bar.txt", get)
+
+		c, _ = gin.CreateTestContext(httptest.NewRecorder())
+		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar/level3/level4/file.txt", nil)
+		c.Request = req
+
+		get = mapPrometheusPath(c)
+		assert.Equal(t, "/api/v1.0/director/object/foo/bar/:path", get)
+	})
+
+	t.Run("aggregate-two-level-object-redirect-path", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		req := httptest.NewRequest("GET", "/api/v1.0/director/origin/foo/bar/barz", nil)
+		c.Request = req
+
+		get := mapPrometheusPath(c)
+		assert.Equal(t, "/api/v1.0/director/origin/foo/bar/:path", get)
+
+		c, _ = gin.CreateTestContext(httptest.NewRecorder())
+		req = httptest.NewRequest("GET", "/api/v1.0/director/origin/foo/bar.txt", nil)
+		c.Request = req
+
+		get = mapPrometheusPath(c)
+		assert.Equal(t, "/api/v1.0/director/origin/foo/bar.txt", get)
+
+		c, _ = gin.CreateTestContext(httptest.NewRecorder())
+		req = httptest.NewRequest("GET", "/api/v1.0/director/origin/foo/bar/level3/level4/file.txt", nil)
+		c.Request = req
+
+		get = mapPrometheusPath(c)
+		assert.Equal(t, "/api/v1.0/director/origin/foo/bar/:path", get)
+	})
+}
