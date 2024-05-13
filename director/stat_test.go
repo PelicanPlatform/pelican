@@ -48,7 +48,7 @@ func TestQueryServersForObject(t *testing.T) {
 	oldAds := serverAds
 
 	stat := NewObjectStat()
-	stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, token string, timeout time.Duration) (*objectMetadata, error) {
+	stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error) {
 		return &objectMetadata{URL: *dataUrl.JoinPath(objectName)}, nil
 	}
 
@@ -461,7 +461,7 @@ func TestQueryServersForObject(t *testing.T) {
 			stat.ReqHandler = oldHandler
 		}()
 
-		stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, token string, timeout time.Duration) (*objectMetadata, error) {
+		stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error) {
 			time.Sleep(time.Second * 30)
 			return &objectMetadata{URL: *dataUrl.JoinPath(objectName)}, nil
 		}
@@ -504,7 +504,7 @@ func TestQueryServersForObject(t *testing.T) {
 			stat.ReqHandler = oldHandler
 		}()
 
-		stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, token string, timeout time.Duration) (*objectMetadata, error) {
+		stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error) {
 			if dataUrl.Host == "example2.com" {
 				return nil, headReqTimeoutErr{}
 			}
@@ -577,7 +577,7 @@ func TestSendHeadReq(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReq(ctx, "/foo/bar/test.txt", mockOriginAd.URL, "", time.Second)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/test.txt", mockOriginAd.URL, true, "", time.Second)
 		require.NoError(t, err)
 		assert.NotNil(t, meta)
 		assert.Equal(t, 1, meta.ContentLength)
@@ -589,7 +589,7 @@ func TestSendHeadReq(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReq(ctx, "/foo/bar/dne", mockOriginAd.URL, "", time.Second)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/dne", mockOriginAd.URL, true, "", time.Second)
 		require.Error(t, err)
 		_, ok := err.(headReqNotFoundErr)
 		assert.True(t, ok)
@@ -601,7 +601,7 @@ func TestSendHeadReq(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReq(ctx, "/foo/bar/timeout.txt", mockOriginAd.URL, "", 200*time.Millisecond)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/timeout.txt", mockOriginAd.URL, true, "", 200*time.Millisecond)
 		require.Error(t, err)
 		_, ok := err.(headReqTimeoutErr)
 		assert.True(t, ok)
@@ -617,7 +617,7 @@ func TestSendHeadReq(t *testing.T) {
 			cancel()
 		}()
 
-		meta, err := stat.sendHeadReq(ctx, "/foo/bar/timeout.txt", mockOriginAd.URL, "", 5*time.Second)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/timeout.txt", mockOriginAd.URL, true, "", 5*time.Second)
 
 		require.Error(t, err)
 		_, ok := err.(headReqCancelledErr)
@@ -630,7 +630,7 @@ func TestSendHeadReq(t *testing.T) {
 		stat := NewObjectStat()
 
 		defer cancel()
-		meta, err := stat.sendHeadReq(ctx, "/foo/bar/error.txt", mockOriginAd.URL, "", 200*time.Millisecond)
+		meta, err := stat.sendHeadReq(ctx, "/foo/bar/error.txt", mockOriginAd.URL, true, "", 200*time.Millisecond)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown origin response with status code 500")
 		assert.Nil(t, meta)

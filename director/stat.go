@@ -70,7 +70,7 @@ type (
 	ObjectStat struct {
 		// Handle the request to test if an object exists on a server
 		//
-		// dataUrl: the base url to access data on the server. This is usally the url pointed at the XRootD instance on the server
+		// dataUrl: the base url to access data on the server. This is usually the url pointed at the XRootD instance on the server
 		//
 		// digest: requst digest for object checkusm. XRootD responds with 403 if digest feature is turned off on the server
 		//
