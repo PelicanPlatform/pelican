@@ -1077,6 +1077,11 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		}
 	}
 
+	if param.Cache_DataLocation.IsSet() {
+		log.Warningf("Deprecated configuration key %s is set. Please migrate to use %s instead", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
+		log.Warningf("Will attempt to use the value of %s as default for %s", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
+	}
+
 	if IsRootExecution() {
 		if currentServers.IsEnabled(OriginType) {
 			viper.SetDefault("Origin.RunLocation", filepath.Join("/run", "pelican", "xrootd", "origin"))
@@ -1084,7 +1089,12 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		if currentServers.IsEnabled(CacheType) {
 			viper.SetDefault("Cache.RunLocation", filepath.Join("/run", "pelican", "xrootd", "cache"))
 		}
-		viper.SetDefault("Cache.LocalRoot", "/run/pelican/cache")
+
+		// To ensure Cache.DataLocation still works, we default Cache.LocalRoot to Cache.DataLocation
+		// The logic is extracted from handleDeprecatedConfig as we manually set the default value here
+		viper.SetDefault(param.Cache_DataLocation.GetName(), "/run/pelican/cache")
+		viper.SetDefault(param.Cache_LocalRoot.GetName(), param.Cache_DataLocation.GetString())
+
 		if viper.IsSet("Cache.DataLocation") {
 			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "data")})
 			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "meta")})
@@ -1092,6 +1102,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			viper.SetDefault("Cache.DataLocations", []string{"/run/pelican/cache/data"})
 			viper.SetDefault("Cache.MetaLocations", []string{"/run/pelican/cache/meta"})
 		}
+
 		viper.SetDefault("LocalCache.RunLocation", filepath.Join("/run", "pelican", "localcache"))
 
 		viper.SetDefault("Origin.Multiuser", true)
@@ -1135,7 +1146,11 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			}
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
-		viper.SetDefault("Cache.LocalRoot", filepath.Join(runtimeDir, "cache"))
+		// To ensure Cache.DataLocation still works, we default Cache.LocalRoot to Cache.DataLocation
+		// The logic is extracted from handleDeprecatedConfig as we manually set the default value here
+		viper.SetDefault(param.Cache_DataLocation.GetName(), filepath.Join(runtimeDir, "cache"))
+		viper.SetDefault(param.Cache_LocalRoot.GetName(), param.Cache_DataLocation.GetString())
+
 		if viper.IsSet("Cache.DataLocation") {
 			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "data")})
 			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "meta")})

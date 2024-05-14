@@ -31,7 +31,7 @@ import (
 func CheckCacheSentinelLocation() error {
 	if param.Cache_SentinelLocation.IsSet() {
 		sentinelPath := param.Cache_SentinelLocation.GetString()
-		dataLoc := param.Cache_DataLocation.GetString()
+		dataLoc := param.Cache_LocalRoot.GetString()
 		sentinelPath = path.Clean(sentinelPath)
 		if path.Base(sentinelPath) != sentinelPath {
 			return errors.Errorf("invalid Cache.SentinelLocation path. File must not contain a directory. Got %s", sentinelPath)
