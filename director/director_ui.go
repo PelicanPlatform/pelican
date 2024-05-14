@@ -56,12 +56,6 @@ type (
 		NamespacePrefixes []string                  `json:"namespacePrefixes"`
 	}
 
-	statResponse struct {
-		OK       bool              `json:"ok"`
-		Message  string            `json:"message"`
-		Metadata []*objectMetadata `json:"metadata"`
-	}
-
 	statRequest struct {
 		MinResponses int `form:"min_responses"`
 		MaxResponses int `form:"max_responses"`
