@@ -561,7 +561,7 @@ func WriteOriginScitokensConfig(authedPaths []string) error {
 	if issuer, err := GenerateOriginIssuer(authedPaths); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
-			val.Name += "; " + issuer.Name
+			val.Name += " and " + issuer.Name
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
@@ -574,7 +574,7 @@ func WriteOriginScitokensConfig(authedPaths []string) error {
 	if issuer, err := GenerateMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
-			val.Name += "; " + issuer.Name
+			val.Name += " and " + issuer.Name
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
@@ -587,7 +587,7 @@ func WriteOriginScitokensConfig(authedPaths []string) error {
 	if issuer, err := GenerateDirectorMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
-			val.Name += "; " + issuer.Name
+			val.Name += " and " + issuer.Name
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
