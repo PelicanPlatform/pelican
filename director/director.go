@@ -38,6 +38,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -384,6 +385,53 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		ginCtx.String(http.StatusNotFound, "There are currently no origins exporting the provided namespace prefix")
 		return
 	}
+
+	availableOriginAds := []server_structs.ServerAd{}
+	if ginCtx.Request.Method == "PUT" { // Only call stat if not uploading the file
+		availableOriginAds = originAds
+	} else {
+		// Query Origins and check if the object exists on the server
+		q := NewObjectStat()
+		qr := q.Query(context.Background(), reqPath, config.OriginType, 1, 3,
+			withOriginAds(originAds), WithToken(authzBearerEscaped))
+		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
+
+		if qr.Status == querySuccessful {
+			for _, obj := range qr.Objects {
+				serverUrl := obj.URL.Host
+				for _, oAd := range originAds {
+					if oAd.URL.Host == serverUrl {
+						availableOriginAds = append(availableOriginAds, oAd)
+					}
+				}
+			}
+		} else if qr.Status == queryFailed {
+			if qr.ErrorType != queryInsufficientResErr {
+				ginCtx.String(http.StatusInternalServerError, fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg))
+				return
+			}
+			// Insufficient response
+			if len(qr.DeniedServers) == 0 {
+				// No denied server, the object was not found on any origins
+				ginCtx.String(http.StatusNotFound, "There are currently no origins hosting the object")
+				return
+			}
+			// For denied servers, append them to availableOriginAds
+			for _, ds := range qr.DeniedServers {
+				for _, oAd := range originAds {
+					if oAd.AuthURL.String() == ds {
+						availableOriginAds = append(availableOriginAds, oAd)
+					}
+				}
+			}
+		}
+		if len(availableOriginAds) == 0 {
+			// No available originAds, object does not exist
+			ginCtx.String(http.StatusNotFound, "There are currently no origins hosting the object: available origin Ads is 0")
+			return
+		}
+	}
+
 	// if err != nil, depth == 0, which is the default value for depth
 	// so we can use it as the value for the header even with err
 	depth, err := getLinkDepth(reqPath, namespaceAd.Path)
@@ -391,7 +439,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
 
-	originAds, err = sortServerAdsByIP(ipAddr, originAds)
+	availableOriginAds, err = sortServerAdsByIP(ipAddr, availableOriginAds)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.String(http.StatusInternalServerError, "Failed to determine origin ordering")
@@ -400,7 +448,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	linkHeader := ""
 	first := true
-	for idx, ad := range originAds {
+	for idx, ad := range availableOriginAds {
 		if first {
 			first = false
 		} else {
@@ -415,11 +463,11 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
 	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
 	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
-	if namespaceAd.Caps.Listings && originAds[0].Listings {
-		if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
-			colUrl = originAds[0].AuthURL.String()
+	if namespaceAd.Caps.Listings && availableOriginAds[0].Listings {
+		if !namespaceAd.PublicRead && availableOriginAds[0].AuthURL != (url.URL{}) {
+			colUrl = availableOriginAds[0].AuthURL.String()
 		} else {
-			colUrl = originAds[0].URL.String()
+			colUrl = availableOriginAds[0].URL.String()
 		}
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
@@ -429,10 +477,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// If we are doing a PROPFIND, check if origins enable dirlistings
 	if ginCtx.Request.Method == "PROPFIND" {
-		for idx, ad := range originAds {
+		for idx, ad := range availableOriginAds {
 			if ad.Listings && namespaceAd.Caps.Listings {
-				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
-				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
+				redirectURL = getRedirectURL(reqPath, availableOriginAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := availableOriginAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
 				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
@@ -448,10 +496,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// Check if we are doing a DirectRead and if it is allowed
 	if ginCtx.Request.URL.Query().Has("directread") {
-		for idx, originAd := range originAds {
+		for idx, originAd := range availableOriginAds {
 			if originAd.DirectReads && namespaceAd.Caps.DirectReads {
-				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
-				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
+				redirectURL = getRedirectURL(reqPath, availableOriginAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := availableOriginAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
 				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
@@ -464,10 +512,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// If we are doing a PUT, check to see if any origins are writeable
 	if ginCtx.Request.Method == "PUT" {
-		for idx, ad := range originAds {
+		for idx, ad := range availableOriginAds {
 			if ad.Writes {
-				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
-				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
+				redirectURL = getRedirectURL(reqPath, availableOriginAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := availableOriginAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
 				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
@@ -477,8 +525,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint have direct reads enabled"})
 		return
 	} else { // Otherwise, we are doing a GET
-		redirectURL := getRedirectURL(reqPath, originAds[0], !namespaceAd.PublicRead)
-		if brokerUrl := originAds[0].BrokerURL; brokerUrl.String() != "" {
+		redirectURL := getRedirectURL(reqPath, availableOriginAds[0], !namespaceAd.PublicRead)
+		if brokerUrl := availableOriginAds[0].BrokerURL; brokerUrl.String() != "" {
 			ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 		}
 

@@ -56,11 +56,13 @@ type (
 	queryErrorType string
 
 	queryResult struct {
-		Status        queryStatus       `json:"status"`
-		ErrorType     queryErrorType    `json:"errorType,omitempty"`     // Available when status==failure
-		Msg           string            `json:"msg,omitempty"`           // General description of the error/success
-		Objects       []*objectMetadata `json:"objects,omitempty"`       // Available when status==success
-		DeniedServers []string          `json:"deniedServers,omitempty"` // Available when status==failure
+		Status    queryStatus       `json:"status"`
+		ErrorType queryErrorType    `json:"errorType,omitempty"` // Available when status==failure
+		Msg       string            `json:"msg,omitempty"`       // General description of the error/success
+		Objects   []*objectMetadata `json:"objects,omitempty"`   // Available when status==success
+		// Available when status==failure. The values are AuthURLs from servers with 403 responses
+		// The AuthURLs are for obtaining a token and retry the query.
+		DeniedServers []string `json:"deniedServers,omitempty"`
 	}
 
 	// A struct to implement `object stat`, by querying against origins/caches with namespaces match the prefix of an object name
@@ -130,7 +132,7 @@ func (e headReqCancelledErr) Error() string {
 }
 
 func (meta objectMetadata) String() string {
-	return fmt.Sprintf("Object Meatadata: File URL %q\nContent-length:%d\nChecksum: %s\n",
+	return fmt.Sprintf("Object Meatadata: File URL %q; Content-length:%d; Checksum: %s\n",
 		meta.URL.String(),
 		meta.ContentLength,
 		meta.Checksum,
@@ -146,6 +148,18 @@ func (m *objectMetadata) MarshalJSON() ([]byte, error) {
 		URL:   m.URL.String(),
 		Alias: (*Alias)(m),
 	})
+}
+
+func (q queryResult) String() string {
+	if q.Status == querySuccessful {
+		res := fmt.Sprintf("Query is successful: %s\nObjects: \n", q.Msg)
+		for _, obj := range q.Objects {
+			res += obj.String() + "\n"
+		}
+		return res
+	} else {
+		return fmt.Sprintf("Query failed with error %s: %s", q.ErrorType, q.Msg)
+	}
 }
 
 // Initialize a new stat instance and set default method implementations
