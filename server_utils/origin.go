@@ -56,9 +56,9 @@ type (
 )
 
 var (
-	ErrUnknownOriginStorageType = errors.New("unknown origin storage type")
-	ErrInvalidOriginConfig      = errors.New("invalid origin configuration")
-	WarnExportVolumes string = "Passing export volumes via -v at the command line causes Pelican to ignore exports configured via the yaml file. " +
+	ErrUnknownOriginStorageType        = errors.New("unknown origin storage type")
+	ErrInvalidOriginConfig             = errors.New("invalid origin configuration")
+	WarnExportVolumes           string = "Passing export volumes via -v at the command line causes Pelican to ignore exports configured via the yaml file. " +
 		"However, namespaces exported this way will inherit the Origin.Enable* settings from your configuration file. " +
 		"For finer-grained control of each export, please configure them in your pelican.yaml file via Origin.Exports"
 )
