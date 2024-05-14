@@ -40,8 +40,9 @@ import (
 )
 
 const (
-	selfTestBody string = "This object was created by the Pelican self-test functionality"
-	selfTestDir  string = "/pelican/monitoring"
+	selfTestBody   string = "This object was created by the Pelican self-test functionality"
+	selfTestDir    string = "/pelican/monitoring/selfTest"
+	selfTestPrefix string = "self-test-"
 )
 
 // Add self-test directories to xrootd data location of the cache
@@ -59,7 +60,8 @@ func InitSelfTestDir() error {
 	basePath := param.Cache_LocalRoot.GetString()
 	pelicanMonPath := filepath.Join(basePath, "/pelican")
 	monitoringPath := filepath.Join(pelicanMonPath, "/monitoring")
-	err = os.MkdirAll(monitoringPath, 0700)
+	selfTestPath := filepath.Join(monitoringPath, "/selfTest")
+	err = os.MkdirAll(selfTestPath, 0700)
 	if err != nil {
 		return errors.Wrap(err, "Fail to create directory for the self-test")
 	}
@@ -67,6 +69,9 @@ func InitSelfTestDir() error {
 		return errors.Wrapf(err, "Unable to change ownership of self-test /pelican directory %v to desired daemon gid %v", monitoringPath, gid)
 	}
 	if err = os.Chown(monitoringPath, uid, gid); err != nil {
+		return errors.Wrapf(err, "Unable to change ownership of self-test /pelican/monitoring directory %v to desired daemon gid %v", monitoringPath, gid)
+	}
+	if err = os.Chown(selfTestPath, uid, gid); err != nil {
 		return errors.Wrapf(err, "Unable to change ownership of self-test /pelican/monitoring directory %v to desired daemon gid %v", monitoringPath, gid)
 	}
 	return nil
@@ -77,10 +82,10 @@ func generateTestFile() (string, error) {
 	if basePath == "" {
 		return "", errors.New("failed to generate self-test file for cache: Cache.LocalRoot is not set.")
 	}
-	monitoringPath := filepath.Join(basePath, selfTestDir)
-	_, err := os.Stat(monitoringPath)
+	selfTestPath := filepath.Join(basePath, selfTestDir)
+	_, err := os.Stat(selfTestPath)
 	if err != nil {
-		return "", errors.Wrap(err, "self-test directory does not exist at "+monitoringPath)
+		return "", errors.Wrap(err, "self-test directory does not exist at "+selfTestPath)
 	}
 	uid, err := config.GetDaemonUID()
 	if err != nil {
@@ -107,13 +112,13 @@ func generateTestFile() (string, error) {
 		return "", err
 	}
 
-	testFileName := "self-test-" + now.Format(time.RFC3339) + ".txt"
-	testFileCinfoName := "self-test-" + now.Format(time.RFC3339) + ".txt.cinfo"
+	testFileName := selfTestPrefix + now.Format(time.RFC3339) + ".txt"
+	testFileCinfoName := selfTestPrefix + now.Format(time.RFC3339) + ".txt.cinfo"
 
-	finalFilePath := filepath.Join(monitoringPath, testFileName)
+	finalFilePath := filepath.Join(selfTestPath, testFileName)
 
-	tmpFileCinfoPath := filepath.Join(monitoringPath, testFileCinfoName+".tmp")
-	finalFileCinfoPath := filepath.Join(monitoringPath, testFileCinfoName)
+	tmpFileCinfoPath := filepath.Join(selfTestPath, testFileCinfoName+".tmp")
+	finalFileCinfoPath := filepath.Join(selfTestPath, testFileCinfoName)
 
 	// This is for web URL path, do not use filepath
 	extFilePath := path.Join(selfTestDir, testFileName)
@@ -169,7 +174,7 @@ func generateFileTestScitoken() (string, error) {
 	fTestTokenCfg.Lifetime = time.Minute
 	fTestTokenCfg.Issuer = issuerUrl
 	fTestTokenCfg.Subject = "cache"
-	fTestTokenCfg.Claims = map[string]string{"scope": "storage.read:/pelican/monitoring"}
+	fTestTokenCfg.Claims = map[string]string{"scope": "storage.read:/pelican/monitoring/selfTest"}
 	// For self-tests, the audience is the server itself
 	fTestTokenCfg.AddAudienceAny()
 
