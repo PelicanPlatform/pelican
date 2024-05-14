@@ -45,7 +45,7 @@ Director:
   CacheSortMethod: "distance"
   MinStatResponse: 1
   MaxStatResponse: 1
-  StatTimeout: 200ms
+  StatTimeout: 300ms
   StatConcurrencyLimit: 1000
   AdvertisementTTL: 15m
   OriginCacheHealthTestInterval: 15s
