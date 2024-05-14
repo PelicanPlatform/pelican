@@ -856,6 +856,14 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Origin.XRootServiceUrl
+description: >-
+ When the origin is configured to export another XRootD storage backend, the `XRootServiceUrl` is used as the base for `root` protocol requests and
+ should point at the upstream XRootD server.
+type: string
+default: none
+components: ["origin"]
+---
 ############################
 #   Local cache configs    #
 ############################

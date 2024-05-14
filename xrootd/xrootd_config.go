@@ -91,6 +91,7 @@ type (
 		CalculatedPort    string
 		FederationPrefix  string
 		HttpServiceUrl    string
+		XRootServiceUrl   string
 		RunLocation       string
 		StorageType       string
 
