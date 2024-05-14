@@ -442,11 +442,8 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Built-in Monitoring"
-	issuerUrl, err := server_utils.GetServerIssuerURL()
-	if err != nil {
-		return
-	}
-	issuer.Issuer = issuerUrl.String()
+	// We use server local issuer regardless of Server.IssuerUrl
+	issuer.Issuer = param.Server_ExternalWebUrl.GetString()
 	issuer.BasePaths = []string{"/pelican/monitoring"}
 	issuer.DefaultUser = "xrootd"
 
@@ -459,11 +456,11 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Origin"
-	issuerUrl, err := server_utils.GetServerIssuerURL()
+	issuerUrl, err := config.GetServerIssuerURL()
 	if err != nil {
 		return
 	}
-	issuer.Issuer = issuerUrl.String()
+	issuer.Issuer = issuerUrl
 	issuer.BasePaths = exportedPaths
 	issuer.RestrictedPaths = param.Origin_ScitokensRestrictedPaths.GetStringSlice()
 	issuer.MapSubject = param.Origin_ScitokensMapSubject.GetBool()
