@@ -26,9 +26,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -45,15 +46,15 @@ func RegisterCacheAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.Gr
 	}
 }
 
-// Periodically scan the /<runLocation>/pelican/monitoring directory to clean up test files
+// Periodically scan the /<Cache.LocalRoot>/pelican/monitoring directory to clean up test files
 func LaunchDirectorTestFileCleanup(ctx context.Context) {
 	server_utils.LaunchWatcherMaintenance(ctx,
-		[]string{filepath.Join(param.Cache_DataLocation.GetString(), "pelican", "monitoring")},
+		[]string{filepath.Join(param.Cache_LocalRoot.GetString(), "pelican", "monitoring")},
 		"cache director-based health test clean up",
 		time.Minute,
 		func(notifyEvent bool) error {
 			// We run this function regardless of notifyEvent to do the cleanup
-			dirPath := filepath.Join(param.Cache_DataLocation.GetString(), "pelican", "monitoring")
+			dirPath := filepath.Join(param.Cache_LocalRoot.GetString(), "pelican", "monitoring")
 			dirInfo, err := os.Stat(dirPath)
 			if err != nil {
 				return err
