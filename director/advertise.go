@@ -70,12 +70,65 @@ func parseServerAd(server utils.Server, serverType server_structs.ServerType) se
 	return serverAd
 }
 
+// Do a subtraction of excludeDowned set from the includeDowned set to find cache servers
+// that are in downtime
+//
+// The excludeDowned is a list of running OSDF topology servers
+// The includeDowned is a list of running and downed OSDF topology servers
+func findDownedTopologyCache(excludeDowned, includeDowned []utils.Server) (caches []utils.Server) {
+	for _, included := range includeDowned {
+		found := false
+		for _, excluded := range excludeDowned {
+			if included == excluded {
+				found = true
+				break
+			}
+		}
+		if !found {
+			caches = append(caches, included)
+		}
+	}
+	return
+}
+
+// Update filteredServers based on topology downtime
+func updateDowntimeFromTopology(excludedNss, includedNss *utils.TopologyNamespacesJSON) {
+	downedCaches := findDownedTopologyCache(excludedNss.Caches, includedNss.Caches)
+
+	filteredServersMutex.Lock()
+	defer filteredServersMutex.Unlock()
+	// Remove existing filteredSevers that are fetched from the topology first
+	for key, val := range filteredServers {
+		if val == topoFiltered {
+			delete(filteredServers, key)
+		}
+	}
+	for _, dc := range downedCaches {
+		if sAd := serverAds.Get(dc.Endpoint); sAd == nil {
+			// The downed cache is not in the director yet
+			filteredServers[dc.Resource] = topoFiltered
+		} else {
+			// If we have the cache in the director, use it's name as the key
+			filteredServers[sAd.Value().Name] = topoFiltered
+		}
+	}
+	log.Infof("The following servers are put in downtime: %#v", filteredServers)
+}
+
 // Populate internal cache with origin/cache ads
 func AdvertiseOSDF(ctx context.Context) error {
-	namespaces, err := utils.GetTopologyJSON(ctx)
+	namespaces, err := utils.GetTopologyJSON(ctx, false)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
+
+	// Second call the fetch all servers (including servers in downtime)
+	includedNss, err := utils.GetTopologyJSON(ctx, true)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to get topology JSON with server in downtime included (include_downed)")
+	}
+
+	updateDowntimeFromTopology(namespaces, includedNss)
 
 	cacheAdMap := make(map[server_structs.ServerAd][]server_structs.NamespaceAdV2)
 	originAdMap := make(map[server_structs.ServerAd][]server_structs.NamespaceAdV2)

@@ -180,3 +180,150 @@ func TestAdvertiseOSDF(t *testing.T) {
 	assert.Equal(t, oAds[0].AuthURL.String(), "https://origin2-auth-endpoint.com")
 	assert.Equal(t, cAds[0].URL.String(), "http://cache-endpoint.com")
 }
+
+func TestFindDownedTopologyCache(t *testing.T) {
+	mockTopoCacheA := utils.Server{AuthEndpoint: "cacheA.org:8443", Endpoint: "cacheA.org:8000", Resource: "CACHE_A"}
+	mockTopoCacheB := utils.Server{AuthEndpoint: "cacheB.org:8443", Endpoint: "cacheB.org:8000", Resource: "CACHE_B"}
+	mockTopoCacheC := utils.Server{AuthEndpoint: "cacheC.org:8443", Endpoint: "cacheC.org:8000", Resource: "CACHE_C"}
+	mockTopoCacheD := utils.Server{AuthEndpoint: "cacheD.org:8443", Endpoint: "cacheD.org:8000", Resource: "CACHE_D"}
+	t.Run("empty-response", func(t *testing.T) {
+		get := findDownedTopologyCache(
+			[]utils.Server{},
+			[]utils.Server{},
+		)
+		assert.Empty(t, get)
+	})
+
+	t.Run("no-downed-cache", func(t *testing.T) {
+		get := findDownedTopologyCache(
+			[]utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
+			[]utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
+		)
+		assert.Empty(t, get)
+	})
+
+	t.Run("one-downed-cache", func(t *testing.T) {
+		get := findDownedTopologyCache(
+			[]utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC},
+			[]utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
+		)
+		require.Len(t, get, 1)
+		assert.EqualValues(t, mockTopoCacheD, get[0])
+	})
+
+	t.Run("two-downed-cache", func(t *testing.T) {
+		get := findDownedTopologyCache(
+			[]utils.Server{mockTopoCacheB, mockTopoCacheC},
+			[]utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
+		)
+		require.Len(t, get, 2)
+		assert.EqualValues(t, mockTopoCacheA, get[0])
+		assert.EqualValues(t, mockTopoCacheD, get[1])
+	})
+
+	t.Run("all-downed-cache", func(t *testing.T) {
+		get := findDownedTopologyCache(
+			[]utils.Server{},
+			[]utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
+		)
+		assert.EqualValues(t, []utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD}, get)
+	})
+}
+
+func TestUpdateDowntimeFromTopology(t *testing.T) {
+	mockTopoCacheA := utils.Server{AuthEndpoint: "cacheA.org:8443", Endpoint: "cacheA.org:8000", Resource: "CACHE_A"}
+	mockTopoCacheB := utils.Server{AuthEndpoint: "cacheB.org:8443", Endpoint: "cacheB.org:8000", Resource: "CACHE_B"}
+	mockTopoCacheC := utils.Server{AuthEndpoint: "cacheC.org:8443", Endpoint: "cacheC.org:8000", Resource: "CACHE_C"}
+
+	t.Run("no-change-with-same-downtime", func(t *testing.T) {
+		filteredServers = map[string]filterType{}
+		updateDowntimeFromTopology(
+			&utils.TopologyNamespacesJSON{},
+			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA, mockTopoCacheB}},
+		)
+		checkResult := func() {
+			filteredServersMutex.RLock()
+			defer filteredServersMutex.RUnlock()
+			assert.Len(t, filteredServers, 2)
+			require.NotEmpty(t, filteredServers[mockTopoCacheA.Resource])
+			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheA.Resource])
+			require.NotEmpty(t, filteredServers[mockTopoCacheB.Resource])
+			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheB.Resource])
+		}
+		checkResult()
+
+		// second round of updates
+		updateDowntimeFromTopology(
+			&utils.TopologyNamespacesJSON{},
+			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA, mockTopoCacheB}},
+		)
+		// Same result
+		checkResult()
+	})
+
+	t.Run("one-server-back-online", func(t *testing.T) {
+		filteredServers = map[string]filterType{}
+		updateDowntimeFromTopology(
+			&utils.TopologyNamespacesJSON{},
+			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA, mockTopoCacheB}},
+		)
+		func() {
+			filteredServersMutex.RLock()
+			defer filteredServersMutex.RUnlock()
+			assert.Len(t, filteredServers, 2)
+			require.NotEmpty(t, filteredServers[mockTopoCacheA.Resource])
+			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheA.Resource])
+			require.NotEmpty(t, filteredServers[mockTopoCacheB.Resource])
+			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheB.Resource])
+		}()
+
+		// second round of updates
+		updateDowntimeFromTopology(
+			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA}}, // A is back online
+			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA, mockTopoCacheB}},
+		)
+
+		func() {
+			filteredServersMutex.RLock()
+			defer filteredServersMutex.RUnlock()
+			assert.Len(t, filteredServers, 1)
+			require.NotEmpty(t, filteredServers[mockTopoCacheB.Resource])
+			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheB.Resource])
+		}()
+	})
+
+	t.Run("one-more-server-in-downtime", func(t *testing.T) {
+		filteredServers = map[string]filterType{}
+		updateDowntimeFromTopology(
+			&utils.TopologyNamespacesJSON{},
+			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA, mockTopoCacheB}},
+		)
+		func() {
+			filteredServersMutex.RLock()
+			defer filteredServersMutex.RUnlock()
+			assert.Len(t, filteredServers, 2)
+			require.NotEmpty(t, filteredServers[mockTopoCacheA.Resource])
+			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheA.Resource])
+			require.NotEmpty(t, filteredServers[mockTopoCacheB.Resource])
+			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheB.Resource])
+		}()
+
+		// second round of updates
+		updateDowntimeFromTopology(
+			&utils.TopologyNamespacesJSON{Caches: []utils.Server{}},
+			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC}},
+		)
+
+		func() {
+			filteredServersMutex.RLock()
+			defer filteredServersMutex.RUnlock()
+			assert.Len(t, filteredServers, 3)
+			require.NotEmpty(t, filteredServers[mockTopoCacheA.Resource])
+			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheA.Resource])
+			require.NotEmpty(t, filteredServers[mockTopoCacheB.Resource])
+			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheB.Resource])
+			require.NotEmpty(t, filteredServers[mockTopoCacheC.Resource])
+			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheC.Resource])
+		}()
+	})
+}
