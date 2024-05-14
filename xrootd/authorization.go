@@ -553,7 +553,7 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 }
 
 // Writes out the origin's scitokens.cfg configuration
-func WriteOriginScitokensConfig(exportedPaths []string) error {
+func WriteOriginScitokensConfig(authedPaths []string) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
@@ -566,8 +566,11 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 			cfg.IssuerMap[issuer.Issuer] = issuer
 			cfg.Global.Audience = append(cfg.Global.Audience, config.GetServerAudience())
 		}
+	} else if err != nil {
+		return errors.Wrap(err, "failed to generate xrootd issuer for self-monitoring")
 	}
-	if issuer, err := GenerateOriginIssuer(exportedPaths); err == nil && len(issuer.Name) > 0 {
+
+	if issuer, err := GenerateOriginIssuer(authedPaths); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
 			cfg.IssuerMap[issuer.Issuer] = val
@@ -575,7 +578,10 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 			cfg.IssuerMap[issuer.Issuer] = issuer
 			cfg.Global.Audience = append(cfg.Global.Audience, config.GetServerAudience())
 		}
+	} else if err != nil {
+		return errors.Wrap(err, "failed to generate xrootd issuer for the origin")
 	}
+
 	if issuer, err := GenerateDirectorMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
@@ -583,6 +589,8 @@ func WriteOriginScitokensConfig(exportedPaths []string) error {
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
 		}
+	} else if err != nil {
+		return errors.Wrap(err, "failed to generate xrootd issuer for director-based monitoring")
 	}
 
 	return writeScitokensConfiguration(config.OriginType, &cfg)
