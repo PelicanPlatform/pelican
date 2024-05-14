@@ -336,8 +336,9 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 			statUtil.Errgroup.Go(func() error {
 				metadata, err := stat.ReqHandler(maxCancelCtx, objectName, sAdInt.URL, true, cfg.token, timeout)
 
-				if _, ok := err.(headReqForbiddenErr); ok {
-					// If the request returns 403, it could be because we request digest
+				if err != nil {
+					// If the request returns 403 or 500, it could be because we request a digest and xrootd
+					// either not has this turned on, or had trouble calculating the checksum
 					// Retry without digest
 					metadata, err = stat.ReqHandler(maxCancelCtx, objectName, sAdInt.URL, false, cfg.token, timeout)
 				}
