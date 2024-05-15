@@ -356,6 +356,9 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
 
+	// Skip the stat check for object availability
+	skipStat := ginCtx.Request.URL.Query().Has("skipStat")
+
 	// /pelican/monitoring is the path for director-based health test
 	// where we have /director/healthTest API to mock a file for the cache to get
 	if strings.HasPrefix(reqPath, "/pelican/monitoring/") {
@@ -387,7 +390,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	}
 
 	availableOriginAds := []server_structs.ServerAd{}
-	if ginCtx.Request.Method == "PUT" { // Only call stat if not uploading the file
+	// Skip stat query for PUT (upload), PROPFIND (listing) or skipStat query flag is on
+	if ginCtx.Request.Method == "PUT" || ginCtx.Request.Method == "PROPFIND" || skipStat {
 		availableOriginAds = originAds
 	} else {
 		// Query Origins and check if the object exists on the server

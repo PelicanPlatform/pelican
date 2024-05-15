@@ -127,6 +127,10 @@ func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]s
 	if !ok || statUtil.Errgroup == nil {
 		baseCtx, cancel := context.WithCancel(ctx)
 		concLimit := param.Director_StatConcurrencyLimit.GetInt()
+		// If the value is not set, set to -1 to remove the limit
+		if concLimit == 0 {
+			concLimit = -1
+		}
 		statErrGrp := errgroup.Group{}
 		statErrGrp.SetLimit(concLimit)
 		newUtil := serverStatUtil{

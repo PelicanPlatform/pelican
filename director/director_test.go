@@ -174,6 +174,8 @@ func TestDirectorRegistration(t *testing.T) {
 
 	viper.Set("Federation.RegistryUrl", ts.URL)
 	viper.Set("Director.CacheSortMethod", "distance")
+	viper.Set("Director.StatTimeout", 300*time.Millisecond)
+	viper.Set("Director.StatConcurrencyLimit", 1)
 
 	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
 		// Setup httptest recorder and context for the the unit test
@@ -558,7 +560,9 @@ func TestDirectorRegistration(t *testing.T) {
 
 		c, r, w = setupContext()
 		token = generateReadToken(pKey, "/foo/bar", isurl.String())
-		setupRedirect(c, r, "/foo/bar/baz", token)
+		// Since we didn't set up any real server for the test
+		// skip the stat for get a 307
+		setupRedirect(c, r, "/foo/bar/baz?skipStat", token)
 
 		r.ServeHTTP(w, c.Request)
 

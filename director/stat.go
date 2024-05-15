@@ -198,6 +198,7 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 			if urlErr.Timeout() {
 				return nil, headReqTimeoutErr{fmt.Sprintf("request timeout after %dms", timeout.Milliseconds())}
 			}
+			return nil, errors.Wrap(err, "unknown request error")
 		}
 	}
 	if res.StatusCode == 404 {
