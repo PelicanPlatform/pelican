@@ -229,8 +229,8 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
     fi
 
 # Install pre-commit
-RUN yum install -y python39 python39-pip &&\
-    /bin/pip-3.9 install pre-commit
+RUN python3.9 -m ensurepip &&\
+    pip3.9 install pre-commit
 
 COPY ./images/dev-container-entrypoint.sh /usr/local/bin/
 
