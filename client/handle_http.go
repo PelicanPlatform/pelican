@@ -2278,7 +2278,7 @@ func getDirListHost(ctx context.Context, remoteObjectUrl *url.URL, namespace nam
 			// If we have an issue querying the director, we want to fallback to the deprecated dirlisthost from the namespace
 			// At this point, we have already queried the director (and it should have succeeded if we are here) so the error
 			// we get is most likely an issue with PROPFIND (and an outdated director). Therefore, we should continue if we get a 404
-			if !(resp.StatusCode == http.StatusNotFound) {
+			if resp == nil || !(resp.StatusCode == http.StatusNotFound) {
 				// We did not get a 404 so we should return the error
 				return nil, err
 			}
@@ -2333,6 +2333,15 @@ func getDirListHost(ctx context.Context, remoteObjectUrl *url.URL, namespace nam
 	return
 }
 
+// This helper function creates a web dav client to walkDavDir's. Used for recursive downloads and lists
+func createWebDavClient(dirListHost *url.URL, token string) (client *gowebdav.Client) {
+	auth := &bearerAuth{token: token}
+	client = gowebdav.NewAuthClient(dirListHost.String(), auth)
+	transport := config.GetTransport()
+	client.SetTransport(transport)
+	return
+}
+
 // Walk a remote directory in a WebDAV server, emitting the files discovered
 func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
 	// Create the client to walk the filesystem
@@ -2352,11 +2361,7 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 	}
 	log.Debugln("Dir list host: ", rootUrl.String())
 
-	auth := &bearerAuth{token: job.job.token}
-	client := gowebdav.NewAuthClient(rootUrl.String(), auth)
-
-	transport := config.GetTransport()
-	client.SetTransport(transport)
+	client := createWebDavClient(&rootUrl, job.job.token)
 	return te.walkDirDownloadHelper(job, transfers, files, url.Path, client)
 }
 
@@ -2483,11 +2488,7 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 	}
 	log.Debugln("Dir list host: ", dirListHost.String())
 
-	auth := &bearerAuth{token: token}
-	client := gowebdav.NewAuthClient(dirListHost.String(), auth)
-
-	transport := config.GetTransport()
-	client.SetTransport(transport)
+	client := createWebDavClient(dirListHost, token)
 	remotePath := remoteObjectUrl.Path
 
 	infos, err := client.ReadDir(remotePath)
