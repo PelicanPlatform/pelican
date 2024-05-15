@@ -20,7 +20,7 @@
 # fail on building this container on arm machine
 FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 
-FROM almalinux:8
+FROM almalinux:9
 
 # https://docs.docker.com/engine/reference/builder/#automatic-platform-args-in-the-global-scope
 ARG TARGETARCH
@@ -32,7 +32,7 @@ ENV GOFLAGS="-buildvcs=false"
 RUN groupadd -o -g 10940 xrootd
 RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
-RUN yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm && \
+RUN yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     /usr/bin/crb enable && \
     # ^^ crb enables the Code Ready Builder repository (EL9) or PowerTools (EL8), needed for some of our dependencies \
     yum clean all
@@ -49,7 +49,7 @@ gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 RUN echo '%_topdir /usr/local/src/rpmbuild' > $HOME/.rpmmacros
 
 # Download OSG's XRootD SRPM and rebuild it. Create a yum repository to put the results in.
-RUN yum install -y yum-utils createrepo https://repo.opensciencegrid.org/osg/23-main/osg-23-main-el8-release-latest.rpm && \
+RUN yum install -y yum-utils createrepo https://repo.opensciencegrid.org/osg/23-main/osg-23-main-el9-release-latest.rpm && \
     yum-config-manager --setopt=install_weak_deps=False --save && \
     # ^^ save some space by not installing weak dependencies \
     yum-config-manager --disable osg --save && \
@@ -60,7 +60,7 @@ RUN yum install -y yum-utils createrepo https://repo.opensciencegrid.org/osg/23-
     yumdownloader --source xrootd --disablerepo=\* --enablerepo=osg-development-source && \
     yum-builddep -y xrootd-*.osg*.src.rpm && \
     rpmbuild --define 'osg 1' \
-             --define 'dist .osg.el8' \
+             --define 'dist .osg.el9' \
              --without compat \
              --without doc \
              --nocheck \
@@ -164,7 +164,7 @@ RUN n lts && \
 ##
 RUN useradd -r -s /sbin/nologin tomcat ;\
     mkdir -p /opt/tomcat ;\
-    curl -s -L https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.80/bin/apache-tomcat-9.0.80.tar.gz | tar -zxf - -C /opt/tomcat --strip-components=1 ;\
+    curl -s -L https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.83/bin/apache-tomcat-9.0.83.tar.gz | tar -zxf - -C /opt/tomcat --strip-components=1 ;\
     chgrp -R tomcat /opt/tomcat/conf ;\
     chmod g+rwx /opt/tomcat/conf ;\
     chmod g+r /opt/tomcat/conf/* ;\
