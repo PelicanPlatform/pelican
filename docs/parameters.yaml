@@ -475,6 +475,12 @@ description: |+
         Capabilities: ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
         SentinelLocation: demoproject_origin_A
     ```
+
+  There are additional configuration fields if Origin.StorageType == "s3".
+  - S3Bucket: [REQUIRED] See `Origin.S3Bucket` for details
+  - S3AccessKeyfile: [OPTIONAL] See `Origin.S3AccessKeyfile` for details
+  - S3SecretKeyfile: [OPTIONAL] See `Origin.S3SecretKeyfile` for details
+
 type: object
 default: none
 components: ["origin"]
@@ -796,6 +802,8 @@ components: ["origin"]
 ---
 name: Origin.S3Bucket
 description: |+
+  **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+
   Objects in S3 are stored in "buckets", which have unique names at each S3 service URL (ie the URL that provides access to your objects).
   Setting a bucket restricts the origin to only serving objects from that bucket.
 
@@ -817,6 +825,8 @@ components: ["origin"]
 ---
 name: Origin.S3AccessKeyfile
 description: |+
+  **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+
   A path to a file containing an S3 access keyfile (also sometimes called an API key) for authenticated buckets when an origin
   is run in S3 mode.
 
@@ -828,6 +838,8 @@ components: ["origin"]
 ---
 name: Origin.S3SecretKeyfile
 description: |+
+  **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+
   A path to a file containing an S3 secret keyfile for authenticated buckets when an origin is run in S3 mode.
 
   This value is OPTIONAL for S3 origins, and only applies when an exported bucket requires authentication. It should not be used
