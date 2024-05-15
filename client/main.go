@@ -470,8 +470,8 @@ func schemeUnderstood(scheme string) error {
 	return nil
 }
 
-// TODO function header
-func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (err error) { //TODO change from TransferOption to something with ls
+// Function for the object ls command, we get target information for our remote object and eventually print out the contents of the specified object
+func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -547,6 +547,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		return err
 	}
 
+	// Take our fileInfos and print them in a nice way
 	// if the -L flag was set, we print more information
 	if long {
 		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
@@ -562,6 +563,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		}
 		w.Flush()
 	} else {
+		// We print using a tabwriter to enhance readability of the listed files and to make things look nicer
 		totalColumns := 4
 		// column is a counter letting us know what item/column we are on (can't use index in loop below since we have continues on conditions)
 		var column int

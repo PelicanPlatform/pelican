@@ -2477,7 +2477,7 @@ func (f *fileInfo) Size() int64        { return f.size }
 func (f *fileInfo) Mode() os.FileMode  { return f.mode }
 func (f *fileInfo) ModTime() time.Time { return f.modTime }
 func (f *fileInfo) IsDir() bool        { return f.isDir }
-func (f *fileInfo) Sys() interface{}   { return nil } // Return nil or a suitable value
+func (f *fileInfo) Sys() interface{}   { return nil }
 
 // This function performs the ls command by walking through the specified directory and printing the contents of the files
 func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string, namespace namespaces.Namespace, token string, options ...TransferOption) (fileInfos []fs.FileInfo, err error) {

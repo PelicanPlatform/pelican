@@ -44,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -949,6 +950,11 @@ func TestGetDirListHost(t *testing.T) {
 		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
+
+		// Wait until our server is working
+		err = server_utils.WaitUntilWorking(ctx, "PROPFIND", server.URL, "testServer", http.StatusTemporaryRedirect, true)
+		require.NoError(t, err)
+
 		dirListHost, err := getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
 		require.NoError(t, err)
 		assert.Equal(t, "http://some", dirListHost.String())
@@ -965,6 +971,11 @@ func TestGetDirListHost(t *testing.T) {
 		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
+
+		// Wait until our server is working
+		err = server_utils.WaitUntilWorking(ctx, "PROPFIND", server.URL, "testServer", http.StatusMethodNotAllowed, true)
+		require.NoError(t, err)
+
 		dirListHost, err := getDirListHost(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, server.URL)
 		require.NoError(t, err)
 		assert.Equal(t, expectedLocation, dirListHost.String())
@@ -981,6 +992,11 @@ func TestGetDirListHost(t *testing.T) {
 		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
+
+		// Wait until our server is working
+		err = server_utils.WaitUntilWorking(ctx, "PROPFIND", server.URL, "testServer", http.StatusNotFound, true)
+		require.NoError(t, err)
+
 		dirListHost, err := getDirListHost(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, server.URL)
 		require.NoError(t, err)
 		assert.Equal(t, expectedLocation, dirListHost.String())
@@ -1007,6 +1023,11 @@ func TestGetDirListHost(t *testing.T) {
 		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
+
+		// Wait until our server is working
+		err = server_utils.WaitUntilWorking(ctx, "PROPFIND", server.URL, "testServer", http.StatusMethodNotAllowed, true)
+		require.NoError(t, err)
+
 		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, &dirListingNotSupportedError{})
@@ -1047,6 +1068,11 @@ func TestGetDirListHost(t *testing.T) {
 		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
+
+		// Wait until our server is working
+		err = server_utils.WaitUntilWorking(ctx, "PROPFIND", server.URL, "testServer", http.StatusTemporaryRedirect, true)
+		require.NoError(t, err)
+
 		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "collections URL not found in director response")
@@ -1065,6 +1091,11 @@ func TestGetDirListHost(t *testing.T) {
 		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
+
+		// Wait until our server is working
+		err = server_utils.WaitUntilWorking(ctx, "PROPFIND", server.URL, "testServer", http.StatusServiceUnavailable, true)
+		require.NoError(t, err)
+
 		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "some server error")
