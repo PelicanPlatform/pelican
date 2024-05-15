@@ -40,8 +40,9 @@ import (
 )
 
 const (
-	selfTestBody string = "This object was created by the Pelican self-test functionality"
-	selfTestDir  string = "/pelican/monitoring"
+	selfTestBody   string = "This object was created by the Pelican self-test functionality"
+	selfTestDir    string = "/pelican/monitoring/selfTest"
+	selfTestPrefix string = "self-test-"
 )
 
 // Add self-test directories to xrootd data location of the cache
@@ -56,10 +57,11 @@ func InitSelfTestDir() error {
 		return err
 	}
 
-	basePath := param.Cache_DataLocation.GetString()
+	basePath := param.Cache_LocalRoot.GetString()
 	pelicanMonPath := filepath.Join(basePath, "/pelican")
 	monitoringPath := filepath.Join(pelicanMonPath, "/monitoring")
-	err = os.MkdirAll(monitoringPath, 0700)
+	selfTestPath := filepath.Join(monitoringPath, "/selfTest")
+	err = os.MkdirAll(selfTestPath, 0700)
 	if err != nil {
 		return errors.Wrap(err, "Fail to create directory for the self-test")
 	}
@@ -69,15 +71,21 @@ func InitSelfTestDir() error {
 	if err = os.Chown(monitoringPath, uid, gid); err != nil {
 		return errors.Wrapf(err, "Unable to change ownership of self-test /pelican/monitoring directory %v to desired daemon gid %v", monitoringPath, gid)
 	}
+	if err = os.Chown(selfTestPath, uid, gid); err != nil {
+		return errors.Wrapf(err, "Unable to change ownership of self-test /pelican/monitoring directory %v to desired daemon gid %v", monitoringPath, gid)
+	}
 	return nil
 }
 
 func generateTestFile() (string, error) {
-	basePath := param.Cache_DataLocation.GetString()
-	monitoringPath := filepath.Join(basePath, selfTestDir)
-	_, err := os.Stat(monitoringPath)
+	basePath := param.Cache_LocalRoot.GetString()
+	if basePath == "" {
+		return "", errors.New("failed to generate self-test file for cache: Cache.LocalRoot is not set.")
+	}
+	selfTestPath := filepath.Join(basePath, selfTestDir)
+	_, err := os.Stat(selfTestPath)
 	if err != nil {
-		return "", errors.Wrap(err, "self-test directory does not exist at "+monitoringPath)
+		return "", errors.Wrap(err, "self-test directory does not exist at "+selfTestPath)
 	}
 	uid, err := config.GetDaemonUID()
 	if err != nil {
@@ -104,13 +112,13 @@ func generateTestFile() (string, error) {
 		return "", err
 	}
 
-	testFileName := "self-test-" + now.Format(time.RFC3339) + ".txt"
-	testFileCinfoName := "self-test-" + now.Format(time.RFC3339) + ".txt.cinfo"
+	testFileName := selfTestPrefix + now.Format(time.RFC3339) + ".txt"
+	testFileCinfoName := selfTestPrefix + now.Format(time.RFC3339) + ".txt.cinfo"
 
-	finalFilePath := filepath.Join(monitoringPath, testFileName)
+	finalFilePath := filepath.Join(selfTestPath, testFileName)
 
-	tmpFileCinfoPath := filepath.Join(monitoringPath, testFileCinfoName+".tmp")
-	finalFileCinfoPath := filepath.Join(monitoringPath, testFileCinfoName)
+	tmpFileCinfoPath := filepath.Join(selfTestPath, testFileCinfoName+".tmp")
+	finalFileCinfoPath := filepath.Join(selfTestPath, testFileCinfoName)
 
 	// This is for web URL path, do not use filepath
 	extFilePath := path.Join(selfTestDir, testFileName)
@@ -120,6 +128,7 @@ func generateTestFile() (string, error) {
 		return "", errors.Wrapf(err, "failed to create self-test file %s", finalFilePath)
 	}
 	defer file.Close()
+	defer log.Debug("Cache self-test file created at: ", finalFilePath)
 
 	cinfoFile, err := os.OpenFile(tmpFileCinfoPath, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
@@ -165,7 +174,7 @@ func generateFileTestScitoken() (string, error) {
 	fTestTokenCfg.Lifetime = time.Minute
 	fTestTokenCfg.Issuer = issuerUrl
 	fTestTokenCfg.Subject = "cache"
-	fTestTokenCfg.Claims = map[string]string{"scope": "storage.read:/pelican/monitoring"}
+	fTestTokenCfg.Claims = map[string]string{"scope": "storage.read:/pelican/monitoring/selfTest"}
 	// For self-tests, the audience is the server itself
 	fTestTokenCfg.AddAudienceAny()
 
@@ -207,14 +216,14 @@ func downloadTestFile(ctx context.Context, fileUrl string) error {
 		return errors.Wrap(err, "failed to get response body from cache self-test download")
 	}
 	if string(body) != selfTestBody {
-		return errors.Errorf("contents of cache self-test file do not match the one uploaded: %v", body)
+		return errors.Errorf("contents of cache self-test file do not match the one uploaded. Expected: %s \nGot: %s", selfTestBody, string(body))
 	}
 
 	return nil
 }
 
 func deleteTestFile(fileUrlStr string) error {
-	basePath := param.Cache_DataLocation.GetString()
+	basePath := param.Cache_LocalRoot.GetString()
 	fileUrl, err := url.Parse(fileUrlStr)
 	if err != nil {
 		return errors.Wrap(err, "invalid file url to remove the test file")
