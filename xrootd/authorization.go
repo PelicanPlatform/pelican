@@ -442,11 +442,8 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Built-in Monitoring"
-	issuerUrl, err := server_utils.GetServerIssuerURL()
-	if err != nil {
-		return
-	}
-	issuer.Issuer = issuerUrl.String()
+	// We use server local issuer regardless of Server.IssuerUrl
+	issuer.Issuer = param.Server_ExternalWebUrl.GetString()
 	issuer.BasePaths = []string{"/pelican/monitoring"}
 	issuer.DefaultUser = "xrootd"
 
@@ -459,11 +456,11 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Origin"
-	issuerUrl, err := server_utils.GetServerIssuerURL()
+	issuerUrl, err := config.GetServerIssuerURL()
 	if err != nil {
 		return
 	}
-	issuer.Issuer = issuerUrl.String()
+	issuer.Issuer = issuerUrl
 	issuer.BasePaths = exportedPaths
 	issuer.RestrictedPaths = param.Origin_ScitokensRestrictedPaths.GetStringSlice()
 	issuer.MapSubject = param.Origin_ScitokensMapSubject.GetBool()
@@ -556,36 +553,47 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 }
 
 // Writes out the origin's scitokens.cfg configuration
-func WriteOriginScitokensConfig(exportedPaths []string) error {
+func WriteOriginScitokensConfig(authedPaths []string) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
 	}
+	if issuer, err := GenerateOriginIssuer(authedPaths); err == nil && len(issuer.Name) > 0 {
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			val.Name += " and " + issuer.Name
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
+			cfg.Global.Audience = append(cfg.Global.Audience, config.GetServerAudience())
+		}
+	} else if err != nil {
+		return errors.Wrap(err, "failed to generate xrootd issuer for the origin")
+	}
+
 	if issuer, err := GenerateMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			val.Name += " and " + issuer.Name
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
 			cfg.Global.Audience = append(cfg.Global.Audience, config.GetServerAudience())
 		}
+	} else if err != nil {
+		return errors.Wrap(err, "failed to generate xrootd issuer for self-monitoring")
 	}
-	if issuer, err := GenerateOriginIssuer(exportedPaths); err == nil && len(issuer.Name) > 0 {
-		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
-			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
-			cfg.IssuerMap[issuer.Issuer] = val
-		} else {
-			cfg.IssuerMap[issuer.Issuer] = issuer
-			cfg.Global.Audience = append(cfg.Global.Audience, config.GetServerAudience())
-		}
-	}
+
 	if issuer, err := GenerateDirectorMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			val.Name += " and " + issuer.Name
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
 		}
+	} else if err != nil {
+		return errors.Wrap(err, "failed to generate xrootd issuer for director-based monitoring")
 	}
 
 	return writeScitokensConfiguration(config.OriginType, &cfg)
