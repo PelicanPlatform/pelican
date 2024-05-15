@@ -476,7 +476,19 @@ definitions:
       type:
         type: string
         example: "posix"
-        description: "The storage type of the origin server. Is either \"posix\" or \"s3\""
+        description: "The storage type of the origin server. Values can be posix, s3, and https"
+      s3Region:
+        type: string
+        description: "The server region for AWS S3 storage. Only available when type == s3"
+      s3ServiceUrl:
+        type: string
+        description: "The URL that provides API access the the S3 objects. Only available when type == s3"
+      s3UrlStyle:
+        type: string
+        description: "The style of S3 urls used by the service URL host. Can be either \"path\" or \"virtual\". Only available when type == s3"
+      httpServiceUrl:
+        type: string
+        description: "The URL used as the base for requests to the backend. Only available when type == https"
       exports:
         type: array
         items:
