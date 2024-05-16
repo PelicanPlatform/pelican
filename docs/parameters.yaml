@@ -481,7 +481,7 @@ components: ["origin"]
 ---
 name: Origin.StorageType
 description: |+
-  The type of storage underpinning the origin. Currently supported types are "posix", "https", and "s3".
+  The type of storage underpinning the origin. Currently supported types are "posix", "https", "s3", and "xroot".
 type: string
 default: "posix"
 components: ["origin"]
@@ -858,8 +858,8 @@ components: ["origin"]
 ---
 name: Origin.XRootServiceUrl
 description: >-
- When the origin is configured to export another XRootD storage backend, the `XRootServiceUrl` is used as the base for `root` protocol requests and
- should point at the upstream XRootD server.
+ When the origin is configured to export another XRootD storage backend by setting `Origin.StorageType = xroot`, the `XRootServiceUrl`
+ is used as the base for `root` protocol requests and should point at the upstream XRootD server.
 type: string
 default: none
 components: ["origin"]

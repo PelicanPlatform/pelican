@@ -69,7 +69,6 @@ Origin:
   EnableWrites: true
   EnableListings: true
   EnableDirectReads: false
-  SelfTest: true
   Port: 8443
   SelfTestInterval: 15s
 Registry:
