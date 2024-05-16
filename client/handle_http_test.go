@@ -828,8 +828,8 @@ func TestGetCachesToTry(t *testing.T) {
 	// Add a duplicate to the list --> check for its removal
 	directorCaches = append(directorCaches, namespaces.DirectorCache{
 		EndpointUrl: "https://some/cache/0",
-			Priority:    0,
-			AuthedReq:   false,
+		Priority:    0,
+		AuthedReq:   false,
 	})
 
 	// Make our namespace:
@@ -843,7 +843,7 @@ func TestGetCachesToTry(t *testing.T) {
 	assert.NoError(t, err)
 
 	job := &TransferJob{
-		namespace:  namespace,
+		namespace: namespace,
 	}
 
 	transfers := getCachesToTry(caches, job, 4, "")

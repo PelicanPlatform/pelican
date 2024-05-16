@@ -1411,7 +1411,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			cachesToTry = len(closestNamespaceCaches)
 		}
 
-		transfers := getCachesToTry(closestNamespaceCaches, job.job, cachesToTry, packOption)
+		transfers = getCachesToTry(closestNamespaceCaches, job.job, cachesToTry, packOption)
 
 		if len(transfers) > 0 {
 			log.Debugln("Transfers:", transfers[0].Url)
