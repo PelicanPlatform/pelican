@@ -31,6 +31,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -810,6 +811,56 @@ func TestNewPelicanURL(t *testing.T) {
 		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
 		viper.Reset()
 	})
+}
+
+// Tests the functionality of getCachesToTry, ensuring that the function returns the correct number of caches and removes duplicates
+func TestGetCachesToTry(t *testing.T) {
+	directorCaches := make([]namespaces.DirectorCache, 3)
+	for i := 0; i < 3; i++ {
+		directorCache := namespaces.DirectorCache{
+			EndpointUrl: "https://some/cache/" + strconv.Itoa(i),
+			Priority:    0,
+			AuthedReq:   false,
+		}
+		directorCaches[i] = directorCache
+	}
+
+	// Add a duplicate to the list --> check for its removal
+	directorCaches = append(directorCaches, namespaces.DirectorCache{
+		EndpointUrl: "https://some/cache/0",
+			Priority:    0,
+			AuthedReq:   false,
+	})
+
+	// Make our namespace:
+	namespace := namespaces.Namespace{
+		SortedDirectorCaches: directorCaches,
+		ReadHTTPS:            false,
+		UseTokenOnRead:       false,
+	}
+
+	caches, err := getCachesFromNamespace(namespace, true, nil)
+	assert.NoError(t, err)
+
+	job := &TransferJob{
+		namespace:  namespace,
+	}
+
+	transfers := getCachesToTry(caches, job, 4, "")
+
+	// Check that there are no duplicates in the result
+	cacheSet := make(map[CacheInterface]bool)
+	for _, transfer := range transfers {
+		if cacheSet[transfer.Url.String()] {
+			t.Errorf("Found duplicate cache: %v", transfer.Url.String())
+		}
+		cacheSet[transfer.Url.String()] = true
+	}
+	// Verify we got the correct caches in our transfer attempt details
+	require.Len(t, transfers, 3)
+	assert.Equal(t, "https://some/cache/0", transfers[0].Url.String())
+	assert.Equal(t, "https://some/cache/1", transfers[1].Url.String())
+	assert.Equal(t, "https://some/cache/2", transfers[2].Url.String())
 }
 
 // Test that the project name is correctly extracted from the job ad file
