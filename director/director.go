@@ -147,7 +147,8 @@ func getLinkDepth(filepath, prefix string) (int, error) {
 	return pathDepth, nil
 }
 
-func getAuthzEscaped(req *http.Request) (authzEscaped string) {
+func getRequestParameters(req *http.Request) (requestParameterEscaped string) {
+	authzEscaped := ""
 	if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
 		authzEscaped = authzQuery[0]
 		// if the authz URL query is coming from XRootD, it probably has a "Bearer " tacked in front
@@ -157,15 +158,31 @@ func getAuthzEscaped(req *http.Request) (authzEscaped string) {
 		authzEscaped = strings.TrimPrefix(authzHeader[0], "Bearer ")
 		authzEscaped = url.QueryEscape(authzEscaped)
 	}
+	timeoutEscaped := ""
+	if timeoutQuery := req.URL.Query()["pelican.timeout"]; len(timeoutQuery) > 0 {
+		timeoutEscaped = timeoutQuery[0]
+	} else if timeoutHeader := req.Header["X-Pelican-Timeout"]; len(timeoutHeader) > 0 {
+		timeoutEscaped = url.QueryEscape(timeoutHeader[0])
+	}
+
+	if authzEscaped != "" {
+		requestParameterEscaped = "authz=" + authzEscaped
+	}
+	if timeoutEscaped != "" {
+		if requestParameterEscaped != "" {
+			requestParameterEscaped += "&"
+		}
+		requestParameterEscaped += "pelican.timeout=" + timeoutEscaped
+	}
 	return
 }
 
-func getFinalRedirectURL(rurl url.URL, authzEscaped string) string {
-	if len(authzEscaped) > 0 {
-		if len(rurl.RawQuery) > 0 {
+func getFinalRedirectURL(rurl url.URL, requestParameterEscaped string) string {
+	if requestParameterEscaped != "" {
+		if rurl.RawQuery != "" {
 			rurl.RawQuery += "&"
 		}
-		rurl.RawQuery += "authz=" + authzEscaped
+		rurl.RawQuery += requestParameterEscaped
 	}
 	return rurl.String()
 }
@@ -241,7 +258,7 @@ func redirectToCache(ginCtx *gin.Context) {
 		return
 	}
 
-	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
+	requestParameterEscaped := getRequestParameters(ginCtx.Request)
 
 	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
@@ -338,7 +355,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	// duplicate link metadata above.  This is purposeful: the Link header might get too long if we repeat
 	// the token 20 times for 20 caches.  This means a "normal HTTP client" will correctly redirect but
 	// anything parsing the `Link` header for metalinks will need logic for redirecting appropriately.
-	ginCtx.Redirect(307, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+	ginCtx.Redirect(307, getFinalRedirectURL(redirectURL, requestParameterEscaped))
 }
 
 func redirectToOrigin(ginCtx *gin.Context) {
@@ -369,7 +386,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
-	authzBearerEscaped := getAuthzEscaped(ginCtx.Request)
+	requestParameterEscaped := getRequestParameters(ginCtx.Request)
 
 	namespaceAd, originAds, _ := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
@@ -435,7 +452,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
-				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, requestParameterEscaped))
 				return
 			}
 		}
@@ -454,7 +471,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
-				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, requestParameterEscaped))
 				return
 			}
 		}
@@ -470,7 +487,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
-				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, requestParameterEscaped))
 				return
 			}
 		}
@@ -484,7 +501,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 		// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
 		// not those in the `Link`.
-		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, authzBearerEscaped))
+		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, requestParameterEscaped))
 	}
 }
 
