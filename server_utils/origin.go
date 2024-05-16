@@ -508,7 +508,7 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 				}
 
 				if storagePrefix != federationPrefix {
-					return nil, errors.Wrapf(ErrInvalidOriginConfig, "Federation and storage prefixes must be the same for XRoot protocol exports, but you "+
+					return nil, errors.Wrapf(ErrInvalidOriginConfig, "federation and storage prefixes must be the same for xroot backends, but you "+
 						"provided %s and %s", storagePrefix, federationPrefix)
 				}
 
@@ -565,7 +565,7 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 				}
 				// Paths must be the same for the XRoot backend
 				if export.StoragePrefix != export.FederationPrefix {
-					return nil, errors.Wrapf(ErrInvalidOriginConfig, "Federation and storage prefixes must be the same for XRoot protocol exports, but you "+
+					return nil, errors.Wrapf(ErrInvalidOriginConfig, "federation and storage prefixes must be the same for xroot backends, but you "+
 						"provided %s and %s", export.StoragePrefix, export.FederationPrefix)
 				}
 
@@ -587,7 +587,7 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 				Capabilities:     capabilities,
 			}
 			if originExport.StoragePrefix != originExport.FederationPrefix {
-				return nil, errors.Wrapf(ErrInvalidOriginConfig, "Federation and storage prefixes must be the same for XRoot protocol exports, but you "+
+				return nil, errors.Wrapf(ErrInvalidOriginConfig, "federation and storage prefixes must be the same for xroot backends, but you "+
 					"provided %s and %s", originExport.StoragePrefix, originExport.FederationPrefix)
 			}
 
