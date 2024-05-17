@@ -144,6 +144,7 @@ func TestQueryServersForObject(t *testing.T) {
 		cleanupMock()
 		// Restore the old serverAds at the end of this test func
 		serverAds = oldAds
+		viper.Reset()
 	})
 
 	t.Run("empty-server-ads-returns", func(t *testing.T) {
