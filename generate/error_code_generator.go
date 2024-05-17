@@ -29,16 +29,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TODO: might need to change this
 type ErrorType struct {
-	Raw       string
-	Display   string
+	Raw       string // Raw is the raw error type specified with a '.' separator
+	Display   string // Display is the error type used in the function headers with a '_' separator
 	ExitCode  int
 	Code      int
 	Retryable bool
 }
 
-// TODO: change to 5 (for minor codes)
 var requiredErrorKeys = [4]string{"code", "clientExitCode", "description", "retryable"}
 
 // GenErrorCodes takes the error_codes.yaml file (located: ../docs/error_codes.yaml) and generates the error_codes/error_codes.go file
@@ -60,7 +58,7 @@ func GenErrorCodes() {
 			if err == io.EOF {
 				break
 			}
-			panic(fmt.Errorf("document decode failed"))
+			panic(fmt.Errorf("%v: document decode failed", err))
 		}
 		values = append(values, value)
 	}

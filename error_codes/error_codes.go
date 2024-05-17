@@ -125,7 +125,7 @@ func NewSpecification_FileNotFoundError(err error) *PelicanError {
 	return &PelicanError{
 		errorType: "Specification.FileNotFound",
 		exitCode:  8,
-		code:      5001,
+		code:      5011,
 		retryable: false,
 		err:       err,
 	}

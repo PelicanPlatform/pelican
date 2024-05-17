@@ -105,7 +105,6 @@ func GenTokenScope() {
 		camelScopeName := handleCaseConversion(scopeName)
 		scopeNameInSnake := strings.Replace(camelScopeName, ".", "_", 1)
 		r := []rune(scopeNameInSnake)
-		r[0] = unicode.ToUpper(r[0])
 		displayName := string(r)
 		if strings.HasPrefix(scopeName, "storage") {
 			displayName = strings.TrimSuffix(displayName, ":")
