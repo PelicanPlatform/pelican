@@ -30,13 +30,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 const (
@@ -174,7 +176,7 @@ func generateFileTestScitoken() (string, error) {
 	fTestTokenCfg.Lifetime = time.Minute
 	fTestTokenCfg.Issuer = issuerUrl
 	fTestTokenCfg.Subject = "cache"
-	fTestTokenCfg.Claims = map[string]string{"scope": "storage.read:/pelican/monitoring/selfTest"}
+	fTestTokenCfg.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/pelican/monitoring/selfTest"))
 	// For self-tests, the audience is the server itself
 	fTestTokenCfg.AddAudienceAny()
 

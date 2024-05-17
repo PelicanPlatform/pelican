@@ -24,21 +24,23 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
-const (
-	cacheMonitroingBasePath = "/pelican/monitoring"
-	testFileContent         = "This object was created by the Pelican director-test functionality. Test is issued at "
-)
-
+// Run one object transfer to a cache from the director. Since director-based cache tests require a different
+// workflow than the origin tests. We can't reuse server_utils.RunTests(), but we want to keep common
+// pieces together
 func runCacheTest(ctx context.Context, cacheUrl url.URL) error {
 	nowStr := time.Now().Format(time.RFC3339)
-	cacheUrl.Path = fmt.Sprintf("/pelican/monitoring/%s.txt", nowStr)
+	dirMonPath := path.Join(server_utils.MonitoringBaseNs, "directorTest")
+	cacheUrl = *cacheUrl.JoinPath(path.Join(dirMonPath, server_utils.DirectorTest.String()+"-"+nowStr+".txt"))
 	client := http.Client{Transport: config.GetTransport()}
 	req, err := http.NewRequestWithContext(ctx, "GET", cacheUrl.String(), nil)
 	if err != nil {
@@ -62,9 +64,9 @@ func runCacheTest(ctx context.Context, cacheUrl url.URL) error {
 	}
 	strBody := string(byteBody)
 
-	if strings.TrimSuffix(strBody, "\n") == testFileContent+nowStr {
+	if strings.TrimSuffix(strBody, "\n") == server_utils.DirectorTestBody {
 		return nil
 	} else {
-		return fmt.Errorf("cache response file does not match expectation. Expected:%s, Got:%s", testFileContent+nowStr, strBody)
+		return fmt.Errorf("cache response file does not match expectation. Expected:%s, Got:%s", server_utils.DirectorTestBody, strBody)
 	}
 }

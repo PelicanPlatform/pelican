@@ -27,12 +27,14 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token"
-	"github.com/pkg/errors"
 )
 
 type (
@@ -45,22 +47,24 @@ type (
 		RunTests(ctx context.Context, baseUrl string, testType TestType) (bool, error)
 	}
 	TestFileTransferImpl struct {
-		audiences []string
-		issuerUrl string
-		testType  TestType
-		testBody  string
+		audiences    []string
+		issuerUrl    string
+		testType     TestType
+		testBody     string
+		testFilePath string // the path to the test file folder. e.g. /pelican/monitoring/selfTest
 	}
 )
 
 const (
-	OriginSelfFileTest TestType = "self-test"
-	DirectorFileTest   TestType = "director-test"
-	CacheTest          TestType = "cache-test"
+	ServerSelfTest TestType = "self-test"     // Origin/Cache object transfer self-test
+	DirectorTest   TestType = "director-test" // Director-based object transfer test
 )
 
+const MonitoringBaseNs string = "/pelican/monitoring" // The base namespace for monitoring objects
+
 const (
-	selfTestBody     string = "This object was created by the Pelican self-test functionality"
-	directorTestBody string = "This object was created by the Pelican director-test functionality"
+	SelfTestBody     string = "This object was created by the Pelican self-test functionality"
+	DirectorTestBody string = "This object was created by the Pelican director-test functionality"
 )
 
 func (t TestType) String() string {
@@ -89,13 +93,12 @@ func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
 	if err != nil {
 		return "", errors.Wrap(err, "failed to create file test token")
 	}
-
 	return tok, nil
 }
 
 // Private function to upload a test file to the `baseUrl` of an exported xrootd file directory
 // the test file content is based on the `testType` attribute
-func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string, namespace string) (string, error) {
+func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string) (string, error) {
 	tkn, err := t.generateFileTestScitoken()
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to create a token for test file transfer")
@@ -105,7 +108,8 @@ func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string
 	if err != nil {
 		return "", errors.Wrap(err, "The baseUrl is not parseable as a URL")
 	}
-	uploadURL.Path = namespace + t.testType.String() + "-" + time.Now().Format(time.RFC3339) + ".txt"
+	// /pelican/monitoring/<selfTest|directorTest>/<self-test|director-test>-YYYY-MM-DDTHH:MM:SSZ.txt
+	uploadURL = uploadURL.JoinPath(path.Join(t.testFilePath, t.testType.String()+"-"+time.Now().Format(time.RFC3339)+".txt"))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL.String(), bytes.NewBuffer([]byte(t.testBody)))
 	if err != nil {
@@ -208,15 +212,19 @@ func (t TestFileTransferImpl) RunTests(ctx context.Context, baseUrl, audienceUrl
 	t.audiences = []string{baseUrl, audienceUrl}
 	t.issuerUrl = issuerUrl
 	t.testType = testType
-	if testType == OriginSelfFileTest {
-		t.testBody = selfTestBody
-	} else if testType == DirectorFileTest {
-		t.testBody = directorTestBody
+	t.testFilePath = MonitoringBaseNs
+
+	if t.testType == ServerSelfTest {
+		t.testBody = SelfTestBody
+		t.testFilePath = path.Join(MonitoringBaseNs, "selfTest")
+	} else if t.testType == DirectorTest {
+		t.testBody = DirectorTestBody
+		t.testFilePath = path.Join(MonitoringBaseNs, "directorTest")
 	} else {
 		return false, errors.New("Unsupported testType: " + testType.String())
 	}
 
-	downloadUrl, err := t.uploadTestfile(ctx, baseUrl, "/pelican/monitoring/")
+	downloadUrl, err := t.uploadTestfile(ctx, baseUrl)
 	if err != nil {
 		return false, errors.Wrap(err, "Test file transfer failed during upload")
 	}

@@ -46,6 +46,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -1159,7 +1160,7 @@ func TestGetHealthTestFile(t *testing.T) {
 
 		bytes, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
-		assert.Equal(t, testFileContent+"testfile\n", string(bytes))
+		assert.Equal(t, server_utils.DirectorTestBody+"\n", string(bytes))
 	})
 }
 
