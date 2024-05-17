@@ -163,7 +163,7 @@ func convertCustomRegFields(configFields []customRegFieldsConfig) []registration
 }
 
 // Helper function to exclude pubkey field from marshaling into json
-func excludePubKey(nss []*server_structs.Namespace) (nssNew []NamespaceWOPubkey) {
+func excludePubKey(nss []server_structs.Namespace) (nssNew []NamespaceWOPubkey) {
 	nssNew = make([]NamespaceWOPubkey, 0)
 	for _, ns := range nss {
 		nsNew := NamespaceWOPubkey{
