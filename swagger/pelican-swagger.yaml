@@ -992,11 +992,12 @@ paths:
       parameters:
         - name: server_type
           in: query
+          type: string
           required: false
           description: The type of server to filter the results. The value can be either `origin` or `cache`
-          type: string
         - name: status
           in: query
+          type: string
           required: false
           description:
             The approval status of the namespaces, can be `pending`, `approved`, `denied`, or `unknown`.
@@ -1004,7 +1005,13 @@ paths:
             If `status == unknown`, internally it will match any registration with `status == ""` or `stauts == "unknown"`
 
             For unauthenticated users, filter with `status != approved` will result in a 403 error.
-          type: string
+        - name: legacy
+          in: query
+          type: boolean
+          required: false
+          description:
+            To show/filter out legacy namespace registrations, which only has two non-empty fields, `prefix` and `pubkey`.
+            Since this is a boolean parameter, it's OK to only pass `legacy` as the parameter without the `=true` value.
       produces:
         - application/json
       responses:
