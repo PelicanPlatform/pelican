@@ -477,7 +477,7 @@ description: |+
     ```
 
   There are additional configuration fields if Origin.StorageType == "s3".
-  - S3Bucket: [REQUIRED] See `Origin.S3Bucket` for details
+  - S3Bucket: [OPTIONAL] See `Origin.S3Bucket` for details
   - S3AccessKeyfile: [OPTIONAL] See `Origin.S3AccessKeyfile` for details
   - S3SecretKeyfile: [OPTIONAL] See `Origin.S3SecretKeyfile` for details
 
@@ -776,7 +776,7 @@ components: ["origin"]
 name: Origin.S3ServiceName
 description: |+
   [Deprecated] Origin.S3ServiceName was previously used in part to determine an export's FederationPrefix, but
-  upstream changes no longer rely on this value. As of Pelican 7.7.0, setting this value no longer has any effect.
+  upstream changes no longer rely on this value. As of Pelican `7.7.0`, setting this value no longer has any effect.
   AWSv4 signatures used by S3 servers to handle authentication now hardcode "s3" as their service name.
 
   When constructing signed URLs for S3, this value is used as a part of the signature. It is almost always "s3". For more
@@ -850,8 +850,8 @@ components: ["origin"]
 ---
 name: Origin.S3UrlStyle
 description: |+
-  The style of S3 urls used by the service URL host. This can be either "path" if objects are fetched at <service-url>/<bucket>/<object>
-  or "virtual" if objects are fetched at <bucket>.<service-url>/<object>.
+  The style of S3 urls used by the service URL host. This can be either "path" if objects are fetched at `<service-url>/<bucket>/<object>`
+  or "virtual" if objects are fetched at `<bucket>.<service-url>/<object>`.
 
   This value is REQUIRED for S3 origins, but defaults to "path" if not set.
 type: string
