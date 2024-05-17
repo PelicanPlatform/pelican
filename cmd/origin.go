@@ -48,24 +48,6 @@ var (
 		Short:        "Start the origin service",
 		RunE:         serveOrigin,
 		SilenceUsage: true,
-		PreRun: func(cmd *cobra.Command, args []string) {
-			// Checking these values has to happen here and not in init() because init
-			// doesn't have access to the actual values passed on the command line.
-			if ost := viper.GetString("Origin.StorageType"); ost == "s3" {
-				if !viper.IsSet("Origin.S3Region") || !viper.IsSet("Origin.S3ServiceUrl") {
-					cmd.PrintErrln("The --region, --service-url flags or equivalent config file entries are required when the origin is launched in S3 mode.")
-					os.Exit(1)
-				}
-			} else if ost == "posix" {
-				// We specifically DON'T want the region, service-url, and url-style flags if the mode is posix
-				if viper.IsSet("Origin.S3Region") || viper.IsSet("Origin.S3ServiceUrl") || viper.IsSet("Origin.S3UrlStyle") {
-					cmd.PrintErrln("The --region, --service-url, and --url-style flags are only used when the origin is launched in S3 mode.")
-				}
-			} else {
-				cmd.PrintErrln(fmt.Sprintf("The --mode flag must be either 'posix' or 's3', but you provided '%s'", ost))
-				os.Exit(1)
-			}
-		},
 	}
 
 	originUiCmd = &cobra.Command{
@@ -131,7 +113,7 @@ func init() {
 		panic(err)
 	}
 
-	// The -v flag is used when an origin is served in POSIX mode
+	// The -v flag is used for passing docker-style volume mounts to the origin.
 	originServeCmd.Flags().StringSliceP("volume", "v", []string{}, "Setting the volume to /SRC:/DEST will export the contents of /SRC as /DEST in the Pelican federation")
 	if err := viper.BindPFlag("Origin.ExportVolumes", originServeCmd.Flags().Lookup("volume")); err != nil {
 		panic(err)
@@ -178,6 +160,14 @@ instead.
 	// We don't require the bucket access and secret keyfiles as they're not needed for unauthenticated buckets.
 	// However, if you give us one, you've got to give us both.
 	originServeCmd.MarkFlagsRequiredTogether("bucket-access-keyfile", "bucket-secret-keyfile")
+
+	// The hostname flag is used to specify the hostname of the upstream xrootd server being exported by THIS origin.
+	// It is NOT the same as the current origin's hostname.
+	originServeCmd.Flags().String("xroot-service-url", "", "When configured in xroot mode, specifies the hostname and port of the upstream xroot server "+
+		"(not to be mistaken with the current server's hostname).")
+	if err := viper.BindPFlag("Origin.XRootServiceUrl", originServeCmd.Flags().Lookup("xroot-service-url")); err != nil {
+		panic(err)
+	}
 
 	// The port any web UI stuff will be served on
 	originServeCmd.Flags().AddFlag(portFlag)

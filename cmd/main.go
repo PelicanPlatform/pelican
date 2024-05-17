@@ -128,6 +128,29 @@ Origin:
 	HttpServiceUrl: "https://example.com/testfiles"
 	Capabilities: ["PublicReads", "Writes", "Listings"]
 `)
+			case server_utils.OriginStorageXRoot:
+				fmt.Fprintf(os.Stderr, `
+Export information was not correct.
+For xroot backends, specify exports via the command line using the -v flag.  Example:
+
+	-v /foo:/foo -v /bar:/bar (REQUIRED --xroot-service-url upstream-xroot-url.com:1095)
+
+Note that this backend type requires that the Storage Prefix (before the colon) and Federation Prefix (after the colon) match.
+It also requires that the exports are configured for public reads.
+
+Alternatively, specify Origin.Exports in the parameters.yaml file:
+
+	Origin:
+		StorageType: xroot
+		XRootServiceUrl: upstream-xroot-url.com:1095
+		Exports:
+		- StoragePrefix: /foo
+		  FederationPrefix: /
+		  Capabilities: ["PublicReads", "Writes", "Listings"]
+		- StoragePrefix: /bar
+		  FederationPrefix: /bar
+		  Capabilities: ["PublicReads", "Writes"]
+`)
 			default:
 				fmt.Fprintf(os.Stderr, "Currently-supported origin modes include posix, https, and s3, but you provided %s.", mode)
 			}
