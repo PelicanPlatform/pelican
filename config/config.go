@@ -1541,12 +1541,8 @@ func InitClient() error {
 		viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
 	}
 
-	// Ensure our worker count is set
-	if viper.IsSet("Client.WorkerCount") {
-		viper.SetDefault("Client.WorkerCount", param.Client_WorkerCount.GetInt())
-	} else {
-		viper.Set("Client.WorkerCount", 5)
-	}
+	// Set our default worker count
+	viper.SetDefault("Client.WorkerCount", 5)
 
 	// The transport will automatically trust this CA cert file.
 	// Even though it's a "server" setting, it's useful to have this in the client when testing
