@@ -1880,7 +1880,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	req = req.WithContext(ctx)
 
 	// Test the transfer speed every 5 seconds
-	t := time.NewTicker(5000 * time.Millisecond)
+	t := time.NewTicker(500 * time.Millisecond)
 	defer t.Stop()
 
 	// Progress ticker

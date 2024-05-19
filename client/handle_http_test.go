@@ -159,8 +159,11 @@ func TestSlowTransfers(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Adjust down some timeouts to speed up the test
-	viper.Set("Client.SlowTransferWindow", 5)
-	viper.Set("Client.SlowTransferRampupTime", 10)
+	viper.Reset()
+	viper.Set("Client.SlowTransferWindow", 2)
+	viper.Set("Client.SlowTransferRampupTime", 1)
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
 
 	channel := make(chan bool)
 	slowDownload := 1024 * 10 // 10 KiB/s < 100 KiB/s
@@ -240,8 +243,11 @@ func TestStoppedTransfer(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Adjust down the timeouts
-	viper.Set("Client.StoppedTransferTimeout", 3)
+	viper.Reset()
+	viper.Set("Client.StoppedTransferTimeout", 2)
 	viper.Set("Client.SlowTransferRampupTime", 100)
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
 
 	channel := make(chan bool)
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
