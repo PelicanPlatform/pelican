@@ -2355,6 +2355,7 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 
 	auth := &bearerAuth{token: job.job.token}
 	client := gowebdav.NewAuthClient(rootUrl.String(), auth)
+	client.SetHeader("User-Agent", getUserAgent(job.job.project))
 
 	// XRootD does not like keep alives and kills things, so turn them off.
 	transport := config.GetTransport()
