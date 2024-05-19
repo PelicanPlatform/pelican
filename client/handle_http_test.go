@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -852,4 +853,43 @@ func TestSearchJobAd(t *testing.T) {
 		jobId := searchJobAd(jobId)
 		assert.Equal(t, "12345", jobId)
 	})
+}
+
+// Test failed connection setup error message
+func TestFailedConnectionSetupError(t *testing.T) {
+	viper.Reset()
+	viper.Set("Transport.ResponseHeaderTimeout", "500ms")
+	viper.Set("Logging.Level", "debug")
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: "/dev/null",
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+	transferResult, err := downloadObject(transfer)
+	assert.NoError(t, err)
+	err = transferResult.Error
+	log.Debugln("Received connection error:", err)
+	var hte *HeaderTimeoutError
+	if errors.As(err, &hte) {
+		require.Equal(t, "timeout waiting for HTTP response (TCP connection successful)", hte.Error())
+	}
+	require.Error(t, err)
 }

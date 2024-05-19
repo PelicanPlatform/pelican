@@ -115,6 +115,8 @@ type (
 		Err error
 	}
 
+	HeaderTimeoutError struct{}
+
 	allocateMemoryError struct {
 		Err error
 	}
@@ -322,6 +324,10 @@ func getProgressContainer() *mpb.Progress {
 		progressCtr = mpb.New()
 	})
 	return progressCtr
+}
+
+func (e *HeaderTimeoutError) Error() string {
+	return "timeout waiting for HTTP response (TCP connection successful)"
 }
 
 func (e *StoppedTransferError) Error() string {
@@ -1711,6 +1717,13 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			} else if errors.As(err, &cse) {
 				if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
 					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, sce)
+				} else if ue, ok := cse.Unwrap().(*url.Error); ok {
+					httpErr := ue.Unwrap()
+					if httpErr.Error() == "net/http: timeout awaiting response headers" {
+						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, &HeaderTimeoutError{})
+					} else {
+						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, httpErr)
+					}
 				} else {
 					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
 				}
