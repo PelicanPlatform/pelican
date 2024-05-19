@@ -496,6 +496,9 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				developerData[fmt.Sprintf("TransferEndTime%d", attempt.Number)] = attempt.TransferEndTime.Unix()
 				developerData[fmt.Sprintf("ServerVersion%d", attempt.Number)] = attempt.ServerVersion
 				developerData[fmt.Sprintf("TransferTime%d", attempt.Number)] = attempt.TransferTime.Round(time.Millisecond).Seconds()
+				if attempt.CacheAge >= 0 {
+					developerData[fmt.Sprintf("DataAge%d", attempt.Number)] = attempt.CacheAge.Round(time.Millisecond).Seconds()
+				}
 				if attempt.Error != nil {
 					developerData[fmt.Sprintf("TransferError%d", attempt.Number)] = attempt.Error.Error()
 				}

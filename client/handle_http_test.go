@@ -206,7 +206,7 @@ func TestSlowTransfers(t *testing.T) {
 	var err error
 	// Do a quick timeout
 	go func() {
-		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 		finishedChannel <- true
 	}()
 
@@ -281,7 +281,7 @@ func TestStoppedTransfer(t *testing.T) {
 	var err error
 
 	go func() {
-		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 		finishedChannel <- true
 	}()
 
@@ -314,7 +314,7 @@ func TestConnectionError(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 
-	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 
 	assert.IsType(t, &ConnectionSetupError{}, err)
 
@@ -354,7 +354,7 @@ func TestTrailerError(t *testing.T) {
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
 	// Call DownloadHTTP and check if the error is returned correctly
-	_, _, _, err := downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	_, _, _, _, err := downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
@@ -430,9 +430,11 @@ func TestSortAttempts(t *testing.T) {
 		}
 	})
 	alwaysRespond := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "HEAD" {
+		if r.Method == "GET" {
 			w.Header().Set("Content-Length", "42")
 			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("A"))
+			require.NoError(t, err)
 		} else {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
@@ -506,7 +508,7 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 
 	serverURL, err := url.Parse(server.URL)
 	assert.NoError(t, err)
-	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 	assert.NoError(t, err)
 	viper.Reset()
 }
@@ -547,7 +549,7 @@ func TestJobIdHeaderSetForDownload(t *testing.T) {
 
 	serverURL, err := url.Parse(server.URL)
 	assert.NoError(t, err)
-	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 	assert.NoError(t, err)
 	viper.Reset()
 	os.Unsetenv("_CONDOR_JOB_AD")
@@ -582,7 +584,7 @@ func TestProjInUserAgent(t *testing.T) {
 
 	serverURL, err := url.Parse(server_test.server.URL)
 	assert.NoError(t, err)
-	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "test")
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "test")
 	assert.NoError(t, err)
 
 	// Test the user-agent header is what we expect it to be
