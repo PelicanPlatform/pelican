@@ -97,7 +97,10 @@ type (
 
 	// Error type for when the transfer started to return data then completely stopped
 	StoppedTransferError struct {
-		Err error
+		BytesTransferred int64
+		StoppedTime      time.Duration
+		CacheHit         bool
+		Upload           bool
 	}
 
 	// SlowTransferError is an error that is returned when a transfer takes longer than the configured timeout
@@ -330,12 +333,21 @@ func (e *HeaderTimeoutError) Error() string {
 	return "timeout waiting for HTTP response (TCP connection successful)"
 }
 
-func (e *StoppedTransferError) Error() string {
-	return e.Err.Error()
-}
-
-func (e *StoppedTransferError) Unwrap() error {
-	return e.Err
+func (e *StoppedTransferError) Error() (errMsg string) {
+	if e.StoppedTime > 0 {
+		errMsg = "no progress for more than " + e.StoppedTime.Truncate(time.Millisecond).String()
+	} else {
+		errMsg = "no progress"
+	}
+	errMsg += " after " + ByteCountSI(e.BytesTransferred) + " transferred"
+	if !e.Upload {
+		if e.CacheHit {
+			errMsg += " (cache hit)"
+		} else {
+			errMsg += " (cache miss)"
+		}
+	}
+	return
 }
 
 func (e *StoppedTransferError) Is(target error) bool {
@@ -1977,16 +1989,12 @@ Loop:
 				if noProgressStartTime.IsZero() {
 					noProgressStartTime = time.Now()
 				} else if time.Since(noProgressStartTime) > time.Duration(stoppedTransferTimeout)*time.Second {
-					errMsg := "No progress for more than " + time.Since(noProgressStartTime).Truncate(time.Millisecond).String()
-					if cacheAge == 0 {
-						errMsg += " (cache miss)"
-					} else if cacheAge > 0 {
-						errMsg += " (cache hit)"
-					}
-					log.Errorln(errMsg)
 					err = &StoppedTransferError{
-						Err: errors.New(errMsg),
+						BytesTransferred: downloaded,
+						StoppedTime:      time.Since(noProgressStartTime),
+						CacheHit:         cacheAge > 0,
 					}
+					log.Errorln(err.Error())
 					return
 				}
 			} else {
@@ -2144,11 +2152,11 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	transferResult.job = transfer.job
 
 	var sizer Sizer = &ConstantSizer{size: 0}
-	var downloaded int64 = 0
+	var uploaded int64 = 0
 	if transfer.callback != nil {
-		transfer.callback(transfer.localPath, downloaded, sizer.Size(), false)
+		transfer.callback(transfer.localPath, 0, sizer.Size(), false)
 		defer func() {
-			transfer.callback(transfer.localPath, downloaded, sizer.Size(), true)
+			transfer.callback(transfer.localPath, uploaded, sizer.Size(), true)
 		}()
 	}
 
@@ -2195,7 +2203,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		nonZeroSize = fileInfo.Size() > 0
 	}
 	if transfer.callback != nil {
-		transfer.callback(transfer.localPath, downloaded, sizer.Size(), false)
+		transfer.callback(transfer.localPath, 0, sizer.Size(), false)
 	}
 
 	// Parse the writeback host as a URL
@@ -2235,14 +2243,14 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		request.Header.Set("X-Pelican-JobId", searchJobAd(jobId))
 	}
 	var lastKnownWritten int64
-	t := time.NewTicker(20 * time.Second)
-	defer t.Stop()
 	uploadStart := time.Now()
 
 	go runPut(request, responseChan, errorChan)
 	var lastError error = nil
 
 	tickerDuration := 100 * time.Millisecond
+	stoppedTransferTimeout := time.Duration(param.Client_StoppedTransferTimeout.GetInt()) * time.Second
+	lastProgress := uploadStart
 	progressTicker := time.NewTicker(tickerDuration)
 	firstByteRecorded := false
 	defer progressTicker.Stop()
@@ -2257,22 +2265,26 @@ Loop:
 		}
 		select {
 		case <-progressTicker.C:
+			uploaded = reader.BytesComplete()
 			if transfer.callback != nil {
-				transfer.callback(transfer.localPath, reader.BytesComplete(), sizer.Size(), false)
+				transfer.callback(transfer.localPath, uploaded, sizer.Size(), false)
 			}
+			// Check to see if we are making progress
 
-		case <-t.C:
-			// If we are not making any progress, if we haven't written 1MB in the last 5 seconds
-			currentRead := reader.BytesComplete()
-			log.Debugln("Current read:", currentRead)
-			log.Debugln("Last known written:", lastKnownWritten)
-			if lastKnownWritten < currentRead {
+			timeSinceLastProgress := time.Since(lastProgress)
+			if lastKnownWritten < uploaded {
 				// We have made progress!
-				lastKnownWritten = currentRead
-			} else {
+				lastKnownWritten = uploaded
+				lastProgress = time.Now()
+			} else if timeSinceLastProgress > stoppedTransferTimeout {
+
+				log.Errorln("No progress made in last", timeSinceLastProgress.Round(time.Millisecond).String(), "in upload")
+				lastError = &StoppedTransferError{
+					BytesTransferred: uploaded,
+					StoppedTime:      timeSinceLastProgress,
+					Upload:           true,
+				}
 				// No progress has been made in the last 1 second
-				log.Errorln("No progress made in last 5 second in upload")
-				lastError = errors.New("upload cancelled, no progress in 5 seconds")
 				break Loop
 			}
 
@@ -2290,7 +2302,14 @@ Loop:
 			break Loop
 
 		case err := <-errorChan:
-			log.Warningln("Unexpected error when performing upload:", err)
+			log.Errorln("Unexpected error when performing upload:", err)
+			var ue *url.Error
+			if errors.As(err, &ue) {
+				err = ue.Unwrap()
+				if err.Error() == "net/http: timeout awaiting response headers" {
+					err = &HeaderTimeoutError{}
+				}
+			}
 			lastError = err
 			break Loop
 
@@ -2298,21 +2317,23 @@ Loop:
 	}
 
 	transferEndTime := time.Now()
-	if fileInfo.Size() == 0 {
+	uploaded = reader.BytesComplete()
+	transferResult.TransferredBytes = uploaded
+	attempt.TransferFileBytes = uploaded
+	if lastError != nil {
 		xferErrors.AddPastError(newTransferAttemptError(dest.Host, "", false, true, lastError), transferEndTime)
 		transferResult.Error = xferErrors
 		attempt.Error = lastError
 	} else {
-		bytesComplete := reader.BytesComplete()
-		log.Debugln("Uploaded bytes:", bytesComplete)
-		transferResult.TransferredBytes = bytesComplete
-		attempt.TransferFileBytes = bytesComplete
+		log.Debugf("Successful upload of %d bytes", uploaded)
 	}
 	// Add our attempt fields
 	attempt.TransferEndTime = transferEndTime
 	attempt.TransferTime = transferEndTime.Sub(transferStartTime)
 	transferResult.Attempts = append(transferResult.Attempts, attempt)
-	return transferResult, lastError
+	// Note: the top-level `err` (second return value) is only for cases where no
+	// transfers were attempted.  If we got here, it must be nil.
+	return transferResult, nil
 }
 
 // Actually perform the HTTP PUT request to the server.
@@ -2326,8 +2347,11 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 	log.Debugf("Dumping request: %s", dump)
 	response, err := client.Do(request)
 	if err != nil {
-		log.Errorln("Error with PUT:", err)
+		if !errors.Is(err, context.Canceled) {
+			log.Errorln("Error with PUT:", err)
+		}
 		errorChan <- err
+		close(errorChan)
 		return
 	}
 	dump, _ = httputil.DumpResponse(response, true)

@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -855,7 +856,7 @@ func TestSearchJobAd(t *testing.T) {
 	})
 }
 
-// Test failed connection setup error message
+// Test failed connection setup error message for downloads
 func TestFailedConnectionSetupError(t *testing.T) {
 	viper.Reset()
 	viper.Set("Transport.ResponseHeaderTimeout", "500ms")
@@ -887,6 +888,130 @@ func TestFailedConnectionSetupError(t *testing.T) {
 	assert.NoError(t, err)
 	err = transferResult.Error
 	log.Debugln("Received connection error:", err)
+	var hte *HeaderTimeoutError
+	if errors.As(err, &hte) {
+		require.Equal(t, "timeout waiting for HTTP response (TCP connection successful)", hte.Error())
+	} else {
+		require.Fail(t, "Slow server did not generate a HeaderTimeoutError")
+	}
+	require.Error(t, err)
+}
+
+// Test error message generated on a failed upload
+//
+// Creates a server that does nothing but stall; examines the
+// corresponding error message out to the user.
+func TestFailedUploadError(t *testing.T) {
+
+	configDir := t.TempDir()
+
+	viper.Reset()
+	viper.Set("Transport.ResponseHeaderTimeout", "500ms")
+	viper.Set("TLSSkipVerify", true)
+	viper.Set("Logging.Level", "debug")
+	viper.Set("ConfigDir", t.TempDir())
+
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
+
+	testfileLocation := filepath.Join(configDir, "testfile.txt")
+	err := os.WriteFile(testfileLocation, []byte("Hello, world!\n"), fs.FileMode(0600))
+	require.NoError(t, err)
+
+	shutdownChan := make(chan bool)
+	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-shutdownChan
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+	defer close(shutdownChan)
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: testfileLocation,
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+	transferResult, err := uploadObject(transfer)
+	assert.NoError(t, err)
+	err = transferResult.Error
+	log.Debugln("Received error:", err)
+	var te *TransferErrors
+	if errors.As(err, &te) {
+		log.Debugln("Received transfer error:", te.UserError())
+	} else {
+		require.Fail(t, "Returned error (%s) is not a TransferError type", err.Error())
+	}
+	var hte *HeaderTimeoutError
+	if errors.As(err, &hte) {
+		require.Equal(t, "timeout waiting for HTTP response (TCP connection successful)", hte.Error())
+	}
+	require.Error(t, err)
+}
+
+// Test error message generated on a failed upload
+//
+// Creates a server that does nothing but stall; examines the
+// corresponding error message out to the user.
+func TestFailedLargeUploadError(t *testing.T) {
+
+	configDir := t.TempDir()
+
+	viper.Reset()
+	viper.Set("Transport.ResponseHeaderTimeout", "500ms")
+	viper.Set("TLSSkipVerify", true)
+	viper.Set("Logging.Level", "debug")
+	viper.Set("Client.StoppedTransferTimeout", 1)
+	viper.Set("ConfigDir", t.TempDir())
+
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
+
+	testfileLocation := filepath.Join(configDir, "testfile.txt")
+	fp, err := os.OpenFile(testfileLocation, os.O_WRONLY|os.O_CREATE, os.FileMode(0600))
+	require.NoError(t, err)
+	test_utils.WriteBigBuffer(t, fp, 40)
+
+	shutdownChan := make(chan bool)
+	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-shutdownChan
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+	defer close(shutdownChan)
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: testfileLocation,
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+	transferResult, err := uploadObject(transfer)
+	assert.NoError(t, err)
+	err = transferResult.Error
+	log.Debugln("Received error:", err)
+	var te *TransferErrors
+	if errors.As(err, &te) {
+		log.Debugln("Received transfer error:", te.UserError())
+	} else {
+		require.Fail(t, "Returned error (%s) is not a TransferError type", err.Error())
+	}
 	var hte *HeaderTimeoutError
 	if errors.As(err, &hte) {
 		require.Equal(t, "timeout waiting for HTTP response (TCP connection successful)", hte.Error())
