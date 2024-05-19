@@ -319,7 +319,27 @@ func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, pr
 		} else {
 			caches = directorCaches
 		}
-		log.Debugln("Matched caches:", caches)
+		if log.IsLevelEnabled(log.DebugLevel) || log.IsLevelEnabled(log.TraceLevel) {
+			cacheHosts := make([]string, len(caches))
+			for idx, entry := range caches {
+				cacheStr := entry.(namespaces.DirectorCache).EndpointUrl
+				cacheUrl, err := url.Parse(cacheStr)
+				if err != nil {
+					cacheHosts[idx] = cacheStr
+				}
+				cacheSimpleUrl := url.URL{
+					Scheme: cacheUrl.Scheme,
+					Host:   cacheUrl.Host,
+				}
+				cacheHosts[idx] = cacheSimpleUrl.String()
+			}
+			if len(cacheHosts) <= 6 {
+				log.Debugln("Matched caches:", strings.Join(cacheHosts, ", "))
+			} else {
+				log.Debugf("Matched caches: %s ... (plus %d more)", strings.Join(cacheHosts[0:6], ", "), len(cacheHosts)-6)
+				log.Traceln("matched caches continued:", cacheHosts[6:])
+			}
+		}
 		return
 	}
 

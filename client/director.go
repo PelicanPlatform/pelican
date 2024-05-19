@@ -146,7 +146,7 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 	}
 
 	defer resp.Body.Close()
-	log.Debugln("Director's response:", resp)
+	log.Traceln("Director's response:", resp)
 
 	// Check HTTP response -- should be 307 (redirect), else something went wrong
 	body, _ := io.ReadAll(resp.Body)
@@ -240,7 +240,7 @@ func newTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transf
 		cacheURL.Scheme = ""
 		cacheURL.Opaque = ""
 	}
-	log.Debugf("Parsed Cache: %s", cacheURL.String())
+	log.Tracef("Parsed Cache: %s", cacheURL.String())
 	if opts.NeedsToken {
 		// Unless we're using the local Unix domain socket cache, force HTTPS
 		if cacheURL.Scheme != "unix" {

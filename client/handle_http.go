@@ -1279,7 +1279,7 @@ func newTransferDetails(cache namespaces.Cache, opts transferDetailsOptions) []t
 		cacheURL.Scheme = ""
 		cacheURL.Opaque = ""
 	}
-	log.Debugf("Parsed Cache: %s", cacheURL.String())
+	log.Tracef("Parsed Cache: %s", cacheURL.String())
 	if opts.NeedsToken {
 		if cacheURL.Scheme != "unix" {
 			cacheURL.Scheme = "https"
@@ -1392,11 +1392,10 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		if cachesToTry > len(closestNamespaceCaches) {
 			cachesToTry = len(closestNamespaceCaches)
 		}
-		log.Debugln("Trying the caches:", closestNamespaceCaches[:cachesToTry])
+		log.Debugf("Trying the first %d caches", cachesToTry)
 
 		for _, cache := range closestNamespaceCaches[:cachesToTry] {
 			// Parse the cache URL
-			log.Debugln("Cache:", cache)
 			td := transferDetailsOptions{
 				NeedsToken: job.job.namespace.ReadHTTPS || job.job.namespace.UseTokenOnRead,
 				PackOption: packOption,
@@ -1405,7 +1404,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		}
 
 		if len(transfers) > 0 {
-			log.Debugln("Transfers:", transfers[0].Url)
+			log.Traceln("First transfer in list:", transfers[0].Url)
 		} else {
 			log.Debugln("No transfers possible as no caches are found")
 			err = errors.New("No transfers possible as no caches are found")
@@ -1592,9 +1591,11 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	for ctr := 0; ctr != len(attempts); ctr++ {
 		result := <-headChan
 		if result.err != nil {
-			if result.err != context.Canceled {
-				log.Debugf("Failure when doing a HEAD request against %s: %s", attempts[result.idx].Url.String(), result.err.Error())
+			if !errors.Is(result.err, context.Canceled) && !errors.Is(result.err, context.DeadlineExceeded) {
+				log.Debugf("Failure when doing a GET request against %s to test functionality: %s", attempts[result.idx].Url.String(), result.err.Error())
 				finished[result.idx] = -1
+			} else if errors.Is(result.err, context.DeadlineExceeded) {
+				log.Debugf("Timed out when querying to see if %s is functioning", attempts[result.idx].Url.String())
 			}
 		} else {
 			finished[result.idx] = 1
