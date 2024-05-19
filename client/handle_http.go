@@ -384,7 +384,7 @@ func (e *SlowTransferError) Error() (errMsg string) {
 		"/s, total transferred=" +
 		ByteCountSI(e.BytesTransferred) +
 		", total transfer time=" +
-		e.Duration.String()
+		e.Duration.Round(time.Millisecond).String()
 	if e.CacheAge == 0 {
 		errMsg += ", cache miss"
 	} else if e.CacheAge > 0 {
