@@ -231,7 +231,11 @@ func TestStashPluginMain(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
 
-	_, err := config.SetPreferredPrefix(config.StashPrefix)
+	oldPrefix, err := config.SetPreferredPrefix(config.StashPrefix)
+	defer func() {
+		_, err = config.SetPreferredPrefix(oldPrefix)
+		require.NoError(t, err)
+	}()
 	assert.NoError(t, err)
 
 	// Temp dir for downloads
