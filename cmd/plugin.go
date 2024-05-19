@@ -96,7 +96,7 @@ func stashPluginMain(args []string) {
 
 			// Set as failure and add errors
 			resultAd.Set("TransferSuccess", false)
-			errMsg := writeTransferErrorMessage(ret+";"+strings.ReplaceAll(string(debug.Stack()), "\n", ";"), "", false)
+			errMsg := writeTransferErrorMessage(ret+";"+strings.ReplaceAll(string(debug.Stack()), "\n", ";"), "")
 			resultAd.Set("TransferError", errMsg)
 			resultAds = append(resultAds, resultAd)
 
@@ -181,7 +181,7 @@ func stashPluginMain(args []string) {
 
 		// Set as failure and add errors
 		resultAd.Set("TransferSuccess", false)
-		errMsg := writeTransferErrorMessage(configErr.Error(), "", upload)
+		errMsg := writeTransferErrorMessage(configErr.Error(), "")
 		resultAd.Set("TransferError", errMsg)
 		if client.ShouldRetry(configErr) {
 			resultAd.Set("TransferRetryable", true)
@@ -531,7 +531,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				if errors.As(result.Error, &te) {
 					errMsgInternal = te.UserError()
 				}
-				errMsg := writeTransferErrorMessage(errMsgInternal, transfer.url.String(), upload)
+				errMsg := writeTransferErrorMessage(errMsgInternal, transfer.url.String())
 				resultAd.Set("TransferError", errMsg)
 				resultAd.Set("TransferFileBytes", 0)
 				resultAd.Set("TransferTotalBytes", 0)
@@ -722,7 +722,7 @@ func readMultiTransfers(stdin bufio.Reader) (transfers []PluginTransfer, err err
 }
 
 // This function wraps the transfer error message into a more readable and user-friendly format.
-func writeTransferErrorMessage(currentError string, transferUrl string, upload bool) (errMsg string) {
+func writeTransferErrorMessage(currentError string, transferUrl string) (errMsg string) {
 
 	errMsg = "Pelican Client Error: "
 
