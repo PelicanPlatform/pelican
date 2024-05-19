@@ -67,7 +67,7 @@ func TestPurge(t *testing.T) {
 		log.Debugln("Will write origin file", filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)))
 		fp, err := os.OpenFile(filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		require.NoError(t, err)
-		size = writeBigBuffer(t, fp, 1)
+		size = test_utils.WriteBigBuffer(t, fp, 1)
 	}
 	require.NotEqual(t, 0, size)
 
@@ -147,7 +147,7 @@ func TestForcePurge(t *testing.T) {
 		log.Debugln("Will write origin file", filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)))
 		fp, err := os.OpenFile(filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		require.NoError(t, err)
-		size = writeBigBuffer(t, fp, 1)
+		size = test_utils.WriteBigBuffer(t, fp, 1)
 	}
 	require.NotEqual(t, 0, size)
 

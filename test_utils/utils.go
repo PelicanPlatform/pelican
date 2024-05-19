@@ -23,6 +23,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -41,6 +43,34 @@ func TestContext(ictx context.Context, t *testing.T) (ctx context.Context, cance
 	}
 	egrp, ctx = errgroup.WithContext(ctx)
 	ctx = context.WithValue(ctx, config.EgrpKey, egrp)
+	return
+}
+
+// Creates a buffer of at least 1MB
+func makeBigBuffer() []byte {
+	byteBuff := []byte("Hello, World!")
+	for {
+		byteBuff = append(byteBuff, []byte("Hello, World!")...)
+		if len(byteBuff) > 1024*1024 {
+			break
+		}
+	}
+	return byteBuff
+}
+
+// Writes a file at least the specified size in MB
+func WriteBigBuffer(t *testing.T, fp io.WriteCloser, sizeMB int) (size int) {
+	defer fp.Close()
+	byteBuff := makeBigBuffer()
+	size = 0
+	for {
+		n, err := fp.Write(byteBuff)
+		require.NoError(t, err)
+		size += n
+		if size > sizeMB*1024*1024 {
+			break
+		}
+	}
 	return
 }
 
