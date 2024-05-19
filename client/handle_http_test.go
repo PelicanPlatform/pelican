@@ -862,6 +862,43 @@ func TestSearchJobAd(t *testing.T) {
 	})
 }
 
+// Test error messages when a 504 Gateway Timeout occurs
+func TestGatewayTimeout(t *testing.T) {
+	viper.Reset()
+	viper.Set("Logging.Level", "debug")
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusGatewayTimeout)
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: "/dev/null",
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+	transferResult, err := downloadObject(transfer)
+	assert.NoError(t, err)
+	err = transferResult.Error
+	log.Debugln("Received connection error:", err)
+	var sce *StatusCodeError
+	if errors.As(err, &sce) {
+		assert.Equal(t, "cache timed out waiting on origin", sce.Error())
+	} else {
+		require.Fail(t, "downloadObject did not return a status code error: %s", err)
+	}
+}
+
 // Test failed connection setup error message for downloads
 func TestFailedConnectionSetupError(t *testing.T) {
 	viper.Reset()

@@ -449,6 +449,9 @@ func (e *ConnectionSetupError) Is(target error) bool {
 }
 
 func (e *StatusCodeError) Error() string {
+	if int(*e) == 504 {
+		return "cache timed out waiting on origin"
+	}
 	return (*grab.StatusCodeError)(e).Error()
 }
 
