@@ -61,6 +61,7 @@ ninja install
 sudo ln -s $PWD/release_dir/lib/libSciTokens*.dylib $xrootd_libdir
 popd
 
+# Build and overwrite xrootd with our patches
 git clone --depth=1 https://github.com/xrootd/xrootd.git
 pushd xrootd
 patch -p1 < $scriptdir/pelican_protocol.patch
@@ -68,9 +69,8 @@ patch -p1 < $scriptdir/gstream.patch
 mkdir build
 cd build
 cmake .. -GNinja
-ninja libXrdAccSciTokens-5.so libXrdPss-5.so
-sudo ln -s $PWD/src/libXrdAccSciTokens-5.so $xrootd_libdir
-sudo ln -sf $PWD/src/libXrdPss-5.so $xrootd_libdir
+ninja
+sudo cp -f $PWD/src/*.so $xrootd_libdir
 popd
 
 popd
@@ -164,7 +164,8 @@ http.header2cgi Authorization authz
 
 all.sitename test_host
 
-xrootd.monitor all auth flush 30s window 5s fstat 60 lfn ops xfr 5  dest redir fstat info files user pfc tcpmon ccm 127.0.0.1:9931
+xrootd.fslib ++ throttle
+xrootd.monitor all auth flush 30s window 5s fstat 60 lfn ops xfr 5  dest redir fstat info files user pfc tcpmon ccm throttle 127.0.0.1:9931
 all.adminpath /tmp/xrootd
 all.pidpath /tmp/xrootd
 ofs.osslib libXrdS3.so
