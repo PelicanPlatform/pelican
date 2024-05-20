@@ -1144,6 +1144,16 @@ func TestRedirects(t *testing.T) {
 		assert.Contains(t, c.Writer.Header().Get("Link"), "pri=6")
 		// We should not have a 7th cache in the header
 		assert.NotContains(t, c.Writer.Header().Get("Link"), "pri=7")
+
+		// Make sure we can still get a cache list with a smaller number of caches
+		req, _ = http.NewRequest("GET", "/my/server/2", nil)
+		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+		c.Request = req
+
+		redirectToCache(c)
+		assert.Contains(t, c.Writer.Header().Get("Link"), "pri=1")
+		assert.NotContains(t, c.Writer.Header().Get("Link"), "pri=2")
 	})
 
 }
