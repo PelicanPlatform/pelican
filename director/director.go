@@ -281,7 +281,11 @@ func redirectToCache(ginCtx *gin.Context) {
 
 	linkHeader := ""
 	first := true
-	for idx, ad := range cacheAds {
+	cachesToSend := 6
+	if numCAds := len(cacheAds); numCAds < cachesToSend {
+		cachesToSend = numCAds
+	}
+	for idx, ad := range cacheAds[:cachesToSend] {
 		if first {
 			first = false
 		} else {
