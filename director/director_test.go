@@ -1112,6 +1112,40 @@ func TestRedirects(t *testing.T) {
 		assert.NotEmpty(t, w.Header().Get("Location"))
 		assert.Equal(t, "https://example.com/api/v1.0/director/healthTest/pelican/monitoring/test.txt", w.Header().Get("Location"))
 	})
+
+	t.Run("redirect-link-header-length", func(t *testing.T) {
+		viper.Reset()
+		serverAds.DeleteAll()
+		t.Cleanup(func() {
+			viper.Reset()
+			serverAds.DeleteAll()
+		})
+
+		// Use ads generated via mock topology for generating list of caches
+		topoServer := httptest.NewServer(http.HandlerFunc(JSONHandler))
+		defer topoServer.Close()
+		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+		viper.Set("Director.CacheSortMethod", "random")
+		// Populate ads for redirectToCache to use
+		err := AdvertiseOSDF()
+		require.NoError(t, err)
+
+		req, _ := http.NewRequest("GET", "/my/server", nil)
+		// Provide a few things to that redirectToCache doesn't choke
+		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = req
+
+		redirectToCache(c)
+		// We should have a random collection of 6 caches in the header
+		assert.Contains(t, c.Writer.Header().Get("Link"), "pri=6")
+		// We should not have a 7th cache in the header
+		assert.NotContains(t, c.Writer.Header().Get("Link"), "pri=7")
+	})
+
 }
 
 func TestGetHealthTestFile(t *testing.T) {
