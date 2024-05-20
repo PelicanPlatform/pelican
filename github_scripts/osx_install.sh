@@ -31,11 +31,15 @@ git clone --depth=1 https://github.com/xrootd/xrootd.git
 pushd xrootd
 patch -p1 < $scriptdir/pelican_protocol.patch
 patch -p1 < $scriptdir/gstream.patch
-mkdir build
-cd build
+mkdir xrootd_build
+cd xrootd_build
 cmake .. -GNinja
 ninja
 ninja install
+cd ..
+mkdir plugin_build
+cd plugin_build
+cmake .. -GNinja
 # Explicitly build libXrdAccSciTokens
 ninja libXrdAccSciTokens-5.so
 xrootd_libdir=$(grealpath $(dirname $(grealpath `which xrootd`))/../lib/)
