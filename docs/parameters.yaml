@@ -337,6 +337,22 @@ osdf_default: 4.5m
 default: none
 components: ["director", "registry"]
 ---
+name: Federation.TopologyProduction
+description: |+
+  Whether to include production caches and origins configured via the OSG Topology application (a legacy integration).
+osdf_default: true
+default: none
+type: bool
+components: ["director"]
+---
+name: Federation.TopologyITB
+description: |+
+  Whether to include itb caches and origins configured via the OSG Topology application (a legacy integration).
+osdf_default: false
+default: none
+type: bool
+componenets: ["director"]
+---
 name: Federation.BrokerUrl
 description: |+
   The URL of the broker endpoint used by the origin.

@@ -300,6 +300,8 @@ var (
 	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
+	Federation_TopologyITB = BoolParam{"Federation.TopologyITB"}
+	Federation_TopologyProduction = BoolParam{"Federation.TopologyProduction"}
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}

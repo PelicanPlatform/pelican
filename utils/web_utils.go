@@ -127,6 +127,23 @@ func GetTopologyJSON(includeDowned bool) (*TopologyNamespacesJSON, error) {
 
 	req.Header.Set("Accept", "application/json")
 
+	var prodval, itbval string
+	if param.Federation_TopologyITB.GetBool() {
+		itbval = "1"
+	} else {
+		itbval = "0"
+	}
+
+	if param.Federation_TopologyProduction.GetBool() {
+		prodval = "1"
+	} else {
+		prodval = "0"
+	}
+	q := req.URL.Query()
+	q.Add("production", prodval)
+	q.Add("itb", itbval)
+	//req.URL.RawQuery = q.Encode()
+
 	// Use the transport to include timeouts
 	client := http.Client{Transport: config.GetTransport()}
 	resp, err := client.Do(req)

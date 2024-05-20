@@ -84,7 +84,9 @@ type Config struct {
 		DiscoveryUrl string
 		JwkUrl string
 		RegistryUrl string
+		TopologyITB bool
 		TopologyNamespaceUrl string
+		TopologyProduction bool
 		TopologyReloadInterval time.Duration
 		TopologyUrl string
 	}
@@ -360,7 +362,9 @@ type configWithType struct {
 		DiscoveryUrl struct { Type string; Value string }
 		JwkUrl struct { Type string; Value string }
 		RegistryUrl struct { Type string; Value string }
+		TopologyITB struct { Type string; Value bool }
 		TopologyNamespaceUrl struct { Type string; Value string }
+		TopologyProduction struct { Type string; Value bool }
 		TopologyReloadInterval struct { Type string; Value time.Duration }
 		TopologyUrl struct { Type string; Value string }
 	}

@@ -23,6 +23,8 @@ Federation:
   TopologyURL: https://topology.opensciencegrid.org
   TopologyNamespaceURL: https://topology.opensciencegrid.org/osdf/namespaces
   TopologyReloadInterval: 4.5m
+  TopologyITB: false
+  TopologyProduction: true
 Registry:
   RequireCacheApproval: true
   RequireOriginApproval: true
