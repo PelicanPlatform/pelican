@@ -1131,7 +1131,7 @@ func TestRedirects(t *testing.T) {
 		require.NoError(t, err)
 
 		req, _ := http.NewRequest("GET", "/my/server", nil)
-		// Provide a few things to that redirectToCache doesn't choke
+		// Provide a few things so that redirectToCache doesn't choke
 		req.Header.Add("User-Agent", "pelican-v7.999.999")
 		req.Header.Add("X-Real-Ip", "128.104.153.60")
 
