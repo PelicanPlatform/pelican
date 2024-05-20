@@ -36,10 +36,11 @@ cd build
 cmake .. -GNinja
 ninja
 ninja install
+# Explicitly build libXrdAccSciTokens
+ninja libXrdAccSciTokens-5.so
 xrootd_libdir=$(grealpath $(dirname $(grealpath `which xrootd`))/../lib/)
 echo "Will install into: $xrootd_libdir"
 sudo ln -s $PWD/src/libXrdAccSciTokens-5.so $xrootd_libdir
-sudo ln -sf $PWD/src/libXrdPss-5.so $xrootd_libdir
 popd
 
 git clone --depth=1 https://github.com/PelicanPlatform/xrdcl-pelican.git
