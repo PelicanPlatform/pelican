@@ -68,9 +68,9 @@ patch -p1 < $scriptdir/pelican_protocol.patch
 patch -p1 < $scriptdir/gstream.patch
 mkdir build
 cd build
-cmake .. -GNinja
+cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$xrootd_libdir
 ninja
-sudo cp -f $PWD/src/*.so $xrootd_libdir
+ninja install
 popd
 
 popd
