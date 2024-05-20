@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -137,6 +138,10 @@ func TestDialerTimeout(t *testing.T) {
 }
 
 func TestInitConfig(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+	})
 	// Set prefix to OSDF to ensure that config is being set
 	testingPreferredPrefix = "OSDF"
 
@@ -175,6 +180,128 @@ func TestInitConfig(t *testing.T) {
 	}
 	InitConfig()
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
+}
+
+// Create a root config file with a Continue key pointing to a test directory
+func setupContConfig(t *testing.T, continueDir string) {
+	rootCfgDir := t.TempDir()
+
+	viper.AddConfigPath(rootCfgDir)
+	viper.SetConfigType("yaml")
+	viper.SetConfigName("pelican")
+
+	err := os.WriteFile(filepath.Join(rootCfgDir, "pelican.yaml"), []byte(fmt.Sprintf("Continue: %s\nOtherVal: bar", continueDir)), 0644)
+	require.NoError(t, err)
+	err = viper.MergeInConfig()
+	require.NoError(t, err)
+}
+
+func TestContinuedCfg(t *testing.T) {
+	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+	})
+
+	t.Run("test-no-continue", func(t *testing.T) {
+		err := handleContinuedCfg()
+		assert.NoError(t, err)
+	})
+
+	t.Run("test-one-continue-one-file", func(t *testing.T) {
+		viper.Reset()
+		continueDir := t.TempDir()
+		setupContConfig(t, continueDir)
+
+		// Write a key: value to a file in the continue directory
+		continueFile := filepath.Join(continueDir, "continue.yaml")
+		err := os.WriteFile(continueFile, []byte("TestVal: foo"), 0644)
+		require.NoError(t, err)
+
+		err = handleContinuedCfg()
+		assert.NoError(t, err)
+		assert.Equal(t, "foo", viper.GetString("TestVal"))
+		// Check the other value in our original config to make sure we didn't simply overwrite
+		assert.Equal(t, "bar", viper.GetString("otherVal"))
+	})
+
+	t.Run("test-one-continue-two-files", func(t *testing.T) {
+		viper.Reset()
+		continueDir := t.TempDir()
+		setupContConfig(t, continueDir)
+
+		continueFile1 := filepath.Join(continueDir, "continue1.yaml")
+		err := os.WriteFile(continueFile1, []byte("TestVal: foo"), 0644)
+		require.NoError(t, err)
+		continueFile2 := filepath.Join(continueDir, "continue2.yaml")
+		err = os.WriteFile(continueFile2, []byte("TestVal: boo"), 0644)
+		require.NoError(t, err)
+
+		// Now we should pick up "boo" as the value, because continue2 is parsed last according to lexicographical order
+		err = handleContinuedCfg()
+		assert.NoError(t, err)
+		assert.Equal(t, "boo", viper.GetString("TestVal"))
+		assert.Equal(t, "bar", viper.GetString("otherVal"))
+	})
+
+	t.Run("test-two-continues-two-files", func(t *testing.T) {
+		viper.Reset()
+		continueDir1 := t.TempDir()
+		setupContConfig(t, continueDir1)
+
+		continueDir2 := t.TempDir()
+		continueFile1 := filepath.Join(continueDir1, "continue1.yaml")
+		// The first continued config will point to the second directory
+		err := os.WriteFile(continueFile1, []byte(fmt.Sprintf("Continue: %s\nTestVal: foo", continueDir2)), 0644)
+		require.NoError(t, err)
+
+		continueFile2 := filepath.Join(continueDir2, "continue2.yaml")
+		err = os.WriteFile(continueFile2, []byte("TestVal: boo"), 0644)
+		require.NoError(t, err)
+
+		// Start with dir 1, ensure we get to dir 2 and pick up the correct overwritten "boo" value
+		// We should pick up "boo" as the value, because continue2 is parsed last
+		err = handleContinuedCfg()
+		assert.NoError(t, err)
+		assert.Equal(t, "boo", viper.GetString("TestVal"))
+		assert.Equal(t, "bar", viper.GetString("otherVal"))
+	})
+
+	t.Run("test-circular-continue", func(t *testing.T) {
+		viper.Reset()
+		continueDir1 := t.TempDir()
+		setupContConfig(t, continueDir1)
+
+		continueDir2 := t.TempDir()
+		continueFile1 := filepath.Join(continueDir1, "continue1.yaml")
+		// The first continued config will point to the second directory
+		err := os.WriteFile(continueFile1, []byte(fmt.Sprintf("Continue: %s\nTestVal: foo", continueDir2)), 0644)
+		require.NoError(t, err)
+
+		continueFile2 := filepath.Join(continueDir2, "continue2.yaml")
+		err = os.WriteFile(continueFile2, []byte(fmt.Sprintf("Continue: %s\nTestVal: boo", continueDir1)), 0644)
+		require.NoError(t, err)
+
+		// We'll start with 1, go to 2, then re-check 1 to find we've already done it. The result is that
+		// we should pick up "boo" as the value, because continue2 is parsed last
+		err = handleContinuedCfg()
+		assert.NoError(t, err)
+		assert.Equal(t, "boo", viper.GetString("TestVal"))
+		assert.Equal(t, "bar", viper.GetString("otherVal"))
+	})
+
+	t.Run("test-bad-directory", func(t *testing.T) {
+		viper.Reset()
+		continueDir := t.TempDir()
+		setupContConfig(t, continueDir+"-dne")
+
+		continueFile := filepath.Join(continueDir, "continue.yaml")
+		err := os.WriteFile(continueFile, []byte("TestVal: foo"), 0644)
+		require.NoError(t, err)
+
+		err = handleContinuedCfg()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "does not exist")
+	})
 }
 
 func TestDeprecateLogMessage(t *testing.T) {

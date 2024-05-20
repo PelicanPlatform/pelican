@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -852,6 +853,73 @@ func setupTranslation() error {
 	})
 }
 
+// If the user defines `Continue: /path/to/dir` in their configuration, this function will
+// crawl through that directory and parse all the yaml files in lexicographical order, overriding
+// viper keys that are redefined as it goes. This will NEVER override a key that's hard-coded in source
+func handleContinuedCfg() error {
+	merged := map[string]bool{}
+	for viper.IsSet("Continue") {
+		nextCfgDir := viper.GetString("Continue")
+		if _, ok := merged[nextCfgDir]; ok {
+			break
+		}
+		merged[nextCfgDir] = true
+
+		// Check that the directory exists
+		if _, err := os.Stat(nextCfgDir); err != nil {
+			if os.IsNotExist(err) {
+				return errors.Errorf("directory %s specified in config 'Continue' does not exist", nextCfgDir)
+			} else {
+				return errors.Wrapf(err, "failed to load extra configuration")
+			}
+		}
+
+		// Get all files from our continue directory, sorted in lexicographical order (handled by WalkDir)
+		configFiles := []string{}
+		fileSystem := os.DirFS(nextCfgDir)
+		err := fs.WalkDir(fileSystem, ".", func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() && path != "." {
+				configFiles = append(configFiles, path)
+			}
+			return nil
+		})
+		if err != nil {
+			return errors.Wrapf(err, "failed to load extra configuration")
+		}
+
+		for _, file := range configFiles {
+			fHandle, err := os.Open(filepath.Join(nextCfgDir, file))
+			if err != nil {
+				return errors.Wrapf(err, "failed to open extra configuration file %s", filepath.Join(nextCfgDir, file))
+			}
+			defer fHandle.Close()
+
+			reader := io.Reader(fHandle)
+			err = viper.MergeConfig(reader)
+			if err != nil {
+				return errors.Wrapf(err, "failed to merge extra configuration file %s", filepath.Join(nextCfgDir, file))
+			}
+		}
+	}
+
+	if len(merged) > 0 {
+		// Log all the extra config files we used, converting the map to a slice of keys for prettier printing
+		keys := make([]string, len(merged))
+		i := 0
+		for k := range merged {
+			keys[i] = k
+			i++
+		}
+		log.Infof("Configuration constructed according to lexicographical file order from the following directories: %s",
+			strings.Join(keys, ", "))
+	}
+
+	return nil
+}
+
 func InitConfig() {
 	viper.SetConfigType("yaml")
 	// 1) Set up defaults.yaml
@@ -901,6 +969,12 @@ func InitConfig() {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			cobra.CheckErr(err)
 		}
+	}
+
+	// If the config file defines a "Continue" key, we parse all the yaml files in that directory
+	err = handleContinuedCfg()
+	if err != nil {
+		cobra.CheckErr(err)
 	}
 
 	logLocation := param.Logging_LogLocation.GetString()
