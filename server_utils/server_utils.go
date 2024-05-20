@@ -28,16 +28,15 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/url"
 	"reflect"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 // Wait until given `reqUrl` returns a HTTP 200.
@@ -129,21 +128,6 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 	} else {
 		return errors.Errorf("Server %s at %s did not startup after 10s of waiting", server, reqUrl)
 	}
-}
-
-// For calling from within the server. Returns the server's issuer URL/port
-func GetServerIssuerURL() (*url.URL, error) {
-	issuerUrlStr, err := config.GetServerIssuerURL()
-	if err != nil {
-		return nil, errors.Wrap(err, "The server failed to determine its own issuer url. Something is wrong!")
-	}
-
-	issuerUrl, err := url.Parse(issuerUrlStr)
-	if err != nil {
-		return nil, errors.Wrapf(err, "The server's issuer URL is malformed: %s. Something is wrong!", param.Server_IssuerUrl.GetString())
-	}
-
-	return issuerUrl, nil
 }
 
 // Launch a maintenance goroutine.

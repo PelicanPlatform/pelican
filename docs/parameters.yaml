@@ -481,7 +481,7 @@ components: ["origin"]
 ---
 name: Origin.StorageType
 description: |+
-  The type of storage underpinning the origin. Currently supported types are "posix", "https", and "s3".
+  The type of storage underpinning the origin. Currently supported types are "posix", "https", "s3", and "xroot".
 type: string
 default: "posix"
 components: ["origin"]
@@ -852,6 +852,14 @@ description: >-
   request, the Origin.FederationPrefix is removed from the object name, then the result is joined with the service URL.
   For example, if one sets `Origin.HTTPServiceUrl=https://example.com/testfiles` and `Origin.FederationPrefix=/foo`, then a request
   for an object named `/foo/bar` will generate a request to https://example.com/testfiles/bar.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.XRootServiceUrl
+description: >-
+ When the origin is configured to export another XRootD storage backend by setting `Origin.StorageType = xroot`, the `XRootServiceUrl`
+ is used as the base for `root` protocol requests and should point at the upstream XRootD server.
 type: string
 default: none
 components: ["origin"]

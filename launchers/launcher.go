@@ -314,16 +314,16 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		servers = append(servers, cacheServer)
 	}
 
-	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
-		log.Debug("Launching periodic advertise of origin/cache server to the director")
-		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
+	if modules.IsEnabled(config.CacheType) {
+		log.Debug("Finishing cache server configuration")
+		if err = CacheServeFinish(ctx, egrp, cacheServer); err != nil {
 			return
 		}
 	}
 
-	if modules.IsEnabled(config.CacheType) {
-		log.Debug("Finishing cache server configuration")
-		if err = CacheServeFinish(ctx, egrp, cacheServer); err != nil {
+	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
+		log.Debug("Launching periodic advertise of origin/cache server to the director")
+		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
 			return
 		}
 	}

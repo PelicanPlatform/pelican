@@ -1077,6 +1077,11 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		}
 	}
 
+	if param.Cache_DataLocation.IsSet() {
+		log.Warningf("Deprecated configuration key %s is set. Please migrate to use %s instead", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
+		log.Warningf("Will attempt to use the value of %s as default for %s", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
+	}
+
 	if IsRootExecution() {
 		if currentServers.IsEnabled(OriginType) {
 			viper.SetDefault("Origin.RunLocation", filepath.Join("/run", "pelican", "xrootd", "origin"))
@@ -1084,7 +1089,12 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		if currentServers.IsEnabled(CacheType) {
 			viper.SetDefault("Cache.RunLocation", filepath.Join("/run", "pelican", "xrootd", "cache"))
 		}
-		viper.SetDefault("Cache.LocalRoot", "/run/pelican/cache")
+
+		// To ensure Cache.DataLocation still works, we default Cache.LocalRoot to Cache.DataLocation
+		// The logic is extracted from handleDeprecatedConfig as we manually set the default value here
+		viper.SetDefault(param.Cache_DataLocation.GetName(), "/run/pelican/cache")
+		viper.SetDefault(param.Cache_LocalRoot.GetName(), param.Cache_DataLocation.GetString())
+
 		if viper.IsSet("Cache.DataLocation") {
 			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "data")})
 			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "meta")})
@@ -1092,6 +1102,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			viper.SetDefault("Cache.DataLocations", []string{"/run/pelican/cache/data"})
 			viper.SetDefault("Cache.MetaLocations", []string{"/run/pelican/cache/meta"})
 		}
+
 		viper.SetDefault("LocalCache.RunLocation", filepath.Join("/run", "pelican", "localcache"))
 
 		viper.SetDefault("Origin.Multiuser", true)
@@ -1135,7 +1146,11 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			}
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
-		viper.SetDefault("Cache.LocalRoot", filepath.Join(runtimeDir, "cache"))
+		// To ensure Cache.DataLocation still works, we default Cache.LocalRoot to Cache.DataLocation
+		// The logic is extracted from handleDeprecatedConfig as we manually set the default value here
+		viper.SetDefault(param.Cache_DataLocation.GetName(), filepath.Join(runtimeDir, "cache"))
+		viper.SetDefault(param.Cache_LocalRoot.GetName(), param.Cache_DataLocation.GetString())
+
 		if viper.IsSet("Cache.DataLocation") {
 			viper.SetDefault("Cache.DataLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "data")})
 			viper.SetDefault("Cache.MetaLocations", []string{filepath.Join(param.Cache_DataLocation.GetString(), "meta")})
@@ -1233,13 +1248,50 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Cache.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
-	if viper.GetString("Origin.StorageType") == "https" {
-		if viper.GetString("Origin.HTTPServiceUrl") == "" {
-			return errors.New("Origin.HTTPServiceUrl may not be empty")
-		}
-		_, err := url.Parse(viper.GetString("Origin.HTTPServiceUrl"))
-		if err != nil {
-			return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
+	if currentServers.IsEnabled(OriginType) {
+		ost := param.Origin_StorageType.GetString()
+		switch ost {
+		case "posix":
+			viper.SetDefault("Origin.SelfTest", true)
+		case "https":
+			if param.Origin_SelfTest.GetBool() {
+				log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+				viper.Set("Origin.SelfTest", false)
+			}
+			httpSvcUrl := param.Origin_HttpServiceUrl.GetString()
+			if httpSvcUrl == "" {
+				return errors.New("Origin.HTTPServiceUrl may not be empty when the origin is configured with an https backend")
+			}
+			_, err := url.Parse(httpSvcUrl)
+			if err != nil {
+				return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
+			}
+		case "xroot":
+			if param.Origin_SelfTest.GetBool() {
+				log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+				viper.Set("Origin.SelfTest", false)
+			}
+			xrootSvcUrl := param.Origin_XRootServiceUrl.GetString()
+			if xrootSvcUrl == "" {
+				return errors.New("Origin.XRootServiceUrl may not be empty when the origin is configured with an xroot backend")
+			}
+			_, err := url.Parse(xrootSvcUrl)
+			if err != nil {
+				return errors.Wrap(err, "unable to parse Origin.XrootServiceUrl as a URL")
+			}
+		case "s3":
+			if param.Origin_SelfTest.GetBool() {
+				log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+				viper.Set("Origin.SelfTest", false)
+			}
+			s3SvcUrl := param.Origin_S3ServiceUrl.GetString()
+			if s3SvcUrl == "" {
+				return errors.New("Origin.S3ServiceUrl may not be empty when the origin is configured with an s3 backend")
+			}
+			_, err := url.Parse(s3SvcUrl)
+			if err != nil {
+				return errors.Wrap(err, "unable to parse Origin.S3ServiceUrl as a URL")
+			}
 		}
 	}
 

@@ -50,7 +50,7 @@ type (
 		DirectReads       bool                      `json:"enableFallbackRead"`
 		Listings          bool                      `json:"enableListing"`
 		Filtered          bool                      `json:"filtered"`
-		FilteredType      filterType                `json:"filteredType"`
+		FilteredType      string                    `json:"filteredType"`
 		Status            HealthTestStatus          `json:"status"`
 		NamespacePrefixes []string                  `json:"namespacePrefixes"`
 		IOLoad            float64                   `json:"ioLoad"`
@@ -134,7 +134,7 @@ func listServers(ctx *gin.Context) {
 			DirectReads:  server.DirectReads,
 			Listings:     server.Listings,
 			Filtered:     filtered,
-			FilteredType: ft,
+			FilteredType: ft.String(),
 			Status:       healthStatus,
 			IOLoad:       server.IOLoad,
 		}
@@ -270,6 +270,12 @@ func handleAllowServer(ctx *gin.Context) {
 	} else if ft == permFiltered {
 		// For servers to filter from the config, temporarily allow the server
 		filteredServers[sn] = tempAllowed
+	} else if ft == topoFiltered {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Can't allow server %s that is disabled by the OSG Topology. Contact OSG admin at support@osg-htc.org to enable the server.", sn),
+		})
+		return
 	}
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "success"})
 }

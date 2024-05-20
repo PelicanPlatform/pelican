@@ -198,6 +198,7 @@ var (
 	Origin_StorageType = StringParam{"Origin.StorageType"}
 	Origin_Url = StringParam{"Origin.Url"}
 	Origin_XRootDPrefix = StringParam{"Origin.XRootDPrefix"}
+	Origin_XRootServiceUrl = StringParam{"Origin.XRootServiceUrl"}
 	Plugin_Token = StringParam{"Plugin.Token"}
 	Registry_DbLocation = StringParam{"Registry.DbLocation"}
 	Registry_InstitutionsUrl = StringParam{"Registry.InstitutionsUrl"}

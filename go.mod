@@ -44,7 +44,7 @@ require (
 	github.com/zsais/go-gin-prometheus v0.1.0
 	go.uber.org/atomic v1.11.0
 	golang.org/x/crypto v0.21.0
-	golang.org/x/net v0.21.0
+	golang.org/x/net v0.23.0
 	golang.org/x/oauth2 v0.15.0
 	golang.org/x/term v0.18.0
 	gopkg.in/yaml.v3 v3.0.1

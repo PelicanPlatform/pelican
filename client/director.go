@@ -152,7 +152,11 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 	body, _ := io.ReadAll(resp.Body)
 
 	// If we get a 404, the director will hopefully tell us why. It might be that the namespace doesn't exist
-	if resp.StatusCode == 404 {
+	if resp.StatusCode == 404 && verb == "PROPFIND" {
+		// If we get a 404 response from a PROPFIND, we are likely working with an old director so we should return a response
+		return resp, errors.New("404: " + string(body))
+	} else if resp.StatusCode == 404 {
+		// If we get a 404 response when we are not doing a PROPFIND, just return the 404 error without a response
 		return nil, errors.New("404: " + string(body))
 	} else if resp.StatusCode == http.StatusMethodNotAllowed && verb == "PROPFIND" {
 		// If we get a 405 with a PROPFIND, the client will handle it
