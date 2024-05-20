@@ -21,10 +21,22 @@
 
 scriptdir=$PWD/`dirname $0`
 
-brew install minio xrootd ninja coreutils
+brew install minio ninja coreutils
 
 mkdir dependencies
 pushd dependencies
+
+# Build and overwrite xrootd with our patches
+git clone --depth=1 https://github.com/xrootd/xrootd.git
+pushd xrootd
+patch -p1 < $scriptdir/pelican_protocol.patch
+patch -p1 < $scriptdir/gstream.patch
+mkdir build
+cd build
+cmake .. -GNinja
+ninja
+ninja install
+popd
 
 git clone --depth=1 https://github.com/PelicanPlatform/xrdcl-pelican.git
 
@@ -59,18 +71,6 @@ export SCITOKENS_CPP_DIR=$PWD/release_dir
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
 ninja install
 sudo ln -s $PWD/release_dir/lib/libSciTokens*.dylib $xrootd_libdir
-popd
-
-# Build and overwrite xrootd with our patches
-git clone --depth=1 https://github.com/xrootd/xrootd.git
-pushd xrootd
-patch -p1 < $scriptdir/pelican_protocol.patch
-patch -p1 < $scriptdir/gstream.patch
-mkdir build
-cd build
-cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$xrootd_libdir
-ninja
-ninja install
 popd
 
 popd
