@@ -44,7 +44,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/namespaces"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -938,6 +937,13 @@ func TestNewTransferEngine(t *testing.T) {
 }
 
 func TestGetDirListHost(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	config.InitConfig()
+	ctx := context.Background()
+	err := config.InitClient()
+	assert.NoError(t, err)
+
 	// Test we get dirlisthost with valid PROPFIND on test server
 	t.Run("testValidPropfind", func(t *testing.T) {
 		expectedLocation := "http://some/origin/path/to/object"
@@ -947,12 +953,7 @@ func TestGetDirListHost(t *testing.T) {
 		}
 		server := httptest.NewServer(http.HandlerFunc(handler))
 		defer server.Close()
-		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		// Wait until our server is working
-		err = server_utils.WaitUntilWorking(ctx, "PROPFIND", server.URL, "testServer", http.StatusTemporaryRedirect, true)
 		require.NoError(t, err)
 
 		dirListHost, err := getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
@@ -968,12 +969,7 @@ func TestGetDirListHost(t *testing.T) {
 		}
 		server := httptest.NewServer(http.HandlerFunc(handler))
 		defer server.Close()
-		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		// Wait until our server is working
-		err = server_utils.WaitUntilWorking(ctx, "PROPFIND", server.URL, "testServer", http.StatusMethodNotAllowed, true)
 		require.NoError(t, err)
 
 		dirListHost, err := getDirListHost(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, server.URL)
@@ -989,12 +985,7 @@ func TestGetDirListHost(t *testing.T) {
 		}
 		server := httptest.NewServer(http.HandlerFunc(handler))
 		defer server.Close()
-		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		// Wait until our server is working
-		err = server_utils.WaitUntilWorking(ctx, "PROPFIND", server.URL, "testServer", http.StatusNotFound, true)
 		require.NoError(t, err)
 
 		dirListHost, err := getDirListHost(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, server.URL)
@@ -1005,7 +996,6 @@ func TestGetDirListHost(t *testing.T) {
 	// Test we get dirlisthost when we are not using a director and namespace has dirlisthost set
 	t.Run("testNoDirectorValidDirListInNamespace", func(t *testing.T) {
 		expectedLocation := "http://origin"
-		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
 		dirListHost, err := getDirListHost(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, "")
@@ -1020,17 +1010,12 @@ func TestGetDirListHost(t *testing.T) {
 		}
 		server := httptest.NewServer(http.HandlerFunc(handler))
 		defer server.Close()
-		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		// Wait until our server is working
-		err = server_utils.WaitUntilWorking(ctx, "PROPFIND", server.URL, "testServer", http.StatusMethodNotAllowed, true)
 		require.NoError(t, err)
 
 		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, &dirListingNotSupportedError{})
+		assert.IsType(t, &dirListingNotSupportedError{}, err)
 	})
 
 	// Test if PROPFIND if 404 and ns.dirlisthost fail, we get dirListingNotSupported error
@@ -1040,22 +1025,20 @@ func TestGetDirListHost(t *testing.T) {
 		}
 		server := httptest.NewServer(http.HandlerFunc(handler))
 		defer server.Close()
-		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
 		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, &dirListingNotSupportedError{})
+		assert.IsType(t, &dirListingNotSupportedError{}, err)
 	})
 
 	// Test if no director and namespace doesn't contain dirlisthost, we get dirListingNotSupported error
 	t.Run("testNoDirectorNoDirListInNamespace", func(t *testing.T) {
-		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
 		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, "")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, &dirListingNotSupportedError{})
+		assert.IsType(t, &dirListingNotSupportedError{}, err)
 	})
 
 	// Test when director does not return 'location' header (just blank response), we fail
@@ -1065,12 +1048,7 @@ func TestGetDirListHost(t *testing.T) {
 		}
 		server := httptest.NewServer(http.HandlerFunc(handler))
 		defer server.Close()
-		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		// Wait until our server is working
-		err = server_utils.WaitUntilWorking(ctx, "PROPFIND", server.URL, "testServer", http.StatusTemporaryRedirect, true)
 		require.NoError(t, err)
 
 		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
@@ -1088,12 +1066,7 @@ func TestGetDirListHost(t *testing.T) {
 		}
 		server := httptest.NewServer(http.HandlerFunc(handler))
 		defer server.Close()
-		ctx := context.Background()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		// Wait until our server is working
-		err = server_utils.WaitUntilWorking(ctx, "PROPFIND", server.URL, "testServer", http.StatusServiceUnavailable, true)
 		require.NoError(t, err)
 
 		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)

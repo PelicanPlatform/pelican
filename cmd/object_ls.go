@@ -42,6 +42,7 @@ func init() {
 	flagSet.BoolP("long", "L", false, "Include extended information")
 	flagSet.BoolP("dironly", "D", false, "List directories only")
 	flagSet.BoolP("fileonly", "F", false, "List files only")
+	flagSet.BoolP("json", "j", false, "Print results in JSON format")
 
 	objectCmd.AddCommand(lsCmd)
 }
@@ -77,9 +78,10 @@ func listMain(cmd *cobra.Command, args []string) {
 	long, _ := cmd.Flags().GetBool("long")
 	dirOnly, _ := cmd.Flags().GetBool("dironly")
 	fileOnly, _ := cmd.Flags().GetBool("fileonly")
+	json, _ := cmd.Flags().GetBool("json")
 
 	result := client.DoList(ctx, object, client.WithTokenLocation(tokenLocation), client.WithLongOption(long),
-		client.WithDirOnlyOption(dirOnly), client.WithFileOnlyOption(fileOnly))
+		client.WithDirOnlyOption(dirOnly), client.WithFileOnlyOption(fileOnly), client.WithJsonOption(json))
 
 	// Exit with failure
 	if result != nil {

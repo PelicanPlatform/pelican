@@ -23,7 +23,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -291,6 +290,7 @@ type (
 	identTransferOptionLong          struct{}
 	identTransferOptionDirOnly       struct{}
 	identTransferOptionFileOnly      struct{}
+	identTransferOptionJson          struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -693,6 +693,11 @@ func WithDirOnlyOption(enable bool) TransferOption {
 // Create an option to specify that only files should be listed with a 'list' command
 func WithFileOnlyOption(enable bool) TransferOption {
 	return option.New(identTransferOptionFileOnly{}, enable)
+}
+
+// Create an option to specify the output being printed in JSON format
+func WithJsonOption(enable bool) TransferOption {
+	return option.New(identTransferOptionJson{}, enable)
 }
 
 // Create a new client to work with an engine
@@ -2462,25 +2467,8 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	return err
 }
 
-// Implement the fs.FileInfo interface for a file. This is needed in the case where we call ls on a file instead of a directory.
-// In this case, the FileInfo we get back from stat does not have a name attatched to it so we need to make our own object to return
-type fileInfo struct {
-	name    string
-	size    int64
-	mode    os.FileMode
-	modTime time.Time
-	isDir   bool
-}
-
-func (f *fileInfo) Name() string       { return f.name }
-func (f *fileInfo) Size() int64        { return f.size }
-func (f *fileInfo) Mode() os.FileMode  { return f.mode }
-func (f *fileInfo) ModTime() time.Time { return f.modTime }
-func (f *fileInfo) IsDir() bool        { return f.isDir }
-func (f *fileInfo) Sys() interface{}   { return nil }
-
 // This function performs the ls command by walking through the specified directory and printing the contents of the files
-func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string, namespace namespaces.Namespace, token string, options ...TransferOption) (fileInfos []fs.FileInfo, err error) {
+func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string, namespace namespaces.Namespace, token string, options ...TransferOption) (fileInfos []fileInfo, err error) {
 	// Get our directory listing host
 	dirListHost, err := getDirListHost(ctx, remoteObjectUrl, namespace, directorUrl)
 	if err != nil {
@@ -2505,12 +2493,12 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 			// If the path leads to a file and not a directory, just add the filename
 			if !info.IsDir() {
 				// NOTE: we implement our own FileInfo here because the one we get back from stat() does not have a .name field for some reason
-				file := &fileInfo{
-					name:    path.Base(remotePath),
-					size:    info.Size(),
-					mode:    info.Mode(),
-					modTime: info.ModTime(),
-					isDir:   false,
+				file := fileInfo{
+					Name:    path.Base(remotePath),
+					Size:    info.Size(),
+					Mode:    info.Mode().String(),
+					ModTime: info.ModTime(),
+					IsDir:   false,
 				}
 				fileInfos = append(fileInfos, file)
 				return fileInfos, nil
@@ -2539,9 +2527,15 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 			continue
 		}
 		// Create a FileInfo for the file and append it to the slice
-		fileInfos = append(fileInfos, info)
+		file := fileInfo{
+			Name:    info.Name(),
+			Size:    info.Size(),
+			Mode:    info.Mode().String(),
+			ModTime: info.ModTime(),
+			IsDir:   info.IsDir(),
+		}
+		fileInfos = append(fileInfos, file)
 	}
-
 	return fileInfos, nil
 }
 

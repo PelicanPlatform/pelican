@@ -785,6 +785,38 @@ func TestObjectList(t *testing.T) {
 		}
 	})
 
+	// This tests object ls with json flag set
+	t.Run("testPelicanObjectLsJson", func(t *testing.T) {
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
+
+			// Create a pipe for output
+			r, w, _ := os.Pipe()
+			originalStdout := os.Stdout
+			os.Stdout = w
+
+			go func() {
+				if export.Capabilities.PublicReads {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithTokenLocation(""), client.WithJsonOption(true))
+					require.NoError(t, err)
+					w.Close()
+				} else {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithTokenLocation(tempToken.Name()), client.WithJsonOption(true))
+					require.NoError(t, err)
+					w.Close()
+				}
+			}()
+			var buf bytes.Buffer
+			_, err = io.Copy(&buf, r)
+			require.NoError(t, err)
+			os.Stdout = originalStdout
+
+			assert.Contains(t, buf.String(), "\"hello_world.txt\"")
+			assert.Contains(t, buf.String(), "\"test\"")
+		}
+	})
+
 	// Test that dironly works and does not list files
 	t.Run("testPelicanObjectLsDirOnly", func(t *testing.T) {
 		// Set path for object to upload/download
@@ -883,6 +915,38 @@ func TestObjectList(t *testing.T) {
 			assert.Contains(t, buf.String(), "hello_world.txt")
 			// permissions for hello_world.txt
 			assert.Contains(t, buf.String(), "-rw-rw-r--")
+		}
+	})
+
+	// Test that long works with JSON format
+	t.Run("testPelicanObjectLsLongWithJson", func(t *testing.T) {
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
+
+			// Create a pipe for output
+			r, w, _ := os.Pipe()
+			originalStdout := os.Stdout
+			os.Stdout = w
+
+			go func() {
+				if export.Capabilities.PublicReads {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithLongOption(true), client.WithJsonOption(true))
+					require.NoError(t, err)
+					w.Close()
+				} else {
+					err := client.DoList(fed.Ctx, uploadURL, client.WithLongOption(true), client.WithJsonOption(true), client.WithTokenLocation(tempToken.Name()))
+					require.NoError(t, err)
+					w.Close()
+				}
+			}()
+			var buf bytes.Buffer
+			_, err = io.Copy(&buf, r)
+			require.NoError(t, err)
+			os.Stdout = originalStdout
+
+			assert.Contains(t, buf.String(), "\"Name\":\"test\",\"Size\":0,\"Mode\":\"drwxrwxr-x\"")
+			assert.Contains(t, buf.String(), "\"Name\":\"hello_world.txt\",\"Size\":13,\"Mode\":\"-rw-rw-r--\"")
 		}
 	})
 

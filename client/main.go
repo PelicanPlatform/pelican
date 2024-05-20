@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"math/rand"
 	"os"
@@ -45,6 +46,17 @@ import (
 
 // Number of caches to attempt to use in any invocation
 var CachesToTry int = 3
+
+// Our own fileInfo structure to hold information about a file
+// NOTE: this was created to provide more flexibility to information on a file. The fs.FileInfo interface was causing some issues like not always returning a Name attribute
+// ALSO NOTE: the fields are exported so they can be marshalled into JSON, it does not work otherwise
+type fileInfo struct {
+	Name    string
+	Size    int64
+	Mode    string
+	ModTime time.Time
+	IsDir   bool
+}
 
 // Determine the token name if it is embedded in the scheme, Condor-style
 func getTokenName(destination *url.URL) (scheme, tokenName string) {
@@ -518,6 +530,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	long := false
 	dironly := false
 	fileonly := false
+	JSON := false
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -532,6 +545,8 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 			dironly = option.Value().(bool)
 		case identTransferOptionFileOnly{}:
 			fileonly = option.Value().(bool)
+		case identTransferOptionJson{}:
+			JSON = option.Value().(bool)
 		}
 	}
 
@@ -551,17 +566,47 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	// if the -L flag was set, we print more information
 	if long {
 		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
+		// If we want JSON format, we append the file info to a slice of fileInfo structs so that we can marshal it
+		if JSON {
+			jsonData, err := json.Marshal(fileInfos)
+			if err != nil {
+				return errors.Wrap(err, "failed to marshal file/directory info to JSON format")
+			}
+			fmt.Println(string(jsonData))
+			return nil
+		}
 		for _, info := range fileInfos {
-			if info.IsDir() && fileonly {
+			if info.IsDir && fileonly {
 				// If the object is a directory and we have fileonly (-F) set, ignore it
 				continue
-			} else if !info.IsDir() && dironly {
+			} else if !info.IsDir && dironly {
+				// If the object is a file and we have dironly (-D) set, ignore it
+				continue
+			} else {
+				// If not json formats, just print out the information in a clean way
+				fmt.Fprintln(w, info.Name+"\t"+strconv.FormatInt(info.Size, 10)+"\t"+info.ModTime.Format("2006-01-02 15:04:05")+"\t"+info.Mode)
+			}
+		}
+		w.Flush()
+	} else if JSON {
+		// In this case, we are not using the long option (-L) and want a JSON format
+		jsonInfo := []string{}
+		for _, info := range fileInfos {
+			if info.IsDir && fileonly {
+				// If the object is a directory and we have fileonly (-F) set, ignore it
+				continue
+			} else if !info.IsDir && dironly {
 				// If the object is a file and we have dironly (-D) set, ignore it
 				continue
 			}
-			fmt.Fprintln(w, info.Name()+"\t"+strconv.FormatInt(info.Size(), 10)+"\t"+info.ModTime().Format("2006-01-02 15:04:05")+"\t"+info.Mode().String())
+			jsonInfo = append(jsonInfo, info.Name)
 		}
-		w.Flush()
+		// Convert the FileInfo to JSON and print it
+		jsonData, err := json.Marshal(jsonInfo)
+		if err != nil {
+			log.Fatalf("Error converting to JSON: %v", err)
+		}
+		fmt.Println(string(jsonData))
 	} else {
 		// We print using a tabwriter to enhance readability of the listed files and to make things look nicer
 		totalColumns := 4
@@ -570,14 +615,14 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
 		var line string
 		for _, info := range fileInfos {
-			if info.IsDir() && fileonly {
+			if info.IsDir && fileonly {
 				// If the object is a directory and we have fileonly (-F) set, ignore it
 				continue
-			} else if !info.IsDir() && dironly {
+			} else if !info.IsDir && dironly {
 				// If the object is a file and we have dironly (-D) set, ignore it
 				continue
 			}
-			line += info.Name()
+			line += info.Name
 			//increase our counter
 			column++
 
