@@ -33,6 +33,9 @@ Logging:
     Xrd: error
     Xrootd: error
 Client:
+  SlowTransferRampupTime: 100
+  SlowTransferWindow: 30
+  StoppedTransferTimeout: 100
   WorkerCount: 5
 Server:
   WebPort: 8444
