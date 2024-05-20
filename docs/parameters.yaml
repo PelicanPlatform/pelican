@@ -351,7 +351,7 @@ description: |+
 osdf_default: false
 default: none
 type: bool
-componenets: ["director"]
+components: ["director"]
 ---
 name: Federation.BrokerUrl
 description: |+
