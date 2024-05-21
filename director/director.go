@@ -87,6 +87,11 @@ var (
 
 	originStatUtils      = make(map[string]originStatUtil)
 	originStatUtilsMutex = sync.RWMutex{}
+
+	// The number of caches to send in the Link header. As discussed in issue
+	// https://github.com/PelicanPlatform/pelican/issues/1247, the client stops
+	// after three attempts, so there's really no need to send every cache we know
+	cachesToSend = 6
 )
 
 func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth bool) (redirectURL url.URL) {
@@ -281,7 +286,10 @@ func redirectToCache(ginCtx *gin.Context) {
 
 	linkHeader := ""
 	first := true
-	for idx, ad := range cacheAds {
+	if numCAds := len(cacheAds); numCAds < cachesToSend {
+		cachesToSend = numCAds
+	}
+	for idx, ad := range cacheAds[:cachesToSend] {
 		if first {
 			first = false
 		} else {
