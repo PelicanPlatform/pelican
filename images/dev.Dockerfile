@@ -77,7 +77,7 @@ priority=1 \n\
 gpgcheck=0' > /etc/yum.repos.d/local.repo
 
 # Install goreleaser and various other packages we need
-RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens \
+RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens xrootd-multiuser \
     xrootd-voms xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel \
     && yum clean all
 
