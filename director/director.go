@@ -670,12 +670,12 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	verifyServer := true
 	if registryPrefix == "" {
 		if sType == server_structs.OriginType {
+			// For origins < 7.9.0, they are not registered, and we skip the verification
+			verifyServer = false
+		} else {
 			// For caches <= 7.8.1, they don't have RegistryPrefix
 			// so we fall back to Name
 			registryPrefix = server_structs.GetCacheNS(adV2.Name)
-		} else {
-			// For origins < 7.9.0, they are not registered, and we skip the verification
-			verifyServer = false
 		}
 	}
 
