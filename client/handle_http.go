@@ -1265,7 +1265,6 @@ func newTransferDetails(cache namespaces.Cache, opts transferDetailsOptions) []t
 		cacheURL.Scheme = ""
 		cacheURL.Opaque = ""
 	}
-	log.Debugf("Parsed Cache: %s", cacheURL.String())
 	if opts.NeedsToken {
 		if cacheURL.Scheme != "unix" {
 			cacheURL.Scheme = "https"
@@ -1336,6 +1335,39 @@ func generateTransferDetailsUsingCache(cache CacheInterface, opts transferDetail
 	return nil
 }
 
+// This function gets the amount of caches we will try equal to the configured "cachesToTry". It sets up our transfer attempt details for us and returns it.
+// This function also ensures that we do not try any duplicate caches
+func getCachesToTry(closestNamespaceCaches []CacheInterface, job *TransferJob, cachesToTry int, packOption string) (transfers []transferAttemptDetails) {
+	// The counter for the amount of caches we currently have listed to try
+	cachesListed := 0
+	// This list keeps track of the caches we have seen to ensure we do not have any duplicates
+	cacheList := make(map[CacheInterface]bool)
+	// Caches is just the list of caches we want to try (we print this out in debug logs)
+	caches := make([]CacheInterface, 0)
+
+	for _, cache := range closestNamespaceCaches {
+		// If we listed the amount of caches we want to try, we can end our loop
+		if cachesListed == cachesToTry {
+			break
+		}
+		// if the current cache is already a cache we are trying, skip it
+		if cacheList[cache] {
+			continue
+		} else {
+			cachesListed++
+			caches = append(caches, cache)
+			cacheList[cache] = true
+			td := transferDetailsOptions{
+				NeedsToken: job.namespace.ReadHTTPS || job.namespace.UseTokenOnRead,
+				PackOption: packOption,
+			}
+			transfers = append(transfers, generateTransferDetailsUsingCache(cache, td)...)
+		}
+	}
+	log.Debugln("Trying the caches:", caches)
+	return transfers
+}
+
 // Take a transfer job and produce one or more transfer file requests.
 // The transfer file requests are sent to be processed via the engine
 func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error) {
@@ -1378,17 +1410,8 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		if cachesToTry > len(closestNamespaceCaches) {
 			cachesToTry = len(closestNamespaceCaches)
 		}
-		log.Debugln("Trying the caches:", closestNamespaceCaches[:cachesToTry])
 
-		for _, cache := range closestNamespaceCaches[:cachesToTry] {
-			// Parse the cache URL
-			log.Debugln("Cache:", cache)
-			td := transferDetailsOptions{
-				NeedsToken: job.job.namespace.ReadHTTPS || job.job.namespace.UseTokenOnRead,
-				PackOption: packOption,
-			}
-			transfers = append(transfers, generateTransferDetailsUsingCache(cache, td)...)
-		}
+		transfers = getCachesToTry(closestNamespaceCaches, job.job, cachesToTry, packOption)
 
 		if len(transfers) > 0 {
 			log.Debugln("Transfers:", transfers[0].Url)
@@ -1755,6 +1778,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	log.Debugln("Attempting to download from:", transferUrl.Host)
 	log.Debugln("Transfer URL String:", transferUrl.String())
 	var req *grab.Request
 	var unpacker *autoUnpacker
