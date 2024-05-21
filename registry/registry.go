@@ -1100,7 +1100,6 @@ func checkStatusHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "failed to parse request body: " + err.Error()})
 	}
 	for _, prefix := range nssReq.Prefixes {
-		isCache := server_structs.IsCacheNS(prefix)
 		complete := server_structs.NamespaceCompletenessResult{}
 		exists, err := namespaceExistsByPrefix(prefix)
 		if err != nil {
@@ -1127,10 +1126,12 @@ func checkStatusHandler(ctx *gin.Context) {
 				Msg:    "Server error when getting federation information: " + err.Error(),
 			})
 		}
-		if isCache {
+		if server_structs.IsCacheNS(prefix) {
 			complete.EditUrl = fmt.Sprintf("%s/view/registry/cache/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
-		} else {
+		} else if server_structs.IsOriginNS(prefix) {
 			complete.EditUrl = fmt.Sprintf("%s/view/registry/origin/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
+		} else {
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/namespace/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
 		}
 		err = config.GetValidate().Struct(ns)
 		if err != nil {
