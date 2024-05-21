@@ -697,7 +697,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 
 		registryPrefix := adV2.RegistryPrefix
 		if registryPrefix == "" { // For caches <= 7.8.1
-			registryPrefix = path.Join("/caches", adV2.Name)
+			registryPrefix = server_structs.GetCacheNS(adV2.Name)
 		}
 
 		ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)

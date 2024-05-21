@@ -156,7 +156,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 			log.Errorf("Failed to get sitename from the registry. The namespace is empty for the %s server. Will fallback to use Xrootd.Sitename", server.GetServerType().String())
 		}
 	} else if server.GetServerType().IsEnabled(config.CacheType) {
-		cachePrefix := "/caches/" + param.Xrootd_Sitename.GetString()
+		cachePrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
 		name, err = getSitenameFromReg(ctx, cachePrefix)
 		if err != nil {
 			log.Errorf("Failed to get sitename from the registry for the cache. Will fallback to use Xrootd.Sitename: %v", err)

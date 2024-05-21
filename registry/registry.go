@@ -829,7 +829,7 @@ func wildcardHandler(ctx *gin.Context) {
 			return
 		}
 		if adminMetadata != nil && adminMetadata.Status != server_structs.RegApproved {
-			if strings.HasPrefix(prefix, "/caches/") { // Caches
+			if server_structs.IsCacheNS(prefix) { // Caches
 				if param.Registry_RequireCacheApproval.GetBool() {
 					// Use 403 to distinguish between server error
 					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
@@ -1056,7 +1056,7 @@ func checkApprovalHandler(ctx *gin.Context) {
 	// we return Approved == true
 	if ns.AdminMetadata != emptyMetadata {
 		// Caches
-		if strings.HasPrefix(req.Prefix, "/caches") && param.Registry_RequireCacheApproval.GetBool() {
+		if server_structs.IsCacheNS(req.Prefix) && param.Registry_RequireCacheApproval.GetBool() {
 			res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == server_structs.RegApproved}
 			ctx.JSON(http.StatusOK, res)
 			return
@@ -1093,10 +1093,7 @@ func checkStatusHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "failed to parse request body: " + err.Error()})
 	}
 	for _, prefix := range nssReq.Prefixes {
-		isCache := false
-		if strings.HasPrefix(prefix, "/caches") {
-			isCache = true
-		}
+		isCache := server_structs.IsCacheNS(prefix)
 		complete := server_structs.NamespaceCompletenessResult{}
 		exists, err := namespaceExistsByPrefix(prefix)
 		if err != nil {

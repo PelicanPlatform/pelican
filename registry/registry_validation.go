@@ -29,6 +29,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // This file has all custom validator logic for registry struct
@@ -73,7 +74,7 @@ func validatePrefix(nspath string) (string, error) {
 
 func validateKeyChaining(prefix string, pubkey jwk.Key) (inTopo bool, topoNss []Topology, validationError error, serverError error) {
 	// We don't check keyChaining for caches
-	if strings.HasPrefix(prefix, "/caches/") {
+	if server_structs.IsCacheNS(prefix) {
 		return
 	}
 	// Here, we do the namespaceSupSubChecks anyway but only returns error (if any)
