@@ -663,6 +663,49 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		})
 	}
 
+	// Verify server registration
+	token := strings.TrimPrefix(tokens[0], "Bearer ")
+
+	registryPrefix := adV2.RegistryPrefix
+	verifyServer := true
+	if registryPrefix == "" {
+		if sType == server_structs.OriginType {
+			// For caches <= 7.8.1, they don't have RegistryPrefix
+			// so we fall back to Name
+			registryPrefix = server_structs.GetCacheNS(adV2.Name)
+		} else {
+			// For origins < 7.9.0, they are not registered, and we skip the verification
+			verifyServer = false
+		}
+	}
+
+	if verifyServer {
+		ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
+		if err != nil {
+			if err == adminApprovalErr {
+				log.Warningf("Failed to verify token. %s %q was not approved", string(sType), adV2.Name)
+				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator", string(sType), ad.Name)})
+				return
+			} else {
+				log.Warningln("Failed to verify token:", err)
+				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
+				})
+				return
+			}
+		}
+		if !ok {
+			log.Warningf("%s %v advertised without valid token scope\n", sType, adV2.Name)
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Authorization token verification failed. Token missing required scope",
+			})
+			return
+		}
+	}
+
+	// For origin, also verify namespace registrations
 	if sType == server_structs.OriginType {
 		for _, namespace := range adV2.Namespaces {
 			// We're assuming there's only one token in the slice
@@ -691,37 +734,6 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				})
 				return
 			}
-		}
-	} else {
-		token := strings.TrimPrefix(tokens[0], "Bearer ")
-
-		registryPrefix := adV2.RegistryPrefix
-		if registryPrefix == "" { // For caches <= 7.8.1
-			registryPrefix = server_structs.GetCacheNS(adV2.Name)
-		}
-
-		ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
-		if err != nil {
-			if err == adminApprovalErr {
-				log.Warningf("Failed to verify token. Cache %q was not approved", adV2.Name)
-				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("Cache %q was not approved by an administrator", ad.Name)})
-				return
-			} else {
-				log.Warningln("Failed to verify token:", err)
-				ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
-				})
-				return
-			}
-		}
-		if !ok {
-			log.Warningf("%s %v advertised without valid token scope\n", sType, adV2.Name)
-			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Authorization token verification failed. Token missing required scope",
-			})
-			return
 		}
 	}
 

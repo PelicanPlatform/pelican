@@ -137,6 +137,6 @@ func CacheServeFinish(ctx context.Context, egrp *errgroup.Group, cacheServer ser
 	if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())); err != nil {
 		return err
 	}
-
+	log.Debug("Cache is registered")
 	return nil
 }
