@@ -56,6 +56,7 @@ type Config struct {
 		WorkerCount int `mapstructure:"workercount"`
 	} `mapstructure:"client"`
 	ConfigDir string `mapstructure:"configdir"`
+	ContinuedConfigLocation string `mapstructure:"continuedconfiglocation"`
 	Debug bool `mapstructure:"debug"`
 	Director struct {
 		AdvertisementTTL time.Duration `mapstructure:"advertisementttl"`
@@ -336,6 +337,7 @@ type configWithType struct {
 		WorkerCount struct { Type string; Value int }
 	}
 	ConfigDir struct { Type string; Value string }
+	ContinuedConfigLocation struct { Type string; Value string }
 	Debug struct { Type string; Value bool }
 	Director struct {
 		AdvertisementTTL struct { Type string; Value time.Duration }

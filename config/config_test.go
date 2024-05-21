@@ -190,7 +190,7 @@ func setupContConfig(t *testing.T, continueDir string) {
 	viper.SetConfigType("yaml")
 	viper.SetConfigName("pelican")
 
-	err := os.WriteFile(filepath.Join(rootCfgDir, "pelican.yaml"), []byte(fmt.Sprintf("Continue: %s\nOtherVal: bar", continueDir)), 0644)
+	err := os.WriteFile(filepath.Join(rootCfgDir, "pelican.yaml"), []byte(fmt.Sprintf("ContinuedConfigLocation: %s\nOtherVal: bar", continueDir)), 0644)
 	require.NoError(t, err)
 	err = viper.MergeInConfig()
 	require.NoError(t, err)
@@ -251,7 +251,7 @@ func TestContinuedCfg(t *testing.T) {
 		continueDir2 := t.TempDir()
 		continueFile1 := filepath.Join(continueDir1, "continue1.yaml")
 		// The first continued config will point to the second directory
-		err := os.WriteFile(continueFile1, []byte(fmt.Sprintf("Continue: %s\nTestVal: foo", continueDir2)), 0644)
+		err := os.WriteFile(continueFile1, []byte(fmt.Sprintf("ContinuedConfigLocation: %s\nTestVal: foo", continueDir2)), 0644)
 		require.NoError(t, err)
 
 		continueFile2 := filepath.Join(continueDir2, "continue2.yaml")
@@ -274,11 +274,11 @@ func TestContinuedCfg(t *testing.T) {
 		continueDir2 := t.TempDir()
 		continueFile1 := filepath.Join(continueDir1, "continue1.yaml")
 		// The first continued config will point to the second directory
-		err := os.WriteFile(continueFile1, []byte(fmt.Sprintf("Continue: %s\nTestVal: foo", continueDir2)), 0644)
+		err := os.WriteFile(continueFile1, []byte(fmt.Sprintf("ContinuedConfigLocation: %s\nTestVal: foo", continueDir2)), 0644)
 		require.NoError(t, err)
 
 		continueFile2 := filepath.Join(continueDir2, "continue2.yaml")
-		err = os.WriteFile(continueFile2, []byte(fmt.Sprintf("Continue: %s\nTestVal: boo", continueDir1)), 0644)
+		err = os.WriteFile(continueFile2, []byte(fmt.Sprintf("ContinuedConfigLocation: %s\nTestVal: boo", continueDir1)), 0644)
 		require.NoError(t, err)
 
 		// We'll start with 1, go to 2, then re-check 1 to find we've already done it. The result is that

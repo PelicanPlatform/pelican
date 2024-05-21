@@ -853,13 +853,13 @@ func setupTranslation() error {
 	})
 }
 
-// If the user defines `Continue: /path/to/dir` in their configuration, this function will
+// If the user defines `ContinuedConfigLocation: /path/to/dir` in their configuration, this function will
 // crawl through that directory and parse all the yaml files in lexicographical order, overriding
 // viper keys that are redefined as it goes. This will NEVER override a key that's hard-coded in source
 func handleContinuedCfg() error {
 	merged := map[string]bool{}
-	for viper.IsSet("Continue") {
-		nextCfgDir := viper.GetString("Continue")
+	for viper.IsSet("ContinuedConfigLocation") {
+		nextCfgDir := viper.GetString("ContinuedConfigLocation")
 		if _, ok := merged[nextCfgDir]; ok {
 			break
 		}
@@ -868,7 +868,7 @@ func handleContinuedCfg() error {
 		// Check that the directory exists
 		if _, err := os.Stat(nextCfgDir); err != nil {
 			if os.IsNotExist(err) {
-				return errors.Errorf("directory %s specified in config 'Continue' does not exist", nextCfgDir)
+				return errors.Errorf("directory %s specified in config 'ContinuedConfigLocation' does not exist", nextCfgDir)
 			} else {
 				return errors.Wrapf(err, "failed to load extra configuration")
 			}

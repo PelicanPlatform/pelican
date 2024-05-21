@@ -30,6 +30,21 @@ default: "~/.config/pelican"
 components: ["*"]
 type: filename
 ---
+name: ContinuedConfigLocation
+description: |+
+  When `ContinuedConfigLocation` is specified in a configuration file, Pelican will continue to read and parse
+  configuration files from that location, overriding previous keys if they're re-defined. Configuration files
+  in a directory are parsed in lexicographical order.
+
+  A configuration file that's already continued to may defined further `ContinuedConfigLocation` keys, allowing
+  for a chain of configuration files to be read and parsed. If no additional `ContinuedConfigLocation` keys are
+  specified, additional directories in a continued directory will be ignored.
+
+  NOTE: This feature assumes that any file in a directory that's continued to is also a yaml configuration file.
+default: none
+components: ["*"]
+type: filename
+---
 name: Debug
 description: |+
   A bool indicating whether Pelican should emit debug messages in its log.
