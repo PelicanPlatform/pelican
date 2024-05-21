@@ -57,11 +57,12 @@ type Topology struct {
 	Prefix string `json:"prefix" gorm:"unique;not null"`
 }
 
-type ServerType string
+type prefixType string // Type of a prefix
 
 const (
-	OriginType ServerType = "origin"
-	CacheType  ServerType = "cache"
+	originPrefix    prefixType = "origin"    // origin servers
+	cachePrefix     prefixType = "cache"     // cache servers
+	namespacePrefix prefixType = "namespace" // storage namespace
 )
 
 /*
@@ -77,7 +78,7 @@ var db *gorm.DB
 //go:embed migrations/*.sql
 var embedMigrations embed.FS
 
-func (st ServerType) String() string {
+func (st prefixType) String() string {
 	return string(st)
 }
 
@@ -300,16 +301,19 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 // For filterNs.AdminMetadata.Description and filterNs.AdminMetadata.SiteName,
 // the string will be matched using `strings.Contains`. This is too mimic a SQL style `like` match.
 // The rest of the AdminMetadata fields is matched by `==`
-func getNamespacesByFilter(filterNs server_structs.Namespace, serverType ServerType) ([]*server_structs.Namespace, error) {
+func getNamespacesByFilter(filterNs server_structs.Namespace, pType prefixType) ([]*server_structs.Namespace, error) {
 	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE 1=1 `
-	if serverType == CacheType {
+	if pType == cachePrefix {
 		// Refer to the cache prefix name in cmd/cache_serve
 		query += ` AND prefix LIKE '/caches/%'`
-	} else if serverType == OriginType {
-		query += ` AND NOT prefix LIKE '/caches/%'`
-	} else if serverType != "" {
-		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", serverType))
+	} else if pType == originPrefix {
+		query += ` AND prefix LIKE '/origins/%'`
+	} else if pType == namespacePrefix {
+		query += ` AND NOT prefix LIKE '/caches/%' AND NOT prefix LIKE '/origins/%'`
+	} else if pType != "" {
+		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", pType))
 	}
+
 	if filterNs.CustomFields != nil {
 		return nil, errors.New("Unsupported operation: Can't filter against Custrom Registration field.")
 	}

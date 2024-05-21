@@ -127,29 +127,39 @@ func mockNamespace(prefix, pubkey, identity string, adminMetadata server_structs
 // Some genertic mock data function to be shared with other test
 // functinos in this package. Please treat them as "constants"
 var (
-	mockNssWithOrigins []server_structs.Namespace = []server_structs.Namespace{
+	mockNssWithNamespaces []server_structs.Namespace = []server_structs.Namespace{
 		mockNamespace("/test1", "pubkey1", "", server_structs.AdminMetadata{Status: server_structs.RegApproved}),
 		mockNamespace("/test2", "pubkey2", "", server_structs.AdminMetadata{Status: server_structs.RegApproved}),
+	}
+	mockNssWithOrigins []server_structs.Namespace = []server_structs.Namespace{
+		mockNamespace("/origins/example.com", "pubkey1", "", server_structs.AdminMetadata{Status: server_structs.RegApproved}),
+		mockNamespace("/origins/mockorigin.org", "pubkey2", "", server_structs.AdminMetadata{Status: server_structs.RegApproved}),
 	}
 	mockNssWithCaches []server_structs.Namespace = []server_structs.Namespace{
 		mockNamespace("/caches/random1", "pubkey1", "", server_structs.AdminMetadata{Status: server_structs.RegApproved}),
 		mockNamespace("/caches/random2", "pubkey2", "", server_structs.AdminMetadata{Status: server_structs.RegApproved}),
 	}
-	mockNssWithOriginsNotApproved []server_structs.Namespace = []server_structs.Namespace{
+	mockNssWithNamespacesNotApproved []server_structs.Namespace = []server_structs.Namespace{
 		mockNamespace("/pending1", "pubkey1", "", server_structs.AdminMetadata{Status: server_structs.RegPending}),
 		mockNamespace("/pending2", "pubkey2", "", server_structs.AdminMetadata{Status: server_structs.RegPending}),
+	}
+	mockNssWithOriginsNotApproved []server_structs.Namespace = []server_structs.Namespace{
+		mockNamespace("/origins/example.com", "pubkey1", "", server_structs.AdminMetadata{Status: server_structs.RegPending}),
+		mockNamespace("/origins/mockorigin.org", "pubkey2", "", server_structs.AdminMetadata{Status: server_structs.RegPending}),
 	}
 	mockNssWithCachesNotApproved []server_structs.Namespace = []server_structs.Namespace{
 		mockNamespace("/caches/pending1", "pubkey1", "", server_structs.AdminMetadata{Status: server_structs.RegPending}),
 		mockNamespace("/caches/pending2", "pubkey2", "", server_structs.AdminMetadata{Status: server_structs.RegPending}),
 	}
 	mockNssWithMixed []server_structs.Namespace = func() (mixed []server_structs.Namespace) {
+		mixed = append(mixed, mockNssWithNamespaces...)
 		mixed = append(mixed, mockNssWithOrigins...)
 		mixed = append(mixed, mockNssWithCaches...)
 		return
 	}()
 
 	mockNssWithMixedNotApproved []server_structs.Namespace = func() (mixed []server_structs.Namespace) {
+		mixed = append(mixed, mockNssWithNamespacesNotApproved...)
 		mixed = append(mixed, mockNssWithOriginsNotApproved...)
 		mixed = append(mixed, mockNssWithCachesNotApproved...)
 		return
@@ -196,7 +206,7 @@ func TestGetNamespaceById(t *testing.T) {
 	})
 
 	t.Run("return-error-with-id-dne", func(t *testing.T) {
-		err := insertMockDBData(mockNssWithOrigins)
+		err := insertMockDBData(mockNssWithNamespaces)
 		require.NoError(t, err)
 		defer resetNamespaceDB(t)
 		_, err = getNamespaceById(100)
@@ -361,7 +371,7 @@ func TestUpdateNamespaceStatusById(t *testing.T) {
 	defer teardownMockNamespaceDB(t)
 	t.Run("return-error-if-id-dne", func(t *testing.T) {
 		defer resetNamespaceDB(t)
-		err := insertMockDBData(mockNssWithOrigins)
+		err := insertMockDBData(mockNssWithNamespaces)
 		require.NoError(t, err)
 		err = updateNamespaceStatusById(100, server_structs.RegApproved, "random")
 		assert.Error(t, err)
@@ -503,22 +513,27 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		require.Error(t, err, "Should return error for filtering against unsupported field ApprovedAt")
 	})
 
-	t.Run("filter-by-server-type", func(t *testing.T) {
+	t.Run("filter-by-prefix-type", func(t *testing.T) {
 		// Assuming mock data and insertMockDBData function exist
 		resetNamespaceDB(t)
-		err := insertMockDBData(append(mockNssWithOrigins, mockNssWithCaches...))
+		err := insertMockDBData(mockNssWithMixed)
 		require.NoError(t, err)
 
 		filterNs := server_structs.Namespace{}
-		nssOrigins, err := getNamespacesByFilter(filterNs, OriginType)
+		gotNss, err := getNamespacesByFilter(filterNs, namespacePrefix)
 		require.NoError(t, err)
-		assert.NotEmpty(t, nssOrigins, "Should return non-empty result for OriginType")
-		assert.True(t, compareNamespaces(mockNssWithOrigins, nssOrigins, true), "Returned nssOrigins does not match")
+		assert.NotEmpty(t, gotNss, "Should return non-empty result for namespacePrefix")
+		assert.True(t, compareNamespaces(mockNssWithNamespaces, gotNss, true), "Returned nssOrigins does not match")
 
-		nssCaches, err := getNamespacesByFilter(filterNs, CacheType)
+		gotOrigins, err := getNamespacesByFilter(filterNs, originPrefix)
 		require.NoError(t, err)
-		assert.NotEmpty(t, nssCaches, "Should return non-empty result for CacheType")
-		assert.True(t, compareNamespaces(mockNssWithCaches, nssCaches, true))
+		assert.NotEmpty(t, gotOrigins, "Should return non-empty result for originPrefix")
+		assert.True(t, compareNamespaces(mockNssWithOrigins, gotOrigins, true), "Returned nssOrigins does not match")
+
+		gotCaches, err := getNamespacesByFilter(filterNs, cachePrefix)
+		require.NoError(t, err)
+		assert.NotEmpty(t, gotCaches, "Should return non-empty result for cachePrefix")
+		assert.True(t, compareNamespaces(mockNssWithCaches, gotCaches, true))
 	})
 
 	t.Run("filter-by-admin-metadata", func(t *testing.T) {

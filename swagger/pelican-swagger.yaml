@@ -990,10 +990,14 @@ paths:
 
         For authenticated users, it returns namespaces with any approval status.
       parameters:
-        - name: server_type
+        - name: prefixType
           in: query
           required: false
-          description: The type of server to filter the results. The value can be either `origin` or `cache`
+          description:
+            The type of the prefix to filter the results. The value can be `origin`, `cache`, or `namespace`
+
+            For `origin` and `cache`, it filters origin/cache server registrations respectively.
+            For `namespace`, it filters namespace prefixes
           type: string
         - name: status
           in: query
