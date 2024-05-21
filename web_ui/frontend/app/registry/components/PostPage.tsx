@@ -21,11 +21,10 @@
 import {
     Box,
     Grid,
-    Typography,
     Collapse,
     Alert, Skeleton
 } from "@mui/material";
-import React, {ReactNode, Suspense, useEffect, useMemo, useState} from "react";
+import React, {useEffect, useState} from "react";
 
 import {Alert as AlertType, Namespace} from "@/components/Main";
 import Form from "@/app/registry/components/Form";
@@ -36,7 +35,30 @@ import type {NamespaceFormPage} from "./CustomRegistrationField/index.d";
 
 const PostPage = ({update}: NamespaceFormPage) => {
 
+    const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined)
+    const [prefix, setPrefix] = useState<string | undefined>(undefined)
     const [alert, setAlert] = useState<AlertType | undefined>(undefined)
+
+    useEffect(() => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const fromUrl = urlParams.get('fromUrl')
+        const prefix = urlParams.get('prefix')
+
+        try {
+            if (fromUrl != undefined) {
+                const parsedUrl = new URL(fromUrl)
+                setFromUrl(parsedUrl)
+            }
+        } catch (e) {
+            setAlert({severity: "error", message: "Invalid fromUrl provided"})
+        }
+
+        try {
+            setPrefix(String(prefix))
+        } catch (e) {
+            setAlert({severity: "error", message: "Invalid prefix provided"})
+        }
+    }, [])
 
     return (
         <AuthenticatedContent redirect={true} boxProps={{width:"100%"}}>
@@ -49,7 +71,7 @@ const PostPage = ({update}: NamespaceFormPage) => {
                     </Collapse>
                     <Form
                         onSubmit={async (data) => {
-                            setAlert(await submitNamespaceForm(data, update))
+                            setAlert(await submitNamespaceForm(data, fromUrl, update))
                         }}
                     />
                 </Grid>

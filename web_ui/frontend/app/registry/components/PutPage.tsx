@@ -83,7 +83,7 @@ const PutPage = ({update}: NamespaceFormPage) => {
                             namespace={namespace}
                             onSubmit={async (data) => {
                                 let namespace = {...data, id: id}
-                                setAlert(await submitNamespaceForm(namespace, update))
+                                setAlert(await submitNamespaceForm(namespace, undefined, update))
                             }}
                         /> :
                         <Skeleton variant="rectangular" width="100%" height={400} />

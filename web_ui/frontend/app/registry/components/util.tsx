@@ -126,6 +126,7 @@ export const putGeneralNamespace = async (data: Namespace): Promise<Alert | unde
 
 export const submitNamespaceForm = async (
     data: Partial<Namespace>,
+    toUrl: URL | undefined,
     handleSubmit: (data: Partial<Namespace>) => Promise<Alert | undefined>
 ) => {
 
@@ -133,7 +134,7 @@ export const submitNamespaceForm = async (
 
     // Clear the form on successful submit
     if (submitAlert == undefined) {
-        window.location.href = "/view/registry/"
+        window.location.href = toUrl ? toUrl.toString() : "/view/registry/"
     }
 
     return submitAlert
