@@ -1,11 +1,21 @@
 import {Avatar, Box, Tooltip} from "@mui/material";
-import {Person, Storage, TripOrigin} from "@mui/icons-material";
+import {FolderOpen, Storage, TripOrigin} from "@mui/icons-material";
 import React from "react";
-import {Namespace} from "@/components/Main";
 
-const NamespaceIcon = ({ serverType }: { serverType: "origin" | "cache" }) => {
+const NamespaceIcon = ({ serverType: prefixType }: { serverType: "origin" | "cache" | "namespace"}) => {
+    if (prefixType == "namespace") {
+        return (
+            <Box>
+                <Tooltip title={"Namespace"} placement={"left"}>
+                    <Avatar sx={{height: "30px", width: "30px", my: "auto", mr: 1, bgcolor: "primary.main"}}>
+                        <FolderOpen/>
+                    </Avatar>
+                </Tooltip>
+            </Box>
+        )
+    }
 
-    if (serverType == "origin") {
+    if (prefixType == "origin") {
         return (
             <Box>
                 <Tooltip title={"Origin"} placement={"left"}>
@@ -17,7 +27,7 @@ const NamespaceIcon = ({ serverType }: { serverType: "origin" | "cache" }) => {
         )
     }
 
-    if (serverType == "cache") {
+    if (prefixType == "cache") {
         return (
             <Box>
                 <Tooltip title={"Cache"} placement={"left"}>

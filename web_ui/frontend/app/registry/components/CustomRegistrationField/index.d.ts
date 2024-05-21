@@ -2,7 +2,7 @@ import {CustomRegistrationField} from "../../../../components/Config/index.d";
 import {Alert as AlertType, Namespace} from "@/components/Main";
 
 export interface NamespaceFormPage {
-    update: (data: Partial<Namespace>) => Promise<AlertType | undefined>
+    update: (data: Partial<Namespace>) => Promise<AlertType | undefined>;
 }
 
 export interface CustomRegistrationProps<T> extends CustomRegistrationField {

@@ -30,7 +30,7 @@ import React, {ReactNode, Suspense, useEffect, useMemo, useState} from "react";
 import {Alert as AlertType, Namespace} from "@/components/Main";
 import Form from "@/app/registry/components/Form";
 import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
-import {submitNamespaceForm, namespaceToCache, postGeneralNamespace} from "@/app/registry/components/util";
+import {submitNamespaceForm} from "@/app/registry/components/util";
 import type {NamespaceFormPage} from "./CustomRegistrationField/index.d";
 
 
