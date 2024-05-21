@@ -68,6 +68,18 @@ func validatePrefix(nspath string) (string, error) {
 	if result == "/" || len(result) == 0 {
 		return "", errors.New("Cannot register the prefix '/' for an origin")
 	}
+	// Check cache/origin prefxies
+	if server_structs.IsCacheNS(nspath) {
+		hostname := strings.TrimPrefix(nspath, server_structs.CachePrefix.String())
+		if server_structs.IsCacheNS(hostname) { // /caches/caches/blah
+			return "", errors.Errorf("Duplicated cache prefix %s", nspath)
+		}
+	} else if server_structs.IsOriginNS(nspath) {
+		hostname := strings.TrimPrefix(nspath, server_structs.OriginPrefix.String())
+		if server_structs.IsOriginNS(hostname) { // /origins/origins/blah
+			return "", errors.Errorf("Duplicated origin prefix %s", nspath)
+		}
+	}
 
 	return result, nil
 }
