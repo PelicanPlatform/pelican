@@ -138,7 +138,10 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	if server.GetServerType().IsEnabled(config.OriginType) {
 		// Note we use Server_ExternalWebUrl as the origin prefix
 		// But caches still use Xrootd_Sitename, which will be changed to Server_ExternalWebUrl in the future
-		originPrefix := server_structs.GetOriginNs(param.Server_ExternalWebUrl.GetString())
+		extUrlStr := param.Server_ExternalWebUrl.GetString()
+		extUrl, _ := url.Parse(extUrlStr)
+		// Only use hostname:port
+		originPrefix := server_structs.GetOriginNs(extUrl.Host)
 		name, err = getSitenameFromReg(ctx, originPrefix)
 		if err != nil {
 			log.Errorf("Failed to get sitename from the registry for the origin. Will fallback to use Xrootd.Sitename: %v", err)

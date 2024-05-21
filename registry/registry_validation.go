@@ -73,8 +73,8 @@ func validatePrefix(nspath string) (string, error) {
 }
 
 func validateKeyChaining(prefix string, pubkey jwk.Key) (inTopo bool, topoNss []Topology, validationError error, serverError error) {
-	// We don't check keyChaining for caches
-	if server_structs.IsCacheNS(prefix) {
+	// We don't check keyChaining for caches or origins
+	if server_structs.IsCacheNS(prefix) || server_structs.IsOriginNS(prefix) {
 		return
 	}
 	// Here, we do the namespaceSupSubChecks anyway but only returns error (if any)

@@ -134,7 +134,10 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")
 	log.Debug("Register Origin")
-	if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, server_structs.GetOriginNs(param.Server_ExternalWebUrl.GetString())); err != nil {
+	extUrlStr := param.Server_ExternalWebUrl.GetString()
+	extUrl, _ := url.Parse(extUrlStr)
+	// Only use hostname:port
+	if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, server_structs.GetOriginNs(extUrl.Host)); err != nil {
 		return err
 	}
 	log.Debug("Origin is registered")

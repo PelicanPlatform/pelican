@@ -837,13 +837,20 @@ func wildcardHandler(ctx *gin.Context) {
 						Msg:    "The cache has not been approved by federation administrator"})
 					return
 				}
-			} else { // Origins
+			} else { // Origins, including both /origins prefix and namespace prefixes
 				if param.Registry_RequireOriginApproval.GetBool() {
-					// Use 403 to distinguish between server error
-					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-						Status: server_structs.RespFailed,
-						Msg:    "The origin has not been approved by federation administrator"})
-					return
+					if server_structs.IsOriginNS(prefix) { // Origin prefix
+						// Use 403 to distinguish between server error
+						ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+							Status: server_structs.RespFailed,
+							Msg:    "The origin has not been approved by a federation administrator"})
+						return
+					} else { // Namespace prefixes
+						ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+							Status: server_structs.RespFailed,
+							Msg:    "The namespace has not been approved by a federation administrator"})
+						return
+					}
 				}
 			}
 		}
