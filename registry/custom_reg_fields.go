@@ -109,9 +109,9 @@ func getCachedOptions(key string, ttl time.Duration) ([]registrationFieldOption,
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse response from key %s to options struct with response body: %s", key, resBody)
 	}
-	isUnique := checkUniqueOptions(options)
+	isUnique, err := checkUniqueOptions(options)
 	if !isUnique {
-		return nil, fmt.Errorf("returned options from key %s are not unique. Options: %s", key, optionsToString(options))
+		return nil, errors.Wrapf(err, "returned options from key %s are not unique", key)
 	}
 	// Check IDs are not empty
 	invalidName := ""
@@ -179,16 +179,22 @@ func excludePubKey(nss []*server_structs.Namespace) (nssNew []NamespaceWOPubkey)
 	return
 }
 
-func checkUniqueOptions(options []registrationFieldOption) bool {
-	repeatMap := make(map[string]bool)
+func checkUniqueOptions(options []registrationFieldOption) (bool, error) {
+	idMap := make(map[string]bool)
+	nameMap := make(map[string]bool)
 	for _, options := range options {
-		if repeatMap[options.ID] {
-			return false
+		if idMap[options.ID] {
+			return false, fmt.Errorf("option IDs are not unique: %s", options.ID)
 		} else {
-			repeatMap[options.ID] = true
+			idMap[options.ID] = true
+		}
+		if nameMap[options.Name] {
+			return false, fmt.Errorf("option names are not unique: %s", options.Name)
+		} else {
+			nameMap[options.Name] = true
 		}
 	}
-	return true
+	return true, nil
 }
 
 // Format custom registration fields in-place, by converting any float64/32 number to int
@@ -229,8 +235,8 @@ func InitInstConfig(ctx context.Context, egrp *errgroup.Group) error {
 		// or Registry.Institutions and Registry.InstitutionsUrl are both set
 		if len(institutions) > 0 {
 			log.Warning("Registry.Institutions and Registry.InstitutionsUrl are both set. Registry.InstitutionsUrl is ignored")
-			if !checkUniqueOptions(institutions) {
-				return errors.Errorf("Institution IDs read from config are not unique")
+			if isUnique, err := checkUniqueOptions(institutions); !isUnique {
+				return errors.Wrap(err, "Institution options from the config are not unique")
 			}
 			// return here so that we don't init the institution url cache
 			return nil
@@ -248,8 +254,8 @@ func InitInstConfig(ctx context.Context, egrp *errgroup.Group) error {
 		registrationFields[instRegIdx].Options = institutions
 	}
 
-	if !checkUniqueOptions(institutions) {
-		return errors.Errorf("Institution IDs read from config are not unique")
+	if isUnique, err := checkUniqueOptions(institutions); !isUnique {
+		return errors.Wrap(err, "Institution options read from the config are not unique")
 	}
 	// Else we will read from Registry.Institutions. No extra action needed.
 	return nil
