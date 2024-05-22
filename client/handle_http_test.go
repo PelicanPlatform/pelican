@@ -936,9 +936,10 @@ func TestNewTransferEngine(t *testing.T) {
 	})
 }
 
-func TestGetDirListHost(t *testing.T) {
+func TestGetCollectionsUrl(t *testing.T) {
 	viper.Reset()
 	defer viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	ctx := context.Background()
 	err := config.InitClient()
@@ -956,7 +957,7 @@ func TestGetDirListHost(t *testing.T) {
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
 
-		dirListHost, err := getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		dirListHost, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
 		require.NoError(t, err)
 		assert.Equal(t, "http://some", dirListHost.String())
 	})
@@ -972,7 +973,7 @@ func TestGetDirListHost(t *testing.T) {
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
 
-		dirListHost, err := getDirListHost(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, server.URL)
+		dirListHost, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, server.URL)
 		require.NoError(t, err)
 		assert.Equal(t, expectedLocation, dirListHost.String())
 	})
@@ -988,7 +989,7 @@ func TestGetDirListHost(t *testing.T) {
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
 
-		dirListHost, err := getDirListHost(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, server.URL)
+		dirListHost, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, server.URL)
 		require.NoError(t, err)
 		assert.Equal(t, expectedLocation, dirListHost.String())
 	})
@@ -998,7 +999,7 @@ func TestGetDirListHost(t *testing.T) {
 		expectedLocation := "http://origin"
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
-		dirListHost, err := getDirListHost(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, "")
+		dirListHost, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, "")
 		require.NoError(t, err)
 		assert.Equal(t, expectedLocation, dirListHost.String())
 	})
@@ -1013,7 +1014,7 @@ func TestGetDirListHost(t *testing.T) {
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
 
-		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
 		require.Error(t, err)
 		assert.IsType(t, &dirListingNotSupportedError{}, err)
 	})
@@ -1027,7 +1028,7 @@ func TestGetDirListHost(t *testing.T) {
 		defer server.Close()
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
-		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
 		require.Error(t, err)
 		assert.IsType(t, &dirListingNotSupportedError{}, err)
 	})
@@ -1036,7 +1037,7 @@ func TestGetDirListHost(t *testing.T) {
 	t.Run("testNoDirectorNoDirListInNamespace", func(t *testing.T) {
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
-		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, "")
+		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, "")
 		require.Error(t, err)
 		assert.IsType(t, &dirListingNotSupportedError{}, err)
 	})
@@ -1051,7 +1052,7 @@ func TestGetDirListHost(t *testing.T) {
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
 
-		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "collections URL not found in director response")
 	})
@@ -1069,7 +1070,7 @@ func TestGetDirListHost(t *testing.T) {
 		testObjectUrl, err := url.Parse("pelican://federation/some/object")
 		require.NoError(t, err)
 
-		_, err = getDirListHost(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "some server error")
 	})

@@ -53,7 +53,6 @@ var CachesToTry int = 3
 type fileInfo struct {
 	Name    string
 	Size    int64
-	Mode    string
 	ModTime time.Time
 	IsDir   bool
 }
@@ -506,7 +505,10 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	if err != nil {
 		return err
 	}
-	te := NewTransferEngine(ctx)
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return err
+	}
 	defer func() {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
@@ -515,7 +517,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 
 	pelicanURL, err := te.newPelicanURL(remoteObjectUrl)
 	if err != nil {
-		return errors.Wrap(err, "Failed to generate pelicanURL object")
+		return errors.Wrap(err, "failed to generate pelicanURL object")
 	}
 
 	ns, err := getNamespaceInfo(ctx, remoteObjectUrl.Path, pelicanURL.directorUrl, false, "")
@@ -529,8 +531,8 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	token := ""
 	long := false
 	dironly := false
-	fileonly := false
-	JSON := false
+	objectonly := false
+	jsn := false
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -543,11 +545,17 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 			long = option.Value().(bool)
 		case identTransferOptionDirOnly{}:
 			dironly = option.Value().(bool)
-		case identTransferOptionFileOnly{}:
-			fileonly = option.Value().(bool)
+		case identTransferOptionObjectOnly{}:
+			objectonly = option.Value().(bool)
 		case identTransferOptionJson{}:
-			JSON = option.Value().(bool)
+			jsn = option.Value().(bool)
 		}
+	}
+
+	// If a user specifies dirOnly and fileOnly, this means basic functionality (list both files and directories) so just remove the flags
+	if dironly && objectonly {
+		dironly = false
+		objectonly = false
 	}
 
 	if ns.UseTokenOnRead && token == "" {
@@ -557,7 +565,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		}
 	}
 
-	fileInfos, err := listHttp(ctx, remoteObjectUrl, pelicanURL.directorUrl, ns, token, WithLongOption(long), WithDirOnlyOption(dironly), WithFileOnlyOption(fileonly))
+	fileInfos, err := listHttp(ctx, remoteObjectUrl, pelicanURL.directorUrl, ns, token, WithDirOnlyOption(dironly), WithObjectOnlyOption(objectonly))
 	if err != nil {
 		return err
 	}
@@ -567,7 +575,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	if long {
 		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
 		// If we want JSON format, we append the file info to a slice of fileInfo structs so that we can marshal it
-		if JSON {
+		if jsn {
 			jsonData, err := json.Marshal(fileInfos)
 			if err != nil {
 				return errors.Wrap(err, "failed to marshal file/directory info to JSON format")
@@ -576,52 +584,30 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 			return nil
 		}
 		for _, info := range fileInfos {
-			if info.IsDir && fileonly {
-				// If the object is a directory and we have fileonly (-F) set, ignore it
-				continue
-			} else if !info.IsDir && dironly {
-				// If the object is a file and we have dironly (-D) set, ignore it
-				continue
-			} else {
-				// If not json formats, just print out the information in a clean way
-				fmt.Fprintln(w, info.Name+"\t"+strconv.FormatInt(info.Size, 10)+"\t"+info.ModTime.Format("2006-01-02 15:04:05")+"\t"+info.Mode)
-			}
+			// If not json formats, just print out the information in a clean way
+			fmt.Fprintln(w, info.Name+"\t"+strconv.FormatInt(info.Size, 10)+"\t"+info.ModTime.Format("2006-01-02 15:04:05"))
 		}
 		w.Flush()
-	} else if JSON {
+	} else if jsn {
 		// In this case, we are not using the long option (-L) and want a JSON format
 		jsonInfo := []string{}
 		for _, info := range fileInfos {
-			if info.IsDir && fileonly {
-				// If the object is a directory and we have fileonly (-F) set, ignore it
-				continue
-			} else if !info.IsDir && dironly {
-				// If the object is a file and we have dironly (-D) set, ignore it
-				continue
-			}
 			jsonInfo = append(jsonInfo, info.Name)
 		}
 		// Convert the FileInfo to JSON and print it
 		jsonData, err := json.Marshal(jsonInfo)
 		if err != nil {
-			log.Fatalf("Error converting to JSON: %v", err)
+			return errors.Wrap(err, "error converting to JSON")
 		}
 		fmt.Println(string(jsonData))
 	} else {
 		// We print using a tabwriter to enhance readability of the listed files and to make things look nicer
 		totalColumns := 4
-		// column is a counter letting us know what item/column we are on (can't use index in loop below since we have continues on conditions)
+		// column is a counter letting us know what item/column we are on
 		var column int
 		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
 		var line string
 		for _, info := range fileInfos {
-			if info.IsDir && fileonly {
-				// If the object is a directory and we have fileonly (-F) set, ignore it
-				continue
-			} else if !info.IsDir && dironly {
-				// If the object is a file and we have dironly (-D) set, ignore it
-				continue
-			}
 			line += info.Name
 			//increase our counter
 			column++

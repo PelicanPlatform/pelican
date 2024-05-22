@@ -289,7 +289,7 @@ type (
 	identTransferOptionToken         struct{}
 	identTransferOptionLong          struct{}
 	identTransferOptionDirOnly       struct{}
-	identTransferOptionFileOnly      struct{}
+	identTransferOptionObjectOnly    struct{}
 	identTransferOptionJson          struct{}
 
 	transferDetailsOptions struct {
@@ -691,8 +691,8 @@ func WithDirOnlyOption(enable bool) TransferOption {
 }
 
 // Create an option to specify that only files should be listed with a 'list' command
-func WithFileOnlyOption(enable bool) TransferOption {
-	return option.New(identTransferOptionFileOnly{}, enable)
+func WithObjectOnlyOption(enable bool) TransferOption {
+	return option.New(identTransferOptionObjectOnly{}, enable)
 }
 
 // Create an option to specify the output being printed in JSON format
@@ -1122,7 +1122,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	// If we are a recursive download and using the director, we want to attempt to get directory listings from
 	// PROPFINDing the director
 	if recursive && !upload && tj.useDirector {
-		dirListHost, err := getDirListHost(tj.ctx, remoteUrl, tj.namespace, tj.directorUrl)
+		dirListHost, err := getCollectionsUrl(tj.ctx, remoteUrl, tj.namespace, tj.directorUrl)
 		if err != nil {
 			return nil, err
 		}
@@ -2271,9 +2271,9 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 
 }
 
-// This function queries the director with a PROPFIND to attempt to get the 'dirListHost'. If a propfind is not allowed on the director
+// This function queries the director with a PROPFIND to attempt to get the 'collections url'. If a propfind is not allowed on the director
 // We fall back to the deprecated dirlisthost in the namespace
-func getDirListHost(ctx context.Context, remoteObjectUrl *url.URL, namespace namespaces.Namespace, directorUrl string) (dirListHost *url.URL, err error) {
+func getCollectionsUrl(ctx context.Context, remoteObjectUrl *url.URL, namespace namespaces.Namespace, directorUrl string) (collectionsUrl *url.URL, err error) {
 	// If we are a recursive download and using the director, we want to attempt to get directory listings from
 	// PROPFINDing the director
 	if directorUrl != "" {
@@ -2298,35 +2298,32 @@ func getDirListHost(ctx context.Context, remoteObjectUrl *url.URL, namespace nam
 				err = &dirListingNotSupportedError{Err: errors.New("origin and/or namespace does not support directory listings")}
 				return nil, err
 			} else {
-				dirListHost, err = url.Parse(namespace.DirListHost)
+				collectionsUrl, err = url.Parse(namespace.DirListHost)
 				if err != nil {
 					return nil, err
 				}
-				return dirListHost, nil
+				return collectionsUrl, nil
 			}
 		} else if resp.StatusCode == http.StatusTemporaryRedirect {
 			// If the director responds with a 307 (temporary redirect), we're working with a new Director.
 			// In that event, we can get the collections URL from our redirect
-			collections := resp.Header.Get("Location")
-			if collections == "" {
+			location := resp.Header.Get("Location")
+			if location == "" {
 				return nil, errors.New("collections URL not found in director response")
 			}
 			// The resp redirect includes the full path to the object from the origin, we are only interested in the scheme and host
-			collectionsURL, err := url.Parse(collections)
+			collectionsUrl, err = url.Parse(location)
 			if err != nil {
 				return nil, err
 			}
-			dirListHost = &url.URL{
-				Scheme: collectionsURL.Scheme,
-				Host:   collectionsURL.Host,
-			}
-			namespace.DirListHost = dirListHost.String()
+			collectionsUrl.Path = ""
+			namespace.DirListHost = collectionsUrl.String()
 		} else {
 			return nil, errors.Errorf("unexpected response from director when requesting collections url from origin: %v", resp.Status)
 		}
 	} else if namespace.DirListHost != "" {
 		// If we're not using the director and are using topology, we should check for a dirlisthost from the namespace
-		dirListHost, err = url.Parse(namespace.DirListHost)
+		collectionsUrl, err = url.Parse(namespace.DirListHost)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to parse directory listing host as a url")
 		}
@@ -2339,9 +2336,9 @@ func getDirListHost(ctx context.Context, remoteObjectUrl *url.URL, namespace nam
 }
 
 // This helper function creates a web dav client to walkDavDir's. Used for recursive downloads and lists
-func createWebDavClient(dirListHost *url.URL, token string) (client *gowebdav.Client) {
+func createWebDavClient(collectionsUrl *url.URL, token string) (client *gowebdav.Client) {
 	auth := &bearerAuth{token: token}
-	client = gowebdav.NewAuthClient(dirListHost.String(), auth)
+	client = gowebdav.NewAuthClient(collectionsUrl.String(), auth)
 	transport := config.GetTransport()
 	client.SetTransport(transport)
 	return
@@ -2470,21 +2467,21 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 // This function performs the ls command by walking through the specified directory and printing the contents of the files
 func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string, namespace namespaces.Namespace, token string, options ...TransferOption) (fileInfos []fileInfo, err error) {
 	// Get our directory listing host
-	dirListHost, err := getDirListHost(ctx, remoteObjectUrl, namespace, directorUrl)
+	collectionsUrl, err := getCollectionsUrl(ctx, remoteObjectUrl, namespace, directorUrl)
 	if err != nil {
 		return
 	}
-	log.Debugln("Dir list host: ", dirListHost.String())
+	log.Debugln("Collections URL: ", collectionsUrl.String())
 
-	client := createWebDavClient(dirListHost, token)
+	client := createWebDavClient(collectionsUrl, token)
 	remotePath := remoteObjectUrl.Path
 
 	infos, err := client.ReadDir(remotePath)
 	if err != nil {
 		// Check if we got a 404:
 		if gowebdav.IsErrNotFound(err) {
-			err = errors.Wrap(err, "file not found")
-		} else if gowebdav.IsErrCode(err, 500) {
+			return nil, errors.New("404: object not found")
+		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
 			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
 			info, err := client.Stat(remotePath)
 			if err != nil {
@@ -2496,7 +2493,6 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 				file := fileInfo{
 					Name:    path.Base(remotePath),
 					Size:    info.Size(),
-					Mode:    info.Mode().String(),
 					ModTime: info.ModTime(),
 					IsDir:   false,
 				}
@@ -2508,19 +2504,19 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 		return nil, errors.Wrap(err, "failed to read remote directory")
 	}
 
-	var dironly, fileonly = false, false
+	var dironly, objectonly = false, false
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionDirOnly{}:
 			dironly = option.Value().(bool)
-		case identTransferOptionFileOnly{}:
-			fileonly = option.Value().(bool)
+		case identTransferOptionObjectOnly{}:
+			objectonly = option.Value().(bool)
 		}
 	}
 
 	for _, info := range infos {
-		if info.IsDir() && fileonly {
-			// If the object is a directory and we have fileonly (-F) set, ignore it
+		if info.IsDir() && objectonly {
+			// If the object is a directory and we have objectonly (-O) set, ignore it
 			continue
 		} else if !info.IsDir() && dironly {
 			// If the object is a file and we have dironly (-D) set, ignore it
@@ -2530,7 +2526,6 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 		file := fileInfo{
 			Name:    info.Name(),
 			Size:    info.Size(),
-			Mode:    info.Mode().String(),
 			ModTime: info.ModTime(),
 			IsDir:   info.IsDir(),
 		}

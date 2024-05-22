@@ -21,11 +21,12 @@ package main
 import (
 	"os"
 
-	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/config"
 )
 
 var (
@@ -41,7 +42,7 @@ func init() {
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.BoolP("long", "L", false, "Include extended information")
 	flagSet.BoolP("dironly", "D", false, "List directories only")
-	flagSet.BoolP("fileonly", "F", false, "List files only")
+	flagSet.BoolP("objectonly", "O", false, "List objects only")
 	flagSet.BoolP("json", "j", false, "Print results in JSON format")
 
 	objectCmd.AddCommand(lsCmd)
@@ -77,22 +78,22 @@ func listMain(cmd *cobra.Command, args []string) {
 
 	long, _ := cmd.Flags().GetBool("long")
 	dirOnly, _ := cmd.Flags().GetBool("dironly")
-	fileOnly, _ := cmd.Flags().GetBool("fileonly")
+	objectOnly, _ := cmd.Flags().GetBool("objectonly")
 	json, _ := cmd.Flags().GetBool("json")
 
-	result := client.DoList(ctx, object, client.WithTokenLocation(tokenLocation), client.WithLongOption(long),
-		client.WithDirOnlyOption(dirOnly), client.WithFileOnlyOption(fileOnly), client.WithJsonOption(json))
+	err = client.DoList(ctx, object, client.WithTokenLocation(tokenLocation), client.WithLongOption(long),
+		client.WithDirOnlyOption(dirOnly), client.WithObjectOnlyOption(objectOnly), client.WithJsonOption(json))
 
 	// Exit with failure
-	if result != nil {
+	if err != nil {
 		// Print the list of errors
-		errMsg := result.Error()
+		errMsg := err.Error()
 		var te *client.TransferErrors
-		if errors.As(result, &te) {
+		if errors.As(err, &te) {
 			errMsg = te.UserError()
 		}
 		log.Errorln("Failure getting " + object + ": " + errMsg)
-		if client.ShouldRetry(result) {
+		if client.ShouldRetry(err) {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
 		}

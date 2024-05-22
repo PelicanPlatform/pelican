@@ -700,6 +700,17 @@ func TestNewTransferJob(t *testing.T) {
 	})
 }
 
+// A helper function to set up the TestObjectLs, gives us a buffer to capture stdout as well as our path to ls
+func setupObjectListTest(export server_utils.OriginExport) (listURL string, r, w, stdout *os.File, buf *bytes.Buffer) {
+	listURL = fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
+	// Create a pipe for output
+	r, w, _ = os.Pipe()
+	stdout = os.Stdout
+	os.Stdout = w
+	buf = new(bytes.Buffer)
+	return listURL, r, w, stdout, buf
+}
+
 // A test that spins up a federation, and tests object list
 func TestObjectList(t *testing.T) {
 	viper.Reset()
@@ -755,28 +766,21 @@ func TestObjectList(t *testing.T) {
 
 	// This tests object ls with no flags set
 	t.Run("testPelicanObjectLsNoFlags", func(t *testing.T) {
-		// Set path for object to upload/download
+		// Set path for ls
 		for _, export := range fed.Exports {
-			uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
-
-			// Create a pipe for output
-			r, w, _ := os.Pipe()
-			originalStdout := os.Stdout
-			os.Stdout = w
-
+			listURL, r, w, originalStdout, buf := setupObjectListTest(export)
 			go func() {
 				if export.Capabilities.PublicReads {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithTokenLocation(""))
+					err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(""))
 					require.NoError(t, err)
 					w.Close()
 				} else {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithTokenLocation(tempToken.Name()))
+					err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()))
 					require.NoError(t, err)
 					w.Close()
 				}
 			}()
-			var buf bytes.Buffer
-			_, err = io.Copy(&buf, r)
+			_, err = io.Copy(buf, r)
 			require.NoError(t, err)
 			os.Stdout = originalStdout
 
@@ -787,28 +791,21 @@ func TestObjectList(t *testing.T) {
 
 	// This tests object ls with json flag set
 	t.Run("testPelicanObjectLsJson", func(t *testing.T) {
-		// Set path for object to upload/download
+		// Set path for ls
 		for _, export := range fed.Exports {
-			uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
-
-			// Create a pipe for output
-			r, w, _ := os.Pipe()
-			originalStdout := os.Stdout
-			os.Stdout = w
-
+			listURL, r, w, originalStdout, buf := setupObjectListTest(export)
 			go func() {
 				if export.Capabilities.PublicReads {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithTokenLocation(""), client.WithJsonOption(true))
+					err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(""), client.WithJsonOption(true))
 					require.NoError(t, err)
 					w.Close()
 				} else {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithTokenLocation(tempToken.Name()), client.WithJsonOption(true))
+					err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()), client.WithJsonOption(true))
 					require.NoError(t, err)
 					w.Close()
 				}
 			}()
-			var buf bytes.Buffer
-			_, err = io.Copy(&buf, r)
+			_, err = io.Copy(buf, r)
 			require.NoError(t, err)
 			os.Stdout = originalStdout
 
@@ -819,28 +816,21 @@ func TestObjectList(t *testing.T) {
 
 	// Test that dironly works and does not list files
 	t.Run("testPelicanObjectLsDirOnly", func(t *testing.T) {
-		// Set path for object to upload/download
+		// Set path for ls
 		for _, export := range fed.Exports {
-			uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
-
-			// Create a pipe for output
-			r, w, _ := os.Pipe()
-			originalStdout := os.Stdout
-			os.Stdout = w
-
+			listURL, r, w, originalStdout, buf := setupObjectListTest(export)
 			go func() {
 				if export.Capabilities.PublicReads {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithDirOnlyOption(true))
+					err := client.DoList(fed.Ctx, listURL, client.WithDirOnlyOption(true))
 					require.NoError(t, err)
 					w.Close()
 				} else {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithDirOnlyOption(true), client.WithTokenLocation(tempToken.Name()))
+					err := client.DoList(fed.Ctx, listURL, client.WithDirOnlyOption(true), client.WithTokenLocation(tempToken.Name()))
 					require.NoError(t, err)
 					w.Close()
 				}
 			}()
-			var buf bytes.Buffer
-			_, err = io.Copy(&buf, r)
+			_, err = io.Copy(buf, r)
 			require.NoError(t, err)
 			os.Stdout = originalStdout
 
@@ -849,30 +839,23 @@ func TestObjectList(t *testing.T) {
 		}
 	})
 
-	// Test that fileonly works and only lists files
-	t.Run("testPelicanObjectLsFileOnly", func(t *testing.T) {
-		// Set path for object to upload/download
+	// Test that objectonly works and only lists files
+	t.Run("testPelicanObjectLsObjectOnly", func(t *testing.T) {
+		// Set path for ls
 		for _, export := range fed.Exports {
-			uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
-
-			// Create a pipe for output
-			r, w, _ := os.Pipe()
-			originalStdout := os.Stdout
-			os.Stdout = w
-
+			listURL, r, w, originalStdout, buf := setupObjectListTest(export)
 			go func() {
 				if export.Capabilities.PublicReads {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithFileOnlyOption(true))
+					err := client.DoList(fed.Ctx, listURL, client.WithObjectOnlyOption(true))
 					require.NoError(t, err)
 					w.Close()
 				} else {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithFileOnlyOption(true), client.WithTokenLocation(tempToken.Name()))
+					err := client.DoList(fed.Ctx, listURL, client.WithObjectOnlyOption(true), client.WithTokenLocation(tempToken.Name()))
 					require.NoError(t, err)
 					w.Close()
 				}
 			}()
-			var buf bytes.Buffer
-			_, err = io.Copy(&buf, r)
+			_, err = io.Copy(buf, r)
 			require.NoError(t, err)
 			os.Stdout = originalStdout
 
@@ -883,112 +866,125 @@ func TestObjectList(t *testing.T) {
 
 	// Test that long works
 	t.Run("testPelicanObjectLsLong", func(t *testing.T) {
-		// Set path for object to upload/download
+		// Set path for ls
 		for _, export := range fed.Exports {
-			uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
-
-			// Create a pipe for output
-			r, w, _ := os.Pipe()
-			originalStdout := os.Stdout
-			os.Stdout = w
-
+			listURL, r, w, originalStdout, buf := setupObjectListTest(export)
 			go func() {
 				if export.Capabilities.PublicReads {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithLongOption(true))
+					err := client.DoList(fed.Ctx, listURL, client.WithLongOption(true))
 					require.NoError(t, err)
 					w.Close()
 				} else {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithLongOption(true), client.WithTokenLocation(tempToken.Name()))
+					err := client.DoList(fed.Ctx, listURL, client.WithLongOption(true), client.WithTokenLocation(tempToken.Name()))
 					require.NoError(t, err)
 					w.Close()
 				}
 			}()
-			var buf bytes.Buffer
-			_, err = io.Copy(&buf, r)
+			_, err = io.Copy(buf, r)
 			require.NoError(t, err)
 			os.Stdout = originalStdout
 
 			assert.Contains(t, buf.String(), "test")
-			// permissions for test
-			assert.Contains(t, buf.String(), "drwxrwxr-x")
+			// size for test (directories have size 0)
+			assert.Contains(t, buf.String(), "0")
+			assert.Contains(t, buf.String(), "hello_world.txt")
+			// size for hello_world.txt
+			assert.Contains(t, buf.String(), "13")
+		}
+	})
+
+	// Test that when both dironly and objectonly are specified, we work as normal
+	t.Run("testPelicanObjectLsDirOnlyAndObjectOnly", func(t *testing.T) {
+		// Set path for ls
+		for _, export := range fed.Exports {
+			listURL, r, w, originalStdout, buf := setupObjectListTest(export)
+			go func() {
+				if export.Capabilities.PublicReads {
+					err := client.DoList(fed.Ctx, listURL, client.WithObjectOnlyOption(true), client.WithDirOnlyOption(true))
+					require.NoError(t, err)
+					w.Close()
+				} else {
+					err := client.DoList(fed.Ctx, listURL, client.WithObjectOnlyOption(true), client.WithDirOnlyOption(true), client.WithTokenLocation(tempToken.Name()))
+					require.NoError(t, err)
+					w.Close()
+				}
+			}()
+			_, err = io.Copy(buf, r)
+			require.NoError(t, err)
+			os.Stdout = originalStdout
 
 			assert.Contains(t, buf.String(), "hello_world.txt")
-			// permissions for hello_world.txt
-			assert.Contains(t, buf.String(), "-rw-rw-r--")
+			assert.Contains(t, buf.String(), "test")
 		}
 	})
 
 	// Test that long works with JSON format
 	t.Run("testPelicanObjectLsLongWithJson", func(t *testing.T) {
-		// Set path for object to upload/download
+		// Set path for ls
 		for _, export := range fed.Exports {
-			uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
-
-			// Create a pipe for output
-			r, w, _ := os.Pipe()
-			originalStdout := os.Stdout
-			os.Stdout = w
-
+			listURL, r, w, originalStdout, buf := setupObjectListTest(export)
 			go func() {
 				if export.Capabilities.PublicReads {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithLongOption(true), client.WithJsonOption(true))
+					err := client.DoList(fed.Ctx, listURL, client.WithLongOption(true), client.WithJsonOption(true))
 					require.NoError(t, err)
 					w.Close()
 				} else {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithLongOption(true), client.WithJsonOption(true), client.WithTokenLocation(tempToken.Name()))
+					err := client.DoList(fed.Ctx, listURL, client.WithLongOption(true), client.WithJsonOption(true), client.WithTokenLocation(tempToken.Name()))
 					require.NoError(t, err)
 					w.Close()
 				}
 			}()
-			var buf bytes.Buffer
-			_, err = io.Copy(&buf, r)
+			_, err = io.Copy(buf, r)
 			require.NoError(t, err)
 			os.Stdout = originalStdout
 
-			assert.Contains(t, buf.String(), "\"Name\":\"test\",\"Size\":0,\"Mode\":\"drwxrwxr-x\"")
-			assert.Contains(t, buf.String(), "\"Name\":\"hello_world.txt\",\"Size\":13,\"Mode\":\"-rw-rw-r--\"")
+			assert.Contains(t, buf.String(), "\"Name\":\"test\",\"Size\":0")
+			assert.Contains(t, buf.String(), "\"Name\":\"hello_world.txt\",\"Size\":13")
 		}
 	})
 
-	// Test we fail when we have an incorrect path
-	t.Run("testPelicanObjectLsFailWhenPathIncorrect", func(t *testing.T) {
+	// Test we fail when we have an incorrect namespace
+	t.Run("testPelicanObjectLsFailWhenNamespaceIncorrect", func(t *testing.T) {
 		// set the prefix to /first instead of /first/namespace
 		federationPrefix := "/first/"
-		uploadURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), federationPrefix)
+		listURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), federationPrefix)
 
-		err := client.DoList(fed.Ctx, uploadURL, nil, client.WithTokenLocation(tempToken.Name()))
+		err := client.DoList(fed.Ctx, listURL, nil, client.WithTokenLocation(tempToken.Name()))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "404: No namespace found for path. Either it doesn't exist, or the Director is experiencing problems")
 	})
 
 	// Test we don't fail when we 'ls' a file instead of a directory
-	t.Run("testPelicanObjectLsOnFile", func(t *testing.T) {
-		// Set path for object to upload/download
+	t.Run("testPelicanObjectLsOnObject", func(t *testing.T) {
+		// Set path for ls
 		for _, export := range fed.Exports {
-			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix, "hello_world.txt")
-
-			// Create a pipe for output
-			r, w, _ := os.Pipe()
-			originalStdout := os.Stdout
-			os.Stdout = w
-
+			listURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix, "hello_world.txt")
+			_, r, w, originalStdout, buf := setupObjectListTest(export)
 			go func() {
 				if export.Capabilities.PublicReads {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithFileOnlyOption(true))
+					err := client.DoList(fed.Ctx, listURL, client.WithObjectOnlyOption(true))
 					require.NoError(t, err)
 					w.Close()
 				} else {
-					err := client.DoList(fed.Ctx, uploadURL, client.WithFileOnlyOption(true), client.WithTokenLocation(tempToken.Name()))
+					err := client.DoList(fed.Ctx, listURL, client.WithObjectOnlyOption(true), client.WithTokenLocation(tempToken.Name()))
 					require.NoError(t, err)
 					w.Close()
 				}
 			}()
-			var buf bytes.Buffer
-			_, err = io.Copy(&buf, r)
+			_, err = io.Copy(buf, r)
 			require.NoError(t, err)
 			os.Stdout = originalStdout
 
 			assert.Contains(t, buf.String(), "hello_world.txt")
 		}
+	})
+
+	// Test we don't fail when we 'ls' on an object not found, we have the proper errror
+	t.Run("testPelicanObjectLsNotFound", func(t *testing.T) {
+		// Set path for ls
+		listURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), fed.Exports[0].FederationPrefix, "ThisDoesNotExist.txt")
+		err = client.DoList(fed.Ctx, listURL, client.WithObjectOnlyOption(true), client.WithTokenLocation(tempToken.Name()))
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "404: object not found")
 	})
 }
