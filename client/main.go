@@ -28,6 +28,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"time"
 
 	"math/rand"
 	"os"
@@ -44,6 +45,16 @@ import (
 
 // Number of caches to attempt to use in any invocation
 var CachesToTry int = 3
+
+// Our own fileInfo structure to hold information about a file
+// NOTE: this was created to provide more flexibility to information on a file. The fs.FileInfo interface was causing some issues like not always returning a Name attribute
+// ALSO NOTE: the fields are exported so they can be marshalled into JSON, it does not work otherwise
+type fileInfo struct {
+	Name    string
+	Size    int64
+	ModTime time.Time
+	IsDir   bool
+}
 
 // Determine the token name if it is embedded in the scheme, Condor-style
 func getTokenName(destination *url.URL) (scheme, tokenName string) {
@@ -206,6 +217,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 	tokenLocation := ""
 	acquire := true
 	token := ""
+	jsn := false
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -214,6 +226,8 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 			acquire = option.Value().(bool)
 		case identTransferOptionToken{}:
 			token = option.Value().(string)
+		case identTransferOptionJson{}:
+			jsn = option.Value().(bool)
 		}
 	}
 
@@ -224,7 +238,24 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}
 
-	if remoteSize, err = statHttp(ctx, destUri, ns, token); err == nil {
+	if statInfo, err := statHttp(ctx, destUri, ns, pelicanURL.directorUrl, token, jsn); err == nil {
+		remoteSize = uint64(statInfo.Size)
+		if jsn {
+			// Print our stat info in JSON format:
+			jsonData, err := json.Marshal(statInfo)
+			if err != nil {
+				return 0, errors.Wrap(err, "failed to marshal file/directory stat info to JSON format")
+			}
+			fmt.Println(string(jsonData))
+			return remoteSize, nil
+		} else {
+			// Print our stat info:
+			fmt.Println("Name:", statInfo.Name)
+			fmt.Println("Size:", statInfo.Size)
+			fmt.Println("ModTime:", statInfo.ModTime)
+			fmt.Println("IsDir:", statInfo.IsDir)
+		}
+
 		return remoteSize, nil
 	}
 	return 0, err
