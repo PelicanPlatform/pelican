@@ -180,7 +180,7 @@ func TestOrigin(t *testing.T) {
 	issuerUrl, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
-	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, server_utils.OriginSelfFileTest)
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, server_utils.ServerSelfTest)
 	require.NoError(t, err)
 	require.True(t, ok)
 }
@@ -228,7 +228,7 @@ func TestMultiExportOrigin(t *testing.T) {
 	issuerUrl, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
-	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, server_utils.OriginSelfFileTest)
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, server_utils.ServerSelfTest)
 	require.NoError(t, err)
 	require.True(t, ok)
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -953,16 +954,16 @@ func getPrefixByPath(ctx *gin.Context) {
 // Generate a mock file for caches to fetch. This is for director-based health tests for caches
 // So that we don't require an origin to feed the test file to the cache
 func getHealthTestFile(ctx *gin.Context) {
-	// Expected path: /pelican/monitoring/2006-01-02T15:04:05Z07:00.txt
+	// Expected path: /pelican/monitoring/directorTest/2006-01-02T15:04:05Z07:00.txt
 	pathParam := ctx.Param("path")
 	cleanedPath := path.Clean(pathParam)
-	if cleanedPath == "" || !strings.HasPrefix(cleanedPath, cacheMonitroingBasePath+"/") {
+	if cleanedPath == "" || !strings.HasPrefix(cleanedPath, server_utils.MonitoringBaseNs+"/") {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Path parameter is not a valid health test path: " + cleanedPath})
 		return
 	}
-	fileName := strings.TrimPrefix(cleanedPath, cacheMonitroingBasePath+"/")
+	fileName := strings.TrimPrefix(cleanedPath, server_utils.MonitoringBaseNs+"/")
 	if fileName == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -977,9 +978,7 @@ func getHealthTestFile(ctx *gin.Context) {
 		return
 	}
 
-	filenameWoExt := fileNameSplit[0]
-
-	fileContent := fmt.Sprintf("%s%s\n", testFileContent, filenameWoExt)
+	fileContent := server_utils.DirectorTestBody + "\n"
 
 	if ctx.Request.Method == "HEAD" {
 		ctx.Header("Content-Length", strconv.Itoa(len(fileContent)))
