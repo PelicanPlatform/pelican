@@ -39,7 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 )
 
-// Wait until given `reqUrl` returns a HTTP 200.
+// Wait until given `reqUrl` returns the expected status.
 // Logging messages emitted will refer to `server` (e.g., origin, cache, director)
 // Pass true to statusMismatch to allow a mismatch of expected status code and what's returned not fail immediately
 func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expectedStatus int, statusMismatch bool) error {
@@ -61,7 +61,7 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 			}
 			httpClient := http.Client{
 				Transport: config.GetTransport(),
-				Timeout:   50 * time.Millisecond,
+				Timeout:   1 * time.Second,
 				CheckRedirect: func(req *http.Request, via []*http.Request) error {
 					return http.ErrUseLastResponse
 				},
@@ -126,7 +126,7 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 	if statusError != nil {
 		return errors.Wrapf(statusError, "url %s didn't respond with the expected status code %d within 10s", reqUrl, expectedStatus)
 	} else {
-		return errors.Errorf("Server %s at %s did not startup after 10s of waiting", server, reqUrl)
+		return errors.Errorf("The %s server at %s either did not startup or did not respond quickly enough after 10s of waiting", server, reqUrl)
 	}
 }
 
