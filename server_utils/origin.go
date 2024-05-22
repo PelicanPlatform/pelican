@@ -38,18 +38,18 @@ var originExports []OriginExport
 
 type (
 	OriginExport struct {
-		StoragePrefix    string `json:"storage_prefix"`
-		FederationPrefix string `json:"federation_prefix"`
+		StoragePrefix    string `json:"storagePrefix"`
+		FederationPrefix string `json:"federationPrefix"`
 
 		// Export fields specific to S3 backend. Other things like
 		// S3ServiceUrl, S3Region, etc are kept top-level in the config
-		S3Bucket        string `json:"s3_bucket,omitempty"`
-		S3AccessKeyfile string `json:"s3_access_keyfile,omitempty"`
-		S3SecretKeyfile string `json:"s3_secret_keyfile,omitempty"`
+		S3Bucket        string `json:"s3Bucket,omitempty"`
+		S3AccessKeyfile string `json:"s3AccessKeyfile,omitempty"`
+		S3SecretKeyfile string `json:"s3SecretKeyfile,omitempty"`
 
 		// Capabilities for the export
 		Capabilities     server_structs.Capabilities `json:"capabilities"`
-		SentinelLocation string                      `json:"sentinel_location"`
+		SentinelLocation string                      `json:"sentinelLocation"`
 	}
 
 	OriginStorageType string

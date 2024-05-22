@@ -36,13 +36,11 @@ import type {NamespaceFormPage} from "./CustomRegistrationField/index.d";
 const PostPage = ({update}: NamespaceFormPage) => {
 
     const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined)
-    const [prefix, setPrefix] = useState<string | undefined>(undefined)
     const [alert, setAlert] = useState<AlertType | undefined>(undefined)
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const fromUrl = urlParams.get('fromUrl')
-        const prefix = urlParams.get('prefix')
 
         try {
             if (fromUrl != undefined) {
@@ -51,12 +49,6 @@ const PostPage = ({update}: NamespaceFormPage) => {
             }
         } catch (e) {
             setAlert({severity: "error", message: "Invalid fromUrl provided"})
-        }
-
-        try {
-            setPrefix(String(prefix))
-        } catch (e) {
-            setAlert({severity: "error", message: "Invalid prefix provided"})
         }
     }, [])
 

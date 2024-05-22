@@ -439,31 +439,31 @@ definitions:
             to finish the registration. `status_description` contains detail information of which field(s) are missing.
           * "Registration Error": there is an error registering the namespace. `edit_url` is empty and the user cannot edit the registration.
         example: Incomplete
-      status_description:
+      statusDescription:
         type: string
         description: The detailed description of the status
         example: "Incomplete Registration: UserID is required"
-      edit_url:
+      editUrl:
         type: string
         description: The URL to update the registration at the registry
-        example: "https://registry.org/view/registry/origin/edit/?id=1"
-      storage_prefix:
+        example: "https://registry.org/view/registry/namespace/edit/?id=1"
+      storagePrefix:
         type: string
         example: "/tmp/pelican"
         description: The path to the directory to be exported on the host server
-      federation_prefix:
+      federationPrefix:
         type: string
         example: "/demo"
         description: The prefix to access the file through the Pelican federation
-      s3_bucket:
+      s3Bucket:
         type: string
         example: "demo-bucket"
         description: "The bucket name of the origin if it's using the S3 storage backend"
-      s3_access_keyfile:
+      s3AccessKeyfile:
         type: string
         example: "/path/to/key"
         description: "The path to the file that contains the access key or API key for S3 storage backend"
-      s3_secret_keyfile:
+      s3SecretKeyfile:
         type: string
         example: "/path/to/secret"
         description: "The path to the file that contains the secret for S3 storage backend"
@@ -477,6 +477,27 @@ definitions:
         type: string
         example: "posix"
         description: "The storage type of the origin server. Values can be posix, s3, and https"
+      status:
+        type: string
+        description: >
+          The registration status of the origin.
+          Can be "Not Supported" | "Completed" | "Incomplete" | "Registration Error"
+
+          * "Not Supported": the Pelican registry is below v7.8.0 and does not support checking registration status.
+            In this case, `edit_url` is empty.
+          * "Completed": the registration is completed
+          * "Incomplete": the registration is not completed. `edit_url` will takes the user to the correspoding registration page
+            to finish the registration. `status_description` contains detail information of which field(s) are missing.
+          * "Registration Error": there is an error registering the origin. `edit_url` is empty and the user cannot edit the registration.
+        example: Incomplete
+      statusDescription:
+        type: string
+        description: The detailed description of the status
+        example: "Incomplete Registration: UserID is required"
+      editUrl:
+        type: string
+        description: The URL to update the registration at the registry
+        example: "https://registry.org/view/registry/origin/edit/?id=1"
       s3Region:
         type: string
         description: "The server region for S3 storage. Only available when type == s3"

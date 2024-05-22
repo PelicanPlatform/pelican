@@ -20,7 +20,6 @@
 
 import {
     Box,
-    Button,
     Grid,
     Typography,
     Collapse,
@@ -38,16 +37,27 @@ import type {NamespaceFormPage} from "./CustomRegistrationField/index.d";
 const PutPage = ({update}: NamespaceFormPage) => {
 
     const [id, setId] = useState<number | undefined>(undefined)
+    const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined)
     const [namespace, setNamespace] = useState<Namespace | undefined>(undefined)
     const [alert, setAlert] = useState<AlertType | undefined>(undefined)
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const id = urlParams.get('id')
+        const fromUrl = urlParams.get('fromUrl')
 
         if (id === null) {
             setAlert({severity: "error", message: "No Namespace ID Provided"})
             return
+        }
+
+        try {
+            if (fromUrl != undefined) {
+                const parsedUrl = new URL(fromUrl)
+                setFromUrl(parsedUrl)
+            }
+        } catch (e) {
+            setAlert({severity: "error", message: "Invalid fromUrl provided"})
         }
 
         try {
@@ -83,7 +93,7 @@ const PutPage = ({update}: NamespaceFormPage) => {
                             namespace={namespace}
                             onSubmit={async (data) => {
                                 let namespace = {...data, id: id}
-                                setAlert(await submitNamespaceForm(namespace, undefined, update))
+                                setAlert(await submitNamespaceForm(namespace, fromUrl, update))
                             }}
                         /> :
                         <Skeleton variant="rectangular" width="100%" height={400} />
