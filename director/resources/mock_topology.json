@@ -1,0 +1,130 @@
+    {
+        "caches": [
+            {
+                "auth_endpoint": "https://cache-auth-endpoint.com",
+                "endpoint": "http://cache-endpoint.com",
+                "resource": "MY_CACHE"
+            },
+            {
+                "auth_endpoint": "https://cache2.com",
+                "endpoint": "https://cache2.com",
+                "resource": "CACHE2"
+            },
+            {
+                "auth_endpoint": "https://cache3.com",
+                "endpoint": "https://cache3.com",
+                "resource": "CACHE3"
+            },
+            {
+                "auth_endpoint": "https://cache4.com",
+                "endpoint": "https://cache4.com",
+                "resource": "CACHE4"
+            },
+            {
+                "auth_endpoint": "https://cache5.com",
+                "endpoint": "https://cache5.com",
+                "resource": "CACHE5"
+            },
+            {
+                "auth_endpoint": "https://cache6.com",
+                "endpoint": "https://cache6.com",
+                "resource": "CACHE6"
+            },
+            {
+                "auth_endpoint": "https://cache7.com",
+                "endpoint": "https://cache7.com",
+                "resource": "CACHE7"
+            }
+        ],
+        "namespaces": [
+            {
+                "caches": [
+                    {
+                        "auth_endpoint": "https://cache-auth-endpoint.com",
+                        "endpoint": "http://cache-endpoint.com",
+                        "resource": "MY_CACHE"
+                    },
+                    {
+                        "auth_endpoint": "https://cache2.com",
+                        "endpoint": "https://cache2.com",
+                        "resource": "CACHE2"
+                    },
+                    {
+                        "auth_endpoint": "https://cache3.com",
+                        "endpoint": "https://cache3.com",
+                        "resource": "CACHE3"
+                    },
+                    {
+                        "auth_endpoint": "https://cache4.com",
+                        "endpoint": "https://cache4.com",
+                        "resource": "CACHE4"
+                    },
+                    {
+                        "auth_endpoint": "https://cache5.com",
+                        "endpoint": "https://cache5.com",
+                        "resource": "CACHE5"
+                    },
+                    {
+                        "auth_endpoint": "https://cache6.com",
+                        "endpoint": "https://cache6.com",
+                        "resource": "CACHE6"
+                    },
+                    {
+                        "auth_endpoint": "https://cache7.com",
+                        "endpoint": "https://cache7.com",
+                        "resource": "CACHE7"
+                    }
+                ],
+                "credential_generation": {
+                    "base_path": "/server",
+                    "issuer": "https://my-issuer.com",
+                    "max_scope_depth": 3,
+                    "strategy": "OAuth2",
+                    "vault_issuer": null,
+                    "vault_server": null
+                },
+                "scitokens": [
+                    {
+                        "base_path": ["/server"],
+                        "issuer": "https://my-issuer.com",
+                        "restricted_path": []
+                    }
+                ],
+                "dirlisthost": null,
+                "origins": [
+                    {
+                        "auth_endpoint": "https://origin1-auth-endpoint.com",
+                        "endpoint": "http://origin1-endpoint.com",
+                        "resource": "MY_ORIGIN1"
+                    }
+                ],
+                "path": "/my/server",
+                "readhttps": true,
+                "usetokenonread": true,
+                "writebackhost": "https://writeback.my-server.com"
+            },
+            {
+                "caches": [
+                    {
+                        "auth_endpoint": "https://cache-auth-endpoint.com",
+                        "endpoint": "http://cache-endpoint.com",
+                        "resource": "MY_CACHE"
+                    }
+                ],
+                "credential_generation": null,
+                "scitokens": [],
+                "dirlisthost": null,
+                "origins": [
+                    {
+                        "auth_endpoint": "https://origin2-auth-endpoint.com",
+                        "endpoint": "http://origin2-endpoint.com",
+                        "resource": "MY_ORIGIN2"
+                    }
+                ],
+                "path": "/my/server/2",
+                "readhttps": true,
+                "usetokenonread": false,
+                "writebackhost": null
+            }
+        ]
+    }

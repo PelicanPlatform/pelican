@@ -31,6 +31,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	viper.Reset()
 	if err := config.InitClient(); err != nil {
 		os.Exit(1)
 	}
@@ -596,13 +598,17 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixNoError", func(t *testing.T) {
 		viper.Reset()
-		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		err := config.InitClient()
+		require.NoError(t, err)
+		_, err = config.SetPreferredPrefix(config.OsdfPrefix)
 		viper.Set("ConfigDir", t.TempDir())
 		assert.NoError(t, err)
 		// Init config to get proper timeouts
 		config.InitConfig()
 
-		te := NewTransferEngine(ctx)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
+
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -625,14 +631,16 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixWithError", func(t *testing.T) {
 		viper.Reset()
-		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		err := config.InitClient()
+		require.NoError(t, err)
+		_, err = config.SetPreferredPrefix(config.OsdfPrefix)
 		viper.Set("ConfigDir", t.TempDir())
 		require.NoError(t, err)
 		config.InitConfig()
 		require.NoError(t, config.InitClient())
 
-		te := NewTransferEngine(ctx)
-		require.NotNil(t, te)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -652,17 +660,19 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithPelicanPrefixNoError", func(t *testing.T) {
 		viper.Reset()
+		err := config.InitClient()
+		require.NoError(t, err)
 		viper.Set("ConfigDir", t.TempDir())
 		config.InitConfig()
 		require.NoError(t, config.InitClient())
-		te := NewTransferEngine(ctx)
-		require.NotNil(t, te)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
 
 		mock.MockOSDFDiscovery(t, config.GetTransport())
-		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		_, err = config.SetPreferredPrefix(config.PelicanPrefix)
 		config.InitConfig()
 		assert.NoError(t, err)
 		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
@@ -686,8 +696,8 @@ func TestNewPelicanURL(t *testing.T) {
 		err := config.InitClient()
 		require.NoError(t, err)
 
-		te := NewTransferEngine(ctx)
-		require.NotNil(t, te)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -736,9 +746,11 @@ func TestNewPelicanURL(t *testing.T) {
 		viper.Reset()
 		viper.Set("ConfigDir", t.TempDir())
 		config.InitConfig()
+		err := config.InitClient()
+		require.NoError(t, err)
 
-		te := NewTransferEngine(ctx)
-		require.NotNil(t, te)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -762,7 +774,8 @@ func TestNewPelicanURL(t *testing.T) {
 		err := config.InitClient()
 		require.NoError(t, err)
 
-		te := NewTransferEngine(ctx)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -812,6 +825,56 @@ func TestNewPelicanURL(t *testing.T) {
 	})
 }
 
+// Tests the functionality of getCachesToTry, ensuring that the function returns the correct number of caches and removes duplicates
+func TestGetCachesToTry(t *testing.T) {
+	directorCaches := make([]namespaces.DirectorCache, 3)
+	for i := 0; i < 3; i++ {
+		directorCache := namespaces.DirectorCache{
+			EndpointUrl: "https://some/cache/" + strconv.Itoa(i),
+			Priority:    0,
+			AuthedReq:   false,
+		}
+		directorCaches[i] = directorCache
+	}
+
+	// Add a duplicate to the list --> check for its removal
+	directorCaches = append(directorCaches, namespaces.DirectorCache{
+		EndpointUrl: "https://some/cache/0",
+		Priority:    0,
+		AuthedReq:   false,
+	})
+
+	// Make our namespace:
+	namespace := namespaces.Namespace{
+		SortedDirectorCaches: directorCaches,
+		ReadHTTPS:            false,
+		UseTokenOnRead:       false,
+	}
+
+	caches, err := getCachesFromNamespace(namespace, true, nil)
+	assert.NoError(t, err)
+
+	job := &TransferJob{
+		namespace: namespace,
+	}
+
+	transfers := getCachesToTry(caches, job, 4, "")
+
+	// Check that there are no duplicates in the result
+	cacheSet := make(map[CacheInterface]bool)
+	for _, transfer := range transfers {
+		if cacheSet[transfer.Url.String()] {
+			t.Errorf("Found duplicate cache: %v", transfer.Url.String())
+		}
+		cacheSet[transfer.Url.String()] = true
+	}
+	// Verify we got the correct caches in our transfer attempt details
+	require.Len(t, transfers, 3)
+	assert.Equal(t, "https://some/cache/0", transfers[0].Url.String())
+	assert.Equal(t, "https://some/cache/1", transfers[1].Url.String())
+	assert.Equal(t, "https://some/cache/2", transfers[2].Url.String())
+}
+
 // Test that the project name is correctly extracted from the job ad file
 func TestSearchJobAd(t *testing.T) {
 	// Create a temporary file
@@ -849,5 +912,26 @@ func TestSearchJobAd(t *testing.T) {
 		// Call GetProjectName and check the result
 		jobId := searchJobAd(jobId)
 		assert.Equal(t, "12345", jobId)
+	})
+}
+
+func TestNewTransferEngine(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	// Test we fail if we do not call initclient() before
+	t.Run("TestInitClientNotCalled", func(t *testing.T) {
+		config.ResetClientInitialized()
+		ctx := context.Background()
+		_, err := NewTransferEngine(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "client has not been initialized, unable to create transfer engine")
+	})
+
+	t.Run("TestInitClientCalled", func(t *testing.T) {
+		err := config.InitClient()
+		require.NoError(t, err)
+		ctx := context.Background()
+		_, err = NewTransferEngine(ctx)
+		assert.NoError(t, err)
 	})
 }

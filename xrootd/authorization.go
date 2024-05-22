@@ -42,6 +42,7 @@ import (
 	"github.com/go-ini/ini"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/exp/slices"
 
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
@@ -143,6 +144,16 @@ func ScanLinesWithCont(data []byte, atEOF bool) (advance int, token []byte, err 
 	}
 }
 
+func deduplicateBasePaths(cfg *ScitokensCfg) {
+	for key, item := range cfg.IssuerMap {
+		bps := item.BasePaths
+		slices.Sort(bps)
+		bps = slices.Compact(bps)
+		item.BasePaths = bps
+		cfg.IssuerMap[key] = item
+	}
+}
+
 // Given a reference to a Scitokens configuration, write it out to a known location
 // on disk for the xrootd server
 func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) error {
@@ -176,6 +187,7 @@ func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) e
 			" configuration file %v to desired daemon gid %v", configPath, gid)
 	}
 
+	deduplicateBasePaths(cfg)
 	err = templ.Execute(file, cfg)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create scitokens.cfg template")

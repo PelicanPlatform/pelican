@@ -37,13 +37,28 @@ import (
 
 type (
 	exportsRes struct {
-		Type    string             `json:"type"` // either "posix" or "s3"
+		Type string `json:"type"` // "posix" | "s3" | "https"
+
+		// For S3 backend
+		S3Region     string `json:"s3Region,omitempty"`
+		S3ServiceUrl string `json:"s3ServiceUrl,omitempty"`
+		S3UrlStyle   string `json:"s3UrlStyle,omitempty"`
+
+		// For https backend
+		HttpServiceUrl string `json:"httpServiceUrl,omitempty"`
+
 		Exports []exportWithStatus `json:"exports"`
 	}
 )
 
 func handleExports(ctx *gin.Context) {
-	storageType := param.Origin_StorageType.GetString()
+	st := param.Origin_StorageType.GetString()
+	storageType, err := server_utils.ParseOriginStorageType(st)
+	if err != nil {
+		log.Errorf("Failed to parse origin storage type: %v", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when parsing the storage type of the origin: " + err.Error()})
+	}
+
 	exports, err := server_utils.GetOriginExports()
 	if err != nil {
 		log.Errorf("Failed to get the origin exports: %v", err)
@@ -99,7 +114,16 @@ func handleExports(ctx *gin.Context) {
 		}
 	}
 
-	ctx.JSON(http.StatusOK, exportsRes{Type: storageType, Exports: wrappedExports})
+	res := exportsRes{Type: string(storageType), Exports: wrappedExports}
+	switch storageType {
+	case server_utils.OriginStorageS3:
+		res.S3Region = param.Origin_S3Region.GetString()
+		res.S3ServiceUrl = param.Origin_S3ServiceUrl.GetString()
+		res.S3UrlStyle = param.Origin_S3UrlStyle.GetString()
+	case server_utils.OriginStorageHTTPS:
+		res.HttpServiceUrl = param.Origin_HttpServiceUrl.GetString()
+	}
+	ctx.JSON(http.StatusOK, res)
 }
 
 func RegisterOriginWebAPI(engine *gin.Engine) {

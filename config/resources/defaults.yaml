@@ -32,8 +32,6 @@ Logging:
     Scitokens: fatal
     Xrd: error
     Xrootd: error
-Client:
-  WorkerCount: 5
 Server:
   WebPort: 8444
   WebHost: "0.0.0.0"
