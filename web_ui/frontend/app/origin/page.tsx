@@ -18,13 +18,14 @@
 
 "use client"
 
-import {Box, Grid, Typography} from "@mui/material";
+import {Box, Button, Grid, Tooltip, Typography} from "@mui/material";
 
 import RateGraph from "@/components/graphs/RateGraph";
 import StatusBox from "@/components/StatusBox";
 import {DataExportTable} from "@/components/DataExportTable";
 import {TimeDuration} from "@/components/graphs/prometheus";
 import FederationOverview from "@/components/FederationOverview";
+import RegisterNamespace from "@/components/RegisterNamespace";
 import {User} from "@/index";
 import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
 
@@ -91,6 +92,7 @@ export default function Home() {
                     </Grid>
                     <Grid item xs={12} lg={6}>
                         <FederationOverview/>
+                        <RegisterNamespace/>
                     </Grid>
                 </Grid>
             </Box>
