@@ -2490,8 +2490,14 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 // is made without.
 func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, directorUrl, token string, jsn bool) (info fileInfo, err error) {
 	statHosts := make([]url.URL, 0, 3)
+	type statResults struct {
+		info fileInfo
+		err  error
+	}
+	var dirListNotSupported *dirListingNotSupportedError
 	collectionsUrl, err := getCollectionsUrl(ctx, dest, namespace, directorUrl)
-	if err != nil {
+	// If we have a dirListingNotSupported error, we can attempt to stat the caches instead
+	if err != nil && !errors.As(err, &dirListNotSupported) {
 		return
 	}
 	if collectionsUrl != nil {
@@ -2508,6 +2514,7 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 			if err != nil {
 				return
 			}
+			endpoint.Path = ""
 			statHosts = append(statHosts, *endpoint)
 		}
 	} else if namespace.WriteBackHost != "" {
@@ -2519,15 +2526,9 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 		statHosts = append(statHosts, *endpoint)
 	}
 
-	type statResults struct {
-		info fileInfo
-		err  error
-	}
 	resultsChan := make(chan statResults)
 	transport := config.GetTransport()
 	auth := &bearerAuth{token: token}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
 
 	for _, statUrl := range statHosts {
 		client := gowebdav.NewAuthClient(statUrl.String(), auth)
@@ -2603,7 +2604,6 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 		result := <-resultsChan
 		if result.err == nil {
 			if !success {
-				cancel()
 				success = true
 				info = result.info
 			}

@@ -173,7 +173,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 
 	defer func() {
 		if r := recover(); r != nil {
-			log.Debugln("Panic captured while attempting to perform size check:", r)
+			log.Debugln("Panic captured while attempting to stat:", r)
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) while check file size: %v", r)
 			err = errors.New(ret)
