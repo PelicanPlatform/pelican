@@ -214,6 +214,59 @@ func TestDeprecateLogMessage(t *testing.T) {
 	})
 }
 
+func TestBadConfigKeys(t *testing.T) {
+	t.Cleanup(func() { viper.Reset() })
+
+	setupFunc := func() *test.Hook {
+		viper.Reset()
+		viper.Set("ConfigDir", t.TempDir())
+		viper.Set("Debug", true)
+		hook := test.NewLocal(logrus.StandardLogger())
+		return hook
+	}
+	t.Run("testRecognizedViperKey", func(t *testing.T) {
+		hook := setupFunc()
+		viper.Set("Origin.FederationPrefix", "/a/prefix")
+		InitConfig()
+
+		require.NotNil(t, hook.LastEntry())
+		assert.NotContains(t, hook.LastEntry().Message, "Unknown configuration keys found")
+	})
+
+	t.Run("testRecognizedEnvKey", func(t *testing.T) {
+		hook := setupFunc()
+		os.Setenv("PELICAN_ORIGIN_FEDERATIONPREFIX", "/a/prefix")
+		defer os.Unsetenv("PELICAN_ORIGIN_FEDERATIONPREFIX")
+		InitConfig()
+
+		require.NotNil(t, hook.LastEntry())
+		assert.NotContains(t, hook.LastEntry().Message, "Unknown configuration keys found")
+	})
+
+	t.Run("testBadViperKey", func(t *testing.T) {
+		hook := setupFunc()
+		viper.Set("Origin.Bad.Key", "/a/prefix")
+		InitConfig()
+
+		require.NotNil(t, hook.LastEntry())
+		assert.Equal(t, logrus.WarnLevel, hook.LastEntry().Level)
+		assert.Contains(t, hook.LastEntry().Message, "Unknown configuration keys found")
+		assert.Contains(t, hook.LastEntry().Message, "origin.bad.key")
+	})
+
+	t.Run("testBadEnvKey", func(t *testing.T) {
+		hook := setupFunc()
+		os.Setenv("PELICAN_ORIGIN_BAD_KEY", "/a/prefix")
+		defer os.Unsetenv("PELICAN_ORIGIN_BAD_KEY")
+		InitConfig()
+
+		require.NotNil(t, hook.LastEntry())
+		assert.Equal(t, logrus.WarnLevel, hook.LastEntry().Level)
+		assert.Contains(t, hook.LastEntry().Message, "Unknown configuration keys found")
+		assert.Contains(t, hook.LastEntry().Message, "origin.bad.key")
+	})
+}
+
 func TestEnabledServers(t *testing.T) {
 	allServerTypes := []ServerType{OriginType, CacheType, DirectorType, RegistryType}
 	allServerStrs := make([]string, 0)

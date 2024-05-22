@@ -37,6 +37,7 @@ import (
 type GoField struct {
 	Name         string
 	Type         string
+	Tag          string
 	NestedFields map[string]*GoField
 }
 
@@ -252,7 +253,9 @@ func generateGoStructCode(field *GoField, indent string) string {
 	// If it has type, it should be a leaf node as parent node
 	// does not have a type
 	if field.Type != "" {
-		return fmt.Sprintf("%s%s %s\n", indent, field.Name, field.Type)
+		// Tack on a mapstructure value with the field's tag (ie the name of the field but lowercased). This
+		// gets used to check viper keys against the struct fields, where Viper lowercases everything.
+		return fmt.Sprintf("%s%s %s `mapstructure:\"%s\"`\n", indent, field.Name, field.Type, field.Tag)
 	}
 	code := fmt.Sprintf("%s%s struct {\n", indent, field.Name)
 	keys := make([]string, 0, len(field.NestedFields))
@@ -265,7 +268,11 @@ func generateGoStructCode(field *GoField, indent string) string {
 		nested := field.NestedFields[key]
 		code += generateGoStructCode(nested, indent+"	")
 	}
-	code += fmt.Sprintf("%s}\n", indent)
+	if field.Tag != "" {
+		code += fmt.Sprintf("%s} `mapstructure:\"%s\"`\n", indent, field.Tag)
+	} else {
+		code += fmt.Sprintf("%s}\n", indent)
+	}
 	return code
 }
 
@@ -361,6 +368,7 @@ func GenParamStruct() {
 			if current.NestedFields[part] == nil {
 				current.NestedFields[part] = &GoField{
 					Name:         part,
+					Tag:          strings.ToLower(part),
 					NestedFields: make(map[string]*GoField),
 				}
 			}
@@ -374,6 +382,7 @@ func GenParamStruct() {
 	// for details
 	root.NestedFields["ConfigDir"] = &GoField{
 		Name:         "ConfigDir",
+		Tag:          "configdir",
 		NestedFields: make(map[string]*GoField),
 		Type:         "string",
 	}
