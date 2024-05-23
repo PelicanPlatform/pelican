@@ -47,6 +47,7 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 	ctx, cancel := context.WithDeadline(ctx, expiry)
 	defer cancel()
 	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
 	success := false
 	logged := false
 	var statusError error
