@@ -475,7 +475,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		log.Errorf("Failed to load OIDC information for registration with identity: %v", err)
 		return
 	}
-	if provider == oauth2.Globus {
+	if provider == config.Globus {
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,

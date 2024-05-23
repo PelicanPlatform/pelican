@@ -25,18 +25,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-type OIDCProvider string
-
-const (
-	CILogon         OIDCProvider = "CILogon"
-	Globus          OIDCProvider = "Globus"
-	UnknownProvider OIDCProvider = "Unknown"
-)
-
 // ServerOIDCClient loads the OIDC client configuration for
 // the pelican server
-func ServerOIDCClient() (result Config, provider OIDCProvider, err error) {
-	provider = UnknownProvider
+func ServerOIDCClient() (result Config, provider config.OIDCProvider, err error) {
+	provider = config.UnknownProvider
 	// Load OIDC.ClientID
 	if result.ClientID, err = config.GetOIDCClientID(); err != nil {
 		return
@@ -64,21 +56,21 @@ func ServerOIDCClient() (result Config, provider OIDCProvider, err error) {
 		return
 	}
 	if authorizationEndpoint == "" {
-		err = errors.New("Nothing set for config parameter OIDC.DeviceAuthEndpoint")
+		err = errors.New("Nothing set for config parameter OIDC.AuthorizationEndpoint")
 		return
 	}
 	authorizationEndpointURL, err := url.Parse(authorizationEndpoint)
 	if err != nil {
-		err = errors.New("Failed to parse URL for parameter OIDC.DeviceAuthEndpoint")
+		err = errors.New("Failed to parse URL for parameter OIDC.AuthorizationEndpoint")
 		return
 	}
 	result.Endpoint.AuthURL = authorizationEndpointURL.String()
 
 	// We get the provider based on the hostname of the authorization endpoint
 	if authorizationEndpointURL.Hostname() == "auth.globus.org" {
-		provider = Globus
+		provider = config.Globus
 	} else if authorizationEndpointURL.Hostname() == "cilogon.org" {
-		provider = CILogon
+		provider = config.CILogon
 	}
 
 	// Load OIDC.DeviceAuthEndpoint
@@ -135,7 +127,7 @@ func ServerOIDCClient() (result Config, provider OIDCProvider, err error) {
 	// Set the scope
 	result.Scopes = []string{"openid", "profile", "email"}
 	// Add extra scope only for CILogon user info endpoint
-	if provider == CILogon {
+	if provider == config.CILogon {
 		result.Scopes = append(result.Scopes, "org.cilogon.userinfo")
 	}
 	return

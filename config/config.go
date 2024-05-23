@@ -1252,14 +1252,14 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 
 	if currentServers.IsEnabled(OriginType) {
 		ost := param.Origin_StorageType.GetString()
+		if ost != "post" && param.Origin_SelfTest.GetBool() {
+			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			viper.Set("Origin.SelfTest", false)
+		}
 		switch ost {
 		case "posix":
 			viper.SetDefault("Origin.SelfTest", true)
 		case "https":
-			if param.Origin_SelfTest.GetBool() {
-				log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-				viper.Set("Origin.SelfTest", false)
-			}
 			httpSvcUrl := param.Origin_HttpServiceUrl.GetString()
 			if httpSvcUrl == "" {
 				return errors.New("Origin.HTTPServiceUrl may not be empty when the origin is configured with an https backend")
@@ -1268,11 +1268,32 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			if err != nil {
 				return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
 			}
-		case "xroot":
-			if param.Origin_SelfTest.GetBool() {
-				log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-				viper.Set("Origin.SelfTest", false)
+		case "globus":
+			pvd, err := GetOIDCProdiver()
+			if err != nil || pvd != Globus {
+				log.Info("Server OIDC provider is not Globus. Use Origin.GlobusClientIDFile instead")
+			} else {
+				// OIDC provider is globus
+				break
 			}
+			// Check if ClientID and ClientSecret are valid
+			clientIDPath := param.Origin_GlobusClientIDFile.GetString()
+			clientSecretPath := param.Origin_GlobusClientSecretFile.GetString()
+			if clientIDPath == "" {
+				return errors.New("Origin.GlobusClientIDFile may not be empty with Globus storage backend ")
+			}
+			_, err = os.Stat(clientIDPath)
+			if err != nil {
+				return errors.Wrap(err, "Origin.GlobusClientIDFile is not a valid filepath")
+			}
+			if clientSecretPath == "" {
+				return errors.New("Origin.GlobusClientSecretFile may not be empty with Globus storage backend ")
+			}
+			_, err = os.Stat(clientSecretPath)
+			if err != nil {
+				return errors.Wrap(err, "Origin.GlobusClientSecretFile is not a valid filepath")
+			}
+		case "xroot":
 			xrootSvcUrl := param.Origin_XRootServiceUrl.GetString()
 			if xrootSvcUrl == "" {
 				return errors.New("Origin.XRootServiceUrl may not be empty when the origin is configured with an xroot backend")
@@ -1282,10 +1303,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 				return errors.Wrap(err, "unable to parse Origin.XrootServiceUrl as a URL")
 			}
 		case "s3":
-			if param.Origin_SelfTest.GetBool() {
-				log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-				viper.Set("Origin.SelfTest", false)
-			}
 			s3SvcUrl := param.Origin_S3ServiceUrl.GetString()
 			if s3SvcUrl == "" {
 				return errors.New("Origin.S3ServiceUrl may not be empty when the origin is configured with an s3 backend")

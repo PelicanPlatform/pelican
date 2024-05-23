@@ -183,6 +183,10 @@ type Config struct {
 		ExportVolumes []string
 		Exports interface{}
 		FederationPrefix string
+		GlobusClientIDFile string
+		GlobusClientSecretFile string
+		GlobusCollectionID string
+		GlobusCollectionName string
 		HttpServiceUrl string
 		Mode string
 		Multiuser bool
@@ -459,6 +463,10 @@ type configWithType struct {
 		ExportVolumes struct { Type string; Value []string }
 		Exports struct { Type string; Value interface{} }
 		FederationPrefix struct { Type string; Value string }
+		GlobusClientIDFile struct { Type string; Value string }
+		GlobusClientSecretFile struct { Type string; Value string }
+		GlobusCollectionID struct { Type string; Value string }
+		GlobusCollectionName struct { Type string; Value string }
 		HttpServiceUrl struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }

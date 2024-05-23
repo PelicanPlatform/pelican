@@ -37,6 +37,7 @@ import (
 var originExports []OriginExport
 
 type (
+	// TODO: pull stoage-specific fields into a separate struct and mixin
 	OriginExport struct {
 		StoragePrefix    string `json:"storage_prefix"`
 		FederationPrefix string `json:"federation_prefix"`
@@ -46,6 +47,10 @@ type (
 		S3Bucket        string `json:"s3_bucket,omitempty"`
 		S3AccessKeyfile string `json:"s3_access_keyfile,omitempty"`
 		S3SecretKeyfile string `json:"s3_secret_keyfile,omitempty"`
+
+		// Export fields specific to Globus backend
+		GlobusCollectionID   string `json:"glousCollectionID,omitempty"`
+		GlobusCollectionName string `json:"globusCollectionName,omitempty"`
 
 		// Capabilities for the export
 		Capabilities     server_structs.Capabilities `json:"capabilities"`
@@ -64,10 +69,11 @@ var (
 )
 
 const (
-	OriginStoragePosix OriginStorageType = "posix"
-	OriginStorageS3    OriginStorageType = "s3"
-	OriginStorageHTTPS OriginStorageType = "https"
-	OriginStorageXRoot OriginStorageType = "xroot" // Not meant to be extensible, but facilitates legacy OSDF --> Pelican transition
+	OriginStoragePosix  OriginStorageType = "posix"
+	OriginStorageS3     OriginStorageType = "s3"
+	OriginStorageHTTPS  OriginStorageType = "https"
+	OriginStorageGlobus OriginStorageType = "globus"
+	OriginStorageXRoot  OriginStorageType = "xroot" // Not meant to be extensible, but facilitates legacy OSDF --> Pelican transition
 )
 
 // Convert a string to an OriginStorageType
@@ -81,8 +87,10 @@ func ParseOriginStorageType(storageType string) (ost OriginStorageType, err erro
 		ost = OriginStoragePosix
 	case string(OriginStorageXRoot):
 		ost = OriginStorageXRoot
+	case string(OriginStorageGlobus):
+		ost = OriginStorageGlobus
 	default:
-		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, s3, https, and xroot)", storageType)
+		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, s3, https, globus, and xroot)", storageType)
 	}
 	return
 }
@@ -329,7 +337,7 @@ func GetOriginExports() ([]OriginExport, error) {
 
 		// Properly configured Origin.Exports block will unmarshal correctly, so don't loop over anything
 		if param.Origin_Exports.IsSet() {
-			log.Infoln("Configuring multi-exports from origin Exports block in config file")
+			log.Infoln("Configuring multi-exports from Origin.Exports block in config file")
 			var tmpExports []OriginExport
 			if err := viper.UnmarshalKey("Origin.Exports", &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
 				return nil, err
@@ -434,7 +442,7 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 		}
 
 		if param.Origin_Exports.IsSet() {
-			log.Infoln("Configuring multiple S3 exports from origin Exports block in config file")
+			log.Infoln("Configuring multiple S3 exports from Origin.Exports block in config file")
 			var tmpExports []OriginExport
 			if err := viper.UnmarshalKey("Origin.Exports", &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
 				return nil, errors.Wrap(err, "unable to parse the Origin.Exports configuration")
@@ -488,6 +496,64 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 			}
 			viper.Set("Origin.EnableReads", capabilities.Reads)
 		}
+	case OriginStorageGlobus:
+		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
+			return nil, errors.New("Globus backend does not support configuring via Origin.ExportVolumes or -v flag. Use Origin.Exports or single export config instead.")
+		}
+
+		if param.Origin_Exports.IsSet() {
+			log.Infoln("Configuring multiple Globus exports from Origin.Exports block in config file")
+			var tmpExports []OriginExport
+			if err := viper.UnmarshalKey("Origin.Exports", &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
+				return nil, errors.Wrap(err, "unable to parse the Origin.Exports configuration")
+			}
+			if len(tmpExports) == 0 {
+				err := errors.New("Origin.Exports is defined, but no exports were found")
+				return nil, err
+			} else if len(tmpExports) == 1 {
+				reads := tmpExports[0].Capabilities.Reads || tmpExports[0].Capabilities.PublicReads
+				viper.Set("Origin.FederationPrefix", tmpExports[0].FederationPrefix)
+				viper.Set("Origin.StoragePrefix", "/") // Globus backend does not support StoragePrefix or partial export
+				viper.Set(param.Origin_GlobusCollectionID.GetName(), tmpExports[0].GlobusCollectionID)
+				viper.Set(param.Origin_GlobusCollectionName.GetName(), tmpExports[0].GlobusCollectionName)
+				viper.Set("Origin.EnableReads", reads)
+				viper.Set("Origin.EnablePublicReads", tmpExports[0].Capabilities.PublicReads)
+				viper.Set("Origin.EnableWrites", tmpExports[0].Capabilities.Writes)
+				viper.Set("Origin.EnableListings", tmpExports[0].Capabilities.Listings)
+				viper.Set("Origin.EnableDirectReads", tmpExports[0].Capabilities.DirectReads)
+			}
+			// Multiple exports
+			// Validate each federation prefix in the exports
+			for _, export := range tmpExports {
+				if err := validateFederationPrefix(export.FederationPrefix); err != nil {
+					return nil, errors.Wrapf(err, "invalid federation prefix for export %s", export.FederationPrefix)
+				}
+				if export.GlobusCollectionID == "" {
+					return nil, errors.Wrapf(err, "invalid GlobusCollectionID %s for export %s: GlobusCollectionID is required", export.GlobusCollectionID, export.FederationPrefix)
+				}
+			}
+			originExports = tmpExports
+			return originExports, nil
+		} else { // we're using the simple Origin.FederationPrefix
+			log.Infoln("Configuring single-export Globus origin")
+
+			// Validate the federation prefix and bucket names
+			if err := validateFederationPrefix(param.Origin_FederationPrefix.GetString()); err != nil {
+				return nil, errors.Wrapf(err, "invalid federation prefix for export %s", param.Origin_FederationPrefix.GetString())
+			}
+			if param.Origin_GlobusCollectionID.GetString() == "" {
+				return nil, errors.Wrapf(err, "invalid GlobusCollectionID %s for export %s: GlobusCollectionID is required", param.Origin_GlobusCollectionID.GetString(), param.Origin_FederationPrefix.GetString())
+			}
+
+			originExport = OriginExport{
+				FederationPrefix:     param.Origin_FederationPrefix.GetString(),
+				StoragePrefix:        "/", // Globus backend does not support StoragePrefix or partial export
+				GlobusCollectionID:   param.Origin_GlobusCollectionID.GetString(),
+				GlobusCollectionName: param.Origin_GlobusCollectionName.GetString(),
+				Capabilities:         capabilities,
+			}
+			viper.Set("Origin.EnableReads", capabilities.Reads)
+		}
 	case OriginStorageXRoot:
 		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
 			log.Infoln("Configuring exports from export volumes passed via command line or via yaml")
@@ -537,7 +603,7 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 		}
 
 		if param.Origin_Exports.IsSet() {
-			log.Infoln("Configuring multi-exports from origin Exports block in config file")
+			log.Infoln("Configuring multi-exports from Origin.Exports block in config file")
 			var tmpExports []OriginExport
 			if err := viper.UnmarshalKey("Origin.Exports", &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
 				return nil, err
