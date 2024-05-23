@@ -2490,10 +2490,6 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 // is made without.
 func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, directorUrl, token string, jsn bool) (info fileInfo, err error) {
 	statHosts := make([]url.URL, 0, 3)
-	type statResults struct {
-		info fileInfo
-		err  error
-	}
 	var dirListNotSupported *dirListingNotSupportedError
 	collectionsUrl, err := getCollectionsUrl(ctx, dest, namespace, directorUrl)
 	// If we have a dirListingNotSupported error, we can attempt to stat the caches instead
@@ -2501,31 +2497,31 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 		return
 	}
 	if collectionsUrl != nil {
-		var endpoint *url.URL
-		endpoint = collectionsUrl
+		endpoint := collectionsUrl
 		statHosts = append(statHosts, *endpoint)
 	} else if len(namespace.SortedDirectorCaches) > 0 {
 		for idx, cache := range namespace.SortedDirectorCaches {
 			if idx > 2 {
 				break
 			}
-			var endpoint *url.URL
-			endpoint, err = url.Parse(cache.EndpointUrl)
+			endpoint, err := url.Parse(cache.EndpointUrl)
 			if err != nil {
-				return
+				return fileInfo{}, err
 			}
 			endpoint.Path = ""
 			statHosts = append(statHosts, *endpoint)
 		}
 	} else if namespace.WriteBackHost != "" {
-		var endpoint *url.URL
-		endpoint, err = url.Parse(namespace.WriteBackHost)
+		endpoint, err := url.Parse(namespace.WriteBackHost)
 		if err != nil {
-			return
+			return fileInfo{}, err
 		}
 		statHosts = append(statHosts, *endpoint)
 	}
-
+	type statResults struct {
+		info fileInfo
+		err  error
+	}
 	resultsChan := make(chan statResults)
 	transport := config.GetTransport()
 	auth := &bearerAuth{token: token}
@@ -2569,6 +2565,7 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 					return
 				}
 
+				// If we have a proxy error, we can try again without the proxy
 				if urle, ok := err.(*url.Error); canDisableProxy && !disableProxy && ok && urle.Unwrap() != nil {
 					if ope, ok := urle.Unwrap().(*net.OpError); ok && ope.Op == "proxyconnect" {
 						log.Warnln("Failed to connect to proxy; will retry without:", ope)

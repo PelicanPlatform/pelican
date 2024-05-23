@@ -72,18 +72,18 @@ func statMain(cmd *cobra.Command, args []string) {
 
 	log.Debugln("Object:", object)
 
-	_, result := client.DoStat(ctx, object, client.WithTokenLocation(tokenLocation), client.WithJson(jsn))
+	_, err = client.DoStat(ctx, object, client.WithTokenLocation(tokenLocation), client.WithJson(jsn))
 
 	// Exit with failure
-	if result != nil {
+	if err != nil {
 		// Print the list of errors
-		errMsg := result.Error()
+		errMsg := err.Error()
 		var te *client.TransferErrors
-		if errors.As(result, &te) {
+		if errors.As(err, &te) {
 			errMsg = te.UserError()
 		}
 		log.Errorln("Failure getting " + object + ": " + errMsg)
-		if client.ShouldRetry(result) {
+		if client.ShouldRetry(err) {
 			log.Errorln("Errors are retryable")
 			os.Exit(11)
 		}
