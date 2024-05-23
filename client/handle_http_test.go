@@ -936,6 +936,8 @@ func TestNewTransferEngine(t *testing.T) {
 	})
 }
 
+// Test the functionality of getting the collections URL from the director or from the namespace ad.
+// Tests different responses from the director with and without 'dirlisthost' specified in the namespace.
 func TestGetCollectionsUrl(t *testing.T) {
 	viper.Reset()
 	defer viper.Reset()

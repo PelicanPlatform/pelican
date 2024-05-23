@@ -552,7 +552,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		}
 	}
 
-	// If a user specifies dirOnly and fileOnly, this means basic functionality (list both files and directories) so just remove the flags
+	// If a user specifies dirOnly and objectOnly, this means basic functionality (list both objects and directories) so just remove the flags
 	if dironly && objectonly {
 		dironly = false
 		objectonly = false
