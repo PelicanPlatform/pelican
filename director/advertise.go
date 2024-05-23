@@ -218,7 +218,7 @@ func AdvertiseOSDF(ctx context.Context) error {
 		}
 		nsAd := server_structs.NamespaceAdV2{
 			Path:         ns.Path,
-			PublicRead:   !ns.UseTokenOnRead,
+			PublicRead:   caps.PublicReads,
 			Caps:         caps,
 			Generation:   []server_structs.TokenGen{tGen},
 			Issuer:       tokenIssuers,

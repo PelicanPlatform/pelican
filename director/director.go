@@ -490,7 +490,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		} else {
 			linkHeader += ", "
 		}
-		redirectURL := getRedirectURL(reqPath, ad, !namespaceAd.PublicRead)
+		redirectURL := getRedirectURL(reqPath, ad, !namespaceAd.Caps.PublicReads)
 		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
 	}
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
@@ -507,7 +507,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		}
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
-		namespaceAd.Path, !namespaceAd.PublicRead, colUrl)}
+		namespaceAd.Path, !namespaceAd.Caps.PublicReads, colUrl)}
 
 	var redirectURL url.URL
 

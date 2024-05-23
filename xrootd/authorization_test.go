@@ -678,7 +678,6 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 
 	nsAds := []server_structs.NamespaceAdV2{
 		{
-			PublicRead: false,
 			Caps:       PrivateCaps,
 			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl:       issuer1URL,
@@ -686,7 +685,6 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 				RestrictedPaths: []string{"/p1/nope", "p1/still_nope"}}},
 		},
 		{
-			PublicRead: false,
 			Caps:       PrivateCaps,
 			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl: issuer2URL,
@@ -695,11 +693,9 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 		},
 		{
 			Path:       "/p3",
-			PublicRead: true,
 			Caps:       PublicCaps,
 		},
 		{
-			PublicRead: false,
 			Caps:       PrivateCaps,
 			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl: issuer1URL,
@@ -711,12 +707,10 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 		},
 		{
 			Path:       "/p4/depth",
-			PublicRead: true,
 			Caps:       PublicCaps,
 		},
 		{
 			Path:       "/p2_noauth",
-			PublicRead: true,
 			Caps:       PublicCaps,
 		},
 	}

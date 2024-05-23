@@ -170,7 +170,7 @@ func TestAdvertiseOSDF(t *testing.T) {
 
 	nsAd, oAds, cAds = getAdsForPath("/my/server/2/path/to/file")
 	assert.Equal(t, "/my/server/2", nsAd.Path)
-	assert.True(t, nsAd.PublicRead)
+	assert.True(t, nsAd.Caps.PublicReads)
 	assert.Equal(t, "https://origin2-auth-endpoint.com", oAds[0].AuthURL.String())
 	assert.Equal(t, "http://cache-endpoint.com", cAds[0].URL.String())
 }
