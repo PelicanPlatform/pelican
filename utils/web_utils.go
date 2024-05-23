@@ -115,9 +115,6 @@ func GetTopologyJSON(includeDowned bool) (*TopologyNamespacesJSON, error) {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
 		return nil, errors.New("Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
 	}
-	if includeDowned {
-		topoNamespaceUrl += "?include_downed=1"
-	}
 
 	req, err := http.NewRequest(http.MethodGet, topoNamespaceUrl, nil)
 	if err != nil {
@@ -127,22 +124,11 @@ func GetTopologyJSON(includeDowned bool) (*TopologyNamespacesJSON, error) {
 
 	req.Header.Set("Accept", "application/json")
 
-	var prodval, itbval string
-	if param.Federation_TopologyITB.GetBool() {
-		itbval = "1"
-	} else {
-		itbval = "0"
-	}
-
-	if param.Federation_TopologyProduction.GetBool() {
-		prodval = "1"
-	} else {
-		prodval = "0"
-	}
 	q := req.URL.Query()
-	q.Add("production", prodval)
-	q.Add("itb", itbval)
-	//req.URL.RawQuery = q.Encode()
+	if includeDowned {
+		q.Add("include_downed", "1")
+	}
+	req.URL.RawQuery = q.Encode()
 
 	// Use the transport to include timeouts
 	client := http.Client{Transport: config.GetTransport()}

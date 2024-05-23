@@ -21,10 +21,8 @@ Xrootd:
 Federation:
   DiscoveryUrl: osg-htc.org
   TopologyURL: https://topology.opensciencegrid.org
-  TopologyNamespaceURL: https://topology.opensciencegrid.org/osdf/namespaces
+  TopologyNamespaceURL: https://topology.opensciencegrid.org/osdf/namespaces?production=1
   TopologyReloadInterval: 4.5m
-  TopologyITB: false
-  TopologyProduction: true
 Registry:
   RequireCacheApproval: true
   RequireOriginApproval: true
