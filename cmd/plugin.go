@@ -487,7 +487,6 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				return
 			}
 			log.Debugln("Got result from transfer client")
-			startTime := time.Now().Unix()
 			resultAd := classads.NewClassAd()
 			// Set our DeveloperData:
 			developerData := make(map[string]interface{})
@@ -507,7 +506,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 
 			resultAd.Set("DeveloperData", developerData)
 
-			resultAd.Set("TransferStartTime", startTime)
+			resultAd.Set("TransferStartTime", result.TransferStartTime.Unix())
 			resultAd.Set("TransferEndTime", time.Now().Unix())
 			hostname, _ := os.Hostname()
 			resultAd.Set("TransferLocalMachineName", hostname)

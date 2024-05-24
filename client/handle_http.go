@@ -141,12 +141,13 @@ type (
 	// Represents the results of a single object transfer,
 	// potentially across multiple attempts / retries.
 	TransferResults struct {
-		jobId            uuid.UUID // The job ID this result corresponds to
-		job              *TransferJob
-		Error            error
-		TransferredBytes int64
-		Scheme           string
-		Attempts         []TransferResult
+		jobId             uuid.UUID // The job ID this result corresponds to
+		job               *TransferJob
+		Error             error
+		TransferredBytes  int64
+		TransferStartTime time.Time
+		Scheme            string
+		Attempts          []TransferResult
 	}
 
 	TransferResult struct {
@@ -1641,6 +1642,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	transferResults = newTransferResults(transfer.job)
 	xferErrors := NewTransferErrors()
 	success := false
+	var transferStartTime time.Time
 	for idx, transferEndpoint := range attempts { // For each transfer attempt (usually 3), try to download via HTTP
 		var attempt TransferResult
 		attempt.Number = idx // Start with 0
@@ -1650,7 +1652,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		transferEndpointUrl := *transferEndpoint.Url
 		transferEndpointUrl.Path = transfer.remoteURL.Path
 		transferEndpoint.Url = &transferEndpointUrl
-		transferStartTime := time.Now()
+		transferStartTime = time.Now()
 		attemptDownloaded, timeToFirstByte, serverVersion, err := downloadHTTP(
 			transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, transfer.token, transfer.project,
 		)
@@ -1698,6 +1700,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			break
 		}
 	}
+	transferResults.TransferStartTime = transferStartTime
 	transferResults.TransferredBytes = downloaded
 	if !success {
 		transferResults.Error = xferErrors
