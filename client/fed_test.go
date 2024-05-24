@@ -140,6 +140,38 @@ func TestGetAndPutAuth(t *testing.T) {
 		}
 	})
 
+	// We ran into a bug with the token option not working how it should. This test ensures that transfer option works how it should
+	t.Run("testPelicanObjectPutAndGetWithWithTokenOption", func(t *testing.T) {
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
+		assert.NoError(t, err)
+
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			tempPath := tempFile.Name()
+			fileName := filepath.Base(tempPath)
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+				export.FederationPrefix, "osdf_osdf", fileName)
+
+			// Upload the file with PUT
+			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithToken(string(token)))
+			assert.NoError(t, err)
+			if err == nil {
+				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
+			}
+
+			// Download that same file with GET
+			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithToken(string(token)))
+			assert.NoError(t, err)
+			if err == nil {
+				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			}
+		}
+	})
+
 	// This tests object get/put with a pelican:// url
 	t.Run("testOsdfObjectPutAndGetWithPelicanUrl", func(t *testing.T) {
 		oldPref, err := config.SetPreferredPrefix(config.OsdfPrefix)
