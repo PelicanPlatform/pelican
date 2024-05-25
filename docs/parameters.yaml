@@ -932,6 +932,14 @@ type: filename
 default: none
 components: ["origin"]
 ---
+name: Origin.GlobusTokenLocation
+description: |+
+  A filepath to the folder containing access tokens for acccess Globus data.
+type: filename
+root_default: /etc/pelican/globus/tokens
+default: $ConfigBase/pelican/globus/tokens
+components: ["origin"]
+---
 ############################
 #   Local cache configs    #
 ############################

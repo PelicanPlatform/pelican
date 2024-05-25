@@ -184,6 +184,7 @@ var (
 	Origin_GlobusClientSecretFile = StringParam{"Origin.GlobusClientSecretFile"}
 	Origin_GlobusCollectionID = StringParam{"Origin.GlobusCollectionID"}
 	Origin_GlobusCollectionName = StringParam{"Origin.GlobusCollectionName"}
+	Origin_GlobusTokenLocation = StringParam{"Origin.GlobusTokenLocation"}
 	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
 	Origin_Mode = StringParam{"Origin.Mode"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}

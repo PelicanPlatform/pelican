@@ -1115,6 +1115,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/data")
 		viper.SetDefault("Shoveler.QueueDirectory", "/var/spool/pelican/shoveler/queue")
 		viper.SetDefault("Shoveler.AMQPTokenLocation", "/etc/pelican/shoveler-token")
+		viper.SetDefault(param.Origin_GlobusTokenLocation.GetName(), "/etc/pelican/globus/tokens")
 	} else {
 		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
@@ -1123,6 +1124,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Monitoring.DataLocation", filepath.Join(configDir, "monitoring/data"))
 		viper.SetDefault("Shoveler.QueueDirectory", filepath.Join(configDir, "shoveler/queue"))
 		viper.SetDefault("Shoveler.AMQPTokenLocation", filepath.Join(configDir, "shoveler-token"))
+		viper.SetDefault(param.Origin_GlobusTokenLocation.GetName(), filepath.Join(configDir, "globus/tokens"))
 
 		var runtimeDir string
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
