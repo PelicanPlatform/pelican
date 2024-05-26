@@ -49,7 +49,7 @@ type (
 		S3SecretKeyfile string `json:"s3_secret_keyfile,omitempty"`
 
 		// Export fields specific to Globus backend
-		GlobusCollectionID   string `json:"glousCollectionID,omitempty"`
+		GlobusCollectionID   string `json:"globusCollectionID,omitempty"`
 		GlobusCollectionName string `json:"globusCollectionName,omitempty"`
 
 		// Capabilities for the export
