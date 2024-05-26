@@ -48,7 +48,7 @@ type globusExport struct {
 	Status           globusExportStatus `json:"status"`
 	Description      string             `json:"description"` // status description
 	HttpsServer      string             `json:"httpsServer"` // server url to access files in the collection
-	Token            *oauth2.Token      `json:"token"`
+	Token            *oauth2.Token      `json:"-"`
 }
 
 // For frontend to show an array of Globus exports
@@ -160,23 +160,23 @@ func doGlobusTokenRefresh() error {
 			if exp.Status == globusInactive {
 				return nil
 			}
-			refreshed, err := refreshGlobusToken(cid, exp.Token)
+			newTok, err := refreshGlobusToken(cid, exp.Token)
 			if err != nil {
 				log.Errorf("Failed to refresh Globus token for collection %s with name %s. Will retry once: %v", cid, exp.DisplayName, err)
-				_, err := refreshGlobusToken(cid, exp.Token)
+				newTok, err = refreshGlobusToken(cid, exp.Token)
 				if err != nil {
 					log.Errorf("Failed to retry refreshing Globus token for collection %s with name %s: %v", cid, exp.DisplayName, err)
 					exp.Status = globusInactive
 					exp.Description = fmt.Sprintf("Failed to refresh token: %v", err)
 					return err
 				}
-				return err
+			}
+			if newTok == nil {
+				log.Debugf("Globus token for collection %s with name %s is still valid. Refresh skipped", cid, exp.DisplayName)
 			} else {
-				if !refreshed {
-					log.Debugf("Globus token for collection %s with name %s is still valid. Refresh skipped", cid, exp.DisplayName)
-				} else {
-					log.Debugf("Globus token for collection %s with name %s is refreshed", cid, exp.DisplayName)
-				}
+				// Update globusExport with the new token
+				expInt.Token = newTok
+				log.Debugf("Globus token for collection %s with name %s is refreshed", cid, exp.DisplayName)
 			}
 			return nil
 		}(cid, exp)
@@ -187,7 +187,7 @@ func doGlobusTokenRefresh() error {
 	return errors.Wrap(firstErr, "failed to refresh Globus tokens")
 }
 
-// Launch an errgroup goroutine to periodically refresh access tokens for activated Globus exports
+// Launch an errgroup goroutine to periodically (5min) refresh access tokens for activated Globus exports
 func LaunchGlobusTokenRefresh(ctx context.Context, egrp *errgroup.Group) {
 	log.Debug("Launching periodic update of Globus access token.")
 	egrp.Go(func() error {
@@ -196,7 +196,7 @@ func LaunchGlobusTokenRefresh(ctx context.Context, egrp *errgroup.Group) {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Debug("Periodic update of Globus access token is stopped.")
+				log.Info("Periodic update of Globus access token is stopped.")
 				return nil
 			case <-ticker.C:
 				if err := doGlobusTokenRefresh(); err != nil {

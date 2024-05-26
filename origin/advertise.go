@@ -142,7 +142,7 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 	if len(prefixes) == 0 {
 		if isGlobusBackend {
 			activateUrl := param.Server_ExternalWebUrl.GetString() + "/view/origin/globus"
-			return nil, fmt.Errorf("failed to create advertisement: no activated Globus collection. Go to %s activate your collection.", activateUrl)
+			return nil, fmt.Errorf("failed to create advertisement: no activated Globus collection. Go to %s to activate your collection.", activateUrl)
 		} else {
 			return nil, errors.New("failed to create advertisement: no valid export")
 		}

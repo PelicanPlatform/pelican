@@ -531,28 +531,29 @@ func handleGlobusAuth(ctx *gin.Context) {
 
 // Refresh a Globus OAuth2 token for collection access
 //
-// Returns if the token is still valid (expire time > 5min) and error if any
-func refreshGlobusToken(cid string, token *oauth2.Token) (bool, error) {
+// Returns nil if the token is still valid (expire time > 5min) or the refreshed token.
+// Returns error if any
+func refreshGlobusToken(cid string, token *oauth2.Token) (*oauth2.Token, error) {
 	if token == nil {
-		return false, fmt.Errorf("failed to update Globus token for collection %s: token is nil", cid)
+		return nil, fmt.Errorf("failed to update Globus token for collection %s: token is nil", cid)
 	}
 	// If token is not expired in the next 5min, return
 	if !token.Expiry.Before(time.Now().Add(5 * time.Minute)) {
-		return false, nil
+		return nil, nil
 	}
 	config, err := GetGlobusOAuthCfg()
 	if err != nil {
-		return false, fmt.Errorf("failed to get Globus client to update Globus token for collection %s:", cid)
+		return nil, fmt.Errorf("failed to get Globus client to update Globus token for collection %s:", cid)
 	}
 	ts := config.TokenSource(context.Background(), token)
 	newTok, err := ts.Token()
 	if err != nil {
-		return false, fmt.Errorf("failed to update Globus token for collection %s:", cid)
+		return nil, fmt.Errorf("failed to update Globus token for collection %s:", cid)
 	}
 	// Update access token location with the new token
 	tokBase := param.Origin_GlobusTokenLocation.GetString()
 	if filepath.Clean(tokBase) == "" {
-		return false, fmt.Errorf("failed to update Globus token for collection %s: Origin.GlobusTokenLocation is not a valid path: %s", cid, tokBase)
+		return nil, fmt.Errorf("failed to update Globus token for collection %s: Origin.GlobusTokenLocation is not a valid path: %s", cid, tokBase)
 	}
 	tokFile := filepath.Join(tokBase, cid+globusTokenFileExt)
 	err = os.Remove(tokFile)
@@ -561,7 +562,7 @@ func refreshGlobusToken(cid string, token *oauth2.Token) (bool, error) {
 	}
 	err = os.WriteFile(tokFile, []byte(newTok.AccessToken+"\n"), 0644)
 	if err != nil {
-		return false, errors.Wrapf(err, "failed to update Globus token for collection %s: unable to write token file", cid)
+		return nil, errors.Wrapf(err, "failed to update Globus token for collection %s: unable to write token file", cid)
 	}
-	return true, nil
+	return newTok, nil
 }
