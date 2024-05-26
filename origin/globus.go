@@ -20,7 +20,6 @@ package origin
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -36,25 +35,28 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 type globusExportStatus string
 
-// Internally for globusExports map
+// Internal use only for globusExports map
 type globusExport struct {
-	DisplayName      string             `json:"displayName"`
-	FederationPrefix string             `json:"federationPrefix"`
-	Status           globusExportStatus `json:"status"`
-	Description      string             `json:"description"` // status description
-	HttpsServer      string             `json:"httpsServer"` // server url to access files in the collection
-	Token            *oauth2.Token      `json:"-"`
+	DisplayName      string
+	FederationPrefix string
+	Status           globusExportStatus
+	Description      string // status description
+	HttpsServer      string // server url to access files in the collection
+	Token            *oauth2.Token
 }
 
-// For frontend to show an array of Globus exports
+// Frontend
 type globusExportUI struct {
-	ID string `json:"id"`
-	globusExport
+	Status      globusExportStatus `json:"status"`
+	Description string             `json:"description,omitempty"`
+	HttpsServer string             `json:"httpsServer"`
+	server_utils.OriginExport
 }
 
 const (
@@ -68,23 +70,6 @@ var (
 	globusExports      map[string]*globusExport // Key is the collection UUID
 	globusExportsMutex = sync.RWMutex{}
 )
-
-func (g *globusExport) MarshalJSON() ([]byte, error) {
-	type Alias globusExport
-	expireStr := ""
-	if g.Token == nil || g.Token.Expiry.IsZero() {
-		expireStr = ""
-	} else {
-		expireStr = g.Token.Expiry.Format(time.RFC3339)
-	}
-	return json.Marshal(&struct {
-		ExpireAt string `json:"expireAt"`
-		*Alias
-	}{
-		ExpireAt: expireStr,
-		Alias:    (*Alias)(g),
-	})
-}
 
 func InitGlobusBackend(exps []server_utils.OriginExport) error {
 	if server_utils.OriginStorageType(param.Origin_StorageType.GetString()) != server_utils.OriginStorageGlobus {
@@ -208,15 +193,21 @@ func LaunchGlobusTokenRefresh(ctx context.Context, egrp *errgroup.Group) {
 }
 
 // Parse the globusExports map into an array of globusExportUI for frontend RESTful API
-func getGlobusExportsList() []globusExportUI {
+func getGlobusExportsList(exps []server_utils.OriginExport) ([]globusExportUI, error) {
 	globusExportsMutex.RLock()
 	defer globusExportsMutex.RUnlock()
 	exportList := []globusExportUI{}
-	for key, val := range globusExports {
-		exportList = append(exportList, globusExportUI{
-			ID:           key,
-			globusExport: *val,
-		})
+	for _, exp := range exps {
+		if gexp, ok := globusExports[exp.GlobusCollectionID]; !ok {
+			return nil, fmt.Errorf("Globus collection %s is not found in Pelican", exp.GlobusCollectionID)
+		} else {
+			exportList = append(exportList, globusExportUI{
+				OriginExport: exp,
+				Status:       gexp.Status,
+				Description:  gexp.Description,
+				HttpsServer:  gexp.HttpsServer,
+			})
+		}
 	}
 
 	// Sort the export by status then federation prefix
@@ -228,11 +219,31 @@ func getGlobusExportsList() []globusExportUI {
 		}
 	})
 
-	return exportList
+	return exportList, nil
 }
 
 // Handle listing all Globus exports
 func listGlobusExports(ctx *gin.Context) {
-	exportList := getGlobusExportsList()
+	exps, err := server_utils.GetOriginExports()
+	if err != nil {
+		log.Errorf("Failed to get origin exports: %v", err)
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to get origin exports: %v", err),
+			})
+		return
+	}
+	exportList, err := getGlobusExportsList(exps)
+	if err != nil {
+		log.Errorf("Failed to get Globus exports: %v", err)
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to get Globus exports: %v", err),
+			})
+		return
+	}
+
 	ctx.JSON(http.StatusOK, exportList)
 }
