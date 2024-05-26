@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
@@ -62,7 +63,9 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 
 	// Set up the APIs for the origin UI
-	origin.RegisterOriginWebAPI(engine)
+	if err = origin.RegisterOriginWebAPI(engine); err != nil {
+		return nil, err
+	}
 
 	origin.ConfigOriginTTLCache(ctx, egrp)
 
@@ -130,6 +133,13 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
 	originExports, err := server_utils.GetOriginExports()
 	if err != nil {
 		return err
+	}
+
+	if param.Origin_StorageType.GetString() == string(server_utils.OriginStorageGlobus) {
+		if err := origin.InitGlobusBackend(originExports); err != nil {
+			return errors.Wrap(err, "failed to initialize Globus backend")
+		}
+		origin.LaunchGlobusTokenRefresh(ctx, egrp)
 	}
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")

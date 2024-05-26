@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -37,7 +38,7 @@ import (
 
 type (
 	exportsRes struct {
-		Type string `json:"type"` // "posix" | "s3" | "https"
+		Type string `json:"type"` // "posix" | "s3" | "https" | "globus" | "xroot"
 
 		// For S3 backend
 		S3Region     string `json:"s3Region,omitempty"`
@@ -126,9 +127,35 @@ func handleExports(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, res)
 }
 
-func RegisterOriginWebAPI(engine *gin.Engine) {
+func RegisterOriginWebAPI(engine *gin.Engine) error {
 	originWebAPI := engine.Group("/api/v1.0/origin_ui")
 	{
 		originWebAPI.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleExports)
 	}
+
+	// Globus backend specific. Config other origin routes above this line
+	if server_utils.OriginStorageType(param.Origin_StorageType.GetString()) !=
+		server_utils.OriginStorageGlobus {
+		return nil
+	}
+
+	_, err := GetGlobusOAuthCfg()
+	if err != nil {
+		return errors.Wrapf(err, "failed to initialize Globus OAuth client")
+	}
+
+	seHandler, err := web_ui.GetSessionHandler()
+	if err != nil {
+		return err
+	}
+
+	originGlobusAPI := originWebAPI.Group("/globus")
+	{
+		originGlobusAPI.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, listGlobusExports)
+
+		globusAuthAPI := originGlobusAPI.Group("/auth", seHandler)
+		globusAuthAPI.GET("/login/:id", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleGlobusAuth)
+		globusAuthAPI.GET("/callback", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleGlobusCallback)
+	}
+	return nil
 }
