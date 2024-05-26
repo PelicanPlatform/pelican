@@ -19,10 +19,15 @@
 package oauth2
 
 import (
+	"fmt"
+	"net"
 	"net/url"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
+	upstream_oauth "golang.org/x/oauth2"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // ServerOIDCClient loads the OIDC client configuration for
@@ -129,6 +134,53 @@ func ServerOIDCClient() (result Config, provider config.OIDCProvider, err error)
 	// Add extra scope only for CILogon user info endpoint
 	if provider == config.CILogon {
 		result.Scopes = append(result.Scopes, "org.cilogon.userinfo")
+	}
+	return
+}
+
+// Generate a redirect URL for OAuth2 code authentication flow, given the callback path
+// It will use OIDC.ClientRedirectHostname as the hostname if set. This is useful for local
+// testing in a container environment.
+func GetRedirectURL(callback string) (redirURL string, err error) {
+	redirectUrlStr := param.Server_ExternalWebUrl.GetString()
+	redirectUrl, err := url.Parse(redirectUrlStr)
+	if err != nil {
+		err = errors.Wrap(err, "failed to parse Server.ExternalWebUrl")
+		return
+	}
+	redirectUrl.Path = callback
+	redirectHostname := param.OIDC_ClientRedirectHostname.GetString()
+	if redirectHostname != "" {
+		_, _, err := net.SplitHostPort(redirectHostname)
+		if err != nil {
+			// Port not present
+			redirectUrl.Host = fmt.Sprint(redirectHostname, ":", param.Server_WebPort.GetInt())
+		} else {
+			// Port present
+			redirectUrl.Host = redirectHostname
+		}
+	}
+	redirURL = redirectUrl.String()
+	return
+}
+
+// Parse pelican/oAuth2 config to golang/x/oauth2 Config
+func ParsePelicanOAuth(pCfg Config, callback string) (oCfg upstream_oauth.Config, err error) {
+	redUrl, err := GetRedirectURL(callback)
+	if err != nil {
+		return
+	}
+
+	oCfg = upstream_oauth.Config{
+		RedirectURL:  redUrl,
+		ClientID:     pCfg.ClientID,
+		ClientSecret: pCfg.ClientSecret,
+		Scopes:       pCfg.Scopes,
+		Endpoint: upstream_oauth.Endpoint{
+			AuthURL:       pCfg.Endpoint.AuthURL,
+			DeviceAuthURL: pCfg.Endpoint.DeviceAuthURL,
+			TokenURL:      pCfg.Endpoint.TokenURL,
+		},
 	}
 	return
 }
