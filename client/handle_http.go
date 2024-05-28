@@ -532,6 +532,11 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 		if config.GetPreferredPrefix() == config.OsdfPrefix {
 			log.Debugln("In OSDF mode with osdf:// url; populating metadata with OSDF defaults")
 			fedInfo, err := config.GetFederation(te.ctx)
+			var metadataTimeoutErr *config.MetadataErr
+			// If we timed out, we should just return the timeout error (and the user can typically just try again)
+			if errors.As(err, &metadataTimeoutErr) {
+				return pelicanUrl{}, err
+			}
 			if fedInfo.DirectorEndpoint == "" {
 				if err != nil {
 					return pelicanUrl{}, errors.Wrap(err, "no OSDF metadata available")

@@ -177,7 +177,7 @@ var (
 
 	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 
-	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
+	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "timeout when discovering federation metadata from url"}
 
 	watermarkUnits = []byte{'k', 'm', 'g', 't'}
 	validPrefixes  = map[ConfigPrefix]bool{
@@ -488,7 +488,10 @@ func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			err = MetadataTimeoutErr.Wrap(err)
+			// Note: we replace the error with a MetadataTimeoutErr because the error we get from http is pretty redundant and contains
+			// no more useful information however, we will put it in trace logging so no info is completely lost from the message
+			log.Traceln(err)
+			err = NewMetadataError(nil, "timeout when discovering federation metadata from url "+federationUrl.String()+", exceeded "+httpClient.Timeout.String())
 			return
 		} else {
 			err = NewMetadataError(err, "Error occurred when querying for metadata")
@@ -584,6 +587,9 @@ func discoverFederationImpl(ctx context.Context) (fedInfo FederationDiscovery, e
 	} else {
 		metadata, err = DiscoverUrlFederation(ctx, federationStr)
 		if err != nil {
+			if errors.As(err, &MetadataTimeoutErr) {
+				return
+			}
 			err = errors.Wrapf(err, "invalid federation value (%s)", federationStr)
 			return
 		}
