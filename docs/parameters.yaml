@@ -936,8 +936,8 @@ name: Origin.GlobusTokenLocation
 description: |+
   A filepath to the folder containing access tokens for acccess Globus data.
 type: filename
-root_default: /etc/pelican/globus/tokens
-default: $ConfigBase/pelican/globus/tokens
+root_default: /run/pelican/xrootd/origin/globus/tokens
+default: $XDG_RUNTIME_DIR/pelican/xrootd/origin/globus/tokens
 components: ["origin"]
 ---
 ############################

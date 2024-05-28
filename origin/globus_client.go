@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -304,6 +305,17 @@ func handleGlobusCallback(ctx *gin.Context) {
 			})
 		return
 	}
+	// Make sure there's no path traversal here
+	cid = path.Clean(cid)
+	if path.Base(cid) != cid {
+		// Someone is trying to hack us!
+		ctx.JSON(http.StatusBadRequest,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprint("Path traversal is forbidden for collection ID: ", cid),
+			})
+		return
+	}
 
 	client, err := GetGlobusOAuthCfg()
 	if err != nil {
@@ -428,14 +440,24 @@ func handleGlobusCallback(ctx *gin.Context) {
 		if filepath.Clean(tokBase) == "" {
 			return fmt.Errorf("failed to update Globus token: Origin.GlobusTokenLocation is not a valid path: %s", tokBase)
 		}
-		tokFile := filepath.Join(tokBase, cid+globusTokenFileExt)
-		err := os.Remove(tokFile)
+		tokFileName := filepath.Join(tokBase, cid+globusTokenFileExt)
+		tmpTokFile, err := os.CreateTemp(tokBase, cid+globusTokenFileExt)
 		if err != nil {
-			log.Debugf("Globus token file %s does not exist, creating a new one.", cid+globusTokenFileExt)
+			return errors.Wrap(err, "failed to update Globus token: unable to create a temporary Globus token file")
 		}
-		err = os.WriteFile(tokFile, []byte(collectionToken.AccessToken+"\n"), 0644)
+		defer os.Remove(tmpTokFile.Name())
+
+		_, err = tmpTokFile.Write([]byte(collectionToken.AccessToken + "\n"))
 		if err != nil {
-			return errors.Wrap(err, "failed to update Globus token: unable to write token file")
+			return errors.Wrap(err, "failed to update Globus token: unable to write token to the tmp file")
+		}
+
+		if err := tmpTokFile.Close(); err != nil {
+			return errors.Wrap(err, "failed to update Globus token: unable to close the tmp file")
+		}
+
+		if err := os.Rename(tmpTokFile.Name(), tokFileName); err != nil {
+			return errors.Wrap(err, "failed to update Globus token: unable to rename tmp file to the token file")
 		}
 
 		if _, ok := globusExports[cid]; ok {
