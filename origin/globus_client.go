@@ -446,6 +446,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 		if err != nil {
 			return errors.Wrap(err, "failed to update Globus token: unable to create a temporary Globus token file")
 		}
+		defer tmpTokFile.Close()
 		defer os.Remove(tmpTokFile.Name())
 
 		_, err = tmpTokFile.Write([]byte(collectionToken.AccessToken + "\n"))
@@ -453,8 +454,8 @@ func handleGlobusCallback(ctx *gin.Context) {
 			return errors.Wrap(err, "failed to update Globus token: unable to write token to the tmp file")
 		}
 
-		if err := tmpTokFile.Close(); err != nil {
-			return errors.Wrap(err, "failed to update Globus token: unable to close the tmp file")
+		if err = tmpTokFile.Sync(); err != nil {
+			return errors.Wrap(err, "failed to update Globus token: unable to flush tmp file to disk")
 		}
 
 		if err := os.Rename(tmpTokFile.Name(), tokFileName); err != nil {
