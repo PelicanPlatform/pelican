@@ -435,31 +435,8 @@ func handleGlobusCallback(ctx *gin.Context) {
 		globusExportsMutex.Lock()
 		defer globusExportsMutex.Unlock()
 
-		// Update access token location with the new token
-		globusFdr := param.Origin_GlobusConfigLocation.GetString()
-		tokBase := filepath.Join(globusFdr, "tokens")
-		if filepath.Clean(tokBase) == "" {
-			return fmt.Errorf("failed to update Globus token: Origin.GlobusTokenLocation is not a valid path: %s", tokBase)
-		}
-		tokFileName := filepath.Join(tokBase, cid+globusTokenFileExt)
-		tmpTokFile, err := os.CreateTemp(tokBase, cid+globusTokenFileExt)
-		if err != nil {
-			return errors.Wrap(err, "failed to update Globus token: unable to create a temporary Globus token file")
-		}
-		defer tmpTokFile.Close()
-		defer os.Remove(tmpTokFile.Name())
-
-		_, err = tmpTokFile.Write([]byte(collectionToken.AccessToken + "\n"))
-		if err != nil {
-			return errors.Wrap(err, "failed to update Globus token: unable to write token to the tmp file")
-		}
-
-		if err = tmpTokFile.Sync(); err != nil {
-			return errors.Wrap(err, "failed to update Globus token: unable to flush tmp file to disk")
-		}
-
-		if err := os.Rename(tmpTokFile.Name(), tokFileName); err != nil {
-			return errors.Wrap(err, "failed to update Globus token: unable to rename tmp file to the token file")
+		if err := persistAccessToken(cid, collectionToken); err != nil {
+			return err
 		}
 
 		if _, ok := globusExports[cid]; ok {
@@ -476,7 +453,26 @@ func handleGlobusCallback(ctx *gin.Context) {
 			return fmt.Errorf("Globus collection %s with name %s does not exist in Pelican", cid, transferJSON.DisplayName)
 		}
 
-		return nil
+		ok, err := collectionExistsByUUID(cid)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			gc := GlobusCollection{
+				UUID:         cid,
+				Name:         transferJSON.DisplayName,
+				ServerURL:    transferJSON.HttpsServer,
+				RefreshToken: collectionToken.RefreshToken,
+			}
+			return createCollection(&gc)
+		} else {
+			gc := GlobusCollection{
+				Name:         transferJSON.DisplayName,
+				ServerURL:    transferJSON.HttpsServer,
+				RefreshToken: collectionToken.RefreshToken,
+			}
+			return updateCollection(cid, &gc)
+		}
 	}()
 
 	if err != nil {
@@ -489,6 +485,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 		return
 	}
 
+	// TODO: instead of redirect, let's restart the server to use the updated config
 	redirectLocation := "/"
 	if nextURL != "" {
 		redirectLocation = nextURL
@@ -553,6 +550,35 @@ func handleGlobusAuth(ctx *gin.Context) {
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectUrl)
 }
 
+func persistAccessToken(collectionID string, token *oauth2.Token) error {
+	globusFdr := param.Origin_GlobusConfigLocation.GetString()
+	tokBase := filepath.Join(globusFdr, "tokens")
+	if filepath.Clean(tokBase) == "" {
+		return fmt.Errorf("failed to update Globus token: Origin.GlobusTokenLocation is not a valid path: %s", tokBase)
+	}
+	tokFileName := filepath.Join(tokBase, collectionID+globusTokenFileExt)
+	tmpTokFile, err := os.CreateTemp(tokBase, collectionID+globusTokenFileExt)
+	if err != nil {
+		return errors.Wrap(err, "failed to update Globus token: unable to create a temporary Globus token file")
+	}
+	defer tmpTokFile.Close()
+	defer os.Remove(tmpTokFile.Name())
+
+	_, err = tmpTokFile.Write([]byte(token.AccessToken + "\n"))
+	if err != nil {
+		return errors.Wrap(err, "failed to update Globus token: unable to write token to the tmp file")
+	}
+
+	if err = tmpTokFile.Sync(); err != nil {
+		return errors.Wrap(err, "failed to update Globus token: unable to flush tmp file to disk")
+	}
+
+	if err := os.Rename(tmpTokFile.Name(), tokFileName); err != nil {
+		return errors.Wrap(err, "failed to update Globus token: unable to rename tmp file to the token file")
+	}
+	return nil
+}
+
 // Refresh a Globus OAuth2 token for collection access
 //
 // Returns nil if the token is still valid (expire time > 5min) or the refreshed token.
@@ -575,19 +601,8 @@ func refreshGlobusToken(cid string, token *oauth2.Token) (*oauth2.Token, error) 
 		return nil, fmt.Errorf("failed to update Globus token for collection %s:", cid)
 	}
 	// Update access token location with the new token
-	globusFdr := param.Origin_GlobusConfigLocation.GetString()
-	tokBase := filepath.Join(globusFdr, "tokens")
-	if filepath.Clean(tokBase) == "" {
-		return nil, fmt.Errorf("failed to update Globus token for collection %s: Origin.GlobusTokenLocation is not a valid path: %s", cid, tokBase)
-	}
-	tokFile := filepath.Join(tokBase, cid+globusTokenFileExt)
-	err = os.Remove(tokFile)
-	if err != nil {
-		log.Debugf("Globus token file %s does not exist, creating a new one.", cid+globusTokenFileExt)
-	}
-	err = os.WriteFile(tokFile, []byte(newTok.AccessToken+"\n"), 0644)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to update Globus token for collection %s: unable to write token file", cid)
+	if err := persistAccessToken(cid, token); err != nil {
+		return nil, err
 	}
 	return newTok, nil
 }

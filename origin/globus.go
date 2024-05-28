@@ -86,35 +86,73 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 		return errors.Wrapf(err, "failed to create directory for Globus tokens: %s", tokFdr)
 	}
 
+	globusAuthCfg, err := GetGlobusOAuthCfg()
+	if err != nil {
+		return errors.Wrap(err, "failed to get Globus OAuth2 config")
+	}
+
 	// Set up Globus map
-	func() {
+	err = func() error {
 		globusExportsMutex.Lock()
 		defer globusExportsMutex.Unlock()
 		for _, esp := range exps {
-			globusExp := globusExport{
+			globusEsp := globusExport{
 				DisplayName:      esp.GlobusCollectionName,
 				FederationPrefix: esp.FederationPrefix,
 				Status:           globusInactive,
 				Description:      "Server start",
 			}
-			// If no DisplayName set in exports, use ID instead
-			if globusExp.DisplayName == "" {
-				globusExp.DisplayName = esp.GlobusCollectionID
+			// We check the origin db and see if we already have the refresh token in-place
+			// If so, use the token to initialize the collection
+			ok, err := collectionExistsByUUID(esp.GlobusCollectionID)
+			if err != nil {
+				return errors.Wrapf(err, "failed to check credential status for Globus collection %s with name %s", esp.GlobusCollectionID, esp.GlobusCollectionName)
 			}
-			// If a token already exists at server start, remove the token
-			tokLoc := filepath.Join(tokFdr, esp.GlobusCollectionID+globusTokenFileExt)
-			if _, err := os.Stat(tokLoc); err == nil { // token file exists
-				if err := os.Remove(tokLoc); err != nil {
-					log.Errorf("Failed to remove expired Globus access token from %s", tokLoc)
-				} else {
-					log.Debugf("Removed expired Globus access token at %s", tokLoc)
+			if !ok {
+				log.Infof("Globus collection %s with name %s is not activated. You need to activate it in the admin website before using this collection", esp.GlobusCollectionID, esp.GlobusCollectionName)
+				continue
+			}
+			// We found the collection in DB, try to get access token with the refresh token
+			col, err := getCollectionByUUID(esp.GlobusCollectionID)
+			if err != nil {
+				return errors.Wrapf(err, "failed to get credentials for Globus collection %s with name %s", esp.GlobusCollectionID, esp.GlobusCollectionName)
+			}
+
+			refToken := &oauth2.Token{
+				RefreshToken: col.RefreshToken,
+			}
+			tokenSource := globusAuthCfg.TokenSource(context.Background(), refToken)
+			collectionToken, err := tokenSource.Token()
+			// If we can't get the access token, we want to evict the entry from db and
+			// ask the suer to redo the authentication
+			if err != nil {
+				if err := deleteCollectionByUUID(col.UUID); err != nil {
+					return errors.Wrapf(err, "failed to delete expired credential record for Globus collection %s with name %s", esp.GlobusCollectionID, esp.GlobusCollectionName)
 				}
+				log.Infof("Access credentials for Globus collection %s with name %s is expired and removed.", esp.GlobusCollectionID, esp.GlobusCollectionName)
 			}
-			globusExports[esp.GlobusCollectionID] = &globusExp
+
+			// Save the new access token
+			if err := persistAccessToken(col.UUID, collectionToken); err != nil {
+				return err
+			}
+
+			// If no DisplayName set in exports, use the name from DB instead
+			// which should be the display_name of the collection from Globus
+			if globusEsp.DisplayName == "" {
+				log.Infof("Globus collection doesn't have GlobusCollectionName set, default to the Globus value: %s", col.Name)
+				globusEsp.DisplayName = col.Name
+			}
+
+			globusEsp.Status = globusActivated
+			globusEsp.Token = collectionToken
+			globusEsp.HttpsServer = col.ServerURL
+			globusExports[esp.GlobusCollectionID] = &globusEsp
 		}
+		return nil
 	}()
 
-	return nil
+	return err
 }
 
 // Return whether a Globus collection export is activated based on its federation prefix.

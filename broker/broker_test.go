@@ -87,7 +87,7 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	err := config.InitServer(ctx, config.BrokerType)
 	require.NoError(t, err)
 
-	err = registry.InitializeDB(ctx)
+	err = registry.InitializeDB()
 	require.NoError(t, err)
 
 	keyset, err := config.GetIssuerPublicJWKS()

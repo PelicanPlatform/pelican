@@ -24,7 +24,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -661,29 +660,10 @@ func GenerateSessionSecret() error {
 		}
 	}
 
-	// How we generate the secret:
-	// Concatenate the byte array pelican with the DER form of the service's private key,
-	// Take a hash, and use the hash's bytes as the secret.
-
-	// Use issuer private key as the source to generate the secret
-	issuerKeyFile := param.IssuerKey.GetString()
-	privateKey, err := LoadPrivateKey(issuerKeyFile, false)
+	secret, err := GetSecret()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to get the secret")
 	}
-
-	derPrivateKey, err := x509.MarshalPKCS8PrivateKey(privateKey)
-
-	if err != nil {
-		return err
-	}
-	byteArray := []byte("pelican")
-
-	concatenated := append(byteArray, derPrivateKey...)
-
-	hash := sha256.Sum256(concatenated)
-
-	secret := string(hash[:])
 
 	_, err = file.WriteString(secret)
 
