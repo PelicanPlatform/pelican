@@ -72,7 +72,7 @@ func TestRegistration(t *testing.T) {
 	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
-	err = registry.InitializeDB(ctx)
+	err = registry.InitializeDB()
 	require.NoError(t, err)
 	defer func() {
 		err := registry.ShutdownDB()

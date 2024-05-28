@@ -165,6 +165,7 @@ type Config struct {
 		UserInfoEndpoint string
 	}
 	Origin struct {
+		DbLocation string
 		EnableBroker bool
 		EnableCmsd bool
 		EnableDirListing bool
@@ -446,6 +447,7 @@ type configWithType struct {
 		UserInfoEndpoint struct { Type string; Value string }
 	}
 	Origin struct {
+		DbLocation struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }

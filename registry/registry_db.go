@@ -19,28 +19,22 @@
 package registry
 
 import (
-	"context"
-	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/glebarez/sqlite" // It doesn't require CGO
+	// It doesn't require CGO
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
-	"github.com/pressly/goose/v3"
 	log "github.com/sirupsen/logrus"
-	gormlog "github.com/thomas-tacquet/gormv2-logrus"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -83,14 +77,6 @@ func (st ServerType) String() string {
 
 func (Topology) TableName() string {
 	return "topology"
-}
-
-func createTopologyTable() error {
-	err := db.AutoMigrate(&Topology{})
-	if err != nil {
-		return fmt.Errorf("failed to migrate topology table: %v", err)
-	}
-	return nil
 }
 
 func GetTopoPrefixString(topoNss []Topology) (result string) {
@@ -488,68 +474,15 @@ func getTopologyNamespaces() ([]*Topology, error) {
 	return topology, nil
 }
 
-// Update database schema based on migration files under /migrations folder
-func MigrateDB(sqldb *sql.DB) error {
-	goose.SetBaseFS(embedMigrations)
-
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		return err
-	}
-
-	if err := goose.Up(sqldb, "migrations"); err != nil {
-		return err
-	}
-	return nil
-}
-
-func InitializeDB(ctx context.Context) error {
+func InitializeDB() error {
 	dbPath := param.Registry_DbLocation.GetString()
-	if dbPath == "" {
-		err := errors.New("Could not get path for the namespace registry database.")
-		log.Fatal(err)
+
+	tdb, err := server_utils.InitSQLiteDB(dbPath)
+	if err != nil {
 		return err
 	}
 
-	// Before attempting to create the database, the path
-	// must exist or sql.Open will panic.
-	err := os.MkdirAll(filepath.Dir(dbPath), 0755)
-	if err != nil {
-		return errors.Wrap(err, "Failed to create directory for namespace registry database")
-	}
-
-	if len(filepath.Ext(dbPath)) == 0 { // No fp extension, let's add .sqlite so it's obvious what the file is
-		dbPath += ".sqlite"
-	}
-
-	dbName := dbPath + "?_busy_timeout=5000&_journal_mode=WAL"
-
-	globalLogLevel := log.GetLevel()
-	var ormLevel logger.LogLevel
-	if globalLogLevel == log.DebugLevel || globalLogLevel == log.TraceLevel || globalLogLevel == log.InfoLevel {
-		ormLevel = logger.Info
-	} else if globalLogLevel == log.WarnLevel {
-		ormLevel = logger.Warn
-	} else if globalLogLevel == log.ErrorLevel {
-		ormLevel = logger.Error
-	} else {
-		ormLevel = logger.Info
-	}
-
-	gormLogger := gormlog.NewGormlog(
-		gormlog.WithLogrusEntry(log.WithField("component", "gorm")),
-		gormlog.WithGormOptions(gormlog.GormOptions{
-			LogLatency: true,
-			LogLevel:   ormLevel,
-		}),
-	)
-
-	log.Debugln("Opening connection to sqlite DB", dbName)
-
-	db, err = gorm.Open(sqlite.Open(dbName), &gorm.Config{Logger: gormLogger})
-
-	if err != nil {
-		return errors.Wrapf(err, "Failed to open the database with path: %s", dbPath)
-	}
+	db = tdb
 
 	sqldb, err := db.DB()
 
@@ -558,7 +491,7 @@ func InitializeDB(ctx context.Context) error {
 	}
 
 	// Run database migrations
-	if err := MigrateDB(sqldb); err != nil {
+	if err := server_utils.MigrateDB(sqldb, embedMigrations); err != nil {
 		return err
 	}
 

@@ -143,7 +143,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	registrySvr := registryMockup(ctx, t, "OSDFkeychaining")
 	topoSvr := topologyMockup(t, []string{"/topo/foo"})
 	viper.Set("Federation.TopologyNamespaceURL", topoSvr.URL)
-	err = createTopologyTable()
+	err = migrateTopologyTestTable()
 	require.NoError(t, err)
 	err = PopulateTopology()
 	require.NoError(t, err)

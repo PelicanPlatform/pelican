@@ -433,6 +433,14 @@ hidden: true
 ############################
 #   Origin-level Configs   #
 ############################
+name: Origin.DbLocation
+description: |+
+  A filepath to the intended location of the origin's database.
+type: filename
+root_default: /var/lib/pelican/origin.sqlite
+default: $ConfigBase/origin.sqlite
+components: ["origin"]
+---
 name: Origin.Url
 description: |+
   The origin's configured URL, as reported to XRootD. This is the file transfer endpoint for the origin.

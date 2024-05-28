@@ -20,6 +20,7 @@ package registry
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -41,13 +42,21 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
+func migrateTopologyTestTable() error {
+	err := db.AutoMigrate(&Topology{})
+	if err != nil {
+		return fmt.Errorf("failed to migrate topology table: %v", err)
+	}
+	return nil
+}
+
 func setupMockRegistryDB(t *testing.T) {
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	db = mockDB
 	require.NoError(t, err, "Error setting up mock namespace DB")
 	err = db.AutoMigrate(&server_structs.Namespace{})
 	require.NoError(t, err, "Failed to migrate DB for namespace table")
-	err = createTopologyTable()
+	err = migrateTopologyTestTable()
 	require.NoError(t, err, "Error creating topology table")
 }
 
@@ -781,10 +790,6 @@ func topologyMockup(t *testing.T, namespaces []string) *httptest.Server {
 }
 
 func TestRegistryTopology(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
 	viper.Reset()
 
 	topoNamespaces := []string{"/topo/foo", "/topo/bar"}
@@ -797,7 +802,7 @@ func TestRegistryTopology(t *testing.T) {
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 
-	err := InitializeDB(ctx)
+	err := InitializeDB()
 	require.NoError(t, err)
 	defer func() {
 		err := ShutdownDB()
@@ -809,7 +814,7 @@ func TestRegistryTopology(t *testing.T) {
 	assert.NoError(t, err)
 
 	//Test topology table population
-	err = createTopologyTable()
+	err = migrateTopologyTestTable()
 	require.NoError(t, err)
 	err = PopulateTopology()
 	require.NoError(t, err)

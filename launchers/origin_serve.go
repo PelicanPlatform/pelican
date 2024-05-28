@@ -57,6 +57,10 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, err
 	}
 
+	if err := origin.InitializeDB(); err != nil {
+		return nil, errors.Wrap(err, "failed to initialize origin sqlite database")
+	}
+
 	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
 	if err = origin.RegisterOriginAPI(engine, ctx, egrp); err != nil {
 		return nil, err

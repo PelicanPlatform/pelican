@@ -1108,6 +1108,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("LocalCache.RunLocation", filepath.Join("/run", "pelican", "localcache"))
 
 		viper.SetDefault("Origin.Multiuser", true)
+		viper.SetDefault(param.Origin_DbLocation.GetName(), "/var/lib/pelican/origin.sqlite")
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
 		// The lotman db will actually take this path and create the lot at /path/.lot/lotman_cpp.sqlite
@@ -1117,6 +1118,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Shoveler.AMQPTokenLocation", "/etc/pelican/shoveler-token")
 		viper.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin", "globus"))
 	} else {
+		viper.SetDefault(param.Origin_DbLocation.GetName(), filepath.Join(configDir, "origin.sqlite"))
 		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
 		// Lotdb will live at <configDir>/.lot/lotman_cpp.sqlite

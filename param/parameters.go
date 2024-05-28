@@ -178,6 +178,7 @@ var (
 	OIDC_Issuer = StringParam{"OIDC.Issuer"}
 	OIDC_TokenEndpoint = StringParam{"OIDC.TokenEndpoint"}
 	OIDC_UserInfoEndpoint = StringParam{"OIDC.UserInfoEndpoint"}
+	Origin_DbLocation = StringParam{"Origin.DbLocation"}
 	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
 	Origin_FederationPrefix = StringParam{"Origin.FederationPrefix"}
 	Origin_GlobusClientIDFile = StringParam{"Origin.GlobusClientIDFile"}
