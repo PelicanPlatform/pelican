@@ -1254,14 +1254,13 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 
 	if currentServers.IsEnabled(OriginType) {
 		ost := param.Origin_StorageType.GetString()
-		if ost != "post" && param.Origin_SelfTest.GetBool() {
-			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-			viper.Set("Origin.SelfTest", false)
-		}
 		switch ost {
 		case "posix":
 			viper.SetDefault("Origin.SelfTest", true)
 		case "https":
+			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			viper.Set("Origin.SelfTest", false)
+
 			httpSvcUrl := param.Origin_HttpServiceUrl.GetString()
 			if httpSvcUrl == "" {
 				return errors.New("Origin.HTTPServiceUrl may not be empty when the origin is configured with an https backend")
@@ -1271,6 +1270,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 				return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
 			}
 		case "globus":
+			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			viper.Set("Origin.SelfTest", false)
+
 			pvd, err := GetOIDCProdiver()
 			if err != nil || pvd != Globus {
 				log.Info("Server OIDC provider is not Globus. Use Origin.GlobusClientIDFile instead")
@@ -1296,6 +1298,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 				return errors.Wrap(err, "Origin.GlobusClientSecretFile is not a valid filepath")
 			}
 		case "xroot":
+			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			viper.Set("Origin.SelfTest", false)
+
 			xrootSvcUrl := param.Origin_XRootServiceUrl.GetString()
 			if xrootSvcUrl == "" {
 				return errors.New("Origin.XRootServiceUrl may not be empty when the origin is configured with an xroot backend")
@@ -1305,6 +1310,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 				return errors.Wrap(err, "unable to parse Origin.XrootServiceUrl as a URL")
 			}
 		case "s3":
+			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			viper.Set("Origin.SelfTest", false)
+
 			s3SvcUrl := param.Origin_S3ServiceUrl.GetString()
 			if s3SvcUrl == "" {
 				return errors.New("Origin.S3ServiceUrl may not be empty when the origin is configured with an s3 backend")
