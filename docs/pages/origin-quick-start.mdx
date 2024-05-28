@@ -1,0 +1,149 @@
+import ExportedImage from "next-image-export-optimizer";
+
+# Getting Started with a Pelican Origin
+
+Pelican users who want to share data within a Pelican federation do so via an *Origin*. Origins are a crucial component of Pelican's architecture for two reasons: they act as an adapter between various storage backends and Pelican federations, and they provide fine-grained access controls for that data. That is, they figure out how to take data from wherever it lives (such as a POSIX filesystem, S3 buckets, HTTPS servers, etc.) and transform it into a format that the federation can utilize while respecting your data access requirements.
+
+> **NOTE:** An important distinction between origins and data backends is that, generally speaking, origins do **NOT** store any data themselves; their primary function is to facilitate data accessibility.
+
+This document contains instructions on how to serve a Pelican origin on top of a variety of storage backend types.
+
+## Core Terminology
+If you haven’t already done so, please familiarize yourself with the core [Pelican terminology](link to pelican terminology)
+
+## Before Starting
+
+### Install Pelican
+
+If you haven't installed Pelican, follow the instructions to [install pelican](/install.mdx).
+
+### Open Firewall Port for Pelican Origin
+
+At their core, Pelican origins are web servers that listen to two TCP ports for file transfers and Web UI. By default, the Web UI and API interface for your origin will be at port `8444`, and the port for object transfers will be at `8443`. You may change these port numbers through the [configuration file](./parameters.mdx) with parameters [`Server.WebPort`](./parameters.mdx#Server-WebPort) and [`Origin.Port`](./parameters.mdx#Origin-Port), respectively.
+
+In order for Pelican origins to work properly, these ports need to be accessible by the federation, which in most cases means they need to be open to the internet. If your server host has a firewall policy in place, please open these two ports for both incoming the outgoing TCP requests.
+
+> **NOTE:** If it is not possible for you to expose any ports through the firewall (e.g. you're on a local network or behind a NAT), Pelican has a special feature called a _Connection Broker_ that allows you to serve origins without publicly-accessible ports and TLS credentials. However, this is an experimental feature and requires the Pelican federation you are joining to be compatible. If you are interested in learning more about the Connection Broker, please contact help@pelicanplatform.org for further instructions.
+
+### Prepare TLS Credentials
+
+Prepare TSL Credentials and save them into the following locations:
+
+- Certificate: `~/.config/pelican/certificates/tls.crt` for non-root users or `/etc/pelican/certificates/tls.crt` for root users.
+
+- TLSKey: `~/.config/pelican/certificates/tls.key` for non-root users or `/etc/pelican/certificates/tls.key` for root users.
+
+- Intermediate Certificate: `~/.config/pelican/certificates/tlsca.pem` for non-root users or `/etc/pelican/certificates/tlsca.pem` for root users.
+
+Since your TLS certificate is associated with your domain name, you will need to change the default hostname of Pelican server to be consistent. Set `Server.Hostname` to your domain name (e.g. `example.com`).
+
+## Serving Origins
+
+When you've completed the aforementioned steps, you're ready to start configuring the origin that will add your data to a federation. Serving an origin is the process of taking some underlying storage repository and making its data accessible via a namespace prefix in your federation. For example, you might make files in the directory `/my/directory` available at the federation path `/my/namespace` so that anyone with access to the federation can get objects from the directory
+
+By default, Pelican origins serve files from a POSIX backend, the filesystem used by Linux computers. However, Pelican aims to support a variety of backends and we currently also support serving objects from S3. Configuration for S3 is mostly similar to configuration for POSIX filesystems, but with a few important differences. For information about S3 backends, look at [S3 documentation](./launch-an-s3-origin.mdx)
+
+> If you are running Pelican docker image to serve an origin, please refer to the [docker image documentation](./install/docker.mdx#run-pelican-origin-server).
+
+### Find a federation to join
+
+Before serving an origin, you need to decide which [**federation**](./client-usage.mdx#useful-terminology) your data will be accessed through. For example, the Open Science Data Federation (OSDF) is Pelican's flagship federation, and if you are interested in serving an OSDF origin, you can refer to the [OSDF website](https://osg-htc.org/services/osdf.html) for details about how to join.
+
+Federations are identified their URL, which is used to host information that origins need for discovering other federation services. For example, the OSDF's federation URL is `https://osg-htc.org`, and an origin that joins the OSDF will visit `https://osg-htc.org/.well-known/pelican-configuration` to get important metadata about the federation's central services (the Director and Registry).
+
+To point your origin at a specific federation, you can either pass the `-f <federation URL>` flag if running from the command line, or configure `Federation.DiscoveryUrl: <federation URL>` in your config yaml.
+
+### Starting the Origin
+
+Origins can be configured via the command line, a config file named `pelican.yaml`, environment variables, or through a combinations of the three. While simple origins can be run entirely from command line arguments, more complex origins will require configuration your your `pelican.yaml`.
+
+To start a simple pelican origin from the command line that serves POSIX data, run:
+
+```bash
+pelican origin serve -f <federation URL> -v </path/to/data>:</your/federation/prefix>
+```
+
+Where:
+
+* `<federation URL>` is the federation URL discussed above
+* `</path/to/data>` is the absolute path to the directory containing files you want to export as Pelican objects in your federation
+* `</your/federation/prefix>` is the federation prefix at which files in `/path/to/data` will be accessed from in the federation. Note that federation prefixes follow POSIX path conventions, and they must begin with `/` to denote an absolute path.
+
+> **NOTE:** By default, origins require authorization tokens for object access. Pelican currently does not support serving a public origin using only the command line, but various access controls can be configured through your configuration file. For more information, see [origin capabilities](#origin-and-namespace-capabilities) below.
+
+To run the same origin using a `pelican.yaml` configuration file, save your configuration to `/etc/pelican/pelican.yaml` if you're running Pelican as root, or at `~/.config/pelican/pelican.yaml` if you're running as a non-root user. The command line origin from above could be configured accordingly:
+
+```yaml filename="pelican.yaml"
+# Tell Pelican which federation you're joining
+Federation:
+  DiscoveryUrl: <federation URL>
+
+# Configure your Origin
+Origin:
+  # POSIX is the default storage type for Pelican origins
+  # and can be omitted
+  StorageType: "posix"
+
+  Exports:
+    - StoragePrefix: "/path/to/data"
+      FederationPrefix: "/your/federation/prefix"
+      # Explicitly state what capabilities you want this prefix to have
+      Capabilities: ["Reads", "Writes"]
+
+```
+and then simply run
+```bash
+pelican origin serve
+```
+Pelican will read the config file and apply it to your origin.
+
+For more advanced configuration options, see [Pelican-Origin-Configurations](./origin-configuration.mdx)
+
+The first time the origin is started, you will see something that looks like the following:
+
+```console
+$ pelican origin serve -f https://osg-htc.org -v $PWD:/demo
+
+Pelican admin interface is not initialized
+To initialize, login at https://localhost:8444/view/initialization/code/ with the following code:
+551220
+```
+See the [admin website configuration](#login-to-admin-website) documentation section for more information about initializing your origin's admin website.
+
+## Test Origin Functionality
+
+Once you have your origin set up, follow the steps below to test if your origin can serve a file through a Pelican federation. It's best to test your origin while it's serving public data to minimize the risk that any test tokens you generate may be malformed and the reason objects can't be pulled through the origin.
+
+1. Create a test file under the directory on your host machine that binds to a Pelican namespace. This the `<local_directory>` in `-v <local_directory>:<namespace_prefix>` argument when you run the Pelican origin. Assuming your directory is `/tmp/demo`, run the following command to create a test file named `testfile.txt` under `/tmp/demo`
+
+    ```bash
+    echo "This is a test file.\n" > /tmp/demo/testfile.txt
+    ```
+
+2. In a **separate terminal**, run the following command to get the data from your origin through the Pelican federation
+
+    ```
+    $ cd ~
+    $ pelican object get -f <federation> <namespace_prefix>/testfile.txt .
+    ```
+
+      Where:
+      * `cd ~` switches the working directory to your `home` direcotry
+      * `<federation>` is the same URL you pass to `-f` argument when running the origin
+      * `<namespace_prefix>` is the `-v <local_directory>:<namespace_prefix>` argument when running the origin.
+
+    You should see the output like the following:
+
+    ```console
+    $ pelican object get -f <federation> /demo/testfile.txt .
+    testfile.txt 36.00 b / 36.00 b [=============================================================================================] Done!
+    ```
+
+3. Confirm the file content by running:
+
+    ```bash
+    $ cat testfile.txt
+    This is a test file.
+    ```
+
+Congratulations! Your have finished setting up and running your origin.

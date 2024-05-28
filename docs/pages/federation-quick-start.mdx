@@ -1,0 +1,140 @@
+import ExportedImage from "next-image-export-optimizer";
+
+# Getting Started with a Pelican Federation
+
+A federation in Pelican refers to an instance of a data sharing ecosystem where members can share and access data as objects. To
+allow such an exchange of data to work, Pelican has two top-level *central server components* to coordinate origins and caches in the
+federation, direct client requests to the proper storage server, and manage namespace registration. They are the *director* and the *registry*.
+A Pelican federation requires both a *director* and a *registry* to be set up first before any origin or cache server can join
+the federation or any client can access objects in the federation.
+
+## Core Terminology
+If you haven’t already done so, please familiarize yourself with the core [Pelican terminology](link to pelican terminology)
+
+## Before Starting
+
+### Install Pelican
+
+If you haven't installed Pelican, follow the instructions to [install pelican](/install.mdx).
+
+### Prepare TLS Credentials
+
+Prepare TSL Credentials and save them into the following locations:
+
+- Certificate: `~/.config/pelican/certificates/tls.crt` for non-root users or `/etc/pelican/certificates/tls.crt` for root users.
+
+- TLSKey: `~/.config/pelican/certificates/tls.key` for non-root users or `/etc/pelican/certificates/tls.key` for root users.
+
+- Intermediate Certificate: `~/.config/pelican/certificates/tlsca.pem` for non-root users or `/etc/pelican/certificates/tlsca.pem` for root users.
+
+Since your TLS certificate is associated with your domain name, you will need to change the default hostname of Pelican server to be consistent. Set `Server.Hostname` to your domain name (e.g. `example.com`).
+
+## Serve a Registry
+
+### Get OIDC Credentials
+<details>
+<summary>Click to see more…</summary>
+
+The Pelican registry follows [OIDC](https://openid.net/developers/how-connect-works/) for user authentication, and [CILogon](https://www.cilogon.org/) is our OpenID Provider by default, which enables single sign-on for users with an account associated with an institution that joins CILogon. (Check out [this page](https://cilogon.org) for institutions in CILogon)
+
+For a Pelican registry to work with CILogon, you need to obtain a client id and associated client secret from CILogon. [This page](https://www.cilogon.org/oidc#h.p_ID_38) details how you can request a client credential. You will need to register your client at https://cilogon.org/oauth2/register and wait for approval before proceeding. Below is a guidance on how to fill in the registration form for CILogon.
+
+* **`Client Name`**: a human-readable name of your service. For example: Pelican Data Federation
+* **`Callback URLs`**: fill in `https://<hostname>:<server_port>/api/v1.0/auth/oauth/callback` where `<hostname>:<server_port>` is your server's public endpoint. For example, `https://example-origin.org:8444/api/v1.0/auth/oauth/callback`
+* **`Client Type`**: select `Confidential`
+* **`Scopes`**: select `email`, `openid`, `org.cilogon.userinfo`, and `profile`
+* **`Refresh Tokens`**: select `No`
+
+Once approved, you will get your `client_id` and `client_secret` from CILogon. Pass them as configuration parameters and configuration files to Pelican.
+
+* Set the `OIDC.ClientID` config parameter to your `<client_id>` value.
+* Create a file named `/etc/pelican/oidc-client-secret`
+
+  ```
+  touch /etc/pelican/oidc-client-secret
+  ```
+
+* Copy and paste your `client_secret` into the file you just created. Please don't share your `client_secret`.
+
+If you prefer to store your `client_secret` file in a path different from the default file path, change `OIDC.ClientSecretFile` to your desired file location.
+</details>
+
+#### Bypass Required Credential Check
+
+To run the registry without CILogon credentials, create two files named `/etc/pelican/oidc-client-id` and `/etc/pelican/oidc-client-secret` and populate the files with non-empty content. Pelican checks if the files exist and are non-empty. It won't check the content of the file.
+
+Note that, by doing this, when users attempt to use `CILogon` to login to the registry they will get an error page from `CILogon` and it's only possible to login using admin password.
+
+### Launch the Registry
+
+That's it! Now you can launch the registry by running the following command:
+
+```bash
+pelican registry serve
+```
+
+and you will see the following message:
+
+```console
+Pelican admin interface is not initialized
+To initialize, login at https://<hostname>:8444/view/initialization/code/ with the following code:
+865309
+```
+
+> Note that your code will be different from what is being shown here.
+
+By default, a registry runs on port `8444`. You may change the port number by passing `-p <port>` when serving
+the registry or by setting `Server.WebPort` in the configuration file.
+
+Now you want to initialize the admin account for your registry web UI. You may refer to [Login to Admin Website](./serving_an_origin.mdx#login-to-admin-website) for details.
+
+Once you finish the initialization, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
+
+<ExportedImage src={registryAdmin} alt={"Image registry home page in public view"} />
+
+You may view and manage namespaces registered in your federation. Pending registrations are shown as the first list and you can click each namespace strip for more detailed information. You can click the check button to approve a namespace registration or the cross button to deny the registration. As an admin user, you can also edit the registration by clicking the pencil icon.
+
+For approved namespaces, you can download the public key associated with the namespace by clicking the downward-arrow button.
+
+The homepage of the registry web UI is also publicly accessible, meaning users can see a list of *approved* namespaces without logging into the registry. Denied and pending registrations are hidden from the public view. The image below shows what the public view looks like.
+
+<ExportedImage src={registryPublic} alt={"Image of registry homepage in public view"} />
+
+## Serve a Director
+
+A Pelican *director* handles data distribution in a Pelican federation. It directs object requests from a Pelican client to the proper object provider (which can be a cache or an origin). It also maintains a collection of actively running origin/cache servers in the federation.
+
+### Set Registry URL
+
+A Pelican director needs to talk to the registry to get the public keys for namespaces. You will need to set `Federation.RegistryUrl` to the public endpoint of your registry for your Pelican director to work. An example value looks like `https://your-registry.org:9999`
+
+Make sure your director is up and running before starting your origins and caches.
+
+### Launch the Director
+
+That's it! Now you can launch the director by running the following command:
+
+```bash
+pelican director serve
+```
+
+and you will see the following message:
+
+```console
+Pelican admin interface is not initialized
+To initialize, login at https://<hostname>:8444/view/initialization/code/ with the following code:
+865309
+```
+
+By default, a director runs on port `8444`. You may change the port number by passing `-p <port>` when serving
+the director or by setting `Server.WebPort` in the configuration file.
+
+To finish setting up the web UI for the director, please refer to [Login to Admin Website](./serving_an_origin.mdx#login-to-admin-website) for details. Once you have finished the initialization and login with your admin password, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
+
+<ExportedImage src={directorHomepage} alt={"Image of director homepage in admin view"} />
+
+The "Origins" table and "Caches" table show the *active* origins and caches in the federation.
+
+## Test The Federation
+
+You can test the federation by [serving an origin](./serving_an_origin.mdx) That sets the `Federation.DiscoveryUrl` to be the URL for the federation’s director.
