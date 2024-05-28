@@ -80,7 +80,8 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 	globusExports = make(map[string]*globusExport)
 
 	// Check and setup token location
-	tokFdr := param.Origin_GlobusTokenLocation.GetString()
+	globusFdr := param.Origin_GlobusConfigLocation.GetString()
+	tokFdr := filepath.Join(globusFdr, "tokens")
 	if err := os.MkdirAll(tokFdr, 0755); err != nil {
 		return errors.Wrapf(err, "failed to create directory for Globus tokens: %s", tokFdr)
 	}

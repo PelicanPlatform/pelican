@@ -187,7 +187,7 @@ type Config struct {
 		GlobusClientSecretFile string
 		GlobusCollectionID string
 		GlobusCollectionName string
-		GlobusTokenLocation string
+		GlobusConfigLocation string
 		HttpServiceUrl string
 		Mode string
 		Multiuser bool
@@ -468,7 +468,7 @@ type configWithType struct {
 		GlobusClientSecretFile struct { Type string; Value string }
 		GlobusCollectionID struct { Type string; Value string }
 		GlobusCollectionName struct { Type string; Value string }
-		GlobusTokenLocation struct { Type string; Value string }
+		GlobusConfigLocation struct { Type string; Value string }
 		HttpServiceUrl struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }

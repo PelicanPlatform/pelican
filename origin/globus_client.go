@@ -436,7 +436,8 @@ func handleGlobusCallback(ctx *gin.Context) {
 		defer globusExportsMutex.Unlock()
 
 		// Update access token location with the new token
-		tokBase := param.Origin_GlobusTokenLocation.GetString()
+		globusFdr := param.Origin_GlobusConfigLocation.GetString()
+		tokBase := filepath.Join(globusFdr, "tokens")
 		if filepath.Clean(tokBase) == "" {
 			return fmt.Errorf("failed to update Globus token: Origin.GlobusTokenLocation is not a valid path: %s", tokBase)
 		}
@@ -573,7 +574,8 @@ func refreshGlobusToken(cid string, token *oauth2.Token) (*oauth2.Token, error) 
 		return nil, fmt.Errorf("failed to update Globus token for collection %s:", cid)
 	}
 	// Update access token location with the new token
-	tokBase := param.Origin_GlobusTokenLocation.GetString()
+	globusFdr := param.Origin_GlobusConfigLocation.GetString()
+	tokBase := filepath.Join(globusFdr, "tokens")
 	if filepath.Clean(tokBase) == "" {
 		return nil, fmt.Errorf("failed to update Globus token for collection %s: Origin.GlobusTokenLocation is not a valid path: %s", cid, tokBase)
 	}

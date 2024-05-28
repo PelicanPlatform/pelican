@@ -19,6 +19,7 @@
 package server_utils
 
 import (
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -511,6 +512,9 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 				err := errors.New("Origin.Exports is defined, but no exports were found")
 				return nil, err
 			} else if len(tmpExports) == 1 {
+				if err := validateFederationPrefix(tmpExports[0].FederationPrefix); err != nil {
+					return nil, errors.Wrapf(err, "invalid federation prefix for export %s", tmpExports[0].FederationPrefix)
+				}
 				reads := tmpExports[0].Capabilities.Reads || tmpExports[0].Capabilities.PublicReads
 				viper.Set("Origin.FederationPrefix", tmpExports[0].FederationPrefix)
 				viper.Set("Origin.StoragePrefix", "/") // Globus backend does not support StoragePrefix or partial export
@@ -521,17 +525,21 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 				viper.Set("Origin.EnableWrites", tmpExports[0].Capabilities.Writes)
 				viper.Set("Origin.EnableListings", tmpExports[0].Capabilities.Listings)
 				viper.Set("Origin.EnableDirectReads", tmpExports[0].Capabilities.DirectReads)
+			} else { // As of 2024/05/28, we only support one Globus export due to Xrootd restriction
+				return nil, fmt.Errorf("Globus storage backend only supports single collection but Origin.Exports has %d", len(tmpExports))
 			}
-			// Multiple exports
-			// Validate each federation prefix in the exports
-			for _, export := range tmpExports {
-				if err := validateFederationPrefix(export.FederationPrefix); err != nil {
-					return nil, errors.Wrapf(err, "invalid federation prefix for export %s", export.FederationPrefix)
-				}
-				if export.GlobusCollectionID == "" {
-					return nil, errors.Wrapf(err, "invalid GlobusCollectionID %s for export %s: GlobusCollectionID is required", export.GlobusCollectionID, export.FederationPrefix)
-				}
-			}
+
+			// TODO: once xrootd supports multiple http servers, come back and allow multiple Globus collections
+			// // Multiple exports
+			// // Validate each federation prefix in the exports
+			// for _, export := range tmpExports {
+			// 	if err := validateFederationPrefix(export.FederationPrefix); err != nil {
+			// 		return nil, errors.Wrapf(err, "invalid federation prefix for export %s", export.FederationPrefix)
+			// 	}
+			// 	if export.GlobusCollectionID == "" {
+			// 		return nil, errors.Wrapf(err, "invalid GlobusCollectionID %s for export %s: GlobusCollectionID is required", export.GlobusCollectionID, export.FederationPrefix)
+			// 	}
+			// }
 			originExports = tmpExports
 			return originExports, nil
 		} else { // we're using the simple Origin.FederationPrefix

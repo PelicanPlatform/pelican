@@ -932,12 +932,12 @@ type: filename
 default: none
 components: ["origin"]
 ---
-name: Origin.GlobusTokenLocation
+name: Origin.GlobusConfigLocation
 description: |+
-  A filepath to the folder containing access tokens for acccess Globus data.
+  A filepath to the folder containing Globus config and access tokens
 type: filename
-root_default: /run/pelican/xrootd/origin/globus/tokens
-default: $XDG_RUNTIME_DIR/pelican/xrootd/origin/globus/tokens
+root_default: /run/pelican/xrootd/origin/globus
+default: $XDG_RUNTIME_DIR/pelican/xrootd/origin/globus
 components: ["origin"]
 ---
 ############################

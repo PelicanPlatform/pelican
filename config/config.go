@@ -1115,7 +1115,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/data")
 		viper.SetDefault("Shoveler.QueueDirectory", "/var/spool/pelican/shoveler/queue")
 		viper.SetDefault("Shoveler.AMQPTokenLocation", "/etc/pelican/shoveler-token")
-		viper.SetDefault(param.Origin_GlobusTokenLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin", "globus", "tokens"))
+		viper.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin", "globus"))
 	} else {
 		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
@@ -1149,7 +1149,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			}
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
-		viper.SetDefault(param.Origin_GlobusTokenLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin", "globus", "tokens"))
+		viper.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin", "globus"))
 		// To ensure Cache.DataLocation still works, we default Cache.LocalRoot to Cache.DataLocation
 		// The logic is extracted from handleDeprecatedConfig as we manually set the default value here
 		viper.SetDefault(param.Cache_DataLocation.GetName(), filepath.Join(runtimeDir, "cache"))
