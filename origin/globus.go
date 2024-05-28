@@ -231,8 +231,36 @@ func LaunchGlobusTokenRefresh(ctx context.Context, egrp *errgroup.Group) {
 	})
 }
 
-// Parse the globusExports map into an array of globusExportUI for frontend RESTful API
-func getGlobusExportsList(exps []server_utils.OriginExport) ([]globusExportUI, error) {
+// Get all values of Globus exports map. Returned values are read-only
+func GetGlobusExportsValues(activeOnly bool) []globusExport {
+	globusExportsMutex.RLock()
+	defer globusExportsMutex.RUnlock()
+	exps := []globusExport{}
+	for _, val := range globusExports {
+		if activeOnly {
+			if val.Status == globusActivated {
+				exps = append(exps, *val)
+			} else {
+				continue
+			}
+		} else {
+			exps = append(exps, *val)
+		}
+	}
+
+	sort.Slice(exps, func(i, j int) bool {
+		if exps[i].Status == exps[j].Status {
+			return exps[i].FederationPrefix < exps[j].FederationPrefix
+		} else {
+			return exps[i].Status < exps[j].Status
+		}
+	})
+
+	return exps
+}
+
+// Parse the OriginExport to add Globus status for each export for frontend RESTful API
+func originExportToGlobusExport(exps []server_utils.OriginExport) ([]globusExportUI, error) {
 	globusExportsMutex.RLock()
 	defer globusExportsMutex.RUnlock()
 	exportList := []globusExportUI{}
@@ -273,7 +301,7 @@ func listGlobusExports(ctx *gin.Context) {
 			})
 		return
 	}
-	exportList, err := getGlobusExportsList(exps)
+	exportList, err := originExportToGlobusExport(exps)
 	if err != nil {
 		log.Errorf("Failed to get Globus exports: %v", err)
 		ctx.JSON(http.StatusInternalServerError,

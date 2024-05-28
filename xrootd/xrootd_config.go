@@ -605,7 +605,7 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 	)
 }
 
-func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
+func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 
 	gid, err := config.GetDaemonGID()
 	if err != nil {
@@ -619,7 +619,7 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	}
 
 	// For cache. convert integer percentage value [0,100] to decimal fraction [0.00, 1.00]
-	if !origin {
+	if !isOrigin {
 		if num, err := strconv.Atoi(xrdConfig.Cache.HighWaterMark); err == nil {
 			if num <= 100 && num > 0 {
 				xrdConfig.Cache.HighWaterMark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
@@ -635,7 +635,7 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	// To make sure we get the correct exports, we overwrite the exports in the xrdConfig struct with the exports
 	// we get from the server_structs.GetOriginExports() function. Failure to do so will cause us to hit viper again,
 	// which in the case of tests prevents us from overwriting some exports with temp dirs.
-	if origin {
+	if isOrigin {
 		originExports, err := server_utils.GetOriginExports()
 		if err != nil {
 			return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
@@ -643,12 +643,25 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 		xrdConfig.Origin.Exports = originExports
 	}
 
-	if xrdConfig.Origin.StorageType == "https" {
+	switch xrdConfig.Origin.StorageType {
+	case "https":
 		if xrdConfig.Origin.HttpServiceUrl == "" {
 			xrdConfig.Origin.HttpServiceUrl = param.Origin_HttpServiceUrl.GetString()
 		}
 		if xrdConfig.Origin.FederationPrefix == "" {
 			xrdConfig.Origin.FederationPrefix = param.Origin_FederationPrefix.GetString()
+		}
+	case "globus":
+		// There's no real globus backend for xrd yet! We use https as the real backend
+		xrdConfig.Origin.StorageType = "https"
+		globusExports := origin.GetGlobusExportsValues(true)
+		// If there's no activated Globus collection, then set the Http config to empty
+		if len(globusExports) == 0 {
+			xrdConfig.Origin.HttpServiceUrl = ""
+			xrdConfig.Origin.FederationPrefix = ""
+		} else if len(globusExports) > 0 {
+			xrdConfig.Origin.HttpServiceUrl = globusExports[0].HttpsServer
+			xrdConfig.Origin.FederationPrefix = globusExports[0].FederationPrefix
 		}
 	}
 
@@ -659,7 +672,7 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	}
 
 	runtimeCAs := filepath.Join(param.Origin_RunLocation.GetString(), "ca-bundle.crt")
-	if !origin {
+	if !isOrigin {
 		runtimeCAs = filepath.Join(param.Cache_RunLocation.GetString(), "ca-bundle.crt")
 	}
 	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, runtimeCAs, 2*time.Minute)
@@ -671,7 +684,7 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 		xrdConfig.Server.TLSCACertificateFile = runtimeCAs
 	}
 
-	if origin {
+	if isOrigin {
 		if xrdConfig.Origin.Multiuser {
 			ok, err := config.HasMultiuserCaps()
 			if err != nil {
@@ -720,7 +733,7 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	}
 
 	var xrootdCfg string
-	if origin {
+	if isOrigin {
 		xrootdCfg = xrootdOriginCfg
 	} else {
 		xrootdCfg = xrootdCacheCfg
@@ -729,7 +742,7 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
 
 	configPath := filepath.Join(param.Origin_RunLocation.GetString(), "xrootd.cfg")
-	if !origin {
+	if !isOrigin {
 		configPath = filepath.Join(param.Cache_RunLocation.GetString(), "xrootd.cfg")
 	}
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
