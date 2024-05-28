@@ -35,6 +35,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestHandleWildcard(t *testing.T) {
@@ -257,7 +258,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 			NamespaceRegistrationEndpoint: "https://registry.org",
 		})
 
-		mockJWKS, err := GenerateMockJWKS()
+		mockJWKS, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		// Institution and UserId are empty
@@ -295,7 +296,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 			NamespaceRegistrationEndpoint: "https://registry.org",
 		})
 
-		mockJWKS, err := GenerateMockJWKS()
+		mockJWKS, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 		// Institution and UserId are empty
 		err = insertMockDBData(
@@ -341,7 +342,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 			NamespaceRegistrationEndpoint: "https://registry.org",
 		})
 
-		mockJWKS, err := GenerateMockJWKS()
+		mockJWKS, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 		// Institution and UserId are empty
 		err = insertMockDBData(
