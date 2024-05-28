@@ -1,10 +1,6 @@
 import React, {ComponentType, FunctionComponent, useMemo, useState, JSX} from "react";
 import {Box, Pagination, TextField} from "@mui/material";
-
-function searchObject<T>(o: T, search: string){
-    const objectString = JSON.stringify(o).toLowerCase()
-    return objectString.includes(search.toLowerCase())
-}
+import useFuse from "@/helpers/useFuse";
 
 interface CardListProps<T> {
     data: Partial<T>[];
@@ -19,9 +15,7 @@ function CardList<T>({ data, Card, cardProps }: CardListProps<T>) {
     const [search, setSearch] = useState<string>("")
     const [page, setPage] = useState<number>(1)
 
-    const filteredObjects = useMemo(() => {
-        return data.filter((d) => searchObject<Partial<T>>(d, search))
-    }, [data, search])
+    const filteredObjects = useFuse<Partial<T>>(data, search)
 
     const count = useMemo(() => {
         return Math.ceil(filteredObjects.length / PAGE_SIZE)
