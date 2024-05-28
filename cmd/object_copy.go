@@ -188,10 +188,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 	}
 
 	if len(source) > 1 {
-		if destStat, err := os.Stat(dest); err != nil {
-			log.Errorln("Destination does not exist")
-			os.Exit(1)
-		} else if !destStat.IsDir() {
+		if destStat, err := os.Stat(dest); err != nil && destStat.IsDir() {
 			log.Errorln("Destination is not a directory")
 			os.Exit(1)
 		}
