@@ -467,6 +467,14 @@ definitions:
         type: string
         example: "/path/to/secret"
         description: "The path to the file that contains the secret for S3 storage backend"
+      globusCollectionID:
+        type: string
+        example: "7c2dc226-767d-4770-b887-720ef547537d"
+        description: The UUID of the exported Globus collection
+      globusCollectionName:
+        type: string
+        example: "Pelican Demo"
+        description: The human-readable name of the exported Globus collection
       capabilities:
         type: object
         $ref: "#/definitions/OriginExportCapabilities"
@@ -998,7 +1006,7 @@ paths:
       summary: Redirect user to OAuth2 authentication provider (default is CILogon) authentication page for OAuth2 third-party login
       parameters:
         - in: query
-          name: next_url
+          name: nextUrl
           type: string
           description: The path to redirect users to once they successfully authenticated against OAuth2 authentication provider
       responses:
@@ -1022,7 +1030,7 @@ paths:
           description: >-
             The state passed along from start of the authentication. In the form of `key1=val1&key2&val2`:
               - `pkce` is a required state for CSRF verification.
-              - `next_url` is an optional state for redirect URL
+              - `nextUrl` is an optional state for redirect URL
 
         - in: query
           name: code
@@ -1901,7 +1909,7 @@ paths:
           type: string
           required: true
           description: The Globus collection UUID to authenticate for
-        - name: next_url
+        - name: nextUrl
           in: query
           type: string
           description: The redirect URL to redirect user to when authentication succeeds
@@ -1942,7 +1950,7 @@ paths:
           description: >-
             The state passed along from start of the authentication. In the form of `key1=val1&key2&val2`:
               - `pkce`: a required state for CSRF verification.
-              - `next_url`: an optional state for redirect URL
+              - `nextUrl`: an optional state for redirect URL
               - `id`: a required state for the Globus collection UUID
 
         - in: query
@@ -1950,8 +1958,15 @@ paths:
           type: string
           description: The access token and refresh token returned from the OAuth2 authentication provider
       responses:
-        "307":
-          description: Callback is successful. Redirect
+        "200":
+          description: OK
+          schema:
+            type: object
+            properties:
+              nextUrl:
+                type: string
+                example: "/view/next"
+                description: The URL to redirect the user to
         "400":
           description: Bad request
           schema:

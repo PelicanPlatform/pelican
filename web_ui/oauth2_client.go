@@ -64,6 +64,9 @@ func ParseOAuthState(state string) (metadata map[string]string, err error) {
 	metadata = map[string]string{}
 	for _, kvStr := range keyvals {
 		kvpair := strings.SplitN(kvStr, "=", 2)
+		if len(kvpair) < 2 {
+			continue
+		}
 		key := kvpair[0]
 		val, err := url.QueryUnescape(kvpair[1])
 		if err != nil {

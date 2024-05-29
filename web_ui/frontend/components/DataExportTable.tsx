@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link";
 import {green, grey, orange, red} from "@mui/material/colors";
 import {
     Typography,
@@ -14,8 +15,7 @@ import {
 import React, {FunctionComponent, ReactElement, useEffect, useMemo, useRef, useState} from "react";
 import {Skeleton} from "@mui/material";
 
-import {TableCellOverflow} from "@/components/Cell";
-import {Edit, Warning, Check, Clear} from "@mui/icons-material";
+import {Edit, Settings, Check, Clear} from "@mui/icons-material";
 import useSWR from "swr";
 import {getErrorMessage} from "@/helpers/util";
 
@@ -27,7 +27,10 @@ interface Capabilities {
     DirectReads: boolean;
   }
 
-type ExportRes = { type: "s3", exports: S3ExportEntry[] } | { type: "posix", exports: PosixExportEntry[]};
+type ExportRes =
+    { type: "s3", exports: S3ExportEntry[] } |
+    { type: "posix", exports: PosixExportEntry[]} |
+    { type: "globus", exports: GlobusExportEntry[]};
 
 type ExportEntryStatus = "Not Supported" | "Completed" | "Incomplete" | "Registration Error"
 
@@ -37,6 +40,11 @@ interface ExportEntry {
     edit_url: string;
     federation_prefix: string;
     capabilities: Capabilities;
+}
+
+interface GlobusExportEntry extends ExportEntry {
+    globusCollectionID: string;
+    globusCollectionName: string;
 }
 
 interface S3ExportEntry extends ExportEntry {
@@ -174,6 +182,33 @@ export const S3DataExportCard = ({entry}: {entry: S3ExportEntry}) => {
     )
 }
 
+export const GlobusDataExportCard = ({entry}: {entry: GlobusExportEntry}) => {
+    return (
+        <Paper elevation={1}>
+            {entry.status != "Completed" && <DataExportStatus {...entry}/>}
+            <Grid container pt={1}>
+                <Grid item xs={9}>
+                    <ValueLabel value={entry.federation_prefix} label={"Federation Prefix"}/>
+                    <ValueLabel value={entry.globusCollectionName || ""} label={"Globus Collection Name"}/>
+                    <ValueLabel value={entry.globusCollectionID} label={"Globus Collection ID"}/>
+                </Grid>
+                <Grid item xs={3}>
+                    <Box width={"100%"} display={"flex"} justifyContent={"end"} marginBottom={"0.5em"} marginRight={"0.5em"}>
+                        <Tooltip title="Configure Globus export">
+                            <Link href={"/origin/globus"}>
+                                <IconButton aria-label="Configure Globus Export">
+                                    <Settings/>
+                                </IconButton>
+                            </Link>
+                        </Tooltip>
+                    </Box>
+                    <CapabilitiesTable {...entry}/>
+                </Grid>
+            </Grid>
+        </Paper>
+    )
+}
+
 export const Paginator = ({data, page, setPage, pageSize}: {data: any[], page: number, pageSize: number, setPage: (p: number) => void}) => {
     if(data.length <= pageSize){
         return null
@@ -220,10 +255,21 @@ export const RecordTable = ({ data }: { data: ExportRes }): ReactElement  => {
                     <Paginator data={data.exports} page={page} pageSize={2} setPage={setPage}/>
                 </>
             )
+        case "globus":
+            return (
+                <>
+                    {entryPage.map((entry, index) => (
+                        <Box key={entry.federation_prefix} pb={1}>
+                            <GlobusDataExportCard entry={entry as GlobusExportEntry}/>
+                        </Box>
+                    ))}
+                    <Paginator data={data.exports} page={page} pageSize={2} setPage={setPage}/>
+                </>
+            )
     }
 }
 
-const getExportData = async () : Promise<ExportRes> => {
+export const getExportData = async () : Promise<ExportRes> => {
     let response = await fetch("/api/v1.0/origin_ui/exports")
     if (response.ok) {
         const responseData = await response.json()

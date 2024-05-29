@@ -15,18 +15,13 @@
  * limitations under the License.
  *
  ***************************************************************/
-
 import {Box, Tooltip} from "@mui/material";
-
-
 import Link from "next/link";
+import {Build, Dashboard, Public} from "@mui/icons-material";
 import IconButton from "@mui/material/IconButton";
-import BuildIcon from "@mui/icons-material/Build";
 
 import Main from "@/components/layout/Main";
 import {Sidebar} from "@/components/layout/Sidebar";
-import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
-import {User} from "@/index";
 
 export const metadata = {
     title: 'Pelican Origin',
@@ -41,11 +36,34 @@ export default function RootLayout({
     return (
         <Box display={"flex"} flexDirection={"row"}>
             <Sidebar>
+                {
+                    true &&
+                    <>
+                    <Box pt={1}>
+                        <Tooltip title={"Dashboard"} placement={"right"}>
+                            <Link href={"/origin/"}>
+                                <IconButton>
+                                    <Dashboard/>
+                                </IconButton>
+                            </Link>
+                        </Tooltip>
+                    </Box>
+                    <Box pt={1}>
+                        <Tooltip title={"Globus Configurations"} placement={"right"}>
+                            <Link href={"/origin/globus/"}>
+                                <IconButton>
+                                    <Public/>
+                                </IconButton>
+                            </Link>
+                        </Tooltip>
+                    </Box>
+                    </>
+                }
                 <Box pt={1}>
                     <Tooltip title={"Config"} placement={"right"}>
                         <Link href={"/config/"}>
                             <IconButton>
-                                <BuildIcon/>
+                                <Build/>
                             </IconButton>
                         </Link>
                     </Tooltip>

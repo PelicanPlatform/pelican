@@ -69,8 +69,8 @@ const (
 )
 
 const (
-	globusAuthPath     = "/api/v1.0/origin_ui/globus/auth/login"
-	globusCallbackPath = "/api/v1.0/origin_ui/globus/auth/callback"
+	// We render the frontend and call the API from their for better user experience
+	globusCallbackPath = "/view/origin/globus/callback"
 )
 
 // Setup the OAuth2 config for Globus backend
