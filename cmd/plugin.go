@@ -565,7 +565,8 @@ func failTransfer(remoteUrl string, localFile string, results chan<- *classads.C
 		resultAd.Set("TransferRetryable", false)
 	}
 	resultAd.Set("TransferSuccess", false)
-	resultAd.Set("TransferError", err.Error())
+	errMsg := writeTransferErrorMessage(err.Error(), remoteUrl)
+	resultAd.Set("TransferError", errMsg)
 
 	results <- resultAd
 }

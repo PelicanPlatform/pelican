@@ -532,14 +532,15 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 		if config.GetPreferredPrefix() == config.OsdfPrefix {
 			log.Debugln("In OSDF mode with osdf:// url; populating metadata with OSDF defaults")
 			fedInfo, err := config.GetFederation(te.ctx)
-			var metadataTimeoutErr *config.MetadataErr
-			// If we timed out, we should just return the timeout error (and the user can typically just try again)
-			if errors.As(err, &metadataTimeoutErr) {
-				return pelicanUrl{}, err
-			}
 			if fedInfo.DirectorEndpoint == "" {
+				var metadataTimeoutErr *config.MetadataErr
+				//If we timed out, we should just return the timeout error (and the user can typically just try again)
 				if err != nil {
-					return pelicanUrl{}, errors.Wrap(err, "no OSDF metadata available")
+					if errors.As(err, &metadataTimeoutErr) {
+						return pelicanUrl{}, err
+					} else {
+						return pelicanUrl{}, errors.Wrap(err, "no OSDF metadata available")
+					}
 				}
 				return pelicanUrl{}, fmt.Errorf("OSDF default metadata is not populated in config")
 			} else {
@@ -1034,7 +1035,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 
 	pelicanURL, err := tc.engine.newPelicanURL(remoteUrl)
 	if err != nil {
-		err = errors.Wrap(err, "error generating metadata for specified url")
+		// No need to wrap the error here, newPelicanURL() and functions in config disovering metadata have verbose enough error messages.
 		return
 	}
 

@@ -488,10 +488,7 @@ func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
-			// Note: we replace the error with a MetadataTimeoutErr because the error we get from http is pretty redundant and contains
-			// no more useful information however, we will put it in trace logging so no info is completely lost from the message
-			log.Traceln(err)
-			err = NewMetadataError(nil, "timeout when discovering federation metadata from url "+federationUrl.String()+", exceeded "+httpClient.Timeout.String())
+			err = MetadataTimeoutErr.Wrap(err)
 			return
 		} else {
 			err = NewMetadataError(err, "Error occurred when querying for metadata")
