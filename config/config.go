@@ -1410,7 +1410,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	}
 
 	// Reset issuerPrivateJWK to ensure test cases can use their own temp IssuerKey
-	issuerPrivateJWK.Store(nil)
+	ResetIssuerJWKPtr()
 
 	// As necessary, generate private keys, JWKS and corresponding certs
 

@@ -50,6 +50,11 @@ var (
 	issuerPrivateJWK atomic.Pointer[jwk.Key]
 )
 
+// Reset the atomic pointer to issuer private jwk
+func ResetIssuerJWKPtr() {
+	issuerPrivateJWK.Store(nil)
+}
+
 // Return a pointer to an ECDSA private key or RSA private key read from keyLocation.
 //
 // This can be used to load ECDSA or RSA private key for various purposes,
