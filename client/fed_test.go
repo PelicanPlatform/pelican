@@ -979,7 +979,7 @@ func TestObjectList(t *testing.T) {
 }
 
 // This tests object ls but for an origin that supports listings but with an object store that does not support PROPFIND.
-// We should get a 405 returned. This is a seperate test since we need a completely different origin
+// We should get a 405 returned. This is a separate test since we need a completely different origin
 func TestObjectList405Error(t *testing.T) {
 	viper.Reset()
 	viper.Set("ConfigDir", t.TempDir())
