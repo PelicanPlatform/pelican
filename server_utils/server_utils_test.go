@@ -116,14 +116,15 @@ func TestWaitUntilWorking(t *testing.T) {
 	})
 
 	t.Run("server-timeout", func(t *testing.T) {
-		// cancel wait until working after 400ms so that we don't wait for 10s before it returns
+		// cancel wait until working after 1500ms so that we don't wait for 10s before it returns
 		earlyCancelCtx, earlyCancel := context.WithCancel(ctx)
 		go func() {
-			<-time.After(400 * time.Millisecond)
+			<-time.After(1500 * time.Millisecond)
 			earlyCancel()
 		}()
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			<-time.After(200 * time.Millisecond)
+			// WaitUntilWorking as a 1s timeout, so we make sure to wait longer than that
+			<-time.After(1100 * time.Millisecond)
 			w.WriteHeader(http.StatusOK) // 200
 		}))
 		defer server.Close()

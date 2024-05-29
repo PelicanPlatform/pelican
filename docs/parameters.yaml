@@ -475,6 +475,12 @@ description: |+
         Capabilities: ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
         SentinelLocation: demoproject_origin_A
     ```
+
+  There are additional configuration fields if Origin.StorageType == "s3".
+  - S3Bucket: [OPTIONAL] See `Origin.S3Bucket` for details
+  - S3AccessKeyfile: [OPTIONAL] See `Origin.S3AccessKeyfile` for details
+  - S3SecretKeyfile: [OPTIONAL] See `Origin.S3SecretKeyfile` for details
+
 type: object
 default: none
 components: ["origin"]
@@ -770,7 +776,7 @@ components: ["origin"]
 name: Origin.S3ServiceName
 description: |+
   [Deprecated] Origin.S3ServiceName was previously used in part to determine an export's FederationPrefix, but
-  upstream changes no longer rely on this value. As of Pelican 7.7.0, setting this value no longer has any effect.
+  upstream changes no longer rely on this value. As of Pelican `7.7.0`, setting this value no longer has any effect.
   AWSv4 signatures used by S3 servers to handle authentication now hardcode "s3" as their service name.
 
   When constructing signed URLs for S3, this value is used as a part of the signature. It is almost always "s3". For more
@@ -796,6 +802,8 @@ components: ["origin"]
 ---
 name: Origin.S3Bucket
 description: |+
+  **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+
   Objects in S3 are stored in "buckets", which have unique names at each S3 service URL (ie the URL that provides access to your objects).
   Setting a bucket restricts the origin to only serving objects from that bucket.
 
@@ -817,6 +825,8 @@ components: ["origin"]
 ---
 name: Origin.S3AccessKeyfile
 description: |+
+  **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+
   A path to a file containing an S3 access keyfile (also sometimes called an API key) for authenticated buckets when an origin
   is run in S3 mode.
 
@@ -828,6 +838,8 @@ components: ["origin"]
 ---
 name: Origin.S3SecretKeyfile
 description: |+
+  **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+
   A path to a file containing an S3 secret keyfile for authenticated buckets when an origin is run in S3 mode.
 
   This value is OPTIONAL for S3 origins, and only applies when an exported bucket requires authentication. It should not be used
@@ -838,8 +850,8 @@ components: ["origin"]
 ---
 name: Origin.S3UrlStyle
 description: |+
-  The style of S3 urls used by the service URL host. This can be either "path" if objects are fetched at <service-url>/<bucket>/<object>
-  or "virtual" if objects are fetched at <bucket>.<service-url>/<object>.
+  The style of S3 urls used by the service URL host. This can be either "path" if objects are fetched at `<service-url>/<bucket>/<object>`
+  or "virtual" if objects are fetched at `<bucket>.<service-url>/<object>`.
 
   This value is REQUIRED for S3 origins, but defaults to "path" if not set.
 type: string

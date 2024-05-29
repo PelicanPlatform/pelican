@@ -269,10 +269,21 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 		return
 	}
 
+	// Ensure to initialize the client before getting a transfer engine
+	err = config.InitClient()
+	if err != nil {
+		return
+	}
+
+	te, err := client.NewTransferEngine(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	lc = &LocalCache{
 		ctx:         ctx,
 		egrp:        egrp,
-		te:          client.NewTransferEngine(ctx),
+		te:          te,
 		downloads:   make(map[string]*activeDownload),
 		hitChan:     make(chan lruEntry, 64),
 		highWater:   (cacheSize / 100) * uint64(highWaterPercentage),

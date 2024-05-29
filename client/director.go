@@ -240,7 +240,6 @@ func newTransferDetailsUsingDirector(cache namespaces.DirectorCache, opts transf
 		cacheURL.Scheme = ""
 		cacheURL.Opaque = ""
 	}
-	log.Tracef("Parsed Cache: %s", cacheURL.String())
 	if opts.NeedsToken {
 		// Unless we're using the local Unix domain socket cache, force HTTPS
 		if cacheURL.Scheme != "unix" {

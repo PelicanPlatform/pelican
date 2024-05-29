@@ -305,7 +305,8 @@ func TestLargeFile(t *testing.T) {
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	te := client.NewTransferEngine(ctx)
+	te, err := client.NewTransferEngine(ctx)
+	require.NoError(t, err)
 
 	cacheUrl := &url.URL{
 		Scheme: "unix",
