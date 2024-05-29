@@ -6,7 +6,7 @@ CREATE TABLE globus_collections (
     server_url TEXT NOT NULL DEFAULT '',
     refresh_token TEXT NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL,
-    updated_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
 );
 -- +goose StatementEnd
 
