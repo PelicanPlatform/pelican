@@ -78,6 +78,10 @@ func InitializeDB() error {
 	return nil
 }
 
+func ShutdownOriginDB() error {
+	return server_utils.ShutdownDB(db)
+}
+
 func collectionExistsByUUID(uuid string) (bool, error) {
 	var count int64
 	err := db.Model(&GlobusCollection{}).Where("uuid = ?", uuid).Count(&count).Error
@@ -89,7 +93,7 @@ func collectionExistsByUUID(uuid string) (bool, error) {
 
 func getCollectionByUUID(uuid string) (*GlobusCollection, error) {
 	var collection GlobusCollection
-	err := db.First(&collection, uuid).Error
+	err := db.First(&collection, "uuid = ?", uuid).Error
 	if err != nil {
 		return nil, err
 	}
@@ -133,5 +137,5 @@ func updateCollection(uuid string, updatedCollection *GlobusCollection) error {
 
 // Hard-delete the collection from the DB
 func deleteCollectionByUUID(uuid string) error {
-	return db.Delete(&GlobusCollection{}, uuid).Error
+	return db.Delete(&GlobusCollection{}, "uuid = ?", uuid).Error
 }

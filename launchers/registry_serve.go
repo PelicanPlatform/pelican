@@ -74,7 +74,7 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 	egrp.Go(func() error {
 		<-ctx.Done()
-		return registry.ShutdownDB()
+		return registry.ShutdownRegistryDB()
 	})
 
 	return nil

@@ -174,7 +174,7 @@ func TestBroker(t *testing.T) {
 
 	egrp.Go(func() error {
 		<-ctx.Done()
-		return registry.ShutdownDB()
+		return registry.ShutdownRegistryDB()
 	})
 
 	// Run the web engine, wait for it to be online.
@@ -287,7 +287,7 @@ func TestRetrieveTimeout(t *testing.T) {
 
 	egrp.Go(func() error {
 		<-ctx.Done()
-		return registry.ShutdownDB()
+		return registry.ShutdownRegistryDB()
 	})
 
 	// Run the web engine, wait for it to be online.

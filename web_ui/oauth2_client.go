@@ -92,8 +92,9 @@ func GenerateOAuthState(metadata map[string]string) string {
 	return metaStr
 }
 
-// Generate a 16B random string and set ctx session key oauthstate as the random string
-// return the random string with URL encoded nextUrl for CSRF token validation
+// Generate a 16B random string and set as the value of ctx session key "oauthstate"
+// return a string for OAuth2 "state" query parameter including the random string and other
+// metadata
 func GenerateCSRFCookie(ctx *gin.Context, metadata map[string]string) (string, error) {
 	session := sessions.Default(ctx)
 

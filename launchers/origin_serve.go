@@ -153,5 +153,10 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
 		}
 	}
 
+	egrp.Go(func() error {
+		<-ctx.Done()
+		return origin.ShutdownOriginDB()
+	})
+
 	return nil
 }

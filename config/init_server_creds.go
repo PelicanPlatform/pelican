@@ -59,7 +59,7 @@ var (
 func LoadPrivateKey(keyLocation string, allowRSA bool) (crypto.PrivateKey, error) {
 	rest, err := os.ReadFile(keyLocation)
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 
 	var privateKey crypto.PrivateKey
@@ -113,10 +113,13 @@ func LoadPrivateKey(keyLocation string, allowRSA bool) (crypto.PrivateKey, error
 	return privateKey, nil
 }
 
-// Check if a file exists at keyLocation, return the file if so; otherwise, generate
+// Check if a file exists at keyLocation, return if so; otherwise, generate
 // and writes a PEM-encoded ECDSA-encrypted private key with elliptic curve assigned
 // by curve
 func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool) error {
+	if keyLocation == "" {
+		return errors.New("failed to generate private key: key location is empty")
+	}
 	uid, err := GetDaemonUID()
 	if err != nil {
 		return err
@@ -156,7 +159,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool)
 	// In this case, the private key file doesn't exist.
 	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
 	if err != nil {
-		return errors.Wrap(err, "Failed to create new private key file")
+		return errors.Wrap(err, "Failed to create new private key file at "+keyLocation)
 	}
 	defer file.Close()
 	priv, err := ecdsa.GenerateKey(curve, rand.Reader)

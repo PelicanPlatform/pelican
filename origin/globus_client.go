@@ -486,6 +486,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 	}
 
 	// TODO: instead of redirect, let's restart the server to use the updated config
+	// and send 200 before that
 	redirectLocation := "/"
 	if nextURL != "" {
 		redirectLocation = nextURL

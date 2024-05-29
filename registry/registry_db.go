@@ -574,15 +574,6 @@ func PeriodicTopologyReload() {
 	}
 }
 
-func ShutdownDB() error {
-	sqldb, err := db.DB()
-	if err != nil {
-		log.Errorln("Failure when getting database instance from gorm:", err)
-		return err
-	}
-	err = sqldb.Close()
-	if err != nil {
-		log.Errorln("Failure when shutting down the database:", err)
-	}
-	return err
+func ShutdownRegistryDB() error {
+	return server_utils.ShutdownDB(db)
 }

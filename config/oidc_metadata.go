@@ -57,6 +57,10 @@ func getMetadata() {
 		metadataError = errors.New("OIDC.Issuer is not set; unable to do metadata discovery")
 		return
 	}
+	// url.Parse doesn't like urls without protocol, so we want to fix this
+	if !strings.HasPrefix(issuerUrl, "https://") && !strings.HasPrefix(issuerUrl, "http://") {
+		issuerUrl = "https://" + issuerUrl
+	}
 	if _, err := url.Parse(issuerUrl); err != nil {
 		metadataError = errors.Wrap(err, "OIDC.Issuer is not a valid URL; unable to do metadata discovery")
 		return
@@ -118,6 +122,10 @@ func GetOIDCProdiver() (pvd OIDCProvider, err error) {
 			err = errors.New("can't determine OIDC provider: nothing set for config parameter OIDC.IssuerUrl or OIDC.AuthorizationEndpoint")
 			return
 		}
+	}
+	// url.Parse doesn't like urls without protocol, so we want to fix this
+	if !strings.HasPrefix(authURLStr, "https://") && !strings.HasPrefix(authURLStr, "http://") {
+		authURLStr = "https://" + authURLStr
 	}
 	authURL, err := url.Parse(authURLStr)
 	if err != nil {

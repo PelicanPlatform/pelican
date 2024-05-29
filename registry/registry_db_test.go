@@ -68,7 +68,7 @@ func resetNamespaceDB(t *testing.T) {
 }
 
 func teardownMockNamespaceDB(t *testing.T) {
-	err := ShutdownDB()
+	err := ShutdownRegistryDB()
 	require.NoError(t, err, "Error tearing down mock namespace DB")
 }
 
@@ -805,7 +805,7 @@ func TestRegistryTopology(t *testing.T) {
 	err := InitializeDB()
 	require.NoError(t, err)
 	defer func() {
-		err := ShutdownDB()
+		err := ShutdownRegistryDB()
 		assert.NoError(t, err)
 	}()
 

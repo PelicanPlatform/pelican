@@ -22,6 +22,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -379,6 +380,10 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 func GetSecret() (string, error) {
 	// Use issuer private key as the source to generate the secret
 	issuerKeyFile := param.IssuerKey.GetString()
+	err := GeneratePrivateKey(issuerKeyFile, elliptic.P256(), false)
+	if err != nil {
+		return "", err
+	}
 	privateKey, err := LoadPrivateKey(issuerKeyFile, false)
 	if err != nil {
 		return "", err

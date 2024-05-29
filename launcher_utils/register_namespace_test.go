@@ -75,7 +75,7 @@ func TestRegistration(t *testing.T) {
 	err = registry.InitializeDB()
 	require.NoError(t, err)
 	defer func() {
-		err := registry.ShutdownDB()
+		err := registry.ShutdownRegistryDB()
 		assert.NoError(t, err)
 	}()
 

@@ -96,3 +96,16 @@ func MigrateDB(sqldb *sql.DB, migrationFS embed.FS) error {
 	}
 	return nil
 }
+
+func ShutdownDB(db *gorm.DB) error {
+	sqldb, err := db.DB()
+	if err != nil {
+		log.Errorln("Failure when getting database instance from gorm:", err)
+		return err
+	}
+	err = sqldb.Close()
+	if err != nil {
+		log.Errorln("Failure when shutting down the database:", err)
+	}
+	return err
+}

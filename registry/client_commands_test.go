@@ -68,7 +68,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 
 	svr := registryMockup(ctx, t, "serveregistry")
 	defer func() {
-		err := ShutdownDB()
+		err := ShutdownRegistryDB()
 		assert.NoError(t, err)
 		svr.CloseClientConnections()
 		svr.Close()
@@ -149,7 +149,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	require.NoError(t, err)
 
 	defer func() {
-		err := ShutdownDB()
+		err := ShutdownRegistryDB()
 		assert.NoError(t, err)
 		registrySvr.CloseClientConnections()
 		registrySvr.Close()
@@ -233,7 +233,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 
 	registrySvr := registryMockup(ctx, t, "keychaining")
 	defer func() {
-		err := ShutdownDB()
+		err := ShutdownRegistryDB()
 		assert.NoError(t, err)
 		registrySvr.CloseClientConnections()
 		registrySvr.Close()

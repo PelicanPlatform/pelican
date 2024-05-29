@@ -24,12 +24,13 @@ import (
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 var (
-	sessionHandler     gin.HandlerFunc
+	sessionHandler     gin.HandlerFunc // A global session handler for web UI. Do not directly access this variable. Use GetSessionHandler() instead
 	sessionHandlerOnce = sync.Once{}
 	sessionSetupErr    error
 )
@@ -45,6 +46,8 @@ func setupSession() {
 	sessionHandler = sessions.Sessions("pelican-session", store)
 }
 
+// Setup and return the session handler for web UI APIs.
+// Calling mutiple times will only set up the handler once
 func GetSessionHandler() (gin.HandlerFunc, error) {
 	sessionHandlerOnce.Do(setupSession)
 	if sessionSetupErr != nil {
