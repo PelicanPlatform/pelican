@@ -18,24 +18,18 @@
 
 "use client"
 
-import {Box, Grid, Typography} from "@mui/material";
+import {Box, Typography} from "@mui/material";
 
-import RateGraph from "@/components/graphs/RateGraph";
-import StatusBox from "@/components/StatusBox";
-import {DataExportTable} from "@/components/DataExportTable";
-import {TimeDuration} from "@/components/graphs/prometheus";
-import FederationOverview from "@/components/FederationOverview";
 import {User} from "@/index";
 import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
+import { GlobusExportTable } from "@/components/GlobusExportTable";
 
 export default function Home() {
     return (
         <AuthenticatedContent redirect={true} checkAuthentication={(u: User) => u?.role == "admin"}>
             <Box width={"100%"}>
                 <Typography variant="h4" mb={2}>Globus Exports</Typography>
-                <Grid container spacing={2}>
-
-                </Grid>
+                <GlobusExportTable />
             </Box>
         </AuthenticatedContent>
     )

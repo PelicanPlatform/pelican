@@ -511,6 +511,14 @@ definitions:
   GlobusExport:
     type: object
     properties:
+      uuid:
+        type: string
+        example: "f933ab04-f34a-4a33-8e2c-cd74bc5622f4"
+        description: The UUID of the exported Globus collection
+      displayName:
+        type: string
+        example: Open Data
+        description: The human readable name of the exported Globus collection
       status:
         type: string
         example: "Inactive"
@@ -527,29 +535,10 @@ definitions:
         type: string
         example: "https://example-server.com"
         description: The https server to request files in the Globus collection
-      storage_prefix:
-        type: string
-        example: "/tmp/pelican"
-        description: The path to the directory to be exported on the host server
-      federation_prefix:
+      federationPrefix:
         type: string
         example: "/demo"
         description: The prefix to access the file through the Pelican federation
-      globusCollectionID:
-        type: string
-        example: "f933ab04-f34a-4a33-8e2c-cd74bc5622f4"
-        description: The UUID of the exported Globus collection
-      globusCollectionName:
-        type: string
-        example: Open Data
-        description: The human readable name of the exported Globus collection
-      capabilities:
-        type: object
-        $ref: "#/definitions/OriginExportCapabilities"
-      sentinel_location:
-        type: string
-        example: "sentinel.txt"
-        description: "The relative path to the file that contains the sentinel file to test the storage device"
   DirectorContact:
     type: object
     properties:

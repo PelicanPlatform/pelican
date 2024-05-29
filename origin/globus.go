@@ -41,22 +41,20 @@ import (
 
 type globusExportStatus string
 
-// Internal use only for globusExports map
+// For internal globusExports map
 type globusExport struct {
-	DisplayName      string
-	FederationPrefix string
-	Status           globusExportStatus
-	Description      string // status description
-	HttpsServer      string // server url to access files in the collection
-	Token            *oauth2.Token
+	DisplayName      string             `json:"displayName"`
+	FederationPrefix string             `json:"federationPrefix"`
+	Status           globusExportStatus `json:"status"`
+	Description      string             `json:"description,omitempty"` // status description
+	HttpsServer      string             `json:"httpsServer"`           // server url to access files in the collection
+	Token            *oauth2.Token      `json:"-"`
 }
 
-// Frontend
+// For UI
 type globusExportUI struct {
-	Status      globusExportStatus `json:"status"`
-	Description string             `json:"description,omitempty"`
-	HttpsServer string             `json:"httpsServer"`
-	server_utils.OriginExport
+	globusExport
+	UUID string `json:"uuid"`
 }
 
 const (
@@ -271,10 +269,8 @@ func originExportToGlobusExport(exps []server_utils.OriginExport) ([]globusExpor
 			return nil, fmt.Errorf("Globus collection %s is not found in Pelican", exp.GlobusCollectionID)
 		} else {
 			exportList = append(exportList, globusExportUI{
-				OriginExport: exp,
-				Status:       gexp.Status,
-				Description:  gexp.Description,
-				HttpsServer:  gexp.HttpsServer,
+				UUID:         exp.GlobusCollectionID,
+				globusExport: *gexp,
 			})
 		}
 	}
