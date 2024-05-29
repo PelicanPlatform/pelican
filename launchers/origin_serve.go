@@ -61,6 +61,20 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, errors.Wrap(err, "failed to initialize origin sqlite database")
 	}
 
+	origin.ConfigOriginTTLCache(ctx, egrp)
+
+	originExports, err := server_utils.GetOriginExports()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to initialize origin exports")
+	}
+
+	if param.Origin_StorageType.GetString() == string(server_utils.OriginStorageGlobus) {
+		if err := origin.InitGlobusBackend(originExports); err != nil {
+			return nil, errors.Wrap(err, "failed to initialize Globus backend")
+		}
+		origin.LaunchGlobusTokenRefresh(ctx, egrp)
+	}
+
 	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
 	if err = origin.RegisterOriginAPI(engine, ctx, egrp); err != nil {
 		return nil, err
@@ -70,8 +84,6 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	if err = origin.RegisterOriginWebAPI(engine); err != nil {
 		return nil, err
 	}
-
-	origin.ConfigOriginTTLCache(ctx, egrp)
 
 	// Director also registers this metadata URL; avoid registering twice.
 	if !modules.IsEnabled(config.DirectorType) {
@@ -137,13 +149,6 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
 	originExports, err := server_utils.GetOriginExports()
 	if err != nil {
 		return err
-	}
-
-	if param.Origin_StorageType.GetString() == string(server_utils.OriginStorageGlobus) {
-		if err := origin.InitGlobusBackend(originExports); err != nil {
-			return errors.Wrap(err, "failed to initialize Globus backend")
-		}
-		origin.LaunchGlobusTokenRefresh(ctx, egrp)
 	}
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")

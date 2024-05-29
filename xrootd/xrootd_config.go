@@ -654,13 +654,20 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 	case "globus":
 		// There's no real globus backend for xrd yet! We use https as the real backend
 		xrdConfig.Origin.StorageType = "https"
-		globusExports := origin.GetGlobusExportsValues(true)
+		// Set activeOnly to false so that we can use the inactive ones as placeholders
+		globusExports := origin.GetGlobusExportsValues(false)
 		// If there's no activated Globus collection, then set the Http config to empty
 		if len(globusExports) == 0 {
-			xrdConfig.Origin.HttpServiceUrl = ""
-			xrdConfig.Origin.FederationPrefix = ""
+			// If there's no export, we fail the start
+			return "", errors.New("failed to configure XRootD: no Globus collection exported")
 		} else if len(globusExports) > 0 {
-			xrdConfig.Origin.HttpServiceUrl = globusExports[0].HttpsServer
+			if globusExports[0].HttpsServer == "" {
+				// FIXME: Once the xrd-http plugin allows the empty server URL, remove this line
+				// For now, put a placeholder here to allow XRootD start without error
+				xrdConfig.Origin.HttpServiceUrl = "https://pelicanplatform.org"
+			} else {
+				xrdConfig.Origin.HttpServiceUrl = globusExports[0].HttpsServer
+			}
 			xrdConfig.Origin.FederationPrefix = globusExports[0].FederationPrefix
 		}
 	}

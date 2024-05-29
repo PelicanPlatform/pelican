@@ -110,6 +110,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 			}
 			if !ok {
 				log.Infof("Globus collection %s with name %s is not activated. You need to activate it in the admin website before using this collection", esp.GlobusCollectionID, esp.GlobusCollectionName)
+				globusExports[esp.GlobusCollectionID] = &globusEsp
 				continue
 			}
 			// We found the collection in DB, try to get access token with the refresh token
@@ -147,6 +148,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 			globusEsp.Status = globusActivated
 			globusEsp.Token = collectionToken
 			globusEsp.HttpsServer = col.ServerURL
+			globusEsp.Description = "Activated with cached credentials"
 			globusExports[esp.GlobusCollectionID] = &globusEsp
 		}
 		return nil
