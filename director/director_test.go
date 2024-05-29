@@ -645,33 +645,61 @@ func TestGetAuthzEscaped(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	req.Header.Set("Authorization", "tokenstring")
-	escapedToken := getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken := getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring", escapedToken)
 
 	// Test passing a token via query with no bearer prefix
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
-	escapedToken = getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken = getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring", escapedToken)
 
 	// Test passing the token via header with Bearer prefix
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer tokenstring")
-	escapedToken = getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken = getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring", escapedToken)
 
 	// Test passing the token via URL with Bearer prefix and + encoded space
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer+tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
-	escapedToken = getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken = getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring", escapedToken)
 
 	// Finally, the same test as before, but test with %20 encoded space
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer%20tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
-	escapedToken = getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken = getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring", escapedToken)
+}
+
+func TestGetRequestParameters(t *testing.T) {
+	// Test passing a token & timeout via header
+	req, err := http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	req.Header.Set("Authorization", "tokenstring")
+	req.Header.Set("X-Pelican-Timeout", "3s")
+	escapedParam := getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring&pelican.timeout=3s", escapedParam)
+
+	// Test passing a timeout via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?pelican.timeout=3s", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	assert.Equal(t, "pelican.timeout=3s", escapedParam)
+
+	// Test passing nothing
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	assert.Equal(t, "", escapedParam)
+
+	// Test passing the token & timeout via URL query string
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?pelican.timeout=3s&authz=tokenstring", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring&pelican.timeout=3s", escapedParam)
 }
 
 func TestDiscoverOriginCache(t *testing.T) {
