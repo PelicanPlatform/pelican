@@ -500,6 +500,20 @@ func (tae *TransferAttemptError) Is(target error) bool {
 	return tae.isUpload == other.isUpload && tae.serviceHost == other.serviceHost && tae.isProxyErr == other.isProxyErr && tae.proxyHost == other.proxyHost
 }
 
+func compatToDuration(dur time.Duration, paramName string) (result time.Duration) {
+	// Backward compat: some parameters were previously integers, in seconds.
+	// If you give viper an integer without a suffix then it interprets it as a
+	// number in *nanoseconds*.  We assume that's not the intent and, if under a
+	// microsecond, assume that the user really meant seconds.
+	if dur < time.Microsecond {
+		log.Warningf("%s must be given as a duration, not an integer; try setting it as '%ds'", paramName, dur.Nanoseconds())
+		result = time.Duration(dur.Nanoseconds()) * time.Second
+	} else {
+		result = dur
+	}
+	return
+}
+
 func newTransferAttemptError(service string, proxy string, isProxyErr bool, isUpload bool, err error) (tae *TransferAttemptError) {
 	tae = &TransferAttemptError{
 		serviceHost: service,
@@ -1958,10 +1972,12 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		callback(dest, 0, totalSize, false)
 	}
 
-	stoppedTransferTimeout := int64(param.Client_StoppedTransferTimeout.GetInt())
-	slowTransferRampupTime := int64(param.Client_SlowTransferRampupTime.GetInt())
-	slowTransferWindow := int64(param.Client_SlowTransferWindow.GetInt())
-	var startBelowLimit int64 = 0
+	stoppedTransferTimeout := compatToDuration(param.Client_StoppedTransferTimeout.GetDuration(), "Client.StoppedTranferTimeout")
+	slowTransferRampupTime := compatToDuration(param.Client_SlowTransferRampupTime.GetDuration(), "Client.SlowTransferRampupTime")
+	slowTransferWindow := compatToDuration(param.Client_SlowTransferWindow.GetDuration(), "Client.SlowTransferWindow")
+	log.Debugf("Stopped transfer timeout is %s; slow transfer ramp-up is %s; slow transfer look-back window is %s",
+		stoppedTransferTimeout.String(), slowTransferRampupTime.String(), slowTransferWindow.String())
+	startBelowLimit := time.Time{}
 	var noProgressStartTime time.Time
 	var lastBytesComplete int64
 	timeToFirstByteRecorded := false
@@ -1991,7 +2007,7 @@ Loop:
 			if downloaded == lastBytesComplete {
 				if noProgressStartTime.IsZero() {
 					noProgressStartTime = time.Now()
-				} else if time.Since(noProgressStartTime) > time.Duration(stoppedTransferTimeout)*time.Second {
+				} else if time.Since(noProgressStartTime) > stoppedTransferTimeout {
 					err = &StoppedTransferError{
 						BytesTransferred: downloaded,
 						StoppedTime:      time.Since(noProgressStartTime),
@@ -2016,18 +2032,18 @@ Loop:
 			}
 			if resp.BytesPerSecond() < limit {
 				// Give the download `slowTransferRampupTime` (default 120) seconds to start
-				if resp.Duration() < time.Second*time.Duration(slowTransferRampupTime) {
+				if resp.Duration() < slowTransferRampupTime {
 					continue
-				} else if startBelowLimit == 0 {
+				} else if startBelowLimit.IsZero() {
 					warning := []byte("Warning! Downloading too slow...\n")
 					status, err := getProgressContainer().Write(warning)
 					if err != nil {
 						log.Errorln("Problem displaying slow message", err, status)
 						continue
 					}
-					startBelowLimit = time.Now().Unix()
+					startBelowLimit = time.Now()
 					continue
-				} else if (time.Now().Unix() - startBelowLimit) < slowTransferWindow {
+				} else if time.Since(startBelowLimit) < slowTransferWindow {
 					// If the download is below the threshold for less than `SlowTransferWindow` (default 30) seconds, continue
 					continue
 				}
@@ -2047,7 +2063,7 @@ Loop:
 
 			} else {
 				// The download is fast enough, reset the startBelowLimit
-				startBelowLimit = 0
+				startBelowLimit = time.Time{}
 			}
 
 		case <-resp.Done:
@@ -2252,7 +2268,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	var lastError error = nil
 
 	tickerDuration := 100 * time.Millisecond
-	stoppedTransferTimeout := time.Duration(param.Client_StoppedTransferTimeout.GetInt()) * time.Second
+	stoppedTransferTimeout := compatToDuration(param.Client_StoppedTransferTimeout.GetDuration(), "Client.StoppedTransferTimeout")
 	lastProgress := uploadStart
 	progressTicker := time.NewTicker(tickerDuration)
 	firstByteRecorded := false
