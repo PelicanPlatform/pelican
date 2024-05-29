@@ -32,35 +32,31 @@ However, things can get a little tricky when you add a longer namespace prefix a
 ```bash
 /ospool/uc-shared/public/OSG-Staff/validation/test.txt
 ```
-In this example, the namespace prefix is `/ospool/uc-shared/public/`, and the actual object is named `/OSG-Staff/validation/test.txt`. While the namespace prefix always comes before the object name, it can get a little confusing once paths and names get longer.
+In this example, the namespace prefix is `/ospool/uc-shared/public/`, and the actual object is named `/OSG-Staff/validation/test.txt`.
 
 >**How to differentiate namespace prefix and object name?**
-To discover where the namespace prefix ends and the object name begins, there are a few options. One way is to access your federation's registry (i.e. [https://osdf-registry.osg-htc.org/view/registry/](https://osdf-registry.osg-htc.org/view/registry/)) which should list the namespaces available in the federation. Another option is also asking your federation administrator for how to access the registry. We are currently working to improve user experience exploring federations which includes better ways to differentiate namespace prefix and object name.
+To discover where the namespace prefix ends and the object name begins, there are a few options. One way is to access your federation's registry (i.e. [https://osdf-registry.osg-htc.org/view/registry/](https://osdf-registry.osg-htc.org/view/registry/)) which should list the namespaces available in the federation. Another option is also asking your federation administrator for how to access the registry. However, you can always think to just combine these two terms into just the "object's path" or the "path to the object within the federation".
 
 **Federations:**
-Objects in Pelican belong to *federations*, which are aggregations of data that are exposed to other individuals in the federation. Each Pelican federation constitutes its own global namespace of objects and each object within a federation has its own path, much like files on a computer. Fetching any object from a federation requires at minimum three pieces of information: a URL indicating the object's federation, a namespace prefix, and the path to the object within that federation (there is the potential that some objects require access tokens as well, but more on that later). For example, the OSDF’s federation URL is https://osg-htc.org, an example namespace-prefix from the federation is:
+Objects in Pelican belong to *federations*, which are aggregations of data that are exposed to other individuals in the federation. Each Pelican federation constitutes its own global namespace of objects and each object within a federation has its own path, much like files on a computer. Fetching any object from a federation requires at minimum two pieces of information: the federation's root (i.e. the discovery URL), and the path to the object within that federation (there is the potential that some objects require access tokens as well, but more on that later). For example, the OSDF’s federation hostname is osg-htc.org, an example path to an object in the federation is:
 ```bash
-/ospool/uc-shared/public
-```
-and the location of the object can be found at:
-```bash
-/OSG-Staff/validation/test.txt
+/ospool/uc-shared/public/OSG-Staff/validation/test.txt
 ```
 
-Combining these three pieces of information, we say the the **object's URL** is:
+Combining these two pieces of information, we say the the **object's URL** is:
 ```bash
-https://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt
+pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt
 ```
 
 ## Your First Pelican Client Command
-Accessing objects from a Pelican federation requires the use of the Pelican client commands. Here we will be using the `pelican object get` command to get an object from a federation. This command is formatted like so:
+You can easily access objects from a Pelican federation with the use of the Pelican client commands. Here we will be using the `pelican object get` command to get an object from a federation. This command is formatted like so:
 ```console
 pelican object get pelican://<federation-url>/<namespace-prefix>/<path/to/federation/object> </local/path/to/destination>
 ```
 We can break down the components of this command before you try it yourself:
 - `pelican object get`: This is the client command we are utilizing. `object` because we want to interact with Pelican objects and `get` because we want to GET the file from our federation.
 - `pelican://`: This is the URL scheme for accessing this object. Pelican accepts different URL schemes which are detailed in the [client usage](./client_usage.mdx#the-different-pelican-url-schemes) page.
-- `<federation-url>`: The URL indicating the object's location.
+- `<federation-url>`: The URL indicating which federation you would like to interact with.
 - `<namespace-prefix>`: The namespace at which this object is located.
 - `<path/to/federation/object>`: The file path to the object we would like to get.
 - `</local/path/to/destination>`: The local destination where we want the file to download to (can be a local or absolute path)
