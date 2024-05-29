@@ -31,6 +31,7 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
@@ -131,4 +132,21 @@ func RegistryMockup(t *testing.T, prefix string) *httptest.Server {
 	}))
 	t.Cleanup(server.Close)
 	return server
+}
+
+// Initialize the client for a unit test
+//
+// Will set the configuration to a temporary directory (to
+// avoid pulling in global configuration) and set some arbitrary
+// viper configurations
+func InitClient(t *testing.T, initCfg map[string]any) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("ConfigDir", t.TempDir())
+	for key, val := range initCfg {
+		viper.Set(key, val)
+	}
+
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
 }

@@ -137,8 +137,8 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	}
 
 	os.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
-	err := config.InitClient()
-	assert.Nil(t, err)
+	test_utils.InitClient(t, map[string]any{})
+
 	transfers := newTransferDetails(testCache, transferDetailsOptions{})
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, true, transfers[0].Proxy)
@@ -151,7 +151,7 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	assert.Equal(t, false, transfers[0].Proxy)
 	os.Unsetenv("OSG_DISABLE_PROXY_FALLBACK")
 	viper.Reset()
-	err = config.InitClient()
+	err := config.InitClient()
 	assert.Nil(t, err)
 }
 
@@ -159,11 +159,10 @@ func TestSlowTransfers(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Adjust down some timeouts to speed up the test
-	viper.Reset()
-	viper.Set("Client.SlowTransferWindow", 2)
-	viper.Set("Client.SlowTransferRampupTime", 1)
-	config.InitConfig()
-	require.NoError(t, config.InitClient())
+	test_utils.InitClient(t, map[string]any{
+		"Client.SlowTransferWindow":     "2s",
+		"Client.SlowTransferRampupTime": "1s",
+	})
 
 	channel := make(chan bool)
 	slowDownload := 1024 * 10 // 10 KiB/s < 100 KiB/s
@@ -243,11 +242,10 @@ func TestStoppedTransfer(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Adjust down the timeouts
-	viper.Reset()
-	viper.Set("Client.StoppedTransferTimeout", 2)
-	viper.Set("Client.SlowTransferRampupTime", 100)
-	config.InitConfig()
-	require.NoError(t, config.InitClient())
+	test_utils.InitClient(t, map[string]any{
+		"Client.StoppedTransferTimeout": "2s",
+		"Client.SlowTransferRampupTime": "100s",
+	})
 
 	channel := make(chan bool)
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -491,10 +489,9 @@ func TestSortAttempts(t *testing.T) {
 }
 
 func TestTimeoutHeaderSetForDownload(t *testing.T) {
-	viper.Reset()
-	config.InitConfig()
-	viper.Set("Transport.ResponseHeaderTimeout", 10*time.Second)
-	require.NoError(t, config.InitClient())
+	test_utils.InitClient(t, map[string]any{
+		"Transport.ResponseHeaderTimeout": 10 * time.Second,
+	})
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// We have this flag because our server will get a few requests throughout its lifetime and the other
@@ -522,9 +519,7 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 }
 
 func TestJobIdHeaderSetForDownload(t *testing.T) {
-	viper.Reset()
-	config.InitConfig()
-	require.NoError(t, config.InitClient())
+	test_utils.InitClient(t, map[string]any{})
 
 	// Create a test .job.ad file
 	jobAdFile, err := os.CreateTemp("", ".job.ad")
@@ -634,12 +629,9 @@ func TestNewPelicanURL(t *testing.T) {
 	})
 
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixWithError", func(t *testing.T) {
-		viper.Reset()
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
-		viper.Set("ConfigDir", t.TempDir())
 		require.NoError(t, err)
-		config.InitConfig()
-		require.NoError(t, config.InitClient())
+		test_utils.InitClient(t, map[string]any{})
 
 		te := NewTransferEngine(ctx)
 		require.NotNil(t, te)
@@ -661,10 +653,7 @@ func TestNewPelicanURL(t *testing.T) {
 	})
 
 	t.Run("TestOsdfOrStashSchemeWithPelicanPrefixNoError", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("ConfigDir", t.TempDir())
-		config.InitConfig()
-		require.NoError(t, config.InitClient())
+		test_utils.InitClient(t, map[string]any{})
 		te := NewTransferEngine(ctx)
 		require.NotNil(t, te)
 		defer func() {
@@ -689,12 +678,9 @@ func TestNewPelicanURL(t *testing.T) {
 	})
 
 	t.Run("TestPelicanSchemeNoError", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("TLSSkipVerify", true)
-		viper.Set("ConfigDir", t.TempDir())
-		config.InitConfig()
-		err := config.InitClient()
-		require.NoError(t, err)
+		test_utils.InitClient(t, map[string]any{
+			"TLSSkipVerify": true,
+		})
 
 		te := NewTransferEngine(ctx)
 		require.NotNil(t, te)
@@ -702,7 +688,6 @@ func TestNewPelicanURL(t *testing.T) {
 			require.NoError(t, te.Shutdown())
 		}()
 
-		assert.NoError(t, err)
 		// Create a server that gives us a mock response
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// make our response:
@@ -763,14 +748,10 @@ func TestNewPelicanURL(t *testing.T) {
 	})
 
 	t.Run("TestPelicanSchemeMetadataTimeoutError", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("TLSSkipVerify", true)
-		viper.Set("ConfigDir", t.TempDir())
-		oldResponseHeaderTimeout := viper.Get("transport.ResponseHeaderTimeout")
-		viper.Set("transport.ResponseHeaderTimeout", 0.1*float64(time.Millisecond))
-		viper.Set("Client.WorkerCount", 5)
-		err := config.InitClient()
-		require.NoError(t, err)
+		test_utils.InitClient(t, map[string]any{
+			"TLSSkipVerify":                   true,
+			"Transport.ResponseHeaderTimeout": time.Millisecond,
+		})
 
 		te := NewTransferEngine(ctx)
 		defer func() {
@@ -778,6 +759,7 @@ func TestNewPelicanURL(t *testing.T) {
 		}()
 
 		// Create a server that gives us a mock response
+		sleepChan := make(chan bool)
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// make our response:
 			response := config.FederationDiscovery{
@@ -792,12 +774,13 @@ func TestNewPelicanURL(t *testing.T) {
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				return
 			}
-
+			<-sleepChan
 			w.WriteHeader(http.StatusOK)
 			_, err = w.Write(responseJSON)
 			assert.NoError(t, err)
 		}))
 		defer server.Close()
+		defer close(sleepChan)
 
 		serverURL, err := url.Parse(server.URL)
 		assert.NoError(t, err)
@@ -809,7 +792,6 @@ func TestNewPelicanURL(t *testing.T) {
 		_, err = te.newPelicanURL(remoteObjectURL)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, config.MetadataTimeoutErr))
-		viper.Set("transport.ResponseHeaderTimeout", oldResponseHeaderTimeout)
 	})
 
 	t.Cleanup(func() {
@@ -864,10 +846,9 @@ func TestSearchJobAd(t *testing.T) {
 
 // Test error messages when a 504 Gateway Timeout occurs
 func TestGatewayTimeout(t *testing.T) {
-	viper.Reset()
-	viper.Set("Logging.Level", "debug")
-	config.InitConfig()
-	require.NoError(t, config.InitClient())
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level": "debug",
+	})
 
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusGatewayTimeout)
@@ -901,11 +882,10 @@ func TestGatewayTimeout(t *testing.T) {
 
 // Test failed connection setup error message for downloads
 func TestFailedConnectionSetupError(t *testing.T) {
-	viper.Reset()
-	viper.Set("Transport.ResponseHeaderTimeout", "500ms")
-	viper.Set("Logging.Level", "debug")
-	config.InitConfig()
-	require.NoError(t, config.InitClient())
+	test_utils.InitClient(t, map[string]any{
+		"Transport.ResponseHeaderTimeout": "500ms",
+		"Logging.Level":                   "debug",
+	})
 
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(time.Second)
@@ -947,15 +927,11 @@ func TestFailedConnectionSetupError(t *testing.T) {
 func TestFailedUploadError(t *testing.T) {
 
 	configDir := t.TempDir()
-
-	viper.Reset()
-	viper.Set("Transport.ResponseHeaderTimeout", "500ms")
-	viper.Set("TLSSkipVerify", true)
-	viper.Set("Logging.Level", "debug")
-	viper.Set("ConfigDir", t.TempDir())
-
-	config.InitConfig()
-	require.NoError(t, config.InitClient())
+	test_utils.InitClient(t, map[string]any{
+		"Transport.ResponseHeaderTimeout": "500ms",
+		"TLSSkipVerify":                   true,
+		"Logging.Level":                   "debug",
+	})
 
 	testfileLocation := filepath.Join(configDir, "testfile.txt")
 	err := os.WriteFile(testfileLocation, []byte("Hello, world!\n"), fs.FileMode(0600))
@@ -1005,20 +981,14 @@ func TestFailedUploadError(t *testing.T) {
 // Creates a server that does nothing but stall; examines the
 // corresponding error message out to the user.
 func TestFailedLargeUploadError(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		"Transport.ResponseHeaderTimeout": "500ms",
+		"TLSSkipVerify":                   true,
+		"Logging.Level":                   "debug",
+		"Client.StoppedTransferTimeout":   "1s",
+	})
 
-	configDir := t.TempDir()
-
-	viper.Reset()
-	viper.Set("Transport.ResponseHeaderTimeout", "500ms")
-	viper.Set("TLSSkipVerify", true)
-	viper.Set("Logging.Level", "debug")
-	viper.Set("Client.StoppedTransferTimeout", 1)
-	viper.Set("ConfigDir", t.TempDir())
-
-	config.InitConfig()
-	require.NoError(t, config.InitClient())
-
-	testfileLocation := filepath.Join(configDir, "testfile.txt")
+	testfileLocation := filepath.Join(t.TempDir(), "testfile.txt")
 	fp, err := os.OpenFile(testfileLocation, os.O_WRONLY|os.O_CREATE, os.FileMode(0600))
 	require.NoError(t, err)
 	test_utils.WriteBigBuffer(t, fp, 40)
