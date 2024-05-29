@@ -20,7 +20,7 @@ package server_structs
 
 type (
 	OAuthLoginRequest struct {
-		NextUrl string `form:"next_url,omitempty"`
+		NextUrl string `form:"nextUrl,omitempty"`
 	}
 
 	OAuthCallbackRequest struct {

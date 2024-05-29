@@ -50,6 +50,10 @@ type globusEndpointRes struct {
 	DisplayName string `json:"display_name"`
 }
 
+type globusAuthCallbackRes struct {
+	NextUrl string `json:"nextUrl"`
+}
+
 var (
 	onceGlobusOAuthCfg sync.Once
 	// A global Globus OAuth2 config. Do not directly access this value. Use GetGlobusOAuthCfg() instead
@@ -285,7 +289,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 		return
 	}
 
-	nextURL := stateMap["nextUrl"]
+	nextUrl := stateMap["nextUrl"]
 
 	if pkce != csrfFromSession {
 		ctx.JSON(http.StatusBadRequest,
@@ -431,6 +435,11 @@ func handleGlobusCallback(ctx *gin.Context) {
 		return
 	}
 
+	// We have all the data in place, let's create/update related data strcutures:
+	// 1. Pesist access token to disk for XRootD to read
+	// 2.	Update in-memory globusExports struct with the OAuth token (both access and refresh token),
+	//    	HttpsServer, and display name (from Globus API)
+	// 3. Update origin DB to persist the refresh token, HttpsServer, and display name
 	err = func() error {
 		globusExportsMutex.Lock()
 		defer globusExportsMutex.Unlock()
@@ -457,7 +466,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 		if err != nil {
 			return err
 		}
-		if !ok {
+		if !ok { // First time activate this collection
 			gc := GlobusCollection{
 				UUID:         cid,
 				Name:         transferJSON.DisplayName,
@@ -465,7 +474,9 @@ func handleGlobusCallback(ctx *gin.Context) {
 				RefreshToken: collectionToken.RefreshToken,
 			}
 			return createCollection(&gc)
-		} else {
+		} else { // Activated this collection before, but for some reason we want to update the credentials
+			// although in the token refresh logic, if any of the credentials expires,
+			// we should hard-delete this collection entry
 			gc := GlobusCollection{
 				Name:         transferJSON.DisplayName,
 				ServerURL:    transferJSON.HttpsServer,
@@ -485,14 +496,10 @@ func handleGlobusCallback(ctx *gin.Context) {
 		return
 	}
 
-	// TODO: instead of redirect, let's restart the server to use the updated config
-	// and send 200 before that
-	redirectLocation := "/"
-	if nextURL != "" {
-		redirectLocation = nextURL
-	}
+	ctx.JSON(http.StatusOK, globusAuthCallbackRes{NextUrl: nextUrl})
 
-	ctx.Redirect(http.StatusTemporaryRedirect, redirectLocation)
+	// Restart the server
+	config.RestartFlag <- true
 }
 
 // Start Globus OAuth2 code flow for a Globus collection
@@ -551,6 +558,7 @@ func handleGlobusAuth(ctx *gin.Context) {
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectUrl)
 }
 
+// Persist the access token on the disk
 func persistAccessToken(collectionID string, token *oauth2.Token) error {
 	globusFdr := param.Origin_GlobusConfigLocation.GetString()
 	tokBase := filepath.Join(globusFdr, "tokens")
@@ -605,5 +613,10 @@ func refreshGlobusToken(cid string, token *oauth2.Token) (*oauth2.Token, error) 
 	if err := persistAccessToken(cid, token); err != nil {
 		return nil, err
 	}
+
+	if err := updateCollection(cid, &GlobusCollection{RefreshToken: newTok.RefreshToken}); err != nil {
+		return nil, err
+	}
+
 	return newTok, nil
 }

@@ -190,7 +190,7 @@ export default function Home() {
                             <Box display={"flex"} justifyContent={"center"} mb={1}>
                                 <Button
                                     size={"large"}
-                                    href={`/api/v1.0/auth/oauth/login?next_url=${returnUrl ? returnUrl : "/"}`}
+                                    href={`/api/v1.0/auth/oauth/login?nextUrl=${returnUrl ? returnUrl : "/"}`}
                                     variant={"contained"}
                                 >
                                     Login with OAuth

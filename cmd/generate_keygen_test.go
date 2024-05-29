@@ -32,6 +32,7 @@ import (
 
 // Create tmpdir, change cwd, and setup clean up functions
 func setupTestRun(t *testing.T) string {
+	config.ResetIssuerJWKPtr()
 	wd, err := os.Getwd()
 	require.NoError(t, err)
 
@@ -62,8 +63,11 @@ func checkKeys(t *testing.T, privateKey, publicKey string) {
 }
 
 func TestKeygenMain(t *testing.T) {
+	config.ResetIssuerJWKPtr()
+
 	t.Cleanup(func() {
 		viper.Reset()
+		config.ResetIssuerJWKPtr()
 	})
 
 	t.Run("no-args-gen-to-wd", func(t *testing.T) {
