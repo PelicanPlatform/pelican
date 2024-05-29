@@ -449,7 +449,7 @@ func (e *ConnectionSetupError) Is(target error) bool {
 }
 
 func (e *StatusCodeError) Error() string {
-	if int(*e) == 504 {
+	if int(*e) == http.StatusGatewayTimeout {
 		return "cache timed out waiting on origin"
 	}
 	return (*grab.StatusCodeError)(e).Error()
@@ -1585,9 +1585,10 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 				headChan <- checkResults{idx, 0, -1, err}
 				return
 			}
-			// Allow response body to fail to read
+			// Allow response body to fail to read; we are only interested in the headers
+			// of the response, not the contents.
 			if _, err := io.ReadAll(headResponse.Body); err != nil {
-				log.Warningln("Failure when reading the zero-response body:", err)
+				log.Warningln("Failure when reading the one-byte-response body:", err)
 			}
 			headResponse.Body.Close()
 			var age int = -1
@@ -1626,8 +1627,10 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	for ctr := 0; ctr != len(attempts); ctr++ {
 		result := <-headChan
 		if result.err != nil {
+			// If an attempt to contact the remote cache failed, log a message (unless we purposely
+			// canceled the attempt).
 			if !errors.Is(result.err, context.Canceled) && !errors.Is(result.err, context.DeadlineExceeded) {
-				log.Debugf("Failure when doing a GET request against %s to test functionality: %s", attempts[result.idx].Url.String(), result.err.Error())
+				log.Debugf("Failure when doing a GET request to see if %s is functioning: %s", attempts[result.idx].Url.String(), result.err.Error())
 				finished[result.idx] = -1
 			} else if errors.Is(result.err, context.DeadlineExceeded) {
 				log.Debugf("Timed out when querying to see if %s is functioning", attempts[result.idx].Url.String())
@@ -1896,7 +1899,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	req.HTTPRequest.Header.Set("User-Agent", getUserAgent(project))
 	req = req.WithContext(ctx)
 
-	// Test the transfer speed every 5 seconds
+	// Test the transfer speed every 0.5 seconds
 	t := time.NewTicker(500 * time.Millisecond)
 	defer t.Stop()
 
@@ -1941,7 +1944,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	if cacheAge == 0 {
 		log.Debugln("Server at", transfer.Url.Host, "had a cache miss")
-	} else {
+	} else if cacheAge > 0 {
 		log.Debugln("Server at", transfer.Url.Host, "had a cache hit with data age", cacheAge.String())
 	}
 
