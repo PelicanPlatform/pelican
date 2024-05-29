@@ -532,7 +532,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	long := false
 	dironly := false
 	objectonly := false
-	jsn := false
+	asJSON := false
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -548,14 +548,13 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		case identTransferOptionObjectOnly{}:
 			objectonly = option.Value().(bool)
 		case identTransferOptionJson{}:
-			jsn = option.Value().(bool)
+			asJSON = option.Value().(bool)
 		}
 	}
 
 	// If a user specifies dirOnly and objectOnly, this means basic functionality (list both objects and directories) so just remove the flags
 	if dironly && objectonly {
-		dironly = false
-		objectonly = false
+		return errors.New("cannot specify both dironly and object only flags, as they are mutually exclusive")
 	}
 
 	if ns.UseTokenOnRead && token == "" {
@@ -575,7 +574,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	if long {
 		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
 		// If we want JSON format, we append the file info to a slice of fileInfo structs so that we can marshal it
-		if jsn {
+		if asJSON {
 			jsonData, err := json.Marshal(fileInfos)
 			if err != nil {
 				return errors.Wrap(err, "failed to marshal file/directory info to JSON format")
@@ -588,7 +587,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 			fmt.Fprintln(w, info.Name+"\t"+strconv.FormatInt(info.Size, 10)+"\t"+info.ModTime.Format("2006-01-02 15:04:05"))
 		}
 		w.Flush()
-	} else if jsn {
+	} else if asJSON {
 		// In this case, we are not using the long option (-L) and want a JSON format
 		jsonInfo := []string{}
 		for _, info := range fileInfos {

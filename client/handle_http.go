@@ -2499,6 +2499,9 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 				fileInfos = append(fileInfos, file)
 				return fileInfos, nil
 			}
+		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+			// We replace the error from gowebdav with our own because gowebdav returns: "ReadDir /prefix/different-path/: 405" which is not very user friendly
+			return nil, errors.New("405: object listings are not supported by the specified origin")
 		}
 		// Otherwise, a different error occurred and we should return it
 		return nil, errors.Wrap(err, "failed to read remote directory")

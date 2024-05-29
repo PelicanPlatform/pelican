@@ -26,6 +26,8 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -63,6 +65,9 @@ var (
 
 	//go:embed resources/pub-origin-no-directread.yml
 	pubOriginNoDirectRead string
+
+	//go:embed resources/test-https-origin.yml
+	httpsOriginConfig string
 )
 
 // A test that spins up a federation, and tests object get and put
@@ -893,29 +898,13 @@ func TestObjectList(t *testing.T) {
 		}
 	})
 
-	// Test that when both dironly and objectonly are specified, we work as normal
+	// Test that when both dironly and objectonly are specified, we throw an error
 	t.Run("testPelicanObjectLsDirOnlyAndObjectOnly", func(t *testing.T) {
-		// Set path for ls
-		for _, export := range fed.Exports {
-			listURL, r, w, originalStdout, buf := setupObjectListTest(export)
-			go func() {
-				if export.Capabilities.PublicReads {
-					err := client.DoList(fed.Ctx, listURL, client.WithObjectOnlyOption(true), client.WithDirOnlyOption(true))
-					require.NoError(t, err)
-					w.Close()
-				} else {
-					err := client.DoList(fed.Ctx, listURL, client.WithObjectOnlyOption(true), client.WithDirOnlyOption(true), client.WithTokenLocation(tempToken.Name()))
-					require.NoError(t, err)
-					w.Close()
-				}
-			}()
-			_, err = io.Copy(buf, r)
-			require.NoError(t, err)
-			os.Stdout = originalStdout
+		listURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), fed.Exports[0].FederationPrefix)
 
-			assert.Contains(t, buf.String(), "hello_world.txt")
-			assert.Contains(t, buf.String(), "test")
-		}
+		err := client.DoList(fed.Ctx, listURL, client.WithObjectOnlyOption(true), client.WithDirOnlyOption(true))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot specify both dironly and object only flags, as they are mutually exclusive")
 	})
 
 	// Test that long works with JSON format
@@ -987,4 +976,44 @@ func TestObjectList(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "404: object not found")
 	})
+}
+
+// This tests object ls but for an origin that supports listings but with an object store that does not support PROPFIND.
+// We should get a 405 returned. This is a seperate test since we need a completely different origin
+func TestObjectList405Error(t *testing.T) {
+	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
+	server_utils.ResetOriginExports()
+	defer viper.Reset()
+	defer server_utils.ResetOriginExports()
+	err := config.InitClient()
+	require.NoError(t, err)
+
+	// Set up our http backend so that we can return a 405 on a PROPFIND
+	body := "Hello, World!"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" && r.URL.Path == "/test2/hello_world" {
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.WriteHeader(http.StatusOK)
+			return
+		} else if r.Method == "GET" && r.URL.Path == "/test2/hello_world" {
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.WriteHeader(http.StatusPartialContent)
+			_, err := w.Write([]byte(body))
+			require.NoError(t, err)
+			return
+		} else if r.Method == "PROPFIND" && r.URL.Path == "/test2/hello_world" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer srv.Close()
+	viper.Set("Origin.HttpServiceUrl", srv.URL+"/test2")
+
+	config.InitConfig()
+	fed := fed_test_utils.NewFedTest(t, httpsOriginConfig)
+	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
+
+	err = client.DoList(fed.Ctx, "pelican://"+host+"/test/hello_world")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "405: object listings are not supported by the specified origin")
 }
