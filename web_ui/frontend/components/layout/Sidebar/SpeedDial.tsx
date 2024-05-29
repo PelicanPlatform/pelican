@@ -2,8 +2,8 @@
 
 import React, {ReactNode, useState} from "react";
 import {Box, BoxProps, Button, Grow, IconButton, Paper, Tooltip} from "@mui/material";
-import Link from "next/link";
-import {BugReport, Description, HelpOutline} from "@mui/icons-material";
+import Link from '@mui/material/Link';
+import {BugReport, Description, HelpOutline, Api} from "@mui/icons-material";
 import GitHubIcon from "@mui/icons-material/GitHub";
 import {ClickAwayListener} from "@mui/base";
 
@@ -39,7 +39,7 @@ const SpeedDialButton = ({open, order, icon, title, onClick, href, boxProps} : S
                 <Tooltip title={title} arrow>
                     <Paper elevation={2} sx={{ borderRadius: "50%", bgcolor: "#ffffff00"}}>
                         { href != undefined ?
-                            <Link href={href} rel={"noopener noreferrer"} target={"_blank"}>
+                            <Link href={href} underline="none" rel={"noopener noreferrer"} target={"_blank"}>
                                 <IconButton sx={{bgcolor: "primary.light", "&:hover": {bgcolor: "white"}}}>
                                     {icon}
                                 </IconButton>
@@ -66,6 +66,11 @@ const PelicanSpeedDial = () => {
             icon: <Description/>,
             title: 'Documentation',
             href: "https://docs.pelicanplatform.org"
+        },
+        {
+            icon: <Api/>,
+            title: 'Pelican Server API',
+            href: "/api/v1.0/docs"
         },
         {
             icon: <GitHubIcon/>,
