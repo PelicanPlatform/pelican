@@ -19,7 +19,6 @@
 package server_structs
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -49,8 +48,8 @@ type (
 )
 
 const (
-	CachePrefix  ServerPrefix = "/caches"
-	OriginPrefix ServerPrefix = "/origins"
+	CachePrefix  ServerPrefix = "/caches/"
+	OriginPrefix ServerPrefix = "/origins/"
 )
 
 func (s ServerPrefix) String() string {
@@ -63,28 +62,28 @@ func GetCacheNS(host string) string {
 	if host == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s/%s", CachePrefix.String(), host)
+	return CachePrefix.String() + host
 }
 
-// Get the namespace for an origin server, i.e. /caches/<hostname>
+// Get the namespace for an origin server, i.e. /origins/<hostname>
 // It returns an empty string is the host is empty
 func GetOriginNs(host string) string {
 	if host == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s/%s", OriginPrefix.String(), host)
+	return OriginPrefix.String() + host
 }
 
 // Check if a namespace is for a cache, i.e. /caches/<hostname>
 func IsCacheNS(ns string) bool {
-	return strings.HasPrefix(ns, CachePrefix.String()+"/") &&
-		strings.TrimPrefix(ns, CachePrefix.String()+"/") != ""
+	return strings.HasPrefix(ns, CachePrefix.String()) &&
+		strings.TrimPrefix(ns, CachePrefix.String()) != ""
 }
 
 // Check if a namespace is for an origin, i.e. /origins/<hostname>
 func IsOriginNS(ns string) bool {
-	return strings.HasPrefix(ns, OriginPrefix.String()+"/") &&
-		strings.TrimPrefix(ns, OriginPrefix.String()+"/") != ""
+	return strings.HasPrefix(ns, OriginPrefix.String()) &&
+		strings.TrimPrefix(ns, OriginPrefix.String()) != ""
 }
 
 func (ns *NamespaceHolder) SetNamespaceAds(ads []NamespaceAdV2) {

@@ -66,17 +66,23 @@ func validatePrefix(nspath string) (string, error) {
 		result += "/" + component
 	}
 	if result == "/" || len(result) == 0 {
-		return "", errors.New("Cannot register the prefix '/' for an origin")
+		return "", errors.New("Cannot register the prefix '/'")
 	}
 	// Check cache/origin prefxies
+	if strings.TrimPrefix(nspath, server_structs.OriginPrefix.String()) == "" {
+		return "", errors.New("Origin prefix is missing hostname")
+	}
+	if strings.TrimPrefix(nspath, server_structs.CachePrefix.String()) == "" {
+		return "", errors.New("Cache prefix is missing sitename")
+	}
 	if server_structs.IsCacheNS(nspath) {
-		hostname := strings.TrimPrefix(nspath, server_structs.CachePrefix.String())
-		if server_structs.IsCacheNS(hostname) { // /caches/caches/blah
+		hostname := strings.TrimPrefix(nspath, server_structs.CachePrefix.String()) // /caches/blah -> blah
+		if server_structs.IsCacheNS("/" + hostname) {                               // /caches/caches/blah -> caches/blah -> /caches/blah
 			return "", errors.Errorf("Duplicated cache prefix %s", nspath)
 		}
 	} else if server_structs.IsOriginNS(nspath) {
-		hostname := strings.TrimPrefix(nspath, server_structs.OriginPrefix.String())
-		if server_structs.IsOriginNS(hostname) { // /origins/origins/blah
+		hostname := strings.TrimPrefix(nspath, server_structs.OriginPrefix.String()) // /origins/blah -> blah
+		if server_structs.IsOriginNS("/" + hostname) {                               // /origins/origins/blah -> origins/blah -> /origins/blah
 			return "", errors.Errorf("Duplicated origin prefix %s", nspath)
 		}
 	}

@@ -705,12 +705,22 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		}
 	}
 
+	approvalErrMsg := "You may find more information on " + param.Server_ExternalWebUrl.GetString()
+	// Prepare the admin approval error message
+	if param.Director_SupportContactEmail.GetString() != "" && param.Director_SupportContactUrl.GetString() != "" {
+		approvalErrMsg = fmt.Sprintf("Contact %s or visit %s for help.", param.Director_SupportContactEmail.GetString(), param.Director_SupportContactUrl.GetString())
+	} else if param.Director_SupportContactEmail.GetString() != "" {
+		approvalErrMsg = fmt.Sprintf("Contact %s for help.", param.Director_SupportContactEmail.GetString())
+	} else if param.Director_SupportContactUrl.GetString() != "" {
+		approvalErrMsg = fmt.Sprintf("Visit %s for help.", param.Director_SupportContactUrl.GetString())
+	}
+
 	if verifyServer {
 		ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
 		if err != nil {
 			if err == adminApprovalErr {
 				log.Warningf("Failed to verify token. %s %q was not approved", string(sType), adV2.Name)
-				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator", string(sType), ad.Name)})
+				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", string(sType), ad.Name, approvalErrMsg)})
 				return
 			} else {
 				log.Warningln("Failed to verify token:", err)
@@ -740,7 +750,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 			if err != nil {
 				if err == adminApprovalErr {
 					log.Warningf("Failed to verify advertise token. Namespace %q requires administrator approval", namespace.Path)
-					ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("The namespace %q was not approved by an administrator", namespace.Path)})
+					ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("The namespace %q was not approved by an administrator. %s", namespace.Path, approvalErrMsg)})
 					return
 				} else {
 					log.Warningln("Failed to verify token:", err)

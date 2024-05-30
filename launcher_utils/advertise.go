@@ -137,7 +137,8 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	// Fetch site name from the registry, if not, fall back to Xrootd.Sitename.
 	if server.GetServerType().IsEnabled(config.OriginType) {
 		// Note we use Server_ExternalWebUrl as the origin prefix
-		// But caches still use Xrootd_Sitename, which will be changed to Server_ExternalWebUrl in the future
+		// But caches still use Xrootd_Sitename, which will be changed to Server_ExternalWebUrl in
+		// https://github.com/PelicanPlatform/pelican/issues/1351
 		extUrlStr := param.Server_ExternalWebUrl.GetString()
 		extUrl, _ := url.Parse(extUrlStr)
 		// Only use hostname:port
