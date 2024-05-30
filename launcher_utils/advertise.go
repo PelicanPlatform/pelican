@@ -250,9 +250,10 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 			return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(body))
 		}
 		if respErr.ApprovalError {
-			return fmt.Errorf("the director rejected the server advertisement with error: %s. Please contact the administrators of %s for more information.", respErr.Error, fedInfo.NamespaceRegistrationEndpoint)
+			// Removed the "Please contact admin..." section since the director now provides contact information
+			return fmt.Errorf("the director rejected the server advertisement: %s", respErr.Error)
 		}
-		return errors.Errorf("error during director registration: %v", respErr.Error)
+		return errors.Errorf("error during director advertisement: %v", respErr.Error)
 	}
 
 	return nil
