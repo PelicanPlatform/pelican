@@ -49,7 +49,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 
-	te := client.NewTransferEngine(fed.Ctx)
+	te, err := client.NewTransferEngine(fed.Ctx)
+	require.NoError(t, err)
 
 	// Create a token file
 	issuer, err := config.GetServerIssuerURL()
@@ -243,7 +244,8 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 
-	te := client.NewTransferEngine(fed.Ctx)
+	te, err := client.NewTransferEngine(fed.Ctx)
+	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		if err := te.Shutdown(); err != nil {

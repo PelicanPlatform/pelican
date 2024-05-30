@@ -437,27 +437,27 @@ func TestGetNamespacesByFilter(t *testing.T) {
 			ID: 123,
 		}
 
-		_, err := getNamespacesByFilter(filterNsID, "")
+		_, err := getNamespacesByFilter(filterNsID, "", false)
 		require.Error(t, err, "Should return error for filtering against unsupported field ID")
 
 		filterNsCF := server_structs.Namespace{
 			CustomFields: mockCustomFields,
 		}
-		_, err = getNamespacesByFilter(filterNsCF, "")
+		_, err = getNamespacesByFilter(filterNsCF, "", false)
 		require.Error(t, err, "Should return error for filtering against unsupported custom fields")
 
 		filterNsIdentity := server_structs.Namespace{
 			Identity: "someIdentity",
 		}
 
-		_, err = getNamespacesByFilter(filterNsIdentity, "")
+		_, err = getNamespacesByFilter(filterNsIdentity, "", false)
 		require.Error(t, err, "Should return error for filtering against unsupported field Identity")
 
 		filterNsPubKey := server_structs.Namespace{
 			Pubkey: "somePubkey",
 		}
 
-		_, err = getNamespacesByFilter(filterNsPubKey, "")
+		_, err = getNamespacesByFilter(filterNsPubKey, "", false)
 		require.Error(t, err, "Should return error for filtering against unsupported field PubKey")
 
 		// Now, for AdminMetadata filters to work, we need to have a valid object
@@ -481,7 +481,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 			},
 		}
 
-		_, err = getNamespacesByFilter(filterNsCreateAt, "")
+		_, err = getNamespacesByFilter(filterNsCreateAt, "", false)
 		require.Error(t, err, "Should return error for filtering against unsupported field CreatedAt")
 
 		filterNsUpdateAt := server_structs.Namespace{
@@ -490,7 +490,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 			},
 		}
 
-		_, err = getNamespacesByFilter(filterNsUpdateAt, "")
+		_, err = getNamespacesByFilter(filterNsUpdateAt, "", false)
 		require.Error(t, err, "Should return error for filtering against unsupported field UpdatedAt")
 
 		filterNsApproveAt := server_structs.Namespace{
@@ -499,7 +499,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 			},
 		}
 
-		_, err = getNamespacesByFilter(filterNsApproveAt, "")
+		_, err = getNamespacesByFilter(filterNsApproveAt, "", false)
 		require.Error(t, err, "Should return error for filtering against unsupported field ApprovedAt")
 	})
 
@@ -510,12 +510,12 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		require.NoError(t, err)
 
 		filterNs := server_structs.Namespace{}
-		nssOrigins, err := getNamespacesByFilter(filterNs, OriginType)
+		nssOrigins, err := getNamespacesByFilter(filterNs, OriginType, false)
 		require.NoError(t, err)
 		assert.NotEmpty(t, nssOrigins, "Should return non-empty result for OriginType")
 		assert.True(t, compareNamespaces(mockNssWithOrigins, nssOrigins, true), "Returned nssOrigins does not match")
 
-		nssCaches, err := getNamespacesByFilter(filterNs, CacheType)
+		nssCaches, err := getNamespacesByFilter(filterNs, CacheType, false)
 		require.NoError(t, err)
 		assert.NotEmpty(t, nssCaches, "Should return non-empty result for CacheType")
 		assert.True(t, compareNamespaces(mockNssWithCaches, nssCaches, true))
@@ -543,7 +543,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 			},
 		}
 
-		namespaces, err := getNamespacesByFilter(filterNs, "")
+		namespaces, err := getNamespacesByFilter(filterNs, "", false)
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for Description")
 
@@ -552,7 +552,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 				SiteName: "Madison",
 			},
 		}
-		namespaces, err = getNamespacesByFilter(filterNs, "")
+		namespaces, err = getNamespacesByFilter(filterNs, "", false)
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for SiteName")
 
@@ -561,7 +561,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 				Institution: "123456",
 			},
 		}
-		namespaces, err = getNamespacesByFilter(filterNs, "")
+		namespaces, err = getNamespacesByFilter(filterNs, "", false)
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for Institution")
 
@@ -570,7 +570,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 				SecurityContactUserID: "contactUserID",
 			},
 		}
-		namespaces, err = getNamespacesByFilter(filterNs, "")
+		namespaces, err = getNamespacesByFilter(filterNs, "", false)
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for SecurityContactUserID")
 
@@ -579,7 +579,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 				ApproverID: "mockApproverID",
 			},
 		}
-		namespaces, err = getNamespacesByFilter(filterNs, "")
+		namespaces, err = getNamespacesByFilter(filterNs, "", false)
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for ApproverID")
 
@@ -588,7 +588,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 				Status: server_structs.RegPending,
 			},
 		}
-		namespaces, err = getNamespacesByFilter(filterNs, "")
+		namespaces, err = getNamespacesByFilter(filterNs, "", false)
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for Status")
 
@@ -597,7 +597,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 				UserID: "mockUserID",
 			},
 		}
-		namespaces, err = getNamespacesByFilter(filterNs, "")
+		namespaces, err = getNamespacesByFilter(filterNs, "", false)
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for UserID")
 	})
@@ -625,7 +625,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 				Status:                server_structs.RegPending,
 			},
 		}
-		namespaces, err := getNamespacesByFilter(filterNs, "")
+		namespaces, err := getNamespacesByFilter(filterNs, "", false)
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for non-empty database without condition")
 	})
@@ -648,7 +648,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		require.NoError(t, err)
 
 		filterNs := mockNs
-		namespaces, err := getNamespacesByFilter(filterNs, "")
+		namespaces, err := getNamespacesByFilter(filterNs, "", false)
 		require.NoError(t, err)
 		assert.NotEmpty(t, namespaces, "Should return non-empty result for non-empty database without condition")
 	})
@@ -672,18 +672,54 @@ func TestGetNamespacesByFilter(t *testing.T) {
 
 		filterNs := mockNs
 		filterNs.AdminMetadata.Status = server_structs.RegDenied
-		namespaces, err := getNamespacesByFilter(filterNs, "")
+		namespaces, err := getNamespacesByFilter(filterNs, "", false)
 		require.NoError(t, err)
-		assert.Empty(t, namespaces, "Should return non-empty result for non-empty database without condition")
+		assert.Empty(t, namespaces)
 	})
 
 	t.Run("empty-db-returns-empty-results", func(t *testing.T) {
 		resetNamespaceDB(t)
 
 		filterNs := server_structs.Namespace{}
-		namespaces, err := getNamespacesByFilter(filterNs, "")
+		namespaces, err := getNamespacesByFilter(filterNs, "", false)
 		require.NoError(t, err)
 		assert.Empty(t, namespaces, "Should return empty result for empty database")
+	})
+
+	t.Run("filter-legacy-result", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockLeg := server_structs.Namespace{
+			Prefix: "/legacy/1",
+		}
+		mockNs := server_structs.Namespace{
+			Prefix: "/bar",
+			AdminMetadata: server_structs.AdminMetadata{
+				Description:           "Mock description",
+				UserID:                "mockUserID",
+				SiteName:              "UW-Madison",
+				Institution:           "123456",
+				SecurityContactUserID: "contactUserID",
+				ApproverID:            "mockApproverID",
+				Status:                server_structs.RegPending,
+			},
+		}
+		err := insertMockDBData([]server_structs.Namespace{mockLeg, mockNs})
+		require.NoError(t, err)
+
+		filterNs := server_structs.Namespace{}
+		// Filter out legacy namespaces
+		namespaces, err := getNamespacesByFilter(filterNs, "", false)
+		require.NoError(t, err)
+		assert.Len(t, namespaces, 1)
+		assert.Equal(t, mockNs.Prefix, namespaces[0].Prefix)
+		assert.EqualValues(t, mockNs.AdminMetadata, namespaces[0].AdminMetadata)
+
+		// Want legacy namespaces
+		namespaces, err = getNamespacesByFilter(filterNs, "", true)
+		require.NoError(t, err)
+		assert.Len(t, namespaces, 1)
+		assert.Equal(t, mockLeg.Prefix, namespaces[0].Prefix)
+		assert.EqualValues(t, mockLeg.AdminMetadata, namespaces[0].AdminMetadata)
 	})
 }
 

@@ -207,6 +207,7 @@ type Config struct {
 		StorageType string
 		Url string
 		XRootDPrefix string
+		XRootServiceUrl string
 	}
 	Plugin struct {
 		Token string
@@ -482,6 +483,7 @@ type configWithType struct {
 		StorageType struct { Type string; Value string }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
+		XRootServiceUrl struct { Type string; Value string }
 	}
 	Plugin struct {
 		Token struct { Type string; Value string }

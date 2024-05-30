@@ -182,7 +182,11 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return 0, err
 	}
 
-	te := NewTransferEngine(ctx)
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return 0, err
+	}
+
 	defer func() {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
@@ -509,7 +513,11 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		return nil, err
 	}
 
-	te := NewTransferEngine(ctx)
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	defer func() {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
@@ -607,7 +615,11 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 
 	success := false
 
-	te := NewTransferEngine(ctx)
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	defer func() {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
@@ -776,7 +788,11 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	success := false
 	var downloaded int64 = 0
 
-	te := NewTransferEngine(ctx)
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	defer func() {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)

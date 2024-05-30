@@ -41,11 +41,11 @@ type (
 		StoragePrefix    string `json:"storage_prefix"`
 		FederationPrefix string `json:"federation_prefix"`
 
-		// Export fields specific to S3. Other things like
+		// Export fields specific to S3 backend. Other things like
 		// S3ServiceUrl, S3Region, etc are kept top-level in the config
-		S3Bucket        string `json:"s3_bucket"`
-		S3AccessKeyfile string `json:"s3_access_keyfile"`
-		S3SecretKeyfile string `json:"s3_secret_keyfile"`
+		S3Bucket        string `json:"s3_bucket,omitempty"`
+		S3AccessKeyfile string `json:"s3_access_keyfile,omitempty"`
+		S3SecretKeyfile string `json:"s3_secret_keyfile,omitempty"`
 
 		// Capabilities for the export
 		Capabilities     server_structs.Capabilities `json:"capabilities"`
@@ -56,14 +56,18 @@ type (
 )
 
 var (
-	ErrUnknownOriginStorageType = errors.New("unknown origin storage type")
-	ErrInvalidOriginConfig      = errors.New("invalid origin configuration")
+	ErrUnknownOriginStorageType        = errors.New("unknown origin storage type")
+	ErrInvalidOriginConfig             = errors.New("invalid origin configuration")
+	WarnExportVolumes           string = "Passing export volumes via -v at the command line causes Pelican to ignore exports configured via the yaml file. " +
+		"However, namespaces exported this way will inherit the Origin.Enable* settings from your configuration file. " +
+		"For finer-grained control of each export, please configure them in your pelican.yaml file via Origin.Exports"
 )
 
 const (
 	OriginStoragePosix OriginStorageType = "posix"
 	OriginStorageS3    OriginStorageType = "s3"
 	OriginStorageHTTPS OriginStorageType = "https"
+	OriginStorageXRoot OriginStorageType = "xroot" // Not meant to be extensible, but facilitates legacy OSDF --> Pelican transition
 )
 
 // Convert a string to an OriginStorageType
@@ -75,8 +79,10 @@ func ParseOriginStorageType(storageType string) (ost OriginStorageType, err erro
 		ost = OriginStorageHTTPS
 	case string(OriginStoragePosix):
 		ost = OriginStoragePosix
+	case string(OriginStorageXRoot):
+		ost = OriginStorageXRoot
 	default:
-		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, s3, and https)", storageType)
+		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, s3, https, and xroot)", storageType)
 	}
 	return
 }
@@ -316,9 +322,7 @@ func GetOriginExports() ([]OriginExport, error) {
 				viper.Set("Origin.EnableReads", tmpExports[0].Capabilities.Reads)
 			}
 
-			log.Warningln("Passing export volumes via -v at the command line causes Pelican to ignore exports configured via the yaml file")
-			log.Warningln("However, namespaces exported this way will inherit the Origin.Enable* settings from your configuration")
-			log.Warningln("For finer-grained control of each export, please configure them in your pelican.yaml file via Origin.Exports")
+			log.Warningln(WarnExportVolumes)
 			originExports = tmpExports
 			return originExports, nil
 		}
@@ -425,9 +429,7 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 				viper.Set("Origin.EnableReads", originExports[0].Capabilities.Reads)
 			}
 
-			log.Warningln("Passing export volumes via -v at the command line causes Pelican to ignore exports configured via the yaml file")
-			log.Warningln("However, namespaces exported this way will inherit the Origin.Enable* settings from your configuration")
-			log.Warningln("For finer-grained control of each export, please configure them in your pelican.yaml file")
+			log.Warningln(WarnExportVolumes)
 			return originExports, nil
 		}
 
@@ -484,6 +486,115 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 				S3SecretKeyfile:  param.Origin_S3SecretKeyfile.GetString(),
 				Capabilities:     capabilities,
 			}
+			viper.Set("Origin.EnableReads", capabilities.Reads)
+		}
+	case OriginStorageXRoot:
+		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
+			log.Infoln("Configuring exports from export volumes passed via command line or via yaml")
+			// This storage backend only works with unauthenticated origins. Check that now.
+			if !capabilities.PublicReads {
+				return nil, errors.Wrap(ErrInvalidOriginConfig, "the xroot backend requires that Origin.EnablePublicReads is true")
+			}
+
+			volumes := param.Origin_ExportVolumes.GetStringSlice()
+			tmpExports := make([]OriginExport, len(volumes))
+			for idx, volume := range volumes {
+				storagePrefix := filepath.Clean(volume)
+				federationPrefix := filepath.Clean(volume)
+				volumeMountInfo := strings.SplitN(volume, ":", 2)
+				if len(volumeMountInfo) == 2 {
+					storagePrefix = filepath.Clean(volumeMountInfo[0])
+					federationPrefix = filepath.Clean(volumeMountInfo[1])
+				}
+
+				if storagePrefix != federationPrefix {
+					return nil, errors.Wrapf(ErrInvalidOriginConfig, "federation and storage prefixes must be the same for xroot backends, but you "+
+						"provided %s and %s", storagePrefix, federationPrefix)
+				}
+
+				if err = validateExportPaths(storagePrefix, federationPrefix); err != nil {
+					return nil, err
+				}
+
+				originExport := OriginExport{
+					FederationPrefix: federationPrefix,
+					StoragePrefix:    storagePrefix,
+					Capabilities:     capabilities,
+				}
+				tmpExports[idx] = originExport
+			}
+
+			// If we're only exporting one namespace, we can set the internal Origin.FederationPrefix and Origin.StoragePrefix
+			if len(volumes) == 1 {
+				viper.Set("Origin.FederationPrefix", tmpExports[0].FederationPrefix)
+				viper.Set("Origin.StoragePrefix", tmpExports[0].StoragePrefix)
+			}
+
+			log.Warningln(WarnExportVolumes)
+			originExports = tmpExports
+
+			return originExports, nil
+		}
+
+		if param.Origin_Exports.IsSet() {
+			log.Infoln("Configuring multi-exports from origin Exports block in config file")
+			var tmpExports []OriginExport
+			if err := viper.UnmarshalKey("Origin.Exports", &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
+				return nil, err
+			}
+			if len(tmpExports) == 0 {
+				err := errors.New("Origin.Exports is defined, but no exports were found")
+				return nil, err
+			} else if len(tmpExports) == 1 {
+				// Again, several viper variables might not be set in config. We set them here so that
+				// sections of code assuming a single export can make use of them.
+				capabilities := tmpExports[0].Capabilities
+				reads := capabilities.Reads || capabilities.PublicReads
+				viper.Set("Origin.FederationPrefix", (tmpExports)[0].FederationPrefix)
+				viper.Set("Origin.StoragePrefix", (tmpExports)[0].StoragePrefix)
+				viper.Set("Origin.EnableReads", reads)
+				viper.Set("Origin.EnablePublicReads", capabilities.PublicReads)
+				viper.Set("Origin.EnableWrites", capabilities.Writes)
+				viper.Set("Origin.EnableListings", capabilities.Listings)
+				viper.Set("Origin.EnableDirectReads", capabilities.DirectReads)
+			}
+			for _, export := range tmpExports {
+				if !export.Capabilities.PublicReads {
+					return nil, errors.Wrapf(ErrInvalidOriginConfig, "all exports from an xroot backend must have the PublicReads capability, but the export with FederationPrefix "+
+						"'%s' did not", export.FederationPrefix)
+				}
+				// Paths must be the same for the XRoot backend
+				if export.StoragePrefix != export.FederationPrefix {
+					return nil, errors.Wrapf(ErrInvalidOriginConfig, "federation and storage prefixes must be the same for xroot backends, but you "+
+						"provided %s and %s", export.StoragePrefix, export.FederationPrefix)
+				}
+
+				if err = validateExportPaths(export.StoragePrefix, export.FederationPrefix); err != nil {
+					return nil, err
+				}
+			}
+			originExports = tmpExports
+			return originExports, nil
+		} else {
+			log.Infoln("Configuring single-export origin")
+			if !capabilities.PublicReads {
+				return nil, errors.Wrap(ErrInvalidOriginConfig, "the xroot backend requires the PublicReads capability, but does not have it")
+			}
+
+			originExport = OriginExport{
+				FederationPrefix: param.Origin_FederationPrefix.GetString(),
+				StoragePrefix:    param.Origin_StoragePrefix.GetString(),
+				Capabilities:     capabilities,
+			}
+			if originExport.StoragePrefix != originExport.FederationPrefix {
+				return nil, errors.Wrapf(ErrInvalidOriginConfig, "federation and storage prefixes must be the same for xroot backends, but you "+
+					"provided %s and %s", originExport.StoragePrefix, originExport.FederationPrefix)
+			}
+
+			if err = validateExportPaths(originExport.StoragePrefix, originExport.FederationPrefix); err != nil {
+				return nil, err
+			}
+
 			viper.Set("Origin.EnableReads", capabilities.Reads)
 		}
 	}

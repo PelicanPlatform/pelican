@@ -300,7 +300,7 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 // For filterNs.AdminMetadata.Description and filterNs.AdminMetadata.SiteName,
 // the string will be matched using `strings.Contains`. This is too mimic a SQL style `like` match.
 // The rest of the AdminMetadata fields is matched by `==`
-func getNamespacesByFilter(filterNs server_structs.Namespace, serverType ServerType) ([]*server_structs.Namespace, error) {
+func getNamespacesByFilter(filterNs server_structs.Namespace, serverType ServerType, legacy bool) ([]server_structs.Namespace, error) {
 	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE 1=1 `
 	if serverType == CacheType {
 		// Refer to the cache prefix name in cmd/cache_serve
@@ -336,8 +336,20 @@ func getNamespacesByFilter(filterNs server_structs.Namespace, serverType ServerT
 		return nil, err
 	}
 
-	namespacesOut := []*server_structs.Namespace{}
+	namespacesOut := []server_structs.Namespace{}
 	for idx, ns := range namespacesIn {
+		// If we want legacy registration and the query result doesn't have AdminMetadata, put it in the return value
+		if legacy {
+			if ns.AdminMetadata.Equal(server_structs.AdminMetadata{}) {
+				namespacesOut = append(namespacesOut, ns)
+				continue
+			} else {
+				continue
+			}
+			// If we don't want legacy namespace and the query result does not have AdminMetadata, skip it
+		} else if !legacy && ns.AdminMetadata.Equal(server_structs.AdminMetadata{}) {
+			continue
+		}
 		if filterNs.AdminMetadata.UserID != "" && filterNs.AdminMetadata.UserID != ns.AdminMetadata.UserID {
 			continue
 		}
@@ -366,7 +378,7 @@ func getNamespacesByFilter(filterNs server_structs.Namespace, serverType ServerT
 			continue
 		}
 		// Congrats! You passed all the filter check and this namespace matches what you want
-		namespacesOut = append(namespacesOut, &namespacesIn[idx])
+		namespacesOut = append(namespacesOut, namespacesIn[idx])
 	}
 	return namespacesOut, nil
 }
