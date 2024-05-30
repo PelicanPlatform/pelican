@@ -563,7 +563,7 @@ func TestDirectorRegistration(t *testing.T) {
 		token = generateReadToken(pKey, "/foo/bar", isurl.String())
 		// Since we didn't set up any real server for the test
 		// skip the stat for get a 307
-		setupRedirect(c, r, "/foo/bar/baz?skipStat", token)
+		setupRedirect(c, r, "/foo/bar/baz?skipstat", token)
 
 		r.ServeHTTP(w, c.Request)
 
