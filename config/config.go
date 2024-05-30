@@ -177,7 +177,7 @@ var (
 
 	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 
-	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
+	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "timeout when discovering federation metadata from url"}
 
 	watermarkUnits = []byte{'k', 'm', 'g', 't'}
 	validPrefixes  = map[ConfigPrefix]bool{
@@ -584,6 +584,9 @@ func discoverFederationImpl(ctx context.Context) (fedInfo FederationDiscovery, e
 	} else {
 		metadata, err = DiscoverUrlFederation(ctx, federationStr)
 		if err != nil {
+			if errors.As(err, &MetadataTimeoutErr) {
+				return
+			}
 			err = errors.Wrapf(err, "invalid federation value (%s)", federationStr)
 			return
 		}

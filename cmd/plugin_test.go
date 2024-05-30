@@ -481,7 +481,7 @@ func TestFailTransfer(t *testing.T) {
 		transferError, _ := result.Get("TransferError")
 		transferErrorStr, ok := transferError.(string)
 		require.True(t, ok)
-		assert.Equal(t, "test error", transferErrorStr)
+		assert.Contains(t, transferErrorStr, "Pelican Client Error: test error")
 	})
 
 	// Test when we call failTransfer with a download
@@ -524,7 +524,7 @@ func TestFailTransfer(t *testing.T) {
 		transferError, _ := result.Get("TransferError")
 		transferErrorStr, ok := transferError.(string)
 		require.True(t, ok)
-		assert.Equal(t, "test error", transferErrorStr)
+		assert.Contains(t, transferErrorStr, "Pelican Client Error: test error")
 	})
 
 	// Test when we call failTransfer with a retryable error
@@ -567,7 +567,7 @@ func TestFailTransfer(t *testing.T) {
 		transferError, _ := result.Get("TransferError")
 		transferErrorStr, ok := transferError.(string)
 		require.True(t, ok)
-		assert.Equal(t, "cancelled transfer, too slow.  Detected speed: 0 B/s, total transferred: 0 B, total transfer time: 0s", transferErrorStr)
+		assert.Contains(t, transferErrorStr, "Pelican Client Error: cancelled transfer, too slow.  Detected speed: 0 B/s, total transferred: 0 B, total transfer time: 0s")
 	})
 }
 
