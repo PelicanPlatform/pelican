@@ -186,6 +186,8 @@ var (
 		StashPrefix:   true,
 		"":            true,
 	}
+
+	clientInitialized = false
 )
 
 // This function creates a new MetadataError by wrapping the previous error
@@ -1427,6 +1429,16 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	return nil
 }
 
+// This function checks if initClient has been called
+func IsClientInitialized() bool {
+	return clientInitialized
+}
+
+// This function resets the clientInitialized variable (mainly used for testing)
+func ResetClientInitialized() {
+	clientInitialized = false
+}
+
 func InitClient() error {
 	if err := initConfigDir(); err != nil {
 		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
@@ -1529,6 +1541,9 @@ func InitClient() error {
 		viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
 	}
 
+	// Set our default worker count
+	viper.SetDefault("Client.WorkerCount", 5)
+
 	// The transport will automatically trust this CA cert file.
 	// Even though it's a "server" setting, it's useful to have this in the client when testing
 	// against a local self-signed server.
@@ -1552,6 +1567,8 @@ func InitClient() error {
 
 	// Sets (or resets) the deferred federation lookup
 	fedDiscoveryOnce = &sync.Once{}
+
+	clientInitialized = true
 
 	return nil
 }

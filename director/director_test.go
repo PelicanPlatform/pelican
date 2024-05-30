@@ -46,6 +46,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -644,33 +645,61 @@ func TestGetAuthzEscaped(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	req.Header.Set("Authorization", "tokenstring")
-	escapedToken := getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken := getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring", escapedToken)
 
 	// Test passing a token via query with no bearer prefix
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
-	escapedToken = getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken = getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring", escapedToken)
 
 	// Test passing the token via header with Bearer prefix
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer tokenstring")
-	escapedToken = getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken = getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring", escapedToken)
 
 	// Test passing the token via URL with Bearer prefix and + encoded space
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer+tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
-	escapedToken = getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken = getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring", escapedToken)
 
 	// Finally, the same test as before, but test with %20 encoded space
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer%20tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
-	escapedToken = getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken = getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring", escapedToken)
+}
+
+func TestGetRequestParameters(t *testing.T) {
+	// Test passing a token & timeout via header
+	req, err := http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	req.Header.Set("Authorization", "tokenstring")
+	req.Header.Set("X-Pelican-Timeout", "3s")
+	escapedParam := getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring&pelican.timeout=3s", escapedParam)
+
+	// Test passing a timeout via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?pelican.timeout=3s", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	assert.Equal(t, "pelican.timeout=3s", escapedParam)
+
+	// Test passing nothing
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	assert.Equal(t, "", escapedParam)
+
+	// Test passing the token & timeout via URL query string
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?pelican.timeout=3s&authz=tokenstring", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	assert.Equal(t, "authz=tokenstring&pelican.timeout=3s", escapedParam)
 }
 
 func TestDiscoverOriginCache(t *testing.T) {
@@ -1112,6 +1141,50 @@ func TestRedirects(t *testing.T) {
 		assert.NotEmpty(t, w.Header().Get("Location"))
 		assert.Equal(t, "https://example.com/api/v1.0/director/healthTest/pelican/monitoring/test.txt", w.Header().Get("Location"))
 	})
+
+	t.Run("redirect-link-header-length", func(t *testing.T) {
+		viper.Reset()
+		serverAds.DeleteAll()
+		t.Cleanup(func() {
+			viper.Reset()
+			serverAds.DeleteAll()
+		})
+
+		// Use ads generated via mock topology for generating list of caches
+		topoServer := httptest.NewServer(http.HandlerFunc(JSONHandler))
+		defer topoServer.Close()
+		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+		viper.Set("Director.CacheSortMethod", "random")
+		// Populate ads for redirectToCache to use
+		err := AdvertiseOSDF()
+		require.NoError(t, err)
+
+		req, _ := http.NewRequest("GET", "/my/server", nil)
+		// Provide a few things so that redirectToCache doesn't choke
+		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = req
+
+		redirectToCache(c)
+		// We should have a random collection of 6 caches in the header
+		assert.Contains(t, c.Writer.Header().Get("Link"), "pri=6")
+		// We should not have a 7th cache in the header
+		assert.NotContains(t, c.Writer.Header().Get("Link"), "pri=7")
+
+		// Make sure we can still get a cache list with a smaller number of caches
+		req, _ = http.NewRequest("GET", "/my/server/2", nil)
+		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+		c.Request = req
+
+		redirectToCache(c)
+		assert.Contains(t, c.Writer.Header().Get("Link"), "pri=1")
+		assert.NotContains(t, c.Writer.Header().Get("Link"), "pri=2")
+	})
+
 }
 
 func TestGetHealthTestFile(t *testing.T) {
@@ -1159,7 +1232,7 @@ func TestGetHealthTestFile(t *testing.T) {
 
 		bytes, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
-		assert.Equal(t, testFileContent+"testfile\n", string(bytes))
+		assert.Equal(t, server_utils.DirectorTestBody+"\n", string(bytes))
 	})
 }
 

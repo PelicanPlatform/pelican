@@ -180,7 +180,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 			var err error
 			if serverAd.Type == server_structs.OriginType {
 				fileTests := server_utils.TestFileTransferImpl{}
-				ok, err = fileTests.RunTests(ctx, serverUrl, serverUrl, "", server_utils.DirectorFileTest)
+				ok, err = fileTests.RunTests(ctx, serverUrl, serverUrl, "", server_utils.DirectorTest)
 			} else if serverAd.Type == server_structs.CacheType {
 				err = runCacheTest(ctx, serverAd.URL)
 			}

@@ -1062,7 +1062,7 @@ func HandleSummaryPacket(packet []byte) error {
 	correctedData := re.ReplaceAll(packet, []byte(`</hits>`))
 
 	if err := xml.Unmarshal(correctedData, &summaryStats); err != nil {
-		return errors.Wrap(err, "error unmarshaling summary pacaket")
+		return errors.Wrap(err, "error unmarshaling summary packet")
 	}
 
 	log.Debug("Received a summary statistics packet")
