@@ -182,7 +182,7 @@ func queryOrigins(ctx *gin.Context) {
 		})
 		return
 	}
-	// qr.Status == queryFailed
+	// This is the case where qr.Status == queryFailed
 	if qr.ErrorType == "" {
 		log.Errorf("A failed stat call doesn't contain error: %#v", qr)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{

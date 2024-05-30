@@ -383,7 +383,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
 
 	// Skip the stat check for object availability
-	skipStat := ginCtx.Request.URL.Query().Has("skipStat")
+	skipStat := ginCtx.Request.URL.Query().Has("skipstat")
 
 	// /pelican/monitoring is the path for director-based health test
 	// where we have /director/healthTest API to mock a file for the cache to get
@@ -426,11 +426,13 @@ func redirectToOrigin(ginCtx *gin.Context) {
 			withOriginAds(originAds), WithToken(reqParams.Get("authz")))
 		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
 
+		// For successful response, we got a list of URL to access the object.
+		// We will use the host of the object url to match the URL field in originAds
 		if qr.Status == querySuccessful {
 			for _, obj := range qr.Objects {
-				serverUrl := obj.URL.Host
+				serverHost := obj.URL.Host
 				for _, oAd := range originAds {
-					if oAd.URL.Host == serverUrl {
+					if oAd.URL.Host == serverHost {
 						availableOriginAds = append(availableOriginAds, oAd)
 					}
 				}
@@ -447,6 +449,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				return
 			}
 			// For denied servers, append them to availableOriginAds
+			// The qr.DeniedServers is a list of AuthURLs of servers that respond with 403
+			// Here, we need to match against the AuthURL field of originAds
 			for _, ds := range qr.DeniedServers {
 				for _, oAd := range originAds {
 					if oAd.AuthURL.String() == ds {

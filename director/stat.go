@@ -260,28 +260,15 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 	ads := []server_structs.ServerAd{}
 
 	// Only fetch origin/cacheAds if it's not provided AND the sType has the corresponding server type
-	if sType.IsEnabled(config.OriginType) && !sType.IsEnabled(config.CacheType) { // Origin only
+	if sType.IsEnabled(config.OriginType) {
 		if !cfg.originAdsProvided {
 			_, originAds, _ := getAdsForPath(objectName)
 			ads = append(ads, originAds...)
 		} else {
 			ads = append(ads, cfg.originAds...)
 		}
-	} else if sType.IsEnabled(config.CacheType) && !sType.IsEnabled(config.OriginType) { // Cache only
-		if !cfg.cacheAdsProvided {
-			_, _, cacheAds := getAdsForPath(objectName)
-			ads = append(ads, cacheAds...)
-		} else {
-			ads = append(ads, cfg.cacheAds...)
-		}
-	} else if sType.IsEnabled(config.CacheType) && sType.IsEnabled(config.OriginType) {
-		if !cfg.originAdsProvided {
-			_, originAds, _ := getAdsForPath(objectName)
-			ads = append(ads, originAds...)
-		} else {
-			ads = append(ads, cfg.originAds...)
-		}
-
+	}
+	if sType.IsEnabled(config.CacheType) {
 		if !cfg.cacheAdsProvided {
 			_, _, cacheAds := getAdsForPath(objectName)
 			ads = append(ads, cacheAds...)
