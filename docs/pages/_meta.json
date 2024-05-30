@@ -7,5 +7,6 @@
   "serving_a_federation":"Serving a Federation",
   "serving_a_cache":"Serving a Cache",
   "prometheus": "Prometheus",
-  "grafana": "Grafana"
+  "grafana": "Grafana",
+  "api-docs": "API Documentation"
 }
