@@ -650,32 +650,33 @@ func TestGetAuthzEscaped(t *testing.T) {
 	assert.NoError(t, err)
 	req.Header.Set("Authorization", "tokenstring")
 	escapedToken := getRequestParameters(req)
-	assert.Equal(t, "authz=tokenstring", escapedToken)
+	expected := url.Values{"authz": []string{"tokenstring"}}
+	assert.EqualValues(t, expected, escapedToken)
 
 	// Test passing a token via query with no bearer prefix
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	escapedToken = getRequestParameters(req)
-	assert.Equal(t, "authz=tokenstring", escapedToken)
+	assert.EqualValues(t, expected, escapedToken)
 
 	// Test passing the token via header with Bearer prefix
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer tokenstring")
 	escapedToken = getRequestParameters(req)
-	assert.Equal(t, "authz=tokenstring", escapedToken)
+	assert.EqualValues(t, expected, escapedToken)
 
 	// Test passing the token via URL with Bearer prefix and + encoded space
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer+tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	escapedToken = getRequestParameters(req)
-	assert.Equal(t, "authz=tokenstring", escapedToken)
+	assert.EqualValues(t, expected, escapedToken)
 
 	// Finally, the same test as before, but test with %20 encoded space
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer%20tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	escapedToken = getRequestParameters(req)
-	assert.Equal(t, "authz=tokenstring", escapedToken)
+	assert.EqualValues(t, expected, escapedToken)
 }
 
 func TestGetRequestParameters(t *testing.T) {
@@ -685,25 +686,29 @@ func TestGetRequestParameters(t *testing.T) {
 	req.Header.Set("Authorization", "tokenstring")
 	req.Header.Set("X-Pelican-Timeout", "3s")
 	escapedParam := getRequestParameters(req)
-	assert.Equal(t, "authz=tokenstring&pelican.timeout=3s", escapedParam)
+	expected := url.Values{"authz": []string{"tokenstring"}, "pelican.timeout": []string{"3s"}}
+	assert.EqualValues(t, expected, escapedParam)
 
 	// Test passing a timeout via query
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?pelican.timeout=3s", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	escapedParam = getRequestParameters(req)
-	assert.Equal(t, "pelican.timeout=3s", escapedParam)
+	expected = url.Values{"pelican.timeout": []string{"3s"}}
+	assert.EqualValues(t, expected, escapedParam)
 
 	// Test passing nothing
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	escapedParam = getRequestParameters(req)
-	assert.Equal(t, "", escapedParam)
+	expected = url.Values{}
+	assert.EqualValues(t, expected, escapedParam)
 
 	// Test passing the token & timeout via URL query string
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?pelican.timeout=3s&authz=tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	escapedParam = getRequestParameters(req)
-	assert.Equal(t, "authz=tokenstring&pelican.timeout=3s", escapedParam)
+	expected = url.Values{"authz": []string{"tokenstring"}, "pelican.timeout": []string{"3s"}}
+	assert.EqualValues(t, expected, escapedParam)
 }
 
 func TestDiscoverOriginCache(t *testing.T) {
@@ -1483,5 +1488,44 @@ func TestGetRedirectUrl(t *testing.T) {
 
 		url = getRedirectURL("/some/path", adWithTopoNotSet, true)
 		assert.Equal(t, "https://fake-ad.org:8444/some/path", url.String())
+	})
+}
+
+func TestGetFinalRedirectURL(t *testing.T) {
+	t.Run("url-without-params", func(t *testing.T) {
+		base := url.URL{Scheme: "https", Host: "example.org:8444"}
+		query := url.Values{"key1": []string{"val1"}}
+		get := getFinalRedirectURL(base, query)
+		assert.Equal(t, "https://example.org:8444?key1=val1", get)
+	})
+
+	t.Run("url-without-params-and-no-passed-params", func(t *testing.T) {
+		base := url.URL{Scheme: "https", Host: "example.org:8444"}
+		query := url.Values{}
+		get := getFinalRedirectURL(base, query)
+		assert.Equal(t, "https://example.org:8444", get)
+	})
+
+	t.Run("url-with-params-and-no-passed-params", func(t *testing.T) {
+		base := url.URL{Scheme: "https", Host: "example.org:8444", RawQuery: "key1=val1&key2=val2"}
+		query := url.Values{}
+		get := getFinalRedirectURL(base, query)
+		assert.Equal(t, "https://example.org:8444?key1=val1&key2=val2", get)
+	})
+
+	t.Run("url-with-params-and-with-params", func(t *testing.T) {
+		base := url.URL{Scheme: "https", Host: "example.org:8444", RawQuery: "key1=val1&key2=val2"}
+		query := url.Values{"pkey1": []string{"pval1"}, "pkey2": []string{"pval2"}}
+		get := getFinalRedirectURL(base, query)
+		assert.Equal(t, "https://example.org:8444?key1=val1&key2=val2&pkey1=pval1&pkey2=pval2", get)
+	})
+
+	t.Run("escape-passed-param", func(t *testing.T) {
+		rawVal := "https://origin.org:8444/api/v1.0?query=value"
+		encodedVal := url.QueryEscape(rawVal)
+		base := url.URL{Scheme: "https", Host: "example.org:8444", RawQuery: "key1=val1&key2=val2"}
+		query := url.Values{"raw": []string{rawVal}}
+		get := getFinalRedirectURL(base, query)
+		assert.Equal(t, "https://example.org:8444?key1=val1&key2=val2&raw="+encodedVal, get)
 	})
 }

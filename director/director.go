@@ -155,9 +155,7 @@ func getLinkDepth(filepath, prefix string) (int, error) {
 }
 
 func getRequestParameters(req *http.Request) (requestParams url.Values) {
-	tmpReq := url.URL{}
-	requestParams = tmpReq.Query()
-
+	requestParams = url.Values{}
 	authz := ""
 	if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
 		authz = authzQuery[0]
