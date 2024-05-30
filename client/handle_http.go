@@ -1540,9 +1540,19 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 		tUrl := *transferEndpoint.Url
 		tUrl.Path = path
 
-		go func(idx int, tUrl string) {
+		go func(idx int, tUrl *url.URL) {
+			// If the scheme is unix://, it is a local cache and therefore, we should always try this cache first and skip the HEAD request (since it will fail)
+			if tUrl.Scheme == "unix" {
+				headChan <- struct {
+					idx  int
+					size uint64
+					err  error
+				}{idx, 0, nil}
+				return
+			}
+
 			headClient := &http.Client{Transport: transport}
-			headRequest, _ := http.NewRequestWithContext(ctx, http.MethodHead, tUrl, nil)
+			headRequest, _ := http.NewRequestWithContext(ctx, http.MethodHead, tUrl.String(), nil)
 			var headResponse *http.Response
 			headResponse, err := headClient.Do(headRequest)
 			if err != nil {
@@ -1569,7 +1579,7 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 				size uint64
 				err  error
 			}{idx, uint64(size), err}
-		}(idx, tUrl.String())
+		}(idx, &tUrl)
 	}
 	// 1 -> success.
 	// 0 -> pending.
