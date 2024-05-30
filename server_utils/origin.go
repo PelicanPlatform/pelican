@@ -204,6 +204,10 @@ func validateFederationPrefix(prefix string) error {
 		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid '\\' characters", prefix)
 	}
 
+	if server_structs.IsCacheNS(prefix) || server_structs.IsOriginNS(prefix) {
+		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s is a reserved prefix for cache/origin server registration", prefix)
+	}
+
 	return nil
 }
 
