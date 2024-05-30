@@ -1088,7 +1088,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	}
 	tj.namespace = ns
 
-	if upload || ns.UseTokenOnRead && tj.token == "" {
+	if (upload || ns.UseTokenOnRead) && tj.token == "" {
 		tj.token, err = getToken(remoteUrl, ns, true, "", tc.tokenLocation, !tj.skipAcquire)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get token for transfer: %v", err)

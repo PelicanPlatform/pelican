@@ -62,6 +62,7 @@ type (
 	listNamespaceRequest struct {
 		PrefixType string `form:"prefixType"`
 		Status     string `form:"status"`
+		Legacy     bool   `form:"legacy"`
 	}
 
 	listNamespacesForUserRequest struct {
@@ -200,6 +201,12 @@ func listNamespaces(ctx *gin.Context) {
 		return
 	}
 
+	if _, ok := ctx.GetQuery("legacy"); ok {
+		queryParams.Legacy = true
+	} else {
+		queryParams.Legacy = false
+	}
+
 	// For unauthed user with non-empty Status query != Approved, return 403
 	if !isAuthed && queryParams.Status != "" && queryParams.Status != server_structs.RegApproved.String() {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
@@ -210,9 +217,9 @@ func listNamespaces(ctx *gin.Context) {
 
 	// Filter ns by server type
 	if queryParams.PrefixType != "" &&
-		queryParams.PrefixType != string(namespacePrefix) &&
-		queryParams.PrefixType != string(originPrefix) &&
-		queryParams.PrefixType != string(cachePrefix) {
+		queryParams.PrefixType != string(prefixForNamespace) &&
+		queryParams.PrefixType != string(prefixForOrigin) &&
+		queryParams.PrefixType != string(prefixForCache) {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Invalid prefix type: %s", queryParams.PrefixType)})
@@ -237,7 +244,7 @@ func listNamespaces(ctx *gin.Context) {
 		filterNs.AdminMetadata.Status = server_structs.RegApproved
 	}
 
-	namespaces, err := getNamespacesByFilter(filterNs, prefixType(queryParams.PrefixType))
+	namespaces, err := getNamespacesByFilter(filterNs, prefixType(queryParams.PrefixType), queryParams.Legacy)
 	if err != nil {
 		log.Error("Failed to get namespaces by prefix type: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -282,7 +289,7 @@ func listNamespacesForUser(ctx *gin.Context) {
 		}
 	}
 
-	namespaces, err := getNamespacesByFilter(filterNs, "")
+	namespaces, err := getNamespacesByFilter(filterNs, "", false)
 	if err != nil {
 		log.Error("Error getting namespaces for user ", user)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{

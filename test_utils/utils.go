@@ -20,6 +20,8 @@ package test_utils
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
@@ -28,8 +30,10 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -80,6 +84,52 @@ func GenerateJWK() (jwk.Key, jwk.Set, string, error) {
 	}
 
 	return jwkKey, jwks, string(jwksBytes), nil
+}
+
+func GenerateJWKS() (string, error) {
+	// Create a private key to use for the test
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", errors.Wrap(err, "Error generating private key")
+	}
+
+	// Convert from raw ecdsa to jwk.Key
+	pKey, err := jwk.FromRaw(privateKey)
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
+	}
+
+	//Assign Key id to the private key
+	err = jwk.AssignKeyID(pKey)
+	if err != nil {
+		return "", errors.Wrap(err, "Error assigning kid to private key")
+	}
+
+	//Set an algorithm for the key
+	err = pKey.Set(jwk.AlgorithmKey, jwa.ES256)
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to set algorithm for pKey")
+	}
+
+	publicKey, err := pKey.PublicKey()
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to get the public key from private key")
+	}
+
+	jwks := jwk.NewSet()
+	err = jwks.AddKey(publicKey)
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to add public key to the jwks")
+	}
+
+	jsonData, err := json.MarshalIndent(jwks, "", "  ")
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to marshal the json into string")
+	}
+	// Append a new line to the JSON data
+	jsonData = append(jsonData, '\n')
+
+	return string(jsonData), nil
 }
 
 // For these tests, we only need to lookup key locations. Create a dummy registry that only returns
