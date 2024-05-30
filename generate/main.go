@@ -30,4 +30,5 @@ func main() {
 	GenPlaceholderPathForNext()
 	GenSwaggerDoc()
 	GenTokenScope()
+	GenErrorCodes()
 }

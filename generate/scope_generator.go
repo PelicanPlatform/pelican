@@ -39,7 +39,7 @@ var requiredScopeKeys = [3]string{"description", "issuedBy", "acceptedBy"}
 
 func handleCaseConversion(s string) string {
 	var camelCase string
-	nextCap := false
+	nextCap := true // default as true so we capitalize the first letter
 
 	for _, r := range s {
 		if r == '_' || r == '.' {
@@ -105,7 +105,6 @@ func GenTokenScope() {
 		camelScopeName := handleCaseConversion(scopeName)
 		scopeNameInSnake := strings.Replace(camelScopeName, ".", "_", 1)
 		r := []rune(scopeNameInSnake)
-		r[0] = unicode.ToUpper(r[0])
 		displayName := string(r)
 		if strings.HasPrefix(scopeName, "storage") {
 			displayName = strings.TrimSuffix(displayName, ":")

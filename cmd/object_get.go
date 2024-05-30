@@ -24,6 +24,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
@@ -131,15 +132,22 @@ func getMain(cmd *cobra.Command, args []string) {
 	if result != nil {
 		// Print the list of errors
 		errMsg := result.Error()
+		var pe error_codes.PelicanError
 		var te *client.TransferErrors
 		if errors.As(result, &te) {
 			errMsg = te.UserError()
 		}
-		log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
-		if client.ShouldRetry(result) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
+		if errors.Is(result, &pe) {
+			errMsg = pe.Error()
+			log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
+			os.Exit(pe.ExitCode())
+		} else { // For now, keeping this else here to catch any errors that are not classified PelicanErrors
+			log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
+			if client.ShouldRetry(result) {
+				log.Errorln("Errors are retryable")
+				os.Exit(11)
+			}
+			os.Exit(1)
 		}
-		os.Exit(1)
 	}
 }
