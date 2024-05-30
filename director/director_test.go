@@ -1147,6 +1147,10 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("redirect-link-header-length", func(t *testing.T) {
+		ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+		defer func() { require.NoError(t, egrp.Wait()) }()
+		defer cancel()
+
 		viper.Reset()
 		serverAds.DeleteAll()
 		t.Cleanup(func() {
@@ -1160,7 +1164,7 @@ func TestRedirects(t *testing.T) {
 		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 		viper.Set("Director.CacheSortMethod", "random")
 		// Populate ads for redirectToCache to use
-		err := AdvertiseOSDF()
+		err := AdvertiseOSDF(ctx)
 		require.NoError(t, err)
 
 		req, _ := http.NewRequest("GET", "/my/server", nil)
