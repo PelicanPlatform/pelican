@@ -32,12 +32,31 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
-func parseServerAd(server utils.Server, serverType server_structs.ServerType) server_structs.ServerAd {
+// Takes in server information from topology and handles converting the necessary bits into a new Pelican
+// ServerAd.
+func parseServerAdFromTopology(server utils.Server, serverType server_structs.ServerType, caps server_structs.Capabilities) server_structs.ServerAd {
 	serverAd := server_structs.ServerAd{}
 	serverAd.Type = serverType
 	serverAd.Name = server.Resource
 
-	serverAd.Writes = param.Origin_EnableWrites.GetBool()
+	// Explicitly set these to false for caches, because these caps don't really translate in that case
+	if serverAd.Type == server_structs.CacheType {
+		serverAd.Caps = server_structs.Capabilities{}
+		serverAd.Writes = false
+		serverAd.Listings = false
+		serverAd.DirectReads = false
+	} else {
+		// Until we consolidate ServerAd capabilities with NamespaceAdV2 capabilities, we'll keep setting the top-level
+		// ServerAd capabilities. Eventually we should replace with the actual caps struct.
+		serverAd.Writes = caps.Writes
+		serverAd.Listings = caps.Listings
+		serverAd.DirectReads = caps.DirectReads
+		serverAd.Caps = caps
+	}
+
+	// Set FromTopology to true, which we use for filtering Pelican vs Topology origins/namespaces that might be competing.
+	serverAd.FromTopology = true
+
 	// url.Parse requires that the scheme be present before the hostname,
 	// but endpoints do not have a scheme. As such, we need to add one for the.
 	// correct parsing. Luckily, we don't use this anywhere else (it's just to
@@ -51,7 +70,11 @@ func parseServerAd(server utils.Server, serverType server_structs.ServerType) se
 		log.Warningf("Namespace JSON returned server %s with invalid unauthenticated URL %s",
 			server.Resource, server.Endpoint)
 	}
-	serverAd.URL = *serverUrl
+	if serverUrl != nil {
+		serverAd.URL = *serverUrl
+	} else {
+		serverAd.URL = url.URL{}
+	}
 
 	if server.AuthEndpoint != "" {
 		if !strings.HasPrefix(server.AuthEndpoint, "http") { // just in case there's already an http(s) tacked in front
@@ -63,7 +86,11 @@ func parseServerAd(server utils.Server, serverType server_structs.ServerType) se
 				server.Resource, server.AuthEndpoint)
 		}
 
-		serverAd.AuthURL = *serverAuthUrl
+		if serverAuthUrl != nil {
+			serverAd.AuthURL = *serverAuthUrl
+		} else {
+			serverAd.AuthURL = url.URL{}
+		}
 	}
 
 	// We will leave serverAd.WebURL as empty when fetched from topology
@@ -124,10 +151,17 @@ func AdvertiseOSDF() error {
 			write = false
 		}
 
+		listings := false
+		if ns.DirlistHost != "" {
+			listings = true
+		}
+
 		caps := server_structs.Capabilities{
 			PublicReads: !ns.UseTokenOnRead,
 			Reads:       ns.ReadHTTPS,
 			Writes:      write,
+			Listings:    listings,
+			DirectReads: true, // Topology namespaces should probably always have this turned on
 		}
 		nsAd := server_structs.NamespaceAdV2{
 			Path:         ns.Path,
@@ -142,15 +176,17 @@ func AdvertiseOSDF() error {
 		// Some namespaces show up in topology but don't have an origin (perhaps because
 		// they're listed as inactive by topology). These namespaces will all be mapped to the
 		// same useless origin ad, resulting in a 404 for queries to those namespaces
+
+		// We further assume that with this legacy code handling, each origin exporting a given namespace
+		// will have the same set of capabilities as the namespace itself. Pelican has teased apart origins
+		// and namespaces, so this isn't true outside this limited context.
 		for _, origin := range ns.Origins {
-			originAd := parseServerAd(origin, server_structs.OriginType)
-			originAd.FromTopology = true
+			originAd := parseServerAdFromTopology(origin, server_structs.OriginType, caps)
 			originAdMap[originAd] = append(originAdMap[originAd], nsAd)
 		}
 
 		for _, cache := range ns.Caches {
-			cacheAd := parseServerAd(cache, server_structs.CacheType)
-			cacheAd.FromTopology = true
+			cacheAd := parseServerAdFromTopology(cache, server_structs.CacheType, server_structs.Capabilities{})
 			cacheAdMap[cacheAd] = append(cacheAdMap[cacheAd], nsAd)
 		}
 	}
