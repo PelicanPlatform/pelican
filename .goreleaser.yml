@@ -61,6 +61,7 @@ archives:
     format_overrides:
       - goos: windows
         format: zip
+    wrap_in_directory: "{{ .ProjectName }}-{{ .RawVersion }}"
 checksum:
   name_template: 'checksums.txt'
 snapshot:
