@@ -1,5 +1,5 @@
 import React, {ComponentType, FunctionComponent, useMemo, useState, JSX} from "react";
-import {Box, Pagination, TextField} from "@mui/material";
+import {Box, Pagination, TextField, Typography} from "@mui/material";
 import useFuse from "@/helpers/useFuse";
 
 interface CardListProps<T> {
@@ -53,8 +53,9 @@ function CardList<T>({ data, Card, cardProps }: CardListProps<T>) {
                         })}
                     </Box>
                     {   count > 1 &&
-                        <Box display={"flex"} justifyContent={"center"}>
+                        <Box display={"flex"} justifyContent={"center"} flexDirection={"column"} alignItems={"center"}>
                             <Pagination count={count} page={page} onChange={(e, p) => setPage(p)} />
+                            <Typography variant={"subtitle1"}>{count} items</Typography>
                         </Box>
                     }
                 </>
