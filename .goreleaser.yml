@@ -107,6 +107,12 @@ nfpms:
             file_info:
               mode: 0644
             type: doc
+          - dst: "/etc/pelican"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: root
+              group: root
       deb:
         contents:
           - src: LICENSE
@@ -119,6 +125,30 @@ nfpms:
             file_info:
               mode: 0644
             type: doc
+          - dst: "/etc/pelican"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: root
+              group: root
+      apk:
+        contents:
+          - src: LICENSE
+            dst: "/usr/share/doc/{{ .PackageName }}/LICENSE.txt"
+            file_info:
+              mode: 0644
+            type: doc
+          - src: README.md
+            dst: "/usr/share/doc/{{ .PackageName }}/README.md"
+            file_info:
+              mode: 0644
+            type: doc
+          - dst: "/etc/pelican"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: root
+              group: root
   # end package pelican
 
   - package_name: pelican-osdf-compat
