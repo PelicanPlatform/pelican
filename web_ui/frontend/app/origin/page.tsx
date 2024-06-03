@@ -57,7 +57,8 @@ export default function Home() {
                                         justifyContent:"center",
                                         display:"flex",
                                         bgcolor:"white",
-                                        borderRadius:2
+                                        borderRadius:2,
+                                        p: 1
                                     }}
                                     options={{
                                         scales: {
