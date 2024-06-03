@@ -362,7 +362,6 @@ func redirectToCache(ginCtx *gin.Context) {
 		xPelicanNamespace += fmt.Sprintf(", collections-url=%s", colUrl)
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{xPelicanNamespace}
-	fmt.Printf("\n\n\nX-Pelican-Namespace: %s\n\n\n", xPelicanNamespace)
 	// Note we only append the `authz` query parameter in the case of the redirect response and not the
 	// duplicate link metadata above.  This is purposeful: the Link header might get too long if we repeat
 	// the token 20 times for 20 caches.  This means a "normal HTTP client" will correctly redirect but
