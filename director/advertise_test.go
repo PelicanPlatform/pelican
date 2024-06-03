@@ -19,6 +19,7 @@
 package director
 
 import (
+	_ "embed"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -120,85 +121,12 @@ func TestParseServerAdFromTopology(t *testing.T) {
 }
 
 func JSONHandler(w http.ResponseWriter, r *http.Request) {
-	jsonResponse := `
-	{
-		"caches": [
-			{
-				"auth_endpoint": "https://cache-auth-endpoint.com",
-				"endpoint": "http://cache-endpoint.com",
-				"resource": "MY_CACHE"
-			}
-		],
-		"namespaces": [
-			{
-				"caches": [
-					{
-						"auth_endpoint": "https://cache-auth-endpoint.com",
-						"endpoint": "http://cache-endpoint.com",
-						"resource": "MY_CACHE"
-					}
-				],
-				"credential_generation": {
-					"base_path": "/server",
-					"issuer": "https://my-issuer.com",
-					"max_scope_depth": 3,
-					"strategy": "OAuth2",
-					"vault_issuer": null,
-					"vault_server": null
-				},
-				"scitokens": [
-					{
-						"base_path": ["/server"],
-						"issuer": "https://my-issuer.com",
-						"restricted_path": []
-					}
-				],
-				"dirlisthost": null,
-				"origins": [
-					{
-						"auth_endpoint": "https://origin1-auth-endpoint.com",
-						"endpoint": "http://origin1-endpoint.com",
-						"resource": "MY_ORIGIN1"
-					}
-				],
-				"path": "/my/server",
-				"readhttps": true,
-				"usetokenonread": true,
-				"writebackhost": "https://writeback.my-server.com"
-			},
-			{
-				"caches": [
-					{
-						"auth_endpoint": "https://cache-auth-endpoint.com",
-						"endpoint": "http://cache-endpoint.com",
-						"resource": "MY_CACHE"
-					}
-				],
-				"credential_generation": null,
-				"scitokens": [],
-				"dirlisthost": null,
-				"origins": [
-					{
-						"auth_endpoint": "https://origin2-auth-endpoint.com",
-						"endpoint": "http://origin2-endpoint.com",
-						"resource": "MY_ORIGIN2"
-					}
-				],
-				"path": "/my/server/2",
-				"readhttps": true,
-				"usetokenonread": false,
-				"writebackhost": null
-			}
-		]
-	}
-	`
-
 	// Set the Content-Type header to indicate JSON.
 	w.Header().Set("Content-Type", "application/json")
 
 	// Write the JSON response to the response body.
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(jsonResponse))
+	_, _ = w.Write([]byte(mockTopology))
 }
 func TestAdvertiseOSDF(t *testing.T) {
 	viper.Reset()
