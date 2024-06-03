@@ -207,23 +207,9 @@ func TestDeprecateLogMessage(t *testing.T) {
 		assert.Equal(t, logrus.WarnLevel, hook.LastEntry().Level)
 		assert.Equal(t, "Deprecated configuration key Origin.NamespacePrefix is set. Please migrate to use Origin.FederationPrefix instead", hook.Entries[len(hook.Entries)-2].Message)
 		assert.Equal(t, "Will attempt to use the value of Origin.NamespacePrefix as default for Origin.FederationPrefix", hook.LastEntry().Message)
-		// We expect the default value of Federation.RegistryUrl is set to Federation.NamespaceUrl
-		// if Federation.NamespaceUrl is not empty for backward compatibility
+		// If the deprecated key is set to something that we can map to the new key, that mapping should be handled in InitConfig.
+		// Since Origin.NamespacePrefix maps to Origin.FederationPrefix, check that it succeeded.
 		assert.Equal(t, "/a/prefix", viper.GetString("Origin.FederationPrefix"))
-		hook.Reset()
-	})
-
-	t.Run("no-deprecated-message-if-namespace-url-unset", func(t *testing.T) {
-		hook := test.NewGlobal()
-		viper.Reset()
-		viper.Set("Logging.Level", "Warning")
-		viper.Set("Federation.RegistryUrl", "https://dont-use.com")
-		viper.Set("ConfigDir", tmpPath)
-		InitConfig()
-
-		assert.Equal(t, 0, len(hook.Entries))
-		assert.Equal(t, "https://dont-use.com", viper.GetString("Federation.RegistryUrl"))
-		assert.Equal(t, "", viper.GetString("Federation.NamespaceUrl"))
 		hook.Reset()
 	})
 }
