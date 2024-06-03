@@ -792,7 +792,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		Caps: server_structs.Capabilities{
 			PublicReads: false,
 		},
-		Path:       "/foo/bar/",
+		Path: "/foo/bar/",
 		Issuer: []server_structs.TokenIssuer{{
 			BasePaths: []string{""},
 			IssuerUrl: url.URL{},

@@ -52,8 +52,8 @@ func TestGetAdsForPath(t *testing.T) {
 	*/
 	nsAd1 := server_structs.NamespaceAdV2{
 		// PublicRead: false,
-		Caps:       server_structs.Capabilities{PublicReads: false},
-		Path:       "/chtc",
+		Caps: server_structs.Capabilities{PublicReads: false},
+		Path: "/chtc",
 		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: url.URL{
 				Scheme: "https",
@@ -65,8 +65,8 @@ func TestGetAdsForPath(t *testing.T) {
 
 	nsAd2 := server_structs.NamespaceAdV2{
 		// PublicRead: true,
-		Caps:       server_structs.Capabilities{PublicReads: true},
-		Path:       "/chtc/PUBLIC",
+		Caps: server_structs.Capabilities{PublicReads: true},
+		Path: "/chtc/PUBLIC",
 		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: url.URL{
 				Scheme: "https",
@@ -78,8 +78,8 @@ func TestGetAdsForPath(t *testing.T) {
 
 	nsAd3 := server_structs.NamespaceAdV2{
 		// PublicRead: true,
-		Caps:       server_structs.Capabilities{PublicReads: true},
-		Path:       "/chtc/PUBLIC2/",
+		Caps: server_structs.Capabilities{PublicReads: true},
+		Path: "/chtc/PUBLIC2/",
 		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: url.URL{
 				Scheme: "https",
@@ -250,9 +250,9 @@ func TestLaunchTTLCache(t *testing.T) {
 		Longitude: 456.78,
 	}
 	mockNamespaceAd := server_structs.NamespaceAdV2{
-		Caps:       server_structs.Capabilities{PublicReads: false},
-		Path:       "/foo/bar/",
-		Issuer:     []server_structs.TokenIssuer{{IssuerUrl: url.URL{}}},
+		Caps:   server_structs.Capabilities{PublicReads: false},
+		Path:   "/foo/bar/",
+		Issuer: []server_structs.TokenIssuer{{IssuerUrl: url.URL{}}},
 		Generation: []server_structs.TokenGen{{
 			MaxScopeDepth: 1,
 			Strategy:      "",

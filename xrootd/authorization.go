@@ -546,8 +546,8 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 				return errors.Wrap(err, "can't parse Server_ExternalWebUrl when generating scitokens config")
 			}
 			cacheIssuer := server_structs.NamespaceAdV2{
-				Caps:       server_structs.Capabilities{PublicReads: false, Reads: true, Writes: true},
-				Path:       "/pelican/monitoring",
+				Caps: server_structs.Capabilities{PublicReads: false, Reads: true, Writes: true},
+				Path: "/pelican/monitoring",
 				Issuer: []server_structs.TokenIssuer{
 					{
 						BasePaths: []string{"/pelican/monitoring"},
