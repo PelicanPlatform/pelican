@@ -999,6 +999,9 @@ func TestDiscoverOriginCache(t *testing.T) {
 }
 
 func TestRedirects(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
 
 	router := gin.Default()
 	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
@@ -1211,7 +1214,7 @@ func TestRedirects(t *testing.T) {
 		defer topoServer.Close()
 		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 		viper.Set("Director.CacheSortMethod", "random")
-		err := AdvertiseOSDF()
+		err := AdvertiseOSDF(ctx)
 		require.NoError(t, err)
 
 		// This one should have a collections url because it has a dirlisthost
