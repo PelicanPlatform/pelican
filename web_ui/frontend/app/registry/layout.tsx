@@ -19,11 +19,9 @@
 
 import {Box, Tooltip} from "@mui/material";
 import Link from "next/link";
-import Image from "next/image";
-import {Add, Build, TripOrigin, Storage, Block} from "@mui/icons-material";
+import {Build, FolderOpen, TripOrigin, Storage, Block} from "@mui/icons-material";
 
 import {Sidebar} from "@/components/layout/Sidebar";
-import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
 import IconButton from "@mui/material/IconButton";
 import {Main} from "@/components/layout/Main"
 import SpeedDial, {SpeedButtonControlledProps} from "@/components/layout/SidebarSpeedDial";
@@ -41,6 +39,12 @@ export default function RootLayout({
 }) {
 
     const actions: SpeedButtonControlledProps[] = [
+        {
+            href: "/registry/namespace/register/",
+            icon: <FolderOpen/>,
+            text: "Namespace",
+            title: "Register a new Namespace"
+        },
         {
             href: "/registry/origin/register/",
             icon: <TripOrigin/>,

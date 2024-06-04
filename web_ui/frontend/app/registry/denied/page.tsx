@@ -48,8 +48,11 @@ const getData = async () => {
             if (namespace.prefix.startsWith("/caches/")) {
                 namespace.type = "cache"
                 namespace.prefix = namespace.prefix.replace("/caches/", "")
-            } else {
+            } else if (namespace.prefix.startsWith("/origins/")) {
                 namespace.type = "origin"
+                namespace.prefix = namespace.prefix.replace("/origins/", "")
+            } else {
+                namespace.type = "namespace"
             }
         })
 

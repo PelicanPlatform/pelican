@@ -1,8 +1,8 @@
 import {Path} from "@/components/Config/index.d";
-import React, {MouseEventHandler} from "react";
-import {Box, Button, TextField} from "@mui/material";
+import React from "react";
+import {Box, Button} from "@mui/material";
 
-import {FormProps, ModalProps} from "@/components/Config/ObjectField/ObjectField";
+import {FormProps} from "@/components/Config/ObjectField/ObjectField";
 import {StringField, BooleanField} from "@/components/Config";
 
 const verifyForm = (x: Path) => {

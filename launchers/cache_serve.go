@@ -134,9 +134,9 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 func CacheServeFinish(ctx context.Context, egrp *errgroup.Group, cacheServer server_structs.XRootDServer) error {
 	log.Debug("Register Cache")
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the cache server")
-	if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, "/caches/"+param.Xrootd_Sitename.GetString()); err != nil {
+	if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())); err != nil {
 		return err
 	}
-
+	log.Debug("Cache is registered")
 	return nil
 }

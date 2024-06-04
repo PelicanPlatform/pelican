@@ -74,11 +74,21 @@ const namespaceFormNodeToJSON = (formData: FormData) => {
 
 export const namespaceToCache = (data: Namespace) => {
     // Build the cache prefix
-    if (data.prefix.startsWith("/caches")) {
+    if (data.prefix.startsWith("/caches/")) {
         return data
     }
 
     data['prefix'] = `/caches/${data.prefix}`
+    return data
+}
+
+export const namespaceToOrigin = (data: Namespace) => {
+    // Build the cache prefix
+    if (data.prefix.startsWith("/origins/")) {
+        return data
+    }
+
+    data['prefix'] = `/origins/${data.prefix}`
     return data
 }
 
@@ -116,6 +126,7 @@ export const putGeneralNamespace = async (data: Namespace): Promise<Alert | unde
 
 export const submitNamespaceForm = async (
     data: Partial<Namespace>,
+    toUrl: URL | undefined,
     handleSubmit: (data: Partial<Namespace>) => Promise<Alert | undefined>
 ) => {
 
@@ -123,7 +134,7 @@ export const submitNamespaceForm = async (
 
     // Clear the form on successful submit
     if (submitAlert == undefined) {
-        window.location.href = "/view/registry/"
+        window.location.href = toUrl ? toUrl.toString() : "/view/registry/"
     }
 
     return submitAlert

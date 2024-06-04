@@ -151,7 +151,8 @@ func TestDirectorRegistration(t *testing.T) {
 			reqJson := server_structs.CheckNamespaceStatusReq{}
 			err = json.Unmarshal(reqBody, &reqJson)
 			require.NoError(t, err)
-			if reqJson.Prefix != "test" && reqJson.Prefix != "/caches/test" { // we expect the registration to use test for namespace and /caches/test for cache
+			// we expect the registration to use "test" for namespace, /caches/test for cache, and /origins/test for origin
+			if reqJson.Prefix != "test" && reqJson.Prefix != "/caches/test" && reqJson.Prefix != "/origins/test" {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
@@ -600,6 +601,40 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
 		setupRequest(c, r, jsonad, token, server_structs.CacheType)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.NotNil(t, serverAds.Get("https://data-url.org"), "Cache fail to register at serverAds")
+		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://data-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in cache registration request")
+		teardown()
+	})
+
+	t.Run("origin-with-registryname", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name", // This is for web UI to display
+			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
 		r.ServeHTTP(w, c.Request)
 

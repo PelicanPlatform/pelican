@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -51,8 +51,11 @@ export default function Home() {
                 if (namespace.prefix.startsWith("/caches/")) {
                     namespace.type = "cache"
                     namespace.prefix = namespace.prefix.replace("/caches/", "")
-                } else {
+                } else if (namespace.prefix.startsWith("/origins/")) {
                     namespace.type = "origin"
+                    namespace.prefix = namespace.prefix.replace("/origins/", "")
+                } else {
+                    namespace.type = "namespace"
                 }
             })
 
@@ -80,15 +83,21 @@ export default function Home() {
             )
         }, [data, user]
     )
+    const approvedOriginData = useMemo(
+        () => data?.filter(
+            ({namespace}) => namespace.admin_metadata.status === "Approved" && namespace.type == "origin"
+        ),
+        [data]
+    )
     const approvedCacheData = useMemo(
         () => data?.filter(
             ({namespace}) => namespace.admin_metadata.status === "Approved" && namespace.type == "cache"
         ),
         [data]
     )
-    const approvedOriginData = useMemo(
+    const approvedNamespaceData = useMemo(
         () => data?.filter(
-            ({namespace}) => namespace.admin_metadata.status === "Approved" && namespace.type == "origin"
+            ({namespace}) => namespace.admin_metadata.status === "Approved" && namespace.type == "namespace"
         ),
         [data]
     )
@@ -129,20 +138,33 @@ export default function Home() {
                         </Grid>
                     }
 
-                    <Typography variant={"h5"} py={2} pt={4}>Public Namespaces</Typography>
+                    <Typography variant={"h5"} py={2} pt={4}>Approved Registrations</Typography>
 
                     <Typography variant={"subtitle1"}>
                         {user !== undefined && user?.role == "admin" &&
-                            "As an administrator, you can edit Public Namespaces by click the pencil button"
+                            "As an administrator, you can edit Approved Registrations by clicking the pencil button."
                         }
                         {user !== undefined && user?.role != "admin" &&
-                            "Public Namespaces are approved by the registry administrators. To edit a Namespace you own please contact the registry administrators."
+                            "To edit an Approved Registration you own, please contact the registry administrators."
                         }
                     </Typography>
 
                     <Typography variant={"h6"} py={2}>
-                        Origins
+                        Namespaces
                         { approvedCacheData !== undefined &&
+                            <Link href={"namespace/register"}>
+                                <IconButton sx={{ml: .5, mb: .5}} size={"small"}>
+                                    <Add/>
+                                </IconButton>
+                            </Link>
+                        }
+                    </Typography>
+                    { approvedNamespaceData !== undefined ? <CardList<CardProps> data={approvedNamespaceData} Card={Card} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
+                    { approvedNamespaceData !== undefined && approvedNamespaceData.length === 0 && <CreateNamespaceCard text={"Register Namespace"} url={"namespace/register"}/>}
+
+                    <Typography variant={"h6"} py={2}>
+                        Origins
+                        { approvedOriginData !== undefined &&
                             <Link href={"origin/register"}>
                                 <IconButton sx={{ml: .5, mb: .5}} size={"small"}>
                                     <Add/>

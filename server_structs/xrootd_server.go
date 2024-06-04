@@ -19,6 +19,8 @@
 package server_structs
 
 import (
+	"strings"
+
 	"github.com/pelicanplatform/pelican/config"
 )
 
@@ -41,7 +43,48 @@ type (
 	NamespaceHolder struct {
 		namespaceAds []NamespaceAdV2
 	}
+
+	ServerPrefix string // The base namespace prefix for origin/cache server
 )
+
+const (
+	CachePrefix  ServerPrefix = "/caches/"
+	OriginPrefix ServerPrefix = "/origins/"
+)
+
+func (s ServerPrefix) String() string {
+	return string(s)
+}
+
+// Get the namespace for a cache server, i.e. /caches/<hostname>
+// It returns an empty string is the host is empty
+func GetCacheNS(host string) string {
+	if host == "" {
+		return ""
+	}
+	return CachePrefix.String() + host
+}
+
+// Get the namespace for an origin server, i.e. /origins/<hostname>
+// It returns an empty string is the host is empty
+func GetOriginNs(host string) string {
+	if host == "" {
+		return ""
+	}
+	return OriginPrefix.String() + host
+}
+
+// Check if a namespace is for a cache, i.e. /caches/<hostname>
+func IsCacheNS(ns string) bool {
+	return strings.HasPrefix(ns, CachePrefix.String()) &&
+		strings.TrimPrefix(ns, CachePrefix.String()) != ""
+}
+
+// Check if a namespace is for an origin, i.e. /origins/<hostname>
+func IsOriginNS(ns string) bool {
+	return strings.HasPrefix(ns, OriginPrefix.String()) &&
+		strings.TrimPrefix(ns, OriginPrefix.String()) != ""
+}
 
 func (ns *NamespaceHolder) SetNamespaceAds(ads []NamespaceAdV2) {
 	ns.namespaceAds = ads
