@@ -1,0 +1,15 @@
+TLSSkipVerify: true # Turn off the TLS check for developmetn
+Logging:
+  Level: "debug" # Debug level will log more verbose messages
+Federation:
+  DiscoveryUrl: "https://osdf-itb.osg-htc.org" # The federation for testing
+  TopologyNamespaceURL: https://topology.opensciencegrid.org/osdf/namespaces
+Origin:
+  Exports:
+    - StoragePrefix: /tmp/pelican # Export this directory on your machine to the federation
+      FederationPrefix: /<your-name>/test/origin1 # Replace <your-name> to your name! Otherwise the origin may fail to start
+      Capabilities: ["Reads", "PublicReads"]
+Director:
+  MaxMindKeyFile: /workspaces/pelican-dev/MaxMindKey # The location of your MaxMind license key
+Registry:
+  InstitutionsUrl: "https://topology.opensciencegrid.org/institution_ids"

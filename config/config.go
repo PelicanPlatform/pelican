@@ -1450,10 +1450,6 @@ func InitClient() error {
 
 	upper_prefix := GetPreferredPrefix()
 
-	viper.SetDefault("Client.StoppedTransferTimeout", 100)
-	viper.SetDefault("Client.SlowTransferRampupTime", 100)
-	viper.SetDefault("Client.SlowTransferWindow", 30)
-
 	if upper_prefix == OsdfPrefix || upper_prefix == StashPrefix {
 		viper.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}

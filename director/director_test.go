@@ -1198,6 +1198,40 @@ func TestRedirects(t *testing.T) {
 		assert.NotContains(t, c.Writer.Header().Get("Link"), "pri=2")
 	})
 
+	// Make sure collections-url is correctly populated when the ns/origin comes from topology
+	t.Run("collections-url-from-topology", func(t *testing.T) {
+		viper.Reset()
+		serverAds.DeleteAll()
+		t.Cleanup(func() {
+			viper.Reset()
+			serverAds.DeleteAll()
+		})
+
+		topoServer := httptest.NewServer(http.HandlerFunc(JSONHandler))
+		defer topoServer.Close()
+		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+		viper.Set("Director.CacheSortMethod", "random")
+		err := AdvertiseOSDF()
+		require.NoError(t, err)
+
+		// This one should have a collections url because it has a dirlisthost
+		req, _ := http.NewRequest("GET", "/my/server", nil)
+		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = req
+		redirectToCache(c)
+		assert.Contains(t, c.Writer.Header().Get("X-Pelican-Namespace"), "collections-url=https://origin1-auth-endpoint.com")
+
+		// This one has no dirlisthost
+		req, _ = http.NewRequest("GET", "/my/server/2", nil)
+		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+		c.Request = req
+		redirectToCache(c)
+		assert.NotContains(t, c.Writer.Header().Get("X-Pelican-Namespace"), "collections-url")
+	})
 }
 
 func TestGetHealthTestFile(t *testing.T) {

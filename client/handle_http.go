@@ -53,6 +53,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/param"
 )
@@ -85,6 +86,8 @@ var (
 			return item
 		},
 	)
+
+	PelicanError error_codes.PelicanError
 )
 
 type (
@@ -97,7 +100,10 @@ type (
 
 	// Error type for when the transfer started to return data then completely stopped
 	StoppedTransferError struct {
-		Err error
+		BytesTransferred int64
+		StoppedTime      time.Duration
+		CacheHit         bool
+		Upload           bool
 	}
 
 	// SlowTransferError is an error that is returned when a transfer takes longer than the configured timeout
@@ -106,6 +112,7 @@ type (
 		BytesPerSecond   int64
 		BytesTotal       int64
 		Duration         time.Duration
+		CacheAge         time.Duration
 	}
 
 	// ConnectionSetupError is an error that is returned when a connection to the remote server fails
@@ -113,6 +120,8 @@ type (
 		URL string
 		Err error
 	}
+
+	HeaderTimeoutError struct{}
 
 	allocateMemoryError struct {
 		Err error
@@ -155,6 +164,7 @@ type (
 		TimeToFirstByte   time.Duration // how long it took to download the first byte
 		TransferEndTime   time.Time     // when the transfer ends
 		TransferTime      time.Duration // amount of time we were transferring per attempt (in seconds)
+		CacheAge          time.Duration // age of the data reported by the cache
 		Endpoint          string        // which origin did it use
 		ServerVersion     string        // version of the server
 		Error             error         // what error the attempt returned (if any)
@@ -178,6 +188,12 @@ type (
 
 		// Specifies the pack option in the transfer URL
 		PackOption string
+
+		// Cache age, if known
+		CacheAge time.Duration
+
+		// Whether or not the cache has been queried
+		CacheQuery bool
 	}
 
 	// A structure representing a single file to transfer.
@@ -316,12 +332,25 @@ func getProgressContainer() *mpb.Progress {
 	return progressCtr
 }
 
-func (e *StoppedTransferError) Error() string {
-	return e.Err.Error()
+func (e *HeaderTimeoutError) Error() string {
+	return "timeout waiting for HTTP response (TCP connection successful)"
 }
 
-func (e *StoppedTransferError) Unwrap() error {
-	return e.Err
+func (e *StoppedTransferError) Error() (errMsg string) {
+	if e.StoppedTime > 0 {
+		errMsg = "no progress for more than " + e.StoppedTime.Truncate(time.Millisecond).String()
+	} else {
+		errMsg = "no progress"
+	}
+	errMsg += " after " + ByteCountSI(e.BytesTransferred) + " transferred"
+	if !e.Upload {
+		if e.CacheHit {
+			errMsg += " (cache hit)"
+		} else {
+			errMsg += " (cache miss)"
+		}
+	}
+	return
 }
 
 func (e *StoppedTransferError) Is(target error) bool {
@@ -364,13 +393,19 @@ func (e *HttpErrResp) Error() string {
 	return e.Err
 }
 
-func (e *SlowTransferError) Error() string {
-	return "cancelled transfer, too slow.  Detected speed: " +
+func (e *SlowTransferError) Error() (errMsg string) {
+	errMsg = "cancelled transfer, too slow; detected speed=" +
 		ByteCountSI(e.BytesPerSecond) +
-		"/s, total transferred: " +
+		"/s, total transferred=" +
 		ByteCountSI(e.BytesTransferred) +
-		", total transfer time: " +
-		e.Duration.String()
+		", total transfer time=" +
+		e.Duration.Round(time.Millisecond).String()
+	if e.CacheAge == 0 {
+		errMsg += ", cache miss"
+	} else if e.CacheAge > 0 {
+		errMsg += ", cache hit"
+	}
+	return
 }
 
 func (e *SlowTransferError) Is(target error) bool {
@@ -417,6 +452,9 @@ func (e *ConnectionSetupError) Is(target error) bool {
 }
 
 func (e *StatusCodeError) Error() string {
+	if int(*e) == http.StatusGatewayTimeout {
+		return "cache timed out waiting on origin"
+	}
 	return (*grab.StatusCodeError)(e).Error()
 }
 
@@ -463,6 +501,20 @@ func (tae *TransferAttemptError) Is(target error) bool {
 		return false
 	}
 	return tae.isUpload == other.isUpload && tae.serviceHost == other.serviceHost && tae.isProxyErr == other.isProxyErr && tae.proxyHost == other.proxyHost
+}
+
+func compatToDuration(dur time.Duration, paramName string) (result time.Duration) {
+	// Backward compat: some parameters were previously integers, in seconds.
+	// If you give viper an integer without a suffix then it interprets it as a
+	// number in *nanoseconds*.  We assume that's not the intent and, if under a
+	// microsecond, assume that the user really meant seconds.
+	if dur < time.Microsecond {
+		log.Warningf("%s must be given as a duration, not an integer; try setting it as '%ds'", paramName, dur.Nanoseconds())
+		result = time.Duration(dur.Nanoseconds()) * time.Second
+	} else {
+		result = dur
+	}
+	return
 }
 
 func newTransferAttemptError(service string, proxy string, isProxyErr bool, isUpload bool, err error) (tae *TransferAttemptError) {
@@ -1414,11 +1466,11 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		if cachesToTry > len(closestNamespaceCaches) {
 			cachesToTry = len(closestNamespaceCaches)
 		}
-
+		log.Debugf("Trying the first %d caches", cachesToTry)
 		transfers = getCachesToTry(closestNamespaceCaches, job.job, cachesToTry, packOption)
 
 		if len(transfers) > 0 {
-			log.Debugln("Transfers:", transfers[0].Url)
+			log.Traceln("First transfer in list:", transfers[0].Url)
 		} else {
 			log.Debugln("No transfers possible as no caches are found")
 			err = errors.New("No transfers possible as no caches are found")
@@ -1528,11 +1580,22 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 		return
 	}
 	transport := config.GetTransport()
-	headChan := make(chan struct {
+	type checkResults struct {
 		idx  int
 		size uint64
+		age  int
 		err  error
-	})
+	}
+	headChan := make(chan checkResults)
+
+	if log.IsLevelEnabled(log.DebugLevel) {
+		attemptHosts := make([]string, len(attempts))
+		for idx, host := range attempts {
+			attemptHosts[idx] = host.Url.Host
+		}
+		log.Debugln("Will query the following endpoints for availability:", strings.Join(attemptHosts, ", "))
+	}
+
 	defer close(headChan)
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
@@ -1542,33 +1605,50 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 
 		go func(idx int, tUrl string) {
 			headClient := &http.Client{Transport: transport}
-			headRequest, _ := http.NewRequestWithContext(ctx, http.MethodHead, tUrl, nil)
+			// Note we are not using a HEAD request here but a GET request for one byte;
+			// this is because the XRootD server currently (v5.6.9) only returns the Age
+			// header for GETs
+			headRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet, tUrl, nil)
+			headRequest.Header.Set("Range", "0-0")
 			var headResponse *http.Response
 			headResponse, err := headClient.Do(headRequest)
 			if err != nil {
-				headChan <- struct {
-					idx  int
-					size uint64
-					err  error
-				}{idx, 0, err}
+				headChan <- checkResults{idx, 0, -1, err}
 				return
 			}
+			// Allow response body to fail to read; we are only interested in the headers
+			// of the response, not the contents.
+			if _, err := io.ReadAll(headResponse.Body); err != nil {
+				log.Warningln("Failure when reading the one-byte-response body:", err)
+			}
 			headResponse.Body.Close()
-			contentLengthStr := headResponse.Header.Get("Content-Length")
-			size := int64(0)
-			if contentLengthStr != "" {
-				size, err = strconv.ParseInt(contentLengthStr, 10, 64)
-				if err != nil {
-					err = errors.Wrap(err, "problem converting Content-Length in response to an int")
-					log.Errorln(err.Error())
+			var age int = -1
+			var size int64 = 0
+			if headResponse.StatusCode <= 300 {
+				contentLengthStr := headResponse.Header.Get("Content-Length")
+				if contentLengthStr != "" {
+					size, err = strconv.ParseInt(contentLengthStr, 10, 64)
+					if err != nil {
+						err = errors.Wrap(err, "problem converting Content-Length in response to an int")
+						log.Errorln(err.Error())
 
+					}
+				}
+				ageStr := headResponse.Header.Get("Age")
+				if ageStr != "" {
+					if ageParsed, err := strconv.Atoi(ageStr); err != nil {
+						log.Warningf("Ignoring invalid age value (%s) due to parsing error: %s", headRequest.Header.Get("Age"), err.Error())
+					} else {
+						age = ageParsed
+					}
+				}
+			} else {
+				err = &HttpErrResp{
+					Code: headResponse.StatusCode,
+					Err:  fmt.Sprintf("GET \"%s\" resulted in status code %d", tUrl, headResponse.StatusCode),
 				}
 			}
-			headChan <- struct {
-				idx  int
-				size uint64
-				err  error
-			}{idx, uint64(size), err}
+			headChan <- checkResults{idx, uint64(size), age, err}
 		}(idx, tUrl.String())
 	}
 	// 1 -> success.
@@ -1578,20 +1658,31 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 	for ctr := 0; ctr != len(attempts); ctr++ {
 		result := <-headChan
 		if result.err != nil {
-			if result.err != context.Canceled {
-				log.Debugf("Failure when doing a HEAD request against %s: %s", attempts[result.idx].Url.String(), result.err.Error())
+			// If an attempt to contact the remote cache failed, log a message (unless we purposely
+			// canceled the attempt).
+			if !errors.Is(result.err, context.Canceled) && !errors.Is(result.err, context.DeadlineExceeded) {
+				log.Debugf("Failure when doing a GET request to see if %s is functioning: %s", attempts[result.idx].Url.String(), result.err.Error())
 				finished[result.idx] = -1
+			} else if errors.Is(result.err, context.DeadlineExceeded) {
+				log.Debugf("Timed out when querying to see if %s is functioning", attempts[result.idx].Url.String())
 			}
 		} else {
 			finished[result.idx] = 1
-			if result.idx == 0 {
+			if result.age >= 0 {
+				attempts[result.idx].CacheAge = time.Duration(result.age) * time.Second
+				attempts[result.idx].CacheQuery = true
+			}
+			if result.idx == 0 && result.err == nil {
 				cancel()
 				// If the first responds successfully, we want to return immediately instead of giving
 				// the other caches time to respond - the result is "good enough".
 				// - Any cache with confirmed errors (-1) is sorted to the back.
 				// - Any cache which is still pending (0) is kept in place.
+				log.Debugf("First available cache (%s) responded; will ignore remaining attempts", attempts[result.idx].Url.Host)
 				for ctr := 0; ctr < len(attempts); ctr++ {
-					finished[ctr] = 1
+					if finished[ctr] != -1 {
+						finished[ctr] = 1
+					}
 				}
 			}
 			if size <= int64(result.size) {
@@ -1643,18 +1734,25 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	success := false
 	for idx, transferEndpoint := range attempts { // For each transfer attempt (usually 3), try to download via HTTP
 		var attempt TransferResult
+		attempt.CacheAge = -1
 		attempt.Number = idx // Start with 0
 		attempt.Endpoint = transferEndpoint.Url.Host
+		if transferEndpoint.CacheQuery {
+			attempt.CacheAge = transferEndpoint.CacheAge
+		}
 		// Make a copy of the transfer endpoint URL; otherwise, when we mutate the pointer, other parallel
 		// workers might download from the wrong path.
 		transferEndpointUrl := *transferEndpoint.Url
 		transferEndpointUrl.Path = transfer.remoteURL.Path
 		transferEndpoint.Url = &transferEndpointUrl
 		transferStartTime := time.Now()
-		attemptDownloaded, timeToFirstByte, serverVersion, err := downloadHTTP(
+		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, err := downloadHTTP(
 			transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, transfer.token, transfer.project,
 		)
 		endTime := time.Now()
+		if cacheAge >= 0 {
+			attempt.CacheAge = cacheAge
+		}
 		attempt.TransferEndTime = endTime
 		attempt.TransferTime = endTime.Sub(transferStartTime)
 		attempt.ServerVersion = serverVersion
@@ -1682,6 +1780,13 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			} else if errors.As(err, &cse) {
 				if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
 					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, sce)
+				} else if ue, ok := cse.Unwrap().(*url.Error); ok {
+					httpErr := ue.Unwrap()
+					if httpErr.Error() == "net/http: timeout awaiting response headers" {
+						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, &HeaderTimeoutError{})
+					} else {
+						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, httpErr)
+					}
 				} else {
 					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
 				}
@@ -1722,7 +1827,7 @@ func parseTransferStatus(status string) (int, string) {
 // Perform the actual download of the file
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
-func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, totalSize int64, token string, project string) (downloaded int64, timeToFirstByte time.Duration, serverVersion string, err error) {
+func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, totalSize int64, token string, project string) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorln("Panic occurred in downloadHTTP:", r)
@@ -1730,6 +1835,9 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			err = errors.New(ret)
 		}
 	}()
+
+	// Negative cache age indicates no Age response header was received
+	cacheAge = -1
 
 	lastUpdate := time.Now()
 	if callback != nil {
@@ -1770,7 +1878,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	httpClient, ok := client.HTTPClient.(*http.Client)
 	if !ok {
-		return 0, 0, "", errors.New("Internal error: implementation is not a http.Client type")
+		return 0, 0, -1, "", errors.New("Internal error: implementation is not a http.Client type")
 	}
 	httpClient.Transport = transport
 	headerTimeout := transport.ResponseHeaderTimeout
@@ -1789,20 +1897,20 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	if transfer.PackOption != "" {
 		behavior, err := GetBehavior(transfer.PackOption)
 		if err != nil {
-			return 0, 0, "", err
+			return 0, 0, -1, "", err
 		}
 		if dest == "." {
 			dest, err = os.Getwd()
 			if err != nil {
-				return 0, 0, "", errors.Wrap(err, "Failed to get current directory for destination")
+				return 0, 0, -1, "", errors.Wrap(err, "Failed to get current directory for destination")
 			}
 		}
 		unpacker = newAutoUnpacker(dest, behavior)
 		if req, err = grab.NewRequestToWriter(unpacker, transferUrl.String()); err != nil {
-			return 0, 0, "", errors.Wrap(err, "Failed to create new download request")
+			return 0, 0, -1, "", errors.Wrap(err, "Failed to create new download request")
 		}
 	} else if req, err = grab.NewRequest(dest, transferUrl.String()); err != nil {
-		return 0, 0, "", errors.Wrap(err, "Failed to create new download request")
+		return 0, 0, -1, "", errors.Wrap(err, "Failed to create new download request")
 	}
 
 	rateLimit := param.Client_MaximumDownloadSpeed.GetInt()
@@ -1823,8 +1931,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	req.HTTPRequest.Header.Set("User-Agent", getUserAgent(project))
 	req = req.WithContext(ctx)
 
-	// Test the transfer speed every 5 seconds
-	t := time.NewTicker(5000 * time.Millisecond)
+	// Test the transfer speed every 0.5 seconds
+	t := time.NewTicker(500 * time.Millisecond)
 	defer t.Stop()
 
 	// Progress ticker
@@ -1859,6 +1967,19 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	serverVersion = resp.HTTPResponse.Header.Get("Server")
 
+	if ageStr := resp.HTTPResponse.Header.Get("Age"); ageStr != "" {
+		if ageSec, err := strconv.Atoi(ageStr); err == nil {
+			cacheAge = time.Duration(ageSec) * time.Second
+		} else {
+			log.Debugf("Server at %s gave unparseable Age header (%s) in response: %s", transfer.Url.Host, ageStr, err.Error())
+		}
+	}
+	if cacheAge == 0 {
+		log.Debugln("Server at", transfer.Url.Host, "had a cache miss")
+	} else if cacheAge > 0 {
+		log.Debugln("Server at", transfer.Url.Host, "had a cache hit with data age", cacheAge.String())
+	}
+
 	// Size of the download
 	totalSize = resp.Size()
 	// Do a head request for content length if resp.Size is unknown
@@ -1886,10 +2007,12 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		callback(dest, 0, totalSize, false)
 	}
 
-	stoppedTransferTimeout := int64(param.Client_StoppedTransferTimeout.GetInt())
-	slowTransferRampupTime := int64(param.Client_SlowTransferRampupTime.GetInt())
-	slowTransferWindow := int64(param.Client_SlowTransferWindow.GetInt())
-	var startBelowLimit int64 = 0
+	stoppedTransferTimeout := compatToDuration(param.Client_StoppedTransferTimeout.GetDuration(), "Client.StoppedTranferTimeout")
+	slowTransferRampupTime := compatToDuration(param.Client_SlowTransferRampupTime.GetDuration(), "Client.SlowTransferRampupTime")
+	slowTransferWindow := compatToDuration(param.Client_SlowTransferWindow.GetDuration(), "Client.SlowTransferWindow")
+	log.Debugf("Stopped transfer timeout is %s; slow transfer ramp-up is %s; slow transfer look-back window is %s",
+		stoppedTransferTimeout.String(), slowTransferRampupTime.String(), slowTransferWindow.String())
+	startBelowLimit := time.Time{}
 	var noProgressStartTime time.Time
 	var lastBytesComplete int64
 	timeToFirstByteRecorded := false
@@ -1919,12 +2042,13 @@ Loop:
 			if downloaded == lastBytesComplete {
 				if noProgressStartTime.IsZero() {
 					noProgressStartTime = time.Now()
-				} else if time.Since(noProgressStartTime) > time.Duration(stoppedTransferTimeout)*time.Second {
-					errMsg := "No progress for more than " + time.Since(noProgressStartTime).Truncate(time.Millisecond).String()
-					log.Errorln(errMsg)
+				} else if time.Since(noProgressStartTime) > stoppedTransferTimeout {
 					err = &StoppedTransferError{
-						Err: errors.New(errMsg),
+						BytesTransferred: downloaded,
+						StoppedTime:      time.Since(noProgressStartTime),
+						CacheHit:         cacheAge > 0,
 					}
+					log.Errorln(err.Error())
 					return
 				}
 			} else {
@@ -1943,37 +2067,39 @@ Loop:
 			}
 			if resp.BytesPerSecond() < limit {
 				// Give the download `slowTransferRampupTime` (default 120) seconds to start
-				if resp.Duration() < time.Second*time.Duration(slowTransferRampupTime) {
+				if resp.Duration() < slowTransferRampupTime {
 					continue
-				} else if startBelowLimit == 0 {
+				} else if startBelowLimit.IsZero() {
 					warning := []byte("Warning! Downloading too slow...\n")
 					status, err := getProgressContainer().Write(warning)
 					if err != nil {
 						log.Errorln("Problem displaying slow message", err, status)
 						continue
 					}
-					startBelowLimit = time.Now().Unix()
+					startBelowLimit = time.Now()
 					continue
-				} else if (time.Now().Unix() - startBelowLimit) < slowTransferWindow {
+				} else if time.Since(startBelowLimit) < slowTransferWindow {
 					// If the download is below the threshold for less than `SlowTransferWindow` (default 30) seconds, continue
 					continue
 				}
 				// The download is below the threshold for more than `SlowTransferWindow` seconds, cancel the download
 				cancel()
 
-				log.Errorln("Cancelled: Download speed of ", resp.BytesPerSecond(), "bytes/s", " is below the limit of", downloadLimit, "bytes/s")
+				log.Errorf("Cancelled: Download speed of %s/s is below the limit of %s/s", ByteCountSI(int64(resp.BytesPerSecond())), ByteCountSI(int64(downloadLimit)))
 
 				err = &SlowTransferError{
 					BytesTransferred: resp.BytesComplete(),
 					BytesPerSecond:   int64(resp.BytesPerSecond()),
 					Duration:         resp.Duration(),
 					BytesTotal:       totalSize,
+					CacheAge:         cacheAge,
 				}
+				err = error_codes.NewTransfer_SlowTransferError(err)
 				return
 
 			} else {
 				// The download is fast enough, reset the startBelowLimit
-				startBelowLimit = 0
+				startBelowLimit = time.Time{}
 			}
 
 		case <-resp.Done:
@@ -2008,7 +2134,7 @@ Loop:
 	// prior attempt.
 	if resp.HTTPResponse.StatusCode != 200 && resp.HTTPResponse.StatusCode != 206 {
 		log.Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
-		return 0, 0, serverVersion, &HttpErrResp{resp.HTTPResponse.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s",
+		return 0, 0, -1, serverVersion, &HttpErrResp{resp.HTTPResponse.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s",
 			resp.HTTPResponse.StatusCode, resp.Err().Error())}
 	}
 
@@ -2081,11 +2207,11 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	transferResult.job = transfer.job
 
 	var sizer Sizer = &ConstantSizer{size: 0}
-	var downloaded int64 = 0
+	var uploaded int64 = 0
 	if transfer.callback != nil {
-		transfer.callback(transfer.localPath, downloaded, sizer.Size(), false)
+		transfer.callback(transfer.localPath, 0, sizer.Size(), false)
 		defer func() {
-			transfer.callback(transfer.localPath, downloaded, sizer.Size(), true)
+			transfer.callback(transfer.localPath, uploaded, sizer.Size(), true)
 		}()
 	}
 
@@ -2132,7 +2258,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		nonZeroSize = fileInfo.Size() > 0
 	}
 	if transfer.callback != nil {
-		transfer.callback(transfer.localPath, downloaded, sizer.Size(), false)
+		transfer.callback(transfer.localPath, 0, sizer.Size(), false)
 	}
 
 	// Parse the writeback host as a URL
@@ -2172,14 +2298,14 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		request.Header.Set("X-Pelican-JobId", searchJobAd(jobId))
 	}
 	var lastKnownWritten int64
-	t := time.NewTicker(20 * time.Second)
-	defer t.Stop()
 	uploadStart := time.Now()
 
 	go runPut(request, responseChan, errorChan)
 	var lastError error = nil
 
 	tickerDuration := 100 * time.Millisecond
+	stoppedTransferTimeout := compatToDuration(param.Client_StoppedTransferTimeout.GetDuration(), "Client.StoppedTransferTimeout")
+	lastProgress := uploadStart
 	progressTicker := time.NewTicker(tickerDuration)
 	firstByteRecorded := false
 	defer progressTicker.Stop()
@@ -2194,22 +2320,26 @@ Loop:
 		}
 		select {
 		case <-progressTicker.C:
+			uploaded = reader.BytesComplete()
 			if transfer.callback != nil {
-				transfer.callback(transfer.localPath, reader.BytesComplete(), sizer.Size(), false)
+				transfer.callback(transfer.localPath, uploaded, sizer.Size(), false)
 			}
+			// Check to see if we are making progress
 
-		case <-t.C:
-			// If we are not making any progress, if we haven't written 1MB in the last 5 seconds
-			currentRead := reader.BytesComplete()
-			log.Debugln("Current read:", currentRead)
-			log.Debugln("Last known written:", lastKnownWritten)
-			if lastKnownWritten < currentRead {
+			timeSinceLastProgress := time.Since(lastProgress)
+			if lastKnownWritten < uploaded {
 				// We have made progress!
-				lastKnownWritten = currentRead
-			} else {
+				lastKnownWritten = uploaded
+				lastProgress = time.Now()
+			} else if timeSinceLastProgress > stoppedTransferTimeout {
+
+				log.Errorln("No progress made in last", timeSinceLastProgress.Round(time.Millisecond).String(), "in upload")
+				lastError = &StoppedTransferError{
+					BytesTransferred: uploaded,
+					StoppedTime:      timeSinceLastProgress,
+					Upload:           true,
+				}
 				// No progress has been made in the last 1 second
-				log.Errorln("No progress made in last 5 second in upload")
-				lastError = errors.New("upload cancelled, no progress in 5 seconds")
 				break Loop
 			}
 
@@ -2227,7 +2357,14 @@ Loop:
 			break Loop
 
 		case err := <-errorChan:
-			log.Warningln("Unexpected error when performing upload:", err)
+			log.Errorln("Unexpected error when performing upload:", err)
+			var ue *url.Error
+			if errors.As(err, &ue) {
+				err = ue.Unwrap()
+				if err.Error() == "net/http: timeout awaiting response headers" {
+					err = &HeaderTimeoutError{}
+				}
+			}
 			lastError = err
 			break Loop
 
@@ -2235,21 +2372,23 @@ Loop:
 	}
 
 	transferEndTime := time.Now()
-	if fileInfo.Size() == 0 {
+	uploaded = reader.BytesComplete()
+	transferResult.TransferredBytes = uploaded
+	attempt.TransferFileBytes = uploaded
+	if lastError != nil {
 		xferErrors.AddPastError(newTransferAttemptError(dest.Host, "", false, true, lastError), transferEndTime)
 		transferResult.Error = xferErrors
 		attempt.Error = lastError
 	} else {
-		bytesComplete := reader.BytesComplete()
-		log.Debugln("Uploaded bytes:", bytesComplete)
-		transferResult.TransferredBytes = bytesComplete
-		attempt.TransferFileBytes = bytesComplete
+		log.Debugf("Successful upload of %d bytes", uploaded)
 	}
 	// Add our attempt fields
 	attempt.TransferEndTime = transferEndTime
 	attempt.TransferTime = transferEndTime.Sub(transferStartTime)
 	transferResult.Attempts = append(transferResult.Attempts, attempt)
-	return transferResult, lastError
+	// Note: the top-level `err` (second return value) is only for cases where no
+	// transfers were attempted.  If we got here, it must be nil.
+	return transferResult, nil
 }
 
 // Actually perform the HTTP PUT request to the server.
@@ -2263,8 +2402,11 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 	log.Debugf("Dumping request: %s", dump)
 	response, err := client.Do(request)
 	if err != nil {
-		log.Errorln("Error with PUT:", err)
+		if !errors.Is(err, context.Canceled) {
+			log.Errorln("Error with PUT:", err)
+		}
 		errorChan <- err
+		close(errorChan)
 		return
 	}
 	dump, _ = httputil.DumpResponse(response, true)
@@ -2305,6 +2447,7 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 
 	auth := &bearerAuth{token: job.job.token}
 	client := gowebdav.NewAuthClient(rootUrl.String(), auth)
+	client.SetHeader("User-Agent", getUserAgent(job.job.project))
 
 	// XRootD does not like keep alives and kills things, so turn them off.
 	transport := config.GetTransport()
