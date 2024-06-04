@@ -11,7 +11,7 @@ Pelican builds separate images for each Pelican server components, e.g. origin, 
 * Pelican director server: `hub.opensciencegrid.org/pelican_platform/director:latest`
 * Pelican registry server: `hub.opensciencegrid.org/pelican_platform/registry:latest`
 
-> **Note**: the `latest` tag will pull the Pelican server image with the latest released version. You may pull an image with explicit Pelican version by passing the version as the tag (e.g. `v7.6.4`) instead. For a list of available tags, refer to [Pelican Harbor repository](https://hub.opensciencegrid.org/harbor/projects/883/repositories/origin/artifacts-tab?publicAndNotLogged=yes).
+> **Note**: The `latest` tag will pull the Pelican server image with the latest released version. You may pull an image with explicit Pelican version by passing the version as the tag (e.g. `v7.6.4`) instead. For a list of available tags, refer to [Pelican Harbor repository](https://hub.opensciencegrid.org/harbor/projects/883/repositories/origin/artifacts-tab?publicAndNotLogged=yes).
 
 ## Run Pelican server via Docker CLI
 
@@ -170,8 +170,10 @@ docker: no matching manifest for linux/arm64/v8 in the manifest list entries.
 See 'docker run --help'
 ```
 
-This is because Pelican Docker images are built for Linux/AMD64 architecture only. To fix the issue, run the image with `--platform linux/amd64` instead:
+This is because Pelican Docker images are built for `X86_64` architecture only, and your machine is in `ARM64`. To fix the issue, run the image with `--platform linux/amd64` instead:
 
 ```bash
 docker run --platform linux/amd64 -it -p 8444:8444 --name=pelican-director hub.opensciencegrid.org/pelican_platform/director:latest serve -f <federation>
 ```
+
+> **Note**: Although you may run Pelican server containers on ARM64 machines, it is not recommended for production use due to performance limitations.
