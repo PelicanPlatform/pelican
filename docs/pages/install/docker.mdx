@@ -1,6 +1,6 @@
 # Run Pelican Server with Docker Image
 
-This document explains how to run a Pelican server using Pelican docker image. If you want to use Pelican client functionalities, such as download or upload an object, refer to [previous sections](../install.mdx) to download and install a Pelican binary instead.
+This document explains how to run a Pelican server using Pelican docker image. If you want to use Pelican client functionalities, such as download or upload an object, refer to [install page](../install.mdx) to download and install a Pelican binary instead.
 
 ## Before starting
 
@@ -53,24 +53,23 @@ Where most of the command overlaps with the one to run the Pelican origin server
 
 ### Run Pelican director server
 
+> **Note**: To successfully run a Pelican director server, additional configuration is required. Follow [Serve a Pelican Director](../serving_a_federation.mdx#serve-a-director) for instructions. For how to pass configurations to Docker container, refer to [the next section](#configure-pelican-server-in-a-container).
+
 To run the latest pelican director server, run the following command:
 
 ```bash
 docker run -it -p 8444:8444 --name=pelican-director hub.opensciencegrid.org/pelican_platform/director:latest serve -f <federation>
 ```
 
-To successfully run a Pelican director server, additional configuration is required. Follow [Serve a Pelican Director](../serving_a_federation.mdx#serve-a-director) for instructions. For how to pass configurations to Docker container, refer to [the next section](#configure-pelican-server-in-a-container).
-
 ### Run Pelican registry server
+
+> **Note**: To successfully run a Pelican registry server, additional configuration is required. Follow [Serve a Pelican Registry](../serving_a_federation.mdx#serve-a-registry) for instructions. For how to pass configurations to Docker container, refer to [the next section](#configure-pelican-server-in-a-container).
 
 To run the latest pelican registry server, run the following command:
 
 ```bash
 docker run -it -p 8444:8444 --name=pelican-registry hub.opensciencegrid.org/pelican_platform/registry:latest serve -f <federation>
 ```
-
-To successfully run a Pelican registry server, additional configuration is required. Follow [Serve a Pelican Registry](../serving_a_federation.mdx#serve-a-registry) for instructions. For how to pass configurations to Docker container, refer to [the next section](#configure-pelican-server-in-a-container).
-
 
 ## Stop Pelican container
 
@@ -158,6 +157,8 @@ In practice, there is usually a reverse-proxy service (such as Nginx, Traefic, e
 Therefore, to keep things consistent, Pelican internally should use the same human-readable domain name as its web server's _external address_. To do so, configure `Server.ExternalWebURL` to the domain name the outside world uses to access the Pelican web service, e.g. https://example-origin.org:8444 for a production service or https://localhost:8444 for a local deployment.
 
 Notice that there is a port number, `8444`, following the hostname in the URLs above. This is the default port for Pelican web server. When publishing ports from the container, you may choose a different port on the host machine to publish to. Two conventional options are `443` or `8080`, which are default ports for a web service. If you publish `8444` port from the container to `443`, or `8080` on the host machine, i.e. `docker run -p 8444:443`, you may remove the port number from `Server.ExternalWebURL`, i.e. `https://example-origin.org`. For other ports, you need to leave the port number in the URL.
+
+> For more information about how Docker networking works, refer to [Docker Networking Documentation](https://docs.docker.com/network/).
 
 ## Troubleshooting
 
