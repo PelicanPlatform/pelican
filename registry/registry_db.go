@@ -566,7 +566,7 @@ func InitializeDB(ctx context.Context) error {
 }
 
 // Create a table in the registry to store namespace prefixes from topology
-func PopulateTopology() error {
+func PopulateTopology(ctx context.Context) error {
 	// The topology table may already exist from before, it may not. Because of this
 	// we need to add to the table any prefixes that are in topology, delete from the
 	// table any that aren't in topology, and skip any that exist in both.
@@ -584,7 +584,7 @@ func PopulateTopology() error {
 	}
 
 	// Next, get the values from topology
-	namespaces, err := utils.GetTopologyJSON(false)
+	namespaces, err := utils.GetTopologyJSON(ctx, false)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
@@ -630,10 +630,10 @@ func PopulateTopology() error {
 	})
 }
 
-func PeriodicTopologyReload() {
+func PeriodicTopologyReload(ctx context.Context) {
 	for {
 		time.Sleep(param.Federation_TopologyReloadInterval.GetDuration())
-		err := PopulateTopology()
+		err := PopulateTopology(ctx)
 		if err != nil {
 			log.Warningf("Failed to re-populate topology table: %s. Will try again later",
 				err)

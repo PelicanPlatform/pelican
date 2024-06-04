@@ -38,6 +38,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -64,8 +65,8 @@ type (
 		Cancel        context.CancelFunc
 		Status        HealthTestStatus
 	}
-	// Util struct to keep track of `stat` call the director made to the origins
-	originStatUtil struct {
+	// Utility struct to keep track of the `stat` call the director made to the origin/cache servers
+	serverStatUtil struct {
 		Context  context.Context
 		Cancel   context.CancelFunc
 		Errgroup *errgroup.Group
@@ -86,8 +87,8 @@ var (
 	healthTestUtils      = make(map[server_structs.ServerAd]*healthTestUtil)
 	healthTestUtilsMutex = sync.RWMutex{}
 
-	originStatUtils      = make(map[string]originStatUtil)
-	originStatUtilsMutex = sync.RWMutex{}
+	statUtils      = make(map[string]serverStatUtil)
+	statUtilsMutex = sync.RWMutex{}
 
 	// The number of caches to send in the Link header. As discussed in issue
 	// https://github.com/PelicanPlatform/pelican/issues/1247, the client stops
@@ -153,43 +154,43 @@ func getLinkDepth(filepath, prefix string) (int, error) {
 	return pathDepth, nil
 }
 
-func getRequestParameters(req *http.Request) (requestParameterEscaped string) {
-	authzEscaped := ""
+func getRequestParameters(req *http.Request) (requestParams url.Values) {
+	requestParams = url.Values{}
+	authz := ""
 	if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
-		authzEscaped = authzQuery[0]
+		authz = authzQuery[0]
 		// if the authz URL query is coming from XRootD, it probably has a "Bearer " tacked in front
 		// even though it's coming via a URL
-		authzEscaped = strings.TrimPrefix(authzEscaped, "Bearer ")
+		authz = strings.TrimPrefix(authz, "Bearer ")
 	} else if authzHeader := req.Header["Authorization"]; len(authzHeader) > 0 {
-		authzEscaped = strings.TrimPrefix(authzHeader[0], "Bearer ")
-		authzEscaped = url.QueryEscape(authzEscaped)
-	}
-	timeoutEscaped := ""
-	if timeoutQuery := req.URL.Query()["pelican.timeout"]; len(timeoutQuery) > 0 {
-		timeoutEscaped = timeoutQuery[0]
-	} else if timeoutHeader := req.Header["X-Pelican-Timeout"]; len(timeoutHeader) > 0 {
-		timeoutEscaped = url.QueryEscape(timeoutHeader[0])
+		authz = strings.TrimPrefix(authzHeader[0], "Bearer ")
 	}
 
-	if authzEscaped != "" {
-		requestParameterEscaped = "authz=" + authzEscaped
+	timeout := ""
+	if timeoutQuery := req.URL.Query()["pelican.timeout"]; len(timeoutQuery) > 0 {
+		timeout = timeoutQuery[0]
+	} else if timeoutHeader := req.Header["X-Pelican-Timeout"]; len(timeoutHeader) > 0 {
+		timeout = timeoutHeader[0]
 	}
-	if timeoutEscaped != "" {
-		if requestParameterEscaped != "" {
-			requestParameterEscaped += "&"
-		}
-		requestParameterEscaped += "pelican.timeout=" + timeoutEscaped
+
+	// url.Values.Encode will help us escape all them
+	if authz != "" {
+		requestParams.Add("authz", authz)
+	}
+	if timeout != "" {
+		requestParams.Add("pelican.timeout", timeout)
 	}
 	return
 }
 
-func getFinalRedirectURL(rurl url.URL, requestParameterEscaped string) string {
-	if requestParameterEscaped != "" {
-		if rurl.RawQuery != "" {
-			rurl.RawQuery += "&"
+func getFinalRedirectURL(rurl url.URL, requstParams url.Values) string {
+	rQuery := rurl.Query()
+	for key, vals := range requstParams {
+		for _, val := range vals {
+			rQuery.Add(key, val)
 		}
-		rurl.RawQuery += requestParameterEscaped
 	}
+	rurl.RawQuery = rQuery.Encode()
 	return rurl.String()
 }
 
@@ -264,7 +265,7 @@ func redirectToCache(ginCtx *gin.Context) {
 		return
 	}
 
-	requestParameterEscaped := getRequestParameters(ginCtx.Request)
+	reqParams := getRequestParameters(ginCtx.Request)
 
 	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
@@ -366,7 +367,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	// duplicate link metadata above.  This is purposeful: the Link header might get too long if we repeat
 	// the token 20 times for 20 caches.  This means a "normal HTTP client" will correctly redirect but
 	// anything parsing the `Link` header for metalinks will need logic for redirecting appropriately.
-	ginCtx.Redirect(307, getFinalRedirectURL(redirectURL, requestParameterEscaped))
+	ginCtx.Redirect(307, getFinalRedirectURL(redirectURL, reqParams))
 }
 
 func redirectToOrigin(ginCtx *gin.Context) {
@@ -383,6 +384,9 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
 
+	// Skip the stat check for object availability
+	skipStat := ginCtx.Request.URL.Query().Has("skipstat")
+
 	// /pelican/monitoring is the path for director-based health test
 	// where we have /director/healthTest API to mock a file for the cache to get
 	if strings.HasPrefix(reqPath, "/pelican/monitoring/") {
@@ -397,7 +401,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
-	requestParameterEscaped := getRequestParameters(ginCtx.Request)
+	reqParams := getRequestParameters(ginCtx.Request)
 
 	namespaceAd, originAds, _ := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
@@ -412,6 +416,58 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		ginCtx.String(http.StatusNotFound, "There are currently no origins exporting the provided namespace prefix")
 		return
 	}
+
+	availableOriginAds := []server_structs.ServerAd{}
+	// Skip stat query for PUT (upload), PROPFIND (listing) or skipStat query flag is on
+	if ginCtx.Request.Method == "PUT" || ginCtx.Request.Method == "PROPFIND" || skipStat {
+		availableOriginAds = originAds
+	} else {
+		// Query Origins and check if the object exists on the server
+		q := NewObjectStat()
+		qr := q.Query(context.Background(), reqPath, config.OriginType, 1, 3,
+			withOriginAds(originAds), WithToken(reqParams.Get("authz")))
+		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
+
+		// For successful response, we got a list of URL to access the object.
+		// We will use the host of the object url to match the URL field in originAds
+		if qr.Status == querySuccessful {
+			for _, obj := range qr.Objects {
+				serverHost := obj.URL.Host
+				for _, oAd := range originAds {
+					if oAd.URL.Host == serverHost {
+						availableOriginAds = append(availableOriginAds, oAd)
+					}
+				}
+			}
+		} else if qr.Status == queryFailed {
+			if qr.ErrorType != queryInsufficientResErr {
+				ginCtx.String(http.StatusInternalServerError, fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg))
+				return
+			}
+			// Insufficient response
+			if len(qr.DeniedServers) == 0 {
+				// No denied server, the object was not found on any origins
+				ginCtx.String(http.StatusNotFound, "There are currently no origins hosting the object")
+				return
+			}
+			// For denied servers, append them to availableOriginAds
+			// The qr.DeniedServers is a list of AuthURLs of servers that respond with 403
+			// Here, we need to match against the AuthURL field of originAds
+			for _, ds := range qr.DeniedServers {
+				for _, oAd := range originAds {
+					if oAd.AuthURL.String() == ds {
+						availableOriginAds = append(availableOriginAds, oAd)
+					}
+				}
+			}
+		}
+		if len(availableOriginAds) == 0 {
+			// No available originAds, object does not exist
+			ginCtx.String(http.StatusNotFound, "There are currently no origins hosting the object: available origin Ads is 0")
+			return
+		}
+	}
+
 	// if err != nil, depth == 0, which is the default value for depth
 	// so we can use it as the value for the header even with err
 	depth, err := getLinkDepth(reqPath, namespaceAd.Path)
@@ -419,7 +475,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
 
-	originAds, err = sortServerAdsByIP(ipAddr, originAds)
+	availableOriginAds, err = sortServerAdsByIP(ipAddr, availableOriginAds)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.String(http.StatusInternalServerError, "Failed to determine origin ordering")
@@ -428,7 +484,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	linkHeader := ""
 	first := true
-	for idx, ad := range originAds {
+	for idx, ad := range availableOriginAds {
 		if first {
 			first = false
 		} else {
@@ -443,11 +499,11 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
 	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
 	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
-	if namespaceAd.Caps.Listings && originAds[0].Listings {
-		if !namespaceAd.PublicRead && originAds[0].AuthURL != (url.URL{}) {
-			colUrl = originAds[0].AuthURL.String()
+	if namespaceAd.Caps.Listings && availableOriginAds[0].Listings {
+		if !namespaceAd.PublicRead && availableOriginAds[0].AuthURL != (url.URL{}) {
+			colUrl = availableOriginAds[0].AuthURL.String()
 		} else {
-			colUrl = originAds[0].URL.String()
+			colUrl = availableOriginAds[0].URL.String()
 		}
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
@@ -457,13 +513,13 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// If we are doing a PROPFIND, check if origins enable dirlistings
 	if ginCtx.Request.Method == "PROPFIND" {
-		for idx, ad := range originAds {
+		for idx, ad := range availableOriginAds {
 			if ad.Listings && namespaceAd.Caps.Listings {
-				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
-				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
+				redirectURL = getRedirectURL(reqPath, availableOriginAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := availableOriginAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
-				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, requestParameterEscaped))
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
 				return
 			}
 		}
@@ -476,13 +532,13 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// Check if we are doing a DirectRead and if it is allowed
 	if ginCtx.Request.URL.Query().Has("directread") {
-		for idx, originAd := range originAds {
+		for idx, originAd := range availableOriginAds {
 			if originAd.DirectReads && namespaceAd.Caps.DirectReads {
-				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
-				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
+				redirectURL = getRedirectURL(reqPath, availableOriginAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := availableOriginAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
-				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, requestParameterEscaped))
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
 				return
 			}
 		}
@@ -492,27 +548,27 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// If we are doing a PUT, check to see if any origins are writeable
 	if ginCtx.Request.Method == "PUT" {
-		for idx, ad := range originAds {
+		for idx, ad := range availableOriginAds {
 			if ad.Writes {
-				redirectURL = getRedirectURL(reqPath, originAds[idx], !namespaceAd.PublicRead)
-				if brokerUrl := originAds[idx].BrokerURL; brokerUrl.String() != "" {
+				redirectURL = getRedirectURL(reqPath, availableOriginAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := availableOriginAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
-				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, requestParameterEscaped))
+				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
 				return
 			}
 		}
 		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint have direct reads enabled"})
 		return
 	} else { // Otherwise, we are doing a GET
-		redirectURL := getRedirectURL(reqPath, originAds[0], !namespaceAd.PublicRead)
-		if brokerUrl := originAds[0].BrokerURL; brokerUrl.String() != "" {
+		redirectURL := getRedirectURL(reqPath, availableOriginAds[0], !namespaceAd.PublicRead)
+		if brokerUrl := availableOriginAds[0].BrokerURL; brokerUrl.String() != "" {
 			ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 		}
 
 		// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
 		// not those in the `Link`.
-		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, requestParameterEscaped))
+		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
 	}
 }
 
@@ -764,7 +820,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		Listings:    adV2.Caps.Listings,
 	}
 
-	recordAd(sAd, &adV2.Namespaces)
+	recordAd(engineCtx, sAd, &adV2.Namespaces)
 
 	// Start director periodic test of origin's health status if origin AD
 	// has WebURL field AND it's not already been registered
@@ -828,24 +884,6 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				LaunchPeriodicDirectorTest(cancelCtx, sAd)
 				return nil
 			})
-		}
-	}
-
-	if sType == server_structs.OriginType {
-		originStatUtilsMutex.Lock()
-		defer originStatUtilsMutex.Unlock()
-		statUtil, ok := originStatUtils[sAd.URL.String()]
-		if !ok || statUtil.Errgroup == nil {
-			baseCtx, cancel := context.WithCancel(engineCtx)
-			concLimit := param.Director_StatConcurrencyLimit.GetInt()
-			statErrGrp := errgroup.Group{}
-			statErrGrp.SetLimit(concLimit)
-			newUtil := originStatUtil{
-				Errgroup: &statErrGrp,
-				Cancel:   cancel,
-				Context:  baseCtx,
-			}
-			originStatUtils[sAd.URL.String()] = newUtil
 		}
 	}
 

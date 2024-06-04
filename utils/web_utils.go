@@ -109,14 +109,14 @@ func MakeRequest(ctx context.Context, url string, method string, data map[string
 }
 
 // GetTopologyJSON returns the namespaces and caches from OSDF topology
-func GetTopologyJSON(includeDowned bool) (*TopologyNamespacesJSON, error) {
+func GetTopologyJSON(ctx context.Context, includeDowned bool) (*TopologyNamespacesJSON, error) {
 	topoNamespaceUrl := param.Federation_TopologyNamespaceUrl.GetString()
 	if topoNamespaceUrl == "" {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
 		return nil, errors.New("Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
 	}
 
-	req, err := http.NewRequest(http.MethodGet, topoNamespaceUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, topoNamespaceUrl, nil)
 	if err != nil {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Failure when getting OSDF namespace data from topology")
 		return nil, errors.Wrap(err, "Failure when getting OSDF namespace data from topology")

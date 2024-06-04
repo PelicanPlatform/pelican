@@ -1058,7 +1058,7 @@ func TestCreateNamespace(t *testing.T) {
 		svr := topologyMockup(t, topoNamespaces)
 		defer svr.Close()
 		viper.Set("Federation.TopologyNamespaceURL", svr.URL)
-		err = PopulateTopology()
+		err = PopulateTopology(context.Background())
 		require.NoError(t, err)
 
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
@@ -1100,7 +1100,7 @@ func TestCreateNamespace(t *testing.T) {
 		svr := topologyMockup(t, topoNamespaces)
 		defer svr.Close()
 		viper.Set("Federation.TopologyNamespaceURL", svr.URL)
-		err = PopulateTopology()
+		err = PopulateTopology(context.Background())
 		require.NoError(t, err)
 
 		mockInsts := []registrationFieldOption{{ID: "1000"}}

@@ -811,7 +811,7 @@ func TestRegistryTopology(t *testing.T) {
 	//Test topology table population
 	err = createTopologyTable()
 	require.NoError(t, err)
-	err = PopulateTopology()
+	err = PopulateTopology(context.Background())
 	require.NoError(t, err)
 
 	// Check that topology namespace exists
@@ -856,7 +856,7 @@ func TestRegistryTopology(t *testing.T) {
 
 	// Re-populate topo
 	//Test topology table population
-	err = PopulateTopology()
+	err = PopulateTopology(context.Background())
 	require.NoError(t, err)
 
 	// Check that /topo/foo still exists

@@ -19,6 +19,7 @@
 package director
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/netip"
@@ -30,6 +31,7 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -68,7 +70,7 @@ func (f filterType) String() string {
 	}
 }
 
-func recordAd(ad server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) {
+func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) {
 	if err := updateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
@@ -116,6 +118,27 @@ func recordAd(ad server_structs.ServerAd, namespaceAds *[]server_structs.Namespa
 		serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: *namespaceAds}, ttlcache.DefaultTTL)
 	} else {
 		serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: *namespaceAds}, customTTL)
+	}
+
+	// Prepare `stat` call utilities
+	statUtilsMutex.Lock()
+	defer statUtilsMutex.Unlock()
+	statUtil, ok := statUtils[ad.URL.String()]
+	if !ok || statUtil.Errgroup == nil {
+		baseCtx, cancel := context.WithCancel(ctx)
+		concLimit := param.Director_StatConcurrencyLimit.GetInt()
+		// If the value is not set, set to -1 to remove the limit
+		if concLimit == 0 {
+			concLimit = -1
+		}
+		statErrGrp := errgroup.Group{}
+		statErrGrp.SetLimit(concLimit)
+		newUtil := serverStatUtil{
+			Errgroup: &statErrGrp,
+			Cancel:   cancel,
+			Context:  baseCtx,
+		}
+		statUtils[ad.URL.String()] = newUtil
 	}
 }
 

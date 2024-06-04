@@ -143,14 +143,14 @@ func updateDowntimeFromTopology(excludedNss, includedNss *utils.TopologyNamespac
 }
 
 // Populate internal cache with origin/cache ads
-func AdvertiseOSDF() error {
-	namespaces, err := utils.GetTopologyJSON(false)
+func AdvertiseOSDF(ctx context.Context) error {
+	namespaces, err := utils.GetTopologyJSON(ctx, false)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
 
 	// Second call to fetch all servers (including servers in downtime)
-	includedNss, err := utils.GetTopologyJSON(true)
+	includedNss, err := utils.GetTopologyJSON(ctx, true)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get topology JSON with server in downtime included (include_downed)")
 	}
@@ -245,11 +245,11 @@ func AdvertiseOSDF() error {
 	}
 
 	for originAd, namespacesSlice := range originAdMap {
-		recordAd(originAd, &namespacesSlice)
+		recordAd(ctx, originAd, &namespacesSlice)
 	}
 
 	for cacheAd, namespacesSlice := range cacheAdMap {
-		recordAd(cacheAd, &namespacesSlice)
+		recordAd(ctx, cacheAd, &namespacesSlice)
 	}
 
 	return nil
@@ -263,7 +263,7 @@ func PeriodicCacheReload(ctx context.Context) {
 			// The ad cache times out every 15 minutes, so update it every
 			// 10. If a key isn't updated, it will survive for 5 minutes
 			// and then disappear
-			err := AdvertiseOSDF()
+			err := AdvertiseOSDF(ctx)
 			if err != nil {
 				log.Warningf("Failed to re-advertise: %s. Will try again later",
 					err)
