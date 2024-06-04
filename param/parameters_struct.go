@@ -50,9 +50,9 @@ type Config struct {
 		DisableProxyFallback bool
 		MaximumDownloadSpeed int
 		MinimumDownloadSpeed int
-		SlowTransferRampupTime int
-		SlowTransferWindow int
-		StoppedTransferTimeout int
+		SlowTransferRampupTime time.Duration
+		SlowTransferWindow time.Duration
+		StoppedTransferTimeout time.Duration
 		WorkerCount int
 	}
 	ConfigDir string
@@ -326,9 +326,9 @@ type configWithType struct {
 		DisableProxyFallback struct { Type string; Value bool }
 		MaximumDownloadSpeed struct { Type string; Value int }
 		MinimumDownloadSpeed struct { Type string; Value int }
-		SlowTransferRampupTime struct { Type string; Value int }
-		SlowTransferWindow struct { Type string; Value int }
-		StoppedTransferTimeout struct { Type string; Value int }
+		SlowTransferRampupTime struct { Type string; Value time.Duration }
+		SlowTransferWindow struct { Type string; Value time.Duration }
+		StoppedTransferTimeout struct { Type string; Value time.Duration }
 		WorkerCount struct { Type string; Value int }
 	}
 	ConfigDir struct { Type string; Value string }

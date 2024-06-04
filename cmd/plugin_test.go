@@ -231,7 +231,11 @@ func TestStashPluginMain(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
 
-	_, err := config.SetPreferredPrefix(config.StashPrefix)
+	oldPrefix, err := config.SetPreferredPrefix(config.StashPrefix)
+	defer func() {
+		_, err = config.SetPreferredPrefix(oldPrefix)
+		require.NoError(t, err)
+	}()
 	assert.NoError(t, err)
 
 	// Temp dir for downloads
@@ -567,7 +571,7 @@ func TestFailTransfer(t *testing.T) {
 		transferError, _ := result.Get("TransferError")
 		transferErrorStr, ok := transferError.(string)
 		require.True(t, ok)
-		assert.Equal(t, "cancelled transfer, too slow.  Detected speed: 0 B/s, total transferred: 0 B, total transfer time: 0s", transferErrorStr)
+		assert.Equal(t, "cancelled transfer, too slow; detected speed=0 B/s, total transferred=0 B, total transfer time=0s, cache miss", transferErrorStr)
 	})
 }
 

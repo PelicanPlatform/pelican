@@ -355,22 +355,22 @@ components: ["origin"]
 name: Client.StoppedTransferTimeout
 description: |+
   A timeout indicating when a "stopped transfer" event should be triggered.
-type: int
-default: 100
+type: duration
+default: 100s
 components: ["client"]
 ---
 name: Client.SlowTransferRampupTime
 description: |+
   A duration indicating the ramp up period for a slow transfer.
-type: int
-default: 30
+type: duration
+default: 30s
 components: ["client"]
 ---
 name: Client.SlowTransferWindow
 description: |+
   A duration indicating the sliding window over which to consider transfer speeds for slow transfers.
-type: int
-default: 30
+type: duration
+default: 30s
 components: ["client"]
 ---
 name: Client.DisableHttpProxy
@@ -411,7 +411,7 @@ components: ["client"]
 ---
 name: Client.MinimumDownloadSpeed
 description: |+
-  The minimum speed allowed for a client download before an error is thrown.
+  The minimum speed (in bytes per second) allowed for a client download before an error is thrown.
 type: int
 default: 102400
 components: ["client"]
