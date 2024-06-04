@@ -198,7 +198,7 @@ function Config() {
                                             <DownloadButton
                                                 Button={IconButton}
                                                 mimeType={"text/yaml"}
-                                                data={yaml.dump(stripTypes(structuredClone(config)))}
+                                                data={yaml.dump(stripNulls(stripTypes(structuredClone(config))))}
                                             >
                                                 <Download/>
                                             </DownloadButton>
@@ -281,6 +281,25 @@ const stripTypes = (config: any) => {
 
     Object.keys(config).forEach(key => {
         config[key] = stripTypes(config[key])
+    })
+
+    return config
+}
+
+/** Recursively delete the keys that have null values in an object */
+const stripNulls = (config: any) => {
+
+    // If the config is an object then iterate keys otherwise skip
+    if(typeof config !== "object"){
+        return config
+    }
+
+    Object.keys(config).forEach(key => {
+        if(config[key] === null){
+            delete config[key]
+        } else {
+            config[key] = stripNulls(config[key])
+        }
     })
 
     return config
