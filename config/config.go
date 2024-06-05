@@ -860,7 +860,7 @@ func handleContinuedCfg() error {
 	if cfgDirs := viper.GetStringSlice("ConfigLocations"); len(cfgDirs) != 0 {
 		for _, cfgDir := range cfgDirs {
 
-		// Check that the directory exists
+			// Check that the directory exists
 			if _, err := os.Stat(cfgDir); err != nil {
 				if os.IsNotExist(err) {
 					return errors.Errorf("directory %s specified by the 'ConfigLocations' key does not exist", cfgDir)
