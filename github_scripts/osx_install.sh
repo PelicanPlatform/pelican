@@ -27,6 +27,7 @@ mkdir dependencies
 pushd dependencies
 
 # Build XRootD from source
+# TODO: Remove this patch and install from brew instead when XRootD releases 5.7.0
 git clone --depth=1 https://github.com/xrootd/xrootd.git
 pushd xrootd
 patch -p1 < $scriptdir/gstream.patch
@@ -35,6 +36,7 @@ cd xrootd_build
 cmake .. -GNinja
 ninja
 ninja install
+popd
 
 git clone --depth=1 https://github.com/PelicanPlatform/xrdcl-pelican.git
 pushd xrdcl-pelican
