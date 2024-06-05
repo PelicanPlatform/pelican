@@ -2,6 +2,7 @@
   "rhel": "CentOS, Fedora, or openSUSE",
   "debian": "Debian and Ubuntu",
   "alpine": "Alpine Linux",
+  "linux_binary": "Linux Standalone Binary",
   "macos": "macOS",
   "docker": "Pelican Docker Image"
 }
