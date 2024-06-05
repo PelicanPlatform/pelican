@@ -27,6 +27,12 @@ cp pelican osdf
 ./osdf origin serve -f https://osg-htc.org -v /tmp/stash/:/test
 ```
 
+##### To run all of the websites
+
+```shell
+./pelican serve --module director,registry,origin,cache
+```
+
 #### To run the website and the reverse proxy:
 
 First make sure that the ports are correct in `dev/nginx.conf` so that they point to

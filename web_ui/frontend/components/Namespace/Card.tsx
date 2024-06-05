@@ -1,4 +1,4 @@
-import {Namespace} from "@/components/Main";
+import {Namespace} from "@/index";
 import React, {useRef, useState} from "react";
 import {Avatar, Box, IconButton, Paper, Tooltip, Typography} from "@mui/material";
 import {Download, Edit, Person} from "@mui/icons-material";

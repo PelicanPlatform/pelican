@@ -4,7 +4,7 @@ import {Avatar, Box, IconButton, Tooltip, Typography} from "@mui/material";
 import {Block, Check, Edit, Person} from "@mui/icons-material";
 import Link from "next/link";
 
-import {Alert, Namespace} from "@/components/Main";
+import {Alert, Namespace} from "@/index";
 import InformationDropdown from "./InformationDropdown";
 import {getServerType, NamespaceIcon} from "@/components/Namespace/index";
 import {User} from "@/index";

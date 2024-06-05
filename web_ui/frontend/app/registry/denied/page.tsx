@@ -23,10 +23,10 @@ import React, {useEffect, useMemo, useState} from "react";
 
 import {PendingCard, Card, CardSkeleton, CreateNamespaceCard} from "@/components/Namespace";
 import Link from "next/link";
-import {Namespace, Alert as AlertType} from "@/components/Main";
+import {Namespace, Alert as AlertType} from "@/index";
 import {getUser} from "@/helpers/login";
 import {Add} from "@mui/icons-material";
-import CardList from "@/components/Namespace/CardList";
+import NamespaceCardList from "@/components/Namespace/NamespaceCardList";
 import useSWR from "swr";
 import {CardProps} from "@/components/Namespace/Card";
 import {PendingCardProps} from "@/components/Namespace/PendingCard";
@@ -93,7 +93,7 @@ export default function Home() {
                         <Typography variant={"h6"} py={2}>
                             Denied Namespaces
                         </Typography>
-                        { deniedNamespaces !== undefined ? <CardList<CardProps> data={deniedNamespaces} Card={DeniedCard} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
+                        { deniedNamespaces !== undefined ? <NamespaceCardList<CardProps> data={deniedNamespaces} Card={DeniedCard} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
                     </AuthenticatedContent>
                 </Grid>
                 <Grid item lg={6} xl={8}>

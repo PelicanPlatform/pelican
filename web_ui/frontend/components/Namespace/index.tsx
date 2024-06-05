@@ -1,13 +1,13 @@
-import {Namespace} from "@/components/Main";
+import {Namespace} from "@/index";
 import Card from "./Card";
 import CreateNamespaceCard from "./CreateNamespaceCard";
 import CardSkeleton from "./CardSkeleton";
 import PendingCard from "./PendingCard";
-import CardList from "./CardList";
+import NamespaceCardList from "./NamespaceCardList";
 import NamespaceIcon from "./NamespaceIcon";
 
 export {
-    Card, CardList, CreateNamespaceCard, CardSkeleton, PendingCard, NamespaceIcon
+    Card, NamespaceCardList, CreateNamespaceCard, CardSkeleton, PendingCard, NamespaceIcon
 }
 
 

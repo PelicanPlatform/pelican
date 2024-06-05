@@ -1,4 +1,4 @@
-import {Namespace} from "@/components/Main";
+import {Namespace} from "@/index";
 import {Authenticated, secureFetch} from "@/helpers/login";
 import React, {useRef, useState} from "react";
 import {
@@ -13,13 +13,14 @@ import {
     FormGroup,
     FormControlLabel, Portal, Alert
 } from "@mui/material";
-import {Server} from "@/components/Main";
+import {Server} from "@/index";
 import {Language} from "@mui/icons-material";
 import {NamespaceIcon} from "@/components/Namespace/index";
 import useSWR from "swr";
 import Link from "next/link";
 import {User} from "@/index";
 import {getErrorMessage} from "@/helpers/util";
+import {DirectorDropdown} from "@/app/director/components/DirectorDropdown";
 
 export interface DirectorCardProps {
     server: Server
@@ -31,6 +32,7 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
     const [filtered, setFiltered] = useState<boolean>(server.filtered);
     const [error, setError] = useState<string | undefined>(undefined);
     const [disabled, setDisabled] = useState<boolean>(false);
+    const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
 
     const {mutate} = useSWR<Server[]>("getServers")
 
@@ -45,12 +47,14 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
                         justifyContent: "space-between",
                         border: "solid #ececec 1px",
                         borderRadius: "4px",
+                        transition: "background-color 0.3s",
                         "&:hover": {
                             bgcolor: "#ececec"
                         },
+                        bgcolor: server.status === "Error" ? "warning.light" : "secondary.main",
                         p: 1
                     }}
-                    bgcolor={"secondary"}
+                    onClick={() => setDropdownOpen(!dropdownOpen)}
                 >
                     <Box my={"auto"} ml={1} display={"flex"} flexDirection={"row"}>
                         <NamespaceIcon serverType={server.type.toLowerCase() as "cache" | "origin"} />
@@ -106,7 +110,7 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
                                 <Box ml={1}>
                                     <Link href={server.webUrl} target={"_blank"} >
                                         <Tooltip title={"View Server Website"}>
-                                            <IconButton>
+                                            <IconButton size={"small"}>
                                                 <Language/>
                                             </IconButton>
                                         </Tooltip>
@@ -117,6 +121,7 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
                     </Box>
                 </Box>
             </Paper>
+            <DirectorDropdown server={server} transition={dropdownOpen}/>
             <Portal>
                 <Snackbar
                     anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
