@@ -56,6 +56,20 @@ The download table above includes Pelican versions up to `7.6.x` If you would li
 
 * [Install Pelican on Windows](./install/windows.mdx)
 
+
+### Install OSDF or Server Package
+
+Pelican has two special packaging, `OSDF` and `Server`. The `OSDF` packaging, i.e. `pelican-osdf-compat`, is for running Pelican in Open Science Data Federation (OSDF). The `Server` packaging, i.e. `pelican-server` is for running Pelican servers.
+
+Both of the package **requires Pelican package to be installed first**. You may get the follow error message if you only install the special package:
+
+```console
+Problem: conflicting requests
+  - nothing provides pelican needed by pelican-osdf-compat-7.8.5-1.aarch64 from @commandline
+```
+
+To fix the issue, install the Pelican package first by following [the instructions](#install-pelican-binary) above.
+
 ## Verify Pelican Is Installed
 
 > If you installed Pelican as a standalone binary, or if you installed Pelican on macOS or Windows operating systems, you need to add Pelican to your `PATH` environment variable before proceeding. Follow the instructions for [Linux](./install/linux_binary.mdx#add-pelican-binary-to-your-path-permanently), [macOS](./install/macos.mdx#add-pelican-binary-to-your-path), and [Windows](./install/windows.mdx#add-pelican-binary-to-your-path).
