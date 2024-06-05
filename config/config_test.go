@@ -192,6 +192,11 @@ func setupConfigLocations(t *testing.T, continueDirs []string) {
 	viper.SetConfigType("yaml")
 	viper.SetConfigName("pelican")
 
+	// Escape backslashes in the directory paths -- needed for Windows tests
+	for idx, dir := range continueDirs {
+		continueDirs[idx] = strings.ReplaceAll(dir, "\\", "\\\\")
+	}
+
 	// Convert the slice of directories into a YAML list
 	yamlDirs := strings.Join(continueDirs, "\", \"")
 	yamlDirs = fmt.Sprintf("[\"%s\"]", yamlDirs)
