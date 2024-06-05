@@ -26,29 +26,17 @@ brew install minio ninja coreutils
 mkdir dependencies
 pushd dependencies
 
-# Build and overwrite xrootd with our patches
+# Build XRootD from source
 git clone --depth=1 https://github.com/xrootd/xrootd.git
 pushd xrootd
-patch -p1 < $scriptdir/pelican_protocol.patch
 patch -p1 < $scriptdir/gstream.patch
 mkdir xrootd_build
 cd xrootd_build
 cmake .. -GNinja
 ninja
 ninja install
-cd ..
-mkdir plugin_build
-cd plugin_build
-cmake .. -GNinja
-# Explicitly build libXrdAccSciTokens
-ninja libXrdAccSciTokens-5.so
-xrootd_libdir=$(grealpath $(dirname $(grealpath `which xrootd`))/../lib/)
-echo "Will install into: $xrootd_libdir"
-sudo ln -s $PWD/src/libXrdAccSciTokens-5.so $xrootd_libdir
-popd
 
 git clone --depth=1 https://github.com/PelicanPlatform/xrdcl-pelican.git
-
 pushd xrdcl-pelican
 mkdir build
 cd build
@@ -65,6 +53,7 @@ mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
 ninja install
+xrootd_libdir=$(grealpath $(dirname $(grealpath `which xrootd`))/../lib/)
 echo "Will install into: $xrootd_libdir"
 sudo mkdir -p $xrootd_libdir
 sudo ln -s $PWD/release_dir/lib/libXrdHTTPServer-5.so $xrootd_libdir
@@ -79,6 +68,18 @@ export SCITOKENS_CPP_DIR=$PWD/release_dir
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
 ninja install
 sudo ln -s $PWD/release_dir/lib/libSciTokens*.dylib $xrootd_libdir
+popd
+
+# Build Xrootd Scitoken library
+git clone --depth=1 https://github.com/xrootd/xrootd.git
+pushd xrootd-scitoken
+patch -p1 < $scriptdir/pelican_protocol.patch
+mkdir build
+cd build
+cmake .. -GNinja
+ninja libXrdAccSciTokens-5.so libXrdPss-5.so
+sudo ln -s $PWD/src/libXrdAccSciTokens-5.so $xrootd_libdir
+sudo ln -sf $PWD/src/libXrdPss-5.so $xrootd_libdir
 popd
 
 popd
@@ -172,8 +173,7 @@ http.header2cgi Authorization authz
 
 all.sitename test_host
 
-xrootd.fslib ++ throttle
-xrootd.monitor all auth flush 30s window 5s fstat 60 lfn ops xfr 5  dest redir fstat info files user pfc tcpmon ccm throttle 127.0.0.1:9931
+xrootd.monitor all auth flush 30s window 5s fstat 60 lfn ops xfr 5  dest redir fstat info files user pfc tcpmon ccm 127.0.0.1:9931
 all.adminpath /tmp/xrootd
 all.pidpath /tmp/xrootd
 ofs.osslib libXrdS3.so
