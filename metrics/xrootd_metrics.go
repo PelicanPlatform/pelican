@@ -316,12 +316,25 @@ var (
 		Help: "Number of bytes the data requested is in the cache or not",
 	}, []string{"path", "type"}) // type: hit/miss/bypass
 
-	CacheIO = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "xrootd_server_io",
-		Help: "I/O statistics for the origin/cache server, including active I/O, total I/O, and IO wait time (in seconds)",
-	}, []string{"type"}) // type: active/total/wait_time
+	ServerTotalIO = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_server_io_total",
+		Help: "Total storage operations in origin/cache server",
+	})
+
+	ServerActiveIO = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_server_io_active",
+		Help: "Number of ongoing storage operations in origin/cache server",
+	})
+
+	ServerIOWaitTime = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_server_io_wait_time",
+		Help: "The current wait time of the storage operation in origin/cache server",
+	})
 
 	lastStats SummaryStat
+
+	lastTotalIO  int     // The last total IO value
+	lastWaitTime float64 // The last IO wait time
 
 	// Maps the connection identifier with a user record
 	sessions = ttlcache.New[UserId, UserRecord](ttlcache.WithTTL[UserId, UserRecord](24 * time.Hour))
@@ -850,9 +863,21 @@ func HandlePacket(packet []byte) error {
 				if err := json.Unmarshal([]byte(js), &throttleGS); err != nil {
 					return errors.Wrap(err, "failed to parse throttle plugin stat json. Raw data is "+string(js))
 				}
-				CacheIO.WithLabelValues("active").Set(float64(throttleGS.IOActive))
-				CacheIO.WithLabelValues("total").Set(float64(throttleGS.IOTotal))
-				CacheIO.WithLabelValues("wait_time").Set(throttleGS.IOWaitTime)
+				totalIOInc := 0
+				if totalIOInc = throttleGS.IOTotal - lastTotalIO; totalIOInc < 0 {
+					totalIOInc = 0
+				}
+				lastTotalIO = throttleGS.IOTotal
+
+				waitTimeInc := 0.0
+				if waitTimeInc = throttleGS.IOWaitTime - lastWaitTime; waitTimeInc < 0 {
+					waitTimeInc = 0
+				}
+				lastWaitTime = throttleGS.IOWaitTime
+
+				ServerTotalIO.Add(float64(totalIOInc))
+				ServerActiveIO.Set(float64(throttleGS.IOActive))
+				ServerIOWaitTime.Add(waitTimeInc)
 			}
 		}
 
