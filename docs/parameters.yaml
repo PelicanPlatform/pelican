@@ -2041,6 +2041,15 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Xrootd.AuthRefreshInterval
+description: |+
+  The interval used by XRootD (cache/origin) for refreshing Authfiles. This affects how often the server polls for upstream changes
+  that might affect the authorization policy. For example, when applied to a cache, this affects how often origin permissions are
+  polled for changes.
+type: duration
+default: 5m
+components: ["origin", "cache"]
+---
 name: Xrootd.ManagerHost
 description: |+
   A URL pointing toward the XRootD instance's Manager Host.

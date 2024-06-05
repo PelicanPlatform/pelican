@@ -290,6 +290,7 @@ type Config struct {
 		TLSHandshakeTimeout time.Duration `mapstructure:"tlshandshaketimeout"`
 	} `mapstructure:"transport"`
 	Xrootd struct {
+		AuthRefreshInterval time.Duration `mapstructure:"authrefreshinterval"`
 		Authfile string `mapstructure:"authfile"`
 		ConfigFile string `mapstructure:"configfile"`
 		DetailedMonitoringHost string `mapstructure:"detailedmonitoringhost"`
@@ -577,6 +578,7 @@ type configWithType struct {
 		TLSHandshakeTimeout struct { Type string; Value time.Duration }
 	}
 	Xrootd struct {
+		AuthRefreshInterval struct { Type string; Value time.Duration }
 		Authfile struct { Type string; Value string }
 		ConfigFile struct { Type string; Value string }
 		DetailedMonitoringHost struct { Type string; Value string }
