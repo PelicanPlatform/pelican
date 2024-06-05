@@ -1,0 +1,162 @@
+#
+# Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+#
+# Licensed under the Apache License, Version 2.0 (the "License"); you
+# may not use this file except in compliance with the License.  You may
+# obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# This file contains structured documentation about the Pelican parameters.
+# While it is somewhat human-readable, it is meant to help with the documentation
+# generation.
+
+############################
+#    Client Error Codes    #
+############################
+
+# The below client error codes are 4 digits and each digit has a specific meaning:
+# 1st digit: The type of error
+# 2nd digit: Nothing yet
+# 3rd digit: Represents if the user/submitter can do a modification to fix the error (1 if it is at user's fault, 0 otherwise)
+# 4th digit: The sub-type of the error
+
+# The clientExitCode is the code that is used to exit the client process
+
+# Retryable is a boolean value that indicates if the error could be solved with a HTCondor job retry.
+# This means that the whole client process will restart with the HTCondor job so the process could succeed
+# if it hits a different cache/site or hits the same cache/site when it is in a better state.
+
+############################
+#     Parameter Errors     #
+############################
+---
+type: Parameter
+code: 1000
+clientExitCode: 4
+description: >-
+  If the client failed to start, or was started with invalid parameters, or otherwise believes what it
+  was asked to do is impossible or the request itself is malformed.
+retryable: false
+
+############################
+#    Resolution Errors     #
+############################
+---
+type: Resolution
+code: 2000
+clientExitCode: 5
+description: >-
+  Indicates that the client failed to even attempt to contact the server.
+retryable: false
+
+############################
+#      Contact Errors      #
+############################
+---
+type: Contact
+code: 3000
+clientExitCode: 6
+description: >-
+  The client attempted to contact the server at its resolved address and failed to do so.
+retryable: false
+---
+type: Contact.Director
+code: 3001
+clientExitCode: 6
+description: >-
+  The client attempted to contact the director at its found address but failed to do so.
+retryable: false
+---
+type: Contact.Cache
+code: 3002
+clientExitCode: 11
+description: >-
+  The client attempted to contact the cache but failed to do so.
+retryable: true
+---
+type: Contact.Origin
+code: 3003
+clientExitCode: 6
+description: >-
+  The client attempted to contact the origin but failed to do so.
+retryable: false
+---
+type: Contact.Registry
+code: 3004
+clientExitCode: 6
+description: >-
+  The client attempted to contact the registry (usually through the director) but failed to do so.
+retryable: false
+
+############################
+#   Authorization Errors   #
+############################
+---
+type: Authorization
+code: 4000
+clientExitCode: 7
+description: >-
+  The client contacted the server but failed to authenticate, or failed to authorize, or if
+  the server replied with an authorization error when the file was requested or sent.
+retryable: false
+
+############################
+#   Specification Errors   #
+############################
+---
+type: Specification
+code: 5000
+clientExitCode: 8
+description: >-
+  If the client successfully contacted the server and received a definitive response that the
+  desired file was not present or could not be created. Usually the submitters fault.
+retryable: false
+---
+type: Specification.FileNotFound
+code: 5011
+clientExitCode: 8
+description: >-
+  If the client successfully contacted the server but the desired file does not exist for download.
+  The user might have enterred the wrong URL or the file might not yet be at the specified origin.
+retryable: false
+---
+type: Specification.FileNotCreated
+code: 5002
+clientExitCode: 8
+description: >-
+  If the client successfully contacted the server but the desired file for upload could not be created.
+retryable: false
+
+############################
+#     Transfer Errors      #
+############################
+---
+type: Transfer
+code: 6000
+clientExitCode: 9
+description: >-
+  The client started transferring the file but did not complete it for some reason, or if the file
+  failed post-transfer validation.
+retryable: true
+---
+type: Transfer.StoppedTransfer
+code: 6001
+clientExitCode: 11
+description: >-
+  The client started transferring file(s) but it got cancelled by Pelican as stopped transferring data.
+retryable: true
+---
+type: Transfer.SlowTransfer
+code: 6002
+clientExitCode: 11
+description: >-
+  The client started transferring data but the transfer was slower than the minumum configured timeout rate.
+retryable: true

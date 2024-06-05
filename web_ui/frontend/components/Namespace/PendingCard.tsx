@@ -36,10 +36,10 @@ export const PendingCard = ({
             })
 
             if (!response.ok){
-                onAlert({severity: "error", message: `Failed to approve namespace: ${namespace.prefix}`})
+                onAlert({severity: "error", message: `Failed to approve ${namespace.type} registration: ${namespace.prefix}`})
             } else {
                 onUpdate()
-                onAlert({severity: "success", message: `Successfully approved namespace: ${namespace.prefix}`})
+                onAlert({severity: "success", message: `Successfully approved ${namespace.type} registration: ${namespace.prefix}`})
             }
 
         } catch (error) {
@@ -57,10 +57,10 @@ export const PendingCard = ({
             })
 
             if (!response.ok){
-                onAlert({severity: "error", message: `Failed to deny namespace: ${namespace.prefix}`})
+                onAlert({severity: "error", message: `Failed to deny ${namespace.type} registration: ${namespace.prefix}`})
             } else {
                 onUpdate()
-                onAlert({severity: "success", message: `Successfully denied namespace: ${namespace.prefix}`})
+                onAlert({severity: "success", message: `Successfully denied ${namespace.type} registration: ${namespace.prefix}`})
             }
 
         } catch (error) {

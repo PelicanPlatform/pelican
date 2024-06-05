@@ -55,7 +55,7 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 		// Get the ads from topology, populate the cache, and keep the cache
 		// updated with fresh info
-		if err := director.AdvertiseOSDF(); err != nil {
+		if err := director.AdvertiseOSDF(ctx); err != nil {
 			return err
 		}
 		go director.PeriodicCacheReload(ctx)

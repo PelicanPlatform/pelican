@@ -266,9 +266,6 @@ var (
 	Cache_Port = IntParam{"Cache.Port"}
 	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
-	Client_SlowTransferRampupTime = IntParam{"Client.SlowTransferRampupTime"}
-	Client_SlowTransferWindow = IntParam{"Client.SlowTransferWindow"}
-	Client_StoppedTransferTimeout = IntParam{"Client.StoppedTransferTimeout"}
 	Client_WorkerCount = IntParam{"Client.WorkerCount"}
 	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
@@ -334,6 +331,9 @@ var (
 
 var (
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
+	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
+	Client_SlowTransferWindow = DurationParam{"Client.SlowTransferWindow"}
+	Client_StoppedTransferTimeout = DurationParam{"Client.StoppedTransferTimeout"}
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
 	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}

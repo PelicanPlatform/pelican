@@ -82,7 +82,7 @@ func TestListNamespaces(t *testing.T) {
 
 	tests := []struct {
 		description  string
-		serverType   string
+		prefixType   string
 		status       string
 		expectedCode int
 		emptyDB      bool
@@ -93,20 +93,26 @@ func TestListNamespaces(t *testing.T) {
 	}{
 		{
 			description:  "valid-request-with-empty-db",
-			serverType:   string(OriginType),
+			prefixType:   string(prefixForOrigin),
 			expectedCode: http.StatusOK,
 			emptyDB:      true,
 			expectedData: []server_structs.Namespace{},
 		},
 		{
+			description:  "valid-request-with-namespace-type",
+			prefixType:   string(prefixForNamespace),
+			expectedCode: http.StatusOK,
+			expectedData: mockNssWithNamespaces,
+		},
+		{
 			description:  "valid-request-with-origin-type",
-			serverType:   string(OriginType),
+			prefixType:   string(prefixForOrigin),
 			expectedCode: http.StatusOK,
 			expectedData: mockNssWithOrigins,
 		},
 		{
 			description:  "valid-request-with-cache-type",
-			serverType:   string(CacheType),
+			prefixType:   string(prefixForCache),
 			expectedCode: http.StatusOK,
 			expectedData: mockNssWithCaches,
 		},
@@ -161,7 +167,7 @@ func TestListNamespaces(t *testing.T) {
 		},
 		{
 			description:  "invalid-request-parameters",
-			serverType:   "random_type", // some invalid query string
+			prefixType:   "random_type", // some invalid query string
 			expectedCode: http.StatusBadRequest,
 			expectedData: nil,
 		},
@@ -188,7 +194,7 @@ func TestListNamespaces(t *testing.T) {
 
 			// Create a request to the endpoint
 			w := httptest.NewRecorder()
-			requestURL := "/namespaces?server_type=" + tc.serverType + "&status=" + tc.status
+			requestURL := "/namespaces?prefixType=" + tc.prefixType + "&status=" + tc.status
 			req, _ := http.NewRequest("GET", requestURL, nil)
 			if tc.authUser {
 				token, err := mockAdminToken()
@@ -1058,7 +1064,7 @@ func TestCreateNamespace(t *testing.T) {
 		svr := topologyMockup(t, topoNamespaces)
 		defer svr.Close()
 		viper.Set("Federation.TopologyNamespaceURL", svr.URL)
-		err = PopulateTopology()
+		err = PopulateTopology(context.Background())
 		require.NoError(t, err)
 
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
@@ -1100,7 +1106,7 @@ func TestCreateNamespace(t *testing.T) {
 		svr := topologyMockup(t, topoNamespaces)
 		defer svr.Close()
 		viper.Set("Federation.TopologyNamespaceURL", svr.URL)
-		err = PopulateTopology()
+		err = PopulateTopology(context.Background())
 		require.NoError(t, err)
 
 		mockInsts := []registrationFieldOption{{ID: "1000"}}

@@ -67,19 +67,20 @@ type (
 	}
 
 	ServerAd struct {
-		Name         string     `json:"name"`
-		AuthURL      url.URL    `json:"auth_url"`
-		BrokerURL    url.URL    `json:"broker_url"` // The URL of the broker service to use for this host.
-		URL          url.URL    `json:"url"`        // This is server's XRootD URL for file transfer
-		WebURL       url.URL    `json:"web_url"`    // This is server's Web interface and API
-		Type         ServerType `json:"type"`
-		Latitude     float64    `json:"latitude"`
-		Longitude    float64    `json:"longitude"`
-		Writes       bool       `json:"enable_write"`
-		Listings     bool       `json:"enable_listing"`       // True if the origin allows directory listings
-		DirectReads  bool       `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
-		FromTopology bool       `json:"from_topology"`
-		IOLoad       float64    `json:"io_load"`
+		Name         string       `json:"name"`
+		AuthURL      url.URL      `json:"auth_url"`
+		BrokerURL    url.URL      `json:"broker_url"` // The URL of the broker service to use for this host.
+		URL          url.URL      `json:"url"`        // This is server's XRootD URL for file transfer
+		WebURL       url.URL      `json:"web_url"`    // This is server's Web interface and API
+		Type         ServerType   `json:"type"`
+		Latitude     float64      `json:"latitude"`
+		Longitude    float64      `json:"longitude"`
+		Caps         Capabilities `json:"capabilities"` // TODO: Get rid of Writes, Listings, DirectReads in favor of Caps.Writes, Caps.Listings, Caps.DirectReads
+		Writes       bool         `json:"enable_write"`
+		Listings     bool         `json:"enable_listing"`       // True if the origin allows directory listings
+		DirectReads  bool         `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
+		FromTopology bool         `json:"from_topology"`
+		IOLoad       float64      `json:"io_load"`
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)

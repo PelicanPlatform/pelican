@@ -44,7 +44,7 @@ const FederationOverview = () => {
             const federationUrls = UrlData.map(({key, text}) => {
                 let url = getObjectValue<string>(responseData, key)
                 if(url && !url?.startsWith("http://") && !url?.startsWith("https://")) {
-                    url = "http://" + url
+                    url = "https://" + url
                 }
 
                 return {

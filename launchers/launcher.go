@@ -270,6 +270,10 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 				// Probably no need to incur another err check since we already checked the director URL.
 				urlToCheck, _ := url.Parse(directorUrl.String())
 				urlToCheck.Path, err = url.JoinPath("/api/v1.0/director/origin", prefix)
+				// Skip stat check. Otherwise it will return 404
+				query := urlToCheck.Query()
+				query.Add("skipstat", "")
+				urlToCheck.RawQuery = query.Encode()
 				if err != nil {
 					errCh <- errors.Wrapf(err, "Failed to join path %s for origin advertisement check", prefix)
 					return
