@@ -1,4 +1,3 @@
-
 # Using The Pelican Client
 It is recommended that you start with our [Quick Start Guide](./user-quickstart-guide.mdx) where you can learn the basics of Pelican client commands and learn some useful terminology.
 
@@ -10,23 +9,25 @@ Before using the Pelican client to interact with objects from your federation, t
 
 - You are on a computer where you have access to a terminal. The Pelican client is a command line tool.
 - You've already installed the version of Pelican appropriate for your system, and Pelican is accessible via your path. To test this on Linux, you can run
-```bash
-which pelican
-```
-which should output a path to the executable. If there is no output to this command, refer to the [Pelican installation docs](./install.mdx) to acquire a working installation.
+
+	```bash
+	which pelican
+	```
+
+	which should output a path to the executable. If there is no output to this command, refer to the [Pelican installation docs](./install.mdx) to acquire a working installation.
 - You are roughly familiar with Pelican client commands and terminology as demonstrated with the [Getting Started: Accessing Data](./getting_started_access_data.mdx) page.
 
 
 ### Useful Terminology
 
-**Notes on Federations:**
+#### Notes on Federations
 All object paths in a federation begin with a preceding `/`, and no relative paths are allowed. Here is the example URL we used in the [Getting Started: Accessing Data](./getting_started_access_data.mdx) page:
 ```console
 /ospool/uc-shared/public/OSG-Staff/validation/test.txt
 ```
 This is the full object path that we will be using in examples below.
 
-**Tokens and JWT:**
+#### Tokens and JWT
 Some namespace prefixes are public, like `/ospool/uc-shared/public`, while others are protected (i.e. they require authorization). Objects in public namespaces can be downloaded by anybody, but downloading objects from protected namespaces requires you prove to the origin supporting that namespace that you are allowed to access the object. In Pelican, this is done using signed JSON Web Tokens, or *JWT*s for short. In many cases, these tokens can be generated automatically.
 
 ## The Different Pelican URL Schemes
