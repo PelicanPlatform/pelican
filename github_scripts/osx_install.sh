@@ -71,7 +71,7 @@ sudo ln -s $PWD/release_dir/lib/libSciTokens*.dylib $xrootd_libdir
 popd
 
 # Build Xrootd Scitoken library
-git clone --depth=1 https://github.com/xrootd/xrootd.git
+git clone --depth=1 https://github.com/xrootd/xrootd.git xrootd-scitoken
 pushd xrootd-scitoken
 patch -p1 < $scriptdir/pelican_protocol.patch
 mkdir build
