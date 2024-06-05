@@ -182,21 +182,28 @@ func TestInitConfig(t *testing.T) {
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
 }
 
-// Create a root config file with a Continue key pointing to a test directory
-func setupContConfig(t *testing.T, continueDir string) {
+// Helper func for TestExtraCfg
+//
+// Sets up the root config file and adds the ConfigLocations key to point to a test's tempdir
+func setupConfigLocations(t *testing.T, continueDirs []string) {
 	rootCfgDir := t.TempDir()
 
 	viper.AddConfigPath(rootCfgDir)
 	viper.SetConfigType("yaml")
 	viper.SetConfigName("pelican")
 
-	err := os.WriteFile(filepath.Join(rootCfgDir, "pelican.yaml"), []byte(fmt.Sprintf("ContinuedConfigLocation: %s\nOtherVal: bar", continueDir)), 0644)
+	// Convert the slice of directories into a YAML list
+	yamlDirs := strings.Join(continueDirs, "\", \"")
+	yamlDirs = fmt.Sprintf("[\"%s\"]", yamlDirs)
+
+	err := os.WriteFile(filepath.Join(rootCfgDir, "pelican.yaml"), []byte(fmt.Sprintf("ConfigLocations: %s\nOtherVal: bar", yamlDirs)), 0644)
 	require.NoError(t, err)
 	err = viper.MergeInConfig()
 	require.NoError(t, err)
 }
 
-func TestContinuedCfg(t *testing.T) {
+// Test that the `ConfigLocations` key works as expected
+func TestExtraCfg(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(func() {
 		viper.Reset()
@@ -207,13 +214,26 @@ func TestContinuedCfg(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("test-one-continue-one-file", func(t *testing.T) {
+	t.Run("test-one-dir-no-files", func(t *testing.T) {
 		viper.Reset()
-		continueDir := t.TempDir()
-		setupContConfig(t, continueDir)
+		dir1 := t.TempDir()
+		setupConfigLocations(t, []string{dir1})
+
+		// If there are no files in a directory pointed to by ConfigLocations, we should not error
+		// We should also do no config merging
+		err := handleContinuedCfg()
+		assert.NoError(t, err)
+		// Check the other value in our original config to make sure we didn't simply overwrite
+		assert.Equal(t, "bar", viper.GetString("OtherVal"))
+	})
+
+	t.Run("test-one-dir-one-file", func(t *testing.T) {
+		viper.Reset()
+		dir1 := t.TempDir()
+		setupConfigLocations(t, []string{dir1})
 
 		// Write a key: value to a file in the continue directory
-		continueFile := filepath.Join(continueDir, "continue.yaml")
+		continueFile := filepath.Join(dir1, "config.yaml")
 		err := os.WriteFile(continueFile, []byte("TestVal: foo"), 0644)
 		require.NoError(t, err)
 
@@ -224,75 +244,59 @@ func TestContinuedCfg(t *testing.T) {
 		assert.Equal(t, "bar", viper.GetString("otherVal"))
 	})
 
-	t.Run("test-one-continue-two-files", func(t *testing.T) {
+	t.Run("test-two-dirs-one-file-each", func(t *testing.T) {
 		viper.Reset()
-		continueDir := t.TempDir()
-		setupContConfig(t, continueDir)
+		dir1 := t.TempDir()
+		dir2 := t.TempDir()
+		setupConfigLocations(t, []string{dir1, dir2})
 
-		continueFile1 := filepath.Join(continueDir, "continue1.yaml")
-		err := os.WriteFile(continueFile1, []byte("TestVal: foo"), 0644)
-		require.NoError(t, err)
-		continueFile2 := filepath.Join(continueDir, "continue2.yaml")
-		err = os.WriteFile(continueFile2, []byte("TestVal: boo"), 0644)
-		require.NoError(t, err)
+		for idx, dir := range []string{dir1, dir2} {
+			continueFile := filepath.Join(dir, "config.yaml")
+			err := os.WriteFile(continueFile, []byte(fmt.Sprintf("TestVal: foo-%d\nDirVal%d: %d", idx, idx, idx)), 0644)
+			require.NoError(t, err)
+		}
 
-		// Now we should pick up "boo" as the value, because continue2 is parsed last according to lexicographical order
-		err = handleContinuedCfg()
+		// Because we've configured ConfigLocations: [dir1, dir2], we should expect the value from dir1 to be overwritten by the value from dir2
+		err := handleContinuedCfg()
 		assert.NoError(t, err)
-		assert.Equal(t, "boo", viper.GetString("TestVal"))
+		assert.Equal(t, "foo-1", viper.GetString("TestVal"))
+		// Any previously-undefined keys should still be picked up (ie they're new and not a "patch")
+		assert.Equal(t, "0", viper.GetString("DirVal0"))
+		assert.Equal(t, "1", viper.GetString("DirVal1"))
+
+		// Check the other value in our original config to make sure we didn't simply overwrite the entire config with our new values
 		assert.Equal(t, "bar", viper.GetString("otherVal"))
 	})
 
-	t.Run("test-two-continues-two-files", func(t *testing.T) {
+	t.Run("test-two-dirs-two-files-each", func(t *testing.T) {
 		viper.Reset()
-		continueDir1 := t.TempDir()
-		setupContConfig(t, continueDir1)
+		dir1 := t.TempDir()
+		dir2 := t.TempDir()
+		setupConfigLocations(t, []string{dir1, dir2})
 
-		continueDir2 := t.TempDir()
-		continueFile1 := filepath.Join(continueDir1, "continue1.yaml")
-		// The first continued config will point to the second directory
-		err := os.WriteFile(continueFile1, []byte(fmt.Sprintf("ContinuedConfigLocation: %s\nTestVal: foo", continueDir2)), 0644)
-		require.NoError(t, err)
+		counter := 1
+		for dirIdx, dir := range []string{dir1, dir2} {
+			for fileIdx := 0; fileIdx < 2; fileIdx++ {
+				// These should be parsed in lexicographical order. That's not extensively tested here, because
+				// it's a feature of the underlying library filesystem library.
+				continueFile := filepath.Join(dir, fmt.Sprintf("config-%d.yaml", dirIdx))
+				err := os.WriteFile(continueFile, []byte(fmt.Sprintf("TestVal: foo-%d-%d", dirIdx, fileIdx)), 0644)
+				require.NoError(t, err)
+			}
+			counter += 1
+		}
 
-		continueFile2 := filepath.Join(continueDir2, "continue2.yaml")
-		err = os.WriteFile(continueFile2, []byte("TestVal: boo"), 0644)
-		require.NoError(t, err)
-
-		// Start with dir 1, ensure we get to dir 2 and pick up the correct overwritten "boo" value
-		// We should pick up "boo" as the value, because continue2 is parsed last
-		err = handleContinuedCfg()
+		err := handleContinuedCfg()
 		assert.NoError(t, err)
-		assert.Equal(t, "boo", viper.GetString("TestVal"))
-		assert.Equal(t, "bar", viper.GetString("otherVal"))
-	})
-
-	t.Run("test-circular-continue", func(t *testing.T) {
-		viper.Reset()
-		continueDir1 := t.TempDir()
-		setupContConfig(t, continueDir1)
-
-		continueDir2 := t.TempDir()
-		continueFile1 := filepath.Join(continueDir1, "continue1.yaml")
-		// The first continued config will point to the second directory
-		err := os.WriteFile(continueFile1, []byte(fmt.Sprintf("ContinuedConfigLocation: %s\nTestVal: foo", continueDir2)), 0644)
-		require.NoError(t, err)
-
-		continueFile2 := filepath.Join(continueDir2, "continue2.yaml")
-		err = os.WriteFile(continueFile2, []byte(fmt.Sprintf("ContinuedConfigLocation: %s\nTestVal: boo", continueDir1)), 0644)
-		require.NoError(t, err)
-
-		// We'll start with 1, go to 2, then re-check 1 to find we've already done it. The result is that
-		// we should pick up "boo" as the value, because continue2 is parsed last
-		err = handleContinuedCfg()
-		assert.NoError(t, err)
-		assert.Equal(t, "boo", viper.GetString("TestVal"))
+		assert.Equal(t, "foo-1-1", viper.GetString("TestVal"))
+		// Check the other value in our original config to make sure we didn't simply overwrite the entire config with our new values
 		assert.Equal(t, "bar", viper.GetString("otherVal"))
 	})
 
 	t.Run("test-bad-directory", func(t *testing.T) {
 		viper.Reset()
 		continueDir := t.TempDir()
-		setupContConfig(t, continueDir+"-dne")
+		setupConfigLocations(t, []string{continueDir + "-dne"})
 
 		continueFile := filepath.Join(continueDir, "continue.yaml")
 		err := os.WriteFile(continueFile, []byte("TestVal: foo"), 0644)

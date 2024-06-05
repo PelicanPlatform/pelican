@@ -30,20 +30,22 @@ default: "~/.config/pelican"
 components: ["*"]
 type: filename
 ---
-name: ContinuedConfigLocation
+name: ConfigLocations
 description: |+
-  When `ContinuedConfigLocation` is specified in a configuration file, Pelican will continue to read and parse
-  configuration files from that location, overriding previous keys if they're re-defined. Configuration files
-  in a directory are parsed in lexicographical order.
+  `ConfigLocations` provides administrators a way to define a list of directories containing Pelican configuration files. Within a given directory,
+  files are read in lexicographical order, and any keys that are defined in multiple files will take the value from the last file read. Directories are
+  read in the order provided by the list. For example, specifying:
 
-  A configuration file that's already continued to may defined further `ContinuedConfigLocation` keys, allowing
-  for a chain of configuration files to be read and parsed. If no additional `ContinuedConfigLocation` keys are
-  specified, additional directories in a continued directory will be ignored.
+  `ConfigLocations: ["/configs1", "/configs2"]`
 
-  NOTE: This feature assumes that any file in a directory that's continued to is also a yaml configuration file.
+  will read files first from `/configs1` and then from `/configs2`. If a key is defined in both `/configs1`
+  and `/configs2`, the value from `/configs2` will be used. If `/configs1` contains files `a.yaml` and `b.yaml` where both define the same key, the value
+  from `b.yaml` will be used.
+
+  Subdirectories of the provided directories are not read.
+type: stringSlice
 default: none
 components: ["*"]
-type: filename
 ---
 name: Debug
 description: |+
