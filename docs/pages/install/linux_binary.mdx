@@ -1,10 +1,10 @@
-# Install Pelican as a standalone binary
+# Install Pelican as a standalone binary on Linux
 
 This document explains how to install Pelican on a Linux operating system as a standalone binary.
 
 ## Download Pelican Binary
 
-1. Navigate to [Pelican download page](../install.mdx) and select the Pelican standalone binary you want to install.
+1. Navigate to [Pelican download page](../install.mdx#download-pelican-binary) and select the Pelican standalone binary you want to install.
 
 2. In **Operating System** section, select **Linux**. In **Architectures** section, select **X86_64** or **AMR64** depending on the architecture of your machine.
 
@@ -32,101 +32,39 @@ The above command extracted the binary from the `tar` file. You may run the bina
 
 ### Run Pelican binary from the downloaded folder:
 
-  * **Linux and macOS**
-    ```bash
-    $ cd pelican_Linux_arm64 # Go to the binary folder
-    $ ./pelican --version # Run Pelican binary
+```bash
+$ cd pelican_Linux_arm64 # Go to the binary folder
+$ ./pelican --version # Run Pelican binary
 
-    Version: 7.5.8
-    Build Date: 2024-03-01T18:13:00Z
-    Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
-    Built By: goreleaser
-    ```
-
-  * **Windows**
-    ```bat
-    rem Go to the binary folder
-    $ cd pelican_Linux_arm64
-
-    rem Run Pelican binary
-    $ .\pelican.exe --version
-
-    Version: 7.5.8
-    Build Date: 2024-03-01T18:13:00Z
-    Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
-    Built By: goreleaser
-    ```
+Version: 7.5.8
+Build Date: 2024-03-01T18:13:00Z
+Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
+Built By: goreleaser
+```
 
 ### Add Pelican binary to your `PATH` for the current terminal
 
-  * **Linux and macOS**
-    ```bash
-    $ cd pelican_Linux_arm64 # Go to the binary folder
-    $ export PATH=$PWD:$PATH # Add current folder to the PATH
-    $ pelican --version # Run Pelican binary
+```bash
+$ cd pelican_Linux_arm64 # Go to the binary folder
+$ export PATH=$PWD:$PATH # Add current folder to the PATH
+$ pelican --version # Run Pelican binary
 
-    Version: 7.5.8
-    Build Date: 2024-03-01T18:13:00Z
-    Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
-    Built By: goreleaser
-    ```
-
-  * **Windows**
-    ```bat
-    rem Go to the binary folder
-    $ cd pelican_Linux_arm64
-
-    rem Add current folder to the PATH
-    $ set PATH=%PATH%;%CD%
-
-    rem Run Pelican binary
-    $ pelican --version
-
-    Version: 7.5.8
-    Build Date: 2024-03-01T18:13:00Z
-    Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
-    Built By: goreleaser
-    ```
+Version: 7.5.8
+Build Date: 2024-03-01T18:13:00Z
+Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
+Built By: goreleaser
+```
 
 ### Add Pelican binary to your `PATH` permanently
 
-  * **Linux and macOS**
+```bash
+$ cd pelican_Linux_arm64 # Go to the binary folder
+$ echo 'export PATH=$PWD:$PATH' >> ~/.bashrc # Add the current folder to your .bashrc file
+$ source ~/.bashrc # Apply the change
+$ pelican --version # Run Pelican binary
 
-    ```bash
-    $ cd pelican_Linux_arm64 # Go to the binary folder
-    $ echo 'export PATH=$PWD:$PATH' >> ~/.bashrc # Add the current folder to your .bashrc file
-    $ source ~/.bashrc # Apply the change
-    $ pelican --version # Run Pelican binary
-
-    Version: 7.5.8
-    Build Date: 2024-03-01T18:13:00Z
-    Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
-    Built By: goreleaser
-    ```
-
- * **Windows**
-
-   1. **Open System Properties**:
-      * Press `Win + R`, type `sysdm.cpl`, and press `Enter`.
-
-   2. **Access Environment Variables**:
-      * In the System Properties window, go to the `Advanced` tab.
-      * Click on the `Environment Variables` button.
-
-   3. **Edit the PATH Variable**:
-      * In the Environment Variables window, under the `System variables` section, scroll down and find the `Path` variable, then select it and click `Edit`.
-      * In the Edit Environment Variable window, click `New` and add the path to the directory containing `pelican.exe` (e.g., `C:\path\to\directory`).
-      * Click `OK` to close all windows.
-
-   4. Verify Pelican is added to `PATH`
-      * In a new PowerShell window, run the following command:
-
-        ```bat
-        rem Run Pelican binary
-        $ pelican --version
-
-        Version: 7.5.8
-        Build Date: 2024-03-01T18:13:00Z
-        Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
-        Built By: goreleaser
-        ```
+Version: 7.5.8
+Build Date: 2024-03-01T18:13:00Z
+Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
+Built By: goreleaser
+```

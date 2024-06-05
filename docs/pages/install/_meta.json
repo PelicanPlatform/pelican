@@ -4,5 +4,6 @@
   "alpine": "Alpine Linux",
   "linux_binary": "Linux Standalone Binary",
   "macos": "macOS",
+  "windows": "Windows",
   "docker": "Pelican Docker Image"
 }
