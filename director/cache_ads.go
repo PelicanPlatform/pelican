@@ -149,7 +149,7 @@ func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]s
 		statUtils[ad.URL.String()] = newUtil
 	}
 
-	// Start director periodic test of origin's health status if it's not from the topology AND it's not already been registered
+	// Prepare and launch the director file transfer tests to the origins/caches if it's not from the topology AND it's not already been registered
 	healthTestUtilsMutex.Lock()
 	defer healthTestUtilsMutex.Unlock()
 	if ad.FromTopology {

@@ -26,6 +26,7 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -430,5 +431,24 @@ func TestRecordAd(t *testing.T) {
 		getAd := serverAds.Get(pelicanServerUrl.String())
 		assert.NotNil(t, getAd)
 		assert.False(t, getAd.Value().FromTopology) // topology ad is ignored
+	})
+
+	t.Run("recorded-sad-should-match-health-test-utils-one", func(t *testing.T) {
+		t.Cleanup(func() {
+			viper.Reset()
+		})
+		viper.Reset()
+		func() {
+			healthTestUtilsMutex.Lock()
+			defer healthTestUtilsMutex.Unlock()
+			healthTestUtils = make(map[string]*healthTestUtil)
+		}()
+		viper.Set("GeoIPOverrides", []map[string]interface{}{{"IP": "192.168.100.100", "Coordinate": map[string]float64{"Lat": 43.567, "Long": -65.322}}})
+		mockUrl := url.URL{Scheme: "https", Host: "192.168.100.100"}
+		updatedAd := recordAd(context.Background(), server_structs.ServerAd{Name: "TEST_ORIGIN", URL: mockUrl, WebURL: mockUrl, FromTopology: false}, &mockPelican.NamespaceAds)
+		assert.NotEmpty(t, updatedAd.Longitude)
+		assert.NotEmpty(t, updatedAd.Latitude)
+		_, ok := healthTestUtils[mockUrl.String()]
+		assert.True(t, ok)
 	})
 }
