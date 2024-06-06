@@ -81,13 +81,14 @@ const (
 )
 
 var (
-	minClientVersion, _  = version.NewVersion("7.0.0")
-	minOriginVersion, _  = version.NewVersion("7.0.0")
-	minCacheVersion, _   = version.NewVersion("7.3.0")
-	healthTestUtils      = make(map[server_structs.ServerAd]*healthTestUtil)
+	minClientVersion, _ = version.NewVersion("7.0.0")
+	minOriginVersion, _ = version.NewVersion("7.0.0")
+	minCacheVersion, _  = version.NewVersion("7.3.0")
+	// TODO: Consolidate the two maps into server_structs.Advertisement. [#1391]
+	healthTestUtils      = make(map[string]*healthTestUtil) // The utilities for the director file tests. The key is string form of ServerAd.URL
 	healthTestUtilsMutex = sync.RWMutex{}
 
-	statUtils      = make(map[string]serverStatUtil)
+	statUtils      = make(map[string]serverStatUtil) // The utilities for the stat call. The key is string form of ServerAd.URL
 	statUtilsMutex = sync.RWMutex{}
 
 	// The number of caches to send in the Link header. As discussed in issue

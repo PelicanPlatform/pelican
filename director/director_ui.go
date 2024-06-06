@@ -102,9 +102,11 @@ func listServers(ctx *gin.Context) {
 	resList := make([]listServerResponse, 0)
 	for _, server := range servers {
 		healthStatus := HealthStatusUnknown
-		healthUtil, ok := healthTestUtils[server.ServerAd]
+		healthUtil, ok := healthTestUtils[server.URL.String()]
 		if ok {
 			healthStatus = healthUtil.Status
+		} else {
+			log.Debugf("listServers: healthTestUtils not found for server at %s", server.URL.String())
 		}
 		filtered, ft := checkFilter(server.Name)
 		var auth_url string

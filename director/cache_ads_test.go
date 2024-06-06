@@ -285,8 +285,8 @@ func TestLaunchTTLCache(t *testing.T) {
 			healthTestUtilsMutex.Lock()
 			defer healthTestUtilsMutex.Unlock()
 			// Clear the map for the new test
-			healthTestUtils = make(map[server_structs.ServerAd]*healthTestUtil)
-			healthTestUtils[mockPelicanOriginServerAd] = &healthTestUtil{
+			healthTestUtils = make(map[string]*healthTestUtil)
+			healthTestUtils[mockPelicanOriginServerAd.URL.String()] = &healthTestUtil{
 				Cancel:        cancelFunc,
 				ErrGrp:        errgrp,
 				ErrGrpContext: errgrpCtx,

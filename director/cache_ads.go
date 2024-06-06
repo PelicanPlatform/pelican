@@ -48,8 +48,10 @@ const (
 
 var (
 	// The in-memory cache of xrootd server advertisement, with the key being ServerAd.URL.String()
-	serverAds            = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
-	filteredServers      = map[string]filterType{} // The map holds servers that are disabled, with the key being the ServerAd.Name
+	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
+	// The map holds servers that are disabled, with the key being the ServerAd.Name
+	// The map should be idenpendent of serverAds as we want to persist this change in-memory, regardless of the presence of the serverAd
+	filteredServers      = map[string]filterType{}
 	filteredServersMutex = sync.RWMutex{}
 )
 
@@ -154,7 +156,7 @@ func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]s
 		return ad
 	}
 
-	if existingUtil, ok := healthTestUtils[updatedAd]; ok {
+	if existingUtil, ok := healthTestUtils[ad.URL.String()]; ok {
 		// Existing registration
 		if existingUtil != nil {
 			if existingUtil.ErrGrp != nil {
@@ -164,51 +166,51 @@ func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]s
 					cancelCtx, cancel := context.WithCancel(errgrpCtx)
 
 					errgrp.SetLimit(1)
-					healthTestUtils[updatedAd] = &healthTestUtil{
+					healthTestUtils[ad.URL.String()] = &healthTestUtil{
 						Cancel:        cancel,
 						ErrGrp:        errgrp,
 						ErrGrpContext: errgrpCtx,
 						Status:        HealthStatusInit,
 					}
 					errgrp.Go(func() error {
-						LaunchPeriodicDirectorTest(cancelCtx, updatedAd)
+						LaunchPeriodicDirectorTest(cancelCtx, ad)
 						return nil
 					})
-					log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(ad.Type), updatedAd.URL.String())
+					log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(ad.Type), ad.URL.String())
 				} else {
 					cancelCtx, cancel := context.WithCancel(existingUtil.ErrGrpContext)
 					started := existingUtil.ErrGrp.TryGo(func() error {
-						LaunchPeriodicDirectorTest(cancelCtx, updatedAd)
+						LaunchPeriodicDirectorTest(cancelCtx, ad)
 						return nil
 					})
 					if !started {
 						cancel()
-						log.Debugf("New director test suite blocked for %s %s, existing test has been running", string(ad.Type), updatedAd.URL.String())
+						log.Debugf("New director test suite blocked for %s %s, existing test has been running", string(ad.Type), ad.URL.String())
 					} else {
-						log.Debugf("New director test suite issued for %s %s. Existing registration", string(ad.Type), updatedAd.URL.String())
+						log.Debugf("New director test suite issued for %s %s. Existing registration", string(ad.Type), ad.URL.String())
 						existingUtil.Cancel()
 						existingUtil.Cancel = cancel
 					}
 				}
 			} else {
-				log.Errorf("%s %s registration didn't start a new director test cycle: errgroup is nil", string(ad.Type), &updatedAd.URL)
+				log.Errorf("%s %s registration didn't start a new director test cycle: errgroup is nil", string(ad.Type), &ad.URL)
 			}
 		} else {
-			log.Errorf("%s %s registration didn't start a new director test cycle: healthTestUtils item is nil", string(ad.Type), &updatedAd.URL)
+			log.Errorf("%s %s registration didn't start a new director test cycle: healthTestUtils item is nil", string(ad.Type), &ad.URL)
 		}
 	} else { // No healthTestUtils found, new registration
 		errgrp, errgrpCtx := errgroup.WithContext(ctx)
 		cancelCtx, cancel := context.WithCancel(errgrpCtx)
 
 		errgrp.SetLimit(1)
-		healthTestUtils[updatedAd] = &healthTestUtil{
+		healthTestUtils[ad.URL.String()] = &healthTestUtil{
 			Cancel:        cancel,
 			ErrGrp:        errgrp,
 			ErrGrpContext: errgrpCtx,
 			Status:        HealthStatusInit,
 		}
 		errgrp.Go(func() error {
-			LaunchPeriodicDirectorTest(cancelCtx, updatedAd)
+			LaunchPeriodicDirectorTest(cancelCtx, ad)
 			return nil
 		})
 	}
