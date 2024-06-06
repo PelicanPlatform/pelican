@@ -842,14 +842,14 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		Listings:    adV2.Caps.Listings,
 	}
 
-	recordAd(engineCtx, sAd, &adV2.Namespaces)
+	updatedAd := recordAd(engineCtx, sAd, &adV2.Namespaces)
 
 	// Start director periodic test of origin's health status if origin AD
 	// has WebURL field AND it's not already been registered
 	healthTestUtilsMutex.Lock()
 	defer healthTestUtilsMutex.Unlock()
 	if adV2.WebURL != "" {
-		if existingUtil, ok := healthTestUtils[sAd]; ok {
+		if existingUtil, ok := healthTestUtils[updatedAd]; ok {
 			// Existing registration
 			if existingUtil != nil {
 				if existingUtil.ErrGrp != nil {
@@ -859,51 +859,51 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 						cancelCtx, cancel := context.WithCancel(errgrpCtx)
 
 						errgrp.SetLimit(1)
-						healthTestUtils[sAd] = &healthTestUtil{
+						healthTestUtils[updatedAd] = &healthTestUtil{
 							Cancel:        cancel,
 							ErrGrp:        errgrp,
 							ErrGrpContext: errgrpCtx,
 							Status:        HealthStatusInit,
 						}
 						errgrp.Go(func() error {
-							LaunchPeriodicDirectorTest(cancelCtx, sAd)
+							LaunchPeriodicDirectorTest(cancelCtx, updatedAd)
 							return nil
 						})
-						log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(sType), sAd.URL.String())
+						log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(sType), updatedAd.URL.String())
 					} else {
 						cancelCtx, cancel := context.WithCancel(existingUtil.ErrGrpContext)
 						started := existingUtil.ErrGrp.TryGo(func() error {
-							LaunchPeriodicDirectorTest(cancelCtx, sAd)
+							LaunchPeriodicDirectorTest(cancelCtx, updatedAd)
 							return nil
 						})
 						if !started {
 							cancel()
-							log.Debugf("New director test suite blocked for %s %s, existing test has been running", string(sType), sAd.URL.String())
+							log.Debugf("New director test suite blocked for %s %s, existing test has been running", string(sType), updatedAd.URL.String())
 						} else {
-							log.Debugf("New director test suite issued for %s %s. Existing registration", string(sType), sAd.URL.String())
+							log.Debugf("New director test suite issued for %s %s. Existing registration", string(sType), updatedAd.URL.String())
 							existingUtil.Cancel()
 							existingUtil.Cancel = cancel
 						}
 					}
 				} else {
-					log.Errorf("%s %s registration didn't start a new director test cycle: errgroup is nil", string(sType), &sAd.URL)
+					log.Errorf("%s %s registration didn't start a new director test cycle: errgroup is nil", string(sType), &updatedAd.URL)
 				}
 			} else {
-				log.Errorf("%s %s registration didn't start a new director test cycle: healthTestUtils item is nil", string(sType), &sAd.URL)
+				log.Errorf("%s %s registration didn't start a new director test cycle: healthTestUtils item is nil", string(sType), &updatedAd.URL)
 			}
 		} else { // No healthTestUtils found, new registration
 			errgrp, errgrpCtx := errgroup.WithContext(engineCtx)
 			cancelCtx, cancel := context.WithCancel(errgrpCtx)
 
 			errgrp.SetLimit(1)
-			healthTestUtils[sAd] = &healthTestUtil{
+			healthTestUtils[updatedAd] = &healthTestUtil{
 				Cancel:        cancel,
 				ErrGrp:        errgrp,
 				ErrGrpContext: errgrpCtx,
-				Status:        HealthStatusUnknown,
+				Status:        HealthStatusInit,
 			}
 			errgrp.Go(func() error {
-				LaunchPeriodicDirectorTest(cancelCtx, sAd)
+				LaunchPeriodicDirectorTest(cancelCtx, updatedAd)
 				return nil
 			})
 		}

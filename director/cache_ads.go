@@ -70,7 +70,10 @@ func (f filterType) String() string {
 	}
 }
 
-func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) {
+// recordAd will update the ServerAd by setting server location and updating server topology attribute
+// then record the ServerAd and NamespaceAdV2 to the TTL cache
+// and finally return the updated ServerAd. The ServerAd passed in will not be modified
+func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) (updatedAd server_structs.ServerAd) {
 	if err := updateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
@@ -140,6 +143,7 @@ func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]s
 		}
 		statUtils[ad.URL.String()] = newUtil
 	}
+	return ad
 }
 
 func updateLatLong(ad *server_structs.ServerAd) error {
