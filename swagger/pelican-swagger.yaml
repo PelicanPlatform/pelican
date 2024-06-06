@@ -370,11 +370,11 @@ definitions:
       name:
         type: string
         example: "Test Origin"
-      auth_url:
+      authUrl:
         type: string
         description: The URL of the issuer on the server to check token validity
         example: "https://example-origin.com:8443"
-      broker_url:
+      brokerUrl:
         type: string
         description: The URL to the connection broker
         example: "https://example-origin.com:8447"
@@ -382,7 +382,7 @@ definitions:
         type: string
         description: The URL of XrootD service on the server to access objects
         example: "https://example-origin.com:8443"
-      web_url:
+      webUrl:
         type: string
         description: The URL of the web engine running on the server to visit the web interface and send API requests
         example: "https://example-origin.com:8444"
@@ -398,14 +398,9 @@ definitions:
         type: number
         description: The longitude of the server based on its IP address
         default: 0
-      enableWrite:
-        type: boolean
-        description: If the origin server enables write access. Only valid for type=Origin
-        default: false
-      enableFallbackRead:
-        type: boolean
-        description: If fall back to read from the origin when there's no cache to serve the file
-        default: false
+      capabilities:
+        type: object
+        $ref: "#/definitions/OriginExportCapabilities"
       filtered:
         type: boolean
         description: |
@@ -423,7 +418,7 @@ definitions:
           * **tempAllow** when the  server is filtered by configuration parameter but _allowed_ by the web API at `/servers/allow/*name`,
             the change lives in-memory and will be overwritten by config parameter at the server restart
         default: ""
-      status:
+      healthStatus:
         type: string
         description: The status of director file transfer test against the server. Can be Initializing|Unknown|OK|Error
         default: Unknown
