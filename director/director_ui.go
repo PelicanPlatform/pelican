@@ -50,6 +50,7 @@ type (
 		Caps              server_structs.Capabilities `json:"capabilities"`
 		Filtered          bool                        `json:"filtered"`
 		FilteredType      string                      `json:"filteredType"`
+		FromTopology      bool                        `json:"fromTopology"`
 		HealthStatus      HealthTestStatus            `json:"healthStatus"`
 		NamespacePrefixes []string                    `json:"namespacePrefixes"`
 	}
@@ -127,6 +128,7 @@ func listServers(ctx *gin.Context) {
 			Caps:         server.Caps,
 			Filtered:     filtered,
 			FilteredType: ft.String(),
+			FromTopology: server.FromTopology,
 			HealthStatus: healthStatus,
 		}
 		for _, ns := range server.NamespaceAds {

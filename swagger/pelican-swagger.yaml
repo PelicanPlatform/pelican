@@ -418,6 +418,10 @@ definitions:
           * **tempAllow** when the  server is filtered by configuration parameter but _allowed_ by the web API at `/servers/allow/*name`,
             the change lives in-memory and will be overwritten by config parameter at the server restart
         default: ""
+      fromTopology:
+        type: boolean
+        description: Whether this server is from the legacy OSDF topology service VS Pelican
+        default: false
       healthStatus:
         type: string
         description: The status of director file transfer test against the server. Can be Initializing|Unknown|OK|Error

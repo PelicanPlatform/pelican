@@ -73,6 +73,7 @@ func TestListServers(t *testing.T) {
 		Latitude:          mockOriginServerAd.Latitude,
 		Longitude:         mockOriginServerAd.Longitude,
 		Caps:              mockOriginServerAd.Caps,
+		FromTopology:      mockOriginServerAd.FromTopology,
 		HealthStatus:      HealthStatusUnknown,
 		NamespacePrefixes: expectedListOriginResNss,
 	}
@@ -87,6 +88,7 @@ func TestListServers(t *testing.T) {
 		Latitude:          mockCacheServerAd.Latitude,
 		Longitude:         mockCacheServerAd.Longitude,
 		Caps:              mockCacheServerAd.Caps,
+		FromTopology:      mockCacheServerAd.FromTopology,
 		HealthStatus:      HealthStatusUnknown,
 		NamespacePrefixes: expectedListCacheResNss,
 	}

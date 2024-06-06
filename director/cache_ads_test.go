@@ -436,14 +436,31 @@ func TestRecordAd(t *testing.T) {
 	t.Run("recorded-sad-should-match-health-test-utils-one", func(t *testing.T) {
 		t.Cleanup(func() {
 			viper.Reset()
+			healthTestUtilsMutex.Lock()
+			statUtilsMutex.Lock()
+			defer statUtilsMutex.Unlock()
+			defer healthTestUtilsMutex.Unlock()
+			healthTestUtils = make(map[string]*healthTestUtil)
+			statUtils = make(map[string]serverStatUtil)
+
+			serverAds.DeleteAll()
+			geoIPOverrides = nil
 		})
 		viper.Reset()
 		func() {
+			geoIPOverrides = nil
+
 			healthTestUtilsMutex.Lock()
+			statUtilsMutex.Lock()
+			defer statUtilsMutex.Unlock()
 			defer healthTestUtilsMutex.Unlock()
 			healthTestUtils = make(map[string]*healthTestUtil)
+			statUtils = make(map[string]serverStatUtil)
+
+			serverAds.DeleteAll()
 		}()
-		viper.Set("GeoIPOverrides", []map[string]interface{}{{"IP": "192.168.100.100", "Coordinate": map[string]float64{"Lat": 43.567, "Long": -65.322}}})
+
+		viper.Set("GeoIPOverrides", []map[string]interface{}{{"IP": "192.168.100.100", "Coordinate": map[string]float64{"lat": 43.567, "long": -65.322}}})
 		mockUrl := url.URL{Scheme: "https", Host: "192.168.100.100"}
 		updatedAd := recordAd(context.Background(), server_structs.ServerAd{Name: "TEST_ORIGIN", URL: mockUrl, WebURL: mockUrl, FromTopology: false}, &mockPelican.NamespaceAds)
 		assert.NotEmpty(t, updatedAd.Longitude)
