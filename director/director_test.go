@@ -151,7 +151,8 @@ func TestDirectorRegistration(t *testing.T) {
 			reqJson := server_structs.CheckNamespaceStatusReq{}
 			err = json.Unmarshal(reqBody, &reqJson)
 			require.NoError(t, err)
-			if reqJson.Prefix != "test" && reqJson.Prefix != "/caches/test" { // we expect the registration to use test for namespace and /caches/test for cache
+			// we expect the registration to use "test" for namespace, /caches/test for cache, and /origins/test for origin
+			if reqJson.Prefix != "test" && reqJson.Prefix != "/caches/test" && reqJson.Prefix != "/origins/test" {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
@@ -175,6 +176,8 @@ func TestDirectorRegistration(t *testing.T) {
 
 	viper.Set("Federation.RegistryUrl", ts.URL)
 	viper.Set("Director.CacheSortMethod", "distance")
+	viper.Set("Director.StatTimeout", 300*time.Millisecond)
+	viper.Set("Director.StatConcurrencyLimit", 1)
 
 	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
 		// Setup httptest recorder and context for the the unit test
@@ -559,7 +562,9 @@ func TestDirectorRegistration(t *testing.T) {
 
 		c, r, w = setupContext()
 		token = generateReadToken(pKey, "/foo/bar", isurl.String())
-		setupRedirect(c, r, "/foo/bar/baz", token)
+		// Since we didn't set up any real server for the test
+		// skip the stat for get a 307
+		setupRedirect(c, r, "/foo/bar/baz?skipstat", token)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -596,6 +601,40 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
 		setupRequest(c, r, jsonad, token, server_structs.CacheType)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.NotNil(t, serverAds.Get("https://data-url.org"), "Cache fail to register at serverAds")
+		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://data-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in cache registration request")
+		teardown()
+	})
+
+	t.Run("origin-with-registryname", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name", // This is for web UI to display
+			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
 
 		r.ServeHTTP(w, c.Request)
 
@@ -645,33 +684,66 @@ func TestGetAuthzEscaped(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	req.Header.Set("Authorization", "tokenstring")
-	escapedToken := getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken := getRequestParameters(req)
+	expected := url.Values{"authz": []string{"tokenstring"}}
+	assert.EqualValues(t, expected, escapedToken)
 
 	// Test passing a token via query with no bearer prefix
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
-	escapedToken = getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken = getRequestParameters(req)
+	assert.EqualValues(t, expected, escapedToken)
 
 	// Test passing the token via header with Bearer prefix
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer tokenstring")
-	escapedToken = getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken = getRequestParameters(req)
+	assert.EqualValues(t, expected, escapedToken)
 
 	// Test passing the token via URL with Bearer prefix and + encoded space
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer+tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
-	escapedToken = getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken = getRequestParameters(req)
+	assert.EqualValues(t, expected, escapedToken)
 
 	// Finally, the same test as before, but test with %20 encoded space
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?authz=Bearer%20tokenstring", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
-	escapedToken = getAuthzEscaped(req)
-	assert.Equal(t, escapedToken, "tokenstring")
+	escapedToken = getRequestParameters(req)
+	assert.EqualValues(t, expected, escapedToken)
+}
+
+func TestGetRequestParameters(t *testing.T) {
+	// Test passing a token & timeout via header
+	req, err := http.NewRequest(http.MethodPost, "http://fake-server.com", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	req.Header.Set("Authorization", "tokenstring")
+	req.Header.Set("X-Pelican-Timeout", "3s")
+	escapedParam := getRequestParameters(req)
+	expected := url.Values{"authz": []string{"tokenstring"}, "pelican.timeout": []string{"3s"}}
+	assert.EqualValues(t, expected, escapedParam)
+
+	// Test passing a timeout via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?pelican.timeout=3s", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{"pelican.timeout": []string{"3s"}}
+	assert.EqualValues(t, expected, escapedParam)
+
+	// Test passing nothing
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{}
+	assert.EqualValues(t, expected, escapedParam)
+
+	// Test passing the token & timeout via URL query string
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?pelican.timeout=3s&authz=tokenstring", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{"authz": []string{"tokenstring"}, "pelican.timeout": []string{"3s"}}
+	assert.EqualValues(t, expected, escapedParam)
 }
 
 func TestDiscoverOriginCache(t *testing.T) {
@@ -962,6 +1034,9 @@ func TestDiscoverOriginCache(t *testing.T) {
 }
 
 func TestRedirects(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
 
 	router := gin.Default()
 	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
@@ -1115,6 +1190,10 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("redirect-link-header-length", func(t *testing.T) {
+		ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+		defer func() { require.NoError(t, egrp.Wait()) }()
+		defer cancel()
+
 		viper.Reset()
 		serverAds.DeleteAll()
 		t.Cleanup(func() {
@@ -1128,7 +1207,7 @@ func TestRedirects(t *testing.T) {
 		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 		viper.Set("Director.CacheSortMethod", "random")
 		// Populate ads for redirectToCache to use
-		err := AdvertiseOSDF()
+		err := AdvertiseOSDF(ctx)
 		require.NoError(t, err)
 
 		req, _ := http.NewRequest("GET", "/my/server", nil)
@@ -1157,6 +1236,40 @@ func TestRedirects(t *testing.T) {
 		assert.NotContains(t, c.Writer.Header().Get("Link"), "pri=2")
 	})
 
+	// Make sure collections-url is correctly populated when the ns/origin comes from topology
+	t.Run("collections-url-from-topology", func(t *testing.T) {
+		viper.Reset()
+		serverAds.DeleteAll()
+		t.Cleanup(func() {
+			viper.Reset()
+			serverAds.DeleteAll()
+		})
+
+		topoServer := httptest.NewServer(http.HandlerFunc(JSONHandler))
+		defer topoServer.Close()
+		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+		viper.Set("Director.CacheSortMethod", "random")
+		err := AdvertiseOSDF(ctx)
+		require.NoError(t, err)
+
+		// This one should have a collections url because it has a dirlisthost
+		req, _ := http.NewRequest("GET", "/my/server", nil)
+		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = req
+		redirectToCache(c)
+		assert.Contains(t, c.Writer.Header().Get("X-Pelican-Namespace"), "collections-url=https://origin1-auth-endpoint.com")
+
+		// This one has no dirlisthost
+		req, _ = http.NewRequest("GET", "/my/server/2", nil)
+		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+		c.Request = req
+		redirectToCache(c)
+		assert.NotContains(t, c.Writer.Header().Get("X-Pelican-Namespace"), "collections-url")
+	})
 }
 
 func TestGetHealthTestFile(t *testing.T) {
@@ -1447,5 +1560,44 @@ func TestGetRedirectUrl(t *testing.T) {
 
 		url = getRedirectURL("/some/path", adWithTopoNotSet, true)
 		assert.Equal(t, "https://fake-ad.org:8444/some/path", url.String())
+	})
+}
+
+func TestGetFinalRedirectURL(t *testing.T) {
+	t.Run("url-without-params", func(t *testing.T) {
+		base := url.URL{Scheme: "https", Host: "example.org:8444"}
+		query := url.Values{"key1": []string{"val1"}}
+		get := getFinalRedirectURL(base, query)
+		assert.Equal(t, "https://example.org:8444?key1=val1", get)
+	})
+
+	t.Run("url-without-params-and-no-passed-params", func(t *testing.T) {
+		base := url.URL{Scheme: "https", Host: "example.org:8444"}
+		query := url.Values{}
+		get := getFinalRedirectURL(base, query)
+		assert.Equal(t, "https://example.org:8444", get)
+	})
+
+	t.Run("url-with-params-and-no-passed-params", func(t *testing.T) {
+		base := url.URL{Scheme: "https", Host: "example.org:8444", RawQuery: "key1=val1&key2=val2"}
+		query := url.Values{}
+		get := getFinalRedirectURL(base, query)
+		assert.Equal(t, "https://example.org:8444?key1=val1&key2=val2", get)
+	})
+
+	t.Run("url-with-params-and-with-params", func(t *testing.T) {
+		base := url.URL{Scheme: "https", Host: "example.org:8444", RawQuery: "key1=val1&key2=val2"}
+		query := url.Values{"pkey1": []string{"pval1"}, "pkey2": []string{"pval2"}}
+		get := getFinalRedirectURL(base, query)
+		assert.Equal(t, "https://example.org:8444?key1=val1&key2=val2&pkey1=pval1&pkey2=pval2", get)
+	})
+
+	t.Run("escape-passed-param", func(t *testing.T) {
+		rawVal := "https://origin.org:8444/api/v1.0?query=value"
+		encodedVal := url.QueryEscape(rawVal)
+		base := url.URL{Scheme: "https", Host: "example.org:8444", RawQuery: "key1=val1&key2=val2"}
+		query := url.Values{"raw": []string{rawVal}}
+		get := getFinalRedirectURL(base, query)
+		assert.Equal(t, "https://example.org:8444?key1=val1&key2=val2&raw="+encodedVal, get)
 	})
 }

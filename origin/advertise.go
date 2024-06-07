@@ -111,9 +111,13 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 
 	// PublicReads implies reads
 	reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
+	extUrlStr := param.Server_ExternalWebUrl.GetString()
+	extUrl, _ := url.Parse(extUrlStr)
+	// Only use hostname:port
+	registryPrefix := server_structs.GetOriginNs(extUrl.Host)
 	ad := server_structs.OriginAdvertiseV2{
 		Name:           name,
-		RegistryPrefix: "", // TODO: set origin's RegistryPrefix to /origins/{xrootd.sitename} once we support registering origins
+		RegistryPrefix: registryPrefix,
 		DataURL:        originUrlStr,
 		WebURL:         originWebUrl,
 		Namespaces:     nsAds,

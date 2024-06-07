@@ -41,7 +41,6 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
@@ -136,27 +135,20 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	name := ""
 	var err error
 	// Fetch site name from the registry, if not, fall back to Xrootd.Sitename.
-	// However, currently the registry only supports registering namespaces, not origins.
-	// If multiple namespaces fall under the same origin, we will use the first namespace to fetch the site name
 	if server.GetServerType().IsEnabled(config.OriginType) {
-		originExports, err := server_utils.GetOriginExports()
+		// Note we use Server_ExternalWebUrl as the origin prefix
+		// But caches still use Xrootd_Sitename, which will be changed to Server_ExternalWebUrl in
+		// https://github.com/PelicanPlatform/pelican/issues/1351
+		extUrlStr := param.Server_ExternalWebUrl.GetString()
+		extUrl, _ := url.Parse(extUrlStr)
+		// Only use hostname:port
+		originPrefix := server_structs.GetOriginNs(extUrl.Host)
+		name, err = getSitenameFromReg(ctx, originPrefix)
 		if err != nil {
-			log.Errorf("Failed to get request sitename from the registry. Failed to get exports from the origin server. Will fall back to use Xrootd.Sitename: %v", err)
-		}
-		if len(originExports) != 0 {
-			if len(originExports) > 1 {
-				log.Warningf("The origin has multiple exports. The sitename will be fetched from the registry using the FederationPrefix of the first export: %s.", originExports[0].FederationPrefix)
-			}
-			prefix := originExports[0].FederationPrefix
-			name, err = getSitenameFromReg(ctx, prefix)
-			if err != nil {
-				log.Errorf("Failed to get sitename from the registry. Will fallback to use Xrootd.Sitename: %v", err)
-			}
-		} else {
-			log.Errorf("Failed to get sitename from the registry. The namespace is empty for the %s server. Will fallback to use Xrootd.Sitename", server.GetServerType().String())
+			log.Errorf("Failed to get sitename from the registry for the origin. Will fallback to use Xrootd.Sitename: %v", err)
 		}
 	} else if server.GetServerType().IsEnabled(config.CacheType) {
-		cachePrefix := "/caches/" + param.Xrootd_Sitename.GetString()
+		cachePrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
 		name, err = getSitenameFromReg(ctx, cachePrefix)
 		if err != nil {
 			log.Errorf("Failed to get sitename from the registry for the cache. Will fallback to use Xrootd.Sitename: %v", err)
@@ -183,7 +175,6 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 
 	if server.GetServerType().IsEnabled(config.CacheType) {
 		serverUrl = param.Cache_Url.GetString()
-		webUrl = param.Server_ExternalWebUrl.GetString()
 	}
 
 	ad, err := server.CreateAdvertisement(name, serverUrl, webUrl)
@@ -215,7 +206,11 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	advTokenCfg.Lifetime = time.Minute
 	advTokenCfg.Issuer = serverIssuer
 	advTokenCfg.AddAudiences(fedInfo.DirectorEndpoint)
-	advTokenCfg.Subject = "origin"
+	if server.GetServerType().IsEnabled(config.CacheType) {
+		advTokenCfg.Subject = "cache"
+	} else if server.GetServerType().IsEnabled(config.OriginType) {
+		advTokenCfg.Subject = "origin"
+	}
 	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)
 
 	// CreateToken also handles validation for us
@@ -245,16 +240,20 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	}
 	defer resp.Body.Close()
 
-	body, _ = io.ReadAll(resp.Body)
+	body, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return errors.Wrap(err, "failed to read the response body for director advertisement")
+	}
 	if resp.StatusCode > 299 {
 		var respErr directorResponse
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(body))
 		}
 		if respErr.ApprovalError {
-			return fmt.Errorf("the director rejected the server advertisement with error: %s. Please contact the administrators of %s for more information.", respErr.Error, fedInfo.NamespaceRegistrationEndpoint)
+			// Removed the "Please contact admin..." section since the director now provides contact information
+			return fmt.Errorf("the director rejected the server advertisement: %s", respErr.Error)
 		}
-		return errors.Errorf("error during director registration: %v", respErr.Error)
+		return errors.Errorf("error during director advertisement: %v", respErr.Error)
 	}
 
 	return nil

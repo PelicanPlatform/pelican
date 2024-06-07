@@ -90,7 +90,7 @@
                         "restricted_path": []
                     }
                 ],
-                "dirlisthost": null,
+                "dirlisthost": "https://origin1-auth-endpoint.com",
                 "origins": [
                     {
                         "auth_endpoint": "https://origin1-auth-endpoint.com",

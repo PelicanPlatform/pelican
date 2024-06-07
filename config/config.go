@@ -770,6 +770,9 @@ func GetEnTranslator() ut.Translator {
 	return *translator
 }
 
+// If the user provides a deprecated key in their config that can be mapped to some new key, we do that here
+// along with printing out a warning to let them know they should update. Whether or not keys are mapped is
+// configured in docs/parameters.yaml using the `deprecated: true` and replacedby: `<list of new keys>` fields.
 func handleDeprecatedConfig() {
 	deprecatedMap := param.GetDeprecated()
 	for deprecated, replacement := range deprecatedMap {
@@ -930,10 +933,7 @@ func InitConfig() {
 		SetLogging(level)
 	}
 
-	if oldNsUrl := viper.GetString("Federation.NamespaceUrl"); oldNsUrl != "" {
-		log.Errorln("Federation.NamespaceUrl is deprecated and removed from parameters. Please use Federation.RegistryUrl instead")
-		os.Exit(1)
-	}
+	// Warn users about deprecated config keys they're using and try to map them to any new equivalent we've defined.
 	handleDeprecatedConfig()
 
 	onceValidate.Do(func() {
@@ -1449,10 +1449,6 @@ func InitClient() error {
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
 
 	upper_prefix := GetPreferredPrefix()
-
-	viper.SetDefault("Client.StoppedTransferTimeout", 100)
-	viper.SetDefault("Client.SlowTransferRampupTime", 100)
-	viper.SetDefault("Client.SlowTransferWindow", 30)
 
 	if upper_prefix == OsdfPrefix || upper_prefix == StashPrefix {
 		viper.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
