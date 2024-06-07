@@ -51,7 +51,6 @@ func TestGetAdsForPath(t *testing.T) {
 			- Query for a few paths and make sure the correct ads are returned
 	*/
 	nsAd1 := server_structs.NamespaceAdV2{
-		// PublicRead: false,
 		Caps: server_structs.Capabilities{PublicReads: false},
 		Path: "/chtc",
 		Issuer: []server_structs.TokenIssuer{{
@@ -64,7 +63,6 @@ func TestGetAdsForPath(t *testing.T) {
 	}
 
 	nsAd2 := server_structs.NamespaceAdV2{
-		// PublicRead: true,
 		Caps: server_structs.Capabilities{PublicReads: true},
 		Path: "/chtc/PUBLIC",
 		Issuer: []server_structs.TokenIssuer{{
@@ -77,7 +75,6 @@ func TestGetAdsForPath(t *testing.T) {
 	}
 
 	nsAd3 := server_structs.NamespaceAdV2{
-		// PublicRead: true,
 		Caps: server_structs.Capabilities{PublicReads: true},
 		Path: "/chtc/PUBLIC2/",
 		Issuer: []server_structs.TokenIssuer{{
@@ -90,7 +87,6 @@ func TestGetAdsForPath(t *testing.T) {
 	}
 
 	nsAdTopo1 := server_structs.NamespaceAdV2{
-		// PublicRead:   true,
 		Caps:         server_structs.Capabilities{PublicReads: true},
 		Path:         "/chtc",
 		FromTopology: true,

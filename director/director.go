@@ -351,7 +351,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
 	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
 	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
-	if namespaceAd.Caps.Listings && originAds[0].Caps.Listings {
+	if namespaceAd.Caps.Listings && len(originAds) > 0 && originAds[0].Caps.Listings {
 		if !namespaceAd.Caps.PublicReads && originAds[0].AuthURL != (url.URL{}) {
 			colUrl = originAds[0].AuthURL.String()
 		} else {
@@ -499,7 +499,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
 	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
 	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
-	if namespaceAd.Caps.Listings && availableOriginAds[0].Listings {
+	if namespaceAd.Caps.Listings && len(availableOriginAds) > 0 && availableOriginAds[0].Listings {
 		if !namespaceAd.PublicRead && availableOriginAds[0].AuthURL != (url.URL{}) {
 			colUrl = availableOriginAds[0].AuthURL.String()
 		} else {
