@@ -615,7 +615,7 @@ func TestDirectReads(t *testing.T) {
 		// Download the file with GET. Shouldn't need a token to succeed
 		_, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to get namespace information for remote URL")
+		assert.Contains(t, err.Error(), "No origins on specified endpoint have direct reads enabled")
 	})
 
 	// Test that direct reads fail if DirectReads=false is set for namespace/export config but true for origin
@@ -645,7 +645,7 @@ func TestDirectReads(t *testing.T) {
 		// Download the file with GET. Shouldn't need a token to succeed
 		_, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to get namespace information for remote URL")
+		assert.Contains(t, err.Error(), "No origins on specified endpoint have direct reads enabled")
 	})
 }
 
