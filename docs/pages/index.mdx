@@ -10,7 +10,7 @@ Pelican is an open-source software platform for building data federations that w
 - Encourage and support [FAIR](https://www.go-fair.org/fair-principles/) data practices
 - Allow computing providers to stage data on-site as it's needed
 
-The flagship federation underpinned by Pelican is called the [Open Science Data Federation](https://osdf.osg-htc.org/) (OSDF), which serves a variety of large scientific collaborations across more than fifty data providers and approximately two dozen staging servers located throughout the world, often at points of presence within the global Research and Education networks such as ESNet and Internet2.
+The flagship federation underpinned by Pelican is called the [Open Science Data Federation](https://osdf.osg-htc.org/) (OSDF), which serves a variety of large scientific collaborations across more than fifty data providers and approximately two dozen caches located throughout the world, often at points of presence within the global Research and Education networks such as ESNet and Internet2.
 
 ## Core Concepts and Terminology
 
@@ -20,7 +20,7 @@ Pelican federations consist of 6 core entities:
 - *Clients*
 - *Data Repositories*
 - *Origin Servers*
-- *Staging Servers (Caches)*
+- *Caches*
 - *Central Services (the Registry and Director)*
 
 where each of these federation stakeholders represents a unique set of interests. One of Pelican's core functionalities is balancing the sometimes-competing needs of each of its constituents.
@@ -58,13 +58,13 @@ Pelican Origins work by making their underlying Repository accessible under some
 	Pelican Origins serve as a transport bus, connecting a variety of backend storage types to their federation
 </ImageRow>
 
-### Staging Servers (Caches)
+### Caches
 
-Pelican *Staging Servers*, sometimes referred to as Caches, are responsible for storing copies of data inside the federation with the goal of providing more efficient access to reusable data. By default, requests to a Pelican federation for an object are proxied through a Staging Server, resulting in the federation storing a temporary copy of the object. Currently, objects are cleared from Staging Servers based on a "least recently used" algorithm whenever the server begins running out of storage space, but more robust forms of staging management are in active development. Like Origins, Staging Servers build on top of [XRootD's "Proxy Storage Services."](https://xrootd.slac.stanford.edu/doc/dev56/pss_config.pdf)
+Pelican *Caches* are responsible for storing copies of data inside the federation with the goal of providing more efficient access to reusable data. By default, requests to a Pelican federation for an object are proxied through a Cache, resulting in the federation storing a temporary copy of the object. Currently, objects are cleared from Caches based on a "least recently used" algorithm whenever the server begins running out of storage space, but more robust forms of cache management are in active development. Like Origins, Caches build on top of [XRootD's "Proxy Storage Services."](https://xrootd.slac.stanford.edu/doc/dev56/pss_config.pdf)
 
-Because Staging Servers store copies of data for re-distribution in the federation, they must also respect the Origin's data access policies. That is, the Origin should trust Staging Servers to protect any data that isn't marked as publicly accessible. Staging devices in a Pelican federation accomplish this by aggregating access policies from the Origins they support and following the same approval/denial rules the Origins themselves would follow.
+Because Caches store copies of data for re-distribution in the federation, they must also respect the Origin's data access policies. That is, the Origin should trust Caches to protect any data that isn't marked as publicly accessible. Caches in a Pelican federation accomplish this by aggregating access policies from the Origins they support and following the same approval/denial rules the Origins themselves would follow.
 
-Generally, Staging Servers are operated by the federation and placed close to computing clusters where data may be quickly re-used as part of High-Throughput Computing workflows, but this is not a requirement.
+Generally, Caches are operated by the federation and placed close to computing clusters where data may be quickly re-used as part of High-Throughput Computing workflows, but this is not a requirement.
 
 ### Central Services
 
@@ -74,21 +74,21 @@ It was mentioned that data federations operate under a minimally-centralized str
 
 #### Director Service
 
-Data access in a Pelican federation requires two fundamental pieces of information -- the federation's hostname (also called the *root* of the federation), and the name of the object within the federation. Notably, the hostnames of any Origins that facilitate access to objects are absent from that list. Instead, the Pelican model uses the federation root to discover and route all Client requests for objects through its *Director*, an HTTP server whose job is determining the best location(s) at which to access a given object. In some cases, this is accomplished by redirecting clients to a nearby Staging Server that might already have a copy of the object, and in other cases the Director might send the client to an Origin that can provide direct access.
+Data access in a Pelican federation requires two fundamental pieces of information -- the federation's hostname (also called the *root* of the federation), and the name of the object within the federation. Notably, the hostnames of any Origins that facilitate access to objects are absent from that list. Instead, the Pelican model uses the federation root to discover and route all Client requests for objects through its *Director*, an HTTP server whose job is determining the best location(s) at which to access a given object. In some cases, this is accomplished by redirecting clients to a nearby Cache that might already have a copy of the object, and in other cases the Director might send the client to an Origin that can provide direct access.
 
 In many cases, but not all, the Director’s hostname can also be used as the federation’s hostname because it provides the same set of metadata. The OSDF breaks these two endpoints apart by providing federation metadata at osg-htc.org, which is duplicated within the OSDF Director. This allows the OSDF Director to use a subdomain of osg-htc.org, which is otherwise a statically-hosted informational website.
 
-All Origins and Staging Servers in a federation send periodic advertisements to the discovered Director at a default interval of 10 minutes to let it know where they can be accessed, which namespace(s) they provide, and any information pertaining to data access policies (such as authorization schemes). In this way, the Director is the only service that has a nearly real-time view of all the Origins and Staging devices in the federation -- if an Origin or Staging Server fails to re-advertise after the required period, it is assumed to be offline until another advertisement is received, and the Director will stop sending clients to that location.
+All Origins and Caches in a federation send periodic advertisements to the discovered Director at a default interval of 10 minutes to let it know where they can be accessed, which namespace(s) they provide, and any information pertaining to data access policies (such as authorization schemes). In this way, the Director is the only service that has a nearly real-time view of all the Origins and Caches in the federation -- if an Origin or Cache fails to re-advertise after the required period, it is assumed to be offline until another advertisement is received, and the Director will stop sending clients to that location.
 
 #### Registry Service
 
-Whenever a new Origin or Staging device is created and added to a federation, its first step is to register itself with the *Registry*, which acts as the federation's locus of trust. In the case of Origins, the process of registration entails sending the Registry the namespace prefix the Origin exports, along with the Origin's public key and a variety of other bookkeeping information. After the Registry and the Origin have performed a handshake that proves the Origin owns the corresponding private key, the Registry stores the information in a persistent database.
+Whenever a new Origin or Cache is created and added to a federation, its first step is to register itself with the *Registry*, which acts as the federation's locus of trust. In the case of Origins, the process of registration entails sending the Registry the namespace prefix the Origin exports, along with the Origin's public key and a variety of other bookkeeping information. After the Registry and the Origin have performed a handshake that proves the Origin owns the corresponding private key, the Registry stores the information in a persistent database.
 
 This process serves two purposes -- first, whenever the Origin re-advertises with the federation's Director, the Director can verify the authenticity of those advertisements through public/private key asymmetric cryptography by looking at the Registry's stored public key for that Origin and namespace. Second, the Registry's persistent database prevents other Origins from registering namespaces under an already-registered namespace without first proving they're allowed to do so by the namespace owner (i.e. the entity that possesses the appropriate private key).
 
 ## Making Bytes Accessible and Moving Them -- A First Look Under The Hood
 
-This section provides a simplified example of how data is made accessible and moved within the OSDF. In particular, it elides the OSDF’s Staging/Caching infrastructure and any discussion of authorization tokens.
+This section provides a simplified example of how data is made accessible and moved within the OSDF. In particular, it elides the OSDF’s Caching infrastructure and any discussion of authorization tokens.
 
 Pelican serves two sides of the same coin -- Data owners who want to federate their data from wherever it lives natively, and data consumers who want to access and compute on data wherever they need it.
 
@@ -132,4 +132,4 @@ The next step is for the data consumer to actually *move* the data. Pelican assu
 	Notice that the Origin continues advertising with the Director throughout.
 </ImageRow>
 
-Once again, this example is simplified, mainly because the Director typically sends the client to a Staging device capable of fetching the object, not directly to the Origin. In any case, the object is delivered to the Client without passing through the federation's Central Services. When the object is fetched through a Staging device, the Staging device performs the same discovery step as the Client by asking the Director for an Origin that exports the object.
+Once again, this example is simplified, mainly because the Director typically sends the client to a Cache capable of fetching the object, not directly to the Origin. In any case, the object is delivered to the Client without passing through the federation's Central Services. When the object is fetched through a Cache, the Cache performs the same discovery step as the Client by asking the Director for an Origin that exports the object.
