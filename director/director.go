@@ -261,7 +261,10 @@ func redirectToCache(ginCtx *gin.Context) {
 	ipAddr, err := getRealIP(ginCtx)
 	if err != nil {
 		log.Errorln("Error in getRealIP:", err)
-		ginCtx.String(http.StatusInternalServerError, "Internal error: Unable to determine client IP")
+		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Internal error: Unable to determine client IP",
+		})
 		return
 	}
 
@@ -272,7 +275,10 @@ func redirectToCache(ginCtx *gin.Context) {
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
-		ginCtx.String(404, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems")
+		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems",
+		})
 		return
 	}
 	// if err != nil, depth == 0, which is the default value for depth
@@ -290,14 +296,20 @@ func redirectToCache(ginCtx *gin.Context) {
 			}
 		}
 		if len(cacheAds) == 0 {
-			ginCtx.String(http.StatusNotFound, "No cache found for path")
+			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "No cache found for path",
+			})
 			return
 		}
 	} else {
 		cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds)
 		if err != nil {
 			log.Error("Error determining server ordering for cacheAds: ", err)
-			ginCtx.String(http.StatusInternalServerError, "Failed to determine server ordering")
+			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to determine server ordering",
+			})
 			return
 		}
 	}
@@ -408,12 +420,18 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
-		ginCtx.String(http.StatusNotFound, "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems")
+		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems",
+		})
 		return
 	}
 	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find the origin.
 	if len(originAds) == 0 {
-		ginCtx.String(http.StatusNotFound, "There are currently no origins exporting the provided namespace prefix")
+		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "There are currently no origins exporting the provided namespace prefix",
+		})
 		return
 	}
 
@@ -441,13 +459,19 @@ func redirectToOrigin(ginCtx *gin.Context) {
 			}
 		} else if qr.Status == queryFailed {
 			if qr.ErrorType != queryInsufficientResErr {
-				ginCtx.String(http.StatusInternalServerError, fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg))
+				ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg),
+				})
 				return
 			}
 			// Insufficient response
 			if len(qr.DeniedServers) == 0 {
 				// No denied server, the object was not found on any origins
-				ginCtx.String(http.StatusNotFound, "There are currently no origins hosting the object")
+				ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "There are currently no origins hosting the object",
+				})
 				return
 			}
 			// For denied servers, append them to availableOriginAds
@@ -463,7 +487,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		}
 		if len(availableOriginAds) == 0 {
 			// No available originAds, object does not exist
-			ginCtx.String(http.StatusNotFound, "There are currently no origins hosting the object: available origin Ads is 0")
+			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "There are currently no origins hosting the object: available origin Ads is 0",
+			})
 			return
 		}
 	}
@@ -478,7 +505,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	availableOriginAds, err = sortServerAdsByIP(ipAddr, availableOriginAds)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
-		ginCtx.String(http.StatusInternalServerError, "Failed to determine origin ordering")
+		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to determine origin ordering",
+		})
 		return
 	}
 
@@ -523,7 +553,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				return
 			}
 		}
-		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint allow directory listings"})
+		ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No origins on specified endpoint allow directory listings",
+		})
 	}
 
 	// We know this can be easily bypassed, we need to eventually enforce this
@@ -542,7 +575,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				return
 			}
 		}
-		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint have direct reads enabled"})
+		ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No origins on specified endpoint have direct reads enabled",
+		})
 		return
 	}
 
@@ -558,7 +594,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				return
 			}
 		}
-		ginCtx.JSON(http.StatusMethodNotAllowed, gin.H{"error": "No origins on specified endpoint have direct reads enabled"})
+		ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No origins on specified endpoint have direct reads enabled",
+		})
 		return
 	} else { // Otherwise, we are doing a GET
 		redirectURL := getRedirectURL(reqPath, availableOriginAds[0], !namespaceAd.PublicRead)
