@@ -248,6 +248,7 @@ var (
 	Cache_DataLocations = StringSliceParam{"Cache.DataLocations"}
 	Cache_MetaLocations = StringSliceParam{"Cache.MetaLocations"}
 	Cache_PermittedNamespaces = StringSliceParam{"Cache.PermittedNamespaces"}
+	ConfigLocations = StringSliceParam{"ConfigLocations"}
 	Director_CacheResponseHostnames = StringSliceParam{"Director.CacheResponseHostnames"}
 	Director_FilteredServers = StringSliceParam{"Director.FilteredServers"}
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
