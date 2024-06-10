@@ -69,7 +69,7 @@ const (
 )
 
 const (
-	// We render the frontend and call the API from their for better user experience
+	// We render the frontend and call the API from there for better user experience
 	globusCallbackPath = "/view/origin/globus/callback"
 )
 
@@ -143,7 +143,7 @@ func setupGlobusOAuthCfg() {
 	globusOAuthCfg = &clientCfg
 }
 
-// Get a resource token from Globus tokne endpoint.
+// Get a resource token from Globus token endpoint.
 // Ref: https://docs.globus.org/api/auth/reference/#authorization_code_grant_preferred
 func getGlobusResourceToken(token *oauth2.Token, name string) (globusTok *oauth2.Token, err error) {
 	otok := token.Extra("other_tokens")
@@ -310,6 +310,8 @@ func handleGlobusCallback(ctx *gin.Context) {
 		return
 	}
 	// Make sure there's no path traversal here
+	// We will eventually use the cid as the file name of the access token we persist on the disk
+	// so we want to make sure this ID is not a path
 	cid = path.Clean(cid)
 	if path.Base(cid) != cid {
 		// Someone is trying to hack us!

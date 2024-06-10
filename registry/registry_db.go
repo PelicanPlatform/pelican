@@ -19,13 +19,13 @@
 package registry
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
-	// It doesn't require CGO
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"

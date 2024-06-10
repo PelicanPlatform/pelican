@@ -1068,7 +1068,7 @@ paths:
           name: state
           type: string
           description: >-
-            The state passed along from start of the authentication. In the form of `key1=val1&key2&val2`:
+            The state passed along from start of the authentication. In the form of `key1=val1&key2=val2`:
               - `pkce` is a required state for CSRF verification.
               - `nextUrl` is an optional state for redirect URL
 

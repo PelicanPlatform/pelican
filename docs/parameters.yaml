@@ -922,7 +922,7 @@ description: |+
   register a new confidential OAuth client: https://app.globus.org/settings/developers/registration/confidential_client/select-project
   Once registered, in the client page, find "Client UUID" and copy it to a file.
 
-  If the serves uses Globus as the OIDC authentication provider, Pelican will use OIDC configuration
+  If the server uses Globus as the OIDC authentication provider, Pelican will use OIDC configuration
   for Globus storage access.
 type: filename
 default: none
@@ -930,13 +930,13 @@ components: ["origin"]
 ---
 name: Origin.GlobusClientSecretFile
 description: |+
- Required if `Origin.StorageType == "globus"` and `OIDC.Issuer` is not Globus
+  Required if `Origin.StorageType == "globus"` and `OIDC.Issuer` is not Globus
 
   A filepath to the file containing the Globus ClientID. You need to create a new project and
   register a new confidential OAuth client following the instruction in `Origin.GlobusClientIDFile`.
   In the client page, you need to "Add Client Secret" and copy the secret to a file.
 
-  If the serves uses Globus as the OIDC authentication provider, Pelican will use OIDC configuration
+  If the server uses Globus as the OIDC authentication provider, Pelican will use OIDC configuration
   for Globus storage access.
 type: filename
 default: none
