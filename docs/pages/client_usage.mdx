@@ -80,8 +80,8 @@ This command will download the object `/OSG-Staff/validation/test.txt` from the 
 
 More specifically, it breaks into these components:
 - Federation URL: `osg-htc.org`
-- Namespace: `/ospool/uc-shared/public`
-- Object name: `/OSG-Staff/validation/test.txt`
+- Namespace: `/ospool/uc-shared/public/`
+- Object name: `OSG-Staff/validation/test.txt`
 - Destination: `downloaded-testfile.txt`
 
 
@@ -143,8 +143,8 @@ For example, if a token is saved in a file named `my-token`, it can be used to g
 $ pelican object get -f https://osg-htc.org /ospool/PROTECTED/auth-test.txt downloaded-auth-test.txt -t my-token
 ```
 
-## PUT an object to Your Federation
-Another powerful Pelican client command is the `pelican object put` command. This command does a simple PUT request to add your object to your federation. Putting files into a federation always requires a token therefore, for the example, we will need a token to perform these requests (see the [previous section](#get-a-protected-object-from-your-federation) for more information). Here is how you can use `pelican object put`:
+## PUT an Object to a Data Repository via the Federation
+Another powerful Pelican client command is the `pelican object put` command. This command does a simple PUT request to add your object to a data repository via the federation, and putting files into a data repository always requires a token. For the example, we will need a token to perform these requests (see the [previous section](#get-a-protected-object-from-your-federation) for more information). Here is how you can use `pelican object put`:
 
 ```bash
 pelican object put <path/to/local/file> pelican://<federation-url></namespace-prefix></path/to/file> -t </path/to/token/file>
@@ -169,7 +169,7 @@ pelican object copy <path/to/local/file> pelican://<federation-url></namespace-p
 ```
 
 ## Utilizing Queries with your URL
-The Pelican client has the ability to select various amount of queries specified in the remote path to an object. The queries the current Pelican client accepts are: `?pack`, `?recursive`, and `?directread`.
+The Pelican client allows users to modify the behavior of requests by passing URL query parameters in the remote path of an object. Currently supported queries include: `?pack`, `?recursive`, and `?directread`.
 
 ### Packing Objects with the ?pack Query
 The Pelican client has the ability to automatically compress/unpack tarballs when uploading and downloading to and from a federation. The user just needs to supply their request URL with a query. For example, to automatically unpack a tarball on downloading, run:
