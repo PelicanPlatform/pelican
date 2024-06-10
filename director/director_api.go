@@ -212,8 +212,9 @@ func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
 				ddlCtx, cancel := context.WithDeadline(ctx, time.Now().Add(10*time.Second))
 				defer cancel()
 
-				// query all the servers and filter them out later
-				query := `deriv(xrootd_server_io{job="origin_cache_servers", type="total"}[5m])`
+				// Query all the servers and filter them out later
+				// We are interested in the derivative of the total server IO over the past 5min
+				query := `deriv(xrootd_server_io_total{job="origin_cache_servers"}[5m])`
 				queryResult, err := queryPromtheus(ddlCtx, query, true)
 				if err != nil {
 					log.Debugf("Failed to update IO stat: querying Prometheus responded with an error: %v", err)
@@ -223,16 +224,15 @@ func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
 					log.Debugf("Failed to update IO stat: Prometheus response returns %s type, expected a vector", queryResult.ResultType)
 					continue
 				}
-
 				for _, result := range queryResult.Result {
 					serverUrlRaw, ok := result.Metric["server_url"]
 					if !ok {
-						log.Debugf("Failed to update IO stat. Prometheus query response does not contain server_url metric: %#v", result)
+						log.Debugf("Failed to update IO stat: Prometheus query response does not contain server_url metric: %#v", result)
 						continue
 					}
 					serverUrl, ok := serverUrlRaw.(string)
 					if !ok {
-						log.Debugf("Failed to update IO stat. Prometheus query response contains invalid server_url: %#v", result)
+						log.Debugf("Failed to update IO stat: Prometheus query response contains invalid server_url: %#v", result)
 						continue
 					}
 					ioDerivStr := result.Values[0].Value
@@ -253,7 +253,7 @@ func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
 						serverAd.Value().SetIOLoad(ioDeriv)
 					}
 				}
-				log.Debug("Successfully updated server IO stat")
+				log.Debugf("Successfully updated server IO stat. Received %d updates.", len(queryResult.Result))
 			}
 		}
 	}
