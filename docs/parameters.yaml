@@ -42,7 +42,7 @@ description: |+
   and `/configs2`, the value from `/configs2` will be used. If `/configs1` contains files `a.yaml` and `b.yaml` where both define the same key, the value
   from `b.yaml` will be used.
 
-  Subdirectories of the provided directories are not read.
+  Subdirectories of the provided directories are not read. Only the root config file's `ConfigLocations` key is used, and any redefinitions are ignored.
 type: stringSlice
 default: none
 components: ["*"]

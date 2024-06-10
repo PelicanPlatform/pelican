@@ -856,53 +856,57 @@ func setupTranslation() error {
 // If the config file defines a "ConfigLocations" key and a list of corresponding directories, we parse all the yaml
 // files in those directories according to directory-scoped lexicographical order. This allows users/admins to split
 // their configuration across multiple directories/files.
+//
+// Config merging is handled by viper. For more information, see https://pkg.go.dev/github.com/spf13/viper#MergeConfig
 func handleContinuedCfg() error {
-	if cfgDirs := viper.GetStringSlice("ConfigLocations"); len(cfgDirs) != 0 {
-		for _, cfgDir := range cfgDirs {
+	cfgDirs := viper.GetStringSlice("ConfigLocations")
+	if len(cfgDirs) == 0 {
+		return nil
+	}
 
-			// Check that the directory exists
-			if _, err := os.Stat(cfgDir); err != nil {
-				if os.IsNotExist(err) {
-					return errors.Errorf("directory %s specified by the 'ConfigLocations' key does not exist", cfgDir)
-				} else {
-					return errors.Wrapf(err, "failed to load extra configuration from %s", cfgDir)
-				}
-			}
-
-			// Get all files from the directory, sorted in lexicographical order (sorting handled by WalkDir)
-			configFiles := []string{}
-			fileSystem := os.DirFS(cfgDir)
-			err := fs.WalkDir(fileSystem, ".", func(path string, d fs.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-				if !d.IsDir() && path != "." {
-					configFiles = append(configFiles, path)
-				}
-				return nil
-			})
-			if err != nil {
-				return errors.Wrapf(err, "failed to load extra configuration")
-			}
-
-			for _, file := range configFiles {
-				fHandle, err := os.Open(filepath.Join(cfgDir, file))
-				if err != nil {
-					return errors.Wrapf(err, "failed to open extra configuration file %s", filepath.Join(cfgDir, file))
-				}
-				defer fHandle.Close()
-
-				reader := io.Reader(fHandle)
-				err = viper.MergeConfig(reader)
-				if err != nil {
-					return errors.Wrapf(err, "failed to merge extra configuration file %s", filepath.Join(cfgDir, file))
-				}
+	for _, cfgDir := range cfgDirs {
+		// Check that the directory exists
+		if _, err := os.Stat(cfgDir); err != nil {
+			if os.IsNotExist(err) {
+				return errors.Errorf("directory %s specified by the 'ConfigLocations' key does not exist", cfgDir)
+			} else {
+				return errors.Wrapf(err, "failed to load extra configuration from %s", cfgDir)
 			}
 		}
 
-		log.Infof("Configuration constructed according to directory-scoped lexicographical file order from the following directories: %s",
-			strings.Join(cfgDirs, ", "))
+		// Get all files from the directory, sorted in lexicographical order (sorting handled by WalkDir)
+		configFiles := []string{}
+		fileSystem := os.DirFS(cfgDir)
+		err := fs.WalkDir(fileSystem, ".", func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() && path != "." {
+				configFiles = append(configFiles, path)
+			}
+			return nil
+		})
+		if err != nil {
+			return errors.Wrapf(err, "failed to load extra configuration")
+		}
+
+		for _, file := range configFiles {
+			fHandle, err := os.Open(filepath.Join(cfgDir, file))
+			if err != nil {
+				return errors.Wrapf(err, "failed to open extra configuration file %s", filepath.Join(cfgDir, file))
+			}
+			defer fHandle.Close()
+
+			reader := io.Reader(fHandle)
+			err = viper.MergeConfig(reader)
+			if err != nil {
+				return errors.Wrapf(err, "failed to merge extra configuration file %s", filepath.Join(cfgDir, file))
+			}
+		}
 	}
+
+	log.Infof("Configuration constructed according to directory-scoped lexicographical file order from the following directories: %s",
+		strings.Join(cfgDirs, ", "))
 
 	return nil
 }
