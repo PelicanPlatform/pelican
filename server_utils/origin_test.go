@@ -515,5 +515,9 @@ func TestFederationPrefixValidation(t *testing.T) {
 	runFedPrefixTest(t, "/dollar$test", false)     // Test prefix with '$'
 	runFedPrefixTest(t, "/star*test", false)       // Test prefix with '*'
 	runFedPrefixTest(t, "/backslash\\test", false) // Test prefix with '\'
-	runFedPrefixTest(t, "/valid/prefix", true)     // Test valid prefix
+	runFedPrefixTest(t, "/origins/foo/bar", false) // Test prefix for origins
+	runFedPrefixTest(t, "/origins/example.org", false)
+	runFedPrefixTest(t, "/caches/foo/bar", false) // Test prefix for caches
+	runFedPrefixTest(t, "/caches/example.org", false)
+	runFedPrefixTest(t, "/valid/prefix", true) // Test valid prefix
 }

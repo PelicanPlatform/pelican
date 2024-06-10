@@ -56,12 +56,12 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	if config.GetPreferredPrefix() == config.OsdfPrefix {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 		log.Info("Populating registry with namespaces from OSG topology service...")
-		if err := registry.PopulateTopology(); err != nil {
+		if err := registry.PopulateTopology(ctx); err != nil {
 			panic(errors.Wrap(err, "Unable to populate topology table"))
 		}
 
 		// Checks topology for updates every 10 minutes
-		go registry.PeriodicTopologyReload()
+		go registry.PeriodicTopologyReload(ctx)
 	}
 
 	rootRouterGroup := engine.Group("/")

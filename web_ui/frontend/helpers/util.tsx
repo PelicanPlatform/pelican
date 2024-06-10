@@ -1,8 +1,10 @@
+import {ServerType} from "@/index"
+
 const stringToTime = (time: string) => {
     return new Date(Date.parse(time)).toLocaleString()
 }
 
-export const getEnabledServers = async () => {
+export const getEnabledServers = async () : Promise<ServerType[]> => {
     const response = await fetch("/api/v1.0/servers")
     if (response.ok) {
         const data = await response.json()
@@ -15,6 +17,8 @@ export const getEnabledServers = async () => {
 
         return servers
     }
+
+    return []
 }
 
 export const getOauthEnabledServers = async () => {
@@ -49,4 +53,10 @@ export const getErrorMessage = async (response: Response) : Promise<string> =>  
         message = response.status + ": " + response.statusText
     }
     return message
+}
+
+type TypeOrTypeFunction<T> = T | (() => T)
+
+export function evaluateOrReturn<T>(o: TypeOrTypeFunction<T>) : T {
+    return typeof o === 'function' ? (o as () => T)() : o
 }

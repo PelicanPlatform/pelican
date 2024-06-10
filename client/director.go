@@ -146,7 +146,7 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 	}
 
 	defer resp.Body.Close()
-	log.Debugln("Director's response:", resp)
+	log.Traceln("Director's response:", resp)
 
 	// Check HTTP response -- should be 307 (redirect), else something went wrong
 	body, _ := io.ReadAll(resp.Body)

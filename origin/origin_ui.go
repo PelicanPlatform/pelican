@@ -38,7 +38,10 @@ import (
 
 type (
 	exportsRes struct {
-		Type string `json:"type"` // "posix" | "s3" | "https" | "globus" | "xroot"
+		Type              string        `json:"type"`              // "posix" | "s3" | "https" | "globus" | "xroot"
+		Status            regStatusEnum `json:"status"`            // Origin registration status
+		StatusDescription string        `json:"statusDescription"` // Description of the status
+		EditUrl           string        `json:"editUrl"`           // URL to edit the origin registration
 
 		// For S3 backend
 		S3Region     string `json:"s3Region,omitempty"`
@@ -58,6 +61,32 @@ func handleExports(ctx *gin.Context) {
 	if err != nil {
 		log.Errorf("Failed to parse origin storage type: %v", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when parsing the storage type of the origin: " + err.Error()})
+	}
+
+	res := exportsRes{Type: string(storageType)}
+
+	extUrlStr := param.Server_ExternalWebUrl.GetString()
+	extUrl, _ := url.Parse(extUrlStr)
+	// Only use hostname:port
+	originPrefix := server_structs.GetOriginNs(extUrl.Host)
+	if !registrationsStatus.Has(originPrefix) {
+		if err := FetchAndSetRegStatus(originPrefix); err != nil {
+			log.Errorf("Failed to fetch registration status from the registry: %v", err)
+			ctx.JSON(http.StatusInternalServerError,
+				server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to fetch registration status from the registry"})
+			return
+		}
+	}
+	if rs := registrationsStatus.Get(originPrefix); rs == nil {
+		log.Error("Failed to fetch registration status from the registry: can't find registration status after querying registry")
+		ctx.JSON(http.StatusInternalServerError,
+			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to fetch registration status from the registry"})
+		return
+	} else {
+		// rs is not nil
+		res.Status = rs.Value().Status
+		res.StatusDescription = rs.Value().Msg
+		res.EditUrl = rs.Value().EditUrl
 	}
 
 	exports, err := server_utils.GetOriginExports()
@@ -100,6 +129,10 @@ func handleExports(ctx *gin.Context) {
 		return
 	}
 
+	if res.EditUrl != "" {
+		res.EditUrl += "&access_token=" + token
+	}
+
 	for idx, export := range wrappedExports {
 		if export.EditUrl != "" {
 			parsed, err := url.Parse(export.EditUrl)
@@ -115,7 +148,8 @@ func handleExports(ctx *gin.Context) {
 		}
 	}
 
-	res := exportsRes{Type: string(storageType), Exports: wrappedExports}
+	res.Exports = wrappedExports
+
 	switch storageType {
 	case server_utils.OriginStorageS3:
 		res.S3Region = param.Origin_S3Region.GetString()

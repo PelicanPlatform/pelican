@@ -51,11 +51,12 @@ type Topology struct {
 	Prefix string `json:"prefix" gorm:"unique;not null"`
 }
 
-type ServerType string
+type prefixType string // Type of a prefix
 
 const (
-	OriginType ServerType = "origin"
-	CacheType  ServerType = "cache"
+	prefixForOrigin    prefixType = "origin"    // origin servers
+	prefixForCache     prefixType = "cache"     // cache servers
+	prefixForNamespace prefixType = "namespace" // data namespace
 )
 
 /*
@@ -71,7 +72,7 @@ var db *gorm.DB
 //go:embed migrations/*.sql
 var embedMigrations embed.FS
 
-func (st ServerType) String() string {
+func (st prefixType) String() string {
 	return string(st)
 }
 
@@ -286,16 +287,19 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 // For filterNs.AdminMetadata.Description and filterNs.AdminMetadata.SiteName,
 // the string will be matched using `strings.Contains`. This is too mimic a SQL style `like` match.
 // The rest of the AdminMetadata fields is matched by `==`
-func getNamespacesByFilter(filterNs server_structs.Namespace, serverType ServerType, legacy bool) ([]server_structs.Namespace, error) {
+func getNamespacesByFilter(filterNs server_structs.Namespace, pType prefixType, legacy bool) ([]server_structs.Namespace, error) {
 	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE 1=1 `
-	if serverType == CacheType {
+	if pType == prefixForCache {
 		// Refer to the cache prefix name in cmd/cache_serve
 		query += ` AND prefix LIKE '/caches/%'`
-	} else if serverType == OriginType {
-		query += ` AND NOT prefix LIKE '/caches/%'`
-	} else if serverType != "" {
-		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", serverType))
+	} else if pType == prefixForOrigin {
+		query += ` AND prefix LIKE '/origins/%'`
+	} else if pType == prefixForNamespace {
+		query += ` AND NOT prefix LIKE '/caches/%' AND NOT prefix LIKE '/origins/%'`
+	} else if pType != "" {
+		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", pType))
 	}
+
 	if filterNs.CustomFields != nil {
 		return nil, errors.New("Unsupported operation: Can't filter against Custrom Registration field.")
 	}
@@ -499,7 +503,7 @@ func InitializeDB() error {
 }
 
 // Create a table in the registry to store namespace prefixes from topology
-func PopulateTopology() error {
+func PopulateTopology(ctx context.Context) error {
 	// The topology table may already exist from before, it may not. Because of this
 	// we need to add to the table any prefixes that are in topology, delete from the
 	// table any that aren't in topology, and skip any that exist in both.
@@ -517,7 +521,7 @@ func PopulateTopology() error {
 	}
 
 	// Next, get the values from topology
-	namespaces, err := utils.GetTopologyJSON(false)
+	namespaces, err := utils.GetTopologyJSON(ctx, false)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
@@ -563,10 +567,10 @@ func PopulateTopology() error {
 	})
 }
 
-func PeriodicTopologyReload() {
+func PeriodicTopologyReload(ctx context.Context) {
 	for {
 		time.Sleep(param.Federation_TopologyReloadInterval.GetDuration())
-		err := PopulateTopology()
+		err := PopulateTopology(ctx)
 		if err != nil {
 			log.Warningf("Failed to re-populate topology table: %s. Will try again later",
 				err)

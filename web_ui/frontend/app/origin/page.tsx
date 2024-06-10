@@ -18,7 +18,9 @@
 
 "use client"
 
-import {Box, Grid, Typography} from "@mui/material";
+import {useState} from "react"
+import {Box, IconButton, Grid, Tooltip, Typography} from "@mui/material";
+import {Key, CheckCircle} from "@mui/icons-material";
 
 import RateGraph from "@/components/graphs/RateGraph";
 import StatusBox from "@/components/StatusBox";
@@ -27,8 +29,26 @@ import {TimeDuration} from "@/components/graphs/prometheus";
 import FederationOverview from "@/components/FederationOverview";
 import {User} from "@/index";
 import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
+import {getErrorMessage} from "@/helpers/util";
 
 export default function Home() {
+    const [copied, setCopied] = useState(false)
+
+    const handleClick = async (e: React.MouseEvent) => {
+        e.stopPropagation()
+        const keyResponse = await fetch("/.well-known/issuer.jwks")
+        if(keyResponse.ok) {
+          const data = await keyResponse.json()
+          await navigator.clipboard.writeText(JSON.stringify(data))
+          setCopied(true)
+          setTimeout(() => {
+            setCopied(false)
+          }, 3000)
+        } else {
+          const errMsg = await getErrorMessage(keyResponse)
+          console.error(errMsg)
+        }
+    }
 
     return (
         <AuthenticatedContent redirect={true} checkAuthentication={(u: User) => u?.role == "admin"}>
@@ -39,7 +59,20 @@ export default function Home() {
                         <StatusBox/>
                     </Grid>
                     <Grid item xs={12} lg={6}>
-                        <Typography variant={"h4"} component={"h2"} mb={2}>Data Exports</Typography>
+                        <Box display={"flex"} flexDirection={"row"} justifyContent={"space-between"} alignItems={"center"}>
+                            <Typography variant={"h4"} component={"h2"} mb={2}>Data Exports</Typography>
+                            <Tooltip title={"Copy Pelican public key"}>
+                                {copied ?
+                                    <IconButton color="success">
+                                        <CheckCircle/>
+                                    </IconButton>
+                                    :
+                                    <IconButton onClick={handleClick}>
+                                        <Key/>
+                                    </IconButton>
+                                }
+                            </Tooltip>
+                        </Box>
                         <DataExportTable/>
                     </Grid>
                     <Grid item xs={12} lg={6}>
@@ -57,7 +90,8 @@ export default function Home() {
                                         justifyContent:"center",
                                         display:"flex",
                                         bgcolor:"white",
-                                        borderRadius:2
+                                        borderRadius:2,
+                                        p: 1
                                     }}
                                     options={{
                                         scales: {

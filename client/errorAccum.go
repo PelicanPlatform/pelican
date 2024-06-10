@@ -102,7 +102,12 @@ func (te *TransferErrors) UserError() string {
 	var errorsFormatted []string
 	for idx, err := range te.errors {
 		theError := err.(*TimestampedError)
-		errFmt := fmt.Sprintf("Attempt #%v: %s", idx+1, theError.err.Error())
+		var errFmt string
+		if len(te.errors) > 1 {
+			errFmt = fmt.Sprintf("Attempt #%v: %s", idx+1, theError.err.Error())
+		} else {
+			errFmt = theError.err.Error()
+		}
 		timeElapsed := theError.timestamp.Sub(lastError)
 		timeFormat := timeElapsed.Truncate(100 * time.Millisecond).String()
 		errFmt += " (" + timeFormat

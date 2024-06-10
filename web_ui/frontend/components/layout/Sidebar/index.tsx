@@ -23,10 +23,10 @@ import styles from "../../../app/page.module.css"
 import React, {ReactNode} from "react";
 
 import UserMenu from "./UserMenu";
-import PelicanSpeedDial from "./SpeedDial";
 import {default as NextLink} from "next/link";
 import Image from "next/image";
 import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
+import AboutMenu from "./AboutMenu";
 
 export const Sidebar = ({children}: {children: ReactNode}) => {
 
@@ -58,7 +58,7 @@ export const Sidebar = ({children}: {children: ReactNode}) => {
                             <Box pb={1}>
                                 <UserMenu/>
                             </Box>
-                            <PelicanSpeedDial/>
+                            <AboutMenu/>
                         </Box>
                     </Box>
                 </Box>

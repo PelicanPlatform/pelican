@@ -294,34 +294,6 @@ func TestStat(t *testing.T) {
 	assert.Equal(t, uint64(13), size)
 }
 
-// Creates a buffer of at least 1MB
-func makeBigBuffer() []byte {
-	byteBuff := []byte("Hello, World!")
-	for {
-		byteBuff = append(byteBuff, []byte("Hello, World!")...)
-		if len(byteBuff) > 1024*1024 {
-			break
-		}
-	}
-	return byteBuff
-}
-
-// Writes a file at least the specified size in MB
-func writeBigBuffer(t *testing.T, fp io.WriteCloser, sizeMB int) (size int) {
-	defer fp.Close()
-	byteBuff := makeBigBuffer()
-	size = 0
-	for {
-		n, err := fp.Write(byteBuff)
-		require.NoError(t, err)
-		size += n
-		if size > sizeMB*1024*1024 {
-			break
-		}
-	}
-	return
-}
-
 // Create a 100MB file in the origin.  Download it (slowly) via the local cache.
 //
 // This triggers multiple internal requests to wait on the slow download
@@ -343,7 +315,7 @@ func TestLargeFile(t *testing.T) {
 
 	fp, err := os.OpenFile(filepath.Join(ft.Exports[0].StoragePrefix, "hello_world.txt"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	require.NoError(t, err)
-	size := writeBigBuffer(t, fp, 100)
+	size := test_utils.WriteBigBuffer(t, fp, 100)
 
 	require.NoError(t, err)
 	tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
@@ -390,7 +362,7 @@ func TestOriginUnresponsive(t *testing.T) {
 
 	fp, err := os.OpenFile(filepath.Join(ft.Exports[0].StoragePrefix, "hello_world.txt"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	require.NoError(t, err)
-	writeBigBuffer(t, fp, 1)
+	test_utils.WriteBigBuffer(t, fp, 1)
 
 	downloadUrl := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
 		ft.Exports[0].FederationPrefix, "hello_world.txt")

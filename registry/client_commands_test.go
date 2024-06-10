@@ -145,7 +145,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	viper.Set("Federation.TopologyNamespaceURL", topoSvr.URL)
 	err = migrateTopologyTestTable()
 	require.NoError(t, err)
-	err = PopulateTopology()
+	err = PopulateTopology(ctx)
 	require.NoError(t, err)
 
 	defer func() {
