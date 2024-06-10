@@ -72,6 +72,8 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		return err
 	}
 
+	registry.LaunchNamespaceMetrics(ctx, egrp)
+
 	egrp.Go(func() error {
 		<-ctx.Done()
 		return registry.ShutdownDB()
