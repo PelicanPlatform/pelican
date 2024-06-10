@@ -148,6 +148,11 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 	// Check HTTP response -- should be 307 (redirect), else something went wrong
 	body, _ := io.ReadAll(resp.Body)
 
+	contentType := req.Header.Get("Content-Type")
+	if contentType != "application/json" {
+		log.Debugln(string(body))
+	}
+
 	// If we get a 404, the director will hopefully tell us why. It might be that the namespace doesn't exist
 	if resp.StatusCode == 404 && verb == "PROPFIND" {
 		// If we get a 404 response from a PROPFIND, we are likely working with an old director so we should return a response
@@ -159,10 +164,6 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 		// If we get a 405 with a PROPFIND, the client will handle it
 		return
 	} else if resp.StatusCode != 307 {
-		contentType := req.Header.Get("Content-Type")
-		if contentType != "application/json" {
-			log.Debugln(string(body))
-		}
 		var respErr server_structs.SimpleApiResp
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			return nil, errors.Wrap(unmarshalErr, "Could not unmarshall the director's response")
