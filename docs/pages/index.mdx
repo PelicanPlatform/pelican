@@ -50,7 +50,7 @@ To make data from a Repository available through a Pelican federation, the data 
 
 Origins are a crucial component of Pelican's architecture for two reasons: they act as an adapter between various storage backends and Pelican federations, and they provide fine-grained access controls for that data. That is, they figure out how to take data from wherever it lives and transform it into a format that the clients from the federation can utilize while respecting the Repository's data access requirements. This implies an inherent trust relationship between Origins and Data Repositories, as the Origin is responsible for enforcing the Repository's needs and wishes within the rest of the federation. However, while the Origin is responsible for translating the Repository's data access policies into something the federation can understand, Pelican is designed so that Origins never need to share secrets with their federation.
 
-Pelican Origins work by making their underlying Repository accessible under some namespace path via HTTPs, which is accomplished by building on top of [XRootD](https://xrootd.slac.stanford.edu/). The namespace path, also called the federation prefix, is the path at which data from the Origin can be accessed in the federation. For example, an Origin that exports the namespace path `/foo` might provide access to an object `bar` in the underlying Data Repository. The full path for this object in the federation would be `/foo/bar`.
+Pelican Origins work by making their underlying Repository accessible under some namespace path via HTTPs, which is accomplished by building on top of [XRootD](https://xrootd.slac.stanford.edu/). The namespace path, also called the *federation prefix*, is the path at which data from the Origin can be accessed in the federation. For example, an Origin that exports the namespace path `/foo` might provide access to an object `bar` in the underlying Data Repository. The full path for this object in the federation would be `/foo/bar`.
 
 > **NOTE**: An important distinction between Origins and Data Repositories is that, generally speaking, Origins do **NOT** store any data themselves; their primary function is to facilitate data access *from* the Repository, which may not coincide on the same machine.
 
@@ -76,9 +76,9 @@ It was mentioned that data federations operate under a minimally-centralized str
 
 Data access in a Pelican federation requires two fundamental pieces of information -- the federation's hostname (also called the *root* of the federation), and the name of the object within the federation. Notably, the hostnames of any Origins that facilitate access to objects are absent from that list. Instead, the Pelican model uses the federation root to discover and route all Client requests for objects through its *Director*, an HTTP server whose job is determining the best location(s) at which to access a given object. In some cases, this is accomplished by redirecting clients to a nearby Cache that might already have a copy of the object, and in other cases the Director might send the client to an Origin that can provide direct access.
 
-In many cases, but not all, the Director’s hostname can also be used as the federation’s hostname because it provides the same set of metadata. The OSDF breaks these two endpoints apart by providing federation metadata at osg-htc.org, which is duplicated within the OSDF Director. This allows the OSDF Director to use a subdomain of osg-htc.org, which is otherwise a statically-hosted informational website.
+Generally, the Director's hostname is used as the federation's hostname because it auto-populates and makes available the federation's metadata. This information is hosted at the *discovery endpoint*, a URL obtained by appending `/.well-known/pelican-configuration` to the federation's root. However, some federations may wish to set up the Director/Registry as subdomains of the federation's hostname. For example, the OSDF breaks these two endpoints apart by providing federation metadata at osg-htc.org, which then points to `osdf-director.osg-htc.org` and `osdf-registry.osg-htc.org`, respectively.
 
-All Origins and Caches in a federation send periodic advertisements to the discovered Director at a default interval of 10 minutes to let it know where they can be accessed, which namespace(s) they provide, and any information pertaining to data access policies (such as authorization schemes). In this way, the Director is the only service that has a nearly real-time view of all the Origins and Caches in the federation -- if an Origin or Cache fails to re-advertise after the required period, it is assumed to be offline until another advertisement is received, and the Director will stop sending clients to that location.
+All Origins and Caches in a federation send periodic advertisements to the discovered Director at a default interval of 1 minute to let it know where they can be accessed, which namespace(s) they provide, and any information pertaining to data access policies (such as authorization schemes). In this way, the Director is the only service that has a nearly real-time view of all the Origins and Caches in the federation -- if an Origin or Cache fails to re-advertise after the required period (15 minutes by default), it is assumed to be offline until another advertisement is received, and the Director will stop sending clients to that location.
 
 #### Registry Service
 
@@ -101,10 +101,10 @@ Pelican serves two sides of the same coin -- Data owners who want to federate th
 As such, the primary prerequisite for data to be moved via a Pelican federation is for a data owner to make their data accessible to the federation. This happens when an Origin is placed in front of the repository and registered with the federation. While federations like the OSDF *may* wish to control or filter any Origin registrations to vet the data they make available, this example assumes the Origin's registration is automatically approved. The red arrow in the following graphic represents the vetting/approval step, should the federation require it.
 
 <ImageRow alt={"Pelican and OSDF"} src={"/pelican/arch-origin-registration.png"}>
-	When the Origin starts, it's told which federation it belongs to. It discovers the
-	hostnames for its Registry and Directory by using the federation root to construct
-	the URL "https://osg-htc.org/.well-known/pelican-configuration", which contains a JSON
-	detailing the federation's central services.
+	The Origin's owner configures a federation root before starting the service. After startup, the
+	Origin then discovers the hostnames for its Registry and Directory by using the federation root
+	to construct the URL "https://osg-htc.org/.well-known/pelican-configuration", the federation's
+	*discovery endpoint* containing a JSON that details the federation's central services.
 
 	Next, the Origin registers its namespace and public key with the Registry, proving that it
 	owns the corresponding private key. Finally, the Origin begins advertising its namespace
@@ -117,9 +117,9 @@ The next step is for the data consumer to actually *move* the data. Pelican assu
 
 <ImageRow alt={"Pelican and OSDF"} src={"/pelican/arch-orig-discovery.png"}>
 	The data consumer provides their Pelican client of choice the pelican:// URL that defines
-	the object they want to download, where osg-htc.org is the federation and
-	(/weather/cloud.jpg) is the object. Just as the origin discovered the Director's hostname
-	by visiting "https://osg-htc.org/.well-known/pelican-configuration", so too does the client.
+	the object they want to download, where `osg-htc.org` is the federation and
+	(`/weather/cloud.jpg`) is the object. Just as the origin discovered the Director's hostname
+	by visiting the discovery endpoint, so too does the client.
 
 	After the client has performed federation metadata discovery, it issues an HTTP GET
 	request to the Director, using the object name as a URL path. The Director responds
