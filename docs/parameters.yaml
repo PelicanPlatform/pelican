@@ -663,6 +663,13 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.EnableMacaroons
+description: |+
+  A bool indicating whether the origin allows clients to authenticate using macaroons.
+type: bool
+default: false
+components: ["origin"]
+---
 name: Origin.SelfTest
 description: |+
   A bool indicating whether the origin should perform self health checks.
@@ -2024,6 +2031,13 @@ type: url
 default: none
 components: ["origin", "cache"]
 ---
+name: Xrootd.ManagerPort
+description: |+
+  The port at which the XRootD instance's Manager Host is available.
+type: int
+default: 1213
+components: ["origin", "cache"]
+---
 name: Xrootd.SummaryMonitoringHost
 description: |+
   A URL pointing toward the XRootD instance's Summary Monitoring Host.
@@ -2031,11 +2045,25 @@ type: url
 default: none
 components: ["origin", "cache"]
 ---
+name: Xrootd.SummaryMonitoringPort
+description: |+
+  The port at which the XRootD instance's Summary Monitoring Host is available.
+type: int
+default: 9931
+components: ["origin", "cache"]
+---
 name: Xrootd.DetailedMonitoringHost
 description: |+
   A URL pointing toward the XRootD instance's Detailed Monitoring Host.
 type: url
 default: none
+components: ["origin", "cache"]
+---
+name: Xrootd.DetailedMonitoringPort
+description: |+
+  The port at which the XRootD instance's Detailed Monitoring Host is available.
+type: int
+default: 9930
 components: ["origin", "cache"]
 ---
 name: Xrootd.LocalMonitoringHost

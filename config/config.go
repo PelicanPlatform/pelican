@@ -40,15 +40,15 @@ import (
 
 	"github.com/go-playground/locales/en"
 	ut "github.com/go-playground/universal-translator"
-	en_translations "github.com/go-playground/validator/v10/translations/en"
-
 	"github.com/go-playground/validator/v10"
-	"github.com/pelicanplatform/pelican/param"
+	en_translations "github.com/go-playground/validator/v10/translations/en"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
@@ -935,6 +935,12 @@ func InitConfig() {
 
 	// Warn users about deprecated config keys they're using and try to map them to any new equivalent we've defined.
 	handleDeprecatedConfig()
+
+	// Spit out a warning if the user has passed config keys that are not recognized
+	// This should work against both config files and appropriately-prefixed env vars
+	if unknownKeys := validateConfigKeys(); len(unknownKeys) > 0 {
+		log.Warningln("Unknown configuration keys found: ", strings.Join(unknownKeys, ", "))
+	}
 
 	onceValidate.Do(func() {
 		err = setupTranslation()
