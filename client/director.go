@@ -161,7 +161,7 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 	} else if resp.StatusCode != 307 {
 		contentType := req.Header.Get("Content-Type")
 		if contentType != "application/json" {
-			log.Debugln(string(body))
+			return nil, errors.New(string(body))
 		}
 		var respErr server_structs.SimpleApiResp
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
