@@ -102,7 +102,7 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		serverAd := i.Value().ServerAd
 		serverUrl := i.Key()
 
-		if util, exists := healthTestUtils[serverAd]; exists {
+		if util, exists := healthTestUtils[serverUrl]; exists {
 			util.Cancel()
 			if util.ErrGrp != nil {
 				err := util.ErrGrp.Wait()

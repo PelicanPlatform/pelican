@@ -88,6 +88,7 @@ func TestCheckOverrides(t *testing.T) {
 
 		addr := net.ParseIP("192.168.0.1")
 		coordinate := checkOverrides(addr)
+		require.NotNil(t, coordinate)
 		require.Equal(t, expectedCoordinate.Lat, coordinate.Lat)
 		require.Equal(t, expectedCoordinate.Long, coordinate.Long)
 	})
@@ -101,6 +102,7 @@ func TestCheckOverrides(t *testing.T) {
 
 		addr := net.ParseIP("10.0.0.136")
 		coordinate := checkOverrides(addr)
+		require.NotNil(t, coordinate)
 		require.Equal(t, expectedCoordinate.Lat, coordinate.Lat)
 		require.Equal(t, expectedCoordinate.Long, coordinate.Long)
 	})
@@ -113,6 +115,7 @@ func TestCheckOverrides(t *testing.T) {
 
 		addr := net.ParseIP("FC00::0001")
 		coordinate := checkOverrides(addr)
+		require.NotNil(t, coordinate)
 		require.Equal(t, expectedCoordinate.Lat, coordinate.Lat)
 		require.Equal(t, expectedCoordinate.Long, coordinate.Long)
 	})
@@ -125,6 +128,7 @@ func TestCheckOverrides(t *testing.T) {
 
 		addr := net.ParseIP("FD00::FA1B")
 		coordinate := checkOverrides(addr)
+		require.NotNil(t, coordinate)
 		require.Equal(t, expectedCoordinate.Lat, coordinate.Lat)
 		require.Equal(t, expectedCoordinate.Long, coordinate.Long)
 	})
