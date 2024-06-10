@@ -72,10 +72,9 @@ func TestListServers(t *testing.T) {
 		Type:              mockOriginServerAd.Type,
 		Latitude:          mockOriginServerAd.Latitude,
 		Longitude:         mockOriginServerAd.Longitude,
-		Writes:            mockOriginServerAd.Writes,
-		DirectReads:       mockOriginServerAd.DirectReads,
-		Listings:          mockOriginServerAd.Listings,
-		Status:            HealthStatusUnknown,
+		Caps:              mockOriginServerAd.Caps,
+		FromTopology:      mockOriginServerAd.FromTopology,
+		HealthStatus:      HealthStatusUnknown,
 		NamespacePrefixes: expectedListOriginResNss,
 	}
 
@@ -88,9 +87,9 @@ func TestListServers(t *testing.T) {
 		Type:              mockCacheServerAd.Type,
 		Latitude:          mockCacheServerAd.Latitude,
 		Longitude:         mockCacheServerAd.Longitude,
-		Writes:            mockCacheServerAd.Writes,
-		DirectReads:       mockCacheServerAd.DirectReads,
-		Status:            HealthStatusUnknown,
+		Caps:              mockCacheServerAd.Caps,
+		FromTopology:      mockCacheServerAd.FromTopology,
+		HealthStatus:      HealthStatusUnknown,
 		NamespacePrefixes: expectedListCacheResNss,
 	}
 

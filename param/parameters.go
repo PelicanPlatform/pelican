@@ -282,7 +282,10 @@ var (
 	Shoveler_PortHigher = IntParam{"Shoveler.PortHigher"}
 	Shoveler_PortLower = IntParam{"Shoveler.PortLower"}
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
+	Xrootd_DetailedMonitoringPort = IntParam{"Xrootd.DetailedMonitoringPort"}
+	Xrootd_ManagerPort = IntParam{"Xrootd.ManagerPort"}
 	Xrootd_Port = IntParam{"Xrootd.Port"}
+	Xrootd_SummaryMonitoringPort = IntParam{"Xrootd.SummaryMonitoringPort"}
 )
 
 var (
@@ -309,6 +312,7 @@ var (
 	Origin_EnableFallbackRead = BoolParam{"Origin.EnableFallbackRead"}
 	Origin_EnableIssuer = BoolParam{"Origin.EnableIssuer"}
 	Origin_EnableListings = BoolParam{"Origin.EnableListings"}
+	Origin_EnableMacaroons = BoolParam{"Origin.EnableMacaroons"}
 	Origin_EnableOIDC = BoolParam{"Origin.EnableOIDC"}
 	Origin_EnablePublicReads = BoolParam{"Origin.EnablePublicReads"}
 	Origin_EnableReads = BoolParam{"Origin.EnableReads"}

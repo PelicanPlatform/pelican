@@ -26,6 +26,7 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -285,8 +286,8 @@ func TestLaunchTTLCache(t *testing.T) {
 			healthTestUtilsMutex.Lock()
 			defer healthTestUtilsMutex.Unlock()
 			// Clear the map for the new test
-			healthTestUtils = make(map[server_structs.ServerAd]*healthTestUtil)
-			healthTestUtils[mockPelicanOriginServerAd] = &healthTestUtil{
+			healthTestUtils = make(map[string]*healthTestUtil)
+			healthTestUtils[mockPelicanOriginServerAd.URL.String()] = &healthTestUtil{
 				Cancel:        cancelFunc,
 				ErrGrp:        errgrp,
 				ErrGrpContext: errgrpCtx,
@@ -430,5 +431,41 @@ func TestRecordAd(t *testing.T) {
 		getAd := serverAds.Get(pelicanServerUrl.String())
 		assert.NotNil(t, getAd)
 		assert.False(t, getAd.Value().FromTopology) // topology ad is ignored
+	})
+
+	t.Run("recorded-sad-should-match-health-test-utils-one", func(t *testing.T) {
+		t.Cleanup(func() {
+			viper.Reset()
+			healthTestUtilsMutex.Lock()
+			statUtilsMutex.Lock()
+			defer statUtilsMutex.Unlock()
+			defer healthTestUtilsMutex.Unlock()
+			healthTestUtils = make(map[string]*healthTestUtil)
+			statUtils = make(map[string]serverStatUtil)
+
+			serverAds.DeleteAll()
+			geoIPOverrides = nil
+		})
+		viper.Reset()
+		func() {
+			geoIPOverrides = nil
+
+			healthTestUtilsMutex.Lock()
+			statUtilsMutex.Lock()
+			defer statUtilsMutex.Unlock()
+			defer healthTestUtilsMutex.Unlock()
+			healthTestUtils = make(map[string]*healthTestUtil)
+			statUtils = make(map[string]serverStatUtil)
+
+			serverAds.DeleteAll()
+		}()
+
+		viper.Set("GeoIPOverrides", []map[string]interface{}{{"IP": "192.168.100.100", "Coordinate": map[string]float64{"lat": 43.567, "long": -65.322}}})
+		mockUrl := url.URL{Scheme: "https", Host: "192.168.100.100"}
+		updatedAd := recordAd(context.Background(), server_structs.ServerAd{Name: "TEST_ORIGIN", URL: mockUrl, WebURL: mockUrl, FromTopology: false}, &mockPelican.NamespaceAds)
+		assert.NotEmpty(t, updatedAd.Longitude)
+		assert.NotEmpty(t, updatedAd.Latitude)
+		_, ok := healthTestUtils[mockUrl.String()]
+		assert.True(t, ok)
 	})
 }
