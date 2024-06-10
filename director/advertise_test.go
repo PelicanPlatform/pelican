@@ -139,10 +139,10 @@ func TestAdvertiseOSDF(t *testing.T) {
 	err := AdvertiseOSDF(context.Background())
 	require.NoError(t, err)
 
-	var foundServer server_structs.Advertisement
+	var foundServer *server_structs.Advertisement
 	for _, item := range serverAds.Items() {
 		if item.Value().URL.Host == "origin1-endpoint.com" {
-			foundServer = *item.Value()
+			foundServer = item.Value()
 		}
 	}
 	require.NotNil(t, foundServer)

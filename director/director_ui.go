@@ -87,7 +87,7 @@ func listServers(ctx *gin.Context) {
 		})
 		return
 	}
-	var servers []server_structs.Advertisement
+	var servers []*server_structs.Advertisement
 	if queryParams.ServerType != "" {
 		if !strings.EqualFold(queryParams.ServerType, string(server_structs.OriginType)) && !strings.EqualFold(queryParams.ServerType, string(server_structs.CacheType)) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -131,7 +131,7 @@ func listServers(ctx *gin.Context) {
 			Filtered:     filtered,
 			FilteredType: ft.String(),
 			Status:       healthStatus,
-			IOLoad:       server.IOLoad,
+			IOLoad:       server.GetIOLoad(),
 		}
 		for _, ns := range server.NamespaceAds {
 			res.NamespacePrefixes = append(res.NamespacePrefixes, ns.Path)

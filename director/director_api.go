@@ -48,13 +48,13 @@ func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
 }
 
 // List all advertisements in the TTL cache that match the serverType array
-func listAdvertisement(serverTypes []server_structs.ServerType) []server_structs.Advertisement {
-	ads := make([]server_structs.Advertisement, 0)
+func listAdvertisement(serverTypes []server_structs.ServerType) []*server_structs.Advertisement {
+	ads := make([]*server_structs.Advertisement, 0)
 	for _, item := range serverAds.Items() {
 		ad := item.Value()
 		for _, serverType := range serverTypes {
 			if ad.Type == serverType {
-				ads = append(ads, *ad)
+				ads = append(ads, ad)
 			}
 		}
 	}
@@ -250,7 +250,7 @@ func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
 							log.Debugf("Failed to update IO stat for server %s: server does not exist in the director", serverUrl)
 							continue
 						}
-						serverAd.Value().IOLoad = ioDeriv
+						serverAd.Value().SetIOLoad(ioDeriv)
 					}
 				}
 				log.Debug("Successfully updated server IO stat")
