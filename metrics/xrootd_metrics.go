@@ -328,7 +328,7 @@ var (
 
 	ServerIOWaitTime = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "xrootd_server_io_wait_time",
-		Help: "The current wait time of the storage operation in origin/cache server",
+		Help: "The aggregate time spent in storage operations in origin/cache server",
 	})
 
 	lastStats SummaryStat

@@ -429,7 +429,7 @@ definitions:
         default: Unknown
       ioLoad:
         type: number
-        description: The I/O load of the server, which is a float number with range [0,1]
+        description: The I/O load of the server, which is the average time spent waiting on I/O in the last 5 minutes.
         default: 0
       namespacePrefixes:
         type: array

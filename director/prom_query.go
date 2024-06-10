@@ -21,7 +21,6 @@ package director
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -77,7 +76,7 @@ type (
 // Example: queryPromtheus("up") // Get metric of the running Prometheus instances
 func queryPromtheus(ctx context.Context, query string, withToken bool) (promParsed promQLParsed, err error) {
 	if strings.HasPrefix(query, "?query=") {
-		err = fmt.Errorf("query argument should not contain \"?query=\"")
+		err = errors.Errorf("query argument should not contain \"?query=\"")
 		return
 	}
 	extWebUrl := param.Server_ExternalWebUrl.GetString()
@@ -121,7 +120,7 @@ func queryPromtheus(ctx context.Context, query string, withToken bool) (promPars
 		return
 	}
 	if res.StatusCode != 200 {
-		err = fmt.Errorf("Prometheus responded %d for the query %q: %s", res.StatusCode, query, string(body))
+		err = errors.Errorf("Prometheus responded %d for the query %q: %s", res.StatusCode, query, string(body))
 		return
 	}
 	promRes := promQLRes{}
@@ -131,7 +130,7 @@ func queryPromtheus(ctx context.Context, query string, withToken bool) (promPars
 		return
 	}
 	if promRes.Status != "success" {
-		err = fmt.Errorf("Prometheus responded error for query %q with error type %s: %s", query, promRes.ErrorType, promRes.Error)
+		err = errors.Errorf("Prometheus responded error for query %q with error type %s: %s", query, promRes.ErrorType, promRes.Error)
 		return
 	}
 	promParsed, err = parsePromRes(promRes)
@@ -154,67 +153,67 @@ func parsePromRes(res promQLRes) (promParsed promQLParsed, err error) {
 			if len(data.Result) == 2 && (data.ResultType == "scalar" || data.ResultType == "string") {
 				timestamp, ok := data.Result[0].(float64)
 				if !ok {
-					err = fmt.Errorf("parse error for result type %s: failed to convert the first element of the result array to float64", data.ResultType)
+					err = errors.Errorf("parse error for result type %s: failed to convert the first element of the result array to float64", data.ResultType)
 					return
 				}
 				value, ok := data.Result[1].(string)
 				if !ok {
-					err = fmt.Errorf("parse error for result type %s: failed to convert the second element of the result array to string", data.ResultType)
+					err = errors.Errorf("parse error for result type %s: failed to convert the second element of the result array to string", data.ResultType)
 					return
 				}
 				promParsed.Result = []promQLResultItem{{Values: []promQLValuePair{{UnixTime: timestamp, Value: value}}}}
 				return
 			} else {
-				err = fmt.Errorf("parse error: unsupported result type: the first element of the result array is float64 but result type is neither scalar or string")
+				err = errors.Errorf("parse error: unsupported result type: the first element of the result array is float64 but result type is neither scalar or string")
 				return
 			}
 		case map[string]interface{}:
 			if data.ResultType != "vector" && data.ResultType != "matrix" {
-				err = fmt.Errorf("parse error: unsupported result type: the first element of the result array is an object but result type is neither vector or matrix")
+				err = errors.Errorf("parse error: unsupported result type: the first element of the result array is an object but result type is neither vector or matrix")
 				return
 			}
 			promParsed.Result = []promQLResultItem{}
 			for rIdx, elem := range data.Result {
 				obj, ok := elem.(map[string]interface{})
 				if !ok {
-					err = fmt.Errorf("parse error for result type %s: failed to convert the element of the result array to object at %d: %#v", data.ResultType, rIdx, elem)
+					err = errors.Errorf("parse error for result type %s: failed to convert the element of the result array to object at %d: %#v", data.ResultType, rIdx, elem)
 					return
 				}
 				// Parse "metric"
 				metric, ok := obj["metric"]
 				if !ok {
-					err = fmt.Errorf("parse error for result type %s: metric field does not exist for element at %d: %#v", data.ResultType, rIdx, elem)
+					err = errors.Errorf("parse error for result type %s: metric field does not exist for element at %d: %#v", data.ResultType, rIdx, elem)
 					return
 				}
 				metricObj, ok := metric.(map[string]interface{})
 				if !ok {
-					err = fmt.Errorf("parse error for result type %s: metric field at %d is not a map with string key and interface value: %#v", data.ResultType, rIdx, elem)
+					err = errors.Errorf("parse error for result type %s: metric field at %d is not a map with string key and interface value: %#v", data.ResultType, rIdx, elem)
 					return
 				}
 
 				if data.ResultType == "vector" { // result: [{"metric": {}, "value": []}]
 					value, ok := obj["value"]
 					if !ok {
-						err = fmt.Errorf("parse error for result type %s: value field does not exist for element at %d: %#v", data.ResultType, rIdx, elem)
+						err = errors.Errorf("parse error for result type %s: value field does not exist for element at %d: %#v", data.ResultType, rIdx, elem)
 						return
 					}
 					valueArr, ok := value.([]interface{})
 					if !ok {
-						err = fmt.Errorf("parse error for result type %s: value field is not an array for element at %d: %#v", data.ResultType, rIdx, elem)
+						err = errors.Errorf("parse error for result type %s: value field is not an array for element at %d: %#v", data.ResultType, rIdx, elem)
 						return
 					}
 					if len(valueArr) != 2 {
-						err = fmt.Errorf("parse error for result type %s: the length of the value field is not 2 for element at %d: %#v", data.ResultType, rIdx, elem)
+						err = errors.Errorf("parse error for result type %s: the length of the value field is not 2 for element at %d: %#v", data.ResultType, rIdx, elem)
 						return
 					}
 					unixTime, ok := valueArr[0].(float64)
 					if !ok {
-						err = fmt.Errorf("parse error for result type %s: the first item of the value field is not float64 type for element at %d: %#v", data.ResultType, rIdx, elem)
+						err = errors.Errorf("parse error for result type %s: the first item of the value field is not float64 type for element at %d: %#v", data.ResultType, rIdx, elem)
 						return
 					}
 					vecValue, ok := valueArr[1].(string)
 					if !ok {
-						err = fmt.Errorf("parse error for result type %s: the second item of the value field is not string type for element at %d: %#v", data.ResultType, rIdx, elem)
+						err = errors.Errorf("parse error for result type %s: the second item of the value field is not string type for element at %d: %#v", data.ResultType, rIdx, elem)
 						return
 					}
 					vp := []promQLValuePair{{UnixTime: unixTime, Value: vecValue}}
@@ -222,12 +221,12 @@ func parsePromRes(res promQLRes) (promParsed promQLParsed, err error) {
 				} else { // this is a a matrix type. result: [{"metric": {}, "values": [[],[]]}]
 					values, ok := obj["values"]
 					if !ok {
-						err = fmt.Errorf("parse error for result type %s: values field does not exist for element at %d: %#v", data.ResultType, rIdx, elem)
+						err = errors.Errorf("parse error for result type %s: values field does not exist for element at %d: %#v", data.ResultType, rIdx, elem)
 						return
 					}
 					valuesArr, ok := values.([]interface{})
 					if !ok {
-						err = fmt.Errorf("parse error for result type %s: values field is not a matrix for element at %d: %#v", data.ResultType, rIdx, elem)
+						err = errors.Errorf("parse error for result type %s: values field is not a matrix for element at %d: %#v", data.ResultType, rIdx, elem)
 						return
 					}
 					vps := []promQLValuePair{}
@@ -235,21 +234,21 @@ func parsePromRes(res promQLRes) (promParsed promQLParsed, err error) {
 						for _, value := range valuesArr {
 							valueArr, ok := value.([]interface{})
 							if !ok {
-								err = fmt.Errorf("parse error for result type %s: values field is not a matrix for element at %d: %#v", data.ResultType, rIdx, elem)
+								err = errors.Errorf("parse error for result type %s: values field is not a matrix for element at %d: %#v", data.ResultType, rIdx, elem)
 								return
 							}
 							if len(valueArr) != 2 {
-								err = fmt.Errorf("parse error for result type %s: malformed item for values field for element at %d: %#v", data.ResultType, rIdx, elem)
+								err = errors.Errorf("parse error for result type %s: malformed item for values field for element at %d: %#v", data.ResultType, rIdx, elem)
 								return
 							}
 							unixTime, ok := valueArr[0].(float64)
 							if !ok {
-								err = fmt.Errorf("parse error for result type %s: malformed time for values field for element at %d: %#v", data.ResultType, rIdx, elem)
+								err = errors.Errorf("parse error for result type %s: malformed time for values field for element at %d: %#v", data.ResultType, rIdx, elem)
 								return
 							}
 							vecValue, ok := valueArr[1].(string)
 							if !ok {
-								err = fmt.Errorf("parse error for result type %s: malformed metric value for values field for element at %d: %#v", data.ResultType, rIdx, elem)
+								err = errors.Errorf("parse error for result type %s: malformed metric value for values field for element at %d: %#v", data.ResultType, rIdx, elem)
 								return
 							}
 							vps = append(vps, promQLValuePair{UnixTime: unixTime, Value: vecValue})
@@ -259,7 +258,7 @@ func parsePromRes(res promQLRes) (promParsed promQLParsed, err error) {
 				}
 			}
 		default:
-			err = fmt.Errorf("unsupported value type %T, expected to be either float64 or object: %#v", data.Result[0], data.Result)
+			err = errors.Errorf("unsupported value type %T, expected to be either float64 or object: %#v", data.Result[0], data.Result)
 			return
 		}
 	}
