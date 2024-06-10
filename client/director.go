@@ -159,6 +159,10 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 		// If we get a 405 with a PROPFIND, the client will handle it
 		return
 	} else if resp.StatusCode != 307 {
+		contentType := req.Header.Get("Content-Type")
+		if contentType != "application/json" {
+			log.Debugln(string(body))
+		}
 		var respErr server_structs.SimpleApiResp
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			return nil, errors.Wrap(unmarshalErr, "Could not unmarshall the director's response")
