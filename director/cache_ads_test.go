@@ -52,9 +52,8 @@ func TestGetAdsForPath(t *testing.T) {
 			- Query for a few paths and make sure the correct ads are returned
 	*/
 	nsAd1 := server_structs.NamespaceAdV2{
-		PublicRead: false,
-		Caps:       server_structs.Capabilities{PublicReads: false},
-		Path:       "/chtc",
+		Caps: server_structs.Capabilities{PublicReads: false},
+		Path: "/chtc",
 		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: url.URL{
 				Scheme: "https",
@@ -65,9 +64,8 @@ func TestGetAdsForPath(t *testing.T) {
 	}
 
 	nsAd2 := server_structs.NamespaceAdV2{
-		PublicRead: true,
-		Caps:       server_structs.Capabilities{PublicReads: true},
-		Path:       "/chtc/PUBLIC",
+		Caps: server_structs.Capabilities{PublicReads: true},
+		Path: "/chtc/PUBLIC",
 		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: url.URL{
 				Scheme: "https",
@@ -78,9 +76,8 @@ func TestGetAdsForPath(t *testing.T) {
 	}
 
 	nsAd3 := server_structs.NamespaceAdV2{
-		PublicRead: true,
-		Caps:       server_structs.Capabilities{PublicReads: true},
-		Path:       "/chtc/PUBLIC2/",
+		Caps: server_structs.Capabilities{PublicReads: true},
+		Path: "/chtc/PUBLIC2/",
 		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: url.URL{
 				Scheme: "https",
@@ -91,7 +88,6 @@ func TestGetAdsForPath(t *testing.T) {
 	}
 
 	nsAdTopo1 := server_structs.NamespaceAdV2{
-		PublicRead:   true,
 		Caps:         server_structs.Capabilities{PublicReads: true},
 		Path:         "/chtc",
 		FromTopology: true,
@@ -166,7 +162,7 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.Equal(t, "/chtc", nsAd.Path)
 	// Make sure it's not from Topology
 	assert.False(t, nsAd.FromTopology)
-	assert.False(t, nsAd.PublicRead) // Topology one has public read turned on while Pelican one doesn't
+	assert.False(t, nsAd.Caps.PublicReads) // Topology one has public read turned on while Pelican one doesn't
 
 	assert.Equal(t, 1, len(oAds))
 	assert.Equal(t, 2, len(cAds))
@@ -251,10 +247,9 @@ func TestLaunchTTLCache(t *testing.T) {
 		Longitude: 456.78,
 	}
 	mockNamespaceAd := server_structs.NamespaceAdV2{
-		PublicRead: false,
-		Caps:       server_structs.Capabilities{PublicReads: false},
-		Path:       "/foo/bar/",
-		Issuer:     []server_structs.TokenIssuer{{IssuerUrl: url.URL{}}},
+		Caps:   server_structs.Capabilities{PublicReads: false},
+		Path:   "/foo/bar/",
+		Issuer: []server_structs.TokenIssuer{{IssuerUrl: url.URL{}}},
 		Generation: []server_structs.TokenGen{{
 			MaxScopeDepth: 1,
 			Strategy:      "",
