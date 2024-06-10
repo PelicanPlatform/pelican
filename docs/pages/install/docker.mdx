@@ -1,6 +1,6 @@
 # Run Pelican Server with Docker Image
 
-This document explains how to run a Pelican server using Pelican docker image. If you want to use Pelican client functionalities, such as download or upload an object, refer to [install page](../install.mdx) to download and install a Pelican binary instead.
+This document explains how to run a Pelican server using Pelican docker image. If you want to use Pelican client functionalities, such as to download or upload an object, refer to the [install page](../install.mdx) to download and install a Pelican binary instead.
 
 ## Before starting
 
@@ -152,7 +152,7 @@ docker run -p 8444:8444 origin
 
 However, Pelican server still recognize `6ee28c5df997` as its hostname, causing a mismatch.
 
-In practice, there is usually a reverse-proxy service (such as Nginx, Traefic, etc.), to direct traffic from a human-readable domain name (e.g. https://example-origin.org) to your container (e.g. `6ee28c5df997:8444`). If Pelican server doesn't catch this information and uses it as its server address, there will be a mismatch when the server advertise itself to other Pelican services.
+In practice, there is usually a reverse-proxy service (such as Nginx, Traefik, etc.), to direct traffic from a human-readable domain name (e.g. https://example-origin.org) to your container (e.g. `6ee28c5df997:8444`). If Pelican server doesn't catch this information and uses it as its server address, there will be a mismatch when the server advertises itself to other Pelican services.
 
 Therefore, to keep things consistent, Pelican internally should use the same human-readable domain name as its web server's _external address_. To do so, configure `Server.ExternalWebURL` to the domain name the outside world uses to access the Pelican web service, e.g. https://example-origin.org:8444 for a production service or https://localhost:8444 for a local deployment.
 
