@@ -112,7 +112,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 			serverAds.Delete(existing.Value().URL.String())
 		}
 		if !sAd.FromTopology && !existing.Value().FromTopology { // Only copy the IO Load value for Pelican server
-			sAd.IOLoad = existing.Value().GetIOLoad() // we copy the value from the existing serverAD to be consistent11
+			sAd.IOLoad = existing.Value().GetIOLoad() // we copy the value from the existing serverAD to be consistent
 		}
 	}
 
