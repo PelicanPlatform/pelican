@@ -57,7 +57,7 @@ const GlobusRecord = ({data}: {data: GlobusCollection}): ReactElement => {
           <ValueLabel label="Globus Collection Name" value={data.displayName}/>
         </Box>
         <Box ml={4}>
-          {data.status != "Activated" ?
+          {data.status === "Activated" ?
             <Tooltip title="The collection is activated and it's ready to serve files">
               <Button color="success" startIcon={<CheckCircle />}>
                 Activated
