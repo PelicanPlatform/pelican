@@ -16,26 +16,15 @@
  *
  ***************************************************************/
 
-import {Box} from "@mui/material";
-import Main from "@/components/layout/Main";
-import { OriginSidebar } from "@/components/layout/OriginSidebar";
+package server_structs
 
-export const metadata = {
-    title: 'Pelican Origin',
-    description: 'Software designed to make data distribution easy',
-}
+type (
+	OAuthLoginRequest struct {
+		NextUrl string `form:"nextUrl,omitempty"`
+	}
 
-export default function RootLayout({
-                                       children,
-                                   }: {
-    children: React.ReactNode
-}) {
-    return (
-        <Box display={"flex"} flexDirection={"row"}>
-            <OriginSidebar/>
-            <Main>
-                {children}
-            </Main>
-        </Box>
-    )
-}
+	OAuthCallbackRequest struct {
+		State string `form:"state"`
+		Code  string `form:"code"`
+	}
+)

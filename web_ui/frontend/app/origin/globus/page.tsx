@@ -16,26 +16,21 @@
  *
  ***************************************************************/
 
-import {Box} from "@mui/material";
-import Main from "@/components/layout/Main";
-import { OriginSidebar } from "@/components/layout/OriginSidebar";
+"use client"
 
-export const metadata = {
-    title: 'Pelican Origin',
-    description: 'Software designed to make data distribution easy',
-}
+import {Box, Typography} from "@mui/material";
 
-export default function RootLayout({
-                                       children,
-                                   }: {
-    children: React.ReactNode
-}) {
+import {User} from "@/index";
+import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
+import { GlobusExportTable } from "@/components/GlobusExportTable";
+
+export default function Home() {
     return (
-        <Box display={"flex"} flexDirection={"row"}>
-            <OriginSidebar/>
-            <Main>
-                {children}
-            </Main>
-        </Box>
+        <AuthenticatedContent redirect={true} checkAuthentication={(u: User) => u?.role == "admin"}>
+            <Box width={"100%"}>
+                <Typography variant="h4" mb={2}>Globus Exports</Typography>
+                <GlobusExportTable />
+            </Box>
+        </AuthenticatedContent>
     )
 }

@@ -19,24 +19,21 @@
 package oauth2
 
 import (
+	"fmt"
+	"net"
 	"net/url"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
-)
+	upstream_oauth "golang.org/x/oauth2"
 
-type OIDCProvider string
-
-const (
-	CILogon         OIDCProvider = "CILogon"
-	Globus          OIDCProvider = "Globus"
-	UnknownProvider OIDCProvider = "Unknown"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // ServerOIDCClient loads the OIDC client configuration for
 // the pelican server
-func ServerOIDCClient() (result Config, provider OIDCProvider, err error) {
-	provider = UnknownProvider
+func ServerOIDCClient() (result Config, provider config.OIDCProvider, err error) {
+	provider = config.UnknownProvider
 	// Load OIDC.ClientID
 	if result.ClientID, err = config.GetOIDCClientID(); err != nil {
 		return
@@ -64,21 +61,21 @@ func ServerOIDCClient() (result Config, provider OIDCProvider, err error) {
 		return
 	}
 	if authorizationEndpoint == "" {
-		err = errors.New("Nothing set for config parameter OIDC.DeviceAuthEndpoint")
+		err = errors.New("Nothing set for config parameter OIDC.AuthorizationEndpoint")
 		return
 	}
 	authorizationEndpointURL, err := url.Parse(authorizationEndpoint)
 	if err != nil {
-		err = errors.New("Failed to parse URL for parameter OIDC.DeviceAuthEndpoint")
+		err = errors.New("Failed to parse URL for parameter OIDC.AuthorizationEndpoint")
 		return
 	}
 	result.Endpoint.AuthURL = authorizationEndpointURL.String()
 
 	// We get the provider based on the hostname of the authorization endpoint
 	if authorizationEndpointURL.Hostname() == "auth.globus.org" {
-		provider = Globus
+		provider = config.Globus
 	} else if authorizationEndpointURL.Hostname() == "cilogon.org" {
-		provider = CILogon
+		provider = config.CILogon
 	}
 
 	// Load OIDC.DeviceAuthEndpoint
@@ -135,8 +132,55 @@ func ServerOIDCClient() (result Config, provider OIDCProvider, err error) {
 	// Set the scope
 	result.Scopes = []string{"openid", "profile", "email"}
 	// Add extra scope only for CILogon user info endpoint
-	if provider == CILogon {
+	if provider == config.CILogon {
 		result.Scopes = append(result.Scopes, "org.cilogon.userinfo")
+	}
+	return
+}
+
+// Generate a redirect URL for OAuth2 code authentication flow, given the callback path
+// It will use OIDC.ClientRedirectHostname as the hostname if set. This is useful for local
+// testing in a container environment.
+func GetRedirectURL(callback string) (redirURL string, err error) {
+	redirectUrlStr := param.Server_ExternalWebUrl.GetString()
+	redirectUrl, err := url.Parse(redirectUrlStr)
+	if err != nil {
+		err = errors.Wrap(err, "failed to parse Server.ExternalWebUrl")
+		return
+	}
+	redirectUrl.Path = callback
+	redirectHostname := param.OIDC_ClientRedirectHostname.GetString()
+	if redirectHostname != "" {
+		_, _, err := net.SplitHostPort(redirectHostname)
+		if err != nil {
+			// Port not present
+			redirectUrl.Host = fmt.Sprint(redirectHostname, ":", param.Server_WebPort.GetInt())
+		} else {
+			// Port present
+			redirectUrl.Host = redirectHostname
+		}
+	}
+	redirURL = redirectUrl.String()
+	return
+}
+
+// Parse pelican/oAuth2 config to golang/x/oauth2 Config
+func ParsePelicanOAuth(pCfg Config, callback string) (oCfg upstream_oauth.Config, err error) {
+	redUrl, err := GetRedirectURL(callback)
+	if err != nil {
+		return
+	}
+
+	oCfg = upstream_oauth.Config{
+		RedirectURL:  redUrl,
+		ClientID:     pCfg.ClientID,
+		ClientSecret: pCfg.ClientSecret,
+		Scopes:       pCfg.Scopes,
+		Endpoint: upstream_oauth.Endpoint{
+			AuthURL:       pCfg.Endpoint.AuthURL,
+			DeviceAuthURL: pCfg.Endpoint.DeviceAuthURL,
+			TokenURL:      pCfg.Endpoint.TokenURL,
+		},
 	}
 	return
 }

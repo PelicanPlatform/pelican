@@ -166,6 +166,7 @@ type Config struct {
 		UserInfoEndpoint string `mapstructure:"userinfoendpoint"`
 	} `mapstructure:"oidc"`
 	Origin struct {
+		DbLocation string `mapstructure:"dblocation"`
 		EnableBroker bool `mapstructure:"enablebroker"`
 		EnableCmsd bool `mapstructure:"enablecmsd"`
 		EnableDirListing bool `mapstructure:"enabledirlisting"`
@@ -185,6 +186,11 @@ type Config struct {
 		ExportVolumes []string `mapstructure:"exportvolumes"`
 		Exports interface{} `mapstructure:"exports"`
 		FederationPrefix string `mapstructure:"federationprefix"`
+		GlobusClientIDFile string `mapstructure:"globusclientidfile"`
+		GlobusClientSecretFile string `mapstructure:"globusclientsecretfile"`
+		GlobusCollectionID string `mapstructure:"globuscollectionid"`
+		GlobusCollectionName string `mapstructure:"globuscollectionname"`
+		GlobusConfigLocation string `mapstructure:"globusconfiglocation"`
 		HttpServiceUrl string `mapstructure:"httpserviceurl"`
 		Mode string `mapstructure:"mode"`
 		Multiuser bool `mapstructure:"multiuser"`
@@ -447,6 +453,7 @@ type configWithType struct {
 		UserInfoEndpoint struct { Type string; Value string }
 	}
 	Origin struct {
+		DbLocation struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }
@@ -466,6 +473,11 @@ type configWithType struct {
 		ExportVolumes struct { Type string; Value []string }
 		Exports struct { Type string; Value interface{} }
 		FederationPrefix struct { Type string; Value string }
+		GlobusClientIDFile struct { Type string; Value string }
+		GlobusClientSecretFile struct { Type string; Value string }
+		GlobusCollectionID struct { Type string; Value string }
+		GlobusCollectionName struct { Type string; Value string }
+		GlobusConfigLocation struct { Type string; Value string }
 		HttpServiceUrl struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
