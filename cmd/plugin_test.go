@@ -454,13 +454,10 @@ func TestPluginDirectRead(t *testing.T) {
 // We ran into a bug where the start time for the transfer was not recorded correctly and was almost always the same as the end time
 // (since they were set at similar sections of code). This test ensures that they are different and that the start time is before the end time.
 func TestPluginCorrectStartAndEndTime(t *testing.T) {
-	viper.Reset()
-	viper.Set("ConfigDir", t.TempDir())
+	test_utils.InitClient(t, nil)
 	server_utils.ResetOriginExports()
 	defer viper.Reset()
 	defer server_utils.ResetOriginExports()
-	err := config.InitClient()
-	require.NoError(t, err)
 
 	// Set up our http backend so that we can sleep during transfer
 	body := "Hello, World!"
