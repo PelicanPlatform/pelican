@@ -85,12 +85,12 @@ func getTempToken(t *testing.T) (tempToken *os.File) {
 	assert.NoError(t, err)
 	scopes = append(scopes, modScope)
 	tokenConfig.AddScopes(scopes...)
-	token, err := tokenConfig.CreateToken()
+	tkn, err := tokenConfig.CreateToken()
 	assert.NoError(t, err)
 	tmpTok := filepath.Join(t.TempDir(), "token")
 	tempToken, err = os.OpenFile(tmpTok, os.O_CREATE|os.O_RDWR, 0644)
 	assert.NoError(t, err, "Error opening the temp token file")
-	_, err = tempToken.WriteString(token)
+	_, err = tempToken.WriteString(tkn)
 	assert.NoError(t, err, "Error writing to temp token file")
 
 	return tempToken
