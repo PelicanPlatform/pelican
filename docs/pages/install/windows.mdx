@@ -35,8 +35,8 @@ Pelican provides a binary file instead of a `MSI` installer for Windows. You nee
   rem Go to the binary folder
   $ cd pelican_Linux_arm64
 
-  rem Add current folder to the PATH
-  $ set PATH=%PATH%;%CD%
+  rem Add current folder to the PATH environment variable
+  $ $env:PATH += ";$(Get-Location)"
 
   rem Run Pelican binary
   $ pelican --version
@@ -62,7 +62,7 @@ Pelican provides a binary file instead of a `MSI` installer for Windows. You nee
       * Click `OK` to close all windows.
 
    4. Verify Pelican is added to `PATH`
-      * In a new PowerShell window, run the following command:
+      * In a **new** PowerShell window, run the following command:
 
         ```bat
         rem Run Pelican binary
