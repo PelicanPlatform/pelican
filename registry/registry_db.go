@@ -20,27 +20,21 @@ package registry
 
 import (
 	"context"
-	"database/sql"
 	"embed"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/glebarez/sqlite" // It doesn't require CGO
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
-	"github.com/pressly/goose/v3"
 	log "github.com/sirupsen/logrus"
-	gormlog "github.com/thomas-tacquet/gormv2-logrus"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -57,11 +51,12 @@ type Topology struct {
 	Prefix string `json:"prefix" gorm:"unique;not null"`
 }
 
-type ServerType string
+type prefixType string // Type of a prefix
 
 const (
-	OriginType ServerType = "origin"
-	CacheType  ServerType = "cache"
+	prefixForOrigin    prefixType = "origin"    // origin servers
+	prefixForCache     prefixType = "cache"     // cache servers
+	prefixForNamespace prefixType = "namespace" // data namespace
 )
 
 /*
@@ -77,20 +72,12 @@ var db *gorm.DB
 //go:embed migrations/*.sql
 var embedMigrations embed.FS
 
-func (st ServerType) String() string {
+func (st prefixType) String() string {
 	return string(st)
 }
 
 func (Topology) TableName() string {
 	return "topology"
-}
-
-func createTopologyTable() error {
-	err := db.AutoMigrate(&Topology{})
-	if err != nil {
-		return fmt.Errorf("failed to migrate topology table: %v", err)
-	}
-	return nil
 }
 
 func GetTopoPrefixString(topoNss []Topology) (result string) {
@@ -300,16 +287,19 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 // For filterNs.AdminMetadata.Description and filterNs.AdminMetadata.SiteName,
 // the string will be matched using `strings.Contains`. This is too mimic a SQL style `like` match.
 // The rest of the AdminMetadata fields is matched by `==`
-func getNamespacesByFilter(filterNs server_structs.Namespace, serverType ServerType) ([]*server_structs.Namespace, error) {
+func getNamespacesByFilter(filterNs server_structs.Namespace, pType prefixType, legacy bool) ([]server_structs.Namespace, error) {
 	query := `SELECT id, prefix, pubkey, identity, admin_metadata FROM namespace WHERE 1=1 `
-	if serverType == CacheType {
+	if pType == prefixForCache {
 		// Refer to the cache prefix name in cmd/cache_serve
 		query += ` AND prefix LIKE '/caches/%'`
-	} else if serverType == OriginType {
-		query += ` AND NOT prefix LIKE '/caches/%'`
-	} else if serverType != "" {
-		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", serverType))
+	} else if pType == prefixForOrigin {
+		query += ` AND prefix LIKE '/origins/%'`
+	} else if pType == prefixForNamespace {
+		query += ` AND NOT prefix LIKE '/caches/%' AND NOT prefix LIKE '/origins/%'`
+	} else if pType != "" {
+		return nil, errors.New(fmt.Sprint("Can't get namespace: unsupported server type: ", pType))
 	}
+
 	if filterNs.CustomFields != nil {
 		return nil, errors.New("Unsupported operation: Can't filter against Custrom Registration field.")
 	}
@@ -336,8 +326,20 @@ func getNamespacesByFilter(filterNs server_structs.Namespace, serverType ServerT
 		return nil, err
 	}
 
-	namespacesOut := []*server_structs.Namespace{}
+	namespacesOut := []server_structs.Namespace{}
 	for idx, ns := range namespacesIn {
+		// If we want legacy registration and the query result doesn't have AdminMetadata, put it in the return value
+		if legacy {
+			if ns.AdminMetadata.Equal(server_structs.AdminMetadata{}) {
+				namespacesOut = append(namespacesOut, ns)
+				continue
+			} else {
+				continue
+			}
+			// If we don't want legacy namespace and the query result does not have AdminMetadata, skip it
+		} else if !legacy && ns.AdminMetadata.Equal(server_structs.AdminMetadata{}) {
+			continue
+		}
 		if filterNs.AdminMetadata.UserID != "" && filterNs.AdminMetadata.UserID != ns.AdminMetadata.UserID {
 			continue
 		}
@@ -366,7 +368,7 @@ func getNamespacesByFilter(filterNs server_structs.Namespace, serverType ServerT
 			continue
 		}
 		// Congrats! You passed all the filter check and this namespace matches what you want
-		namespacesOut = append(namespacesOut, &namespacesIn[idx])
+		namespacesOut = append(namespacesOut, namespacesIn[idx])
 	}
 	return namespacesOut, nil
 }
@@ -476,68 +478,15 @@ func getTopologyNamespaces() ([]*Topology, error) {
 	return topology, nil
 }
 
-// Update database schema based on migration files under /migrations folder
-func MigrateDB(sqldb *sql.DB) error {
-	goose.SetBaseFS(embedMigrations)
-
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		return err
-	}
-
-	if err := goose.Up(sqldb, "migrations"); err != nil {
-		return err
-	}
-	return nil
-}
-
-func InitializeDB(ctx context.Context) error {
+func InitializeDB() error {
 	dbPath := param.Registry_DbLocation.GetString()
-	if dbPath == "" {
-		err := errors.New("Could not get path for the namespace registry database.")
-		log.Fatal(err)
+
+	tdb, err := server_utils.InitSQLiteDB(dbPath)
+	if err != nil {
 		return err
 	}
 
-	// Before attempting to create the database, the path
-	// must exist or sql.Open will panic.
-	err := os.MkdirAll(filepath.Dir(dbPath), 0755)
-	if err != nil {
-		return errors.Wrap(err, "Failed to create directory for namespace registry database")
-	}
-
-	if len(filepath.Ext(dbPath)) == 0 { // No fp extension, let's add .sqlite so it's obvious what the file is
-		dbPath += ".sqlite"
-	}
-
-	dbName := dbPath + "?_busy_timeout=5000&_journal_mode=WAL"
-
-	globalLogLevel := log.GetLevel()
-	var ormLevel logger.LogLevel
-	if globalLogLevel == log.DebugLevel || globalLogLevel == log.TraceLevel || globalLogLevel == log.InfoLevel {
-		ormLevel = logger.Info
-	} else if globalLogLevel == log.WarnLevel {
-		ormLevel = logger.Warn
-	} else if globalLogLevel == log.ErrorLevel {
-		ormLevel = logger.Error
-	} else {
-		ormLevel = logger.Info
-	}
-
-	gormLogger := gormlog.NewGormlog(
-		gormlog.WithLogrusEntry(log.WithField("component", "gorm")),
-		gormlog.WithGormOptions(gormlog.GormOptions{
-			LogLatency: true,
-			LogLevel:   ormLevel,
-		}),
-	)
-
-	log.Debugln("Opening connection to sqlite DB", dbName)
-
-	db, err = gorm.Open(sqlite.Open(dbName), &gorm.Config{Logger: gormLogger})
-
-	if err != nil {
-		return errors.Wrapf(err, "Failed to open the database with path: %s", dbPath)
-	}
+	db = tdb
 
 	sqldb, err := db.DB()
 
@@ -546,7 +495,7 @@ func InitializeDB(ctx context.Context) error {
 	}
 
 	// Run database migrations
-	if err := MigrateDB(sqldb); err != nil {
+	if err := server_utils.MigrateDB(sqldb, embedMigrations); err != nil {
 		return err
 	}
 
@@ -554,7 +503,7 @@ func InitializeDB(ctx context.Context) error {
 }
 
 // Create a table in the registry to store namespace prefixes from topology
-func PopulateTopology() error {
+func PopulateTopology(ctx context.Context) error {
 	// The topology table may already exist from before, it may not. Because of this
 	// we need to add to the table any prefixes that are in topology, delete from the
 	// table any that aren't in topology, and skip any that exist in both.
@@ -572,7 +521,7 @@ func PopulateTopology() error {
 	}
 
 	// Next, get the values from topology
-	namespaces, err := utils.GetTopologyJSON(false)
+	namespaces, err := utils.GetTopologyJSON(ctx, false)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
@@ -618,10 +567,10 @@ func PopulateTopology() error {
 	})
 }
 
-func PeriodicTopologyReload() {
+func PeriodicTopologyReload(ctx context.Context) {
 	for {
 		time.Sleep(param.Federation_TopologyReloadInterval.GetDuration())
-		err := PopulateTopology()
+		err := PopulateTopology(ctx)
 		if err != nil {
 			log.Warningf("Failed to re-populate topology table: %s. Will try again later",
 				err)
@@ -629,15 +578,6 @@ func PeriodicTopologyReload() {
 	}
 }
 
-func ShutdownDB() error {
-	sqldb, err := db.DB()
-	if err != nil {
-		log.Errorln("Failure when getting database instance from gorm:", err)
-		return err
-	}
-	err = sqldb.Close()
-	if err != nil {
-		log.Errorln("Failure when shutting down the database:", err)
-	}
-	return err
+func ShutdownRegistryDB() error {
+	return server_utils.ShutdownDB(db)
 }

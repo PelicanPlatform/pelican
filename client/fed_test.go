@@ -66,7 +66,7 @@ var (
 
 // Helper function to get a temporary token file
 // NOTE: when used make sure to call os.Remove() on the file
-func getTempToken(t *testing.T) (tempToken *os.File) {
+func getTempToken(t *testing.T) (tempToken *os.File, tkn string) {
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
@@ -85,7 +85,7 @@ func getTempToken(t *testing.T) (tempToken *os.File) {
 	assert.NoError(t, err)
 	scopes = append(scopes, modScope)
 	tokenConfig.AddScopes(scopes...)
-	tkn, err := tokenConfig.CreateToken()
+	tkn, err = tokenConfig.CreateToken()
 	assert.NoError(t, err)
 	tmpTok := filepath.Join(t.TempDir(), "token")
 	tempToken, err = os.OpenFile(tmpTok, os.O_CREATE|os.O_RDWR, 0644)
@@ -93,7 +93,7 @@ func getTempToken(t *testing.T) (tempToken *os.File) {
 	_, err = tempToken.WriteString(tkn)
 	assert.NoError(t, err, "Error writing to temp token file")
 
-	return tempToken
+	return
 }
 
 // A test that spins up a federation, and tests object get and put
@@ -112,7 +112,7 @@ func TestGetAndPutAuth(t *testing.T) {
 	assert.NoError(t, err, "Error writing to temp file")
 	tempFile.Close()
 
-	tempToken := getTempToken(t)
+	tempToken, tmpTkn := getTempToken(t)
 	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
 
@@ -144,6 +144,38 @@ func TestGetAndPutAuth(t *testing.T) {
 
 			// Download that same file with GET
 			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
+			assert.NoError(t, err)
+			if err == nil {
+				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			}
+		}
+	})
+
+	// We ran into a bug with the token option not working how it should. This test ensures that transfer option works how it should
+	t.Run("testPelicanObjectPutAndGetWithWithTokenOption", func(t *testing.T) {
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
+		assert.NoError(t, err)
+
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			tempPath := tempFile.Name()
+			fileName := filepath.Base(tempPath)
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+				export.FederationPrefix, "osdf_osdf", fileName)
+
+			// Upload the file with PUT
+			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithToken(tmpTkn))
+			assert.NoError(t, err)
+			if err == nil {
+				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
+			}
+
+			// Download that same file with GET
+			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithToken(tmpTkn))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
@@ -247,7 +279,7 @@ func TestCopyAuth(t *testing.T) {
 	assert.NoError(t, err, "Error writing to temp file")
 	tempFile.Close()
 
-	tempToken := getTempToken(t)
+	tempToken, _ := getTempToken(t)
 	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
 	// Disable progress bars to not reuse the same mpb instance
@@ -434,7 +466,7 @@ func TestObjectStat(t *testing.T) {
 	tempFile.Close()
 
 	// Get a temporary token file
-	tempToken := getTempToken(t)
+	tempToken, _ := getTempToken(t)
 	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
 

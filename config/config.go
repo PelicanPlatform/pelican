@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
@@ -40,15 +41,15 @@ import (
 
 	"github.com/go-playground/locales/en"
 	ut "github.com/go-playground/universal-translator"
-	en_translations "github.com/go-playground/validator/v10/translations/en"
-
 	"github.com/go-playground/validator/v10"
-	"github.com/pelicanplatform/pelican/param"
+	en_translations "github.com/go-playground/validator/v10/translations/en"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
@@ -770,6 +771,9 @@ func GetEnTranslator() ut.Translator {
 	return *translator
 }
 
+// If the user provides a deprecated key in their config that can be mapped to some new key, we do that here
+// along with printing out a warning to let them know they should update. Whether or not keys are mapped is
+// configured in docs/parameters.yaml using the `deprecated: true` and replacedby: `<list of new keys>` fields.
 func handleDeprecatedConfig() {
 	deprecatedMap := param.GetDeprecated()
 	for deprecated, replacement := range deprecatedMap {
@@ -849,6 +853,64 @@ func setupTranslation() error {
 	})
 }
 
+// If the config file defines a "ConfigLocations" key and a list of corresponding directories, we parse all the yaml
+// files in those directories according to directory-scoped lexicographical order. This allows users/admins to split
+// their configuration across multiple directories/files.
+//
+// Config merging is handled by viper. For more information, see https://pkg.go.dev/github.com/spf13/viper#MergeConfig
+func handleContinuedCfg() error {
+	cfgDirs := viper.GetStringSlice("ConfigLocations")
+	if len(cfgDirs) == 0 {
+		return nil
+	}
+
+	for _, cfgDir := range cfgDirs {
+		// Check that the directory exists
+		if _, err := os.Stat(cfgDir); err != nil {
+			if os.IsNotExist(err) {
+				return errors.Errorf("directory %s specified by the 'ConfigLocations' key does not exist", cfgDir)
+			} else {
+				return errors.Wrapf(err, "failed to load extra configuration from %s", cfgDir)
+			}
+		}
+
+		// Get all files from the directory, sorted in lexicographical order (sorting handled by WalkDir)
+		configFiles := []string{}
+		fileSystem := os.DirFS(cfgDir)
+		err := fs.WalkDir(fileSystem, ".", func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() && path != "." {
+				configFiles = append(configFiles, path)
+			}
+			return nil
+		})
+		if err != nil {
+			return errors.Wrapf(err, "failed to load extra configuration")
+		}
+
+		for _, file := range configFiles {
+			fHandle, err := os.Open(filepath.Join(cfgDir, file))
+			if err != nil {
+				return errors.Wrapf(err, "failed to open extra configuration file %s", filepath.Join(cfgDir, file))
+			}
+			defer fHandle.Close()
+
+			reader := io.Reader(fHandle)
+			err = viper.MergeConfig(reader)
+			if err != nil {
+				return errors.Wrapf(err, "failed to merge extra configuration file %s", filepath.Join(cfgDir, file))
+			}
+		}
+	}
+
+	log.Infof("Configuration constructed according to directory-scoped lexicographical file order from the following directories: %s",
+		strings.Join(cfgDirs, ", "))
+
+	return nil
+}
+
 func InitConfig() {
 	viper.SetConfigType("yaml")
 	// 1) Set up defaults.yaml
@@ -900,6 +962,12 @@ func InitConfig() {
 		}
 	}
 
+	// Handle any extra yaml configurations specified in the ConfigLocations key
+	err = handleContinuedCfg()
+	if err != nil {
+		cobra.CheckErr(err)
+	}
+
 	logLocation := param.Logging_LogLocation.GetString()
 	if logLocation != "" {
 		dir := filepath.Dir(logLocation)
@@ -930,11 +998,14 @@ func InitConfig() {
 		SetLogging(level)
 	}
 
-	if oldNsUrl := viper.GetString("Federation.NamespaceUrl"); oldNsUrl != "" {
-		log.Errorln("Federation.NamespaceUrl is deprecated and removed from parameters. Please use Federation.RegistryUrl instead")
-		os.Exit(1)
-	}
+	// Warn users about deprecated config keys they're using and try to map them to any new equivalent we've defined.
 	handleDeprecatedConfig()
+
+	// Spit out a warning if the user has passed config keys that are not recognized
+	// This should work against both config files and appropriately-prefixed env vars
+	if unknownKeys := validateConfigKeys(); len(unknownKeys) > 0 {
+		log.Warningln("Unknown configuration keys found: ", strings.Join(unknownKeys, ", "))
+	}
 
 	onceValidate.Do(func() {
 		err = setupTranslation()
@@ -1108,6 +1179,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("LocalCache.RunLocation", filepath.Join("/run", "pelican", "localcache"))
 
 		viper.SetDefault("Origin.Multiuser", true)
+		viper.SetDefault(param.Origin_DbLocation.GetName(), "/var/lib/pelican/origin.sqlite")
 		viper.SetDefault("Director.GeoIPLocation", "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		viper.SetDefault("Registry.DbLocation", "/var/lib/pelican/registry.sqlite")
 		// The lotman db will actually take this path and create the lot at /path/.lot/lotman_cpp.sqlite
@@ -1115,7 +1187,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Monitoring.DataLocation", "/var/lib/pelican/monitoring/data")
 		viper.SetDefault("Shoveler.QueueDirectory", "/var/spool/pelican/shoveler/queue")
 		viper.SetDefault("Shoveler.AMQPTokenLocation", "/etc/pelican/shoveler-token")
+		viper.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin", "globus"))
 	} else {
+		viper.SetDefault(param.Origin_DbLocation.GetName(), filepath.Join(configDir, "origin.sqlite"))
 		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
 		// Lotdb will live at <configDir>/.lot/lotman_cpp.sqlite
@@ -1148,6 +1222,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			}
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
+		viper.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin", "globus"))
 		// To ensure Cache.DataLocation still works, we default Cache.LocalRoot to Cache.DataLocation
 		// The logic is extracted from handleDeprecatedConfig as we manually set the default value here
 		viper.SetDefault(param.Cache_DataLocation.GetName(), filepath.Join(runtimeDir, "cache"))
@@ -1256,10 +1331,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		case "posix":
 			viper.SetDefault("Origin.SelfTest", true)
 		case "https":
-			if param.Origin_SelfTest.GetBool() {
-				log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-				viper.Set("Origin.SelfTest", false)
-			}
+			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			viper.Set("Origin.SelfTest", false)
+
 			httpSvcUrl := param.Origin_HttpServiceUrl.GetString()
 			if httpSvcUrl == "" {
 				return errors.New("Origin.HTTPServiceUrl may not be empty when the origin is configured with an https backend")
@@ -1268,11 +1342,38 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			if err != nil {
 				return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
 			}
-		case "xroot":
-			if param.Origin_SelfTest.GetBool() {
-				log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-				viper.Set("Origin.SelfTest", false)
+		case "globus":
+			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			viper.Set("Origin.SelfTest", false)
+
+			pvd, err := GetOIDCProdiver()
+			if err != nil || pvd != Globus {
+				log.Info("Server OIDC provider is not Globus. Use Origin.GlobusClientIDFile instead")
+			} else {
+				// OIDC provider is globus
+				break
 			}
+			// Check if ClientID and ClientSecret are valid
+			clientIDPath := param.Origin_GlobusClientIDFile.GetString()
+			clientSecretPath := param.Origin_GlobusClientSecretFile.GetString()
+			if clientIDPath == "" {
+				return errors.New("Origin.GlobusClientIDFile may not be empty with Globus storage backend ")
+			}
+			_, err = os.Stat(clientIDPath)
+			if err != nil {
+				return errors.Wrap(err, "Origin.GlobusClientIDFile is not a valid filepath")
+			}
+			if clientSecretPath == "" {
+				return errors.New("Origin.GlobusClientSecretFile may not be empty with Globus storage backend ")
+			}
+			_, err = os.Stat(clientSecretPath)
+			if err != nil {
+				return errors.Wrap(err, "Origin.GlobusClientSecretFile is not a valid filepath")
+			}
+		case "xroot":
+			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			viper.Set("Origin.SelfTest", false)
+
 			xrootSvcUrl := param.Origin_XRootServiceUrl.GetString()
 			if xrootSvcUrl == "" {
 				return errors.New("Origin.XRootServiceUrl may not be empty when the origin is configured with an xroot backend")
@@ -1282,10 +1383,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 				return errors.Wrap(err, "unable to parse Origin.XrootServiceUrl as a URL")
 			}
 		case "s3":
-			if param.Origin_SelfTest.GetBool() {
-				log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-				viper.Set("Origin.SelfTest", false)
-			}
+			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			viper.Set("Origin.SelfTest", false)
+
 			s3SvcUrl := param.Origin_S3ServiceUrl.GetString()
 			if s3SvcUrl == "" {
 				return errors.New("Origin.S3ServiceUrl may not be empty when the origin is configured with an s3 backend")
@@ -1381,7 +1481,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	}
 
 	// Reset issuerPrivateJWK to ensure test cases can use their own temp IssuerKey
-	issuerPrivateJWK.Store(nil)
+	ResetIssuerJWKPtr()
 
 	// As necessary, generate private keys, JWKS and corresponding certs
 
@@ -1449,10 +1549,6 @@ func InitClient() error {
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
 
 	upper_prefix := GetPreferredPrefix()
-
-	viper.SetDefault("Client.StoppedTransferTimeout", 100)
-	viper.SetDefault("Client.SlowTransferRampupTime", 100)
-	viper.SetDefault("Client.SlowTransferWindow", 30)
 
 	if upper_prefix == OsdfPrefix || upper_prefix == StashPrefix {
 		viper.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")

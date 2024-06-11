@@ -1,21 +1,23 @@
 import { Portal } from '@mui/base';
 import React from "react";
-import {Alert, Snackbar} from "@mui/material";
+import {Alert, SnackbarProps, Snackbar} from "@mui/material";
 
 import {Alert as AlertType} from "@/components/Main";
 
 export interface AlertPortalProps {
     alert?: AlertType;
     onClose: () => void;
+    snackBarProps?: SnackbarProps;
 }
 
-export const AlertPortal = ({alert, onClose}: AlertPortalProps) => {
+export const AlertPortal = ({alert, onClose, snackBarProps}: AlertPortalProps) => {
     return (
         <Portal>
             <Snackbar
                 anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
                 open={alert !== undefined}
                 onClose={onClose}
+                {...snackBarProps}
             >
                 <Alert
                     onClose={onClose}

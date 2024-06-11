@@ -47,6 +47,8 @@ type (
 	}
 
 	NamespaceAdV2 struct {
+		// TODO: Deprecate this top-level PublicRead field in favor of the Caps.PublicReads field.
+		// Should be done ~v7.10 series
 		PublicRead   bool
 		Caps         Capabilities  // Namespace capabilities should be considered independently of the origin’s capabilities.
 		Path         string        `json:"path"`
@@ -67,18 +69,19 @@ type (
 	}
 
 	ServerAd struct {
-		Name         string     `json:"name"`
-		AuthURL      url.URL    `json:"auth_url"`
-		BrokerURL    url.URL    `json:"broker_url"` // The URL of the broker service to use for this host.
-		URL          url.URL    `json:"url"`        // This is server's XRootD URL for file transfer
-		WebURL       url.URL    `json:"web_url"`    // This is server's Web interface and API
-		Type         ServerType `json:"type"`
-		Latitude     float64    `json:"latitude"`
-		Longitude    float64    `json:"longitude"`
-		Writes       bool       `json:"enable_write"`
-		Listings     bool       `json:"enable_listing"`       // True if the origin allows directory listings
-		DirectReads  bool       `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
-		FromTopology bool       `json:"from_topology"`
+		Name         string       `json:"name"`
+		AuthURL      url.URL      `json:"auth_url"`
+		BrokerURL    url.URL      `json:"broker_url"` // The URL of the broker service to use for this host.
+		URL          url.URL      `json:"url"`        // This is server's XRootD URL for file transfer
+		WebURL       url.URL      `json:"web_url"`    // This is server's Web interface and API
+		Type         ServerType   `json:"type"`
+		Latitude     float64      `json:"latitude"`
+		Longitude    float64      `json:"longitude"`
+		Caps         Capabilities `json:"capabilities"` // TODO: Get rid of Writes, Listings, DirectReads in favor of Caps.Writes, Caps.Listings, Caps.DirectReads
+		Writes       bool         `json:"enable_write"`
+		Listings     bool         `json:"enable_listing"`       // True if the origin allows directory listings
+		DirectReads  bool         `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
+		FromTopology bool         `json:"from_topology"`
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
@@ -292,7 +295,7 @@ func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) 
 			}
 
 			newNS := NamespaceAdV2{
-				PublicRead: !nsAd.RequireToken,
+				PublicRead: caps.PublicReads,
 				Caps:       caps,
 				Path:       nsAd.Path,
 			}

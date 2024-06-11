@@ -320,13 +320,44 @@ definitions:
               description: The unique identifier of the option that will be stored in db
               example: "option1"
           minItems: 0
+  ObjectStatResponse:
+    type: object
+    properties:
+      status:
+        type: string
+        example: "success"
+        description: The status of the stat call. Will be either "success" or "error"
+      msg:
+        type: string
+        example: "Stat finished with required number of responses."
+        description: The detailed message of the status
+      errorType:
+        type: string
+        example: "ParameterError"
+        description: |
+          The type of the error if status == "error".
+          Will be one of "ParameterError" | "NoPrefixMatchError" | "InsufficientResError" |  "CancelledError"
+      objects:
+        type: array
+        description: The metadata of objects if status == "success"
+        items:
+          type: object
+          $ref: "#/definitions/ObjectStatMetadata"
+      deniedServers:
+        type: array
+        description: |
+          A list of issuer URLs from servers who responded with 403 to the stat request.
+          Used for obtaining a token to access the object.
+        items:
+          type: string
+          example: "https://pelican-origin.org:8444"
   ObjectStatMetadata:
     type: object
     properties:
       checksum:
         type: string
         default: ""
-      content_length:
+      contentLength:
         type: integer
         example: 10
       url:
@@ -339,11 +370,11 @@ definitions:
       name:
         type: string
         example: "Test Origin"
-      auth_url:
+      authUrl:
         type: string
         description: The URL of the issuer on the server to check token validity
         example: "https://example-origin.com:8443"
-      broker_url:
+      brokerUrl:
         type: string
         description: The URL to the connection broker
         example: "https://example-origin.com:8447"
@@ -351,7 +382,7 @@ definitions:
         type: string
         description: The URL of XrootD service on the server to access objects
         example: "https://example-origin.com:8443"
-      web_url:
+      webUrl:
         type: string
         description: The URL of the web engine running on the server to visit the web interface and send API requests
         example: "https://example-origin.com:8444"
@@ -367,14 +398,9 @@ definitions:
         type: number
         description: The longitude of the server based on its IP address
         default: 0
-      enableWrite:
-        type: boolean
-        description: If the origin server enables write access. Only valid for type=Origin
-        default: false
-      enableFallbackRead:
-        type: boolean
-        description: If fall back to read from the origin when there's no cache to serve the file
-        default: false
+      capabilities:
+        type: object
+        $ref: "#/definitions/OriginExportCapabilities"
       filtered:
         type: boolean
         description: |
@@ -392,7 +418,11 @@ definitions:
           * **tempAllow** when the  server is filtered by configuration parameter but _allowed_ by the web API at `/servers/allow/*name`,
             the change lives in-memory and will be overwritten by config parameter at the server restart
         default: ""
-      status:
+      fromTopology:
+        type: boolean
+        description: Whether this server is from the legacy OSDF topology service VS Pelican
+        default: false
+      healthStatus:
         type: string
         description: The status of director file transfer test against the server. Can be Initializing|Unknown|OK|Error
         default: Unknown
@@ -439,37 +469,49 @@ definitions:
             to finish the registration. `status_description` contains detail information of which field(s) are missing.
           * "Registration Error": there is an error registering the namespace. `edit_url` is empty and the user cannot edit the registration.
         example: Incomplete
-      status_description:
+      statusDescription:
         type: string
         description: The detailed description of the status
         example: "Incomplete Registration: UserID is required"
-      edit_url:
+      editUrl:
         type: string
         description: The URL to update the registration at the registry
-        example: "https://registry.org/view/registry/origin/edit/?id=1"
-      storage_prefix:
+        example: "https://registry.org/view/registry/namespace/edit/?id=1"
+      storagePrefix:
         type: string
         example: "/tmp/pelican"
         description: The path to the directory to be exported on the host server
-      federation_prefix:
+      federationPrefix:
         type: string
         example: "/demo"
         description: The prefix to access the file through the Pelican federation
-      s3_bucket:
+      s3Bucket:
         type: string
         example: "demo-bucket"
         description: "The bucket name of the origin if it's using the S3 storage backend"
-      s3_access_keyfile:
+      s3AccessKeyfile:
         type: string
         example: "/path/to/key"
         description: "The path to the file that contains the access key or API key for S3 storage backend"
-      s3_secret_keyfile:
+      s3SecretKeyfile:
         type: string
         example: "/path/to/secret"
         description: "The path to the file that contains the secret for S3 storage backend"
+      globusCollectionID:
+        type: string
+        example: "7c2dc226-767d-4770-b887-720ef547537d"
+        description: The UUID of the exported Globus collection
+      globusCollectionName:
+        type: string
+        example: "Pelican Demo"
+        description: The human-readable name of the exported Globus collection
       capabilities:
         type: object
         $ref: "#/definitions/OriginExportCapabilities"
+      sentinel_location:
+        type: string
+        example: "sentinel.txt"
+        description: "The relative path to the file that contains the sentinel file to test the storage device"
   OriginExportRes:
     type: object
     properties:
@@ -477,6 +519,27 @@ definitions:
         type: string
         example: "posix"
         description: "The storage type of the origin server. Values can be posix, s3, and https"
+      status:
+        type: string
+        description: >
+          The registration status of the origin.
+          Can be "Not Supported" | "Completed" | "Incomplete" | "Registration Error"
+
+          * "Not Supported": the Pelican registry is below v7.8.0 and does not support checking registration status.
+            In this case, `edit_url` is empty.
+          * "Completed": the registration is completed
+          * "Incomplete": the registration is not completed. `edit_url` will takes the user to the correspoding registration page
+            to finish the registration. `status_description` contains detail information of which field(s) are missing.
+          * "Registration Error": there is an error registering the origin. `edit_url` is empty and the user cannot edit the registration.
+        example: Incomplete
+      statusDescription:
+        type: string
+        description: The detailed description of the status
+        example: "Incomplete Registration: UserID is required"
+      editUrl:
+        type: string
+        description: The URL to update the registration at the registry
+        example: "https://registry.org/view/registry/origin/edit/?id=1"
       s3Region:
         type: string
         description: "The server region for S3 storage. Only available when type == s3"
@@ -496,6 +559,37 @@ definitions:
         items:
            $ref: "#/definitions/OriginExport"
         minItems: 0
+  GlobusExport:
+    type: object
+    properties:
+      uuid:
+        type: string
+        example: "f933ab04-f34a-4a33-8e2c-cd74bc5622f4"
+        description: The UUID of the exported Globus collection
+      displayName:
+        type: string
+        example: Open Data
+        description: The human readable name of the exported Globus collection
+      status:
+        type: string
+        example: "Inactive"
+        description: >-
+          The activation status of the Globus colleciton.
+          Can be either "Inactive" or "Activated".
+      description:
+        type: string
+        example: Server Status
+        description: >-
+          The detailed description of the activation status of the Globus Collection.
+          Available when `status != Activated`
+      httpsServer:
+        type: string
+        example: "https://example-server.com"
+        description: The https server to request files in the Globus collection
+      federationPrefix:
+        type: string
+        example: "/demo"
+        description: The prefix to access the file through the Pelican federation
   DirectorContact:
     type: object
     properties:
@@ -952,7 +1046,7 @@ paths:
       summary: Redirect user to OAuth2 authentication provider (default is CILogon) authentication page for OAuth2 third-party login
       parameters:
         - in: query
-          name: next_url
+          name: nextUrl
           type: string
           description: The path to redirect users to once they successfully authenticated against OAuth2 authentication provider
       responses:
@@ -973,7 +1067,11 @@ paths:
         - in: query
           name: state
           type: string
-          description: The CSRF token for validation and the next_url for redirect, in the form of `"<[16]byte>:<nextURL>"`
+          description: >-
+            The state passed along from start of the authentication. In the form of `key1=val1&key2=val2`:
+              - `pkce` is a required state for CSRF verification.
+              - `nextUrl` is an optional state for redirect URL
+
         - in: query
           name: code
           type: string
@@ -1004,13 +1102,18 @@ paths:
 
         For authenticated users, it returns namespaces with any approval status.
       parameters:
-        - name: server_type
+        - name: prefixType
           in: query
-          required: false
-          description: The type of server to filter the results. The value can be either `origin` or `cache`
           type: string
+          required: false
+          description:
+            The type of the prefix to filter the results. The value can be `origin`, `cache`, or `namespace`
+
+            For `origin` and `cache`, it filters origin/cache server registrations respectively.
+            For `namespace`, it filters namespace prefixes
         - name: status
           in: query
+          type: string
           required: false
           description:
             The approval status of the namespaces, can be `pending`, `approved`, `denied`, or `unknown`.
@@ -1018,7 +1121,13 @@ paths:
             If `status == unknown`, internally it will match any registration with `status == ""` or `stauts == "unknown"`
 
             For unauthenticated users, filter with `status != approved` will result in a 403 error.
-          type: string
+        - name: legacy
+          in: query
+          type: boolean
+          required: false
+          description:
+            To show/filter out legacy namespace registrations, which only has two non-empty fields, `prefix` and `pubkey`.
+            Since this is a boolean parameter, it's OK to only pass `legacy` as the parameter without the `=true` value.
       produces:
         - application/json
       responses:
@@ -1597,7 +1706,10 @@ paths:
       tags:
         - "director_ui"
       summary: Get a list of origins willing to serve an object
-      description: "`Authentication Required`"
+      description: |
+        To stat protected origins, you may pass a valid bearer token via the `Authorization` header.
+
+        You need to obtain the token from one of the origins willing to serve this file first.
       produces:
         - application/json
       parameters:
@@ -1620,30 +1732,16 @@ paths:
       responses:
         "200":
           description: Object is found in active origins and at least one origin responses successfully.
-            It returns 200 even if min_responses wasn't reached but it will mark `ok` field to `false`.
           schema:
             type: object
-            properties:
-              ok:
-                type: boolean
-                description: If the min_responses is satistifed.
-                example: true
-              message:
-                type: string
-                description: Additional message when a query returns
-                example: "Maximum responses reached for stat. Return result and cancel ongoing requests."
-              metadata:
-                type: array
-                items:
-                  $ref: "#/definitions/ObjectStatMetadata"
-                  minItems: 1
+            $ref: "#/definitions/ObjectStatResponse"
         "400":
           description: Bad request. Either min_responses > max_responses, or invalid path to the object.
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
         "401":
-          description: Authentication required to perform this action
+          description: Authentication required
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
@@ -1661,7 +1759,10 @@ paths:
       tags:
         - "director_ui"
       summary: Get a list of origins willing to serve an object
-      description: "`Authentication Required`"
+      description: |
+        To stat protected origins, you may pass a valid bearer token via the `Authorization` header.
+
+        You need to obtain the token from one of the origins willing to serve this file first.
       produces:
         - application/json
       parameters:
@@ -1684,35 +1785,21 @@ paths:
       responses:
         "200":
           description: Object is found in active origins and at least one origin responses successfully.
-            It returns 200 even if min_responses wasn't reached but it will mark `ok` field to `false`.
           schema:
             type: object
-            properties:
-              ok:
-                type: boolean
-                description: If the min_responses is satistifed.
-                example: true
-              message:
-                type: string
-                description: Additional message when a query returns
-                example: "Maximum responses reached for stat. Return result and cancel ongoing requests."
-              metadata:
-                type: array
-                items:
-                  $ref: "#/definitions/ObjectStatMetadata"
-                  minItems: 1
+            $ref: "#/definitions/ObjectStatResponse"
         "400":
           description: Bad request. Either min_responses > max_responses, or invalid path to the object.
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
-        "404":
-          description: Object namespace not found in active origins, or no origin responses successfully.
+        "401":
+          description: Authentication required
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
-        "401":
-          description: Authentication required to perform this action
+        "404":
+          description: Object namespace not found in active origins, or no origin responses successfully.
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
@@ -1797,7 +1884,128 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModelV2"
         "500":
-          description: Error when fetching the origin exports
+          description: Error fetching the origin exports
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/globus/exports:
+    get:
+      tags:
+        - "origin_ui"
+      summary: Get a list of Globus exports
+      description: >-
+        `Authentication Required` `Admin Previlege Required`
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              type: object
+              $ref: "#/definitions/GlobusExport"
+        "401":
+          description: Authentication required
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: You need to have admin privilege to access this endpoint
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Error fetching the Globus exports
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/globus/auth/login/{id}:
+    get:
+      summary: Start the OAuth2 code flow for authenticating a Globus collection
+      description: >-
+        `Authentication Required` `Admin Previlege Required`
+      tags:
+        - "origin_ui"
+      parameters:
+        - name: id
+          in: path
+          type: string
+          required: true
+          description: The Globus collection UUID to authenticate for
+        - name: nextUrl
+          in: query
+          type: string
+          description: The redirect URL to redirect user to when authentication succeeds
+      responses:
+        "307":
+          description: Redirect to Globus authentication endpoint
+        "400":
+          description: Bad request
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: You need to have admin privilege to access this endpoint
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Error generating PKCE code
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/globus/auth/callback:
+    get:
+      summary: The callback endpoint for Globus OAuth2 code flow
+      description: >-
+        `Authentication Required` `Admin Previlege Required`
+      tags:
+        - "origin_ui"
+      parameters:
+        - in: query
+          name: state
+          type: string
+          description: >-
+            The state passed along from start of the authentication. In the form of `key1=val1&key2&val2`:
+              - `pkce`: a required state for CSRF verification.
+              - `nextUrl`: an optional state for redirect URL
+              - `id`: a required state for the Globus collection UUID
+
+        - in: query
+          name: code
+          type: string
+          description: The access token and refresh token returned from the OAuth2 authentication provider
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            properties:
+              nextUrl:
+                type: string
+                example: "/view/next"
+                description: The URL to redirect the user to
+        "400":
+          description: Bad request
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: You need to have admin privilege to access this endpoint
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Server error
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"

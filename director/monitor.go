@@ -191,7 +191,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 				func() {
 					healthTestUtilsMutex.Lock()
 					defer healthTestUtilsMutex.Unlock()
-					if existingUtil, ok := healthTestUtils[serverAd]; ok {
+					if existingUtil, ok := healthTestUtils[serverAd.URL.String()]; ok {
 						existingUtil.Status = HealthStatusOK
 					} else {
 						log.Debugln("HealthTestUtil missing for ", serverAd.Type, " server: ", serverUrl, " Failed to update internal status")
@@ -270,7 +270,7 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 				func() {
 					healthTestUtilsMutex.Lock()
 					defer healthTestUtilsMutex.Unlock()
-					if existingUtil, ok := healthTestUtils[serverAd]; ok {
+					if existingUtil, ok := healthTestUtils[serverAd.URL.String()]; ok {
 						existingUtil.Status = HealthStatusError
 					} else {
 						log.Debugln("HealthTestUtil missing for", serverAd.Type, " server: ", serverUrl, " Failed to update internal status")

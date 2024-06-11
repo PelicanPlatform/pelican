@@ -29,6 +29,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // This file has all custom validator logic for registry struct
@@ -65,15 +66,33 @@ func validatePrefix(nspath string) (string, error) {
 		result += "/" + component
 	}
 	if result == "/" || len(result) == 0 {
-		return "", errors.New("Cannot register the prefix '/' for an origin")
+		return "", errors.New("Cannot register the prefix '/'")
+	}
+	// Check cache/origin prefxies
+	if strings.TrimPrefix(nspath, server_structs.OriginPrefix.String()) == "" {
+		return "", errors.New("Origin prefix is missing hostname")
+	}
+	if strings.TrimPrefix(nspath, server_structs.CachePrefix.String()) == "" {
+		return "", errors.New("Cache prefix is missing sitename")
+	}
+	if server_structs.IsCacheNS(nspath) {
+		hostname := strings.TrimPrefix(nspath, server_structs.CachePrefix.String()) // /caches/blah -> blah
+		if server_structs.IsCacheNS("/" + hostname) {                               // /caches/caches/blah -> caches/blah -> /caches/blah
+			return "", errors.Errorf("Duplicated cache prefix %s", nspath)
+		}
+	} else if server_structs.IsOriginNS(nspath) {
+		hostname := strings.TrimPrefix(nspath, server_structs.OriginPrefix.String()) // /origins/blah -> blah
+		if server_structs.IsOriginNS("/" + hostname) {                               // /origins/origins/blah -> origins/blah -> /origins/blah
+			return "", errors.Errorf("Duplicated origin prefix %s", nspath)
+		}
 	}
 
 	return result, nil
 }
 
 func validateKeyChaining(prefix string, pubkey jwk.Key) (inTopo bool, topoNss []Topology, validationError error, serverError error) {
-	// We don't check keyChaining for caches
-	if strings.HasPrefix(prefix, "/caches/") {
+	// We don't check keyChaining for caches or origins
+	if server_structs.IsCacheNS(prefix) || server_structs.IsOriginNS(prefix) {
 		return
 	}
 	// Here, we do the namespaceSupSubChecks anyway but only returns error (if any)

@@ -144,7 +144,7 @@ func reverseRequest(ctx context.Context, ginCtx *gin.Context) {
 		return
 	}
 
-	ok, err := verifyToken(ctx, token, "/caches/"+hostname, param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Reverse)
+	ok, err := verifyToken(ctx, token, server_structs.GetCacheNS(hostname), param.Server_ExternalWebUrl.GetString(), token_scopes.Broker_Reverse)
 	if err != nil {
 		log.Errorln("Failed to verify token for cache reversal request:", err)
 		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, newBrokerRespFail("Failed to verify provided token"))

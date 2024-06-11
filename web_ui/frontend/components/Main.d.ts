@@ -9,7 +9,7 @@ export interface Namespace {
     id: number;
     prefix: string;
     pubkey: string;
-    type: "origin" | "cache";
+    type: "origin" | "cache" | "namespace";
     admin_metadata: NamespaceAdminMetadata;
     custom_fields?: Record<string, any>;
 }

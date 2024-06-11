@@ -1,0 +1,99 @@
+# Getting Started: Accessing Data
+The developers of the Pelican Platform believe data is the lifeblood of science. That's why Pelican provides a suite of tools that make it easy for researchers to federate their data, giving them the ability to share objects from a broad range of data repositories and allowing them to connect their data with distributed computational capacity, such as the OSPool. For more information on Pelican, visit the [About Pelican](../index.mdx) page.
+
+## Before Starting
+
+### Assumptions
+
+Before using the Pelican client to interact with objects, this guide makes several assumptions:
+
+- You are on a computer where you have access to a terminal. The Pelican client is a command line tool.
+- You've already installed the version of Pelican appropriate for your system, and Pelican is accessible via your path. To test this on Linux, you can run
+
+  ```bash
+  which pelican
+  ```
+  which should output a path to the executable. If there is no output to this command, refer to the [Pelican installation docs](../install.mdx) to acquire a working installation.
+
+### Useful Terminology
+
+#### Core Concepts
+To learn our terminology and the basics of Pelican, we recommend you read through our [Core Concepts](../index.mdx) page to learn how Pelican works and how it can be useful to you.
+
+#### Objects
+Pelican should be thought of as a tool that works with federated *objects* as opposed to *files*. The reason for this is that calling something a file carries with it the connotation of a filesystem. File systems have extra features such as owners, permissions, etc., which Pelican does not implement. In addition, a *file* gives the connotation that the file is mutable, i.e., its contents can change without requiring a new name. Objects in a Pelican federation, however, should be treated as **immutable**, especially in any case where objects are pulled through a cache (which will be the case for almost all files in the [Open Science Data Federation](https://osg-htc.org/services/osdf), or OSDF). This is because the underlying cache mechanism, powered by [XRootD](https://xrootd.slac.stanford.edu/), will deliver whatever object it already has access to; if an object's contents change at the origin, the cache will remain unaware and continue to deliver the old object. In the worst case, when the cache only has a partial object, it may attempt to combine its stale version with whatever exists at the origin. Use object names wisely!
+
+#### Namespace Prefixes
+Each origin supports one or more *namespace prefixes*, which are analogous to the folders or directories from your computer that you use to organize files. Below is an example object:
+
+```bash
+/demo/testfile.txt
+```
+
+This is a simple example where the namespace prefix would be `/demo` and the object is named `/testfile.txt`.
+
+However, things can get a little tricky when you add a longer namespace prefix and/or a longer filepath within that namespace where the object lives. For example:
+
+```bash
+/ospool/uc-shared/public/OSG-Staff/validation/test.txt
+```
+
+In this example, the namespace prefix is `/ospool/uc-shared/public/`, and the actual object is named `/OSG-Staff/validation/test.txt`.
+
+>**Differentiating Namespace Prefixes and Object Names**
+To discover where the namespace prefix ends and the object name begins, there are a few options. One way is to access your federation's registry (i.e. [https://osdf-registry.osg-htc.org/view/registry/](https://osdf-registry.osg-htc.org/view/registry/)) which should list the namespaces available in the federation. Another option is also asking your federation administrator for how to access the registry. However, you can always think to just combine these two terms into just the "object's path" or the "path to the object within the federation".
+
+#### Federations
+Objects in Pelican belong to *federations*, which are aggregations of data that are exposed to other individuals in the federation. Each Pelican federation constitutes its own global namespace of objects and each object within a federation has its own path, much like files on a computer. Fetching any object from a federation requires at minimum two pieces of information: the federation's root (i.e. the discovery URL), and the path to the object within that federation (there is the potential that some objects require access tokens as well, but more on that later). For example, the OSDF’s federation hostname is osg-htc.org, an example path to an object in the federation is:
+```bash
+/ospool/uc-shared/public/OSG-Staff/validation/test.txt
+```
+
+Combining these two pieces of information, we say the the **object's URL** is:
+```bash
+pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt
+```
+
+## Your First Pelican Client Command
+You can easily access public objects from a Pelican federation with the use of the Pelican client commands. Here we will be using the `pelican object get` command to get an object from a federation. This command is formatted like so:
+
+```bash
+pelican object get pelican://<federation-url>/<object-path> </local/path/to/destination>
+```
+
+We can break down the components of this command before you try it yourself:
+- `pelican object get`: This is the client command we are utilizing. `object` because we want to interact with Pelican objects and `get` because we want to GET the file from our federation.
+- `pelican://`: This is the URL scheme for accessing this object. Pelican accepts different URL schemes which are detailed in the [client usage](./client_usage.mdx#the-different-pelican-url-schemes) page.
+- `<federation-url>`: The URL indicating which federation you would like to interact with.
+- `<object-path>`: The path to the object we would like to get.
+- `</local/path/to/destination>`: The local destination where we want the file to download to (can be a local or absolute path)
+
+### Try The Command Yourself
+Now it is time for you to get your first object from a federation. Before getting your first object, be sure you are in a directory/location where you want to download this test file. To get the object, run the command below:
+
+```bash
+pelican object get pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-test.txt
+```
+
+>**Note:** with pelican:// URLs like the one above, it is important to include the correct number of slashes (`/`). This is because pelican URLs rely on the hostname being the federation URL therefore, they must only contain two slashes after `pelican`. For more information, visit the [Client-Usage](./client_usage.mdx#the-different-pelican-url-schemes) page
+
+You should see a progress bar output and eventually a file named `downloaded-test.txt` within your local directory:
+
+```bash
+$ pelican object get pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-test.txt
+downloaded-test.txt 14.00 b / 14.00 b [==============================================================================] Done!
+$ ls
+downloaded-test.txt
+$ cat downloaded-test.txt
+Hello, World!
+```
+
+## Where to Go from Here
+**For More Info on Pelican:**
+- Go to our website located at https://pelicanplatform.org
+
+**For Users:**
+- Learn more advanced client-usage from our [Client Usage](../client_usage.mdx) page.
+
+**For Admins:**
+- Learn how to serve your own [Pelican Federation](../serving_a_federation.mdx) or more simply a [Pelican Origin](../serving_an_origin.mdx)

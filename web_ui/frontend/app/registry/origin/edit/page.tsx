@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -19,14 +19,14 @@
 "use client"
 
 import {PutPage} from "@/app/registry/components/PutPage";
-import {putGeneralNamespace} from "@/app/registry/components/util";
+import {namespaceToOrigin, putGeneralNamespace} from "@/app/registry/components/util";
 import {Box, Grid, Typography} from "@mui/material";
 import React from "react";
 
 export default function Page () {
-
     const putCache = async (data: any) => {
-        return putGeneralNamespace(data)
+        const origin = namespaceToOrigin(structuredClone(data))
+        return putGeneralNamespace(origin)
     }
 
     return (
@@ -34,7 +34,7 @@ export default function Page () {
             <Grid container>
                 <Grid item xs={12}>
                     <Typography variant={"h4"} pb={3}>Namespace Registry</Typography>
-                    <Typography variant={"h5"} pb={3}>Edit Namespace</Typography>
+                    <Typography variant={"h5"} pb={3}>Edit Origin</Typography>
                 </Grid>
                 <Grid item xs={12}>
                     <PutPage update={putCache}/>
