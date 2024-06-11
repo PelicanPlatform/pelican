@@ -10,12 +10,14 @@ import (
 )
 
 func getCountofFederationNamespacesByStatus(status server_structs.RegistrationStatus) (int, error) {
+	// filter by approved, denied, pending
 	filterNs := server_structs.Namespace{
 		AdminMetadata: server_structs.AdminMetadata{
 			Status: status,
 		},
 	}
 
+	// prefixForNamespace allows us to get all namespaces that don't have /origin/ or /cache/
 	namespaces, err := getNamespacesByFilter(filterNs, prefixForNamespace, false)
 	if err != nil {
 		return 0, nil
@@ -32,8 +34,10 @@ func LaunchNamespaceMetrics(ctx context.Context, egrp *errgroup.Group) {
 		for {
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return nil
 			case <-ticker.C:
+				// get the amount of approved, denied, and pending namespaces
+
 				numApproved, err := getCountofFederationNamespacesByStatus(server_structs.RegApproved)
 				if err != nil {
 					return err
