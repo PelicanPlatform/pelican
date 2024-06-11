@@ -1733,6 +1733,8 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	transferResults = newTransferResults(transfer.job)
 	xferErrors := NewTransferErrors()
 	success := false
+	// transferStartTime is the start time of the last transfer attempt
+	// we create a var here and update it in the loop
 	var transferStartTime time.Time
 	for idx, transferEndpoint := range attempts { // For each transfer attempt (usually 3), try to download via HTTP
 		var attempt TransferResult
