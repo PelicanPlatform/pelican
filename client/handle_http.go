@@ -224,9 +224,9 @@ type (
 		ctx           context.Context
 		cancel        context.CancelFunc
 		callback      TransferCallbackFunc
-		uuid          uuid.UUID
-		remoteURL     *url.URL
-		lookupDone    atomic.Bool
+		uuid          uuid.UUID   // Unique identifier for the job
+		remoteURL     *url.URL    // The URL of the server
+		lookupDone    atomic.Bool // Set to true if the lookup (and, potentially, the directory walk) is done
 		lookupErr     error
 		activeXfer    atomic.Int64
 		totalXfer     int
@@ -299,12 +299,14 @@ type (
 		setupResults  sync.Once
 	}
 
-	TransferOption                   = option.Interface
-	identTransferOptionCaches        struct{}
-	identTransferOptionCallback      struct{}
-	identTransferOptionTokenLocation struct{}
-	identTransferOptionAcquireToken  struct{}
-	identTransferOptionToken         struct{}
+	TransferOption                         = option.Interface
+	identTransferOptionCaches              struct{}
+	identTransferOptionCallback            struct{}
+	identTransferOptionTokenLocation       struct{} // In the case of a third-party-copy, this is the destination token
+	identTransferOptionAcquireToken        struct{}
+	identTransferOptionToken               struct{}
+	identTransferOptionSourceTokenLocation struct{}
+	identTransferOptionSourceToken         struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -534,6 +536,21 @@ func newTransferAttemptError(service string, proxy string, isProxyErr bool, isUp
 func hasPort(host string) bool {
 	var checkPort = regexp.MustCompile("^.*:[0-9]+$")
 	return checkPort.MatchString(host)
+}
+
+// Helper function that merges two contexts into a new context and cancel.
+//
+// When either of the parent contexts are cancelled, then the new context
+// will be cancelled.
+func mergeCancel(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {
+	newCtx, cancel := context.WithCancel(ctx1)
+	stop := context.AfterFunc(ctx2, func() {
+		cancel()
+	})
+	return newCtx, func() {
+		stop()
+		cancel()
+	}
 }
 
 // Create a new transfer results object
@@ -1067,6 +1084,46 @@ func (te *TransferEngine) runJobHandler() error {
 	}
 }
 
+// Create a new copy job for the client
+//
+// This function does not "submit" the job for execution.
+func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *url.URL, options ...TransferOption) (cj *CopyJob, err error) {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return
+	}
+
+	project := searchJobAd(projectName)
+
+	cj = &CopyJob{
+		id:       id,
+		src:      src,
+		dest:     dest,
+		project:  project,
+		callback: tc.callback,
+	}
+	cj.ctx, cj.cancel = mergeCancel(ctx, tc.ctx)
+
+	for _, option := range options {
+		switch option.Ident() {
+		case identTransferOptionCallback{}:
+			cj.callback = option.Value().(TransferCallbackFunc)
+		case identTransferOptionTokenLocation{}:
+			cj.destTokenLocation = option.Value().(string)
+		case identTransferOptionAcquireToken{}:
+			cj.skipAcquire = !option.Value().(bool)
+		case identTransferOptionToken{}:
+			cj.destToken = option.Value().(string)
+		case identTransferOptionSourceToken{}:
+			cj.srcToken = option.Value().(string)
+		case identTransferOptionSourceTokenLocation{}:
+			cj.srcTokenLocation = option.Value().(string)
+		}
+	}
+
+	return
+}
+
 // Create a new transfer job for the client
 //
 // The returned object can be further customized as desired.
@@ -1100,17 +1157,6 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		uuid:          id,
 		token:         tc.token,
 		project:       project,
-	}
-
-	mergeCancel := func(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {
-		newCtx, cancel := context.WithCancel(ctx1)
-		stop := context.AfterFunc(ctx2, func() {
-			cancel()
-		})
-		return newCtx, func() {
-			stop()
-			cancel()
-		}
 	}
 
 	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
@@ -1806,8 +1852,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorln("Panic occurred in downloadHTTP:", r)
-			ret := fmt.Sprintf("Unrecoverable error (panic) occurred in downloadHTTP: %v", r)
-			err = errors.New(ret)
+			err = errors.Errorf("Unrecoverable error (panic) occurred in downloadHTTP: %v", r)
 		}
 	}()
 
