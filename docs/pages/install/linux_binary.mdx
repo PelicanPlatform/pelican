@@ -46,7 +46,7 @@ Built By: goreleaser
 
 ```bash
 $ cd pelican_Linux_arm64 # Go to the binary folder
-$ export PATH=$PWD:$PATH # Add current folder to the PATH
+$ export PATH="$PWD:$PATH" # Add current folder to the PATH
 $ pelican --version # Run Pelican binary
 
 Version: 7.5.8
@@ -59,7 +59,7 @@ Built By: goreleaser
 
 ```bash
 $ cd pelican_Linux_arm64 # Go to the binary folder
-$ echo 'export PATH=$PWD:$PATH' >> ~/.bashrc # Add the current folder to your .bashrc file
+$ echo "export PATH=$PWD:\$PATH" >> ~/.bashrc # Add the current folder to your .bashrc file
 $ source ~/.bashrc # Apply the change
 $ pelican --version # Run Pelican binary
 
