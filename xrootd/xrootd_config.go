@@ -647,8 +647,8 @@ func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
 			return nil, err
 		}
 
-		if duration < time.Second {
-			log.Warningf("'Xrootd.AuthRefreshInterval' appears as less than a second. Using fallback of 5m")
+		if duration < 60*time.Second {
+			log.Warningf("'Xrootd.AuthRefreshInterval' of %s appears as less than 60s. Using fallback of 5m", durStr)
 			duration = time.Minute * 5
 		}
 
