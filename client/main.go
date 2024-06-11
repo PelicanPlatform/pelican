@@ -238,7 +238,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}
 
-	if statInfo, err := statHttp(ctx, destUri, ns, pelicanURL.directorUrl, token, jsn); err == nil {
+	if statInfo, err := statHttp(ctx, destUri, ns, pelicanURL.directorUrl, token); err == nil {
 		remoteSize = uint64(statInfo.Size)
 		if jsn {
 			// Print our stat info in JSON format:

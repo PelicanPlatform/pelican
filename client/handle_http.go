@@ -2488,7 +2488,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 // Otherwise, the first three caches are queried simultaneously.
 // For any of the queries, if the attempt with the proxy fails, a second attempt
 // is made without.
-func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, directorUrl, token string, jsn bool) (info fileInfo, err error) {
+func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, directorUrl, token string) (info fileInfo, err error) {
 	statHosts := make([]url.URL, 0, 3)
 	var dirListNotSupported *dirListingNotSupportedError
 	collectionsUrl, err := getCollectionsUrl(ctx, dest, namespace, directorUrl)
