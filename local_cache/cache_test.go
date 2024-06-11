@@ -187,8 +187,6 @@ func TestHttpFailures(t *testing.T) {
 
 // Test that the client library (with authentication) works with the local cache
 func TestClient(t *testing.T) {
-	tmpDir := t.TempDir()
-
 	viper.Reset()
 	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
@@ -210,6 +208,7 @@ func TestClient(t *testing.T) {
 	}
 
 	t.Run("correct-auth", func(t *testing.T) {
+		tmpDir := t.TempDir()
 		tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
 			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken(ft.Token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.NoError(t, err)
@@ -226,6 +225,7 @@ func TestClient(t *testing.T) {
 	})
 
 	t.Run("incorrect-auth", func(t *testing.T) {
+		tmpDir := t.TempDir()
 		_, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
 			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken("badtoken"), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.Error(t, err)
@@ -238,6 +238,7 @@ func TestClient(t *testing.T) {
 
 	// Test the local cache works with the client when multiple are specified
 	t.Run("multi-caches", func(t *testing.T) {
+		tmpDir := t.TempDir()
 		cacheList := []*url.URL{cacheUrl, cacheUrl2}
 		tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
 			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken(ft.Token), client.WithCaches(cacheList...), client.WithAcquireToken(false))
@@ -256,6 +257,7 @@ func TestClient(t *testing.T) {
 
 	// Test the local cache works with '+' specified (append normal list of caches as well) and that we match with the local cache
 	t.Run("append-caches-hit-local-cache", func(t *testing.T) {
+		tmpDir := t.TempDir()
 		plusCache := &url.URL{Path: "+"}
 		cacheList := []*url.URL{cacheUrl, plusCache}
 		tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
@@ -275,6 +277,7 @@ func TestClient(t *testing.T) {
 
 	// Test the local cache works with '+' specified (append normal list of caches as well) and that we match with our fed cache when local cache fails
 	t.Run("append-caches-hit-appended-cache", func(t *testing.T) {
+		tmpDir := t.TempDir()
 		plusCache := &url.URL{Path: "+"}
 		cacheList := []*url.URL{invalidCacheUrl, plusCache}
 		tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
@@ -309,6 +312,7 @@ func TestClient(t *testing.T) {
 	})
 
 	t.Run("file-not-found", func(t *testing.T) {
+		tmpDir := t.TempDir()
 		issuer, err := config.GetServerIssuerURL()
 		require.NoError(t, err)
 		tokConf := token.NewWLCGToken()
