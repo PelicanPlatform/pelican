@@ -87,11 +87,11 @@ func getTempToken(t *testing.T) (tempToken *os.File) {
 	tokenConfig.AddScopes(scopes...)
 	token, err := tokenConfig.CreateToken()
 	assert.NoError(t, err)
-	tempToken, err = os.CreateTemp(t.TempDir(), "token")
-	assert.NoError(t, err, "Error creating temp token file")
+	tmpTok := filepath.Join(t.TempDir(), "token")
+	tempToken, err = os.OpenFile(tmpTok, os.O_CREATE|os.O_RDWR, 0644)
+	assert.NoError(t, err, "Error opening the temp token file")
 	_, err = tempToken.WriteString(token)
 	assert.NoError(t, err, "Error writing to temp token file")
-	tempToken.Close()
 
 	return tempToken
 }
@@ -113,6 +113,7 @@ func TestGetAndPutAuth(t *testing.T) {
 	tempFile.Close()
 
 	tempToken := getTempToken(t)
+	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
 
 	// Disable progress bars to not reuse the same mpb instance
@@ -247,6 +248,7 @@ func TestCopyAuth(t *testing.T) {
 	tempFile.Close()
 
 	tempToken := getTempToken(t)
+	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
 	// Disable progress bars to not reuse the same mpb instance
 	viper.Set("Logging.DisableProgressBars", true)
@@ -404,7 +406,7 @@ func TestGetPublicRead(t *testing.T) {
 
 // A helper function to set up the TestObjectStat, gives us a buffer to capture stdout as well as our object to stat
 func setupStatTest(export server_utils.OriginExport) (statUrl string, r, w, stdout *os.File, buf *bytes.Buffer) {
-	statUrl = fmt.Sprintf("pelican://%s:%s%s/hello_world.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
+	statUrl = fmt.Sprintf("pelican://%s:%d%s/hello_world.txt", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), export.FederationPrefix)
 	// Create a pipe for output
 	r, w, _ = os.Pipe()
 	stdout = os.Stdout
@@ -424,15 +426,16 @@ func TestObjectStat(t *testing.T) {
 	// Other set-up items:
 	testFileContent := "test file content"
 	// Create the temporary file to upload
-	tempFile, err := os.CreateTemp(t.TempDir(), "test")
+	tempFileName := filepath.Join(t.TempDir(), "test")
+	tempFile, err := os.OpenFile(tempFileName, os.O_CREATE|os.O_RDWR, 0644)
 	assert.NoError(t, err, "Error creating temp file")
-	defer os.Remove(tempFile.Name())
 	_, err = tempFile.WriteString(testFileContent)
 	assert.NoError(t, err, "Error writing to temp file")
 	tempFile.Close()
 
 	// Get a temporary token file
 	tempToken := getTempToken(t)
+	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
 
 	// Disable progress bars to not reuse the same mpb instance
