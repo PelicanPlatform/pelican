@@ -59,7 +59,7 @@ const approveNamespace = async (id: number) => {
             }
         }
 
-        throw new Error("Failed to approve namespace: " + alertMessage)
+        throw new Error("Failed to approve registration: " + alertMessage)
     }
 }
 
@@ -119,7 +119,7 @@ export const DeniedCard = ({
                                                 e.stopPropagation()
                                                 try {
                                                     await deleteNamespace(namespace.id)
-                                                    setAlert({severity: "success", message: "Namespace deleted"})
+                                                    setAlert({severity: "success", message: "Registration deleted"})
                                                     setTimeout(() =>  mutate("getNamespaces"), 600)
                                                 } catch (e) {
                                                     if(e instanceof Error){
@@ -139,7 +139,7 @@ export const DeniedCard = ({
                                                 e.stopPropagation()
                                                 try {
                                                     await approveNamespace(namespace.id)
-                                                    setAlert({severity: "success", message: "Namespace Approved"})
+                                                    setAlert({severity: "success", message: "Registration Approved"})
                                                     setTimeout(() =>  mutate("getNamespaces"), 600)
                                                 } catch (e) {
                                                     if(e instanceof Error){

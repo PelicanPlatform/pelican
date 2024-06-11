@@ -29,6 +29,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
@@ -142,11 +143,11 @@ func getCacheHostnameFromToken(token []byte) (hostname string, err error) {
 		return
 	}
 	iss := tok.Issuer()
-	expectedPrefix, err := getRegistryIssValue("/caches")
+	expectedPrefix, err := getRegistryIssValue(server_structs.CachePrefix.String())
 	if err != nil {
 		return
 	}
-	hostname, hasPrefix := strings.CutPrefix(iss, expectedPrefix+"/")
+	hostname, hasPrefix := strings.CutPrefix(iss, expectedPrefix)
 	if !hasPrefix {
 		err = errors.Errorf("Token issuer %s doesn't start with expected registry issuer %s", iss, expectedPrefix)
 		return

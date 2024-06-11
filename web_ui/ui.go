@@ -167,6 +167,28 @@ func getEnabledServers(ctx *gin.Context) {
 	ctx.JSON(200, gin.H{"servers": enabledServers})
 }
 
+func handleGlobusPages(ctx *gin.Context) {
+	// /foo/bar
+	requestPath := ctx.Param("requestPath")
+	if strings.HasPrefix(requestPath, "/origin/globus") {
+		// Attempt to visit Globus backend pages
+		st := param.Origin_StorageType.GetString()
+		if st != "globus" {
+			// render 404 page
+			file, _ := webAssets.ReadFile(notFoundFilePath)
+			ctx.Data(
+				http.StatusNotFound,
+				mime.TypeByExtension(notFoundFilePath),
+				file,
+			)
+			ctx.Abort()
+			return
+		}
+		ctx.Next()
+		return
+	}
+}
+
 func handleWebUIRedirect(ctx *gin.Context) {
 	query := ctx.Request.URL.Query().Encode()
 	if query != "" {
@@ -343,6 +365,7 @@ func handleWebUIResource(ctx *gin.Context) {
 
 func configureWebResource(engine *gin.Engine) {
 	engine.GET("/view/*requestPath",
+		handleGlobusPages,
 		handleWebUIRedirect,
 		handleWebUIAuth,
 		handleWebUIResource,

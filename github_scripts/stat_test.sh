@@ -128,7 +128,7 @@ STAT_URL="https://$HOSTNAME:8444/api/v1.0/director_ui/servers/origins/stat/test/
 
 RESPONSE=$(curl -k -H "Cookie: login=$TOKEN" -H "Content-Type: application/json" "$STAT_URL")
 
-if echo "$RESPONSE" | grep -q "\"ok\":true"; then
+if echo "$RESPONSE" | grep -q "\"status\":\"success\""; then
     echo "Desired response received: $RESPONSE"
     echo "Test Succeeded"
     exit 0

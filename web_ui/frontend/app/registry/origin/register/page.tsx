@@ -18,16 +18,16 @@
 
 "use client"
 
-import {postGeneralNamespace} from "@/app/registry/components/util";
+import {namespaceToOrigin, postGeneralNamespace} from "@/app/registry/components/util";
 import {PostPage} from "@/app/registry/components/PostPage";
 import {Box, Grid, Typography} from "@mui/material";
 import React from "react";
-import {PutPage} from "@/app/registry/components/PutPage";
 
 export default function Page () {
 
     const postCache = async (data: any) => {
-        return postGeneralNamespace(data)
+        const origin = namespaceToOrigin(structuredClone(data))
+        return postGeneralNamespace(origin)
     }
 
     return (
@@ -35,7 +35,7 @@ export default function Page () {
             <Grid container>
                 <Grid item xs={12}>
                     <Typography variant={"h4"} pb={3}>Namespace Registry</Typography>
-                    <Typography variant={"h5"} pb={3}>Register New Namespace</Typography>
+                    <Typography variant={"h5"} pb={3}>Register New Origin</Typography>
                 </Grid>
                 <Grid item xs={12}>
                     <PostPage update={postCache}/>

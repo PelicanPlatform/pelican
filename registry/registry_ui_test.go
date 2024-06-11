@@ -21,9 +21,7 @@ package registry
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,9 +33,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/lestrrat-go/jwx/v2/jwa"
-	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -50,50 +45,14 @@ import (
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
-func GenerateMockJWKS() (string, error) {
-	// Create a private key to use for the test
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return "", errors.Wrap(err, "Error generating private key")
-	}
-
-	// Convert from raw ecdsa to jwk.Key
-	pKey, err := jwk.FromRaw(privateKey)
-	if err != nil {
-		return "", errors.Wrap(err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
-	}
-
-	//Assign Key id to the private key
-	err = jwk.AssignKeyID(pKey)
-	if err != nil {
-		return "", errors.Wrap(err, "Error assigning kid to private key")
-	}
-
-	//Set an algorithm for the key
-	err = pKey.Set(jwk.AlgorithmKey, jwa.ES256)
-	if err != nil {
-		return "", errors.Wrap(err, "Unable to set algorithm for pKey")
-	}
-
-	publicKey, err := pKey.PublicKey()
-	if err != nil {
-		return "", errors.Wrap(err, "Unable to get the public key from private key")
-	}
-
-	jwks := jwk.NewSet()
-	err = jwks.AddKey(publicKey)
-	if err != nil {
-		return "", errors.Wrap(err, "Unable to add public key to the jwks")
-	}
-
-	jsonData, err := json.MarshalIndent(jwks, "", "  ")
-	if err != nil {
-		return "", errors.Wrap(err, "Unable to marshal the json into string")
-	}
-	// Append a new line to the JSON data
-	jsonData = append(jsonData, '\n')
-
-	return string(jsonData), nil
+func mockAdminToken() (string, error) {
+	tokenCfg := token.NewWLCGToken()
+	tokenCfg.Issuer = "https://mock-server.com"
+	tokenCfg.Lifetime = time.Minute
+	tokenCfg.Subject = "admin"
+	tokenCfg.AddScopes(token_scopes.WebUi_Access)
+	tokenCfg.AddAudienceAny()
+	return tokenCfg.CreateToken()
 }
 
 func TestListNamespaces(t *testing.T) {
@@ -123,30 +82,37 @@ func TestListNamespaces(t *testing.T) {
 
 	tests := []struct {
 		description  string
-		serverType   string
+		prefixType   string
 		status       string
 		expectedCode int
 		emptyDB      bool
 		notApproved  bool
 		authUser     bool
+		legacy       bool
 		expectedData []server_structs.Namespace
 	}{
 		{
 			description:  "valid-request-with-empty-db",
-			serverType:   string(OriginType),
+			prefixType:   string(prefixForOrigin),
 			expectedCode: http.StatusOK,
 			emptyDB:      true,
 			expectedData: []server_structs.Namespace{},
 		},
 		{
+			description:  "valid-request-with-namespace-type",
+			prefixType:   string(prefixForNamespace),
+			expectedCode: http.StatusOK,
+			expectedData: mockNssWithNamespaces,
+		},
+		{
 			description:  "valid-request-with-origin-type",
-			serverType:   string(OriginType),
+			prefixType:   string(prefixForOrigin),
 			expectedCode: http.StatusOK,
 			expectedData: mockNssWithOrigins,
 		},
 		{
 			description:  "valid-request-with-cache-type",
-			serverType:   string(CacheType),
+			prefixType:   string(prefixForCache),
 			expectedCode: http.StatusOK,
 			expectedData: mockNssWithCaches,
 		},
@@ -201,7 +167,7 @@ func TestListNamespaces(t *testing.T) {
 		},
 		{
 			description:  "invalid-request-parameters",
-			serverType:   "random_type", // some invalid query string
+			prefixType:   "random_type", // some invalid query string
 			expectedCode: http.StatusBadRequest,
 			expectedData: nil,
 		},
@@ -228,16 +194,10 @@ func TestListNamespaces(t *testing.T) {
 
 			// Create a request to the endpoint
 			w := httptest.NewRecorder()
-			requestURL := "/namespaces?server_type=" + tc.serverType + "&status=" + tc.status
+			requestURL := "/namespaces?prefixType=" + tc.prefixType + "&status=" + tc.status
 			req, _ := http.NewRequest("GET", requestURL, nil)
 			if tc.authUser {
-				tokenCfg := token.NewWLCGToken()
-				tokenCfg.Issuer = "https://mock-server.com"
-				tokenCfg.Lifetime = time.Minute
-				tokenCfg.Subject = "admin"
-				tokenCfg.AddScopes(token_scopes.WebUi_Access)
-				tokenCfg.AddAudienceAny()
-				token, err := tokenCfg.CreateToken()
+				token, err := mockAdminToken()
 				require.NoError(t, err)
 				req.AddCookie(&http.Cookie{Name: "login", Value: token, Path: "/"})
 			}
@@ -256,6 +216,97 @@ func TestListNamespaces(t *testing.T) {
 			}
 		})
 	}
+	// The following tests are for checking legacy server listing
+	mockLegacyNs := server_structs.Namespace{Prefix: "/legacy/1"}
+
+	t.Run("filter-legacy-out", func(t *testing.T) {
+		t.Cleanup(func() { resetNamespaceDB(t) })
+		err := insertMockDBData(append(mockNssWithMixed, mockLegacyNs))
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		requestURL := "/namespaces"
+		req, _ := http.NewRequest("GET", requestURL, nil)
+		require.NoError(t, err)
+		token, err := mockAdminToken()
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: token, Path: "/"})
+
+		router.ServeHTTP(w, req)
+
+		// Check the response
+		assert.Equal(t, 200, w.Code)
+		var got []server_structs.Namespace
+		err = json.Unmarshal(w.Body.Bytes(), &got)
+		require.NoError(t, err)
+		assert.True(t, compareNamespaces(mockNssWithMixed, got, true), "Response data does not match expected")
+	})
+
+	t.Run("ask-for-legacy-full-query-param", func(t *testing.T) {
+		t.Cleanup(func() { resetNamespaceDB(t) })
+		err := insertMockDBData(append(mockNssWithMixed, mockLegacyNs))
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		requestURL := "/namespaces?legacy=true"
+		req, _ := http.NewRequest("GET", requestURL, nil)
+		require.NoError(t, err)
+		token, err := mockAdminToken()
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: token, Path: "/"})
+
+		router.ServeHTTP(w, req)
+
+		// Check the response
+		assert.Equal(t, 200, w.Code)
+		var got []server_structs.Namespace
+		err = json.Unmarshal(w.Body.Bytes(), &got)
+		require.NoError(t, err)
+		assert.True(t, compareNamespaces([]server_structs.Namespace{mockLegacyNs}, got, true), "Response data does not match expected")
+	})
+
+	t.Run("ask-for-legacy-short-query-param", func(t *testing.T) {
+		t.Cleanup(func() { resetNamespaceDB(t) })
+		err := insertMockDBData(append(mockNssWithMixed, mockLegacyNs))
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		requestURL := "/namespaces?legacy"
+		req, _ := http.NewRequest("GET", requestURL, nil)
+		require.NoError(t, err)
+		token, err := mockAdminToken()
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: token, Path: "/"})
+
+		router.ServeHTTP(w, req)
+
+		// Check the response
+		assert.Equal(t, 200, w.Code)
+		var got []server_structs.Namespace
+		err = json.Unmarshal(w.Body.Bytes(), &got)
+		require.NoError(t, err)
+		assert.True(t, compareNamespaces([]server_structs.Namespace{mockLegacyNs}, got, true), fmt.Sprintf("Response data does not match expected. Expected %#v. Got %#v", mockLegacyNs, got))
+	})
+
+	t.Run("ask-for-legacy-as-public", func(t *testing.T) {
+		t.Cleanup(func() { resetNamespaceDB(t) })
+		err := insertMockDBData(append(mockNssWithMixed, mockLegacyNs))
+		require.NoError(t, err)
+		// Create a request to the endpoint
+		w := httptest.NewRecorder()
+		requestURL := "/namespaces?legacy=true"
+		req, _ := http.NewRequest("GET", requestURL, nil)
+		require.NoError(t, err)
+
+		router.ServeHTTP(w, req)
+
+		// Check the response
+		assert.Equal(t, 200, w.Code)
+		var got []server_structs.Namespace
+		err = json.Unmarshal(w.Body.Bytes(), &got)
+		require.NoError(t, err)
+		assert.True(t, compareNamespaces([]server_structs.Namespace{mockLegacyNs}, got, true), "Response data does not match expected")
+	})
 }
 
 func TestListNamespacesForUser(t *testing.T) {
@@ -481,7 +532,7 @@ func TestGetNamespaceJWKS(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	mockPublicKey, err := GenerateMockJWKS()
+	mockPublicKey, err := test_utils.GenerateJWKS()
 	if err != nil {
 		t.Fatalf("Failed to set up mock public key: %v", err)
 	}
@@ -757,7 +808,7 @@ func TestCreateNamespace(t *testing.T) {
 		viper.Reset()
 		viper.Set("Registry.Institutions", []map[string]string{{"name": "Mock School", "id": "123"}})
 		resetNamespaceDB(t)
-		jwks, err := GenerateMockJWKS()
+		jwks, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		mockEmptyNs := server_structs.Namespace{Prefix: "/test", Pubkey: jwks} // Missing institution
@@ -837,14 +888,14 @@ func TestCreateNamespace(t *testing.T) {
 	t.Run("duplicated-key-returns-400", func(t *testing.T) {
 		resetNamespaceDB(t)
 
-		pubKeyStr, err := GenerateMockJWKS()
+		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		err = insertMockDBData([]server_structs.Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Status: server_structs.RegPending}}})
 		require.NoError(t, err)
 		defer resetNamespaceDB(t)
 
-		diffPubKeyStr, err := GenerateMockJWKS()
+		diffPubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: diffPubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
@@ -867,14 +918,14 @@ func TestCreateNamespace(t *testing.T) {
 		viper.Set("Registry.RequireKeyChaining", true)
 		resetNamespaceDB(t)
 
-		pubKeyStr, err := GenerateMockJWKS()
+		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		err = insertMockDBData([]server_structs.Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Status: server_structs.RegPending}}})
 		require.NoError(t, err)
 		defer resetNamespaceDB(t)
 
-		diffPubKeyStr, err := GenerateMockJWKS()
+		diffPubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		mockNs := server_structs.Namespace{Prefix: "/foo/bar", Pubkey: diffPubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
@@ -898,7 +949,7 @@ func TestCreateNamespace(t *testing.T) {
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
-		pubKeyStr, err := GenerateMockJWKS()
+		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
@@ -921,7 +972,7 @@ func TestCreateNamespace(t *testing.T) {
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
-		pubKeyStr, err := GenerateMockJWKS()
+		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
@@ -967,7 +1018,7 @@ func TestCreateNamespace(t *testing.T) {
 			customRegFieldsConfigs = []customRegFieldsConfig{}
 		}()
 
-		pubKeyStr, err := GenerateMockJWKS()
+		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		customFieldsVals := map[string]interface{}{
@@ -1013,13 +1064,13 @@ func TestCreateNamespace(t *testing.T) {
 		svr := topologyMockup(t, topoNamespaces)
 		defer svr.Close()
 		viper.Set("Federation.TopologyNamespaceURL", svr.URL)
-		err = PopulateTopology()
+		err = PopulateTopology(context.Background())
 		require.NoError(t, err)
 
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
-		pubKeyStr, err := GenerateMockJWKS()
+		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		mockNs := server_structs.Namespace{Prefix: "/topo/foo/bar", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
@@ -1055,13 +1106,13 @@ func TestCreateNamespace(t *testing.T) {
 		svr := topologyMockup(t, topoNamespaces)
 		defer svr.Close()
 		viper.Set("Federation.TopologyNamespaceURL", svr.URL)
-		err = PopulateTopology()
+		err = PopulateTopology(context.Background())
 		require.NoError(t, err)
 
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
-		pubKeyStr, err := GenerateMockJWKS()
+		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		mockNs := server_structs.Namespace{Prefix: "/topo/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
@@ -1154,7 +1205,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
-		pubKeyStr, err := GenerateMockJWKS()
+		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
@@ -1177,7 +1228,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
-		pubKeyStr, err := GenerateMockJWKS()
+		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", UserID: "notYourNs"}}
@@ -1207,7 +1258,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
-		pubKeyStr, err := GenerateMockJWKS()
+		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		mockNs := server_structs.Namespace{
@@ -1245,7 +1296,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
-		pubKeyStr, err := GenerateMockJWKS()
+		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		mockNs := server_structs.Namespace{
@@ -1290,7 +1341,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
-		pubKeyStr, err := GenerateMockJWKS()
+		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		mockNs := server_structs.Namespace{

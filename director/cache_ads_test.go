@@ -26,6 +26,7 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -51,9 +52,8 @@ func TestGetAdsForPath(t *testing.T) {
 			- Query for a few paths and make sure the correct ads are returned
 	*/
 	nsAd1 := server_structs.NamespaceAdV2{
-		PublicRead: false,
-		Caps:       server_structs.Capabilities{PublicReads: false},
-		Path:       "/chtc",
+		Caps: server_structs.Capabilities{PublicReads: false},
+		Path: "/chtc",
 		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: url.URL{
 				Scheme: "https",
@@ -64,9 +64,8 @@ func TestGetAdsForPath(t *testing.T) {
 	}
 
 	nsAd2 := server_structs.NamespaceAdV2{
-		PublicRead: true,
-		Caps:       server_structs.Capabilities{PublicReads: true},
-		Path:       "/chtc/PUBLIC",
+		Caps: server_structs.Capabilities{PublicReads: true},
+		Path: "/chtc/PUBLIC",
 		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: url.URL{
 				Scheme: "https",
@@ -77,9 +76,8 @@ func TestGetAdsForPath(t *testing.T) {
 	}
 
 	nsAd3 := server_structs.NamespaceAdV2{
-		PublicRead: true,
-		Caps:       server_structs.Capabilities{PublicReads: true},
-		Path:       "/chtc/PUBLIC2/",
+		Caps: server_structs.Capabilities{PublicReads: true},
+		Path: "/chtc/PUBLIC2/",
 		Issuer: []server_structs.TokenIssuer{{
 			IssuerUrl: url.URL{
 				Scheme: "https",
@@ -90,7 +88,6 @@ func TestGetAdsForPath(t *testing.T) {
 	}
 
 	nsAdTopo1 := server_structs.NamespaceAdV2{
-		PublicRead:   true,
 		Caps:         server_structs.Capabilities{PublicReads: true},
 		Path:         "/chtc",
 		FromTopology: true,
@@ -153,19 +150,19 @@ func TestGetAdsForPath(t *testing.T) {
 	o2Slice := []server_structs.NamespaceAdV2{nsAd2, nsAd3}
 	c1Slice := []server_structs.NamespaceAdV2{nsAd1, nsAd2}
 	topoSlice := []server_structs.NamespaceAdV2{nsAdTopo1}
-	recordAd(originAd2, &o2Slice)
-	recordAd(originAd1, &o1Slice)
+	recordAd(context.Background(), originAd2, &o2Slice)
+	recordAd(context.Background(), originAd1, &o1Slice)
 	// Add a server from Topology that serves /chtc namespace
-	recordAd(originAdTopo1, &topoSlice)
-	recordAd(cacheAd1, &c1Slice)
-	recordAd(cacheAd2, &o1Slice)
+	recordAd(context.Background(), originAdTopo1, &topoSlice)
+	recordAd(context.Background(), cacheAd1, &c1Slice)
+	recordAd(context.Background(), cacheAd2, &o1Slice)
 
 	// If /chtc is served both from topology and Pelican, the Topology server/namespace should be ignored
 	nsAd, oAds, cAds := getAdsForPath("/chtc")
 	assert.Equal(t, "/chtc", nsAd.Path)
 	// Make sure it's not from Topology
 	assert.False(t, nsAd.FromTopology)
-	assert.False(t, nsAd.PublicRead) // Topology one has public read turned on while Pelican one doesn't
+	assert.False(t, nsAd.Caps.PublicReads) // Topology one has public read turned on while Pelican one doesn't
 
 	assert.Equal(t, 1, len(oAds))
 	assert.Equal(t, 2, len(cAds))
@@ -250,10 +247,9 @@ func TestLaunchTTLCache(t *testing.T) {
 		Longitude: 456.78,
 	}
 	mockNamespaceAd := server_structs.NamespaceAdV2{
-		PublicRead: false,
-		Caps:       server_structs.Capabilities{PublicReads: false},
-		Path:       "/foo/bar/",
-		Issuer:     []server_structs.TokenIssuer{{IssuerUrl: url.URL{}}},
+		Caps:   server_structs.Capabilities{PublicReads: false},
+		Path:   "/foo/bar/",
+		Issuer: []server_structs.TokenIssuer{{IssuerUrl: url.URL{}}},
 		Generation: []server_structs.TokenGen{{
 			MaxScopeDepth: 1,
 			Strategy:      "",
@@ -285,8 +281,8 @@ func TestLaunchTTLCache(t *testing.T) {
 			healthTestUtilsMutex.Lock()
 			defer healthTestUtilsMutex.Unlock()
 			// Clear the map for the new test
-			healthTestUtils = make(map[server_structs.ServerAd]*healthTestUtil)
-			healthTestUtils[mockPelicanOriginServerAd] = &healthTestUtil{
+			healthTestUtils = make(map[string]*healthTestUtil)
+			healthTestUtils[mockPelicanOriginServerAd.URL.String()] = &healthTestUtil{
 				Cancel:        cancelFunc,
 				ErrGrp:        errgrp,
 				ErrGrpContext: errgrpCtx,
@@ -399,20 +395,20 @@ func TestRecordAd(t *testing.T) {
 	}
 
 	t.Run("topology-server-added-if-no-duplicate", func(t *testing.T) {
-		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
+		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(topologyServerUrl.String()))
 	})
 
 	t.Run("pelican-server-added-if-no-duplicate", func(t *testing.T) {
-		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
+		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
 	})
 
 	t.Run("pelican-server-overwrites-topology", func(t *testing.T) {
-		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
-		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
+		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
+		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
 
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
@@ -422,13 +418,49 @@ func TestRecordAd(t *testing.T) {
 	})
 
 	t.Run("topology-server-is-ignored-with-dup-pelican-server", func(t *testing.T) {
-		recordAd(mockPelican.ServerAd, &mockPelican.NamespaceAds)
-		recordAd(mockTopology.ServerAd, &mockTopology.NamespaceAds)
+		recordAd(context.Background(), mockPelican.ServerAd, &mockPelican.NamespaceAds)
+		recordAd(context.Background(), mockTopology.ServerAd, &mockTopology.NamespaceAds)
 
 		assert.Len(t, serverAds.Items(), 1)
 		assert.True(t, serverAds.Has(pelicanServerUrl.String()))
 		getAd := serverAds.Get(pelicanServerUrl.String())
 		assert.NotNil(t, getAd)
 		assert.False(t, getAd.Value().FromTopology) // topology ad is ignored
+	})
+
+	t.Run("recorded-sad-should-match-health-test-utils-one", func(t *testing.T) {
+		t.Cleanup(func() {
+			viper.Reset()
+			healthTestUtilsMutex.Lock()
+			statUtilsMutex.Lock()
+			defer statUtilsMutex.Unlock()
+			defer healthTestUtilsMutex.Unlock()
+			healthTestUtils = make(map[string]*healthTestUtil)
+			statUtils = make(map[string]serverStatUtil)
+
+			serverAds.DeleteAll()
+			geoIPOverrides = nil
+		})
+		viper.Reset()
+		func() {
+			geoIPOverrides = nil
+
+			healthTestUtilsMutex.Lock()
+			statUtilsMutex.Lock()
+			defer statUtilsMutex.Unlock()
+			defer healthTestUtilsMutex.Unlock()
+			healthTestUtils = make(map[string]*healthTestUtil)
+			statUtils = make(map[string]serverStatUtil)
+
+			serverAds.DeleteAll()
+		}()
+
+		viper.Set("GeoIPOverrides", []map[string]interface{}{{"IP": "192.168.100.100", "Coordinate": map[string]float64{"lat": 43.567, "long": -65.322}}})
+		mockUrl := url.URL{Scheme: "https", Host: "192.168.100.100"}
+		updatedAd := recordAd(context.Background(), server_structs.ServerAd{Name: "TEST_ORIGIN", URL: mockUrl, WebURL: mockUrl, FromTopology: false}, &mockPelican.NamespaceAds)
+		assert.NotEmpty(t, updatedAd.Longitude)
+		assert.NotEmpty(t, updatedAd.Latitude)
+		_, ok := healthTestUtils[mockUrl.String()]
+		assert.True(t, ok)
 	})
 }

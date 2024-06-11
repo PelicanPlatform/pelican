@@ -32,6 +32,11 @@ Logging:
     Scitokens: fatal
     Xrd: error
     Xrootd: error
+Client:
+  SlowTransferRampupTime: 100s
+  SlowTransferWindow: 30s
+  StoppedTransferTimeout: 100s
+  WorkerCount: 5
 Server:
   WebPort: 8444
   WebHost: "0.0.0.0"
@@ -43,7 +48,7 @@ Director:
   CacheSortMethod: "distance"
   MinStatResponse: 1
   MaxStatResponse: 1
-  StatTimeout: 200ms
+  StatTimeout: 300ms
   StatConcurrencyLimit: 1000
   AdvertisementTTL: 15m
   OriginCacheHealthTestInterval: 15s

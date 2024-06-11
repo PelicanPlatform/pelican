@@ -68,7 +68,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 
 	svr := registryMockup(ctx, t, "serveregistry")
 	defer func() {
-		err := ShutdownDB()
+		err := ShutdownRegistryDB()
 		assert.NoError(t, err)
 		svr.CloseClientConnections()
 		svr.Close()
@@ -143,13 +143,13 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	registrySvr := registryMockup(ctx, t, "OSDFkeychaining")
 	topoSvr := topologyMockup(t, []string{"/topo/foo"})
 	viper.Set("Federation.TopologyNamespaceURL", topoSvr.URL)
-	err = createTopologyTable()
+	err = migrateTopologyTestTable()
 	require.NoError(t, err)
-	err = PopulateTopology()
+	err = PopulateTopology(ctx)
 	require.NoError(t, err)
 
 	defer func() {
-		err := ShutdownDB()
+		err := ShutdownRegistryDB()
 		assert.NoError(t, err)
 		registrySvr.CloseClientConnections()
 		registrySvr.Close()
@@ -233,7 +233,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 
 	registrySvr := registryMockup(ctx, t, "keychaining")
 	defer func() {
-		err := ShutdownDB()
+		err := ShutdownRegistryDB()
 		assert.NoError(t, err)
 		registrySvr.CloseClientConnections()
 		registrySvr.Close()

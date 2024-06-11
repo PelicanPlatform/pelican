@@ -20,16 +20,23 @@ package test_utils
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pkg/errors"
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -41,6 +48,34 @@ func TestContext(ictx context.Context, t *testing.T) (ctx context.Context, cance
 	}
 	egrp, ctx = errgroup.WithContext(ctx)
 	ctx = context.WithValue(ctx, config.EgrpKey, egrp)
+	return
+}
+
+// Creates a buffer of at least 1MB
+func makeBigBuffer() []byte {
+	byteBuff := []byte("Hello, World!")
+	for {
+		byteBuff = append(byteBuff, []byte("Hello, World!")...)
+		if len(byteBuff) > 1024*1024 {
+			break
+		}
+	}
+	return byteBuff
+}
+
+// Writes a file at least the specified size in MB
+func WriteBigBuffer(t *testing.T, fp io.WriteCloser, sizeMB int) (size int) {
+	defer fp.Close()
+	byteBuff := makeBigBuffer()
+	size = 0
+	for {
+		n, err := fp.Write(byteBuff)
+		require.NoError(t, err)
+		size += n
+		if size > sizeMB*1024*1024 {
+			break
+		}
+	}
 	return
 }
 
@@ -82,6 +117,52 @@ func GenerateJWK() (jwk.Key, jwk.Set, string, error) {
 	return jwkKey, jwks, string(jwksBytes), nil
 }
 
+func GenerateJWKS() (string, error) {
+	// Create a private key to use for the test
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", errors.Wrap(err, "Error generating private key")
+	}
+
+	// Convert from raw ecdsa to jwk.Key
+	pKey, err := jwk.FromRaw(privateKey)
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
+	}
+
+	//Assign Key id to the private key
+	err = jwk.AssignKeyID(pKey)
+	if err != nil {
+		return "", errors.Wrap(err, "Error assigning kid to private key")
+	}
+
+	//Set an algorithm for the key
+	err = pKey.Set(jwk.AlgorithmKey, jwa.ES256)
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to set algorithm for pKey")
+	}
+
+	publicKey, err := pKey.PublicKey()
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to get the public key from private key")
+	}
+
+	jwks := jwk.NewSet()
+	err = jwks.AddKey(publicKey)
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to add public key to the jwks")
+	}
+
+	jsonData, err := json.MarshalIndent(jwks, "", "  ")
+	if err != nil {
+		return "", errors.Wrap(err, "Unable to marshal the json into string")
+	}
+	// Append a new line to the JSON data
+	jsonData = append(jsonData, '\n')
+
+	return string(jsonData), nil
+}
+
 // For these tests, we only need to lookup key locations. Create a dummy registry that only returns
 // the jwks_uri location for the given key. Once a server is instantiated, it will only return
 // locations for the provided prefix. To change prefixes, create a new registry mockup.
@@ -101,4 +182,21 @@ func RegistryMockup(t *testing.T, prefix string) *httptest.Server {
 	}))
 	t.Cleanup(server.Close)
 	return server
+}
+
+// Initialize the client for a unit test
+//
+// Will set the configuration to a temporary directory (to
+// avoid pulling in global configuration) and set some arbitrary
+// viper configurations
+func InitClient(t *testing.T, initCfg map[string]any) {
+	viper.Reset()
+	t.Cleanup(viper.Reset)
+	viper.Set("ConfigDir", t.TempDir())
+	for key, val := range initCfg {
+		viper.Set(key, val)
+	}
+
+	config.InitConfig()
+	require.NoError(t, config.InitClient())
 }

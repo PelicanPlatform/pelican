@@ -37,9 +37,14 @@ func TestConversion(t *testing.T) {
 	require.NoError(t, err, "error parsing test issuer url")
 
 	v2Ads := []NamespaceAdV2{{
-		PublicRead: false,
-		Caps:       Capabilities{PublicReads: false, Reads: true, Writes: true, DirectReads: false, Listings: true},
-		Path:       "/foo/bar",
+		Caps: Capabilities{
+			PublicReads: false,
+			Reads:       true,
+			Writes:      true,
+			DirectReads: false,
+			Listings:    true,
+		},
+		Path: "/foo/bar",
 		Generation: []TokenGen{{
 			Strategy:         "OAuth2",
 			MaxScopeDepth:    3,
@@ -63,8 +68,9 @@ func TestConversion(t *testing.T) {
 				PublicReads: true,
 				Reads:       true,
 				Writes:      true,
+				DirectReads: false,
 				Listings:    true,
-				DirectReads: false},
+			},
 			Path: "/baz/bar",
 		},
 	}

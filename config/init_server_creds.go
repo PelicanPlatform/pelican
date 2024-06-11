@@ -24,7 +24,6 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -51,6 +50,11 @@ var (
 	issuerPrivateJWK atomic.Pointer[jwk.Key]
 )
 
+// Reset the atomic pointer to issuer private jwk
+func ResetIssuerJWKPtr() {
+	issuerPrivateJWK.Store(nil)
+}
+
 // Return a pointer to an ECDSA private key or RSA private key read from keyLocation.
 //
 // This can be used to load ECDSA or RSA private key for various purposes,
@@ -60,7 +64,7 @@ var (
 func LoadPrivateKey(keyLocation string, allowRSA bool) (crypto.PrivateKey, error) {
 	rest, err := os.ReadFile(keyLocation)
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 
 	var privateKey crypto.PrivateKey
@@ -114,10 +118,13 @@ func LoadPrivateKey(keyLocation string, allowRSA bool) (crypto.PrivateKey, error
 	return privateKey, nil
 }
 
-// Check if a file exists at keyLocation, return the file if so; otherwise, generate
+// Check if a file exists at keyLocation, return if so; otherwise, generate
 // and writes a PEM-encoded ECDSA-encrypted private key with elliptic curve assigned
 // by curve
 func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool) error {
+	if keyLocation == "" {
+		return errors.New("failed to generate private key: key location is empty")
+	}
 	uid, err := GetDaemonUID()
 	if err != nil {
 		return err
@@ -157,7 +164,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool)
 	// In this case, the private key file doesn't exist.
 	file, err := os.OpenFile(keyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
 	if err != nil {
-		return errors.Wrap(err, "Failed to create new private key file")
+		return errors.Wrap(err, "Failed to create new private key file at "+keyLocation)
 	}
 	defer file.Close()
 	priv, err := ecdsa.GenerateKey(curve, rand.Reader)
@@ -661,29 +668,10 @@ func GenerateSessionSecret() error {
 		}
 	}
 
-	// How we generate the secret:
-	// Concatenate the byte array pelican with the DER form of the service's private key,
-	// Take a hash, and use the hash's bytes as the secret.
-
-	// Use issuer private key as the source to generate the secret
-	issuerKeyFile := param.IssuerKey.GetString()
-	privateKey, err := LoadPrivateKey(issuerKeyFile, false)
+	secret, err := GetSecret()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to get the secret")
 	}
-
-	derPrivateKey, err := x509.MarshalPKCS8PrivateKey(privateKey)
-
-	if err != nil {
-		return err
-	}
-	byteArray := []byte("pelican")
-
-	concatenated := append(byteArray, derPrivateKey...)
-
-	hash := sha256.Sum256(concatenated)
-
-	secret := string(hash[:])
 
 	_, err = file.WriteString(secret)
 

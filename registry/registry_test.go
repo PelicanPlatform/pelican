@@ -35,6 +35,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestHandleWildcard(t *testing.T) {
@@ -257,7 +258,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 			NamespaceRegistrationEndpoint: "https://registry.org",
 		})
 
-		mockJWKS, err := GenerateMockJWKS()
+		mockJWKS, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		// Institution and UserId are empty
@@ -283,7 +284,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		result, ok := resStruct.Results["/incomplete-prefix"]
 		require.True(t, ok)
 		assert.False(t, result.Completed)
-		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/origin/edit/?id=")
+		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/namespace/edit/?id=")
 		assert.Contains(t, result.Msg, "Incomplete registration:")
 	})
 
@@ -295,7 +296,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 			NamespaceRegistrationEndpoint: "https://registry.org",
 		})
 
-		mockJWKS, err := GenerateMockJWKS()
+		mockJWKS, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 		// Institution and UserId are empty
 		err = insertMockDBData(
@@ -329,7 +330,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		result, ok := resStruct.Results["/complete-prefix"]
 		require.True(t, ok)
 		assert.True(t, result.Completed)
-		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/origin/edit/?id=")
+		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/namespace/edit/?id=")
 		assert.Empty(t, result.Msg)
 	})
 
@@ -341,7 +342,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 			NamespaceRegistrationEndpoint: "https://registry.org",
 		})
 
-		mockJWKS, err := GenerateMockJWKS()
+		mockJWKS, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 		// Institution and UserId are empty
 		err = insertMockDBData(
@@ -387,19 +388,19 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		result, ok := resStruct.Results["/complete-prefix-1"]
 		require.True(t, ok)
 		assert.True(t, result.Completed)
-		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/origin/edit/?id=")
+		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/namespace/edit/?id=")
 		assert.Empty(t, result.Msg)
 
 		result, ok = resStruct.Results["/complete-prefix-2"]
 		require.True(t, ok)
 		assert.True(t, result.Completed)
-		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/origin/edit/?id=")
+		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/namespace/edit/?id=")
 		assert.Empty(t, result.Msg)
 
 		result, ok = resStruct.Results["/foo/bar"]
 		require.True(t, ok)
 		assert.True(t, result.Completed)
-		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/origin/edit/?id=")
+		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/namespace/edit/?id=")
 		assert.Empty(t, result.Msg)
 	})
 }

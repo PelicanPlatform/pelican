@@ -61,6 +61,7 @@ archives:
     format_overrides:
       - goos: windows
         format: zip
+    wrap_in_directory: '{{ .ProjectName }}-{{ trimsuffix .Version "-next" }}'
 checksum:
   name_template: 'checksums.txt'
 snapshot:
@@ -106,6 +107,12 @@ nfpms:
             file_info:
               mode: 0644
             type: doc
+          - dst: "/etc/pelican"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: root
+              group: root
       deb:
         contents:
           - src: LICENSE
@@ -118,6 +125,30 @@ nfpms:
             file_info:
               mode: 0644
             type: doc
+          - dst: "/etc/pelican"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: root
+              group: root
+      apk:
+        contents:
+          - src: LICENSE
+            dst: "/usr/share/doc/{{ .PackageName }}/LICENSE.txt"
+            file_info:
+              mode: 0644
+            type: doc
+          - src: README.md
+            dst: "/usr/share/doc/{{ .PackageName }}/README.md"
+            file_info:
+              mode: 0644
+            type: doc
+          - dst: "/etc/pelican"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: root
+              group: root
   # end package pelican
 
   - package_name: pelican-osdf-compat
@@ -221,19 +252,12 @@ nfpms:
     license: ASL 2.0
     meta: true
     formats:
-      # XXX Deb has some different conventions; planned for a later release
-      # - deb
+      - deb
       - rpm
     release: 1
     section: default
     priority: extra
     # dependencies are per-package format
-    provides:
-      ## {{ .Version }} substitutions do not work in this list
-      - "pelican-origin = 7"
-      - "pelican-cache = 7"
-      - "pelican-registry = 7"
-      - "pelican-director = 7"
     contents:
       - src: "systemd/pelican-cache.service"
         dst: "/usr/lib/systemd/system/pelican-cache.service"
@@ -267,9 +291,26 @@ nfpms:
 
     overrides:
       rpm:
+        provides:
+          ## {{ .Version }} substitutions do not work in this list
+          - "pelican-origin = 7"
+          - "pelican-cache = 7"
+          - "pelican-registry = 7"
+          - "pelican-director = 7"
         dependencies:
           - "pelican >= 7.4.0"
           - "xrootd-server >= 1:5.6.3"
           - "xrootd-scitokens"
           - "xrootd-voms"
+      deb:
+        provides:
+          - "pelican-origin (= 7)"
+          - "pelican-cache (= 7)"
+          - "pelican-registry (= 7)"
+          - "pelican-director (= 7)"
+        dependencies:
+          - "pelican (>= 7.4.0)"
+          - "xrootd-server (>= 5.6.3)"
+          - "xrootd-scitokens-plugins"
+          - "xrootd-voms-plugins"
   # end package pelican-server

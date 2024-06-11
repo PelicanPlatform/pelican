@@ -36,7 +36,7 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	log.Info("Initializing the namespace registry's database...")
 
 	// Initialize the registry's sqlite database
-	err := registry.InitializeDB(ctx)
+	err := registry.InitializeDB()
 	if err != nil {
 		return errors.Wrap(err, "Unable to initialize the namespace registry database")
 	}
@@ -56,12 +56,12 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	if config.GetPreferredPrefix() == config.OsdfPrefix {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 		log.Info("Populating registry with namespaces from OSG topology service...")
-		if err := registry.PopulateTopology(); err != nil {
+		if err := registry.PopulateTopology(ctx); err != nil {
 			panic(errors.Wrap(err, "Unable to populate topology table"))
 		}
 
 		// Checks topology for updates every 10 minutes
-		go registry.PeriodicTopologyReload()
+		go registry.PeriodicTopologyReload(ctx)
 	}
 
 	rootRouterGroup := engine.Group("/")
@@ -74,7 +74,7 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 	egrp.Go(func() error {
 		<-ctx.Done()
-		return registry.ShutdownDB()
+		return registry.ShutdownRegistryDB()
 	})
 
 	return nil

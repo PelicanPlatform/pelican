@@ -50,8 +50,8 @@ type (
 	// For API response to embed export with the registration status
 	exportWithStatus struct {
 		Status            regStatusEnum `json:"status"`
-		StatusDescription string        `json:"status_description"` // detailed description of the current status
-		EditUrl           string        `json:"edit_url"`
+		StatusDescription string        `json:"statusDescription"` // detailed description of the current status
+		EditUrl           string        `json:"editUrl"`
 		server_utils.OriginExport
 	}
 )
@@ -59,8 +59,11 @@ type (
 // A TTL cache to save namespace registration status
 // The TTL depends on the Status: For Status == StatusRegistrationError, the cache item won't expire,
 // meaning a failure registration stays in the cache, until the registration is successful.
-// For other Status, TTL is set to 1 min
-var registrationsStatus = ttlcache.New(ttlcache.WithTTL[string, RegistrationStatus](1 * time.Minute))
+// For other Status, TTL is set to 15s, and we won't extend the TTL if there's a successful GET
+var registrationsStatus = ttlcache.New(
+	ttlcache.WithTTL[string, RegistrationStatus](15*time.Second),
+	ttlcache.WithDisableTouchOnHit[string, RegistrationStatus](),
+)
 
 var RegistryNotImplErr = errors.New("the running version of the registry didn't implmenet this function")
 

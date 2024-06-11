@@ -30,7 +30,7 @@ import (
 
 func TestPasswordMain(t *testing.T) {
 	t.Run("w-password-arg", func(t *testing.T) {
-		tmpWd := setupTempWd(t)
+		tmpWd := setupTestRun(t)
 		tempDir := t.TempDir()
 		inPasswordPath = filepath.Join(tempDir, "password-in")
 		outPasswordPath = ""
