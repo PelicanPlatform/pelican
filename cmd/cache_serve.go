@@ -21,9 +21,10 @@
 package main
 
 import (
+	"github.com/spf13/cobra"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
-	"github.com/spf13/cobra"
 )
 
 func serveCache(cmd *cobra.Command, _ []string) error {

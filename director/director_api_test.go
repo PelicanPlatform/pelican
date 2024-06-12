@@ -24,9 +24,10 @@ import (
 	"testing"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var mockOriginServerAd server_structs.ServerAd = server_structs.ServerAd{

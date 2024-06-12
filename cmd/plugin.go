@@ -33,14 +33,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pelicanplatform/pelican/classads"
-	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/classads"
+	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (

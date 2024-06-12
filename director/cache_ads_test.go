@@ -25,11 +25,12 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 func hasServerAdWithName(serverAds []server_structs.ServerAd, name string) bool {

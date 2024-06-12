@@ -23,10 +23,11 @@ import (
 	"io"
 	"syscall"
 
-	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 func uiPasswordReset(cmd *cobra.Command, args []string) error {

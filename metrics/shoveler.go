@@ -30,11 +30,12 @@ import (
 	"strings"
 
 	shoveler "github.com/opensciencegrid/xrootd-monitoring-shoveler"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 type ipMappingItem struct {

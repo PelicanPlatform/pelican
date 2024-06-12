@@ -23,9 +23,10 @@ package main
 import (
 	_ "embed"
 
+	"github.com/spf13/cobra"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
-	"github.com/spf13/cobra"
 )
 
 func serveOrigin(cmd *cobra.Command, args []string) error {

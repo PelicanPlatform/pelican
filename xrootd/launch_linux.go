@@ -27,12 +27,13 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/daemon"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"kernel.org/pub/linux/libs/security/libcap/cap"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func doWait(pid int) error {

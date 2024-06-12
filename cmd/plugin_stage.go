@@ -28,12 +28,13 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/pelicanplatform/pelican/classads"
-	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/classads"
+	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func init() {

@@ -33,10 +33,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/metrics"
 )
 
 type (

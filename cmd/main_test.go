@@ -30,9 +30,10 @@ import (
 
 	"testing"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func TestHandleCLIVersionFlag(t *testing.T) {

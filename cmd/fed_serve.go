@@ -21,11 +21,12 @@
 package main
 
 import (
+	"github.com/pkg/errors"
+	"github.com/spf13/cobra"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
 )
 
 func fedServeStart(cmd *cobra.Command, args []string) error {

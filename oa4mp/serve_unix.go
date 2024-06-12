@@ -24,8 +24,9 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func customizeCmd(cmd *exec.Cmd) error {
