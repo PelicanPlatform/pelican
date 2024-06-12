@@ -757,6 +757,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	// Set to ctx for metrics handler downstream
 	ctx.Set("serverName", adV2.Name)
 	ctx.Set("serverWebUrl", adV2.WebURL)
+	ctx.Set("namespacePrefix", adV2.RegistryPrefix)
 
 	adUrl, err := url.Parse(adV2.DataURL)
 	if err != nil {
