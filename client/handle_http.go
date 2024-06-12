@@ -150,12 +150,13 @@ type (
 	// Represents the results of a single object transfer,
 	// potentially across multiple attempts / retries.
 	TransferResults struct {
-		jobId            uuid.UUID // The job ID this result corresponds to
-		job              *TransferJob
-		Error            error
-		TransferredBytes int64
-		Scheme           string
-		Attempts         []TransferResult
+		jobId             uuid.UUID // The job ID this result corresponds to
+		job               *TransferJob
+		Error             error
+		TransferredBytes  int64
+		TransferStartTime time.Time
+		Scheme            string
+		Attempts          []TransferResult
 	}
 
 	TransferResult struct {
@@ -1732,6 +1733,9 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	transferResults = newTransferResults(transfer.job)
 	xferErrors := NewTransferErrors()
 	success := false
+	// transferStartTime is the start time of the last transfer attempt
+	// we create a var here and update it in the loop
+	var transferStartTime time.Time
 	for idx, transferEndpoint := range attempts { // For each transfer attempt (usually 3), try to download via HTTP
 		var attempt TransferResult
 		attempt.CacheAge = -1
@@ -1745,7 +1749,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		transferEndpointUrl := *transferEndpoint.Url
 		transferEndpointUrl.Path = transfer.remoteURL.Path
 		transferEndpoint.Url = &transferEndpointUrl
-		transferStartTime := time.Now()
+		transferStartTime = time.Now() // Update start time for this attempt
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, err := downloadHTTP(
 			transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, transfer.token, transfer.project,
 		)
@@ -1803,6 +1807,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			break
 		}
 	}
+	transferResults.TransferStartTime = transferStartTime
 	transferResults.TransferredBytes = downloaded
 	if !success {
 		transferResults.Error = xferErrors
