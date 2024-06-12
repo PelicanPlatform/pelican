@@ -1604,12 +1604,18 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 		tUrl := *transferEndpoint.Url
 		tUrl.Path = path
 
-		go func(idx int, tUrl string) {
+		go func(idx int, tUrl *url.URL) {
+			// If the scheme is unix://, it is a local cache and therefore, we should always try this cache first and skip the HEAD request (since it will fail)
+			if tUrl.Scheme == "unix" {
+				headChan <- checkResults{idx, 0, -1, nil}
+				return
+			}
+
 			headClient := &http.Client{Transport: transport}
 			// Note we are not using a HEAD request here but a GET request for one byte;
 			// this is because the XRootD server currently (v5.6.9) only returns the Age
 			// header for GETs
-			headRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet, tUrl, nil)
+			headRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet, tUrl.String(), nil)
 			headRequest.Header.Set("Range", "0-0")
 			var headResponse *http.Response
 			headResponse, err := headClient.Do(headRequest)
@@ -1650,7 +1656,7 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 				}
 			}
 			headChan <- checkResults{idx, uint64(size), age, err}
-		}(idx, tUrl.String())
+		}(idx, &tUrl)
 	}
 	// 1 -> success.
 	// 0 -> pending.
