@@ -21,11 +21,12 @@ package main
 import (
 	"os"
 
-	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+
+	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/config"
 )
 
 var (
@@ -61,10 +62,10 @@ func statMain(cmd *cobra.Command, args []string) {
 	jsn, _ := cmd.Flags().GetBool("json")
 
 	if len(args) < 1 {
-		log.Errorln("no object provided")
+		log.Errorln("No object provided")
 		err = cmd.Help()
 		if err != nil {
-			log.Errorln("failed to print out help:", err)
+			log.Errorln("Failed to print out help:", err)
 		}
 		os.Exit(1)
 	}

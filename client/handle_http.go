@@ -2473,15 +2473,12 @@ func getCollectionsUrl(ctx context.Context, remoteObjectUrl *url.URL, namespace 
 				return nil, errors.New("collections URL not found in director response")
 			}
 			// The resp redirect includes the full path to the object from the origin, we are only interested in the scheme and host
-			collectionsURL, err := url.Parse(collections)
+			collectionsUrl, err = url.Parse(collections)
 			if err != nil {
-				return nil, err
+				return nil, errors.Wrap(err, "failed to parse the collections url from the Location header")
+			} else {
+				return collectionsUrl, nil
 			}
-			collectionsUrl = &url.URL{
-				Scheme: collectionsURL.Scheme,
-				Host:   collectionsURL.Host,
-			}
-			namespace.DirListHost = collectionsUrl.String()
 		} else {
 			return nil, errors.Errorf("unexpected response from director when requesting collections url from origin: %v", resp.Status)
 		}
