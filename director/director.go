@@ -903,7 +903,7 @@ func serverAdMetricMiddleware(ctx *gin.Context) {
 		serverWebUrl = ctx.GetString("serverWebUrl")
 	}
 
-	metrics.PelicanDirectorTotalAdvertisementsReceived.With(
+	metrics.PelicanDirectorAdvertisementsRecievedTotal.With(
 		prometheus.Labels{
 			"server_name":      serverName,
 			"server_web_url":   serverWebUrl,
