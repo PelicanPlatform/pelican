@@ -213,8 +213,8 @@ func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
 				defer cancel()
 
 				// Query all the servers and filter them out later
-				// We are interested in the derivative of the total server IO over the past 5min
-				query := `deriv(xrootd_server_io_total{job="origin_cache_servers"}[5m])`
+				// We are interested in the derivative/rate of the total server IO over the past 5min
+				query := `rate(xrootd_server_io_total{job="origin_cache_servers"}[5m])`
 				queryResult, err := queryPromtheus(ddlCtx, query, true)
 				if err != nil {
 					log.Debugf("Failed to update IO stat: querying Prometheus responded with an error: %v", err)
