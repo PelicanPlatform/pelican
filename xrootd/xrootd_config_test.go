@@ -801,10 +801,10 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	t.Run("test-no-suffix-to-seconds", func(t *testing.T) {
 		viper.Reset()
 		var xrdConfig XrootdConfig
-		viper.Set("Xrootd.AuthRefreshInterval", "5")
+		viper.Set("Xrootd.AuthRefreshInterval", "99")
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
 		assert.NoError(t, err)
-		assert.Equal(t, 5, xrdConfig.Xrootd.AuthRefreshInterval)
+		assert.Equal(t, 99, xrdConfig.Xrootd.AuthRefreshInterval)
 	})
 
 	t.Run("test-less-than-second", func(t *testing.T) {
