@@ -22,6 +22,7 @@ import (
 	_ "embed"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/sirupsen/logrus"
@@ -38,6 +39,59 @@ var (
 	//go:embed resources/mock_topology.json
 	mockTopology string
 )
+
+func TestConsolidateDupServerAd(t *testing.T) {
+	t.Run("union-capabilities", func(t *testing.T) {
+		existingAd := server_structs.ServerAd{Writes: false}
+		newAd := server_structs.ServerAd{Writes: true}
+		get := consolidateDupServerAd(newAd, existingAd)
+		assert.True(t, get.Writes)
+
+		existingAd = server_structs.ServerAd{DirectReads: false}
+		newAd = server_structs.ServerAd{DirectReads: true}
+		get = consolidateDupServerAd(newAd, existingAd)
+		assert.True(t, get.DirectReads)
+
+		existingAd = server_structs.ServerAd{Listings: false}
+		newAd = server_structs.ServerAd{Listings: true}
+		get = consolidateDupServerAd(newAd, existingAd)
+		assert.True(t, get.Listings)
+
+		// All false
+		existingAd = server_structs.ServerAd{Caps: server_structs.Capabilities{}}
+		newAd = server_structs.ServerAd{Caps: server_structs.Capabilities{Reads: true, Writes: true, DirectReads: true, Listings: true}}
+		get = consolidateDupServerAd(newAd, existingAd)
+		assert.EqualValues(t, server_structs.Capabilities{Reads: true, Writes: true, Listings: true, DirectReads: true}, get.Caps)
+	})
+
+	t.Run("take-existing-one-for-non-cap-fields", func(t *testing.T) {
+		existingAd := server_structs.ServerAd{
+			Name:         "fool",
+			AuthURL:      url.URL{Host: "example.org"},
+			BrokerURL:    url.URL{Host: "example.org"},
+			URL:          url.URL{Host: "example.org"},
+			WebURL:       url.URL{Host: "example.org"},
+			Type:         server_structs.OriginType,
+			FromTopology: true,
+		}
+		newAd := server_structs.ServerAd{
+			Name:         "bar",
+			AuthURL:      url.URL{Host: "diff.org"},
+			BrokerURL:    url.URL{Host: "diff.org"},
+			URL:          url.URL{Host: "example.org"},
+			WebURL:       url.URL{Host: "diff.org"},
+			Type:         server_structs.OriginType,
+			FromTopology: false,
+		}
+		get := consolidateDupServerAd(newAd, existingAd)
+		assert.Equal(t, get.AuthURL, existingAd.AuthURL)
+		assert.Equal(t, get.BrokerURL, existingAd.BrokerURL)
+		assert.Equal(t, get.WebURL, existingAd.WebURL)
+		assert.Equal(t, get.Name, existingAd.Name)
+		assert.Equal(t, get.Type, existingAd.Type)
+		assert.Equal(t, get.FromTopology, existingAd.FromTopology)
+	})
+}
 
 func TestParseServerAdFromTopology(t *testing.T) {
 
