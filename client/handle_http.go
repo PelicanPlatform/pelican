@@ -304,9 +304,6 @@ type (
 	identTransferOptionAcquireToken  struct{}
 	identTransferOptionToken         struct{}
 	identTransferOptionLong          struct{}
-	identTransferOptionDirOnly       struct{}
-	identTransferOptionObjectOnly    struct{}
-	identTransferOptionJson          struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -735,21 +732,6 @@ func WithAcquireToken(enable bool) TransferOption {
 // Create an option to specify more information to be displayed with a 'list' command
 func WithLongOption(enable bool) TransferOption {
 	return option.New(identTransferOptionLong{}, enable)
-}
-
-// Create an option to specify that only directories should be listed with a 'list' command
-func WithDirOnlyOption(enable bool) TransferOption {
-	return option.New(identTransferOptionDirOnly{}, enable)
-}
-
-// Create an option to specify that only files should be listed with a 'list' command
-func WithObjectOnlyOption(enable bool) TransferOption {
-	return option.New(identTransferOptionObjectOnly{}, enable)
-}
-
-// Create an option to specify the output being printed in JSON format
-func WithJsonOption(enable bool) TransferOption {
-	return option.New(identTransferOptionJson{}, enable)
 }
 
 // Create a new client to work with an engine
@@ -2608,7 +2590,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 }
 
 // This function performs the ls command by walking through the specified directory and printing the contents of the files
-func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string, namespace namespaces.Namespace, token string, options ...TransferOption) (fileInfos []fileInfo, err error) {
+func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string, namespace namespaces.Namespace, token string) (fileInfos []FileInfo, err error) {
 	// Get our directory listing host
 	collectionsUrl, err := getCollectionsUrl(ctx, remoteObjectUrl, namespace, directorUrl)
 	if err != nil {
@@ -2634,7 +2616,7 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 			// If the path leads to a file and not a directory, just add the filename
 			if !info.IsDir() {
 				// NOTE: we implement our own FileInfo here because the one we get back from stat() does not have a .name field for some reason
-				file := fileInfo{
+				file := FileInfo{
 					Name:    path.Base(remotePath),
 					Size:    info.Size(),
 					ModTime: info.ModTime(),
@@ -2651,26 +2633,9 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 		return nil, errors.Wrap(err, "failed to read remote directory")
 	}
 
-	var dironly, objectonly = false, false
-	for _, option := range options {
-		switch option.Ident() {
-		case identTransferOptionDirOnly{}:
-			dironly = option.Value().(bool)
-		case identTransferOptionObjectOnly{}:
-			objectonly = option.Value().(bool)
-		}
-	}
-
 	for _, info := range infos {
-		if info.IsDir() && objectonly {
-			// If the object is a directory and we have objectonly (-O) set, ignore it
-			continue
-		} else if !info.IsDir() && dironly {
-			// If the object is a file and we have dironly (-D) set, ignore it
-			continue
-		}
 		// Create a FileInfo for the file and append it to the slice
-		file := fileInfo{
+		file := FileInfo{
 			Name:    info.Name(),
 			Size:    info.Size(),
 			ModTime: info.ModTime(),

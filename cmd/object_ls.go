@@ -19,7 +19,11 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
+	"strconv"
+	"text/tabwriter"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -33,7 +37,7 @@ var (
 	lsCmd = &cobra.Command{
 		Use:   "ls {object}",
 		Short: "List objects in a namespace from a federation",
-		Run:   listMain,
+		RunE:  listMain,
 	}
 )
 
@@ -48,7 +52,7 @@ func init() {
 	objectCmd.AddCommand(lsCmd)
 }
 
-func listMain(cmd *cobra.Command, args []string) {
+func listMain(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	err := config.InitClient()
 	if err != nil {
@@ -79,10 +83,14 @@ func listMain(cmd *cobra.Command, args []string) {
 	long, _ := cmd.Flags().GetBool("long")
 	dirOnly, _ := cmd.Flags().GetBool("dironly")
 	objectOnly, _ := cmd.Flags().GetBool("objectonly")
-	json, _ := cmd.Flags().GetBool("json")
+	asJSON, _ := cmd.Flags().GetBool("json")
 
-	err = client.DoList(ctx, object, client.WithTokenLocation(tokenLocation), client.WithLongOption(long),
-		client.WithDirOnlyOption(dirOnly), client.WithObjectOnlyOption(objectOnly), client.WithJsonOption(json))
+	// If a user specifies dirOnly and objectOnly, this means basic functionality (list both objects and directories) so just remove the flags
+	if dirOnly && objectOnly {
+		return errors.New("cannot specify both dironly and object only flags, as they are mutually exclusive")
+	}
+
+	fileInfos, err := client.DoList(ctx, object, client.WithTokenLocation(tokenLocation))
 
 	// Exit with failure
 	if err != nil {
@@ -99,4 +107,62 @@ func listMain(cmd *cobra.Command, args []string) {
 		}
 		os.Exit(1)
 	}
+
+	// Take our fileInfos and print them in a nice way
+	// if the -L flag was set, we print more information
+	if long {
+		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
+		// If we want JSON format, we append the file info to a slice of fileInfo structs so that we can marshal it
+		if asJSON {
+			jsonData, err := json.Marshal(fileInfos)
+			if err != nil {
+				return errors.Errorf("failed to marshal file/directory info to JSON format: %v", err)
+			}
+			fmt.Println(string(jsonData))
+			return nil
+		}
+		for _, info := range fileInfos {
+			// If not json formats, just print out the information in a clean way
+			fmt.Fprintln(w, info.Name+"\t"+strconv.FormatInt(info.Size, 10)+"\t"+info.ModTime.Format("2006-01-02 15:04:05"))
+		}
+		w.Flush()
+	} else if asJSON {
+		// In this case, we are not using the long option (-L) and want a JSON format
+		jsonInfo := []string{}
+		for _, info := range fileInfos {
+			jsonInfo = append(jsonInfo, info.Name)
+		}
+		// Convert the FileInfo to JSON and print it
+		jsonData, err := json.Marshal(jsonInfo)
+		if err != nil {
+			return errors.Errorf("error converting to JSON: %v", err)
+		}
+		fmt.Println(string(jsonData))
+	} else {
+		// We print using a tabwriter to enhance readability of the listed files and to make things look nicer
+		totalColumns := 4
+		// column is a counter letting us know what item/column we are on
+		var column int
+		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
+		var line string
+		for _, info := range fileInfos {
+			line += info.Name
+			//increase our counter
+			column++
+
+			// This section just checks if we go thru <numColumns> times, we print a newline. Otherwise, add the object to the current line with a tab after
+			if column%totalColumns == 0 {
+				fmt.Fprintln(w, line)
+				line = ""
+			} else {
+				line += "\t"
+			}
+		}
+		// If we have anything remaining in line, print it
+		if line != "" {
+			fmt.Fprintln(w, line)
+		}
+		w.Flush()
+	}
+	return nil
 }

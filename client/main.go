@@ -28,7 +28,6 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	"math/rand"
@@ -47,10 +46,10 @@ import (
 // Number of caches to attempt to use in any invocation
 var CachesToTry int = 3
 
-// Our own fileInfo structure to hold information about a file
+// Our own FileInfo structure to hold information about a file
 // NOTE: this was created to provide more flexibility to information on a file. The fs.FileInfo interface was causing some issues like not always returning a Name attribute
 // ALSO NOTE: the fields are exported so they can be marshalled into JSON, it does not work otherwise
-type fileInfo struct {
+type FileInfo struct {
 	Name    string
 	Size    int64
 	ModTime time.Time
@@ -502,7 +501,7 @@ func schemeUnderstood(scheme string) error {
 }
 
 // Function for the object ls command, we get target information for our remote object and eventually print out the contents of the specified object
-func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (err error) {
+func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (fileInfos []FileInfo, err error) {
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
@@ -515,7 +514,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 
 	remoteObjectUrl, err := url.Parse(remoteObject)
 	if err != nil {
-		return errors.Wrap(err, "failed to parse remote object URL")
+		return nil, errors.Wrap(err, "failed to parse remote object URL")
 	}
 
 	remoteObjectScheme := remoteObjectUrl.Scheme
@@ -523,11 +522,11 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	// Check if we understand the found url scheme
 	err = schemeUnderstood(remoteObjectScheme)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	te, err := NewTransferEngine(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() {
 		if err := te.Shutdown(); err != nil {
@@ -537,22 +536,18 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 
 	pelicanURL, err := te.newPelicanURL(remoteObjectUrl)
 	if err != nil {
-		return errors.Wrap(err, "failed to generate pelicanURL object")
+		return nil, errors.Wrap(err, "failed to generate pelicanURL object")
 	}
 
 	ns, err := getNamespaceInfo(ctx, remoteObjectUrl.Path, pelicanURL.directorUrl, false, "")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Get our token if needed
 	tokenLocation := ""
 	acquire := true
 	token := ""
-	long := false
-	dironly := false
-	objectonly := false
-	asJSON := false
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -561,92 +556,22 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 			acquire = option.Value().(bool)
 		case identTransferOptionToken{}:
 			token = option.Value().(string)
-		case identTransferOptionLong{}:
-			long = option.Value().(bool)
-		case identTransferOptionDirOnly{}:
-			dironly = option.Value().(bool)
-		case identTransferOptionObjectOnly{}:
-			objectonly = option.Value().(bool)
-		case identTransferOptionJson{}:
-			asJSON = option.Value().(bool)
 		}
-	}
-
-	// If a user specifies dirOnly and objectOnly, this means basic functionality (list both objects and directories) so just remove the flags
-	if dironly && objectonly {
-		return errors.New("cannot specify both dironly and object only flags, as they are mutually exclusive")
 	}
 
 	if ns.UseTokenOnRead && token == "" {
 		token, err = getToken(remoteObjectUrl, ns, true, "", tokenLocation, acquire)
 		if err != nil {
-			return errors.Errorf("failed to get token for transfer: %v", err)
+			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
 	}
 
-	fileInfos, err := listHttp(ctx, remoteObjectUrl, pelicanURL.directorUrl, ns, token, WithDirOnlyOption(dironly), WithObjectOnlyOption(objectonly))
+	fileInfos, err = listHttp(ctx, remoteObjectUrl, pelicanURL.directorUrl, ns, token)
 	if err != nil {
-		return err
+		return nil, errors.Wrap(err, "failed to do the list")
 	}
 
-	// Take our fileInfos and print them in a nice way
-	// if the -L flag was set, we print more information
-	if long {
-		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
-		// If we want JSON format, we append the file info to a slice of fileInfo structs so that we can marshal it
-		if asJSON {
-			jsonData, err := json.Marshal(fileInfos)
-			if err != nil {
-				return errors.Wrap(err, "failed to marshal file/directory info to JSON format")
-			}
-			fmt.Println(string(jsonData))
-			return nil
-		}
-		for _, info := range fileInfos {
-			// If not json formats, just print out the information in a clean way
-			fmt.Fprintln(w, info.Name+"\t"+strconv.FormatInt(info.Size, 10)+"\t"+info.ModTime.Format("2006-01-02 15:04:05"))
-		}
-		w.Flush()
-	} else if asJSON {
-		// In this case, we are not using the long option (-L) and want a JSON format
-		jsonInfo := []string{}
-		for _, info := range fileInfos {
-			jsonInfo = append(jsonInfo, info.Name)
-		}
-		// Convert the FileInfo to JSON and print it
-		jsonData, err := json.Marshal(jsonInfo)
-		if err != nil {
-			return errors.Wrap(err, "error converting to JSON")
-		}
-		fmt.Println(string(jsonData))
-	} else {
-		// We print using a tabwriter to enhance readability of the listed files and to make things look nicer
-		totalColumns := 4
-		// column is a counter letting us know what item/column we are on
-		var column int
-		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
-		var line string
-		for _, info := range fileInfos {
-			line += info.Name
-			//increase our counter
-			column++
-
-			// This section just checks if we go thru <numColumns> times, we print a newline. Otherwise, add the object to the current line with a tab after
-			if column%totalColumns == 0 {
-				fmt.Fprintln(w, line)
-				line = ""
-			} else {
-				line += "\t"
-			}
-		}
-		// If we have anything remaining in line, print it
-		if line != "" {
-			fmt.Fprintln(w, line)
-		}
-		w.Flush()
-	}
-
-	return nil
+	return fileInfos, nil
 }
 
 /*
