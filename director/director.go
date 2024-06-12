@@ -904,10 +904,11 @@ func serverAdMetricMiddleware(ctx *gin.Context) {
 
 	metrics.PelicanDirectorTotalAdvertisementsReceived.With(
 		prometheus.Labels{
-			"server_name":    serverName,
-			"server_web_url": serverWebUrl,
-			"server_type":    ctx.GetString("serverType"),
-			"status_code":    strconv.Itoa(statusCode),
+			"server_name":      serverName,
+			"server_web_url":   serverWebUrl,
+			"server_type":      ctx.GetString("serverType"),
+			"status_code":      strconv.Itoa(statusCode),
+			"namespace_prefix": ctx.GetString("namespacePrefix"),
 		}).Inc()
 }
 
