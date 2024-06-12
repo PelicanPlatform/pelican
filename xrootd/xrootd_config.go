@@ -629,7 +629,7 @@ func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
 		}
 
 		// Sanitize the input to guarantee we have a unit
-		suffixes := []string{"s", "m", "h", "d"}
+		suffixes := []string{"s", "m", "h"}
 		hasSuffix := false
 		for _, suffix := range suffixes {
 			if strings.HasSuffix(durStr, suffix) {
@@ -638,13 +638,13 @@ func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
 			}
 		}
 		if !hasSuffix {
-			log.Warningf("'Xrootd.AuthRefreshInterval' does not have a time unit (s, m, h, d). Interpreting as seconds")
+			log.Warningf("'Xrootd.AuthRefreshInterval' does not have a time unit (s, m, h). Interpreting as seconds")
 			durStr = durStr + "s"
 		}
 
 		duration, err := time.ParseDuration(durStr)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrapf(err, "Failed to parse 'Xrootd.AuthRefreshInterval' of %s as a duration", durStr)
 		}
 
 		if duration < 60*time.Second {
