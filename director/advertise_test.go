@@ -38,8 +38,8 @@ import (
 var (
 	//go:embed resources/mock_topology.json
 	mockTopology string
-	//go:embed resources/real_topology.json
-	realTopology string
+	//go:embed resources/multi_export_topology.json
+	multiExportTopology string
 )
 
 func TestConsolidateDupServerAd(t *testing.T) {
@@ -185,13 +185,13 @@ func mockTopoJSONHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(mockTopology))
 }
 
-func realTopoJSONHandler(w http.ResponseWriter, r *http.Request) {
+func multiExportsTopoJSONHandler(w http.ResponseWriter, r *http.Request) {
 	// Set the Content-Type header to indicate JSON.
 	w.Header().Set("Content-Type", "application/json")
 
 	// Write the JSON response to the response body.
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(realTopology))
+	_, _ = w.Write([]byte(multiExportTopology))
 }
 
 func TestAdvertiseOSDF(t *testing.T) {
@@ -254,20 +254,20 @@ func TestAdvertiseOSDF(t *testing.T) {
 			serverAds.DeleteAll()
 		}()
 
-		topoServer := httptest.NewServer(http.HandlerFunc(realTopoJSONHandler))
+		topoServer := httptest.NewServer(http.HandlerFunc(multiExportsTopoJSONHandler))
 		defer topoServer.Close()
 		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 
 		err := AdvertiseOSDF()
 		require.NoError(t, err)
 
-		// This origin should export 12 namespaces
+		// This origin should export 3 namespaces
 		found := serverAds.Has("http://sdsc-origin.nationalresearchplatform.org:1094")
 		require.True(t, found)
 		foundAd := serverAds.Get("http://sdsc-origin.nationalresearchplatform.org:1094").Value()
 		require.NotNil(t, foundAd)
 		assert.Equal(t, server_structs.OriginType, foundAd.Type)
-		assert.Len(t, foundAd.NamespaceAds, 12)
+		assert.Len(t, foundAd.NamespaceAds, 3)
 		// This origin has at least one namespace enables the following capacity
 		assert.True(t, foundAd.DirectReads)
 		assert.True(t, foundAd.Writes)
@@ -282,19 +282,19 @@ func TestAdvertiseOSDF(t *testing.T) {
 			serverAds.DeleteAll()
 		}()
 
-		topoServer := httptest.NewServer(http.HandlerFunc(realTopoJSONHandler))
+		topoServer := httptest.NewServer(http.HandlerFunc(multiExportsTopoJSONHandler))
 		defer topoServer.Close()
 		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 
 		err := AdvertiseOSDF()
 		require.NoError(t, err)
 
-		// This cache should serve 64 namespaces
-		found := serverAds.Has("http://dtn-pas.cinc.nrp.internet2.edu:8000")
+		// This cache should serve 2 namespaces
+		found := serverAds.Has("http://dtn-pas.bois.nrp.internet2.edu:8000")
 		require.True(t, found)
-		foundAd := serverAds.Get("http://dtn-pas.cinc.nrp.internet2.edu:8000").Value()
+		foundAd := serverAds.Get("http://dtn-pas.bois.nrp.internet2.edu:8000").Value()
 		require.NotNil(t, foundAd)
 		assert.Equal(t, server_structs.CacheType, foundAd.Type)
-		assert.Len(t, foundAd.NamespaceAds, 64)
+		assert.Len(t, foundAd.NamespaceAds, 2)
 	})
 }
