@@ -58,11 +58,11 @@ type globusExportUI struct {
 }
 
 const (
-	globusInactive  = "Inactive"
-	globusActivated = "Activated"
+	GlobusInactive  = "Inactive"
+	GlobusActivated = "Activated"
 )
 
-const globusTokenFileExt = ".tok" // File extension for caching Globus access token
+const GlobusTokenFileExt = ".tok" // File extension for caching Globus access token
 
 var (
 	// An in-memory map-struct to keep Globus collections information with key being the collection UUID.
@@ -104,7 +104,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 		globusEsp := globusExport{
 			DisplayName:      esp.GlobusCollectionName,
 			FederationPrefix: esp.FederationPrefix,
-			Status:           globusInactive,
+			Status:           GlobusInactive,
 			Description:      "Server start",
 		}
 		// We check the origin db and see if we already have the refresh token in-place
@@ -150,7 +150,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 			globusEsp.DisplayName = col.Name
 		}
 
-		globusEsp.Status = globusActivated
+		globusEsp.Status = GlobusActivated
 		globusEsp.Token = collectionToken
 		globusEsp.HttpsServer = col.ServerURL
 		globusEsp.Description = "Activated with cached credentials"
@@ -167,7 +167,7 @@ func isExportActivated(fedPrefix string) (ok bool) {
 	defer globusExportsMutex.RUnlock()
 	for _, exp := range globusExports {
 		if exp.FederationPrefix == fedPrefix {
-			return exp.Status == globusActivated
+			return exp.Status == GlobusActivated
 		}
 	}
 	return false
@@ -185,7 +185,7 @@ func doGlobusTokenRefresh() error {
 			globusExportsMutex.Lock()
 			defer globusExportsMutex.Unlock()
 			// We can't refresh exports that are never activated
-			if exp.Status == globusInactive {
+			if exp.Status == GlobusInactive {
 				return nil
 			}
 			newTok, err := refreshGlobusToken(cid, exp.Token)
@@ -194,7 +194,7 @@ func doGlobusTokenRefresh() error {
 				newTok, err = refreshGlobusToken(cid, exp.Token)
 				if err != nil {
 					log.Errorf("Failed to retry refreshing Globus token for collection %s with name %s: %v", cid, exp.DisplayName, err)
-					exp.Status = globusInactive
+					exp.Status = GlobusInactive
 					exp.Description = fmt.Sprintf("Failed to refresh token: %v", err)
 					return err
 				}
@@ -242,7 +242,7 @@ func GetGlobusExportsValues(activeOnly bool) []globusExport {
 	exps := []globusExport{}
 	for _, val := range globusExports {
 		if activeOnly {
-			if val.Status == globusActivated {
+			if val.Status == GlobusActivated {
 				exps = append(exps, *val)
 			} else {
 				continue

@@ -454,7 +454,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 			log.Infof("Updating existing Globus export %s with new token", cid)
 			globusExports[cid].HttpsServer = transferJSON.HttpsServer
 			globusExports[cid].Token = collectionToken
-			globusExports[cid].Status = globusActivated
+			globusExports[cid].Status = GlobusActivated
 			globusExports[cid].Description = ""
 			if globusExports[cid].DisplayName == "" || globusExports[cid].DisplayName == cid {
 				globusExports[cid].DisplayName = transferJSON.DisplayName
@@ -567,8 +567,8 @@ func persistAccessToken(collectionID string, token *oauth2.Token) error {
 	if filepath.Clean(tokBase) == "" {
 		return fmt.Errorf("failed to update Globus token: Origin.GlobusTokenLocation is not a valid path: %s", tokBase)
 	}
-	tokFileName := filepath.Join(tokBase, collectionID+globusTokenFileExt)
-	tmpTokFile, err := os.CreateTemp(tokBase, collectionID+globusTokenFileExt)
+	tokFileName := filepath.Join(tokBase, collectionID+GlobusTokenFileExt)
+	tmpTokFile, err := os.CreateTemp(tokBase, collectionID+GlobusTokenFileExt)
 	if err != nil {
 		return errors.Wrap(err, "failed to update Globus token: unable to create a temporary Globus token file")
 	}
