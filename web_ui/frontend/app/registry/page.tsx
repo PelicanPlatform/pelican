@@ -158,7 +158,7 @@ export default function Home() {
                             </Link>
                         }
                     </Typography>
-                    { approvedNamespaceData !== undefined ? <CardList<CardProps> data={approvedNamespaceData} Card={Card} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
+                    { approvedNamespaceData !== undefined ? <NamespaceCardList<CardProps> data={approvedNamespaceData} Card={Card} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
                     { approvedNamespaceData !== undefined && approvedNamespaceData.length === 0 && <CreateNamespaceCard text={"Register Namespace"} url={"namespace/register"}/>}
 
                     <Typography variant={"h6"} py={2}>

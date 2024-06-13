@@ -51,7 +51,7 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
                         "&:hover": {
                             bgcolor: "#ececec"
                         },
-                        bgcolor: server.status === "Error" ? "warning.light" : "secondary.main",
+                        bgcolor: server.healthStatus === "Error" ? "warning.light" : "secondary.main",
                         p: 1
                     }}
                     onClick={() => setDropdownOpen(!dropdownOpen)}
@@ -63,48 +63,50 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
                     <Box display={"flex"} flexDirection={"row"}>
                         <Box my={"auto"} display={"flex"}>
                             {(authenticated && authenticated.role == "admin") &&
-                                <FormGroup>
+                                <Tooltip title={"Toggle Server Downtime"}>
+                                  <FormGroup>
                                     <FormControlLabel
-                                        labelPlacement="start"
-                                        control={
-                                            <Switch
-                                                key={server.name}
-                                                disabled={disabled}
-                                                checked={!filtered}
-                                                color={"success"}
-                                                onClick={async (x) => {
+                                      labelPlacement="start"
+                                      control={
+                                        <Switch
+                                          key={server.name}
+                                          disabled={disabled}
+                                          checked={!filtered}
+                                          color={"success"}
+                                          onClick={async (x) => {
 
-                                                    x.stopPropagation()
+                                            x.stopPropagation()
 
-                                                    // Disable the switch
-                                                    setDisabled(true)
+                                            // Disable the switch
+                                            setDisabled(true)
 
-                                                    // Provide optimistic feedback
-                                                    setFiltered(!filtered)
+                                            // Provide optimistic feedback
+                                            setFiltered(!filtered)
 
-                                                    // Update the server
-                                                    let error;
-                                                    if(filtered) {
-                                                        error = await allowServer(server.name)
-                                                    } else {
-                                                        error = await filterServer(server.name)
-                                                    }
+                                            // Update the server
+                                            let error;
+                                            if(filtered) {
+                                              error = await allowServer(server.name)
+                                            } else {
+                                              error = await filterServer(server.name)
+                                            }
 
-                                                    // Revert if we were too optimistic
-                                                    if(error) {
-                                                        setFiltered(!filtered)
-                                                        setError(error)
-                                                    } else {
-                                                        mutate()
-                                                    }
+                                            // Revert if we were too optimistic
+                                            if(error) {
+                                              setFiltered(!filtered)
+                                              setError(error)
+                                            } else {
+                                              mutate()
+                                            }
 
-                                                    setDisabled(false)
-                                                }}
-                                            />
-                                        }
-                                        label={!filtered ? "Active" : "Disabled"}
+                                            setDisabled(false)
+                                          }}
+                                        />
+                                      }
+                                      label={!filtered ? "Active" : "Disabled"}
                                     />
-                                </FormGroup>
+                                  </FormGroup>
+                                </Tooltip>
                             }
                             { server?.webUrl &&
                                 <Box ml={1}>

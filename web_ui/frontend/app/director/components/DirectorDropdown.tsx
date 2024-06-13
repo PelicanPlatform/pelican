@@ -1,6 +1,6 @@
 import {Server, StringTree} from "@/index";
-import {Dropdown, InformationSpan} from "@/components";
-import {Box, Typography} from "@mui/material";
+import { CapabilitiesChip, CapabilitiesDisplay, Dropdown, InformationSpan } from '@/components';
+import { Box, Grid, Typography } from '@mui/material';
 import DirectoryTree from "@/components/DirectoryTree";
 import React from "react";
 
@@ -13,10 +13,28 @@ export const DirectorDropdown = ({server, transition} : DirectorDropdownProps) =
     return (
         <Dropdown transition={transition} flexDirection={"column"}>
             <InformationSpan name={"Type"} value={server.type} />
-            <InformationSpan name={"Status"} value={server.status} />
+            <InformationSpan name={"Status"} value={server.healthStatus} />
             <InformationSpan name={"URL"} value={server.url} />
-            <Typography variant={"body2"} sx={{fontWeight: 500,  display: "inline", mr: 2, my: .5}}>Namespace Prefixes</Typography>
-            <DirectoryTree data={directoryListToTree(server.namespacePrefixes)} />
+            <InformationSpan name={"Longitude"} value={server.longitude.toString()} />
+            <InformationSpan name={"Latitude"} value={server.latitude.toString()} />
+            <Box sx={{my: 1}}>
+              <Typography variant={"body2"} sx={{fontWeight: 500,  display: "inline", mr: 2 }}>Namespace Prefixes</Typography>
+              <DirectoryTree data={directoryListToTree(server.namespacePrefixes)} />
+            </Box>
+          <Box>
+            { server.capabilities &&
+              <Grid container spacing={1}>
+                {Object.entries(server.capabilities).map(([key, value]) => {
+                  return (
+                    <Grid item md={12/5} sm={12/4} xs={12/2} key={key}>
+                      <CapabilitiesChip name={key} value={value} />
+                    </Grid>
+                  )
+                })}
+              </Grid>
+            }
+          </Box>
+
         </Dropdown>
     )
 }

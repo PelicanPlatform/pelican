@@ -3,11 +3,7 @@ import {Box, Grid, Pagination, TextField, Typography} from "@mui/material";
 import {DirectorCard, DirectorCardProps} from "./";
 import {Server} from "@/index";
 import {BooleanToggleButton, CardList} from "@/components";
-
-function searchObject<T>(o: T, search: string){
-    const objectString = JSON.stringify(o).toLowerCase()
-    return objectString.includes(search.toLowerCase())
-}
+import useFuse from '@/helpers/useFuse';
 
 interface DirectorCardListProps {
     data: Partial<DirectorCardProps>[];
@@ -21,11 +17,12 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
     const [serverError, setServerError] = useState<boolean | undefined>(undefined)
     const [serverDowntime, setServerDowntime] = useState<boolean | undefined>(undefined)
 
+    const searchedData = useFuse<Partial<DirectorCardProps>>(data, search)
+
     const filteredData = useMemo(() => {
-        let filteredData = structuredClone(data)
-        filteredData = data.filter((d) => searchObject<Partial<DirectorCardProps>>(d, search))
+        let filteredData = structuredClone(searchedData)
         if (pelicanServer != undefined) {
-            filteredData = filteredData.filter((d) => isPelicanServer(d?.server) == pelicanServer)
+            filteredData = filteredData.filter((d) => d?.server?.fromTopology != pelicanServer)
         }
         if (serverError != undefined) {
             filteredData = filteredData.filter((d) => serverHasError(d?.server) == serverError)
@@ -34,7 +31,7 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
             filteredData = filteredData.filter((d) => d?.server?.filtered == serverDowntime)
         }
         return filteredData
-    }, [data, search, serverError, pelicanServer, serverDowntime])
+    }, [searchedData, search, serverError, pelicanServer, serverDowntime])
 
     return (
         <Box>
@@ -47,13 +44,13 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
                 />
                 <Grid container spacing={1} pt={1}>
                     <Grid item>
-                        <BooleanToggleButton label={"Pelican Server"} value={pelicanServer} onChange={setPelicanServer}/>
+                        <BooleanToggleButton label={"Is Pelican Server"} value={pelicanServer} onChange={setPelicanServer}/>
                     </Grid>
                     <Grid item>
-                        <BooleanToggleButton label={"Error"} value={serverError} onChange={setServerError} />
+                        <BooleanToggleButton label={"Has Error"} value={serverError} onChange={setServerError} />
                     </Grid>
                     <Grid item>
-                        <BooleanToggleButton label={"Down"} value={serverDowntime} onChange={setServerDowntime} />
+                        <BooleanToggleButton label={"Is Disabled"} value={serverDowntime} onChange={setServerDowntime} />
                     </Grid>
                 </Grid>
             </Box>
@@ -62,12 +59,8 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
     )
 }
 
-const isPelicanServer = (server?: Server) => {
-    return server?.webUrl != "";
-}
-
 const serverHasError = (server?: Server) => {
-    return server?.status == "Error";
+    return server?.healthStatus === "Error";
 }
 
 export default DirectorCardList;

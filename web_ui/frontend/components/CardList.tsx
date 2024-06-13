@@ -34,14 +34,27 @@ export function CardList<T>({ data, Card, cardProps }: CardListProps<T>) {
                         <Card {...props} />
                     </Box>
                 })}
-                {!data || count == 0 && <Skeleton variant="rectangular" height={60}></Skeleton>}
+                {!data || count == 0 && <NoResultsCard/>}
             </Box>
             <Box display={"flex"} justifyContent={"center"} flexDirection={"column"} alignItems={"center"}>
                 { count > 1 && <Pagination count={count} page={page} onChange={(e, p) => setPage(p)} /> }
-                <Typography variant={"subtitle1"}>{count} items</Typography>
+                <Typography variant={"subtitle1"}>{data?.length || 0} items</Typography>
             </Box>
         </>
     )
+}
+
+/**
+ * A card to display when there are no results
+ * Has the text No results centered in a text box with height 60 and 100% width
+ * @constructor
+ */
+const NoResultsCard = () => {
+  return (
+    <Box height={60} display={"flex"} justifyContent={"center"} alignItems={"center"} border={"1px solid grey"} borderRadius={1}>
+      <Typography>No results</Typography>
+    </Box>
+  )
 }
 
 export default CardList;

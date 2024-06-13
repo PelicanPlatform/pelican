@@ -19,14 +19,8 @@ import {Skeleton} from "@mui/material";
 import {Edit, Settings, Check, Clear} from "@mui/icons-material";
 import useSWR from "swr";
 import {getErrorMessage} from "@/helpers/util";
-
-interface Capabilities {
-    PublicReads: boolean;
-    Reads: boolean;
-    Writes: boolean;
-    Listings: boolean;
-    DirectReads: boolean;
-  }
+import type { Capabilities } from '@/index';
+import {CapabilitiesDisplay} from '@/components';
 
 type RegistrationStatus = "Not Supported" | "Completed" | "Incomplete" | "Registration Error"
 
@@ -107,39 +101,6 @@ export const DataExportStatus = (
     }
 }
 
-export const CapabilitiesTable = ({capabilities}: {capabilities: Capabilities}) => {
-
-    return (
-        <Box>
-            {Object.entries(capabilities).map(([key, value]) => {
-                return (
-                    <Tooltip title={value.toString()} key={key}>
-                        <Box
-                            sx={{
-                                borderRadius: 1,
-                                display: "flex",
-                                justifyContent: "space-between",
-                                py: .4,
-                                px: 1,
-                                mb: .2,
-                                backgroundColor: value ? green[200] : orange[200],
-                                border: "1px 1px solid black"
-                            }}
-                        >
-                            <Typography variant={"body2"}>
-                                {key}
-                            </Typography>
-                            <Box display={"flex"}>
-                                {value ? <Check fontSize="small" /> : <Clear fontSize="small" />}
-                            </Box>
-                        </Box>
-                    </Tooltip>
-                )
-            })}
-        </Box>
-    )
-}
-
 export const ValueLabel = ({value, label}: {value: string, label: string}) => {
 
     if(!value){
@@ -165,7 +126,7 @@ export const PosixDataExportCard = ({entry}: {entry: PosixExportEntry}) => {
                     <ValueLabel value={entry.sentinelLocation} label={"Sentinel Location"}/>
                 </Grid>
                 <Grid item xs={3}>
-                    <CapabilitiesTable {...entry}/>
+                    <CapabilitiesDisplay {...entry}/>
                 </Grid>
             </Grid>
         </Paper>
@@ -182,7 +143,7 @@ export const S3DataExportCard = ({entry}: {entry: S3ExportEntry}) => {
                     <ValueLabel value={entry.s3Bucket} label={"S3 Bucket"}/>
                 </Grid>
                 <Grid item xs={3}>
-                    <CapabilitiesTable {...entry}/>
+                    <CapabilitiesDisplay {...entry}/>
                 </Grid>
             </Grid>
         </Paper>
@@ -209,7 +170,7 @@ export const GlobusDataExportCard = ({entry}: {entry: GlobusExportEntry}) => {
                             </Link>
                         </Tooltip>
                     </Box>
-                    <CapabilitiesTable {...entry}/>
+                    <CapabilitiesDisplay {...entry}/>
                 </Grid>
             </Grid>
         </Paper>

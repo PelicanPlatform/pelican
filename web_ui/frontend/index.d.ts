@@ -18,12 +18,20 @@ export interface Server {
     "type": "Origin" | "Cache";
     "latitude": number;
     "longitude": number;
-    "enableWrite": boolean;
-    "enableFallbackRead": boolean;
+    "capabilities": Capabilities;
     "filtered": boolean;
     "filteredType": string;
-    "status": string;
+    "fromTopology": boolean;
+    "healthStatus": string;
     "namespacePrefixes": string[];
+}
+
+export interface Capabilities {
+    PublicReads: boolean;
+    Reads: boolean;
+    Writes: boolean;
+    Listings: boolean;
+    DirectReads: boolean;
 }
 
 export type StringTree = Record<string, StringTree | true>
@@ -37,7 +45,7 @@ export interface Namespace {
     id: number;
     prefix: string;
     pubkey: string;
-    type: "origin" | "cache";
+    type: "origin" | "cache" | "namespace";
     admin_metadata: NamespaceAdminMetadata;
     custom_fields?: Record<string, any>;
 }
