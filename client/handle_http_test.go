@@ -1281,7 +1281,7 @@ func TestGetCollectionsUrl(t *testing.T) {
 		handler := func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			err := json.NewEncoder(w).Encode(map[string]string{"error": "some server error"})
+			err := json.NewEncoder(w).Encode(map[string]string{"status": "error", "msg": "some server error"})
 			require.NoError(t, err)
 		}
 		server := httptest.NewServer(http.HandlerFunc(handler))

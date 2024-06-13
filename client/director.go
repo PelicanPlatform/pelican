@@ -158,7 +158,10 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 			log.Errorln("Failed to unmarshal the director's JSON response:", err)
 			return resp, unmarshalErr
 		}
-		errMsg = respErr.Msg
+		// In case we have old director returning "error": "message content"
+		if respErr.Msg != "" {
+			errMsg = respErr.Msg
+		}
 	}
 
 	// If we get a 404, the director will hopefully tell us why. It might be that the namespace doesn't exist
