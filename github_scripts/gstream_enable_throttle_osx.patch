@@ -1,0 +1,49 @@
+From e46da8edd35a1bc8699b53fc75a9791e99aec517 Mon Sep 17 00:00:00 2001
+From: Brian Bockelman <bbockelman@morgridge.org>
+Date: Wed, 15 May 2024 09:17:10 +0200
+Subject: [PATCH] Enable throttle manager timing on Mac OS X
+
+With the change to a POSIX-specified clock, all the needed functions
+are available in OS X.
+---
+ src/XrdThrottle/XrdThrottleManager.cc | 2 +-
+ src/XrdThrottle/XrdThrottleManager.hh | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/src/XrdThrottle/XrdThrottleManager.cc b/src/XrdThrottle/XrdThrottleManager.cc
+index 7c478aef0..d1daec7cc 100644
+--- a/src/XrdThrottle/XrdThrottleManager.cc
++++ b/src/XrdThrottle/XrdThrottleManager.cc
+@@ -18,7 +18,7 @@ XrdThrottleManager::TraceID = "ThrottleManager";
+ const
+ int XrdThrottleManager::m_max_users = 1024;
+
+-#if defined(__linux__) || defined(__GNU__) || (defined(__FreeBSD_kernel__) && defined(__GLIBC__))
++#if defined(__linux__) || defined(__APPLE__) || defined(__GNU__) || (defined(__FreeBSD_kernel__) && defined(__GLIBC__))
+ clockid_t XrdThrottleTimer::clock_id = CLOCK_MONOTONIC;
+ #else
+ int XrdThrottleTimer::clock_id = 0;
+diff --git a/src/XrdThrottle/XrdThrottleManager.hh b/src/XrdThrottle/XrdThrottleManager.hh
+index 53838758a..8d43a4123 100644
+--- a/src/XrdThrottle/XrdThrottleManager.hh
++++ b/src/XrdThrottle/XrdThrottleManager.hh
+@@ -167,7 +167,7 @@ public:
+ void StopTimer()
+ {
+    struct timespec end_timer = {0, 0};
+-#if defined(__linux__) || defined(__GNU__) || (defined(__FreeBSD_kernel__) && defined(__GLIBC__))
++#if defined(__linux__) || defined(__APPLE__) || defined(__GNU__) || (defined(__FreeBSD_kernel__) && defined(__GLIBC__))
+    int retval = clock_gettime(clock_id, &end_timer);
+ #else
+    int retval = -1;
+@@ -203,7 +203,7 @@ protected:
+ XrdThrottleTimer(XrdThrottleManager & manager) :
+    m_manager(manager)
+ {
+-#if defined(__linux__) || defined(__GNU__) || (defined(__FreeBSD_kernel__) && defined(__GLIBC__))
++#if defined(__linux__) || defined(__APPLE__) || defined(__GNU__) || (defined(__FreeBSD_kernel__) && defined(__GLIBC__))
+    int retval = clock_gettime(clock_id, &m_timer);
+ #else
+    int retval = -1;
+--
+2.39.3 (Apple Git-145)
