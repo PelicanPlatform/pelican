@@ -112,9 +112,9 @@ ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/m
 # until we can sort out the RPMs.
 # Ping the http plugin at a specific commit
 RUN \
-    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
+    git clone --recurse-submodules https://github.com/PelicanPlatform/xrootd-s3-http.git && \
     cd xrootd-s3-http && \
-    git checkout v0.1.2 && \
+    git checkout v0.1.3 && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
