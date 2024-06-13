@@ -1122,7 +1122,7 @@ func TestRedirects(t *testing.T) {
 			serverAds.DeleteAll()
 		})
 
-		topoServer := httptest.NewServer(http.HandlerFunc(JSONHandler))
+		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 		defer topoServer.Close()
 		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 		viper.Set("Director.CacheSortMethod", "random")
