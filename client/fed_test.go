@@ -26,6 +26,8 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -62,6 +64,9 @@ var (
 
 	//go:embed resources/pub-origin-no-directread.yml
 	pubOriginNoDirectRead string
+
+	//go:embed resources/test-https-origin.yml
+	httpsOriginConfig string
 )
 
 // Helper function to get a temporary token file
@@ -766,4 +771,146 @@ func TestNewTransferJob(t *testing.T) {
 		_, err = tc.NewTransferJob(context.Background(), remoteUrl, t.TempDir(), false, false)
 		assert.NoError(t, err)
 	})
+}
+
+// A test that spins up a federation, and tests object list
+func TestObjectList(t *testing.T) {
+	viper.Reset()
+	server_utils.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
+	defer viper.Reset()
+	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
+
+	// Other set-up items:
+	testFileContent := "test file content"
+	// Create the temporary file to upload
+	tempFile, err := os.CreateTemp(t.TempDir(), "test")
+	assert.NoError(t, err, "Error creating temp file")
+	defer os.Remove(tempFile.Name())
+	_, err = tempFile.WriteString(testFileContent)
+	assert.NoError(t, err, "Error writing to temp file")
+	tempFile.Close()
+
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+
+	// Create a token file
+	tokenConfig := token.NewWLCGToken()
+	tokenConfig.Lifetime = time.Minute
+	tokenConfig.Issuer = issuer
+	tokenConfig.Subject = "origin"
+	tokenConfig.AddAudienceAny()
+
+	scopes := []token_scopes.TokenScope{}
+	readScope, err := token_scopes.Storage_Read.Path("/")
+	assert.NoError(t, err)
+	scopes = append(scopes, readScope)
+	modScope, err := token_scopes.Storage_Modify.Path("/")
+	assert.NoError(t, err)
+	scopes = append(scopes, modScope)
+	tokenConfig.AddScopes(scopes...)
+	token, err := tokenConfig.CreateToken()
+	assert.NoError(t, err)
+	tempToken, err := os.CreateTemp(t.TempDir(), "token")
+	assert.NoError(t, err, "Error creating temp token file")
+	defer os.Remove(tempToken.Name())
+	_, err = tempToken.WriteString(token)
+	assert.NoError(t, err, "Error writing to temp token file")
+	tempToken.Close()
+	// Disable progress bars to not reuse the same mpb instance
+	viper.Set("Logging.DisableProgressBars", true)
+
+	// Make directories for test within origin exports
+	destDir1 := filepath.Join(fed.Exports[0].StoragePrefix, "test")
+	require.NoError(t, os.MkdirAll(destDir1, os.FileMode(0755)))
+	destDir2 := filepath.Join(fed.Exports[1].StoragePrefix, "test")
+	require.NoError(t, os.MkdirAll(destDir2, os.FileMode(0755)))
+
+	// This tests object ls with no flags set
+	t.Run("testPelicanObjectLsNoFlags", func(t *testing.T) {
+		for _, export := range fed.Exports {
+			listURL := fmt.Sprintf("pelican://%s:%d%s", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), export.FederationPrefix)
+			if export.Capabilities.PublicReads {
+				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(""))
+				require.NoError(t, err)
+				require.Len(t, get, 2)
+			} else {
+				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				require.Len(t, get, 2)
+			}
+		}
+	})
+
+	t.Run("testPelicanObjectLsNoTokForProtectedNs", func(t *testing.T) {
+		for _, export := range fed.Exports {
+			listURL := fmt.Sprintf("pelican://%s:%d%s", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), export.FederationPrefix)
+			if !export.Capabilities.PublicReads {
+				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(""))
+				require.Error(t, err)
+				assert.Len(t, get, 0)
+				assert.Contains(t, err.Error(), "failed to get token for transfer: failed to find or generate a token as required")
+
+				// No error if it's with token
+				get, err = client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				require.Len(t, get, 2)
+			} else {
+				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				require.Len(t, get, 2)
+			}
+		}
+	})
+
+	// Test we fail when we have an incorrect namespace
+	t.Run("testPelicanObjectLsFailWhenNamespaceIncorrect", func(t *testing.T) {
+		// set the prefix to /first instead of /first/namespace
+		federationPrefix := "/first/"
+		listURL := fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), federationPrefix)
+
+		_, err := client.DoList(fed.Ctx, listURL, nil, client.WithTokenLocation(tempToken.Name()))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "404: No namespace found for path. Either it doesn't exist, or the Director is experiencing problems")
+	})
+}
+
+// This tests object ls but for an origin that supports listings but with an object store that does not support PROPFIND.
+// We should get a 405 returned. This is a separate test since we need a completely different origin
+func TestObjectList405Error(t *testing.T) {
+	viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
+	server_utils.ResetOriginExports()
+	defer viper.Reset()
+	defer server_utils.ResetOriginExports()
+	err := config.InitClient()
+	require.NoError(t, err)
+
+	// Set up our http backend so that we can return a 405 on a PROPFIND
+	body := "Hello, World!"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" && r.URL.Path == "/test2/hello_world" {
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.WriteHeader(http.StatusOK)
+			return
+		} else if r.Method == "GET" && r.URL.Path == "/test2/hello_world" {
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.WriteHeader(http.StatusPartialContent)
+			_, err := w.Write([]byte(body))
+			require.NoError(t, err)
+			return
+		} else if r.Method == "PROPFIND" && r.URL.Path == "/test2/hello_world" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer srv.Close()
+	viper.Set("Origin.HttpServiceUrl", srv.URL+"/test2")
+
+	config.InitConfig()
+	fed := fed_test_utils.NewFedTest(t, httpsOriginConfig)
+	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
+
+	_, err = client.DoList(fed.Ctx, "pelican://"+host+"/test/hello_world")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "405: object listings are not supported by the specified origin")
 }
