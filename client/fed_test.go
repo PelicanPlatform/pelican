@@ -21,7 +21,6 @@
 package client_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
@@ -440,17 +439,6 @@ func TestGetPublicRead(t *testing.T) {
 	})
 }
 
-// A helper function to set up the TestObjectStat, gives us a buffer to capture stdout as well as our object to stat
-func setupStatTest(export server_utils.OriginExport) (statUrl string, r, w, stdout *os.File, buf *bytes.Buffer) {
-	statUrl = fmt.Sprintf("pelican://%s:%d%s/hello_world.txt", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), export.FederationPrefix)
-	// Create a pipe for output
-	r, w, _ = os.Pipe()
-	stdout = os.Stdout
-	os.Stdout = w
-	buf = new(bytes.Buffer)
-	return statUrl, r, w, stdout, buf
-}
-
 // A test that spins up a federation, and tests object stat
 func TestObjectStat(t *testing.T) {
 	viper.Reset()
@@ -497,7 +485,7 @@ func TestObjectStat(t *testing.T) {
 				got = *statInfo
 				require.NoError(t, err)
 			}
-			assert.Equal(t, uint64(13), got.Size)
+			assert.Equal(t, int64(13), got.Size)
 			assert.Equal(t, "hello_world.txt", got.Name)
 		}
 	})
@@ -509,11 +497,11 @@ func TestObjectStat(t *testing.T) {
 			if export.Capabilities.PublicReads {
 				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(""))
 				require.NoError(t, err)
-				assert.Equal(t, uint64(0), statInfo.Size)
+				assert.Equal(t, int64(0), statInfo.Size)
 			} else {
 				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(tempToken.Name()))
 				require.NoError(t, err)
-				assert.Equal(t, uint64(0), statInfo.Size)
+				assert.Equal(t, int64(0), statInfo.Size)
 			}
 		}
 	})
@@ -576,9 +564,9 @@ func TestObjectStat(t *testing.T) {
 		uploadURL := fmt.Sprintf("some://incorrect/scheme/%s", fileName)
 
 		// Stat the file
-		objectSize, err := client.DoStat(fed.Ctx, uploadURL)
+		objStat, err := client.DoStat(fed.Ctx, uploadURL)
 		assert.Error(t, err)
-		assert.Equal(t, uint64(0), objectSize)
+		assert.Nil(t, objStat)
 		assert.Contains(t, err.Error(), "Do not understand the destination scheme: some. Permitted values are file, osdf, pelican, stash, ")
 	})
 }
