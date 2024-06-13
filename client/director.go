@@ -161,6 +161,9 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 	} else if resp.StatusCode == http.StatusMethodNotAllowed && verb == "PROPFIND" {
 		// If we get a 405 with a PROPFIND, the client will handle it
 		return
+	} else if resp.StatusCode == http.StatusMultiStatus && verb == "PROPFIND" {
+		// This is a director >7.9 proxy the PROPFIND response instead of redirect to the origin
+		return
 	} else if resp.StatusCode != 307 {
 		var respErr directorResponse
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json

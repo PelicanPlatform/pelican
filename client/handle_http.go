@@ -56,6 +56,7 @@ import (
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -2433,15 +2434,33 @@ func getCollectionsUrl(ctx context.Context, remoteObjectUrl *url.URL, namespace 
 			// In that event, we can get the collections URL from our redirect
 			location := resp.Header.Get("Location")
 			if location == "" {
-				return nil, errors.New("collections URL not found in director response")
+				return nil, errors.New("collections URL not found in director response: Location header is missing in 307 response")
 			}
 			// The resp redirect includes the full path to the object from the origin, we are only interested in the scheme and host
 			collectionsUrl, err = url.Parse(location)
 			if err != nil {
+				return nil, errors.Wrap(err, "failed to parse collections URL from the Location header")
+			}
+			// We don't want anything in path for the collections url
+			collectionsUrl.Path = ""
+			return collectionsUrl, nil
+		} else if resp.StatusCode == http.StatusMultiStatus {
+			// In 7.10, we plan to proxy PROPFIND at the director for origins enabled connection broker,
+			// which will respond with 207 instead of redirect client to the origin.
+			// In this case, read from X-Pelican-Namespace header
+			pelicanNamespaceHdr := resp.Header.Values("X-Pelican-Namespace")
+			if len(pelicanNamespaceHdr) == 0 {
+				err = errors.New("collections URL not found in director response: X-Pelican-Namespace header is missing in 207 response")
 				return nil, err
 			}
-			collectionsUrl.Path = ""
-			namespace.DirListHost = collectionsUrl.String()
+			xPelicanNamespace := utils.HeaderParser(pelicanNamespaceHdr[0])
+			dirCollectionsUrl := xPelicanNamespace["collections-url"]
+
+			collectionsUrl, err = url.Parse(dirCollectionsUrl)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to parse collections URL from the X-Pelican-Namespace header")
+			}
+			return collectionsUrl, nil
 		} else {
 			return nil, errors.Errorf("unexpected response from director when requesting collections url from origin: %v", resp.Status)
 		}

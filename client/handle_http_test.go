@@ -1245,6 +1245,37 @@ func TestGetCollectionsUrl(t *testing.T) {
 		assert.Contains(t, err.Error(), "collections URL not found in director response")
 	})
 
+	// Test when director returns 200 with X-Pelican-Namespace header
+	t.Run("test207ResponseWPelicanNamespaceHeader", func(t *testing.T) {
+		expectedLocation := "https://example-origin.com"
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Pelican-Namespace", "namespace=federation, require-token=false, collections-url="+expectedLocation)
+			w.WriteHeader(http.StatusMultiStatus)
+		}
+		server := httptest.NewServer(http.HandlerFunc(handler))
+		defer server.Close()
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+
+		res, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		require.NoError(t, err)
+		assert.Equal(t, expectedLocation, res.String())
+	})
+
+	t.Run("test200ResponseWOPelicanNamespaceHeader", func(t *testing.T) {
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusMultiStatus)
+		}
+		server := httptest.NewServer(http.HandlerFunc(handler))
+		defer server.Close()
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+
+		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "collections URL not found in director response: X-Pelican-Namespace header is missing in 207 response")
+	})
+
 	// Test if failure to connect to director we handle that properly
 	t.Run("testDirectorFailedToConnect", func(t *testing.T) {
 		handler := func(w http.ResponseWriter, r *http.Request) {
