@@ -34,12 +34,9 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
-
-type directorResponse struct {
-	Error string `json:"error"`
-}
 
 // Given the Director response, create the ordered list of caches
 // and store it as namespace.SortedDirectorCaches
@@ -146,8 +143,7 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 	}
 
 	defer resp.Body.Close()
-	log.Traceln("Director's response:", resp)
-
+	log.Tracef("Director's response: %#v\n", resp)
 	// Check HTTP response -- should be 307 (redirect), else something went wrong
 	body, _ := io.ReadAll(resp.Body)
 
@@ -165,11 +161,15 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 		// This is a director >7.9 proxy the PROPFIND response instead of redirect to the origin
 		return
 	} else if resp.StatusCode != 307 {
-		var respErr directorResponse
+		contentType := req.Header.Get("Content-Type")
+		if contentType != "application/json" {
+			return nil, errors.New(string(body))
+		}
+		var respErr server_structs.SimpleApiResp
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			return nil, errors.Wrap(unmarshalErr, "Could not unmarshall the director's response")
 		}
-		return resp, errors.New(respErr.Error)
+		return resp, errors.New(respErr.Msg)
 	}
 
 	return

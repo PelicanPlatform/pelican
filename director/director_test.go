@@ -789,8 +789,10 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 
 	mockNamespaceAd := server_structs.NamespaceAdV2{
-		PublicRead: false,
-		Path:       "/foo/bar/",
+		Caps: server_structs.Capabilities{
+			PublicReads: false,
+		},
+		Path: "/foo/bar/",
 		Issuer: []server_structs.TokenIssuer{{
 			BasePaths: []string{""},
 			IssuerUrl: url.URL{},

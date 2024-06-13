@@ -48,8 +48,10 @@ const (
 
 var (
 	// The in-memory cache of xrootd server advertisement, with the key being ServerAd.URL.String()
-	serverAds            = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
-	filteredServers      = map[string]filterType{} // The map holds servers that are disabled, with the key being the ServerAd.Name
+	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
+	// The map holds servers that are disabled, with the key being the ServerAd.Name
+	// The map should be idenpendent of serverAds as we want to persist this change in-memory, regardless of the presence of the serverAd
+	filteredServers      = map[string]filterType{}
 	filteredServersMutex = sync.RWMutex{}
 )
 
@@ -70,7 +72,13 @@ func (f filterType) String() string {
 	}
 }
 
-func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) {
+// recordAd does following for an incoming ServerAd and []NamespaceAdV2 pair:
+//
+// 1. Update the ServerAd by setting server location and updating server topology attribute
+// 2. Record the ServerAd and NamespaceAdV2 to the TTL cache
+// 3. Set up the server `stat` call utilities
+// 4. Return the updated ServerAd. The ServerAd passed in will not be modified
+func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) (updatedAd server_structs.ServerAd) {
 	if err := updateLatLong(&ad); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
 	}
@@ -120,7 +128,7 @@ func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]s
 		serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: *namespaceAds}, customTTL)
 	}
 
-	// Prepare `stat` call utilities
+	// Prepare `stat` call utilities for all servers regardless of its source (topology or Pelican)
 	statUtilsMutex.Lock()
 	defer statUtilsMutex.Unlock()
 	statUtil, ok := statUtils[ad.URL.String()]
@@ -140,6 +148,74 @@ func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]s
 		}
 		statUtils[ad.URL.String()] = newUtil
 	}
+
+	// Prepare and launch the director file transfer tests to the origins/caches if it's not from the topology AND it's not already been registered
+	healthTestUtilsMutex.Lock()
+	defer healthTestUtilsMutex.Unlock()
+	if ad.FromTopology {
+		return ad
+	}
+
+	if existingUtil, ok := healthTestUtils[ad.URL.String()]; ok {
+		// Existing registration
+		if existingUtil != nil {
+			if existingUtil.ErrGrp != nil {
+				if existingUtil.ErrGrpContext.Err() != nil {
+					// ErrGroup has been Done. Start a new one
+					errgrp, errgrpCtx := errgroup.WithContext(ctx)
+					cancelCtx, cancel := context.WithCancel(errgrpCtx)
+
+					errgrp.SetLimit(1)
+					healthTestUtils[ad.URL.String()] = &healthTestUtil{
+						Cancel:        cancel,
+						ErrGrp:        errgrp,
+						ErrGrpContext: errgrpCtx,
+						Status:        HealthStatusInit,
+					}
+					errgrp.Go(func() error {
+						LaunchPeriodicDirectorTest(cancelCtx, ad)
+						return nil
+					})
+					log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(ad.Type), ad.URL.String())
+				} else {
+					cancelCtx, cancel := context.WithCancel(existingUtil.ErrGrpContext)
+					started := existingUtil.ErrGrp.TryGo(func() error {
+						LaunchPeriodicDirectorTest(cancelCtx, ad)
+						return nil
+					})
+					if !started {
+						cancel()
+						log.Debugf("New director test suite blocked for %s %s, existing test has been running", string(ad.Type), ad.URL.String())
+					} else {
+						log.Debugf("New director test suite issued for %s %s. Existing registration", string(ad.Type), ad.URL.String())
+						existingUtil.Cancel()
+						existingUtil.Cancel = cancel
+					}
+				}
+			} else {
+				log.Errorf("%s %s registration didn't start a new director test cycle: errgroup is nil", string(ad.Type), &ad.URL)
+			}
+		} else {
+			log.Errorf("%s %s registration didn't start a new director test cycle: healthTestUtils item is nil", string(ad.Type), &ad.URL)
+		}
+	} else { // No healthTestUtils found, new registration
+		errgrp, errgrpCtx := errgroup.WithContext(ctx)
+		cancelCtx, cancel := context.WithCancel(errgrpCtx)
+
+		errgrp.SetLimit(1)
+		healthTestUtils[ad.URL.String()] = &healthTestUtil{
+			Cancel:        cancel,
+			ErrGrp:        errgrp,
+			ErrGrpContext: errgrpCtx,
+			Status:        HealthStatusInit,
+		}
+		errgrp.Go(func() error {
+			LaunchPeriodicDirectorTest(cancelCtx, ad)
+			return nil
+		})
+	}
+
+	return ad
 }
 
 func updateLatLong(ad *server_structs.ServerAd) error {

@@ -32,6 +32,26 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
+// Consolite two ServerAds that share the same ServerAd.URL. For all but the capability fields,
+// the existing ServerAds takes precedence. For capability fields, an OR is made between two ads
+// to get a union of permissions.
+func consolidateDupServerAd(newAd, existingAd server_structs.ServerAd) server_structs.ServerAd {
+	consolidatedAd := existingAd
+
+	// Update new serverAd capabilities by taking the OR operation so that it's more permissive
+	consolidatedAd.Caps.DirectReads = existingAd.Caps.DirectReads || newAd.Caps.DirectReads
+	consolidatedAd.Caps.PublicReads = existingAd.Caps.PublicReads || newAd.Caps.PublicReads
+	consolidatedAd.Caps.Reads = existingAd.Caps.Reads || newAd.Caps.Reads
+	consolidatedAd.Caps.Writes = existingAd.Caps.Writes || newAd.Caps.Writes
+	consolidatedAd.Caps.Listings = existingAd.Caps.Listings || newAd.Caps.Listings
+
+	consolidatedAd.DirectReads = existingAd.DirectReads || newAd.DirectReads
+	consolidatedAd.Writes = existingAd.Writes || newAd.Writes
+	consolidatedAd.Listings = existingAd.Listings || newAd.Listings
+
+	return consolidatedAd
+}
+
 // Takes in server information from topology and handles converting the necessary bits into a new Pelican
 // ServerAd.
 func parseServerAdFromTopology(server utils.Server, serverType server_structs.ServerType, caps server_structs.Capabilities) server_structs.ServerAd {
@@ -157,8 +177,8 @@ func AdvertiseOSDF(ctx context.Context) error {
 
 	updateDowntimeFromTopology(namespaces, includedNss)
 
-	cacheAdMap := make(map[server_structs.ServerAd][]server_structs.NamespaceAdV2)
-	originAdMap := make(map[server_structs.ServerAd][]server_structs.NamespaceAdV2)
+	cacheAdMap := make(map[string]*server_structs.Advertisement)  // key is serverAd.URL.String()
+	originAdMap := make(map[string]*server_structs.Advertisement) // key is serverAd.URL.String()
 	tGen := server_structs.TokenGen{}
 	for _, ns := range namespaces.Namespaces {
 		requireToken := ns.UseTokenOnRead
@@ -218,7 +238,7 @@ func AdvertiseOSDF(ctx context.Context) error {
 		}
 		nsAd := server_structs.NamespaceAdV2{
 			Path:         ns.Path,
-			PublicRead:   !ns.UseTokenOnRead,
+			PublicRead:   caps.PublicReads,
 			Caps:         caps,
 			Generation:   []server_structs.TokenGen{tGen},
 			Issuer:       tokenIssuers,
@@ -235,21 +255,35 @@ func AdvertiseOSDF(ctx context.Context) error {
 		// and namespaces, so this isn't true outside this limited context.
 		for _, origin := range ns.Origins {
 			originAd := parseServerAdFromTopology(origin, server_structs.OriginType, caps)
-			originAdMap[originAd] = append(originAdMap[originAd], nsAd)
+			if existingAd, ok := originAdMap[originAd.URL.String()]; ok {
+				existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
+				consolidatedAd := consolidateDupServerAd(originAd, existingAd.ServerAd)
+				existingAd.ServerAd = consolidatedAd
+			} else {
+				// New entry
+				originAdMap[originAd.URL.String()] = &server_structs.Advertisement{ServerAd: originAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+			}
 		}
 
 		for _, cache := range ns.Caches {
 			cacheAd := parseServerAdFromTopology(cache, server_structs.CacheType, server_structs.Capabilities{})
-			cacheAdMap[cacheAd] = append(cacheAdMap[cacheAd], nsAd)
+			if existingAd, ok := originAdMap[cacheAd.URL.String()]; ok {
+				existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
+				consolidatedAd := consolidateDupServerAd(cacheAd, existingAd.ServerAd)
+				existingAd.ServerAd = consolidatedAd
+			} else {
+				// New entry
+				cacheAdMap[cacheAd.URL.String()] = &server_structs.Advertisement{ServerAd: cacheAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+			}
 		}
 	}
 
-	for originAd, namespacesSlice := range originAdMap {
-		recordAd(ctx, originAd, &namespacesSlice)
+	for _, ad := range originAdMap {
+		recordAd(ctx, ad.ServerAd, &ad.NamespaceAds)
 	}
 
-	for cacheAd, namespacesSlice := range cacheAdMap {
-		recordAd(ctx, cacheAd, &namespacesSlice)
+	for _, ad := range cacheAdMap {
+		recordAd(ctx, ad.ServerAd, &ad.NamespaceAds)
 	}
 
 	return nil

@@ -39,21 +39,20 @@ type (
 	}
 
 	listServerResponse struct {
-		Name              string                    `json:"name"`
-		AuthURL           string                    `json:"authUrl"`
-		BrokerURL         string                    `json:"brokerUrl"`
-		URL               string                    `json:"url"`    // This is server's XRootD URL for file transfer
-		WebURL            string                    `json:"webUrl"` // This is server's Web interface and API
-		Type              server_structs.ServerType `json:"type"`
-		Latitude          float64                   `json:"latitude"`
-		Longitude         float64                   `json:"longitude"`
-		Writes            bool                      `json:"enableWrite"`
-		DirectReads       bool                      `json:"enableFallbackRead"`
-		Listings          bool                      `json:"enableListing"`
-		Filtered          bool                      `json:"filtered"`
-		FilteredType      string                    `json:"filteredType"`
-		Status            HealthTestStatus          `json:"status"`
-		NamespacePrefixes []string                  `json:"namespacePrefixes"`
+		Name              string                      `json:"name"`
+		AuthURL           string                      `json:"authUrl"`
+		BrokerURL         string                      `json:"brokerUrl"`
+		URL               string                      `json:"url"`    // This is server's XRootD URL for file transfer
+		WebURL            string                      `json:"webUrl"` // This is server's Web interface and API
+		Type              server_structs.ServerType   `json:"type"`
+		Latitude          float64                     `json:"latitude"`
+		Longitude         float64                     `json:"longitude"`
+		Caps              server_structs.Capabilities `json:"capabilities"`
+		Filtered          bool                        `json:"filtered"`
+		FilteredType      string                      `json:"filteredType"`
+		FromTopology      bool                        `json:"fromTopology"`
+		HealthStatus      HealthTestStatus            `json:"healthStatus"`
+		NamespacePrefixes []string                    `json:"namespacePrefixes"`
 	}
 
 	statRequest struct {
@@ -104,9 +103,11 @@ func listServers(ctx *gin.Context) {
 	resList := make([]listServerResponse, 0)
 	for _, server := range servers {
 		healthStatus := HealthStatusUnknown
-		healthUtil, ok := healthTestUtils[server.ServerAd]
+		healthUtil, ok := healthTestUtils[server.URL.String()]
 		if ok {
 			healthStatus = healthUtil.Status
+		} else {
+			log.Debugf("listServers: healthTestUtils not found for server at %s", server.URL.String())
 		}
 		filtered, ft := checkFilter(server.Name)
 		var auth_url string
@@ -124,12 +125,11 @@ func listServers(ctx *gin.Context) {
 			Type:         server.Type,
 			Latitude:     server.Latitude,
 			Longitude:    server.Longitude,
-			Writes:       server.Writes,
-			DirectReads:  server.DirectReads,
-			Listings:     server.Listings,
+			Caps:         server.Caps,
 			Filtered:     filtered,
 			FilteredType: ft.String(),
-			Status:       healthStatus,
+			FromTopology: server.FromTopology,
+			HealthStatus: healthStatus,
 		}
 		for _, ns := range server.NamespaceAds {
 			res.NamespacePrefixes = append(res.NamespacePrefixes, ns.Path)

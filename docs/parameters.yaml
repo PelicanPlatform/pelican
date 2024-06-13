@@ -30,6 +30,23 @@ default: "~/.config/pelican"
 components: ["*"]
 type: filename
 ---
+name: ConfigLocations
+description: |+
+  `ConfigLocations` provides administrators a way to define a list of directories containing Pelican configuration files. Within a given directory,
+  files are read in lexicographical order, and any keys that are defined in multiple files will take the value from the last file read. Directories are
+  read in the order provided by the list. For example, specifying:
+
+  `ConfigLocations: ["/configs1", "/configs2"]`
+
+  will read files first from `/configs1` and then from `/configs2`. If a key is defined in both `/configs1`
+  and `/configs2`, the value from `/configs2` will be used. If `/configs1` contains files `a.yaml` and `b.yaml` where both define the same key, the value
+  from `b.yaml` will be used.
+
+  Subdirectories of the provided directories are not read. Only the root config file's `ConfigLocations` key is used, and any redefinitions are ignored.
+type: stringSlice
+default: none
+components: ["*"]
+---
 name: Debug
 description: |+
   A bool indicating whether Pelican should emit debug messages in its log.
@@ -193,7 +210,7 @@ default: info
 components: ["origin"]
 ---
 name: Logging.Origin.Http
-description: >-
+description: |+
   Logging level for the HTTP component of the origin. Increasing to debug will cause the Xrootd daemon to log.
   Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
   all headers and requests.
@@ -202,7 +219,7 @@ default: error
 components: ["origin"]
 ---
 name: Logging.Origin.Ofs
-description: >-
+description: |+
   Logging level of Xrootd's "Open File System" (ofs) subsystem.  The OFS manages the file descriptor table and redirection/
   error handling. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
@@ -210,7 +227,7 @@ default: error
 components: ["origin"]
 ---
 name: Logging.Origin.Oss
-description: >-
+description: |+
   Logging level of Xrootd's "Open Storage System" (oss) subsystem.  The OSS manages the interaction with the underlying
   POSIX storage (open, read, write, close, etc). Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
@@ -218,7 +235,7 @@ default: error
 components: ["origin"]
 ---
 name: Logging.Cache.Http
-description: >-
+description: |+
   Logging level for the HTTP component of the cache.  Increasing to debug will cause the Xrootd daemon to log
   all headers and requests. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
@@ -435,6 +452,14 @@ hidden: true
 ############################
 #   Origin-level Configs   #
 ############################
+name: Origin.DbLocation
+description: |+
+  A filepath to the intended location of the origin's database.
+type: filename
+root_default: /var/lib/pelican/origin.sqlite
+default: $ConfigBase/origin.sqlite
+components: ["origin"]
+---
 name: Origin.Url
 description: |+
   The origin's configured URL, as reported to XRootD. This is the file transfer endpoint for the origin.
@@ -465,8 +490,9 @@ description: |+
 
       You should always choose a distinct name for `SentinelLocation`. It should not be reused for other servers.
       If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
-      You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`. Note that this parameter will be ignored
-      if the origin StorageType is S3.
+      You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`.
+
+      Note that this parameter is only available for the POSIX backend.
 
     Example:
 
@@ -478,10 +504,14 @@ description: |+
         SentinelLocation: demoproject_origin_A
     ```
 
-  There are additional configuration fields if Origin.StorageType == "s3".
+  If Origin.StorageType == "s3", the following additional fields are available:
   - S3Bucket: [OPTIONAL] See `Origin.S3Bucket` for details
   - S3AccessKeyfile: [OPTIONAL] See `Origin.S3AccessKeyfile` for details
   - S3SecretKeyfile: [OPTIONAL] See `Origin.S3SecretKeyfile` for details
+
+  If Origin.StorageType == "globus", the following additional fields are available:
+  - GlobusCollectionID: [REQUIRED] See `Origin.GlobusCollectionID` for details
+  - GlobusCollectionName: [OPTIONAL] See `Origin.GlobusCollectionName` for details
 
 type: object
 default: none
@@ -489,7 +519,7 @@ components: ["origin"]
 ---
 name: Origin.StorageType
 description: |+
-  The type of storage underpinning the origin. Currently supported types are "posix", "https", "s3", and "xroot".
+  The type of storage underpinning the origin. Currently supported types are "posix", "https", "s3", "globus", and "xroot".
 type: string
 default: "posix"
 components: ["origin"]
@@ -650,6 +680,13 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.EnableMacaroons
+description: |+
+  A bool indicating whether the origin allows clients to authenticate using macaroons.
+type: bool
+default: false
+components: ["origin"]
+---
 name: Origin.SelfTest
 description: |+
   A bool indicating whether the origin should perform self health checks.
@@ -672,7 +709,7 @@ default: true
 components: ["origin"]
 ---
 name: Origin.EnableOIDC
-description: >-
+description: |+
   Indicate whether the origin should allow users to login to the admin website via OAuth2/OIDC with third-party
   authentication providers such as CILogon.
 
@@ -861,7 +898,7 @@ default: path
 components: ["origin"]
 ---
 name: Origin.HttpServiceUrl
-description: >-
+description: |+
   If Origin.StorageType is set to `https`, the service URL is used as the base for requests to the backend.  To generate the
   request, the Origin.FederationPrefix is removed from the object name, then the result is joined with the service URL.
   For example, if one sets `Origin.HTTPServiceUrl=https://example.com/testfiles` and `Origin.FederationPrefix=/foo`, then a request
@@ -871,11 +908,70 @@ default: none
 components: ["origin"]
 ---
 name: Origin.XRootServiceUrl
-description: >-
+description: |+
  When the origin is configured to export another XRootD storage backend by setting `Origin.StorageType = xroot`, the `XRootServiceUrl`
  is used as the base for `root` protocol requests and should point at the upstream XRootD server.
 type: string
 default: none
+components: ["origin"]
+---
+name: Origin.GlobusCollectionID
+description: |+
+ **Note**: This value is only for setting up an origin that exports **one** Globus collection. For multiple exports, use `Origin.Exports`
+
+ Required if `Origin.StorageType == "globus"` AND `Origin.Exports` is not set.
+
+ Globus stores objects in [Collections](https://docs.globus.org/guides/overviews/collections-and-endpoints/#collection).
+ The unique identifier of a Collection is the Collection UUID.
+ You can find the Collection UUID at the bottom of your Collection's overview page.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.GlobusCollectionName
+description: |+
+ **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+
+ An optional human-readable name to describe the Collection. This should set to the "Display Name" of your Collection in Globus.
+ It is recommended to set this name; otherwise the UUID will be used as the Collection name.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.GlobusClientIDFile
+description: |+
+  Required if `Origin.StorageType == "globus"` and `OIDC.Issuer` is not Globus
+
+  A filepath to the file containing the Globus ClientID. You need to create a new project and
+  register a new confidential OAuth client: https://app.globus.org/settings/developers/registration/confidential_client/select-project
+  Once registered, in the client page, find "Client UUID" and copy it to a file.
+
+  If the server uses Globus as the OIDC authentication provider, Pelican will use OIDC configuration
+  for Globus storage access.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.GlobusClientSecretFile
+description: |+
+  Required if `Origin.StorageType == "globus"` and `OIDC.Issuer` is not Globus
+
+  A filepath to the file containing the Globus ClientID. You need to create a new project and
+  register a new confidential OAuth client following the instruction in `Origin.GlobusClientIDFile`.
+  In the client page, you need to "Add Client Secret" and copy the secret to a file.
+
+  If the server uses Globus as the OIDC authentication provider, Pelican will use OIDC configuration
+  for Globus storage access.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.GlobusConfigLocation
+description: |+
+  A filepath to the folder containing Globus config and access tokens
+type: filename
+root_default: /run/pelican/xrootd/origin/globus
+default: $XDG_RUNTIME_DIR/pelican/xrootd/origin/globus
 components: ["origin"]
 ---
 ############################
@@ -1096,7 +1192,7 @@ default: 15s
 components: ["cache"]
 ---
 name: Cache.EnableOIDC
-description: >-
+description: |+
   Indicate whether the cache should allow users to login to the admin website via OAuth2/OIDC with third-party
   authentication providers such as CILogon.
 
@@ -1254,7 +1350,7 @@ default: none
 components: ["director"]
 ---
 name: Director.EnableOIDC
-description: >-
+description: |+
   Indicate whether the director should allow users to login to the admin website via OAuth2/OIDC with third-party
   authentication providers such as CILogon.
 
@@ -1593,7 +1689,7 @@ default: "$ConfigBase/web-config.yaml"
 components: ["*"]
 ---
 name: Server.UIAdminUsers
-description: >-
+description: |+
   A string slice of "subject" claim of users to give admin permission for the server admin website,
   who are authenticated through OAuth/OIDC.
 
@@ -1888,7 +1984,7 @@ replacedby: ["Cache.RunLocation", "Origin.RunLocation"]
 components: ["origin", "cache"]
 ---
 name: Xrootd.ConfigFile
-description: >-
+description: |+
   The _absolute_ path to an XRootD configuration file for customized XRootD configuration. This should only be used by admins with
   experience in configuring XRootD directly.
 
@@ -1952,6 +2048,13 @@ type: url
 default: none
 components: ["origin", "cache"]
 ---
+name: Xrootd.ManagerPort
+description: |+
+  The port at which the XRootD instance's Manager Host is available.
+type: int
+default: 1213
+components: ["origin", "cache"]
+---
 name: Xrootd.SummaryMonitoringHost
 description: |+
   A URL pointing toward the XRootD instance's Summary Monitoring Host.
@@ -1959,11 +2062,25 @@ type: url
 default: none
 components: ["origin", "cache"]
 ---
+name: Xrootd.SummaryMonitoringPort
+description: |+
+  The port at which the XRootD instance's Summary Monitoring Host is available.
+type: int
+default: 9931
+components: ["origin", "cache"]
+---
 name: Xrootd.DetailedMonitoringHost
 description: |+
   A URL pointing toward the XRootD instance's Detailed Monitoring Host.
 type: url
 default: none
+components: ["origin", "cache"]
+---
+name: Xrootd.DetailedMonitoringPort
+description: |+
+  The port at which the XRootD instance's Detailed Monitoring Host is available.
+type: int
+default: 9930
 components: ["origin", "cache"]
 ---
 name: Xrootd.LocalMonitoringHost
