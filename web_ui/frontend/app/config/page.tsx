@@ -41,12 +41,13 @@ import {
     AssistantDirection,
     QuestionMark,
     TripOrigin,
-    Cached
+    Cached,
+    Download
 } from '@mui/icons-material';
 import {default as NextLink} from "next/link";
 import useSWR from "swr";
 import {merge, isMatch} from "lodash"
-
+import * as yaml from "js-yaml"
 import {Sidebar} from "@/components/layout/Sidebar";
 import {Main} from "@/components/layout/Main";
 import {Field} from "@/components/Config";
@@ -57,13 +58,257 @@ import StatusSnackBar, {StatusSnackBarProps} from "@/components/StatusSnackBar";
 import {useRouter} from "next/navigation";
 import {ServerType} from "@/index";
 import {getEnabledServers} from "@/helpers/util";
+import DownloadButton from "@/components/DownloadButton";
 
+function Config() {
+
+    const router = useRouter()
+
+    const [status, setStatus] = useState<StatusSnackBarProps|undefined>(undefined)
+    const [config, setConfig] = useState<Config | undefined>(undefined)
+
+    // Config state managers
+    const [configKey, setConfigKey] = useState<number>(0)
+
+    const [patch, setPatch] = useState<any>({})
+
+    let onChange = (fieldPatch: any) => {
+        const newPatch = merge(patch, fieldPatch)
+        setPatch(structuredClone(newPatch))
+    }
+
+    const {data: enabledServers} = useSWR<ServerType[]>("getEnabledServers", getEnabledServers, {
+        fallbackData: ["origin", "registry", "director"]
+    })
+    const {data: configMetadata} = useSWR<ConfigMetadata | undefined>("getConfigMetadata", getConfigMetadata)
+
+    const getConfig = async () => {
+        let response = await fetch("/api/v1.0/config")
+        if(response.ok){
+            const data = await response.json()
+            setConfig(data)
+            setStatus(undefined)
+            setConfigKey(configKey + 1)
+        } else {
+            setConfig(undefined)
+            if(response.status === 401){
+                setStatus({
+                    severity: "error",
+                    message: "Unauthorized",
+                    action: {
+                        label: "Login",
+                        onClick: () => router.push("/login/?returnURL=/view/config/")
+                    }
+                })
+            }
+            setTimeout(getConfig, 2000)
+        }
+    }
+
+    useEffect(() => {
+        getConfig()
+    }, [])
+
+    const filteredConfig = useMemo(() => {
+
+        if(!config) {
+            return undefined
+        }
+
+        if(!enabledServers || !configMetadata) {
+            return config
+        }
+
+        // Filter out the inactive config values
+        const filteredConfig: Config = structuredClone(config)
+        Object.entries(configMetadata).forEach(([key, value]) => {
+
+            if([...enabledServers, "*"].filter(i => value.components.includes(i)).length === 0) {
+                deleteKey(filteredConfig, key.split("."))
+            } else {
+                updateValue(filteredConfig, key.split("."), configMetadata[key])
+            }
+        })
+
+        // Filter out read-only values
+        deleteKey(filteredConfig, ["ConfigDir"])
+
+        return filteredConfig
+
+    }, [config, enabledServers, configMetadata])
+
+    return (
+        <>
+            <Sidebar>
+                {enabledServers && enabledServers.includes("origin") &&
+                    <Box pt={1}>
+                        <NextLink href={"/origin/"}>
+                            <Tooltip title={"Origin"} placement={"right"}>
+                                <IconButton>
+                                    <TripOrigin/>
+                                </IconButton>
+                            </Tooltip>
+                        </NextLink>
+                    </Box>
+                }
+                {enabledServers && enabledServers.includes("director") &&
+                    <Box pt={1}>
+                        <NextLink href={"/director/"}>
+                            <Tooltip title={"Director"} placement={"right"}>
+                                <IconButton>
+                                    <AssistantDirection/>
+                                </IconButton>
+                            </Tooltip>
+                        </NextLink>
+                    </Box>
+                }
+                {enabledServers && enabledServers.includes("registry") &&
+                    <Box pt={1}>
+                        <NextLink href={"/registry/"}>
+                            <Tooltip title={"Registry"} placement={"right"}>
+                                <IconButton>
+                                    <AppRegistration/>
+                                </IconButton>
+                            </Tooltip>
+                        </NextLink>
+                    </Box>
+                }
+                {enabledServers && enabledServers.includes("cache") &&
+                    <Box pt={1}>
+                        <NextLink href={"/cache/"}>
+                            <Tooltip title={"Cache"} placement={"right"}>
+                                <IconButton>
+                                    <Cached/>
+                                </IconButton>
+                            </Tooltip>
+                        </NextLink>
+                    </Box>
+                }
+            </Sidebar>
+            <Main>
+                <Container maxWidth={"xl"}>
+                    <Box width={"100%"}>
+                        <Grid container spacing={2}>
+                            <Grid item xs={7} md={8} lg={6}>
+                                <Box display={"flex"} flexDirection={"row"}>
+                                    <Typography variant={"h4"} component={"h2"} mb={1}>Configuration</Typography>
+                                    {
+                                        config &&
+                                        <Box ml={2}>
+                                            <DownloadButton
+                                                Button={IconButton}
+                                                mimeType={"text/yaml"}
+                                                data={yaml.dump(stripNulls(stripTypes(structuredClone(config))))}
+                                            >
+                                                <Download/>
+                                            </DownloadButton>
+                                        </Box>
+                                    }
+                                </Box>
+                            </Grid>
+                            <Grid  item xs={5} md={4} lg={3}></Grid>
+                            <Grid item xs={12} md={8} lg={6}>
+                                <form>
+                                    {
+                                        filteredConfig === undefined ?
+                                            <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
+                                            <ConfigDisplay key={configKey.toString()} id={[]} name={""} value={filteredConfig} level={4} onChange={onChange}/>
+                                    }
+                                </form>
+                                <Snackbar
+                                    anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                                    open={!isMatch(config === undefined ? {} : config, patch)}
+                                    message="Save Changes"
+                                    action={
+                                        <Box>
+                                            <Button
+                                                onClick={async () => {
+                                                    try {
+                                                        await submitConfigChange(patch)
+                                                        setPatch({})
+                                                        setStatus({message: "Changes Saved, Restarting Server"})
+                                                        setTimeout(getConfig, 3000)
+                                                    } catch (e) {
+                                                        setStatus({
+                                                            severity: "error",
+                                                            message: (e as string).toString()
+                                                        })
+                                                    }
+                                                }}
+                                            >
+                                                Save
+                                            </Button>
+                                            <Button
+                                                onClick={() => {
+                                                    setPatch({})
+                                                    getConfig()
+                                                }}
+                                            >
+                                                Clear
+                                            </Button>
+                                        </Box>
+                                    }
+                                />
+                                {
+                                    status &&
+                                    <StatusSnackBar key={status.message} {...status} />
+                                }
+                            </Grid>
+                            <Grid item xs={12} md={4} lg={3} display={{ xs: "none", md: "block"}}>
+                                {
+                                    filteredConfig === undefined ?
+                                        <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
+                                        <Box pt={2}><TableOfContents id={[]} name={""} value={filteredConfig} level={1}/></Box>
+                                }
+                            </Grid>
+                        </Grid>
+                    </Box>
+                </Container>
+            </Main>
+        </>
+    )
+}
+
+/**
+ * Recursively replace all objects of type { Type: any, Value: any } with the value of Value
+ * @param config
+ */
+const stripTypes = (config: any) => {
+
+    if(config?.Value !== undefined && config?.Type !== undefined){
+        return config.Value
+    }
+
+    Object.keys(config).forEach(key => {
+        config[key] = stripTypes(config[key])
+    })
+
+    return config
+}
+
+/** Recursively delete the keys that have null values in an object */
+const stripNulls = (config: any) => {
+
+    // If the config is an object then iterate keys otherwise skip
+    if(typeof config !== "object"){
+        return config
+    }
+
+    Object.keys(config).forEach(key => {
+        if(config[key] === null){
+            delete config[key]
+        } else {
+            config[key] = stripNulls(config[key])
+        }
+    })
+
+    return config
+}
 
 const isConfig = (value: ParameterInputProps | Config): boolean => {
     const isConfig = (value as Config)?.Type === undefined
     return isConfig
 }
-
 
 function sortConfig (a: [string, ParameterInputProps | Config], b: [string, ParameterInputProps | Config]) {
 
@@ -253,201 +498,6 @@ function TableOfContents({id, name, value, level = 1}: TableOfContentsProps) {
                 </Box> :
                 subContents
             }
-        </>
-    )
-}
-
-function Config() {
-
-    const router = useRouter()
-
-    const [status, setStatus] = useState<StatusSnackBarProps|undefined>(undefined)
-    const [config, setConfig] = useState<Config | undefined>(undefined)
-
-    // Config state managers
-    const [configKey, setConfigKey] = useState<number>(0)
-
-    const [patch, setPatch] = useState<any>({})
-
-    let onChange = (fieldPatch: any) => {
-        const newPatch = merge(patch, fieldPatch)
-        setPatch(structuredClone(newPatch))
-    }
-
-    const {data: enabledServers} = useSWR<ServerType[]>("getEnabledServers", getEnabledServers, {
-        fallbackData: ["origin", "registry", "director"]
-    })
-    const {data: configMetadata} = useSWR<ConfigMetadata | undefined>("getConfigMetadata", getConfigMetadata)
-
-    const getConfig = async () => {
-        let response = await fetch("/api/v1.0/config")
-        if(response.ok){
-            const data = await response.json()
-            setConfig(data)
-            setStatus(undefined)
-            setConfigKey(configKey + 1)
-        } else {
-            setConfig(undefined)
-            if(response.status === 401){
-                setStatus({
-                    severity: "error",
-                    message: "Unauthorized",
-                    action: {
-                        label: "Login",
-                        onClick: () => router.push("/login/?returnURL=/view/config/")
-                    }
-                })
-            }
-            setTimeout(getConfig, 2000)
-        }
-    }
-
-    useEffect(() => {
-        getConfig()
-    }, [])
-
-    const filteredConfig = useMemo(() => {
-
-        if(!config) {
-            return undefined
-        }
-
-        if(!enabledServers || !configMetadata) {
-            return config
-        }
-
-        // Filter out the inactive config values
-        const filteredConfig: Config = structuredClone(config)
-        Object.entries(configMetadata).forEach(([key, value]) => {
-
-            if([...enabledServers, "*"].filter(i => value.components.includes(i)).length === 0) {
-                deleteKey(filteredConfig, key.split("."))
-            } else {
-                updateValue(filteredConfig, key.split("."), configMetadata[key])
-            }
-        })
-
-        // Filter out read-only values
-        deleteKey(filteredConfig, ["ConfigDir"])
-
-        return filteredConfig
-
-    }, [config, enabledServers, configMetadata])
-
-    return (
-        <>
-            <Sidebar>
-                {enabledServers && enabledServers.includes("origin") &&
-                    <Box pt={1}>
-                        <NextLink href={"/origin/"}>
-                            <Tooltip title={"Origin"} placement={"right"}>
-                                <IconButton>
-                                    <TripOrigin/>
-                                </IconButton>
-                            </Tooltip>
-                        </NextLink>
-                    </Box>
-                }
-                {enabledServers && enabledServers.includes("director") &&
-                    <Box pt={1}>
-                        <NextLink href={"/director/"}>
-                            <Tooltip title={"Director"} placement={"right"}>
-                                <IconButton>
-                                    <AssistantDirection/>
-                                </IconButton>
-                            </Tooltip>
-                        </NextLink>
-                    </Box>
-                }
-                {enabledServers && enabledServers.includes("registry") &&
-                    <Box pt={1}>
-                        <NextLink href={"/registry/"}>
-                            <Tooltip title={"Registry"} placement={"right"}>
-                                <IconButton>
-                                    <AppRegistration/>
-                                </IconButton>
-                            </Tooltip>
-                        </NextLink>
-                    </Box>
-                }
-                {enabledServers && enabledServers.includes("cache") &&
-                    <Box pt={1}>
-                        <NextLink href={"/cache/"}>
-                            <Tooltip title={"Cache"} placement={"right"}>
-                                <IconButton>
-                                    <Cached/>
-                                </IconButton>
-                            </Tooltip>
-                        </NextLink>
-                    </Box>
-                }
-            </Sidebar>
-            <Main>
-                <Container maxWidth={"xl"}>
-                    <Box width={"100%"}>
-                        <Grid container spacing={2}>
-                            <Grid item xs={7} md={8} lg={6}>
-                                <Typography variant={"h4"} component={"h2"} mb={1}>Configuration</Typography>
-                            </Grid>
-                            <Grid  item xs={5} md={4} lg={3}></Grid>
-                            <Grid item xs={12} md={8} lg={6}>
-                                <form>
-                                    {
-                                        filteredConfig === undefined ?
-                                            <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
-                                            <ConfigDisplay key={configKey.toString()} id={[]} name={""} value={filteredConfig} level={4} onChange={onChange}/>
-                                    }
-                                </form>
-                                <Snackbar
-                                    anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-                                    open={!isMatch(config === undefined ? {} : config, patch)}
-                                    message="Save Changes"
-                                    action={
-                                        <Box>
-                                            <Button
-                                                onClick={async () => {
-                                                    try {
-                                                        await submitConfigChange(patch)
-                                                        setPatch({})
-                                                        setStatus({message: "Changes Saved, Restarting Server"})
-                                                        setTimeout(getConfig, 3000)
-                                                    } catch (e) {
-                                                        setStatus({
-                                                            severity: "error",
-                                                            message: (e as string).toString()
-                                                        })
-                                                    }
-                                                }}
-                                            >
-                                                Save
-                                            </Button>
-                                            <Button
-                                                onClick={() => {
-                                                    setPatch({})
-                                                    getConfig()
-                                                }}
-                                            >
-                                                Clear
-                                            </Button>
-                                        </Box>
-                                    }
-                                />
-                                {
-                                    status &&
-                                    <StatusSnackBar key={status.message} {...status} />
-                                }
-                            </Grid>
-                            <Grid item xs={12} md={4} lg={3} display={{ xs: "none", md: "block"}}>
-                                {
-                                    filteredConfig === undefined ?
-                                        <Skeleton  variant="rectangular" animation="wave" height={"1000px"}/> :
-                                        <Box pt={2}><TableOfContents id={[]} name={""} value={filteredConfig} level={1}/></Box>
-                                }
-                            </Grid>
-                        </Grid>
-                    </Box>
-                </Container>
-            </Main>
         </>
     )
 }
