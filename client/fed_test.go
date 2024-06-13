@@ -21,7 +21,6 @@
 package client_test
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
@@ -702,17 +701,6 @@ func TestNewTransferJob(t *testing.T) {
 		_, err = tc.NewTransferJob(context.Background(), remoteUrl, t.TempDir(), false, false)
 		assert.NoError(t, err)
 	})
-}
-
-// A helper function to set up the TestObjectLs, gives us a buffer to capture stdout as well as our path to ls
-func setupObjectListTest(export server_utils.OriginExport) (listURL string, r, w, stdout *os.File, buf *bytes.Buffer) {
-	listURL = fmt.Sprintf("pelican://%s:%s%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
-	// Create a pipe for output
-	r, w, _ = os.Pipe()
-	stdout = os.Stdout
-	os.Stdout = w
-	buf = new(bytes.Buffer)
-	return listURL, r, w, stdout, buf
 }
 
 // A test that spins up a federation, and tests object list
