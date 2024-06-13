@@ -267,7 +267,7 @@ func AdvertiseOSDF(ctx context.Context) error {
 
 		for _, cache := range ns.Caches {
 			cacheAd := parseServerAdFromTopology(cache, server_structs.CacheType, server_structs.Capabilities{})
-			if existingAd, ok := originAdMap[cacheAd.URL.String()]; ok {
+			if existingAd, ok := cacheAdMap[cacheAd.URL.String()]; ok {
 				existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
 				consolidatedAd := consolidateDupServerAd(cacheAd, existingAd.ServerAd)
 				existingAd.ServerAd = consolidatedAd

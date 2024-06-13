@@ -39,6 +39,8 @@ import (
 var (
 	//go:embed resources/mock_topology.json
 	mockTopology string
+	//go:embed resources/real_topology.json
+	realTopology string
 )
 
 func TestConsolidateDupServerAd(t *testing.T) {
@@ -175,7 +177,7 @@ func TestParseServerAdFromTopology(t *testing.T) {
 	})
 }
 
-func JSONHandler(w http.ResponseWriter, r *http.Request) {
+func mockTopoJSONHandler(w http.ResponseWriter, r *http.Request) {
 	// Set the Content-Type header to indicate JSON.
 	w.Header().Set("Content-Type", "application/json")
 
@@ -183,50 +185,119 @@ func JSONHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(mockTopology))
 }
+
+func realTopoJSONHandler(w http.ResponseWriter, r *http.Request) {
+	// Set the Content-Type header to indicate JSON.
+	w.Header().Set("Content-Type", "application/json")
+
+	// Write the JSON response to the response body.
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(realTopology))
+}
+
 func TestAdvertiseOSDF(t *testing.T) {
-	viper.Reset()
-	serverAds.DeleteAll()
-	topoServer := httptest.NewServer(http.HandlerFunc(JSONHandler))
-	defer topoServer.Close()
-	viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+	t.Run("mock-topology-parse-correctly", func(t *testing.T) {
+		viper.Reset()
+		serverAds.DeleteAll()
+		defer func() {
+			viper.Reset()
+			serverAds.DeleteAll()
+		}()
 
-	err := AdvertiseOSDF(context.Background())
-	require.NoError(t, err)
+		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
+		defer topoServer.Close()
+		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 
-	var foundServer server_structs.Advertisement
-	for _, item := range serverAds.Items() {
-		if item.Value().URL.Host == "origin1-endpoint.com" {
-			foundServer = *item.Value()
+		err := AdvertiseOSDF(context.Background())
+		require.NoError(t, err)
+
+		var foundServer server_structs.Advertisement
+		for _, item := range serverAds.Items() {
+			if item.Value().URL.Host == "origin1-endpoint.com" {
+				foundServer = *item.Value()
+			}
 		}
-	}
-	require.NotNil(t, foundServer)
-	assert.True(t, foundServer.FromTopology)
-	require.NotNil(t, foundServer.NamespaceAds)
-	assert.True(t, foundServer.NamespaceAds[0].FromTopology)
+		require.NotNil(t, foundServer)
+		assert.True(t, foundServer.FromTopology)
+		require.NotNil(t, foundServer.NamespaceAds)
+		assert.True(t, foundServer.NamespaceAds[0].FromTopology)
 
-	// Test a few values. If they're correct, it indicates the whole process likely succeeded
-	nsAd, oAds, cAds := getAdsForPath("/my/server/path/to/file")
-	assert.Equal(t, "/my/server", nsAd.Path)
-	assert.Equal(t, uint(3), nsAd.Generation[0].MaxScopeDepth)
-	assert.Equal(t, "https://origin1-auth-endpoint.com", oAds[0].AuthURL.String())
-	assert.Equal(t, "https://cache2.com", cAds[0].URL.String())
-	// Check that various capabilities have survived until this point. Because these are from topology,
-	// origin and namespace caps should be the same
-	assert.True(t, oAds[0].Writes)
-	assert.True(t, oAds[0].Caps.Writes)
-	assert.True(t, oAds[0].Listings)
-	assert.True(t, oAds[0].Caps.Listings)
-	assert.False(t, oAds[0].Caps.PublicReads)
-	assert.True(t, nsAd.Caps.Writes)
-	assert.True(t, nsAd.Caps.Listings)
-	assert.False(t, nsAd.Caps.PublicReads)
-	assert.True(t, nsAd.Caps.Listings)
+		// Test a few values. If they're correct, it indicates the whole process likely succeeded
+		nsAd, oAds, cAds := getAdsForPath("/my/server/path/to/file")
+		assert.Equal(t, "/my/server", nsAd.Path)
+		assert.Equal(t, uint(3), nsAd.Generation[0].MaxScopeDepth)
+		assert.Equal(t, "https://origin1-auth-endpoint.com", oAds[0].AuthURL.String())
+		assert.Equal(t, "https://cache2.com", cAds[0].URL.String())
+		// Check that various capabilities have survived until this point. Because these are from topology,
+		// origin and namespace caps should be the same
+		assert.True(t, oAds[0].Writes)
+		assert.True(t, oAds[0].Caps.Writes)
+		assert.True(t, oAds[0].Listings)
+		assert.True(t, oAds[0].Caps.Listings)
+		assert.False(t, oAds[0].Caps.PublicReads)
+		assert.True(t, nsAd.Caps.Writes)
+		assert.True(t, nsAd.Caps.Listings)
+		assert.False(t, nsAd.Caps.PublicReads)
+		assert.True(t, nsAd.Caps.Listings)
 
-	nsAd, oAds, cAds = getAdsForPath("/my/server/2/path/to/file")
-	assert.Equal(t, "/my/server/2", nsAd.Path)
-	assert.True(t, nsAd.Caps.PublicReads)
-	assert.Equal(t, "https://origin2-auth-endpoint.com", oAds[0].AuthURL.String())
-	assert.Equal(t, "http://cache-endpoint.com", cAds[0].URL.String())
+		nsAd, oAds, cAds = getAdsForPath("/my/server/2/path/to/file")
+		assert.Equal(t, "/my/server/2", nsAd.Path)
+		assert.True(t, nsAd.Caps.PublicReads)
+		assert.Equal(t, "https://origin2-auth-endpoint.com", oAds[0].AuthURL.String())
+		assert.Equal(t, "http://cache-endpoint.com", cAds[0].URL.String())
+	})
+
+	t.Run("multiple-ns-single-origin", func(t *testing.T) {
+		viper.Reset()
+		serverAds.DeleteAll()
+		defer func() {
+			viper.Reset()
+			serverAds.DeleteAll()
+		}()
+
+		topoServer := httptest.NewServer(http.HandlerFunc(realTopoJSONHandler))
+		defer topoServer.Close()
+		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+
+		err := AdvertiseOSDF(context.Background())
+		require.NoError(t, err)
+
+		// This origin should export 12 namespaces
+		found := serverAds.Has("http://sdsc-origin.nationalresearchplatform.org:1094")
+		require.True(t, found)
+		foundAd := serverAds.Get("http://sdsc-origin.nationalresearchplatform.org:1094").Value()
+		require.NotNil(t, foundAd)
+		assert.Equal(t, server_structs.OriginType, foundAd.Type)
+		assert.Len(t, foundAd.NamespaceAds, 12)
+		// This origin has at least one namespace enables the following capacity
+		assert.True(t, foundAd.DirectReads)
+		assert.True(t, foundAd.Writes)
+		assert.True(t, foundAd.Caps.PublicReads)
+	})
+
+	t.Run("caches-serving-multiple-nss", func(t *testing.T) {
+		viper.Reset()
+		serverAds.DeleteAll()
+		defer func() {
+			viper.Reset()
+			serverAds.DeleteAll()
+		}()
+
+		topoServer := httptest.NewServer(http.HandlerFunc(realTopoJSONHandler))
+		defer topoServer.Close()
+		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+
+		err := AdvertiseOSDF(context.Background())
+		require.NoError(t, err)
+
+		// This cache should serve 64 namespaces
+		found := serverAds.Has("http://dtn-pas.cinc.nrp.internet2.edu:8000")
+		require.True(t, found)
+		foundAd := serverAds.Get("http://dtn-pas.cinc.nrp.internet2.edu:8000").Value()
+		require.NotNil(t, foundAd)
+		assert.Equal(t, server_structs.CacheType, foundAd.Type)
+		assert.Len(t, foundAd.NamespaceAds, 64)
+	})
 }
 
 func TestFindDownedTopologyCache(t *testing.T) {
