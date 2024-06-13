@@ -715,8 +715,8 @@ func (lc *LocalCache) Stat(path, token string) (uint64, error) {
 	dUrl := *lc.directorURL
 	dUrl.Path = path
 	dUrl.Scheme = "pelican"
-	size, err := client.DoStat(context.Background(), dUrl.String(), client.WithToken(token))
-	return size, err
+	statInfo, err := client.DoStat(context.Background(), dUrl.String(), client.WithToken(token))
+	return uint64(statInfo.Size), err
 }
 
 func (sc *LocalCache) updateConfig() error {

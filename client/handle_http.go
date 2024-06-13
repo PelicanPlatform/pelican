@@ -305,7 +305,6 @@ type (
 	identTransferOptionTokenLocation struct{}
 	identTransferOptionAcquireToken  struct{}
 	identTransferOptionToken         struct{}
-	identTransferOptionJson          struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -729,11 +728,6 @@ func WithToken(token string) TransferOption {
 // disabled with this options
 func WithAcquireToken(enable bool) TransferOption {
 	return option.New(identTransferOptionAcquireToken{}, enable)
-}
-
-// Create an option to specify the output of the command to be in json format
-func WithJson(enable bool) TransferOption {
-	return option.New(identTransferOptionJson{}, enable)
 }
 
 // Create a new client to work with an engine
@@ -2674,7 +2668,8 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 	return fileInfos, nil
 }
 
-// Invoke HEAD against a remote URL, using the provided namespace information
+// Invoke a stat request against a remote URL that accepts WebDAV protocol,
+// using the provided namespace information
 //
 // If a "dirlist host" is given, then that is used for the namespace info.
 // Otherwise, the first three caches are queried simultaneously.
@@ -2698,7 +2693,7 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 			}
 			endpoint, err := url.Parse(cache.EndpointUrl)
 			if err != nil {
-				return FileInfo{}, err
+				return info, err
 			}
 			endpoint.Path = ""
 			statHosts = append(statHosts, *endpoint)
@@ -2706,7 +2701,7 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 	} else if namespace.WriteBackHost != "" {
 		endpoint, err := url.Parse(namespace.WriteBackHost)
 		if err != nil {
-			return FileInfo{}, err
+			return info, err
 		}
 		statHosts = append(statHosts, *endpoint)
 	}

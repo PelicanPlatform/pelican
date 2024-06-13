@@ -25,7 +25,6 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -487,73 +486,35 @@ func TestObjectStat(t *testing.T) {
 	// This tests object stat with no flags set
 	t.Run("testPelicanObjectStatNoFlags", func(t *testing.T) {
 		for _, export := range fed.Exports {
-			statUrl, r, w, oldStdout, buf := setupStatTest(export)
-			go func() {
-				var size uint64
-				if export.Capabilities.PublicReads {
-					size, err = client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(""))
-					require.NoError(t, err)
-					w.Close()
-				} else {
-					size, err = client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(tempToken.Name()))
-					require.NoError(t, err)
-					w.Close()
-				}
-				assert.Equal(t, uint64(13), size)
-			}()
-			_, err = io.Copy(buf, r)
-			require.NoError(t, err)
-			os.Stdout = oldStdout
-			assert.Contains(t, buf.String(), "Name: hello_world.txt\nSize: 13")
+			statUrl := fmt.Sprintf("pelican://%s:%d%s/hello_world.txt", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), export.FederationPrefix)
+			var got client.FileInfo
+			if export.Capabilities.PublicReads {
+				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(""))
+				got = *statInfo
+				require.NoError(t, err)
+			} else {
+				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(tempToken.Name()))
+				got = *statInfo
+				require.NoError(t, err)
+			}
+			assert.Equal(t, uint64(13), got.Size)
+			assert.Equal(t, "hello_world.txt", got.Name)
 		}
 	})
 
 	// This tests object stat when used on a directory
 	t.Run("testPelicanObjectStatOnDirectory", func(t *testing.T) {
 		for _, export := range fed.Exports {
-			_, r, w, oldStdout, buf := setupStatTest(export)
 			statUrl := fmt.Sprintf("pelican://%s:%s%s/test", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
-			go func() {
-				var size uint64
-				if export.Capabilities.PublicReads {
-					size, err = client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(""))
-					require.NoError(t, err)
-					w.Close()
-				} else {
-					size, err = client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(tempToken.Name()))
-					require.NoError(t, err)
-					w.Close()
-				}
-				assert.Equal(t, uint64(0), size)
-			}()
-			_, err = io.Copy(buf, r)
-			require.NoError(t, err)
-			os.Stdout = oldStdout
-			assert.Contains(t, buf.String(), "Name: test\nSize: 0")
-		}
-	})
-
-	// This tests object stat with json flag set
-	t.Run("testPelicanObjectStatJsonFlag", func(t *testing.T) {
-		for _, export := range fed.Exports {
-			statUrl, r, w, oldStdout, buf := setupStatTest(export)
-			go func() {
-				var size uint64
-				if export.Capabilities.PublicReads {
-					size, err = client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(""), client.WithJson(true))
-					require.NoError(t, err)
-					w.Close()
-				} else {
-					size, err = client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(tempToken.Name()), client.WithJson(true))
-					require.NoError(t, err)
-					w.Close()
-				}
-				assert.Equal(t, uint64(13), size)
-			}()
-			_, err = io.Copy(buf, r)
-			require.NoError(t, err)
-			os.Stdout = oldStdout
-			assert.Contains(t, buf.String(), "{\"Name\":\"hello_world.txt\",\"Size\":13,")
+			if export.Capabilities.PublicReads {
+				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(""))
+				require.NoError(t, err)
+				assert.Equal(t, uint64(0), statInfo.Size)
+			} else {
+				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				assert.Equal(t, uint64(0), statInfo.Size)
+			}
 		}
 	})
 
@@ -589,10 +550,11 @@ func TestObjectStat(t *testing.T) {
 		viper.Set("Federation.DiscoveryUrl", hostname)
 
 		// Stat the file
-		objectSize, err := client.DoStat(fed.Ctx, statUrl)
+		statInfo, err := client.DoStat(fed.Ctx, statUrl)
 		assert.NoError(t, err)
 		if err == nil {
-			assert.Equal(t, int64(17), int64(objectSize))
+			assert.Equal(t, int64(17), int64(statInfo.Size))
+			assert.Equal(t, "test.txt", statInfo.Name)
 		}
 	})
 

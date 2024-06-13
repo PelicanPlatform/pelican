@@ -19,6 +19,8 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/pkg/errors"
@@ -73,7 +75,7 @@ func statMain(cmd *cobra.Command, args []string) {
 
 	log.Debugln("Object:", object)
 
-	_, err = client.DoStat(ctx, object, client.WithTokenLocation(tokenLocation), client.WithJson(jsn))
+	statInfo, err := client.DoStat(ctx, object, client.WithTokenLocation(tokenLocation))
 
 	// Exit with failure
 	if err != nil {
@@ -89,5 +91,23 @@ func statMain(cmd *cobra.Command, args []string) {
 			os.Exit(11)
 		}
 		os.Exit(1)
+	}
+
+	if jsn {
+		// Print our stat info in JSON format:
+		jsonData, err := json.Marshal(statInfo)
+		if err != nil {
+			log.Errorf("Failed to parse object/directory stat info to JSON format: %v", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(jsonData))
+		return
+	} else {
+		// Print our stat info:
+		fmt.Println("Name:", statInfo.Name)
+		fmt.Println("Size:", statInfo.Size)
+		fmt.Println("ModTime:", statInfo.ModTime)
+		fmt.Println("IsDir:", statInfo.IsDir)
+		return
 	}
 }
