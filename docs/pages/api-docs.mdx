@@ -1,0 +1,27 @@
+import React from "react";
+import "swagger-ui-react/swagger-ui.css"
+import SwaggerUI from "swagger-ui-react";
+import {useData} from "nextra/data"
+
+export const getServerSideProps = async () => {
+
+	const response = await fetch("https://raw.githubusercontent.com/PelicanPlatform/pelican/main/swagger/pelican-swagger.yaml")
+	const spec = await response.text()
+
+	return {
+		props: {
+			// We add an `ssg` field to the page props,
+			// which will be provided to the Nextra `useData` hook.
+			ssg: {
+				spec: spec
+			}
+		}
+	}
+}
+
+export const SwaggerPage = () => {
+	const { spec } = useData()
+	return <SwaggerUI spec={spec} />
+}
+
+<SwaggerPage/>
