@@ -69,7 +69,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 	tokenLocation, _ := cmd.Flags().GetString("token")
 
 	if len(args) < 1 {
-		log.Errorln("no object provided")
+		log.Errorln("no location provided")
 		err = cmd.Help()
 		if err != nil {
 			log.Errorln("failed to print out help:", err)
@@ -78,7 +78,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 	}
 	object := args[len(args)-1]
 
-	log.Debugln("Object:", object)
+	log.Debugln("Location:", object)
 
 	long, _ := cmd.Flags().GetBool("long")
 	dirOnly, _ := cmd.Flags().GetBool("dironly")
@@ -108,20 +108,33 @@ func listMain(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 
+	filteredInfos := []client.FileInfo{}
+
+	// Filter by object or directory
+	for _, info := range fileInfos {
+		if dirOnly && !info.IsDir {
+			continue
+		}
+		if objectOnly && info.IsDir {
+			continue
+		}
+		filteredInfos = append(filteredInfos, info)
+	}
+
 	// Take our fileInfos and print them in a nice way
 	// if the -L flag was set, we print more information
 	if long {
 		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
 		// If we want JSON format, we append the file info to a slice of fileInfo structs so that we can marshal it
 		if asJSON {
-			jsonData, err := json.Marshal(fileInfos)
+			jsonData, err := json.Marshal(filteredInfos)
 			if err != nil {
-				return errors.Errorf("failed to marshal file/directory info to JSON format: %v", err)
+				return errors.Errorf("failed to marshal object/directory info to JSON format: %v", err)
 			}
 			fmt.Println(string(jsonData))
 			return nil
 		}
-		for _, info := range fileInfos {
+		for _, info := range filteredInfos {
 			// If not json formats, just print out the information in a clean way
 			fmt.Fprintln(w, info.Name+"\t"+strconv.FormatInt(info.Size, 10)+"\t"+info.ModTime.Format("2006-01-02 15:04:05"))
 		}
@@ -129,13 +142,13 @@ func listMain(cmd *cobra.Command, args []string) error {
 	} else if asJSON {
 		// In this case, we are not using the long option (-L) and want a JSON format
 		jsonInfo := []string{}
-		for _, info := range fileInfos {
+		for _, info := range filteredInfos {
 			jsonInfo = append(jsonInfo, info.Name)
 		}
 		// Convert the FileInfo to JSON and print it
 		jsonData, err := json.Marshal(jsonInfo)
 		if err != nil {
-			return errors.Errorf("error converting to JSON: %v", err)
+			return errors.Errorf("failed to marshal object/directory info to JSON format: %v", err)
 		}
 		fmt.Println(string(jsonData))
 	} else {
@@ -145,7 +158,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 		var column int
 		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
 		var line string
-		for _, info := range fileInfos {
+		for _, info := range filteredInfos {
 			line += info.Name
 			//increase our counter
 			column++
