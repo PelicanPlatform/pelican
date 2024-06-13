@@ -759,20 +759,37 @@ func TestObjectList(t *testing.T) {
 	// This tests object ls with no flags set
 	t.Run("testPelicanObjectLsNoFlags", func(t *testing.T) {
 		for _, export := range fed.Exports {
-			go func(export server_utils.OriginExport) {
-				listURL := fmt.Sprintf("pelican://%s:%d%s", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), export.FederationPrefix)
-				if export.Capabilities.PublicReads {
-					get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(""))
-					require.NoError(t, err)
-					require.Len(t, get, 1)
-					assert.Equal(t, "hello_world.txt", get[0].Name)
-				} else {
-					get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()))
-					require.NoError(t, err)
-					require.Len(t, get, 1)
-					assert.Equal(t, "hello_world.txt", get[0].Name)
-				}
-			}(export)
+			listURL := fmt.Sprintf("pelican://%s:%d%s", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), export.FederationPrefix)
+			if export.Capabilities.PublicReads {
+				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(""))
+				require.NoError(t, err)
+				require.Len(t, get, 2)
+			} else {
+				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				require.Len(t, get, 2)
+			}
+		}
+	})
+
+	t.Run("testPelicanObjectLsNoTokForProtectedNs", func(t *testing.T) {
+		for _, export := range fed.Exports {
+			listURL := fmt.Sprintf("pelican://%s:%d%s", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), export.FederationPrefix)
+			if !export.Capabilities.PublicReads {
+				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(""))
+				require.Error(t, err)
+				assert.Len(t, get, 0)
+				assert.Contains(t, err.Error(), "failed to get token for transfer: failed to find or generate a token as required")
+
+				// No error if it's with token
+				get, err = client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				require.Len(t, get, 2)
+			} else {
+				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				require.Len(t, get, 2)
+			}
 		}
 	})
 
