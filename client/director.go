@@ -145,15 +145,29 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 	defer resp.Body.Close()
 	log.Tracef("Director's response: %#v\n", resp)
 	// Check HTTP response -- should be 307 (redirect), else something went wrong
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Errorln("Failed to read the body from the director response:", err)
+		return resp, err
+	}
+	errMsg := string(body)
+	// The Content-Type will be alike "application/json; charset=utf-8"
+	if utils.HasContentType(resp, "application/json") {
+		var respErr server_structs.SimpleApiResp
+		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
+			log.Errorln("Failed to unmarshal the director's JSON response:", err)
+			return resp, unmarshalErr
+		}
+		errMsg = respErr.Msg
+	}
 
 	// If we get a 404, the director will hopefully tell us why. It might be that the namespace doesn't exist
 	if resp.StatusCode == 404 && verb == "PROPFIND" {
 		// If we get a 404 response from a PROPFIND, we are likely working with an old director so we should return a response
-		return resp, errors.New("404: " + string(body))
+		return resp, errors.New("404: " + errMsg)
 	} else if resp.StatusCode == 404 {
 		// If we get a 404 response when we are not doing a PROPFIND, just return the 404 error without a response
-		return nil, errors.New("404: " + string(body))
+		return nil, errors.New("404: " + errMsg)
 	} else if resp.StatusCode == http.StatusMethodNotAllowed && verb == "PROPFIND" {
 		// If we get a 405 with a PROPFIND, the client will handle it
 		return
@@ -161,15 +175,7 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 		// This is a director >7.9 proxy the PROPFIND response instead of redirect to the origin
 		return
 	} else if resp.StatusCode != 307 {
-		contentType := req.Header.Get("Content-Type")
-		if contentType != "application/json" {
-			return nil, errors.New(string(body))
-		}
-		var respErr server_structs.SimpleApiResp
-		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
-			return nil, errors.Wrap(unmarshalErr, "Could not unmarshall the director's response")
-		}
-		return resp, errors.New(respErr.Msg)
+		return resp, errors.Errorf("%d: %s", resp.StatusCode, errMsg)
 	}
 
 	return
