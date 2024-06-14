@@ -2,43 +2,34 @@ import DownloadsComponent from "/components/DownloadsComponent";
 
 # Install Pelican
 
-This document lists the operating system requirements to install Pelican and explains how a user can download Pelican client or Pelican server components.
+This document lists the operating system requirements for Pelican and explains how a user can download and install Pelican.
 
-> Pelican also has Docker images for users who want to serve **Pelican servers**. Refer to [Run Pelican Server using Docker image](./install/docker.mdx) for instructions.
+## Before Starting
 
-## Supported Operating Sytems
+Pelican executables can run as a **client** or a **server**.
 
-Pelican supports the following operating systems:
+To use the client for interacting with data, download and install the Pelican package or Pelican Binary [following the instructions below](#install-pelican-binary).
+
+For server usage, such as serving your data to a Pelican data federation or to start a new Pelican data federation, you need to run Pelican using [Pelican Docker images](./install/docker.mdx). It is not recommended to run Pelican server with a binary. Although technically possible, additional software dependencies and configurations are required to make the binary functional for server usage.
+
+
+## Supported Operating Systems
+
+Pelican supports the following operating systems, when running as a **client**:
 
 * [Red Hat Enterprise Linux (CentOS, Fedora, Alma, Rocky, or openSUSE)](./install/rhel.mdx)
 * [Debian or Ubuntu](./install/debian.mdx)
 * [Alpine Linux](./install/alpine.mdx)
-* [macOS](./install/macos.mdx) [*]
-* Windows [*]
+* [macOS](./install/macos.mdx)
+* [Windows](./install/windows.mdx)
 
-> Note that for macOS and Windows, Pelican only supports the _client_ functionality but not the _server_ functionality. To launch a Pelican server on macOS or Windows, use [Pelican Docker image](./install/docker.mdx) instead.
-
-> Note that installation of Pelican on other operating systems is possible, but not recommended or supported.
+> **Note**: Installation of Pelican on other operating systems is possible, but not recommended or supported.
 
 ## Download Pelican Binary
 
-Download the proper binary for the system you are running on and select which version you would like to install. If you do not know which binary to install, below is a chart that may help:
+Download the binary based on your operating system and CPU architecture. For instructions on how to install the binary, refer to [the next section](#install-pelican-binary).
 
 <DownloadsComponent />
-
-### RPM, APK, or DEB?
-
-#### RPM (Red Hat Package Manager):
-You want to install a `.rpm` package if you are using a Red Hat-based Linux distribution system such as: Red Hat Enterprise Linux, CentOS, Fedora, or openSUSE.
-
-#### APK (Alpine Package Keeper):
-You want to install a `.apk` package if you are using an Alpine Linux system.
-
-#### DEB (Debian Package):
-You want to install a `.deb` package if you are using a Linux distribution system such as: Debian, Ubuntu, or something similar.
-
-#### What about tar and zip?
-If you want a more manual setup, you can download the `.tar.gz` or `.zip` files and extract the binary where you need it. However, the above packages are recommended for more inexperienced users.
 
 ### What version should I download?
 Our versions are built like so:
@@ -47,4 +38,74 @@ For example: 7.1.2
 - 1 represents feature releases
 - 2 represents a bug fix/patch release
 
-The download section above always shows the latest released version of Pelican and we recommend you to use the latest feature or major release version so it includes the latest bug fixes and features. If you would like to download a previous version, please refer to our [GitHub release page](https://github.com/PelicanPlatform/pelican/releases).
+The download table above includes Pelican versions as old as `7.6.x` To download older versions, please refer to the [GitHub release page](https://github.com/PelicanPlatform/pelican/releases).
+
+## Install Pelican Binary
+
+### Linux
+
+* [Install Pelican on Red Hat Enterprise Linux (CentOS, Fedora, Alma, Rocky, or openSUSE)](./install/rhel.mdx)
+* [Install Pelican on Debian or Ubuntu](./install/debian.mdx)
+* [Install Pelican on Alpine Linux](./install/alpine.mdx)
+
+### macOS
+
+* [Install Pelican on macOS](./install/macos.mdx)
+
+### Windows
+
+* [Install Pelican on Windows](./install/windows.mdx)
+
+
+### Install OSDF or Server Package
+
+Pelican has two special packaging, `OSDF` and `Server`. The `OSDF` packaging, i.e. `pelican-osdf-compat`, is for running Pelican in Open Science Data Federation (OSDF). The `Server` packaging, i.e. `pelican-server` is for running Pelican services, e.g., an *Origin* or a *Cache*.
+
+Both of the packages **require Pelican package to be installed first**. You may get the following error message if you only install the special package:
+
+```console
+Problem: conflicting requests
+  - nothing provides pelican needed by pelican-osdf-compat-7.8.5-1.aarch64 from @commandline
+```
+
+To fix the issue, install the Pelican package first by following [the instructions](#install-pelican-binary) above.
+
+## Verify Pelican Is Installed
+
+> If you installed Pelican as a standalone binary, or if you installed Pelican on macOS or Windows operating systems, you need to add Pelican to your `PATH` environment variable before proceeding. Follow the instructions for [Linux](./install/linux_binary.mdx#add-pelican-binary-to-your-path-permanently), [macOS](./install/macos.mdx#add-pelican-binary-to-your-path), and [Windows](./install/windows.mdx#add-pelican-binary-to-your-path).
+
+1. Run the following command after you installed Pelican
+
+    * **Linux and macOS**:
+        ```bash
+        which pelican
+        ```
+
+        It should output something similar to
+
+        ```console
+        /bin/pelican
+        ```
+    * **Windows**:
+        ```bash
+        where pelican
+        ```
+
+        It should output something similar to
+
+        ```console
+        C:\Program Files\Pelican\pelican.exe
+        ```
+
+2. Test Pelican client function by running an **object copy** command that downloads a test file from [Open Science Data Federation (OSDF)](https://osg-htc.org/services/osdf) to your current directory
+
+    ```bash
+    $ pelican object copy pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt .
+    test.txt 14.00b / 14.00b [=============================================================================================] Done!
+    ```
+
+## Next Steps
+
+* [Access data with Pelican client](../client-usage.mdx)
+* [Serve your data with Pelican Origin server](../serving_an_origin.mdx)
+* [Serve a new Pelican Pelican federation](../serving_a_federation.mdx)

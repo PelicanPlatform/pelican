@@ -6,24 +6,26 @@ This document explains how to install Pelican on a Debian or Ubuntu Linux operat
 
 You can install Pelican by downloading a `.deb` package or by downloading a binary `.tar.gz` file. You only need to follow one section below to install.
 
-### Install the Pelican using a DEB pacakge
+> **Note**: Pelican Debian package does not contain dependencies such as `XRootD` for Pelican servers. Use [Pelican Docker image](./docker.mdx) instead if you want to serve a Pelican server.
 
-1. Navigate to [Pelican download page](../install.mdx) and select the Pelican DEB you want to install.
+### Install the Pelican using a DEB package
 
-2. In **Operating System** section, select **Linux**. In **Architectures** section, select **AMD64** (Intel/AMD) or **ARM64** (ARM) depending on the architecture of your machine.
+1. Navigate to [Pelican download page](../install.mdx#download-pelican-binary) and select the Pelican DEB you want to install.
 
-3. In the list of download candidates, copy the link to `pelican-x.x.x-1_arm64.deb` if you select **ARM64** (ARM), or `pelican-x.x.x-1.amd64.deb` if you select **AMD64** (Intel/AMD). Where `x.x.x` is the version number.
+2. In the **Operating System** section, select **Linux**. In **Architectures** section, select **X86_64** or **ARM64** depending on the architecture of your machine.
+
+3. In the list of download candidates, copy the link to `pelican-x.x.x-1.amd64.deb` if you select **X86_64**, or `pelican-x.x.x-1_arm64.deb` if you select **ARM64**, where `x.x.x` is the version number.
 
 4. Change the following command with the link to the binary you copied in the previous step and run the command
 
     ```bash
     wget <replace-with-the-link-you-copied>
-    sudo dpkg -i pelican_7.5.8-1_arm64.deb
+    sudo dpkg -i pelican_7.5.8-1_amd64.deb
     ```
 
-    Note that you need to replace `pelican_7.5.8-1_arm64.deb` with `pelican_7.5.8-1_amd64.deb` if you are running an Intel/AMD machine.
+    > **Note**: You need to replace `pelican_7.5.8-1_amd64.deb` with `pelican_7.5.8-1_arm64.deb` if you are running an `ARM64` machine.
 
-    Example to install Pelican `v7.5.8` DEB package for an Intel/AMD machine:
+    Example to install Pelican `v7.5.8` DEB package on an `X86_64` machine:
 
     ```bash
     wget https://github.com/PelicanPlatform/pelican/releases/download/v7.5.8/pelican_7.5.8-1_amd64.deb
@@ -32,7 +34,7 @@ You can install Pelican by downloading a `.deb` package or by downloading a bina
 
 ### Install Pelican as a standalone binary
 
-Refer to the [previous section](./rhel.mdx#install-pelican-as-a-standalone-binary) on how to install Pelican as a standalone binary.
+Refer to installing [Linux Standalone Binary](./linux_binary.mdx) page for how to install Pelican as a standalone binary.
 
 ## Uninstall on Debian or Ubuntu
 
@@ -42,10 +44,9 @@ To uninstall Pelican, run the following command
 sudo apt-get remove pelican
 ```
 
-## Verify Pelican is installed
-
-Refer to the [previous section](./rhel.mdx#verify-pelican-is-installed) on how to verify that Pelican is successfully installed.
-
 ## Next steps
 
-If you want to use Pelican client to download or upload files, refer to [Client Usage](../client-usage.mdx) to get started. If you want to serve a Pelican server, refer to [Serve a Pelican Origin](../serving_an_origin.mdx) and [Serve a Pelican Federation](../serving_a_federation.mdx).
+* [Verify Pelican is installed](../install.mdx#verify-pelican-is-installed)
+* [Access data with Pelican client](../client-usage.mdx)
+* [Serve your data with Pelican Origin server](../serving_an_origin.mdx)
+* [Serve a new Pelican Pelican federation](../serving_a_federation.mdx)
