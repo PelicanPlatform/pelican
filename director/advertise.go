@@ -58,6 +58,7 @@ func parseServerAdFromTopology(server utils.Server, serverType server_structs.Se
 	serverAd := server_structs.ServerAd{}
 	serverAd.Type = serverType
 	serverAd.Name = server.Resource
+	serverAd.IOLoad = 0.5 // We don't have the probe for topology server load, so we default to 0.5
 
 	// Explicitly set these to false for caches, because these caps don't really translate in that case
 	if serverAd.Type == server_structs.CacheType {
@@ -267,7 +268,7 @@ func AdvertiseOSDF(ctx context.Context) error {
 
 		for _, cache := range ns.Caches {
 			cacheAd := parseServerAdFromTopology(cache, server_structs.CacheType, server_structs.Capabilities{})
-			if existingAd, ok := originAdMap[cacheAd.URL.String()]; ok {
+			if existingAd, ok := cacheAdMap[cacheAd.URL.String()]; ok {
 				existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
 				consolidatedAd := consolidateDupServerAd(cacheAd, existingAd.ServerAd)
 				existingAd.ServerAd = consolidatedAd

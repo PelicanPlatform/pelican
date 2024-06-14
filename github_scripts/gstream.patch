@@ -1,0 +1,395 @@
+From 07e06e762699d3e4c2f062cfc0785a2dc14ae4d3 Mon Sep 17 00:00:00 2001
+From: Brian Bockelman <bbockelman@morgridge.org>
+Date: Thu, 29 Feb 2024 22:15:02 -0600
+Subject: Add monitoring packet for IO, based on the throttle plugin
+
+Given the throttle plugin is collecting timing statistics for I/O
+anyway, have it begin to report these statistics out through the g-stream.
+This allows the monitoring programs to determine the overall time spent
+in the I/O subsystem.
+---
+ src/XrdThrottle/XrdThrottle.hh                |  7 ++--
+ .../XrdThrottleFileSystemConfig.cc            | 32 ++++++++++++---
+ src/XrdThrottle/XrdThrottleManager.cc         | 39 ++++++++++++++-----
+ src/XrdThrottle/XrdThrottleManager.hh         | 12 +++++-
+ src/XrdXrootd/XrdXrootdConfigMon.cc           | 37 ++++++++++--------
+ src/XrdXrootd/XrdXrootdMonData.hh             |  1 +
+ src/XrdXrootd/XrdXrootdMonitor.hh             |  3 +-
+ 7 files changed, 94 insertions(+), 37 deletions(-)
+
+diff --git a/src/XrdThrottle/XrdThrottle.hh b/src/XrdThrottle/XrdThrottle.hh
+index 9ddc890f3..cccd21229 100644
+--- a/src/XrdThrottle/XrdThrottle.hh
++++ b/src/XrdThrottle/XrdThrottle.hh
+@@ -135,7 +135,7 @@ private:
+ class FileSystem : public XrdSfsFileSystem
+ {
+
+-friend XrdSfsFileSystem * XrdSfsGetFileSystem_Internal(XrdSfsFileSystem *, XrdSysLogger *, const char *);
++friend XrdSfsFileSystem * XrdSfsGetFileSystem_Internal(XrdSfsFileSystem *, XrdSysLogger *, const char *, XrdOucEnv *);
+
+ public:
+
+@@ -260,14 +260,15 @@ public:
+             const char             *opaque = 0);
+
+    virtual int
+-   Configure(XrdSysError &, XrdSfsFileSystem *native_fs);
++   Configure(XrdSysError &, XrdSfsFileSystem *native_fs, XrdOucEnv *envP);
+
+ private:
+    static void
+    Initialize(      FileSystem      *&fs,
+                     XrdSfsFileSystem *native_fs,
+                     XrdSysLogger     *lp,
+-              const char             *config_file);
++              const char             *config_file,
++                    XrdOucEnv        *envP);
+
+    FileSystem();
+
+diff --git a/src/XrdThrottle/XrdThrottleFileSystemConfig.cc b/src/XrdThrottle/XrdThrottleFileSystemConfig.cc
+index 5d1ef9f3b..ad1cfbd80 100644
+--- a/src/XrdThrottle/XrdThrottleFileSystemConfig.cc
++++ b/src/XrdThrottle/XrdThrottleFileSystemConfig.cc
+@@ -55,10 +55,11 @@ namespace XrdThrottle {
+ XrdSfsFileSystem *
+ XrdSfsGetFileSystem_Internal(XrdSfsFileSystem *native_fs,
+                             XrdSysLogger     *lp,
+-                            const char       *configfn)
++                            const char       *configfn,
++                            XrdOucEnv        *envP)
+ {
+    FileSystem* fs = NULL;
+-   FileSystem::Initialize(fs, native_fs, lp, configfn);
++   FileSystem::Initialize(fs, native_fs, lp, configfn, envP);
+    return fs;
+ }
+ }
+@@ -70,11 +71,21 @@ XrdSfsGetFileSystem(XrdSfsFileSystem *native_fs,
+                     XrdSysLogger     *lp,
+                     const char       *configfn)
+ {
+-   return XrdSfsGetFileSystem_Internal(native_fs, lp, configfn);
++   return XrdSfsGetFileSystem_Internal(native_fs, lp, configfn, nullptr);
++}
++
++XrdSfsFileSystem *
++XrdSfsGetFileSystem2(XrdSfsFileSystem *native_fs,
++                    XrdSysLogger     *lp,
++                    const char       *configfn,
++                    XrdOucEnv        *envP)
++{
++   return XrdSfsGetFileSystem_Internal(native_fs, lp, configfn, envP);
+ }
+ }
+
+ XrdVERSIONINFO(XrdSfsGetFileSystem, FileSystem);
++XrdVERSIONINFO(XrdSfsGetFileSystem2, FileSystem);
+
+ FileSystem* FileSystem::m_instance = 0;
+
+@@ -90,7 +101,8 @@ void
+ FileSystem::Initialize(FileSystem      *&fs,
+                        XrdSfsFileSystem *native_fs,
+                        XrdSysLogger     *lp,
+-                       const char       *configfn)
++                       const char       *configfn,
++                       XrdOucEnv        *envP)
+ {
+    fs = NULL;
+    if (m_instance == NULL && !(m_instance = new FileSystem()))
+@@ -103,7 +115,7 @@ FileSystem::Initialize(FileSystem      *&fs,
+       fs->m_config_file = configfn;
+       fs->m_eroute.logger(lp);
+       fs->m_eroute.Say("Initializing a Throttled file system.");
+-      if (fs->Configure(fs->m_eroute, native_fs))
++      if (fs->Configure(fs->m_eroute, native_fs, envP))
+       {
+          fs->m_eroute.Say("Initialization of throttled file system failed.");
+          fs = NULL;
+@@ -116,7 +128,7 @@ FileSystem::Initialize(FileSystem      *&fs,
+
+ #define TS_Xeq(key, func) NoGo = (strcmp(key, var) == 0) ? func(Config) : 0
+ int
+-FileSystem::Configure(XrdSysError & log, XrdSfsFileSystem *native_fs)
++FileSystem::Configure(XrdSysError & log, XrdSfsFileSystem *native_fs, XrdOucEnv *envP)
+ {
+    XrdOucEnv myEnv;
+    XrdOucStream Config(&m_eroute, getenv("XRDINSTANCE"), &myEnv, "(Throttle Config)> ");
+@@ -165,6 +177,14 @@ FileSystem::Configure(XrdSysError & log, XrdSfsFileSystem *native_fs)
+    // Overwrite the environment variable saying that throttling is the fslib.
+    XrdOucEnv::Export("XRDOFSLIB", fslib.c_str());
+
++   if (envP)
++   {
++       auto gstream = reinterpret_cast<XrdXrootdGStream*>(envP->GetPtr("Throttle.gStream*"));
++       log.Say("Config", "Throttle g-stream has", gstream ? "" : " NOT", " been configured via xrootd.mongstream directive");
++       m_throttle.SetMonitor(gstream);
++   }
++
++
+    return 0;
+ }
+
+diff --git a/src/XrdThrottle/XrdThrottleManager.cc b/src/XrdThrottle/XrdThrottleManager.cc
+index 0bca3f1fc..651bd6d9b 100644
+--- a/src/XrdThrottle/XrdThrottleManager.cc
++++ b/src/XrdThrottle/XrdThrottleManager.cc
+@@ -1,11 +1,11 @@
+
+ #include "XrdThrottleManager.hh"
+
++#include "XrdOuc/XrdOucEnv.hh"
+ #include "XrdSys/XrdSysAtomics.hh"
+ #include "XrdSys/XrdSysTimer.hh"
+ #include "XrdSys/XrdSysPthread.hh"
+-
+-#include "XrdOuc/XrdOucEnv.hh"
++#include "XrdXrootd/XrdXrootdGStream.hh"
+
+ #define XRD_TRACE m_trace->
+ #include "XrdThrottle/XrdThrottleTrace.hh"
+@@ -33,7 +33,7 @@ XrdThrottleManager::XrdThrottleManager(XrdSysError *lP, XrdOucTrace *tP) :
+    m_ops_per_second(-1),
+    m_concurrency_limit(-1),
+    m_last_round_allocation(100*1024),
+-   m_io_counter(0),
++   m_io_active(0),
+    m_loadshed_host(""),
+    m_loadshed_port(0),
+    m_loadshed_frequency(0),
+@@ -430,7 +430,10 @@ XrdThrottleManager::RecomputeInternal()
+
+    // Update the IO counters
+    m_compute_var.Lock();
+-   m_stable_io_counter = AtomicGet(m_io_counter);
++   m_stable_io_active = AtomicGet(m_io_active);
++   auto io_active = m_stable_io_active;
++   m_stable_io_total = static_cast<unsigned>(AtomicGet(m_io_total));
++   auto io_total = m_stable_io_total;
+    time_t secs; AtomicFZAP(secs, m_io_wait.tv_sec);
+    long nsecs; AtomicFZAP(nsecs, m_io_wait.tv_nsec);
+    m_stable_io_wait.tv_sec += static_cast<long>(secs * intervals_per_second);
+@@ -440,8 +443,25 @@ XrdThrottleManager::RecomputeInternal()
+       m_stable_io_wait.tv_nsec -= 1000000000;
+       m_stable_io_wait.tv_nsec --;
+    }
++   struct timespec io_wait_ts;
++   io_wait_ts.tv_sec = m_stable_io_wait.tv_sec;
++   io_wait_ts.tv_nsec = m_stable_io_wait.tv_nsec;
++
+    m_compute_var.UnLock();
+-   TRACE(IOLOAD, "Current IO counter is " << m_stable_io_counter << "; total IO wait time is " << (m_stable_io_wait.tv_sec*1000+m_stable_io_wait.tv_nsec/1000000) << "ms.");
++   uint64_t io_wait_ms = io_wait_ts.tv_sec*1000+io_wait_ts.tv_nsec/1000000;
++   TRACE(IOLOAD, "Current IO counter is " << io_active << "; total IO wait time is " << io_wait_ms << "ms.");
++   if (m_gstream)
++   {
++        char buf[128];
++        auto len = snprintf(buf, 128,
++                            R"({"event":"throttle_update","io_wait":%.4f,"io_active":%d,"io_total":%d})",
++                            static_cast<double>(io_wait_ms) / 1000.0, io_active, io_total);
++        auto suc = (len < 128) ? m_gstream->Insert(buf, len + 1) : false;
++        if (!suc)
++        {
++            TRACE(IOLOAD, "Failed g-stream insertion of throttle_update record (len=" << len << "): " << buf);
++        }
++   }
+    m_compute_var.Broadcast();
+ }
+
+@@ -470,17 +490,18 @@ XrdThrottleTimer
+ XrdThrottleManager::StartIOTimer()
+ {
+    AtomicBeg(m_compute_var);
+-   int cur_counter = AtomicInc(m_io_counter);
++   int cur_counter = AtomicInc(m_io_active);
++   AtomicInc(m_io_total);
+    AtomicEnd(m_compute_var);
+    while (m_concurrency_limit >= 0 && cur_counter > m_concurrency_limit)
+    {
+       AtomicBeg(m_compute_var);
+       AtomicInc(m_loadshed_limit_hit);
+-      AtomicDec(m_io_counter);
++      AtomicDec(m_io_active);
+       AtomicEnd(m_compute_var);
+       m_compute_var.Wait();
+       AtomicBeg(m_compute_var);
+-      cur_counter = AtomicInc(m_io_counter);
++      cur_counter = AtomicInc(m_io_active);
+       AtomicEnd(m_compute_var);
+    }
+    return XrdThrottleTimer(*this);
+@@ -493,7 +514,7 @@ void
+ XrdThrottleManager::StopIOTimer(struct timespec timer)
+ {
+    AtomicBeg(m_compute_var);
+-   AtomicDec(m_io_counter);
++   AtomicDec(m_io_active);
+    AtomicAdd(m_io_wait.tv_sec, timer.tv_sec);
+    // Note this may result in tv_nsec > 1e9
+    AtomicAdd(m_io_wait.tv_nsec, timer.tv_nsec);
+diff --git a/src/XrdThrottle/XrdThrottleManager.hh b/src/XrdThrottle/XrdThrottleManager.hh
+index dd1dc2e7a..6f292ac7c 100644
+--- a/src/XrdThrottle/XrdThrottleManager.hh
++++ b/src/XrdThrottle/XrdThrottleManager.hh
+@@ -40,6 +40,7 @@
+ class XrdSysError;
+ class XrdOucTrace;
+ class XrdThrottleTimer;
++class XrdXrootdGStream;
+
+ class XrdThrottleManager
+ {
+@@ -68,6 +69,8 @@ void        SetMaxOpen(unsigned long max_open) {m_max_open = max_open;}
+
+ void        SetMaxConns(unsigned long max_conns) {m_max_conns = max_conns;}
+
++void        SetMonitor(XrdXrootdGStream *gstream) {m_gstream = gstream;}
++
+ //int         Stats(char *buff, int blen, int do_sync=0) {return m_pool.Stats(buff, blen, do_sync);}
+
+ static
+@@ -125,10 +128,12 @@ std::vector<int> m_secondary_ops_shares;
+ int         m_last_round_allocation;
+
+ // Active IO counter
+-int         m_io_counter;
++int         m_io_active;
+ struct timespec m_io_wait;
++unsigned    m_io_total{0};
+ // Stable IO counters - must hold m_compute_var lock when reading/writing;
+-int         m_stable_io_counter;
++int m_stable_io_active;
++int m_stable_io_total{0}; // It would take ~3 years to overflow a 32-bit unsigned integer at 100Hz of IO operations.
+ struct timespec m_stable_io_wait;
+
+ // Load shed details
+@@ -145,6 +150,9 @@ std::unordered_map<std::string, unsigned long> m_conn_counters;
+ std::unordered_map<std::string, std::unique_ptr<std::unordered_map<pid_t, unsigned long>>> m_active_conns;
+ std::mutex m_file_mutex;
+
++// Monitoring handle, if configured
++XrdXrootdGStream* m_gstream{nullptr};
++
+ static const char *TraceID;
+
+ };
+diff --git a/src/XrdXrootd/XrdXrootdConfigMon.cc b/src/XrdXrootd/XrdXrootdConfigMon.cc
+index d8d48ce64..3acc2e150 100644
+--- a/src/XrdXrootd/XrdXrootdConfigMon.cc
++++ b/src/XrdXrootd/XrdXrootdConfigMon.cc
+@@ -80,14 +80,16 @@ struct MonParms
+ MonParms *MP = 0;
+
+ struct XrdXrootdGSReal::GSParms gsObj[] =
+-       {{"ccm",    0, XROOTD_MON_CCM,   0, -1, XROOTD_MON_GSCCM, 0,
+-                   XrdXrootdGSReal::fmtBin, XrdXrootdGSReal::hdrNorm},
+-        {"pfc",    0, XROOTD_MON_PFC,   0, -1, XROOTD_MON_GSPFC, 0,
+-                   XrdXrootdGSReal::fmtBin, XrdXrootdGSReal::hdrNorm},
+-        {"TcpMon", 0, XROOTD_MON_TCPMO, 0, -1, XROOTD_MON_GSTCP, 0,
+-                   XrdXrootdGSReal::fmtBin, XrdXrootdGSReal::hdrNorm},
+-        {"Tpc",    0, XROOTD_MON_TPC,   0, -1, XROOTD_MON_GSTPC, 0,
+-                   XrdXrootdGSReal::fmtBin, XrdXrootdGSReal::hdrNorm}
++       {{"ccm",      0, XROOTD_MON_CCM,   0, -1, XROOTD_MON_GSCCM, 0,
++                     XrdXrootdGSReal::fmtBin, XrdXrootdGSReal::hdrNorm},
++        {"pfc",      0, XROOTD_MON_PFC,   0, -1, XROOTD_MON_GSPFC, 0,
++                     XrdXrootdGSReal::fmtBin, XrdXrootdGSReal::hdrNorm},
++        {"TcpMon",   0, XROOTD_MON_TCPMO, 0, -1, XROOTD_MON_GSTCP, 0,
++                     XrdXrootdGSReal::fmtBin, XrdXrootdGSReal::hdrNorm},
++        {"Throttle", 0, XROOTD_MON_THROT, 0, -1, XROOTD_MON_GSTHR, 0,
++                     XrdXrootdGSReal::fmtBin, XrdXrootdGSReal::hdrNorm},
++        {"Tpc",      0, XROOTD_MON_TPC,   0, -1, XROOTD_MON_GSTPC, 0,
++                     XrdXrootdGSReal::fmtBin, XrdXrootdGSReal::hdrNorm}
+        };
+ }
+
+@@ -100,7 +102,7 @@ bool XrdXrootdProtocol::ConfigGStream(XrdOucEnv &myEnv, XrdOucEnv *urEnv)
+    XrdXrootdGStream *gs;
+    static const int numgs=sizeof(gsObj)/sizeof(struct XrdXrootdGSReal::GSParms);
+    char vbuff[64];
+-   bool aOK, gXrd[numgs] = {false, false, true, true};
++   bool aOK, gXrd[numgs] = {false, false, true, false, true};
+
+ // For each enabled monitoring provider, allocate a g-stream and put
+ // its address in our environment.
+@@ -190,7 +192,7 @@ bool XrdXrootdProtocol::ConfigMon(XrdProtocol_Config *pi, XrdOucEnv &xrootdEnv)
+                                       [rbuff <sz>] [rnums <cnt>] [window <sec>]
+                                       [dest [Events] <host:port>]
+
+-   Events: [ccm] [files] [fstat] [info] [io] [iov] [pfc] [redir] [tcpmon] [user]
++   Events: [ccm] [files] [fstat] [info] [io] [iov] [pfc] [redir] [tcpmon] [throttle] [user]
+
+          all                enables monitoring for all connections.
+          auth               add authentication information to "user".
+@@ -222,6 +224,7 @@ bool XrdXrootdProtocol::ConfigMon(XrdProtocol_Config *pi, XrdOucEnv &xrootdEnv)
+          pfc                monitor proxy file cache
+          redir              monitors request redirections
+          tcpmon             monitors tcp connection closes.
++         throttle           monitors I/O activity via the throttle plugin
+          tpc                Third Party Copy
+          user               monitors user login and disconnect events.
+          <host:port>        where monitor records are to be sentvia UDP.
+@@ -350,11 +353,12 @@ int XrdXrootdProtocol::xmon(XrdOucStream &Config)
+               else if (!strcmp("io",   val)) MP->monMode[i] |=  XROOTD_MON_IO;
+               else if (!strcmp("iov",  val)) MP->monMode[i] |= (XROOTD_MON_IO
+                                                                |XROOTD_MON_IOV);
+-              else if (!strcmp("pfc",  val)) MP->monMode[i] |=  XROOTD_MON_PFC;
+-              else if (!strcmp("redir",val)) MP->monMode[i] |=  XROOTD_MON_REDR;
+-              else if (!strcmp("tcpmon",val))MP->monMode[i] |=  XROOTD_MON_TCPMO;
+-              else if (!strcmp("tpc",   val))MP->monMode[i] |=  XROOTD_MON_TPC;
+-              else if (!strcmp("user", val)) MP->monMode[i] |=  XROOTD_MON_USER;
++              else if (!strcmp("pfc",      val)) MP->monMode[i] |=  XROOTD_MON_PFC;
++              else if (!strcmp("redir",    val)) MP->monMode[i] |=  XROOTD_MON_REDR;
++              else if (!strcmp("tcpmon",   val)) MP->monMode[i] |=  XROOTD_MON_TCPMO;
++              else if (!strcmp("throttle", val)) MP->monMode[i] |=  XROOTD_MON_THROT;
++              else if (!strcmp("tpc",      val)) MP->monMode[i] |=  XROOTD_MON_TPC;
++              else if (!strcmp("user",     val)) MP->monMode[i] |=  XROOTD_MON_USER;
+               else break;
+
+          if (!val) {eDest.Emsg("Config","monitor dest value not specified");
+@@ -456,6 +460,7 @@ char *XrdXrootdProtocol::xmondest(const char *what, char *val)
+          ccm                gstream: cache context management
+          pfc                gstream: proxy file cache
+          tcpmon             gstream: tcp connection monitoring
++         throttle           gstream: monitors I/O activity via the throttle plugin
+          tpc                gstream: Third Party Copy
+
+          noXXX              do not include information.
+@@ -478,7 +483,7 @@ int XrdXrootdProtocol::xmongs(XrdOucStream &Config)
+
+    int numgs = sizeof(gsObj)/sizeof(struct XrdXrootdGSReal::GSParms);
+    int selAll = XROOTD_MON_CCM | XROOTD_MON_PFC | XROOTD_MON_TCPMO
+-              | XROOTD_MON_TPC;
++              | XROOTD_MON_THROT | XROOTD_MON_TPC;
+    int i, selMon = 0, opt = -1, hdr = -1, fmt = -1, flushVal = -1;
+    long long maxlVal = -1;
+    char *val, *dest = 0;
+diff --git a/src/XrdXrootd/XrdXrootdMonData.hh b/src/XrdXrootd/XrdXrootdMonData.hh
+index 1c98a6b47..82035e7cb 100644
+--- a/src/XrdXrootd/XrdXrootdMonData.hh
++++ b/src/XrdXrootd/XrdXrootdMonData.hh
+@@ -119,6 +119,7 @@ const kXR_char XROOTD_MON_GSCCM         = 'M'; // pfc: Cache context mgt info
+ const kXR_char XROOTD_MON_GSPFC         = 'C'; // pfc: Cache monitoring  info
+ const kXR_char XROOTD_MON_GSTCP         = 'T'; // TCP connection statistics
+ const kXR_char XROOTD_MON_GSTPC         = 'P'; // TPC Third Party Copy
++const kXR_char XROOTD_MON_GSTHR         = 'R'; // IO activity from the throttle plugin
+
+ // The following bits are insert in the low order 4 bits of the MON_REDIRECT
+ // entry code to indicate the actual operation that was requestded.
+diff --git a/src/XrdXrootd/XrdXrootdMonitor.hh b/src/XrdXrootd/XrdXrootdMonitor.hh
+index 1c1c142ad..52205e182 100644
+--- a/src/XrdXrootd/XrdXrootdMonitor.hh
++++ b/src/XrdXrootd/XrdXrootdMonitor.hh
+@@ -59,7 +59,8 @@
+ #define XROOTD_MON_PFC   0x00000400
+ #define XROOTD_MON_TCPMO 0x00000800
+ #define XROOTD_MON_TPC   0x00001000
+-#define XROOTD_MON_GSTRM (XROOTD_MON_CCM | XROOTD_MON_PFC | XROOTD_MON_TCPMO)
++#define XROOTD_MON_THROT 0x00002000
++#define XROOTD_MON_GSTRM (XROOTD_MON_CCM | XROOTD_MON_PFC | XROOTD_MON_TCPMO | XROOTD_MON_THROT)
+
+ #define XROOTD_MON_FSLFN    1
+ #define XROOTD_MON_FSOPS    2
+--
+2.39.3 (Apple Git-145)

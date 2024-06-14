@@ -191,6 +191,7 @@ type Config struct {
 		GlobusCollectionID string `mapstructure:"globuscollectionid"`
 		GlobusCollectionName string `mapstructure:"globuscollectionname"`
 		GlobusConfigLocation string `mapstructure:"globusconfiglocation"`
+		HttpAuthTokenFile string `mapstructure:"httpauthtokenfile"`
 		HttpServiceUrl string `mapstructure:"httpserviceurl"`
 		Mode string `mapstructure:"mode"`
 		Multiuser bool `mapstructure:"multiuser"`
@@ -290,6 +291,7 @@ type Config struct {
 		TLSHandshakeTimeout time.Duration `mapstructure:"tlshandshaketimeout"`
 	} `mapstructure:"transport"`
 	Xrootd struct {
+		AuthRefreshInterval time.Duration `mapstructure:"authrefreshinterval"`
 		Authfile string `mapstructure:"authfile"`
 		ConfigFile string `mapstructure:"configfile"`
 		DetailedMonitoringHost string `mapstructure:"detailedmonitoringhost"`
@@ -478,6 +480,7 @@ type configWithType struct {
 		GlobusCollectionID struct { Type string; Value string }
 		GlobusCollectionName struct { Type string; Value string }
 		GlobusConfigLocation struct { Type string; Value string }
+		HttpAuthTokenFile struct { Type string; Value string }
 		HttpServiceUrl struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
@@ -577,6 +580,7 @@ type configWithType struct {
 		TLSHandshakeTimeout struct { Type string; Value time.Duration }
 	}
 	Xrootd struct {
+		AuthRefreshInterval struct { Type string; Value time.Duration }
 		Authfile struct { Type string; Value string }
 		ConfigFile struct { Type string; Value string }
 		DetailedMonitoringHost struct { Type string; Value string }

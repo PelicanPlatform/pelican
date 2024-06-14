@@ -1204,7 +1204,7 @@ func TestRedirects(t *testing.T) {
 		})
 
 		// Use ads generated via mock topology for generating list of caches
-		topoServer := httptest.NewServer(http.HandlerFunc(JSONHandler))
+		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 		defer topoServer.Close()
 		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 		viper.Set("Director.CacheSortMethod", "random")
@@ -1247,7 +1247,7 @@ func TestRedirects(t *testing.T) {
 			serverAds.DeleteAll()
 		})
 
-		topoServer := httptest.NewServer(http.HandlerFunc(JSONHandler))
+		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 		defer topoServer.Close()
 		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 		viper.Set("Director.CacheSortMethod", "random")

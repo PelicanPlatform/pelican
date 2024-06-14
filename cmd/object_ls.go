@@ -45,7 +45,7 @@ func init() {
 	flagSet := lsCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.BoolP("long", "L", false, "Include extended information")
-	flagSet.BoolP("dironly", "D", false, "List directories only")
+	flagSet.BoolP("collectionOnly", "C", false, "List collections only")
 	flagSet.BoolP("objectonly", "O", false, "List objects only")
 	flagSet.BoolP("json", "j", false, "Print results in JSON format")
 
@@ -81,13 +81,13 @@ func listMain(cmd *cobra.Command, args []string) error {
 	log.Debugln("Location:", object)
 
 	long, _ := cmd.Flags().GetBool("long")
-	dirOnly, _ := cmd.Flags().GetBool("dironly")
+	collectionOnly, _ := cmd.Flags().GetBool("collectionOnly")
 	objectOnly, _ := cmd.Flags().GetBool("objectonly")
 	asJSON, _ := cmd.Flags().GetBool("json")
 
-	// If a user specifies dirOnly and objectOnly, this means basic functionality (list both objects and directories) so just remove the flags
-	if dirOnly && objectOnly {
-		return errors.New("cannot specify both dironly and object only flags, as they are mutually exclusive")
+	if collectionOnly && objectOnly {
+		// If a user specifies collectionOnly and objectOnly, this means basic functionality (list both objects and directories) so just remove the flags
+		return errors.New("cannot specify both collectionOnly (-C) and object only (-O) flags, as they are mutually exclusive")
 	}
 
 	fileInfos, err := client.DoList(ctx, object, client.WithTokenLocation(tokenLocation))
@@ -112,7 +112,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 
 	// Filter by object or directory
 	for _, info := range fileInfos {
-		if dirOnly && !info.IsDir {
+		if collectionOnly && !info.IsDir {
 			continue
 		}
 		if objectOnly && info.IsDir {

@@ -34,6 +34,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -58,11 +59,11 @@ type globusExportUI struct {
 }
 
 const (
-	globusInactive  = "Inactive"
-	globusActivated = "Activated"
+	GlobusInactive  = "Inactive"
+	GlobusActivated = "Activated"
 )
 
-const globusTokenFileExt = ".tok" // File extension for caching Globus access token
+const GlobusTokenFileExt = ".tok" // File extension for caching Globus access token
 
 var (
 	// An in-memory map-struct to keep Globus collections information with key being the collection UUID.
@@ -78,6 +79,16 @@ var (
 //     from the origin's SQLite DB and populate the global map, refresh the access token by the persisted
 //     refresh token
 func InitGlobusBackend(exps []server_utils.OriginExport) error {
+	uid, err := config.GetDaemonUID()
+	if err != nil {
+		return errors.Wrap(err, "failed to initialize Globus backend: failed to get uid")
+	}
+
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return errors.Wrap(err, "failed to initialize Globus backend: failed to get gid")
+	}
+
 	if server_utils.OriginStorageType(param.Origin_StorageType.GetString()) != server_utils.OriginStorageGlobus {
 		return errors.Errorf("failed to initialize Globus backend: Origin.StorageType is not Globus: %s",
 			param.Origin_StorageType.GetString())
@@ -90,6 +101,13 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 	tokFdr := filepath.Join(globusFdr, "tokens")
 	if err := os.MkdirAll(tokFdr, 0755); err != nil {
 		return errors.Wrapf(err, "failed to create directory for Globus tokens: %s", tokFdr)
+	}
+	// We need to change the directory and file permission to XRootD user/group so that it can access the token
+	if err = os.Chown(globusFdr, uid, gid); err != nil {
+		return errors.Wrapf(err, "unable to change the ownership of %s to xrootd daemon uid %d and gid %d for Globus config", globusFdr, uid, gid)
+	}
+	if err = os.Chown(tokFdr, uid, gid); err != nil {
+		return errors.Wrapf(err, "unable to change the ownership of %s to xrootd daemon uid %d and gid %d for Globus tokens", tokFdr, uid, gid)
 	}
 
 	globusAuthCfg, err := GetGlobusOAuthCfg()
@@ -104,7 +122,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 		globusEsp := globusExport{
 			DisplayName:      esp.GlobusCollectionName,
 			FederationPrefix: esp.FederationPrefix,
-			Status:           globusInactive,
+			Status:           GlobusInactive,
 			Description:      "Server start",
 		}
 		// We check the origin db and see if we already have the refresh token in-place
@@ -118,7 +136,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 			globusExports[esp.GlobusCollectionID] = &globusEsp
 			continue
 		}
-		// We found the collection in DB, try to get access token with the refresh token
+		// We found the collection in DB, try to get access token via the refresh token
 		col, err := getCollectionByUUID(esp.GlobusCollectionID)
 		if err != nil {
 			return errors.Wrapf(err, "failed to get credentials for Globus collection %s with name %s", esp.GlobusCollectionID, esp.GlobusCollectionName)
@@ -150,7 +168,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 			globusEsp.DisplayName = col.Name
 		}
 
-		globusEsp.Status = globusActivated
+		globusEsp.Status = GlobusActivated
 		globusEsp.Token = collectionToken
 		globusEsp.HttpsServer = col.ServerURL
 		globusEsp.Description = "Activated with cached credentials"
@@ -167,7 +185,7 @@ func isExportActivated(fedPrefix string) (ok bool) {
 	defer globusExportsMutex.RUnlock()
 	for _, exp := range globusExports {
 		if exp.FederationPrefix == fedPrefix {
-			return exp.Status == globusActivated
+			return exp.Status == GlobusActivated
 		}
 	}
 	return false
@@ -185,7 +203,7 @@ func doGlobusTokenRefresh() error {
 			globusExportsMutex.Lock()
 			defer globusExportsMutex.Unlock()
 			// We can't refresh exports that are never activated
-			if exp.Status == globusInactive {
+			if exp.Status == GlobusInactive {
 				return nil
 			}
 			newTok, err := refreshGlobusToken(cid, exp.Token)
@@ -194,7 +212,7 @@ func doGlobusTokenRefresh() error {
 				newTok, err = refreshGlobusToken(cid, exp.Token)
 				if err != nil {
 					log.Errorf("Failed to retry refreshing Globus token for collection %s with name %s: %v", cid, exp.DisplayName, err)
-					exp.Status = globusInactive
+					exp.Status = GlobusInactive
 					exp.Description = fmt.Sprintf("Failed to refresh token: %v", err)
 					return err
 				}
@@ -242,7 +260,7 @@ func GetGlobusExportsValues(activeOnly bool) []globusExport {
 	exps := []globusExport{}
 	for _, val := range globusExports {
 		if activeOnly {
-			if val.Status == globusActivated {
+			if val.Status == GlobusActivated {
 				exps = append(exps, *val)
 			} else {
 				continue

@@ -828,10 +828,8 @@ func TestObjectList(t *testing.T) {
 // This tests object ls but for an origin that supports listings but with an object store that does not support PROPFIND.
 // We should get a 405 returned. This is a separate test since we need a completely different origin
 func TestObjectList405Error(t *testing.T) {
-	viper.Reset()
-	viper.Set("ConfigDir", t.TempDir())
+	test_utils.InitClient(t, nil)
 	server_utils.ResetOriginExports()
-	defer viper.Reset()
 	defer server_utils.ResetOriginExports()
 	err := config.InitClient()
 	require.NoError(t, err)
@@ -862,5 +860,5 @@ func TestObjectList405Error(t *testing.T) {
 
 	_, err = client.DoList(fed.Ctx, "pelican://"+host+"/test/hello_world")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "405: object listings are not supported by the specified origin")
+	require.Contains(t, err.Error(), "405: object listings are not supported by the discovered origin")
 }

@@ -21,13 +21,38 @@
 
 scriptdir=$PWD/`dirname $0`
 
-brew install minio xrootd ninja coreutils
+brew install minio ninja coreutils
 
 mkdir dependencies
 pushd dependencies
 
-git clone --depth=1 https://github.com/PelicanPlatform/xrdcl-pelican.git
+# Install scitokens first, which our xrootd build relies on
+git clone --depth=1 https://github.com/scitokens/scitokens-cpp.git
+pushd scitokens-cpp
+mkdir build
+cd build
+export SCITOKENS_CPP_DIR=$PWD/release_dir
+cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
+ninja install
+sudo ln -s $PWD/release_dir/lib/libSciTokens*.dylib /usr/local/lib
+popd
 
+# Build XRootD from source
+# TODO: Remove this patch and install from brew instead when XRootD releases 5.7.0
+git clone --depth=1 https://github.com/xrootd/xrootd.git
+pushd xrootd
+patch -p1 < $scriptdir/pelican_protocol.patch
+patch -p1 < $scriptdir/gstream.patch
+patch -p1 < $scriptdir/gstream_clock_fix.patch
+patch -p1 < $scriptdir/gstream_enable_throttle_osx.patch
+mkdir xrootd_build
+cd xrootd_build
+cmake .. -GNinja
+ninja
+ninja install
+popd
+
+git clone --depth=1 https://github.com/PelicanPlatform/xrdcl-pelican.git
 pushd xrdcl-pelican
 mkdir build
 cd build
@@ -49,27 +74,6 @@ echo "Will install into: $xrootd_libdir"
 sudo mkdir -p $xrootd_libdir
 sudo ln -s $PWD/release_dir/lib/libXrdHTTPServer-5.so $xrootd_libdir
 sudo ln -s $PWD/release_dir/lib/libXrdS3-5.so $xrootd_libdir
-popd
-
-git clone --depth=1 https://github.com/scitokens/scitokens-cpp.git
-pushd scitokens-cpp
-mkdir build
-cd build
-export SCITOKENS_CPP_DIR=$PWD/release_dir
-cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
-ninja install
-sudo ln -s $PWD/release_dir/lib/libSciTokens*.dylib $xrootd_libdir
-popd
-
-git clone --depth=1 https://github.com/xrootd/xrootd.git
-pushd xrootd
-patch -p1 < $scriptdir/pelican_protocol.patch
-mkdir build
-cd build
-cmake .. -GNinja
-ninja libXrdAccSciTokens-5.so libXrdPss-5.so
-sudo ln -s $PWD/src/libXrdAccSciTokens-5.so $xrootd_libdir
-sudo ln -sf $PWD/src/libXrdPss-5.so $xrootd_libdir
 popd
 
 popd
