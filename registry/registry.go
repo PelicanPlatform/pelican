@@ -475,7 +475,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 		log.Errorf("Failed to load OIDC information for registration with identity: %v", err)
 		return
 	}
-	if provider == oauth2.Globus {
+	if provider == config.Globus {
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -829,7 +829,7 @@ func wildcardHandler(ctx *gin.Context) {
 			return
 		}
 		if adminMetadata != nil && adminMetadata.Status != server_structs.RegApproved {
-			if strings.HasPrefix(prefix, "/caches/") { // Caches
+			if server_structs.IsCacheNS(prefix) { // Caches
 				if param.Registry_RequireCacheApproval.GetBool() {
 					// Use 403 to distinguish between server error
 					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
@@ -837,13 +837,20 @@ func wildcardHandler(ctx *gin.Context) {
 						Msg:    "The cache has not been approved by federation administrator"})
 					return
 				}
-			} else { // Origins
+			} else { // Origins, including both /origins prefix and namespace prefixes
 				if param.Registry_RequireOriginApproval.GetBool() {
-					// Use 403 to distinguish between server error
-					ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
-						Status: server_structs.RespFailed,
-						Msg:    "The origin has not been approved by federation administrator"})
-					return
+					if server_structs.IsOriginNS(prefix) { // Origin prefix
+						// Use 403 to distinguish between server error
+						ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+							Status: server_structs.RespFailed,
+							Msg:    "The origin has not been approved by a federation administrator"})
+						return
+					} else { // Namespace prefixes
+						ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+							Status: server_structs.RespFailed,
+							Msg:    "The namespace has not been approved by a federation administrator"})
+						return
+					}
 				}
 			}
 		}
@@ -1056,7 +1063,7 @@ func checkApprovalHandler(ctx *gin.Context) {
 	// we return Approved == true
 	if ns.AdminMetadata != emptyMetadata {
 		// Caches
-		if strings.HasPrefix(req.Prefix, "/caches") && param.Registry_RequireCacheApproval.GetBool() {
+		if server_structs.IsCacheNS(req.Prefix) && param.Registry_RequireCacheApproval.GetBool() {
 			res := server_structs.CheckNamespaceStatusRes{Approved: ns.AdminMetadata.Status == server_structs.RegApproved}
 			ctx.JSON(http.StatusOK, res)
 			return
@@ -1093,10 +1100,6 @@ func checkStatusHandler(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "failed to parse request body: " + err.Error()})
 	}
 	for _, prefix := range nssReq.Prefixes {
-		isCache := false
-		if strings.HasPrefix(prefix, "/caches") {
-			isCache = true
-		}
 		complete := server_structs.NamespaceCompletenessResult{}
 		exists, err := namespaceExistsByPrefix(prefix)
 		if err != nil {
@@ -1123,10 +1126,12 @@ func checkStatusHandler(ctx *gin.Context) {
 				Msg:    "Server error when getting federation information: " + err.Error(),
 			})
 		}
-		if isCache {
+		if server_structs.IsCacheNS(prefix) {
 			complete.EditUrl = fmt.Sprintf("%s/view/registry/cache/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
-		} else {
+		} else if server_structs.IsOriginNS(prefix) {
 			complete.EditUrl = fmt.Sprintf("%s/view/registry/origin/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
+		} else {
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/namespace/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
 		}
 		err = config.GetValidate().Struct(ns)
 		if err != nil {

@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -31,22 +32,26 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestMain(m *testing.M) {
+	viper.Reset()
 	if err := config.InitClient(); err != nil {
 		os.Exit(1)
 	}
@@ -135,8 +140,8 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	}
 
 	os.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
-	err := config.InitClient()
-	assert.Nil(t, err)
+	test_utils.InitClient(t, map[string]any{})
+
 	transfers := newTransferDetails(testCache, transferDetailsOptions{})
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, true, transfers[0].Proxy)
@@ -149,7 +154,7 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	assert.Equal(t, false, transfers[0].Proxy)
 	os.Unsetenv("OSG_DISABLE_PROXY_FALLBACK")
 	viper.Reset()
-	err = config.InitClient()
+	err := config.InitClient()
 	assert.Nil(t, err)
 }
 
@@ -157,8 +162,10 @@ func TestSlowTransfers(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Adjust down some timeouts to speed up the test
-	viper.Set("Client.SlowTransferWindow", 5)
-	viper.Set("Client.SlowTransferRampupTime", 10)
+	test_utils.InitClient(t, map[string]any{
+		"Client.SlowTransferWindow":     "2s",
+		"Client.SlowTransferRampupTime": "1s",
+	})
 
 	channel := make(chan bool)
 	slowDownload := 1024 * 10 // 10 KiB/s < 100 KiB/s
@@ -206,7 +213,7 @@ func TestSlowTransfers(t *testing.T) {
 	var err error
 	// Do a quick timeout
 	go func() {
-		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 		finishedChannel <- true
 	}()
 
@@ -225,7 +232,16 @@ func TestSlowTransfers(t *testing.T) {
 
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
-	assert.IsType(t, &SlowTransferError{}, err)
+	// Check we have an overlapping PelicanError type
+	_, ok := err.(*error_codes.PelicanError)
+	if ok {
+		var slowTransferError *SlowTransferError
+		assert.Contains(t, err.Error(), "Transfer.SlowTransfer Error: Error code 6002:")
+		// Check we successfully wrapped an already defined SlowTransferError
+		assert.True(t, errors.As(err, &slowTransferError))
+	} else {
+		t.Fatal("Error is not of type PelicanError")
+	}
 }
 
 // Test stopped transfer
@@ -238,8 +254,10 @@ func TestStoppedTransfer(t *testing.T) {
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// Adjust down the timeouts
-	viper.Set("Client.StoppedTransferTimeout", 3)
-	viper.Set("Client.SlowTransferRampupTime", 100)
+	test_utils.InitClient(t, map[string]any{
+		"Client.StoppedTransferTimeout": "2s",
+		"Client.SlowTransferRampupTime": "100s",
+	})
 
 	channel := make(chan bool)
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -281,7 +299,7 @@ func TestStoppedTransfer(t *testing.T) {
 	var err error
 
 	go func() {
-		_, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 		finishedChannel <- true
 	}()
 
@@ -314,7 +332,7 @@ func TestConnectionError(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 
-	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 
 	assert.IsType(t, &ConnectionSetupError{}, err)
 
@@ -354,7 +372,7 @@ func TestTrailerError(t *testing.T) {
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
 	// Call DownloadHTTP and check if the error is returned correctly
-	_, _, _, err := downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	_, _, _, _, err := downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
@@ -430,9 +448,11 @@ func TestSortAttempts(t *testing.T) {
 		}
 	})
 	alwaysRespond := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "HEAD" {
+		if r.Method == "GET" {
 			w.Header().Set("Content-Length", "42")
 			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("A"))
+			require.NoError(t, err)
 		} else {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
@@ -481,10 +501,9 @@ func TestSortAttempts(t *testing.T) {
 }
 
 func TestTimeoutHeaderSetForDownload(t *testing.T) {
-	viper.Reset()
-	config.InitConfig()
-	viper.Set("Transport.ResponseHeaderTimeout", 10*time.Second)
-	require.NoError(t, config.InitClient())
+	test_utils.InitClient(t, map[string]any{
+		"Transport.ResponseHeaderTimeout": 10 * time.Second,
+	})
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// We have this flag because our server will get a few requests throughout its lifetime and the other
@@ -506,15 +525,13 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 
 	serverURL, err := url.Parse(server.URL)
 	assert.NoError(t, err)
-	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 	assert.NoError(t, err)
 	viper.Reset()
 }
 
 func TestJobIdHeaderSetForDownload(t *testing.T) {
-	viper.Reset()
-	config.InitConfig()
-	require.NoError(t, config.InitClient())
+	test_utils.InitClient(t, map[string]any{})
 
 	// Create a test .job.ad file
 	jobAdFile, err := os.CreateTemp("", ".job.ad")
@@ -547,7 +564,7 @@ func TestJobIdHeaderSetForDownload(t *testing.T) {
 
 	serverURL, err := url.Parse(server.URL)
 	assert.NoError(t, err)
-	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 	assert.NoError(t, err)
 	viper.Reset()
 	os.Unsetenv("_CONDOR_JOB_AD")
@@ -582,7 +599,7 @@ func TestProjInUserAgent(t *testing.T) {
 
 	serverURL, err := url.Parse(server_test.server.URL)
 	assert.NoError(t, err)
-	_, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "test")
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "test")
 	assert.NoError(t, err)
 
 	// Test the user-agent header is what we expect it to be
@@ -596,13 +613,17 @@ func TestNewPelicanURL(t *testing.T) {
 
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixNoError", func(t *testing.T) {
 		viper.Reset()
-		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
+		err := config.InitClient()
+		require.NoError(t, err)
+		_, err = config.SetPreferredPrefix(config.OsdfPrefix)
 		viper.Set("ConfigDir", t.TempDir())
 		assert.NoError(t, err)
 		// Init config to get proper timeouts
 		config.InitConfig()
 
-		te := NewTransferEngine(ctx)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
+
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -624,15 +645,12 @@ func TestNewPelicanURL(t *testing.T) {
 	})
 
 	t.Run("TestOsdfOrStashSchemeWithOSDFPrefixWithError", func(t *testing.T) {
-		viper.Reset()
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
-		viper.Set("ConfigDir", t.TempDir())
 		require.NoError(t, err)
-		config.InitConfig()
-		require.NoError(t, config.InitClient())
+		test_utils.InitClient(t, map[string]any{})
 
-		te := NewTransferEngine(ctx)
-		require.NotNil(t, te)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -651,18 +669,15 @@ func TestNewPelicanURL(t *testing.T) {
 	})
 
 	t.Run("TestOsdfOrStashSchemeWithPelicanPrefixNoError", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("ConfigDir", t.TempDir())
-		config.InitConfig()
-		require.NoError(t, config.InitClient())
-		te := NewTransferEngine(ctx)
-		require.NotNil(t, te)
+		test_utils.InitClient(t, map[string]any{})
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
 
 		mock.MockOSDFDiscovery(t, config.GetTransport())
-		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		_, err = config.SetPreferredPrefix(config.PelicanPrefix)
 		config.InitConfig()
 		assert.NoError(t, err)
 		remoteObject := "osdf:///something/somewhere/thatdoesnotexist.txt"
@@ -679,20 +694,16 @@ func TestNewPelicanURL(t *testing.T) {
 	})
 
 	t.Run("TestPelicanSchemeNoError", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("TLSSkipVerify", true)
-		viper.Set("ConfigDir", t.TempDir())
-		config.InitConfig()
-		err := config.InitClient()
-		require.NoError(t, err)
+		test_utils.InitClient(t, map[string]any{
+			"TLSSkipVerify": true,
+		})
 
-		te := NewTransferEngine(ctx)
-		require.NotNil(t, te)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
 
-		assert.NoError(t, err)
 		// Create a server that gives us a mock response
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// make our response:
@@ -736,9 +747,11 @@ func TestNewPelicanURL(t *testing.T) {
 		viper.Reset()
 		viper.Set("ConfigDir", t.TempDir())
 		config.InitConfig()
+		err := config.InitClient()
+		require.NoError(t, err)
 
-		te := NewTransferEngine(ctx)
-		require.NotNil(t, te)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
@@ -753,21 +766,19 @@ func TestNewPelicanURL(t *testing.T) {
 	})
 
 	t.Run("TestPelicanSchemeMetadataTimeoutError", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("TLSSkipVerify", true)
-		viper.Set("ConfigDir", t.TempDir())
-		oldResponseHeaderTimeout := viper.Get("transport.ResponseHeaderTimeout")
-		viper.Set("transport.ResponseHeaderTimeout", 0.1*float64(time.Millisecond))
-		viper.Set("Client.WorkerCount", 5)
-		err := config.InitClient()
-		require.NoError(t, err)
+		test_utils.InitClient(t, map[string]any{
+			"TLSSkipVerify":                   true,
+			"Transport.ResponseHeaderTimeout": time.Millisecond,
+		})
 
-		te := NewTransferEngine(ctx)
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
 		defer func() {
 			require.NoError(t, te.Shutdown())
 		}()
 
 		// Create a server that gives us a mock response
+		sleepChan := make(chan bool)
 		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// make our response:
 			response := config.FederationDiscovery{
@@ -782,12 +793,13 @@ func TestNewPelicanURL(t *testing.T) {
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				return
 			}
-
+			<-sleepChan
 			w.WriteHeader(http.StatusOK)
 			_, err = w.Write(responseJSON)
 			assert.NoError(t, err)
 		}))
 		defer server.Close()
+		defer close(sleepChan)
 
 		serverURL, err := url.Parse(server.URL)
 		assert.NoError(t, err)
@@ -799,7 +811,6 @@ func TestNewPelicanURL(t *testing.T) {
 		_, err = te.newPelicanURL(remoteObjectURL)
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, config.MetadataTimeoutErr))
-		viper.Set("transport.ResponseHeaderTimeout", oldResponseHeaderTimeout)
 	})
 
 	t.Cleanup(func() {
@@ -810,6 +821,56 @@ func TestNewPelicanURL(t *testing.T) {
 		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
 		viper.Reset()
 	})
+}
+
+// Tests the functionality of getCachesToTry, ensuring that the function returns the correct number of caches and removes duplicates
+func TestGetCachesToTry(t *testing.T) {
+	directorCaches := make([]namespaces.DirectorCache, 3)
+	for i := 0; i < 3; i++ {
+		directorCache := namespaces.DirectorCache{
+			EndpointUrl: "https://some/cache/" + strconv.Itoa(i),
+			Priority:    0,
+			AuthedReq:   false,
+		}
+		directorCaches[i] = directorCache
+	}
+
+	// Add a duplicate to the list --> check for its removal
+	directorCaches = append(directorCaches, namespaces.DirectorCache{
+		EndpointUrl: "https://some/cache/0",
+		Priority:    0,
+		AuthedReq:   false,
+	})
+
+	// Make our namespace:
+	namespace := namespaces.Namespace{
+		SortedDirectorCaches: directorCaches,
+		ReadHTTPS:            false,
+		UseTokenOnRead:       false,
+	}
+
+	caches, err := getCachesFromNamespace(namespace, true, nil)
+	assert.NoError(t, err)
+
+	job := &TransferJob{
+		namespace: namespace,
+	}
+
+	transfers := getCachesToTry(caches, job, 4, "")
+
+	// Check that there are no duplicates in the result
+	cacheSet := make(map[CacheInterface]bool)
+	for _, transfer := range transfers {
+		if cacheSet[transfer.Url.String()] {
+			t.Errorf("Found duplicate cache: %v", transfer.Url.String())
+		}
+		cacheSet[transfer.Url.String()] = true
+	}
+	// Verify we got the correct caches in our transfer attempt details
+	require.Len(t, transfers, 3)
+	assert.Equal(t, "https://some/cache/0", transfers[0].Url.String())
+	assert.Equal(t, "https://some/cache/1", transfers[1].Url.String())
+	assert.Equal(t, "https://some/cache/2", transfers[2].Url.String())
 }
 
 // Test that the project name is correctly extracted from the job ad file
@@ -849,5 +910,214 @@ func TestSearchJobAd(t *testing.T) {
 		// Call GetProjectName and check the result
 		jobId := searchJobAd(jobId)
 		assert.Equal(t, "12345", jobId)
+	})
+}
+
+// Test error messages when a 504 Gateway Timeout occurs
+func TestGatewayTimeout(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level": "debug",
+	})
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusGatewayTimeout)
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: "/dev/null",
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+	transferResult, err := downloadObject(transfer)
+	assert.NoError(t, err)
+	err = transferResult.Error
+	log.Debugln("Received connection error:", err)
+	var sce *StatusCodeError
+	if errors.As(err, &sce) {
+		assert.Equal(t, "cache timed out waiting on origin", sce.Error())
+	} else {
+		require.Fail(t, "downloadObject did not return a status code error: %s", err)
+	}
+}
+
+// Test failed connection setup error message for downloads
+func TestFailedConnectionSetupError(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		"Transport.ResponseHeaderTimeout": "500ms",
+		"Logging.Level":                   "debug",
+	})
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: "/dev/null",
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+	transferResult, err := downloadObject(transfer)
+	assert.NoError(t, err)
+	err = transferResult.Error
+	log.Debugln("Received connection error:", err)
+	var hte *HeaderTimeoutError
+	if errors.As(err, &hte) {
+		require.Equal(t, "timeout waiting for HTTP response (TCP connection successful)", hte.Error())
+	} else {
+		require.Fail(t, "Slow server did not generate a HeaderTimeoutError")
+	}
+	require.Error(t, err)
+}
+
+// Test error message generated on a failed upload
+//
+// Creates a server that does nothing but stall; examines the
+// corresponding error message out to the user.
+func TestFailedUploadError(t *testing.T) {
+
+	configDir := t.TempDir()
+	test_utils.InitClient(t, map[string]any{
+		"Transport.ResponseHeaderTimeout": "500ms",
+		"TLSSkipVerify":                   true,
+		"Logging.Level":                   "debug",
+	})
+
+	testfileLocation := filepath.Join(configDir, "testfile.txt")
+	err := os.WriteFile(testfileLocation, []byte("Hello, world!\n"), fs.FileMode(0600))
+	require.NoError(t, err)
+
+	shutdownChan := make(chan bool)
+	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-shutdownChan
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+	defer close(shutdownChan)
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: testfileLocation,
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+	transferResult, err := uploadObject(transfer)
+	assert.NoError(t, err)
+	err = transferResult.Error
+	log.Debugln("Received error:", err)
+	var te *TransferErrors
+	if errors.As(err, &te) {
+		log.Debugln("Received transfer error:", te.UserError())
+	} else {
+		require.Fail(t, "Returned error (%s) is not a TransferError type", err.Error())
+	}
+	var hte *HeaderTimeoutError
+	if errors.As(err, &hte) {
+		require.Equal(t, "timeout waiting for HTTP response (TCP connection successful)", hte.Error())
+	}
+	require.Error(t, err)
+}
+
+// Test error message generated on a failed upload
+//
+// Creates a server that does nothing but stall; examines the
+// corresponding error message out to the user.
+func TestFailedLargeUploadError(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		"Transport.ResponseHeaderTimeout": "500ms",
+		"TLSSkipVerify":                   true,
+		"Logging.Level":                   "debug",
+		"Client.StoppedTransferTimeout":   "1s",
+	})
+
+	testfileLocation := filepath.Join(t.TempDir(), "testfile.txt")
+	fp, err := os.OpenFile(testfileLocation, os.O_WRONLY|os.O_CREATE, os.FileMode(0600))
+	require.NoError(t, err)
+	test_utils.WriteBigBuffer(t, fp, 40)
+
+	shutdownChan := make(chan bool)
+	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-shutdownChan
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+	defer close(shutdownChan)
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: testfileLocation,
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+	transferResult, err := uploadObject(transfer)
+	assert.NoError(t, err)
+	err = transferResult.Error
+	log.Debugln("Received error:", err)
+	var te *TransferErrors
+	if errors.As(err, &te) {
+		log.Debugln("Received transfer error:", te.UserError())
+	} else {
+		require.Fail(t, "Returned error (%s) is not a TransferError type", err.Error())
+	}
+	var hte *HeaderTimeoutError
+	if errors.As(err, &hte) {
+		require.Equal(t, "timeout waiting for HTTP response (TCP connection successful)", hte.Error())
+	}
+	require.Error(t, err)
+}
+
+func TestNewTransferEngine(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	// Test we fail if we do not call initclient() before
+	t.Run("TestInitClientNotCalled", func(t *testing.T) {
+		config.ResetClientInitialized()
+		ctx := context.Background()
+		_, err := NewTransferEngine(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "client has not been initialized, unable to create transfer engine")
+	})
+
+	t.Run("TestInitClientCalled", func(t *testing.T) {
+		err := config.InitClient()
+		require.NoError(t, err)
+		ctx := context.Background()
+		_, err = NewTransferEngine(ctx)
+		assert.NoError(t, err)
 	})
 }

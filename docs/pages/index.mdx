@@ -2,39 +2,134 @@ import ImageRow from "@/components/ImageRow";
 
 # What Is the Pelican Platform?
 
-Pelican provides an open-source software platform for federating dataset repositories together and delivering the
-objects to computing capacity such as the [OSPool](https://osg-htc.org/services/open_science_pool.html).
+Pelican is an open-source software platform for building data federations that works by connecting a broad range of data repositories under a unified architecture. Whether data lives on a POSIX filesystem, in S3, or behind an HTTP server, Pelican aims to bring this data together and simplify its access by abstracting away the need to know where it comes from.
 
-**Pelican Enables**:
-- Researchers to access their datasets at scales from a notebook to a campus cluster to the national computing fabric
-- Repositories and storage providers to export datasets in a scalable manner and helps implement FAIR principles
-- Compute providers to cache datasets on-site
-- Cyberinfrastructures to build gateways and portals to large-scale datasets
+**Pelican's goals are to**:
+- Enable researchers to access data from wherever it lives wherever they need it -- without having to learn multiple backend technologies. This access could take place in a Jupyter notebook, a campus cluster, or from national-scale computing infrastructure like the [OSPool](https://osg-htc.org/services/open_science_pool.html).
+- Enable repositories and storage providers to make their data accessible to a broad range of users while maintaining control over how their data is accessed and by whom
+- Encourage and support [FAIR](https://www.go-fair.org/fair-principles/) data practices
+- Allow computing providers to stage data on-site as it's needed
 
-Objects in a federation are accessible through a common namespace; given an object name,
-the Pelican client can discover the object’s location and download it through the access layer.
-The access layer consists of distributed caches which reduce the load on the origin for repeated accesses.
+The flagship federation underpinned by Pelican is called the [Open Science Data Federation](https://osdf.osg-htc.org/) (OSDF), which serves a variety of large scientific collaborations across more than fifty data providers and approximately two dozen caches located throughout the world, often at points of presence within the global Research and Education networks such as ESNet and Internet2.
 
-<ImageRow alt={"Pelican and OSDF"} src={"/pelican/pelican-and-osdf.png"}>
-	A Pelican data federation provides an access layer that helps the origin
-	distribute datasets in the repositories.  A client wanting an object contacts
-	the manager to find the closest cache which either serves the objects from
-	local storage or streams it through the origin.
-</ImageRow>
+## Core Concepts and Terminology
+
+Pelican is a tool for building ***data federations***, a model in which decentralized, autonomous data repositories work together to make their data broadly available to other members of the federation under a minimally-centralized structure. In this model, data is accessed through a unified namespace regardless of where the data comes from or what type of storage is used to host it -- to a user, everything feels like it's coming from the same source.
+
+Pelican federations consist of 6 core entities:
+- *Clients*
+- *Data Repositories*
+- *Origin Servers*
+- *Caches*
+- *Central Services (the Registry and Director)*
+
+where each of these federation stakeholders represents a unique set of interests. One of Pelican's core functionalities is balancing the sometimes-competing needs of each of its constituents.
+
+A description for each of these entities is provided below.
+
+### Clients
+
+Pelican views itself as serving two types of users; data providers and data consumers. *Pelican Clients* are the tools built around Pelican that support consumers, enabling them to download data via a federation. Pelican currently has three Clients, and more are under development. Existing Clients include the [Pelican CLI tool](install.mdx), the [Pelican FSSpec](https://github.com/pelicanplatform/pelicanfs) for Python, and a file transfer plugin for [HTCondor](https://htcondor.readthedocs.io/en/latest/users-manual/file-transfer.html#file-transfer-using-a-url).
+
+Pelican Clients are designed to work with `pelican://`-style URLs, which defines a metadata lookup protocol on top of HTTP. For more information on this URL specification, see Pelican's [client usage documentation](client-usage.mdx).
+
+Lastly, because Pelican builds on top of HTTP, most HTTP clients (e.g. curl) can be modified to interact with Pelican federations.
+
+### Data Repository
+
+Data can live in any number of places, from a hard drive with an associated POSIX filesystem, to buckets in S3. Pelican defines a *Data Repository* as any instance of a storage backend.
+
+Data Repositories often have their own policies that are unique from federation policies, including things like authentication/access control and rate limiting.
+
+Pelican's primary goal with respect to Data Repositories is to make the data they hold accessible to clients within a federation, without requiring that users know what type of repository the data comes from or how it works.
 
 
-The flagship Pelican federation is the Open Science Data Federation (OSDF).
-The OSDF has approximately two dozen caches located throughout the world, often at
-points of presence within the global Research and Education networks such as ESNet and
-Internet2.
+### Origins
+
+To make data from a Repository available through a Pelican federation, the data provider must serve an *Origin* in front of the Repository.
+
+Origins are a crucial component of Pelican's architecture for two reasons: they act as an adapter between various storage backends and Pelican federations, and they provide fine-grained access controls for that data. That is, they figure out how to take data from wherever it lives and transform it into a format that the clients from the federation can utilize while respecting the Repository's data access requirements. This implies an inherent trust relationship between Origins and Data Repositories, as the Origin is responsible for enforcing the Repository's needs and wishes within the rest of the federation. However, while the Origin is responsible for translating the Repository's data access policies into something the federation can understand, Pelican is designed so that Origins never need to share secrets with their federation.
+
+Pelican Origins work by making their underlying Repository accessible under some namespace path via HTTPs, which is accomplished by building on top of [XRootD](https://xrootd.slac.stanford.edu/). The namespace path, also called the *federation prefix*, is the path at which data from the Origin can be accessed in the federation. For example, an Origin that exports the namespace path `/foo` might provide access to an object `bar` in the underlying Data Repository. The full path for this object in the federation would be `/foo/bar`.
+
+> **NOTE**: An important distinction between Origins and Data Repositories is that, generally speaking, Origins do **NOT** store any data themselves; their primary function is to facilitate data access *from* the Repository, which may not coincide on the same machine.
 
 <ImageRow alt={"Pelican and OSDF"} src={"/pelican/pelican-bus.png"}>
-	The OSDF serves as a transport bus, connecting a variety of backend storage types
+	Pelican Origins serve as a transport bus, connecting a variety of backend storage types to their federation
+</ImageRow>
+
+### Caches
+
+Pelican *Caches* are responsible for storing copies of data inside the federation with the goal of providing more efficient access to reusable data. By default, requests to a Pelican federation for an object are proxied through a Cache, resulting in the federation storing a temporary copy of the object. Currently, objects are cleared from Caches based on a "least recently used" algorithm whenever the server begins running out of storage space, but more robust forms of cache management are in active development. Like Origins, Caches build on top of [XRootD's "Proxy Storage Services."](https://xrootd.slac.stanford.edu/doc/dev56/pss_config.pdf)
+
+Because Caches store copies of data for re-distribution in the federation, they must also respect the Origin's data access policies. That is, the Origin should trust Caches to protect any data that isn't marked as publicly accessible. Caches in a Pelican federation accomplish this by aggregating access policies from the Origins they support and following the same approval/denial rules the Origins themselves would follow.
+
+Generally, Caches are operated by the federation and placed close to computing clusters where data may be quickly re-used as part of High-Throughput Computing workflows, but this is not a requirement.
+
+### Central Services
+
+It was mentioned that data federations operate under a minimally-centralized structure. In Pelican, this structure is made up of the *Central Services*, namely the *Director* and the *Registry*.
+
+**NOTE**: Pelican's Central Services are responsible for connecting Repositories and data consumers, but a core part of Pelican's architecture is that objects never pass through the Central Services. In fact, the federation’s Central Services are unable to access any authorization-protected objects via Origins unless the Origin mints a token granting that permission. In this way, Origins that don’t allow their data to be staged/cached in the federation need not trust the federation operators, because each Origin acts as its own token issuer and is solely responsible for deciding which requests to respect. This architecture also prevents the creation of centralized bottlenecks as a federation grows.
+
+#### Director Service
+
+Data access in a Pelican federation requires two fundamental pieces of information -- the federation's hostname (also called the *root* of the federation), and the name of the object within the federation. Notably, the hostnames of any Origins that facilitate access to objects are absent from that list. Instead, the Pelican model uses the federation root to discover and route all Client requests for objects through its *Director*, an HTTP server whose job is determining the best location(s) at which to access a given object. In some cases, this is accomplished by redirecting clients to a nearby Cache that might already have a copy of the object, and in other cases the Director might send the client to an Origin that can provide direct access.
+
+Generally, the Director's hostname is used as the federation's hostname because it auto-populates and makes available the federation's metadata. This information is hosted at the *discovery endpoint*, a URL obtained by appending `/.well-known/pelican-configuration` to the federation's root. However, some federations may wish to set up the Director/Registry as subdomains of the federation's hostname. For example, the OSDF breaks these two endpoints apart by providing federation metadata at osg-htc.org, which then points to `osdf-director.osg-htc.org` and `osdf-registry.osg-htc.org`, respectively.
+
+All Origins and Caches in a federation send periodic advertisements to the discovered Director at a default interval of 1 minute to let it know where they can be accessed, which namespace(s) they provide, and any information pertaining to data access policies (such as authorization schemes). In this way, the Director is the only service that has a nearly real-time view of all the Origins and Caches in the federation -- if an Origin or Cache fails to re-advertise after the required period (15 minutes by default), it is assumed to be offline until another advertisement is received, and the Director will stop sending clients to that location.
+
+#### Registry Service
+
+Whenever a new Origin or Cache is created and added to a federation, its first step is to register itself with the *Registry*, which acts as the federation's locus of trust. In the case of Origins, the process of registration entails sending the Registry the namespace prefix the Origin exports, along with the Origin's public key and a variety of other bookkeeping information. After the Registry and the Origin have performed a handshake that proves the Origin owns the corresponding private key, the Registry stores the information in a persistent database.
+
+This process serves two purposes -- first, whenever the Origin re-advertises with the federation's Director, the Director can verify the authenticity of those advertisements through public/private key asymmetric cryptography by looking at the Registry's stored public key for that Origin and namespace. Second, the Registry's persistent database prevents other Origins from registering namespaces under an already-registered namespace without first proving they're allowed to do so by the namespace owner (i.e. the entity that possesses the appropriate private key).
+
+## Making Bytes Accessible and Moving Them -- A First Look Under The Hood
+
+This section provides a simplified example of how data is made accessible and moved within the OSDF. In particular, it elides the OSDF’s Caching infrastructure and any discussion of authorization tokens.
+
+Pelican serves two sides of the same coin -- Data owners who want to federate their data from wherever it lives natively, and data consumers who want to access and compute on data wherever they need it.
+
+
+<ImageRow alt={"Pelican and OSDF"} src={"/pelican/arch-repo-and-consumer.png"}>
+	The federation's core goal is connecting data owners and data consumers.
 </ImageRow>
 
 
+As such, the primary prerequisite for data to be moved via a Pelican federation is for a data owner to make their data accessible to the federation. This happens when an Origin is placed in front of the repository and registered with the federation. While federations like the OSDF *may* wish to control or filter any Origin registrations to vet the data they make available, this example assumes the Origin's registration is automatically approved. The red arrow in the following graphic represents the vetting/approval step, should the federation require it.
 
+<ImageRow alt={"Pelican and OSDF"} src={"/pelican/arch-origin-registration.png"}>
+	The Origin's owner configures a federation root before starting the service. After startup, the
+	Origin then discovers the hostnames for its Registry and Directory by using the federation root
+	to construct the URL "https://osg-htc.org/.well-known/pelican-configuration", the federation's
+	*discovery endpoint* containing a JSON that details the federation's central services.
 
-Central to Pelican is the concept of the origin service.  The origin is the intermediary between
-the existing storage and the federation.  The origin is responsible for serving data as well
-as issuing tokens (credentials) authorizing access to datasets based on the local policy.
+	Next, the Origin registers its namespace and public key with the Registry, proving that it
+	owns the corresponding private key. Finally, the Origin begins advertising its namespace
+	information and hostname to the Director.
+</ImageRow>
+
+While somewhat simplified, this example illustrates the process origins must take to make themselves known within the federation. After completing these steps, the objects from the Data Repository are available via Pelican.
+
+The next step is for the data consumer to actually *move* the data. Pelican assumes the data consumer already knows the federation that provides the data they want, along with the name of the object within the federation. These two pieces of information are combined and provided to the Client as a `pelican://`-schemed URL
+
+<ImageRow alt={"Pelican and OSDF"} src={"/pelican/arch-orig-discovery.png"}>
+	The data consumer provides their Pelican client of choice the pelican:// URL that defines
+	the object they want to download, where `osg-htc.org` is the federation and
+	(`/weather/cloud.jpg`) is the object. Just as the origin discovered the Director's hostname
+	by visiting the discovery endpoint, so too does the client.
+
+	After the client has performed federation metadata discovery, it issues an HTTP GET
+	request to the Director, using the object name as a URL path. The Director responds
+	with an HTTP 307 Redirect, forwarding the client on to the a server that can provide
+	the object, in this example an Origin.
+
+	Finally, the Client follows the redirect and downloads the object by issuing an HTTP
+	GET request to "https://my-origin.com/weather/cloud.jpg"
+
+	Notice that the Origin continues advertising with the Director throughout.
+</ImageRow>
+
+Once again, this example is simplified, mainly because the Director typically sends the client to a Cache capable of fetching the object, not directly to the Origin. In any case, the object is delivered to the Client without passing through the federation's Central Services. When the object is fetched through a Cache, the Cache performs the same discovery step as the Client by asking the Director for an Origin that exports the object.

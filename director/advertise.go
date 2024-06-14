@@ -32,12 +32,51 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
-func parseServerAd(server utils.Server, serverType server_structs.ServerType) server_structs.ServerAd {
+// Consolite two ServerAds that share the same ServerAd.URL. For all but the capability fields,
+// the existing ServerAds takes precedence. For capability fields, an OR is made between two ads
+// to get a union of permissions.
+func consolidateDupServerAd(newAd, existingAd server_structs.ServerAd) server_structs.ServerAd {
+	consolidatedAd := existingAd
+
+	// Update new serverAd capabilities by taking the OR operation so that it's more permissive
+	consolidatedAd.Caps.DirectReads = existingAd.Caps.DirectReads || newAd.Caps.DirectReads
+	consolidatedAd.Caps.PublicReads = existingAd.Caps.PublicReads || newAd.Caps.PublicReads
+	consolidatedAd.Caps.Reads = existingAd.Caps.Reads || newAd.Caps.Reads
+	consolidatedAd.Caps.Writes = existingAd.Caps.Writes || newAd.Caps.Writes
+	consolidatedAd.Caps.Listings = existingAd.Caps.Listings || newAd.Caps.Listings
+
+	consolidatedAd.DirectReads = existingAd.DirectReads || newAd.DirectReads
+	consolidatedAd.Writes = existingAd.Writes || newAd.Writes
+	consolidatedAd.Listings = existingAd.Listings || newAd.Listings
+
+	return consolidatedAd
+}
+
+// Takes in server information from topology and handles converting the necessary bits into a new Pelican
+// ServerAd.
+func parseServerAdFromTopology(server utils.Server, serverType server_structs.ServerType, caps server_structs.Capabilities) server_structs.ServerAd {
 	serverAd := server_structs.ServerAd{}
 	serverAd.Type = serverType
 	serverAd.Name = server.Resource
 
-	serverAd.Writes = param.Origin_EnableWrites.GetBool()
+	// Explicitly set these to false for caches, because these caps don't really translate in that case
+	if serverAd.Type == server_structs.CacheType {
+		serverAd.Caps = server_structs.Capabilities{}
+		serverAd.Writes = false
+		serverAd.Listings = false
+		serverAd.DirectReads = false
+	} else {
+		// Until we consolidate ServerAd capabilities with NamespaceAdV2 capabilities, we'll keep setting the top-level
+		// ServerAd capabilities. Eventually we should replace with the actual caps struct.
+		serverAd.Writes = caps.Writes
+		serverAd.Listings = caps.Listings
+		serverAd.DirectReads = caps.DirectReads
+		serverAd.Caps = caps
+	}
+
+	// Set FromTopology to true, which we use for filtering Pelican vs Topology origins/namespaces that might be competing.
+	serverAd.FromTopology = true
+
 	// url.Parse requires that the scheme be present before the hostname,
 	// but endpoints do not have a scheme. As such, we need to add one for the.
 	// correct parsing. Luckily, we don't use this anywhere else (it's just to
@@ -51,7 +90,11 @@ func parseServerAd(server utils.Server, serverType server_structs.ServerType) se
 		log.Warningf("Namespace JSON returned server %s with invalid unauthenticated URL %s",
 			server.Resource, server.Endpoint)
 	}
-	serverAd.URL = *serverUrl
+	if serverUrl != nil {
+		serverAd.URL = *serverUrl
+	} else {
+		serverAd.URL = url.URL{}
+	}
 
 	if server.AuthEndpoint != "" {
 		if !strings.HasPrefix(server.AuthEndpoint, "http") { // just in case there's already an http(s) tacked in front
@@ -63,22 +106,79 @@ func parseServerAd(server utils.Server, serverType server_structs.ServerType) se
 				server.Resource, server.AuthEndpoint)
 		}
 
-		serverAd.AuthURL = *serverAuthUrl
+		if serverAuthUrl != nil {
+			serverAd.AuthURL = *serverAuthUrl
+		} else {
+			serverAd.AuthURL = url.URL{}
+		}
 	}
 
 	// We will leave serverAd.WebURL as empty when fetched from topology
 	return serverAd
 }
 
+// Do a subtraction of excludeDowned set from the includeDowned set to find cache servers
+// that are in downtime
+//
+// The excludeDowned is a list of running OSDF topology servers
+// The includeDowned is a list of running and downed OSDF topology servers
+func findDownedTopologyCache(excludeDowned, includeDowned []utils.Server) (caches []utils.Server) {
+	for _, included := range includeDowned {
+		found := false
+		for _, excluded := range excludeDowned {
+			if included == excluded {
+				found = true
+				break
+			}
+		}
+		if !found {
+			caches = append(caches, included)
+		}
+	}
+	return
+}
+
+// Update filteredServers based on topology downtime
+func updateDowntimeFromTopology(excludedNss, includedNss *utils.TopologyNamespacesJSON) {
+	downedCaches := findDownedTopologyCache(excludedNss.Caches, includedNss.Caches)
+
+	filteredServersMutex.Lock()
+	defer filteredServersMutex.Unlock()
+	// Remove existing filteredSevers that are fetched from the topology first
+	for key, val := range filteredServers {
+		if val == topoFiltered {
+			delete(filteredServers, key)
+		}
+	}
+	for _, dc := range downedCaches {
+		if sAd := serverAds.Get(dc.Endpoint); sAd == nil {
+			// The downed cache is not in the director yet
+			filteredServers[dc.Resource] = topoFiltered
+		} else {
+			// If we have the cache in the director, use it's name as the key
+			filteredServers[sAd.Value().Name] = topoFiltered
+		}
+	}
+	log.Infof("The following servers are put in downtime: %#v", filteredServers)
+}
+
 // Populate internal cache with origin/cache ads
-func AdvertiseOSDF() error {
-	namespaces, err := utils.GetTopologyJSON()
+func AdvertiseOSDF(ctx context.Context) error {
+	namespaces, err := utils.GetTopologyJSON(ctx, false)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
 
-	cacheAdMap := make(map[server_structs.ServerAd][]server_structs.NamespaceAdV2)
-	originAdMap := make(map[server_structs.ServerAd][]server_structs.NamespaceAdV2)
+	// Second call to fetch all servers (including servers in downtime)
+	includedNss, err := utils.GetTopologyJSON(ctx, true)
+	if err != nil {
+		return errors.Wrapf(err, "Failed to get topology JSON with server in downtime included (include_downed)")
+	}
+
+	updateDowntimeFromTopology(namespaces, includedNss)
+
+	cacheAdMap := make(map[string]*server_structs.Advertisement)  // key is serverAd.URL.String()
+	originAdMap := make(map[string]*server_structs.Advertisement) // key is serverAd.URL.String()
 	tGen := server_structs.TokenGen{}
 	for _, ns := range namespaces.Namespaces {
 		requireToken := ns.UseTokenOnRead
@@ -124,14 +224,21 @@ func AdvertiseOSDF() error {
 			write = false
 		}
 
+		listings := false
+		if ns.DirlistHost != "" {
+			listings = true
+		}
+
 		caps := server_structs.Capabilities{
 			PublicReads: !ns.UseTokenOnRead,
 			Reads:       ns.ReadHTTPS,
 			Writes:      write,
+			Listings:    listings,
+			DirectReads: true, // Topology namespaces should probably always have this turned on
 		}
 		nsAd := server_structs.NamespaceAdV2{
 			Path:         ns.Path,
-			PublicRead:   !ns.UseTokenOnRead,
+			PublicRead:   caps.PublicReads,
 			Caps:         caps,
 			Generation:   []server_structs.TokenGen{tGen},
 			Issuer:       tokenIssuers,
@@ -142,25 +249,41 @@ func AdvertiseOSDF() error {
 		// Some namespaces show up in topology but don't have an origin (perhaps because
 		// they're listed as inactive by topology). These namespaces will all be mapped to the
 		// same useless origin ad, resulting in a 404 for queries to those namespaces
+
+		// We further assume that with this legacy code handling, each origin exporting a given namespace
+		// will have the same set of capabilities as the namespace itself. Pelican has teased apart origins
+		// and namespaces, so this isn't true outside this limited context.
 		for _, origin := range ns.Origins {
-			originAd := parseServerAd(origin, server_structs.OriginType)
-			originAd.FromTopology = true
-			originAdMap[originAd] = append(originAdMap[originAd], nsAd)
+			originAd := parseServerAdFromTopology(origin, server_structs.OriginType, caps)
+			if existingAd, ok := originAdMap[originAd.URL.String()]; ok {
+				existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
+				consolidatedAd := consolidateDupServerAd(originAd, existingAd.ServerAd)
+				existingAd.ServerAd = consolidatedAd
+			} else {
+				// New entry
+				originAdMap[originAd.URL.String()] = &server_structs.Advertisement{ServerAd: originAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+			}
 		}
 
 		for _, cache := range ns.Caches {
-			cacheAd := parseServerAd(cache, server_structs.CacheType)
-			cacheAd.FromTopology = true
-			cacheAdMap[cacheAd] = append(cacheAdMap[cacheAd], nsAd)
+			cacheAd := parseServerAdFromTopology(cache, server_structs.CacheType, server_structs.Capabilities{})
+			if existingAd, ok := cacheAdMap[cacheAd.URL.String()]; ok {
+				existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
+				consolidatedAd := consolidateDupServerAd(cacheAd, existingAd.ServerAd)
+				existingAd.ServerAd = consolidatedAd
+			} else {
+				// New entry
+				cacheAdMap[cacheAd.URL.String()] = &server_structs.Advertisement{ServerAd: cacheAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+			}
 		}
 	}
 
-	for originAd, namespacesSlice := range originAdMap {
-		recordAd(originAd, &namespacesSlice)
+	for _, ad := range originAdMap {
+		recordAd(ctx, ad.ServerAd, &ad.NamespaceAds)
 	}
 
-	for cacheAd, namespacesSlice := range cacheAdMap {
-		recordAd(cacheAd, &namespacesSlice)
+	for _, ad := range cacheAdMap {
+		recordAd(ctx, ad.ServerAd, &ad.NamespaceAds)
 	}
 
 	return nil
@@ -174,7 +297,7 @@ func PeriodicCacheReload(ctx context.Context) {
 			// The ad cache times out every 15 minutes, so update it every
 			// 10. If a key isn't updated, it will survive for 5 minutes
 			// and then disappear
-			err := AdvertiseOSDF()
+			err := AdvertiseOSDF(ctx)
 			if err != nil {
 				log.Warningf("Failed to re-advertise: %s. Will try again later",
 					err)

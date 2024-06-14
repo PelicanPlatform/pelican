@@ -178,8 +178,15 @@ var (
 	OIDC_Issuer = StringParam{"OIDC.Issuer"}
 	OIDC_TokenEndpoint = StringParam{"OIDC.TokenEndpoint"}
 	OIDC_UserInfoEndpoint = StringParam{"OIDC.UserInfoEndpoint"}
+	Origin_DbLocation = StringParam{"Origin.DbLocation"}
 	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
 	Origin_FederationPrefix = StringParam{"Origin.FederationPrefix"}
+	Origin_GlobusClientIDFile = StringParam{"Origin.GlobusClientIDFile"}
+	Origin_GlobusClientSecretFile = StringParam{"Origin.GlobusClientSecretFile"}
+	Origin_GlobusCollectionID = StringParam{"Origin.GlobusCollectionID"}
+	Origin_GlobusCollectionName = StringParam{"Origin.GlobusCollectionName"}
+	Origin_GlobusConfigLocation = StringParam{"Origin.GlobusConfigLocation"}
+	Origin_HttpAuthTokenFile = StringParam{"Origin.HttpAuthTokenFile"}
 	Origin_HttpServiceUrl = StringParam{"Origin.HttpServiceUrl"}
 	Origin_Mode = StringParam{"Origin.Mode"}
 	Origin_NamespacePrefix = StringParam{"Origin.NamespacePrefix"}
@@ -198,6 +205,7 @@ var (
 	Origin_StorageType = StringParam{"Origin.StorageType"}
 	Origin_Url = StringParam{"Origin.Url"}
 	Origin_XRootDPrefix = StringParam{"Origin.XRootDPrefix"}
+	Origin_XRootServiceUrl = StringParam{"Origin.XRootServiceUrl"}
 	Plugin_Token = StringParam{"Plugin.Token"}
 	Registry_DbLocation = StringParam{"Registry.DbLocation"}
 	Registry_InstitutionsUrl = StringParam{"Registry.InstitutionsUrl"}
@@ -247,6 +255,7 @@ var (
 	Cache_DataLocations = StringSliceParam{"Cache.DataLocations"}
 	Cache_MetaLocations = StringSliceParam{"Cache.MetaLocations"}
 	Cache_PermittedNamespaces = StringSliceParam{"Cache.PermittedNamespaces"}
+	ConfigLocations = StringSliceParam{"ConfigLocations"}
 	Director_CacheResponseHostnames = StringSliceParam{"Director.CacheResponseHostnames"}
 	Director_FilteredServers = StringSliceParam{"Director.FilteredServers"}
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
@@ -265,9 +274,6 @@ var (
 	Cache_Port = IntParam{"Cache.Port"}
 	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
-	Client_SlowTransferRampupTime = IntParam{"Client.SlowTransferRampupTime"}
-	Client_SlowTransferWindow = IntParam{"Client.SlowTransferWindow"}
-	Client_StoppedTransferTimeout = IntParam{"Client.StoppedTransferTimeout"}
 	Client_WorkerCount = IntParam{"Client.WorkerCount"}
 	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
@@ -284,7 +290,10 @@ var (
 	Shoveler_PortHigher = IntParam{"Shoveler.PortHigher"}
 	Shoveler_PortLower = IntParam{"Shoveler.PortLower"}
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
+	Xrootd_DetailedMonitoringPort = IntParam{"Xrootd.DetailedMonitoringPort"}
+	Xrootd_ManagerPort = IntParam{"Xrootd.ManagerPort"}
 	Xrootd_Port = IntParam{"Xrootd.Port"}
+	Xrootd_SummaryMonitoringPort = IntParam{"Xrootd.SummaryMonitoringPort"}
 )
 
 var (
@@ -311,6 +320,7 @@ var (
 	Origin_EnableFallbackRead = BoolParam{"Origin.EnableFallbackRead"}
 	Origin_EnableIssuer = BoolParam{"Origin.EnableIssuer"}
 	Origin_EnableListings = BoolParam{"Origin.EnableListings"}
+	Origin_EnableMacaroons = BoolParam{"Origin.EnableMacaroons"}
 	Origin_EnableOIDC = BoolParam{"Origin.EnableOIDC"}
 	Origin_EnablePublicReads = BoolParam{"Origin.EnablePublicReads"}
 	Origin_EnableReads = BoolParam{"Origin.EnableReads"}
@@ -333,6 +343,9 @@ var (
 
 var (
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
+	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
+	Client_SlowTransferWindow = DurationParam{"Client.SlowTransferWindow"}
+	Client_StoppedTransferTimeout = DurationParam{"Client.StoppedTransferTimeout"}
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
 	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
@@ -348,6 +361,7 @@ var (
 	Transport_IdleConnTimeout = DurationParam{"Transport.IdleConnTimeout"}
 	Transport_ResponseHeaderTimeout = DurationParam{"Transport.ResponseHeaderTimeout"}
 	Transport_TLSHandshakeTimeout = DurationParam{"Transport.TLSHandshakeTimeout"}
+	Xrootd_AuthRefreshInterval = DurationParam{"Xrootd.AuthRefreshInterval"}
 )
 
 var (

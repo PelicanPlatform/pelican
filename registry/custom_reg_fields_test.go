@@ -115,7 +115,23 @@ func TestGetCachedOptions(t *testing.T) {
 		optionsCache.DeleteAll()
 		_, err := getCachedOptions(ts.URL, ttlcache.DefaultTTL)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "are not unique")
+		assert.Contains(t, err.Error(), "option IDs are not unique: bar")
+	})
+
+	t.Run("new-item-with-duplicated-names", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			badResponse := `[{"name":"foo","id":"1"}, {"name":"foo","id":"2"}]`
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(badResponse))
+			require.NoError(t, err)
+		}))
+		defer ts.Close()
+
+		optionsCache.DeleteAll()
+		_, err := getCachedOptions(ts.URL, ttlcache.DefaultTTL)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "option names are not unique: foo")
 	})
 
 	t.Run("new-item-with-successful-fetch", func(t *testing.T) {

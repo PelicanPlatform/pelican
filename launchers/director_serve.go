@@ -39,23 +39,23 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	log.Info("Initializing Director GeoIP database...")
 	director.InitializeDB(ctx)
 
+	director.ConfigFilterdServers()
+
+	director.LaunchTTLCache(ctx, egrp)
+
+	director.LaunchMapMetrics(ctx, egrp)
+
 	if config.GetPreferredPrefix() == config.OsdfPrefix {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 		log.Info("Generating/advertising server ads from OSG topology service...")
 
 		// Get the ads from topology, populate the cache, and keep the cache
 		// updated with fresh info
-		if err := director.AdvertiseOSDF(); err != nil {
+		if err := director.AdvertiseOSDF(ctx); err != nil {
 			return err
 		}
 		go director.PeriodicCacheReload(ctx)
 	}
-
-	director.LaunchTTLCache(ctx, egrp)
-
-	director.LaunchMapMetrics(ctx, egrp)
-
-	director.ConfigFilterdServers()
 
 	// Configure the shortcut middleware to either redirect to a cache
 	// or to an origin

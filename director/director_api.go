@@ -77,6 +77,8 @@ func checkFilter(serverName string) (bool, filterType) {
 			return true, permFiltered
 		case tempFiltered:
 			return true, tempFiltered
+		case topoFiltered:
+			return true, topoFiltered
 		case tempAllowed:
 			return false, tempAllowed
 		default:
@@ -100,7 +102,7 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		serverAd := i.Value().ServerAd
 		serverUrl := i.Key()
 
-		if util, exists := healthTestUtils[serverAd]; exists {
+		if util, exists := healthTestUtils[serverUrl]; exists {
 			util.Cancel()
 			if util.ErrGrp != nil {
 				err := util.ErrGrp.Wait()
@@ -117,15 +119,15 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		}
 
 		if serverAd.Type == server_structs.OriginType {
-			originStatUtilsMutex.Lock()
-			defer originStatUtilsMutex.Unlock()
-			statUtil, ok := originStatUtils[serverUrl]
+			statUtilsMutex.Lock()
+			defer statUtilsMutex.Unlock()
+			statUtil, ok := statUtils[serverUrl]
 			if ok {
 				statUtil.Cancel()
 				if err := statUtil.Errgroup.Wait(); err != nil {
 					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", serverAd.Name, err))
 				}
-				delete(originStatUtils, serverUrl)
+				delete(statUtils, serverUrl)
 			}
 		}
 	})
@@ -174,7 +176,7 @@ func LaunchMapMetrics(ctx context.Context, egrp *errgroup.Group) {
 				// Maps
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("filteredServers").Set(float64(len(filteredServers)))
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("healthTestUtils").Set(float64(len(healthTestUtils)))
-				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("originStatUtils").Set(float64(len(originStatUtils)))
+				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("originStatUtils").Set(float64(len(statUtils)))
 			}
 		}
 	})

@@ -182,7 +182,11 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return 0, err
 	}
 
-	te := NewTransferEngine(ctx)
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return 0, err
+	}
+
 	defer func() {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
@@ -319,7 +323,27 @@ func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, pr
 		} else {
 			caches = directorCaches
 		}
-		log.Debugln("Matched caches:", caches)
+		if log.IsLevelEnabled(log.DebugLevel) || log.IsLevelEnabled(log.TraceLevel) {
+			cacheHosts := make([]string, len(caches))
+			for idx, entry := range caches {
+				cacheStr := entry.(namespaces.DirectorCache).EndpointUrl
+				cacheUrl, err := url.Parse(cacheStr)
+				if err != nil {
+					cacheHosts[idx] = cacheStr
+				}
+				cacheSimpleUrl := url.URL{
+					Scheme: cacheUrl.Scheme,
+					Host:   cacheUrl.Host,
+				}
+				cacheHosts[idx] = cacheSimpleUrl.String()
+			}
+			if len(cacheHosts) <= 6 {
+				log.Debugln("Matched caches:", strings.Join(cacheHosts, ", "))
+			} else {
+				log.Debugf("Matched caches: %s ... (plus %d more)", strings.Join(cacheHosts[0:6], ", "), len(cacheHosts)-6)
+				log.Traceln("matched caches continued:", cacheHosts[6:])
+			}
+		}
 		return
 	}
 
@@ -509,7 +533,11 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		return nil, err
 	}
 
-	te := NewTransferEngine(ctx)
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	defer func() {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
@@ -607,7 +635,11 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 
 	success := false
 
-	te := NewTransferEngine(ctx)
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	defer func() {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
@@ -776,7 +808,11 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	success := false
 	var downloaded int64 = 0
 
-	te := NewTransferEngine(ctx)
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	defer func() {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)

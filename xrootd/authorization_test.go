@@ -392,6 +392,55 @@ func TestEmitCfg(t *testing.T) {
 	t.Run("DualIssuers", configTester(&ScitokensCfg{Global: globalCfg, IssuerMap: map[string]Issuer{issuer.Issuer: issuer, issuer2.Issuer: issuer2}}, dualOutput))
 }
 
+func TestDeduplicateBasePaths(t *testing.T) {
+	tests := []struct {
+		name        string
+		initialCfg  ScitokensCfg
+		expectedCfg ScitokensCfg
+	}{
+		{
+			name: "duplicate base paths",
+			initialCfg: ScitokensCfg{
+				Global: GlobalCfg{Audience: []string{"test_audience"}},
+				IssuerMap: map[string]Issuer{"iss": {
+					Name:      "Demo",
+					BasePaths: []string{"foo", "foo"},
+				}},
+			},
+			expectedCfg: ScitokensCfg{
+				Global: GlobalCfg{Audience: []string{"test_audience"}},
+				IssuerMap: map[string]Issuer{"iss": {
+					Name:      "Demo",
+					BasePaths: []string{"foo"},
+				}},
+			},
+		},
+		{
+			name: "non-sequential duplicate base paths",
+			initialCfg: ScitokensCfg{
+				Global: GlobalCfg{Audience: []string{"test_audience"}},
+				IssuerMap: map[string]Issuer{"iss": {
+					Name:      "Demo",
+					BasePaths: []string{"foo", "bar", "foo"},
+				}},
+			},
+			expectedCfg: ScitokensCfg{
+				Global: GlobalCfg{Audience: []string{"test_audience"}},
+				IssuerMap: map[string]Issuer{"iss": {
+					Name:      "Demo",
+					BasePaths: []string{"bar", "foo"},
+				}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deduplicateBasePaths(&tt.initialCfg)
+			require.Equal(t, tt.initialCfg, tt.expectedCfg)
+		})
+	}
+}
+
 func TestLoadScitokensConfig(t *testing.T) {
 	dirname := t.TempDir()
 	viper.Reset()
@@ -629,29 +678,25 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 
 	nsAds := []server_structs.NamespaceAdV2{
 		{
-			PublicRead: false,
-			Caps:       PrivateCaps,
+			Caps: PrivateCaps,
 			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl:       issuer1URL,
 				BasePaths:       []string{"/p1"},
 				RestrictedPaths: []string{"/p1/nope", "p1/still_nope"}}},
 		},
 		{
-			PublicRead: false,
-			Caps:       PrivateCaps,
+			Caps: PrivateCaps,
 			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl: issuer2URL,
 				BasePaths: []string{"/p2/path", "/p2/foo", "/p2/baz"},
 			}},
 		},
 		{
-			Path:       "/p3",
-			PublicRead: true,
-			Caps:       PublicCaps,
+			Path: "/p3",
+			Caps: PublicCaps,
 		},
 		{
-			PublicRead: false,
-			Caps:       PrivateCaps,
+			Caps: PrivateCaps,
 			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl: issuer1URL,
 				BasePaths: []string{"/p1_again"},
@@ -661,14 +706,12 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 			}},
 		},
 		{
-			Path:       "/p4/depth",
-			PublicRead: true,
-			Caps:       PublicCaps,
+			Path: "/p4/depth",
+			Caps: PublicCaps,
 		},
 		{
-			Path:       "/p2_noauth",
-			PublicRead: true,
-			Caps:       PublicCaps,
+			Path: "/p2_noauth",
+			Caps: PublicCaps,
 		},
 	}
 

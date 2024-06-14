@@ -33,6 +33,9 @@ Logging:
     Xrd: error
     Xrootd: error
 Client:
+  SlowTransferRampupTime: 100s
+  SlowTransferWindow: 30s
+  StoppedTransferTimeout: 100s
   WorkerCount: 5
 Server:
   WebPort: 8444
@@ -45,7 +48,7 @@ Director:
   CacheSortMethod: "distance"
   MinStatResponse: 1
   MaxStatResponse: 1
-  StatTimeout: 200ms
+  StatTimeout: 300ms
   StatConcurrencyLimit: 1000
   AdvertisementTTL: 15m
   OriginCacheHealthTestInterval: 15s
@@ -69,7 +72,6 @@ Origin:
   EnableWrites: true
   EnableListings: true
   EnableDirectReads: false
-  SelfTest: true
   Port: 8443
   SelfTestInterval: 15s
 Registry:
@@ -94,6 +96,7 @@ Xrootd:
   ManagerPort: 1213
   DetailedMonitoringPort: 9930
   SummaryMonitoringPort: 9931
+  AuthRefreshInterval: 5m
 Transport:
   DialerTimeout: 10s
   DialerKeepAlive: 30s

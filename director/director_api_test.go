@@ -51,7 +51,6 @@ func mockNamespaceAds(size int, serverPrefix string) []server_structs.NamespaceA
 	namespaceAds := make([]server_structs.NamespaceAdV2, size)
 	for i := 0; i < size; i++ {
 		namespaceAds[i] = server_structs.NamespaceAdV2{
-			PublicRead: false,
 			Caps: server_structs.Capabilities{
 				PublicReads: false,
 			},

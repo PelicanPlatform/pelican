@@ -48,7 +48,7 @@ func TestCheckCacheSentinelLocation(t *testing.T) {
 		tmpDir := t.TempDir()
 		viper.Reset()
 		viper.Set(param.Cache_SentinelLocation.GetName(), "test.txt")
-		viper.Set(param.Cache_DataLocation.GetName(), tmpDir)
+		viper.Set(param.Cache_LocalRoot.GetName(), tmpDir)
 		err := CheckCacheSentinelLocation()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to open Cache.SentinelLocation")
@@ -59,7 +59,7 @@ func TestCheckCacheSentinelLocation(t *testing.T) {
 		viper.Reset()
 
 		viper.Set(param.Cache_SentinelLocation.GetName(), "test.txt")
-		viper.Set(param.Cache_DataLocation.GetName(), tmpDir)
+		viper.Set(param.Cache_LocalRoot.GetName(), tmpDir)
 
 		file, err := os.Create(filepath.Join(tmpDir, "test.txt"))
 		require.NoError(t, err)

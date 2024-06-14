@@ -2,10 +2,12 @@
   "index": "About Pelican",
   "install": "Install Pelican",
   "parameters": "Configuration",
+  "getting-started": "Getting Started",
   "client-usage": "Client Usage",
-  "serving_an_origin":"Serving an Origin",
-  "serving_a_federation":"Serving a Federation",
-  "serving_a_cache":"Serving a Cache",
+  "serving-an-origin":"Serving an Origin",
+  "serving-a-federation":"Serving a Federation",
+  "serving-a-cache":"Serving a Cache",
   "prometheus": "Prometheus",
-  "grafana": "Grafana"
+  "grafana": "Grafana",
+  "api-docs": "API Documentation"
 }

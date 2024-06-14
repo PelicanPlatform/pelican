@@ -24,10 +24,19 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/param"
+)
+
+type OIDCProvider string
+
+const (
+	CILogon         OIDCProvider = "CILogon"
+	Globus          OIDCProvider = "Globus"
+	UnknownProvider OIDCProvider = "Unknown"
 )
 
 var (
@@ -47,6 +56,10 @@ func getMetadata() {
 	if issuerUrl == "" {
 		metadataError = errors.New("OIDC.Issuer is not set; unable to do metadata discovery")
 		return
+	}
+	// url.Parse doesn't like urls without protocol, so we want to fix this
+	if !strings.HasPrefix(issuerUrl, "https://") && !strings.HasPrefix(issuerUrl, "http://") {
+		issuerUrl = "https://" + issuerUrl
 	}
 	if _, err := url.Parse(issuerUrl); err != nil {
 		metadataError = errors.Wrap(err, "OIDC.Issuer is not a valid URL; unable to do metadata discovery")
@@ -96,6 +109,37 @@ func getMetadataValue(stringParam param.StringParam) (result string, err error) 
 				stringParam.GetName(),
 			)
 		}
+	}
+	return
+}
+
+// Get from the config parameters the OIDC provider
+func GetOIDCProdiver() (pvd OIDCProvider, err error) {
+	authURLStr := param.OIDC_AuthorizationEndpoint.GetString()
+	if authURLStr == "" {
+		authURLStr = param.OIDC_Issuer.GetString()
+		if authURLStr == "" {
+			err = errors.New("can't determine OIDC provider: nothing set for config parameter OIDC.IssuerUrl or OIDC.AuthorizationEndpoint")
+			return
+		}
+	}
+	// url.Parse doesn't like urls without protocol, so we want to fix this
+	if !strings.HasPrefix(authURLStr, "https://") && !strings.HasPrefix(authURLStr, "http://") {
+		authURLStr = "https://" + authURLStr
+	}
+	authURL, err := url.Parse(authURLStr)
+	if err != nil {
+		err = errors.Wrap(err, "can't determine OIDC provider: failed to parse OIDC.AuthorizationEndpoint")
+		return
+	}
+
+	// We get the provider based on the hostname of the authorization endpoint
+	if authURL.Hostname() == "auth.globus.org" {
+		pvd = Globus
+	} else if authURL.Hostname() == "cilogon.org" {
+		pvd = CILogon
+	} else {
+		pvd = UnknownProvider
 	}
 	return
 }

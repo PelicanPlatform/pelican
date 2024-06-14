@@ -20,6 +20,9 @@ package client
 
 import "fmt"
 
+// Convert b bytes to a human-friendly string with SI units
+//
+// For example, ByteCountSI(2000) returns "2 KB"
 func ByteCountSI(b int64) string {
 	const unit = 1000
 	if b < unit {
@@ -31,5 +34,5 @@ func ByteCountSI(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB",
-		float64(b)/float64(div), "kMGTPE"[exp])
+		float64(b)/float64(div), "KMGTPE"[exp])
 }

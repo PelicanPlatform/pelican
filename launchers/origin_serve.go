@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
@@ -56,15 +57,33 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, err
 	}
 
+	if err := origin.InitializeDB(); err != nil {
+		return nil, errors.Wrap(err, "failed to initialize origin sqlite database")
+	}
+
+	origin.ConfigOriginTTLCache(ctx, egrp)
+
+	originExports, err := server_utils.GetOriginExports()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to initialize origin exports")
+	}
+
+	if param.Origin_StorageType.GetString() == string(server_utils.OriginStorageGlobus) {
+		if err := origin.InitGlobusBackend(originExports); err != nil {
+			return nil, errors.Wrap(err, "failed to initialize Globus backend")
+		}
+		origin.LaunchGlobusTokenRefresh(ctx, egrp)
+	}
+
 	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
 	if err = origin.RegisterOriginAPI(engine, ctx, egrp); err != nil {
 		return nil, err
 	}
 
 	// Set up the APIs for the origin UI
-	origin.RegisterOriginWebAPI(engine)
-
-	origin.ConfigOriginTTLCache(ctx, egrp)
+	if err = origin.RegisterOriginWebAPI(engine); err != nil {
+		return nil, err
+	}
 
 	// Director also registers this metadata URL; avoid registering twice.
 	if !modules.IsEnabled(config.DirectorType) {
@@ -133,11 +152,24 @@ func OriginServeFinish(ctx context.Context, egrp *errgroup.Group) error {
 	}
 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusWarning, "Start to register namespaces for the origin server")
+	log.Debug("Register Origin")
+	extUrlStr := param.Server_ExternalWebUrl.GetString()
+	extUrl, _ := url.Parse(extUrlStr)
+	// Only use hostname:port
+	if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, server_structs.GetOriginNs(extUrl.Host)); err != nil {
+		return err
+	}
+	log.Debug("Origin is registered")
 	for _, export := range originExports {
 		if err := launcher_utils.RegisterNamespaceWithRetry(ctx, egrp, export.FederationPrefix); err != nil {
 			return err
 		}
 	}
+
+	egrp.Go(func() error {
+		<-ctx.Done()
+		return origin.ShutdownOriginDB()
+	})
 
 	return nil
 }

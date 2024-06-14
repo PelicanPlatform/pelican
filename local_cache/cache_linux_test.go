@@ -55,7 +55,8 @@ func TestPurge(t *testing.T) {
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	te := client.NewTransferEngine(ctx)
+	te, err := client.NewTransferEngine(ctx)
+	require.NoError(t, err)
 
 	cacheUrl := &url.URL{
 		Scheme: "unix",
@@ -67,7 +68,7 @@ func TestPurge(t *testing.T) {
 		log.Debugln("Will write origin file", filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)))
 		fp, err := os.OpenFile(filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		require.NoError(t, err)
-		size = writeBigBuffer(t, fp, 1)
+		size = test_utils.WriteBigBuffer(t, fp, 1)
 	}
 	require.NotEqual(t, 0, size)
 
@@ -118,7 +119,8 @@ func TestForcePurge(t *testing.T) {
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	te := client.NewTransferEngine(ctx)
+	te, err := client.NewTransferEngine(ctx)
+	require.NoError(t, err)
 
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
@@ -147,7 +149,7 @@ func TestForcePurge(t *testing.T) {
 		log.Debugln("Will write origin file", filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)))
 		fp, err := os.OpenFile(filepath.Join(ft.Exports[0].StoragePrefix, fmt.Sprintf("hello_world.txt.%d", idx)), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 		require.NoError(t, err)
-		size = writeBigBuffer(t, fp, 1)
+		size = test_utils.WriteBigBuffer(t, fp, 1)
 	}
 	require.NotEqual(t, 0, size)
 

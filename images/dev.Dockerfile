@@ -20,7 +20,7 @@
 # fail on building this container on arm machine
 FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 
-FROM almalinux:8
+FROM almalinux:9
 
 # https://docs.docker.com/engine/reference/builder/#automatic-platform-args-in-the-global-scope
 ARG TARGETARCH
@@ -32,7 +32,7 @@ ENV GOFLAGS="-buildvcs=false"
 RUN groupadd -o -g 10940 xrootd
 RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
-RUN yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm && \
+RUN yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
     /usr/bin/crb enable && \
     # ^^ crb enables the Code Ready Builder repository (EL9) or PowerTools (EL8), needed for some of our dependencies \
     yum clean all
@@ -49,7 +49,7 @@ gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 RUN echo '%_topdir /usr/local/src/rpmbuild' > $HOME/.rpmmacros
 
 # Download OSG's XRootD SRPM and rebuild it. Create a yum repository to put the results in.
-RUN yum install -y yum-utils createrepo https://repo.opensciencegrid.org/osg/23-main/osg-23-main-el8-release-latest.rpm && \
+RUN yum install -y yum-utils createrepo https://repo.opensciencegrid.org/osg/23-main/osg-23-main-el9-release-latest.rpm && \
     yum-config-manager --setopt=install_weak_deps=False --save && \
     # ^^ save some space by not installing weak dependencies \
     yum-config-manager --disable osg --save && \
@@ -60,7 +60,7 @@ RUN yum install -y yum-utils createrepo https://repo.opensciencegrid.org/osg/23-
     yumdownloader --source xrootd --disablerepo=\* --enablerepo=osg-development-source && \
     yum-builddep -y xrootd-*.osg*.src.rpm && \
     rpmbuild --define 'osg 1' \
-             --define 'dist .osg.el8' \
+             --define 'dist .osg.el9' \
              --without compat \
              --without doc \
              --nocheck \
@@ -77,8 +77,8 @@ priority=1 \n\
 gpgcheck=0' > /etc/yum.repos.d/local.repo
 
 # Install goreleaser and various other packages we need
-RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens \
-    xrootd-voms xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel \
+RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens xrootd-voms \
+    xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel libcap-devel \
     && yum clean all
 
 # The ADD command with a api.github.com URL in the next couple of sections
@@ -96,15 +96,25 @@ RUN \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make && make install
 
+# Install xrootd-multiuser from source (otherwise it's only available from osg repos)
+ADD https://api.github.com/repos/opensciencegrid/xrootd-multiuser/git/refs/heads/master /tmp/hash-xrootd-multiuser
+RUN \
+    git clone https://github.com/opensciencegrid/xrootd-multiuser.git && \
+    cd xrootd-multiuser && \
+    git checkout v2.2.0-1 && \
+    mkdir build && cd build && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    make && make install
+
 ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/main /tmp/hash-xrootd-s3-http
 
 # Install the S3 and HTTP server plugins for XRootD. For now we do this from source
 # until we can sort out the RPMs.
 # Ping the http plugin at a specific commit
 RUN \
-    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
+    git clone --recurse-submodules https://github.com/PelicanPlatform/xrootd-s3-http.git && \
     cd xrootd-s3-http && \
-    git checkout v0.1.2 && \
+    git checkout v0.1.3 && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
@@ -164,7 +174,7 @@ RUN n lts && \
 ##
 RUN useradd -r -s /sbin/nologin tomcat ;\
     mkdir -p /opt/tomcat ;\
-    curl -s -L https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.80/bin/apache-tomcat-9.0.80.tar.gz | tar -zxf - -C /opt/tomcat --strip-components=1 ;\
+    curl -s -L https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.83/bin/apache-tomcat-9.0.83.tar.gz | tar -zxf - -C /opt/tomcat --strip-components=1 ;\
     chgrp -R tomcat /opt/tomcat/conf ;\
     chmod g+rwx /opt/tomcat/conf ;\
     chmod g+r /opt/tomcat/conf/* ;\
@@ -229,8 +239,8 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
     fi
 
 # Install pre-commit
-RUN yum install -y python39 python39-pip &&\
-    /bin/pip-3.9 install pre-commit
+RUN python3.9 -m ensurepip &&\
+    pip3.9 install pre-commit
 
 COPY ./images/dev-container-entrypoint.sh /usr/local/bin/
 

@@ -42,6 +42,7 @@ import (
 	"github.com/go-ini/ini"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/exp/slices"
 
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
@@ -143,6 +144,16 @@ func ScanLinesWithCont(data []byte, atEOF bool) (advance int, token []byte, err 
 	}
 }
 
+func deduplicateBasePaths(cfg *ScitokensCfg) {
+	for key, item := range cfg.IssuerMap {
+		bps := item.BasePaths
+		slices.Sort(bps)
+		bps = slices.Compact(bps)
+		item.BasePaths = bps
+		cfg.IssuerMap[key] = item
+	}
+}
+
 // Given a reference to a Scitokens configuration, write it out to a known location
 // on disk for the xrootd server
 func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) error {
@@ -176,6 +187,7 @@ func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) e
 			" configuration file %v to desired daemon gid %v", configPath, gid)
 	}
 
+	deduplicateBasePaths(cfg)
 	err = templ.Execute(file, cfg)
 	if err != nil {
 		return errors.Wrapf(err, "Unable to create scitokens.cfg template")
@@ -330,7 +342,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 			outStr = "u * "
 		}
 		for _, ad := range server.GetNamespaceAds() {
-			if ad.PublicRead && ad.Path != "" {
+			if ad.Caps.PublicReads && ad.Path != "" {
 				outStr += ad.Path + " lr "
 			}
 		}
@@ -442,11 +454,8 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Built-in Monitoring"
-	issuerUrl, err := server_utils.GetServerIssuerURL()
-	if err != nil {
-		return
-	}
-	issuer.Issuer = issuerUrl.String()
+	// We use server local issuer regardless of Server.IssuerUrl
+	issuer.Issuer = param.Server_ExternalWebUrl.GetString()
 	issuer.BasePaths = []string{"/pelican/monitoring"}
 	issuer.DefaultUser = "xrootd"
 
@@ -459,11 +468,11 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 		return
 	}
 	issuer.Name = "Origin"
-	issuerUrl, err := server_utils.GetServerIssuerURL()
+	issuerUrl, err := config.GetServerIssuerURL()
 	if err != nil {
 		return
 	}
-	issuer.Issuer = issuerUrl.String()
+	issuer.Issuer = issuerUrl
 	issuer.BasePaths = exportedPaths
 	issuer.RestrictedPaths = param.Origin_ScitokensRestrictedPaths.GetStringSlice()
 	issuer.MapSubject = param.Origin_ScitokensMapSubject.GetBool()
@@ -537,9 +546,8 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 				return errors.Wrap(err, "can't parse Server_ExternalWebUrl when generating scitokens config")
 			}
 			cacheIssuer := server_structs.NamespaceAdV2{
-				PublicRead: false,
-				Caps:       server_structs.Capabilities{PublicReads: false, Reads: true, Writes: true},
-				Path:       "/pelican/monitoring",
+				Caps: server_structs.Capabilities{PublicReads: false, Reads: true, Writes: true},
+				Path: "/pelican/monitoring",
 				Issuer: []server_structs.TokenIssuer{
 					{
 						BasePaths: []string{"/pelican/monitoring"},
@@ -556,36 +564,47 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 }
 
 // Writes out the origin's scitokens.cfg configuration
-func WriteOriginScitokensConfig(exportedPaths []string) error {
+func WriteOriginScitokensConfig(authedPaths []string) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
 	}
+	if issuer, err := GenerateOriginIssuer(authedPaths); err == nil && len(issuer.Name) > 0 {
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			val.Name += " and " + issuer.Name
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
+			cfg.Global.Audience = append(cfg.Global.Audience, config.GetServerAudience())
+		}
+	} else if err != nil {
+		return errors.Wrap(err, "failed to generate xrootd issuer for the origin")
+	}
+
 	if issuer, err := GenerateMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			val.Name += " and " + issuer.Name
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
 			cfg.Global.Audience = append(cfg.Global.Audience, config.GetServerAudience())
 		}
+	} else if err != nil {
+		return errors.Wrap(err, "failed to generate xrootd issuer for self-monitoring")
 	}
-	if issuer, err := GenerateOriginIssuer(exportedPaths); err == nil && len(issuer.Name) > 0 {
-		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
-			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
-			cfg.IssuerMap[issuer.Issuer] = val
-		} else {
-			cfg.IssuerMap[issuer.Issuer] = issuer
-			cfg.Global.Audience = append(cfg.Global.Audience, config.GetServerAudience())
-		}
-	}
+
 	if issuer, err := GenerateDirectorMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			val.Name += " and " + issuer.Name
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
 		}
+	} else if err != nil {
+		return errors.Wrap(err, "failed to generate xrootd issuer for director-based monitoring")
 	}
 
 	return writeScitokensConfiguration(config.OriginType, &cfg)
@@ -598,7 +617,7 @@ func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAdV2) error {
 		return err
 	}
 	for _, ad := range nsAds {
-		if !ad.PublicRead {
+		if !ad.Caps.PublicReads {
 			for _, ti := range ad.Issuer {
 				if val, ok := cfg.IssuerMap[ti.IssuerUrl.String()]; ok {
 					val.BasePaths = append(val.BasePaths, ti.BasePaths...)

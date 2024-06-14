@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -16,17 +16,9 @@
  *
  ***************************************************************/
 
-import {Box, Tooltip} from "@mui/material";
-
-
-import Link from "next/link";
-import IconButton from "@mui/material/IconButton";
-import BuildIcon from "@mui/icons-material/Build";
-
+import {Box} from "@mui/material";
 import Main from "@/components/layout/Main";
-import {Sidebar} from "@/components/layout/Sidebar";
-import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
-import {User} from "@/index";
+import { OriginSidebar } from "@/components/layout/OriginSidebar";
 
 export const metadata = {
     title: 'Pelican Origin',
@@ -40,17 +32,7 @@ export default function RootLayout({
 }) {
     return (
         <Box display={"flex"} flexDirection={"row"}>
-            <Sidebar>
-                <Box pt={1}>
-                    <Tooltip title={"Config"} placement={"right"}>
-                        <Link href={"/config/"}>
-                            <IconButton>
-                                <BuildIcon/>
-                            </IconButton>
-                        </Link>
-                    </Tooltip>
-                </Box>
-            </Sidebar>
+            <OriginSidebar/>
             <Main>
                 {children}
             </Main>

@@ -17,7 +17,8 @@
 # ***************************************************************
 
 ARG BASE_YUM_REPO=release
-ARG BASE_OSG_SERIES=3.6
+ARG BASE_OSG_SERIES=23
+ARG BASE_OS=el9
 
 FROM goreleaser/goreleaser:v1.21.0 AS pelican-build
 ARG IS_NONRELEASE_BUILD="true"
@@ -39,7 +40,7 @@ RUN\
 
 FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
 
-FROM --platform=linux/amd64 opensciencegrid/software-base:$BASE_OSG_SERIES-el8-$BASE_YUM_REPO AS dependency-build
+FROM --platform=linux/amd64 opensciencegrid/software-base:$BASE_OSG_SERIES-$BASE_OS-$BASE_YUM_REPO AS dependency-build
 
 # Create the xrootd user with a fixed GID/UID
 RUN groupadd -o -g 10940 xrootd
@@ -47,8 +48,7 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
 RUN yum -y update \
-    && yum -y install https://repo.opensciencegrid.org/osg/23-main/osg-23-main-el8-release-latest.rpm\
-    && yum -y install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms curl java-17-openjdk-headless \
+    && yum -y --allowerasing install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms xrootd-multiuser curl java-17-openjdk-headless \
     && yum clean all \
     && rm -rf /var/cache/yum/
 
@@ -80,9 +80,9 @@ ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/m
 # until we can sort out the RPMs.
 # Ping the http plugin at a specific commit
 RUN \
-    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
+    git clone --recurse-submodules https://github.com/PelicanPlatform/xrootd-s3-http.git && \
     cd xrootd-s3-http && \
-    git checkout v0.1.2 && \
+    git checkout v0.1.3 && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
@@ -124,7 +124,7 @@ WORKDIR /pelican
 # Download and install tomcat
 RUN useradd -r -s /sbin/nologin tomcat ;\
     mkdir -p /opt/tomcat ;\
-    curl -s -L https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.80/bin/apache-tomcat-9.0.80.tar.gz | tar -zxf - -C /opt/tomcat --strip-components=1 ;\
+    curl -s -L https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.83/bin/apache-tomcat-9.0.83.tar.gz | tar -zxf - -C /opt/tomcat --strip-components=1 ;\
     chgrp -R tomcat /opt/tomcat/conf ;\
     chmod g+rwx /opt/tomcat/conf ;\
     chmod g+r /opt/tomcat/conf/* ;\

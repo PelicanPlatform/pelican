@@ -1,0 +1,23 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/cpp
+{
+	"name": "Pelican",
+	"image": "hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb",
+
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// "forwardPorts": [],
+
+	// Configure tool-specific properties.
+	"customizations": {
+		"settings": {
+			"go.gopath": "/root/go",
+			"go.goroot": "/usr/local/go",
+			"go.useLanguageServer": true
+		},
+		"extensions": ["golang.go"],
+		"postCreateCommand": "go get -v github.com/go-delve/delve/cmd/dlv"
+	},
+
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	"remoteUser": "root"
+}

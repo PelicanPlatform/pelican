@@ -30,6 +30,23 @@ default: "~/.config/pelican"
 components: ["*"]
 type: filename
 ---
+name: ConfigLocations
+description: |+
+  `ConfigLocations` provides administrators a way to define a list of directories containing Pelican configuration files. Within a given directory,
+  files are read in lexicographical order, and any keys that are defined in multiple files will take the value from the last file read. Directories are
+  read in the order provided by the list. For example, specifying:
+
+  `ConfigLocations: ["/configs1", "/configs2"]`
+
+  will read files first from `/configs1` and then from `/configs2`. If a key is defined in both `/configs1`
+  and `/configs2`, the value from `/configs2` will be used. If `/configs1` contains files `a.yaml` and `b.yaml` where both define the same key, the value
+  from `b.yaml` will be used.
+
+  Subdirectories of the provided directories are not read. Only the root config file's `ConfigLocations` key is used, and any redefinitions are ignored.
+type: stringSlice
+default: none
+components: ["*"]
+---
 name: Debug
 description: |+
   A bool indicating whether Pelican should emit debug messages in its log.
@@ -162,6 +179,7 @@ description: |+
   Cms basically is a file (or asset) discovery service. Each server has a cmsd daemon which
   connect to a master one informing it if a server is available. XRootD asks cms where a file
   could be found and cms works to report back the server for where the file is located.
+  Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: error
 components: ["origin"]
@@ -169,7 +187,7 @@ components: ["origin"]
 name: Logging.Origin.Scitokens
 description: |+
   Trace level of scitokens debug output within XRootD configuration. This entails token management
-  and security credentials within XRootD.
+  and security credentials within XRootD. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: error
 components: ["origin"]
@@ -177,7 +195,7 @@ components: ["origin"]
 name: Logging.Origin.Xrd
 description: |+
   Trace level of the eXtended Request Daemon within XRootD, another main XRootD executable. This reports information
-  the XRootD protocol and works with cms.
+  the XRootD protocol and works with cms. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: error
 components: ["origin"]
@@ -186,39 +204,40 @@ name: Logging.Origin.Xrootd
 description: |+
   Trace options for XRootD debug output within XRootD configuration. This prefix is reserved for the xroot protocol,
   which is the component that sits on sockets and talks to clients as they query file-system info, open files, and read data.
-  This is the protocol for XRootD (like http) and handles connections and requests.
+  This is the protocol for XRootD (like http) and handles connections and requests. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: info
 components: ["origin"]
 ---
 name: Logging.Origin.Http
-description: >-
-  Logging level for the HTTP component of the origin.  Increasing to debug will cause the Xrootd daemon to log
+description: |+
+  Logging level for the HTTP component of the origin. Increasing to debug will cause the Xrootd daemon to log.
+  Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
   all headers and requests.
 type: string
 default: error
 components: ["origin"]
 ---
 name: Logging.Origin.Ofs
-description: >-
+description: |+
   Logging level of Xrootd's "Open File System" (ofs) subsystem.  The OFS manages the file descriptor table and redirection/
-  error handling.
+  error handling. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: error
 components: ["origin"]
 ---
 name: Logging.Origin.Oss
-description: >-
+description: |+
   Logging level of Xrootd's "Open Storage System" (oss) subsystem.  The OSS manages the interaction with the underlying
-  POSIX storage (open, read, write, close, etc).
+  POSIX storage (open, read, write, close, etc). Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: error
 components: ["origin"]
 ---
 name: Logging.Cache.Http
-description: >-
+description: |+
   Logging level for the HTTP component of the cache.  Increasing to debug will cause the Xrootd daemon to log
-  all headers and requests.
+  all headers and requests. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: error
 components: ["cache"]
@@ -227,7 +246,7 @@ name: Logging.Cache.Ofs
 description: |+
   Trace level of XRootD's Open File System. This component cares about files and directories from the administrative perspective.
   This component is build on top of the Open Storage System component, which deals with things like file creation and reads and
-  writes for files and directories.
+  writes for files and directories. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: error
 components: ["cache"]
@@ -236,7 +255,7 @@ name: Logging.Cache.Pfc
 description: |+
   Trace level of XRootD Proxy File Cache (XCache), the caching mechanism used by XRootD. This component
   entails information for caches/caching within XRootD. This component instantiates its own Open Storage
-  System (OSS) to write local files to.
+  System (OSS) to write local files to. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: info
 components: ["cache"]
@@ -244,7 +263,7 @@ components: ["cache"]
 name: Logging.Cache.Pss
 description: |+
   Trace level of XRootD Proxy System Service. Variables this component reports include: number of remotes file opens,
-  number of opens that failed, number of remote file closes, and number of closes that failed.
+  number of opens that failed, number of remote file closes, and number of closes that failed. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: error
 components: ["cache"]
@@ -252,7 +271,7 @@ components: ["cache"]
 name: Logging.Cache.Scitokens
 description: |+
   Trace level of scitokens debug output within XRootD configuration. This entails token management
-  and security credentials within XRootD.
+  and security credentials within XRootD. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: error
 components: ["cache"]
@@ -260,7 +279,7 @@ components: ["cache"]
 name: Logging.Cache.Xrd
 description: |+
   Trace level of the eXtended Request Daemon within XRootD, another main XRootD executable. This reports information
-  the XRootD protocol and works with cms.
+  the XRootD protocol and works with cms. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: error
 components: ["cache"]
@@ -269,7 +288,7 @@ name: Logging.Cache.Xrootd
 description: |+
   Trace options for XRootD debug output within XRootD configuration. This prefix is reserved for the xroot protocol,
   which is the component that sits on sockets and talks to clients as they query file-system info, open files, and read data.
-  This is the protocol for XRootD (like http) and handles connections and requests.
+  This is the protocol for XRootD (like http) and handles connections and requests. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
 default: error
 components: ["cache"]
@@ -353,22 +372,22 @@ components: ["origin"]
 name: Client.StoppedTransferTimeout
 description: |+
   A timeout indicating when a "stopped transfer" event should be triggered.
-type: int
-default: 100
+type: duration
+default: 100s
 components: ["client"]
 ---
 name: Client.SlowTransferRampupTime
 description: |+
   A duration indicating the ramp up period for a slow transfer.
-type: int
-default: 30
+type: duration
+default: 30s
 components: ["client"]
 ---
 name: Client.SlowTransferWindow
 description: |+
   A duration indicating the sliding window over which to consider transfer speeds for slow transfers.
-type: int
-default: 30
+type: duration
+default: 30s
 components: ["client"]
 ---
 name: Client.DisableHttpProxy
@@ -409,7 +428,7 @@ components: ["client"]
 ---
 name: Client.MinimumDownloadSpeed
 description: |+
-  The minimum speed allowed for a client download before an error is thrown.
+  The minimum speed (in bytes per second) allowed for a client download before an error is thrown.
 type: int
 default: 102400
 components: ["client"]
@@ -433,6 +452,14 @@ hidden: true
 ############################
 #   Origin-level Configs   #
 ############################
+name: Origin.DbLocation
+description: |+
+  A filepath to the intended location of the origin's database.
+type: filename
+root_default: /var/lib/pelican/origin.sqlite
+default: $ConfigBase/origin.sqlite
+components: ["origin"]
+---
 name: Origin.Url
 description: |+
   The origin's configured URL, as reported to XRootD. This is the file transfer endpoint for the origin.
@@ -463,8 +490,9 @@ description: |+
 
       You should always choose a distinct name for `SentinelLocation`. It should not be reused for other servers.
       If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
-      You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`. Note that this parameter will be ignored
-      if the origin StorageType is S3.
+      You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`.
+
+      Note that this parameter is only available for the POSIX backend.
 
     Example:
 
@@ -475,13 +503,23 @@ description: |+
         Capabilities: ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
         SentinelLocation: demoproject_origin_A
     ```
+
+  If Origin.StorageType == "s3", the following additional fields are available:
+  - S3Bucket: [OPTIONAL] See `Origin.S3Bucket` for details
+  - S3AccessKeyfile: [OPTIONAL] See `Origin.S3AccessKeyfile` for details
+  - S3SecretKeyfile: [OPTIONAL] See `Origin.S3SecretKeyfile` for details
+
+  If Origin.StorageType == "globus", the following additional fields are available:
+  - GlobusCollectionID: [REQUIRED] See `Origin.GlobusCollectionID` for details
+  - GlobusCollectionName: [OPTIONAL] See `Origin.GlobusCollectionName` for details
+
 type: object
 default: none
 components: ["origin"]
 ---
 name: Origin.StorageType
 description: |+
-  The type of storage underpinning the origin. Currently supported types are "posix", "https", and "s3".
+  The type of storage underpinning the origin. Currently supported types are "posix", "https", "s3", "globus", and "xroot".
 type: string
 default: "posix"
 components: ["origin"]
@@ -642,6 +680,13 @@ type: bool
 default: true
 components: ["origin"]
 ---
+name: Origin.EnableMacaroons
+description: |+
+  A bool indicating whether the origin allows clients to authenticate using macaroons.
+type: bool
+default: false
+components: ["origin"]
+---
 name: Origin.SelfTest
 description: |+
   A bool indicating whether the origin should perform self health checks.
@@ -664,7 +709,7 @@ default: true
 components: ["origin"]
 ---
 name: Origin.EnableOIDC
-description: >-
+description: |+
   Indicate whether the origin should allow users to login to the admin website via OAuth2/OIDC with third-party
   authentication providers such as CILogon.
 
@@ -770,7 +815,7 @@ components: ["origin"]
 name: Origin.S3ServiceName
 description: |+
   [Deprecated] Origin.S3ServiceName was previously used in part to determine an export's FederationPrefix, but
-  upstream changes no longer rely on this value. As of Pelican 7.7.0, setting this value no longer has any effect.
+  upstream changes no longer rely on this value. As of Pelican `7.7.0`, setting this value no longer has any effect.
   AWSv4 signatures used by S3 servers to handle authentication now hardcode "s3" as their service name.
 
   When constructing signed URLs for S3, this value is used as a part of the signature. It is almost always "s3". For more
@@ -796,6 +841,8 @@ components: ["origin"]
 ---
 name: Origin.S3Bucket
 description: |+
+  **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+
   Objects in S3 are stored in "buckets", which have unique names at each S3 service URL (ie the URL that provides access to your objects).
   Setting a bucket restricts the origin to only serving objects from that bucket.
 
@@ -817,6 +864,8 @@ components: ["origin"]
 ---
 name: Origin.S3AccessKeyfile
 description: |+
+  **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+
   A path to a file containing an S3 access keyfile (also sometimes called an API key) for authenticated buckets when an origin
   is run in S3 mode.
 
@@ -828,6 +877,8 @@ components: ["origin"]
 ---
 name: Origin.S3SecretKeyfile
 description: |+
+  **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+
   A path to a file containing an S3 secret keyfile for authenticated buckets when an origin is run in S3 mode.
 
   This value is OPTIONAL for S3 origins, and only applies when an exported bucket requires authentication. It should not be used
@@ -838,8 +889,8 @@ components: ["origin"]
 ---
 name: Origin.S3UrlStyle
 description: |+
-  The style of S3 urls used by the service URL host. This can be either "path" if objects are fetched at <service-url>/<bucket>/<object>
-  or "virtual" if objects are fetched at <bucket>.<service-url>/<object>.
+  The style of S3 urls used by the service URL host. This can be either "path" if objects are fetched at `<service-url>/<bucket>/<object>`
+  or "virtual" if objects are fetched at `<bucket>.<service-url>/<object>`.
 
   This value is REQUIRED for S3 origins, but defaults to "path" if not set.
 type: string
@@ -847,13 +898,91 @@ default: path
 components: ["origin"]
 ---
 name: Origin.HttpServiceUrl
-description: >-
+description: |+
   If Origin.StorageType is set to `https`, the service URL is used as the base for requests to the backend.  To generate the
   request, the Origin.FederationPrefix is removed from the object name, then the result is joined with the service URL.
   For example, if one sets `Origin.HTTPServiceUrl=https://example.com/testfiles` and `Origin.FederationPrefix=/foo`, then a request
   for an object named `/foo/bar` will generate a request to https://example.com/testfiles/bar.
 type: string
 default: none
+components: ["origin"]
+---
+name: Origin.HttpAuthTokenFile
+description: |+
+  When set, all requests from the origin to the http backend will include the contents of the file as a bearer token in the
+  Authorization header.
+
+  If the origin backend is configured with the `globus` storage type, any value set here will be overridden with the filepath to
+  the first file ending in `.tok` found in the $(Origin.GlobusConfigLocation)/tokens directory
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.XRootServiceUrl
+description: |+
+ When the origin is configured to export another XRootD storage backend by setting `Origin.StorageType = xroot`, the `XRootServiceUrl`
+ is used as the base for `root` protocol requests and should point at the upstream XRootD server.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.GlobusCollectionID
+description: |+
+ **Note**: This value is only for setting up an origin that exports **one** Globus collection. For multiple exports, use `Origin.Exports`
+
+ Required if `Origin.StorageType == "globus"` AND `Origin.Exports` is not set.
+
+ Globus stores objects in [Collections](https://docs.globus.org/guides/overviews/collections-and-endpoints/#collection).
+ The unique identifier of a Collection is the Collection UUID.
+ You can find the Collection UUID at the bottom of your Collection's overview page.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.GlobusCollectionName
+description: |+
+ **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+
+ An optional human-readable name to describe the Collection. This should set to the "Display Name" of your Collection in Globus.
+ It is recommended to set this name; otherwise the UUID will be used as the Collection name.
+type: string
+default: none
+components: ["origin"]
+---
+name: Origin.GlobusClientIDFile
+description: |+
+  Required if `Origin.StorageType == "globus"` and `OIDC.Issuer` is not Globus
+
+  A filepath to the file containing the Globus ClientID. You need to create a new project and
+  register a new confidential OAuth client: https://app.globus.org/settings/developers/registration/confidential_client/select-project
+  Once registered, in the client page, find "Client UUID" and copy it to a file.
+
+  If the server uses Globus as the OIDC authentication provider, Pelican will use OIDC configuration
+  for Globus storage access.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.GlobusClientSecretFile
+description: |+
+  Required if `Origin.StorageType == "globus"` and `OIDC.Issuer` is not Globus
+
+  A filepath to the file containing the Globus ClientID. You need to create a new project and
+  register a new confidential OAuth client following the instruction in `Origin.GlobusClientIDFile`.
+  In the client page, you need to "Add Client Secret" and copy the secret to a file.
+
+  If the server uses Globus as the OIDC authentication provider, Pelican will use OIDC configuration
+  for Globus storage access.
+type: filename
+default: none
+components: ["origin"]
+---
+name: Origin.GlobusConfigLocation
+description: |+
+  A filepath to the folder containing Globus config and access tokens
+type: filename
+root_default: /run/pelican/xrootd/origin/globus
+default: $XDG_RUNTIME_DIR/pelican/xrootd/origin/globus
 components: ["origin"]
 ---
 ############################
@@ -1074,7 +1203,7 @@ default: 15s
 components: ["cache"]
 ---
 name: Cache.EnableOIDC
-description: >-
+description: |+
   Indicate whether the cache should allow users to login to the admin website via OAuth2/OIDC with third-party
   authentication providers such as CILogon.
 
@@ -1232,7 +1361,7 @@ default: none
 components: ["director"]
 ---
 name: Director.EnableOIDC
-description: >-
+description: |+
   Indicate whether the director should allow users to login to the admin website via OAuth2/OIDC with third-party
   authentication providers such as CILogon.
 
@@ -1571,7 +1700,7 @@ default: "$ConfigBase/web-config.yaml"
 components: ["*"]
 ---
 name: Server.UIAdminUsers
-description: >-
+description: |+
   A string slice of "subject" claim of users to give admin permission for the server admin website,
   who are authenticated through OAuth/OIDC.
 
@@ -1866,7 +1995,7 @@ replacedby: ["Cache.RunLocation", "Origin.RunLocation"]
 components: ["origin", "cache"]
 ---
 name: Xrootd.ConfigFile
-description: >-
+description: |+
   The _absolute_ path to an XRootD configuration file for customized XRootD configuration. This should only be used by admins with
   experience in configuring XRootD directly.
 
@@ -1923,11 +2052,27 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Xrootd.AuthRefreshInterval
+description: |+
+  The interval used by XRootD (cache/origin) for refreshing Authfiles. This affects how often the server polls for upstream changes
+  that might affect the authorization policy. For example, when applied to a cache, this affects how often origin permissions are
+  polled for changes.
+type: duration
+default: 5m
+components: ["origin", "cache"]
+---
 name: Xrootd.ManagerHost
 description: |+
   A URL pointing toward the XRootD instance's Manager Host.
 type: url
 default: none
+components: ["origin", "cache"]
+---
+name: Xrootd.ManagerPort
+description: |+
+  The port at which the XRootD instance's Manager Host is available.
+type: int
+default: 1213
 components: ["origin", "cache"]
 ---
 name: Xrootd.SummaryMonitoringHost
@@ -1937,11 +2082,25 @@ type: url
 default: none
 components: ["origin", "cache"]
 ---
+name: Xrootd.SummaryMonitoringPort
+description: |+
+  The port at which the XRootD instance's Summary Monitoring Host is available.
+type: int
+default: 9931
+components: ["origin", "cache"]
+---
 name: Xrootd.DetailedMonitoringHost
 description: |+
   A URL pointing toward the XRootD instance's Detailed Monitoring Host.
 type: url
 default: none
+components: ["origin", "cache"]
+---
+name: Xrootd.DetailedMonitoringPort
+description: |+
+  The port at which the XRootD instance's Detailed Monitoring Host is available.
+type: int
+default: 9930
 components: ["origin", "cache"]
 ---
 name: Xrootd.LocalMonitoringHost

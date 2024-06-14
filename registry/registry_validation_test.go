@@ -278,3 +278,57 @@ func TestValidateKeyChaining(t *testing.T) {
 		assert.NoError(t, validErr)
 	})
 }
+
+func TestValidatePrefix(t *testing.T) {
+	t.Run("root-origin-prefix-returns-err", func(t *testing.T) {
+		_, err := validatePrefix("/origins/")
+		require.Error(t, err)
+		assert.Equal(t, "Origin prefix is missing hostname", err.Error())
+	})
+
+	t.Run("root-cache-prefix-returns-err", func(t *testing.T) {
+		_, err := validatePrefix("/caches/")
+		require.Error(t, err)
+		assert.Equal(t, "Cache prefix is missing sitename", err.Error())
+	})
+
+	t.Run("dup-origin-prefix-returns-err", func(t *testing.T) {
+		_, err := validatePrefix("/origins/origins/foo")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Duplicated origin prefix")
+	})
+
+	t.Run("dup-cache-prefix-returns-err", func(t *testing.T) {
+		_, err := validatePrefix("/caches/caches/bar")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "Duplicated cache prefix")
+	})
+
+	t.Run("correct-origin-prefix", func(t *testing.T) {
+		got, err := validatePrefix("/origins/foo")
+		require.NoError(t, err)
+		assert.Equal(t, "/origins/foo", got)
+
+		got, err = validatePrefix("/origins/example.org")
+		require.NoError(t, err)
+		assert.Equal(t, "/origins/example.org", got)
+
+		got, err = validatePrefix("/origins/192.168.5.21")
+		require.NoError(t, err)
+		assert.Equal(t, "/origins/192.168.5.21", got)
+	})
+
+	t.Run("correct-cache-prefix", func(t *testing.T) {
+		got, err := validatePrefix("/caches/foo")
+		require.NoError(t, err)
+		assert.Equal(t, "/caches/foo", got)
+
+		got, err = validatePrefix("/caches/example.org")
+		require.NoError(t, err)
+		assert.Equal(t, "/caches/example.org", got)
+
+		got, err = validatePrefix("/caches/192.168.5.21")
+		require.NoError(t, err)
+		assert.Equal(t, "/caches/192.168.5.21", got)
+	})
+}

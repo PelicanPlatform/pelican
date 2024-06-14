@@ -24,11 +24,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -36,6 +38,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -52,6 +55,11 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+)
+
+var (
+	//go:embed resources/test-https-origin.yml
+	httpsOriginConfig string
 )
 
 // TestReadMultiTransfer test if we can read multiple transfers from stdin
@@ -231,7 +239,11 @@ func TestStashPluginMain(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
 
-	_, err := config.SetPreferredPrefix(config.StashPrefix)
+	oldPrefix, err := config.SetPreferredPrefix(config.StashPrefix)
+	defer func() {
+		_, err = config.SetPreferredPrefix(oldPrefix)
+		require.NoError(t, err)
+	}()
 	assert.NoError(t, err)
 
 	// Temp dir for downloads
@@ -439,6 +451,90 @@ func TestPluginDirectRead(t *testing.T) {
 	}
 }
 
+// We ran into a bug where the start time for the transfer was not recorded correctly and was almost always the same as the end time
+// (since they were set at similar sections of code). This test ensures that they are different and that the start time is before the end time.
+func TestPluginCorrectStartAndEndTime(t *testing.T) {
+	test_utils.InitClient(t, nil)
+	server_utils.ResetOriginExports()
+	defer viper.Reset()
+	defer server_utils.ResetOriginExports()
+
+	// Set up our http backend so that we can sleep during transfer
+	body := "Hello, World!"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" && r.URL.Path == "/test2/hello_world" {
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.WriteHeader(http.StatusOK)
+			return
+		} else if r.Method == "GET" && r.URL.Path == "/test2/hello_world" {
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.WriteHeader(http.StatusPartialContent)
+			time.Sleep(1 * time.Second)
+			_, err := w.Write([]byte(body))
+			require.NoError(t, err)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	viper.Set("Origin.HttpServiceUrl", srv.URL+"/test2")
+
+	config.InitConfig()
+	tmpPath := t.TempDir()
+
+	fed := fed_test_utils.NewFedTest(t, httpsOriginConfig)
+	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
+
+	downloadUrl := url.URL{
+		Scheme: "pelican",
+		Host:   host,
+		Path:   "/test/hello_world",
+	}
+
+	workChan := make(chan PluginTransfer, 2)
+	workChan <- PluginTransfer{url: &downloadUrl, localFile: tmpPath}
+	close(workChan)
+
+	results := make(chan *classads.ClassAd, 5)
+	fed.Egrp.Go(func() error {
+		return runPluginWorker(fed.Ctx, false, workChan, results)
+	})
+
+	done := false
+	for !done {
+		select {
+		case <-fed.Ctx.Done():
+			break
+		case resultAd, ok := <-results:
+			if !ok {
+				done = true
+				break
+			}
+			// Process results as soon as we get them
+			transferSuccess, err := resultAd.Get("TransferSuccess")
+			assert.NoError(t, err)
+			boolVal, ok := transferSuccess.(bool)
+			require.True(t, ok)
+			assert.True(t, boolVal)
+
+			// Assert that our start time is different from end time (and less than the end time)
+			startTime, err := resultAd.Get("TransferStartTime")
+			assert.NoError(t, err)
+			startTimeVal, ok := startTime.(int64)
+			require.True(t, ok)
+			assert.True(t, startTimeVal > 0)
+
+			endTime, err := resultAd.Get("TransferEndTime")
+			assert.NoError(t, err)
+			endTimeVal, ok := endTime.(int64)
+			require.True(t, ok)
+			assert.True(t, endTimeVal > 0)
+
+			require.True(t, startTimeVal < endTimeVal)
+		}
+	}
+}
+
 // Test the functionality of the failTransfer function, ensuring the proper classads are being set and returned
 func TestFailTransfer(t *testing.T) {
 	// Test when we call failTransfer with an upload
@@ -567,7 +663,7 @@ func TestFailTransfer(t *testing.T) {
 		transferError, _ := result.Get("TransferError")
 		transferErrorStr, ok := transferError.(string)
 		require.True(t, ok)
-		assert.Equal(t, "cancelled transfer, too slow.  Detected speed: 0 B/s, total transferred: 0 B, total transfer time: 0s", transferErrorStr)
+		assert.Equal(t, "cancelled transfer, too slow; detected speed=0 B/s, total transferred=0 B, total transfer time=0s, cache miss", transferErrorStr)
 	})
 }
 
