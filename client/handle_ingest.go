@@ -67,7 +67,8 @@ func DoShadowIngest(ctx context.Context, sourceFile string, originPrefix string,
 		startTime := lastUpdateTime
 		maxRuntime := float64(localSize/10*1024*1024) + 300
 		for {
-			remoteSize, err := DoStat(ctx, shadowFile, options...)
+			fileInfo, err := DoStat(ctx, shadowFile, options...)
+			remoteSize := uint64(fileInfo.Size)
 			if httpErr, ok := err.(*HttpErrResp); ok {
 				if httpErr.Code == 404 {
 					break

@@ -68,22 +68,9 @@ var (
 	httpsOriginConfig string
 )
 
-// A test that spins up a federation, and tests object get and put
-func TestGetAndPutAuth(t *testing.T) {
-	viper.Reset()
-	server_utils.ResetOriginExports()
-	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
-
-	// Other set-up items:
-	testFileContent := "test file content"
-	// Create the temporary file to upload
-	tempFile, err := os.CreateTemp(t.TempDir(), "test")
-	assert.NoError(t, err, "Error creating temp file")
-	defer os.Remove(tempFile.Name())
-	_, err = tempFile.WriteString(testFileContent)
-	assert.NoError(t, err, "Error writing to temp file")
-	tempFile.Close()
-
+// Helper function to get a temporary token file
+// NOTE: when used make sure to call os.Remove() on the file
+func getTempToken(t *testing.T) (tempToken *os.File, tkn string) {
 	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
@@ -102,14 +89,37 @@ func TestGetAndPutAuth(t *testing.T) {
 	assert.NoError(t, err)
 	scopes = append(scopes, modScope)
 	tokenConfig.AddScopes(scopes...)
-	token, err := tokenConfig.CreateToken()
+	tkn, err = tokenConfig.CreateToken()
 	assert.NoError(t, err)
-	tempToken, err := os.CreateTemp(t.TempDir(), "token")
-	assert.NoError(t, err, "Error creating temp token file")
-	defer os.Remove(tempToken.Name())
-	_, err = tempToken.WriteString(token)
+	tmpTok := filepath.Join(t.TempDir(), "token")
+	tempToken, err = os.OpenFile(tmpTok, os.O_CREATE|os.O_RDWR, 0644)
+	assert.NoError(t, err, "Error opening the temp token file")
+	_, err = tempToken.WriteString(tkn)
 	assert.NoError(t, err, "Error writing to temp token file")
-	tempToken.Close()
+
+	return
+}
+
+// A test that spins up a federation, and tests object get and put
+func TestGetAndPutAuth(t *testing.T) {
+	viper.Reset()
+	server_utils.ResetOriginExports()
+	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
+
+	// Other set-up items:
+	testFileContent := "test file content"
+	// Create the temporary file to upload
+	tempFile, err := os.CreateTemp(t.TempDir(), "test")
+	assert.NoError(t, err, "Error creating temp file")
+	defer os.Remove(tempFile.Name())
+	_, err = tempFile.WriteString(testFileContent)
+	assert.NoError(t, err, "Error writing to temp file")
+	tempFile.Close()
+
+	tempToken, tmpTkn := getTempToken(t)
+	defer tempToken.Close()
+	defer os.Remove(tempToken.Name())
+
 	// Disable progress bars to not reuse the same mpb instance
 	viper.Set("Logging.DisableProgressBars", true)
 
@@ -162,14 +172,14 @@ func TestGetAndPutAuth(t *testing.T) {
 				export.FederationPrefix, "osdf_osdf", fileName)
 
 			// Upload the file with PUT
-			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithToken(string(token)))
+			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithToken(tmpTkn))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 			}
 
 			// Download that same file with GET
-			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithToken(string(token)))
+			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithToken(tmpTkn))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
@@ -273,32 +283,9 @@ func TestCopyAuth(t *testing.T) {
 	assert.NoError(t, err, "Error writing to temp file")
 	tempFile.Close()
 
-	issuer, err := config.GetServerIssuerURL()
-	require.NoError(t, err)
-
-	// Create a token file
-	tokenConfig := token.NewWLCGToken()
-	tokenConfig.Lifetime = time.Minute
-	tokenConfig.Issuer = issuer
-	tokenConfig.Subject = "origin"
-	tokenConfig.AddAudienceAny()
-
-	scopes := []token_scopes.TokenScope{}
-	readScope, err := token_scopes.Storage_Read.Path("/")
-	assert.NoError(t, err)
-	scopes = append(scopes, readScope)
-	modScope, err := token_scopes.Storage_Modify.Path("/")
-	assert.NoError(t, err)
-	scopes = append(scopes, modScope)
-	tokenConfig.AddScopes(scopes...)
-	token, err := tokenConfig.CreateToken()
-	assert.NoError(t, err)
-	tempToken, err := os.CreateTemp(t.TempDir(), "token")
-	assert.NoError(t, err, "Error creating temp token file")
+	tempToken, _ := getTempToken(t)
+	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
-	_, err = tempToken.WriteString(token)
-	assert.NoError(t, err, "Error writing to temp token file")
-	tempToken.Close()
 	// Disable progress bars to not reuse the same mpb instance
 	viper.Set("Logging.DisableProgressBars", true)
 
@@ -453,42 +440,75 @@ func TestGetPublicRead(t *testing.T) {
 	})
 }
 
-// A test that tests the statHttp function
-func TestStatHttp(t *testing.T) {
-	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+// A test that spins up a federation, and tests object stat
+func TestObjectStat(t *testing.T) {
 	viper.Reset()
 	server_utils.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
+	defer viper.Reset()
+	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 
-	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
+	// Other set-up items:
+	testFileContent := "test file content"
+	// Create the temporary file to upload
+	tempFileName := filepath.Join(t.TempDir(), "test")
+	tempFile, err := os.OpenFile(tempFileName, os.O_CREATE|os.O_RDWR, 0644)
+	assert.NoError(t, err, "Error creating temp file")
+	_, err = tempFile.WriteString(testFileContent)
+	assert.NoError(t, err, "Error writing to temp file")
+	tempFile.Close()
 
-	t.Run("testStatHttpPelicanScheme", func(t *testing.T) {
-		testFileContent := "test file content"
-		// Drop the testFileContent into the origin directory
-		tempFile, err := os.Create(filepath.Join(fed.Exports[0].StoragePrefix, "test.txt"))
-		assert.NoError(t, err, "Error creating temp file")
-		_, err = tempFile.WriteString(testFileContent)
-		assert.NoError(t, err, "Error writing to temp file")
-		tempFile.Close()
+	// Get a temporary token file
+	tempToken, _ := getTempToken(t)
+	defer tempToken.Close()
+	defer os.Remove(tempToken.Name())
 
-		viper.Set("Logging.DisableProgressBars", true)
+	// Disable progress bars to not reuse the same mpb instance
+	viper.Set("Logging.DisableProgressBars", true)
 
-		// Set path for object to upload/download
-		tempPath := tempFile.Name()
-		fileName := filepath.Base(tempPath)
-		uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
-			fed.Exports[0].FederationPrefix, fileName)
+	// Make directories for test within origin exports
+	destDir1 := filepath.Join(fed.Exports[0].StoragePrefix, "test")
+	require.NoError(t, os.MkdirAll(destDir1, os.FileMode(0755)))
+	destDir2 := filepath.Join(fed.Exports[1].StoragePrefix, "test")
+	require.NoError(t, os.MkdirAll(destDir2, os.FileMode(0755)))
 
-		log.Errorln(uploadURL)
-
-		// Download the file with GET. Shouldn't need a token to succeed
-		objectSize, err := client.DoStat(ctx, uploadURL)
-		assert.NoError(t, err)
-		if err == nil {
-			assert.Equal(t, int64(17), int64(objectSize))
+	// This tests object stat with no flags set
+	t.Run("testPelicanObjectStatNoFlags", func(t *testing.T) {
+		for _, export := range fed.Exports {
+			statUrl := fmt.Sprintf("pelican://%s:%d%s/hello_world.txt", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), export.FederationPrefix)
+			var got client.FileInfo
+			if export.Capabilities.PublicReads {
+				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(""))
+				got = *statInfo
+				require.NoError(t, err)
+			} else {
+				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(tempToken.Name()))
+				got = *statInfo
+				require.NoError(t, err)
+			}
+			assert.Equal(t, int64(13), got.Size)
+			assert.Equal(t, "hello_world.txt", got.Name)
 		}
 	})
 
-	t.Run("testStatHttpOSDFScheme", func(t *testing.T) {
+	// This tests object stat when used on a directory
+	t.Run("testPelicanObjectStatOnDirectory", func(t *testing.T) {
+		for _, export := range fed.Exports {
+			statUrl := fmt.Sprintf("pelican://%s:%s%s/test", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), export.FederationPrefix)
+			if export.Capabilities.PublicReads {
+				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(""))
+				require.NoError(t, err)
+				assert.Equal(t, int64(0), statInfo.Size)
+			} else {
+				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(tempToken.Name()))
+				require.NoError(t, err)
+				assert.Equal(t, int64(0), statInfo.Size)
+			}
+		}
+	})
+
+	// Ensure stat works with an OSDF scheme
+	t.Run("testObjectStatOSDFScheme", func(t *testing.T) {
 		oldPref, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		assert.NoError(t, err)
 		defer func() {
@@ -508,7 +528,7 @@ func TestStatHttp(t *testing.T) {
 		tempPath := tempFile.Name()
 		fileName := filepath.Base(tempPath)
 
-		uploadURL := fmt.Sprintf("osdf://%s/%s", fed.Exports[0].FederationPrefix, fileName)
+		statUrl := fmt.Sprintf("osdf://%s/%s", fed.Exports[0].FederationPrefix, fileName)
 		hostname := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
 
 		// Set our metadata values in config since that is what this url scheme - prefix combo does in handle_http
@@ -517,17 +537,18 @@ func TestStatHttp(t *testing.T) {
 		viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
 		viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
 		viper.Set("Federation.DiscoveryUrl", hostname)
-		log.Errorln(uploadURL)
 
-		// Download the file with GET. Shouldn't need a token to succeed
-		objectSize, err := client.DoStat(ctx, uploadURL)
+		// Stat the file
+		statInfo, err := client.DoStat(fed.Ctx, statUrl)
 		assert.NoError(t, err)
 		if err == nil {
-			assert.Equal(t, int64(17), int64(objectSize))
+			assert.Equal(t, int64(17), int64(statInfo.Size))
+			assert.Equal(t, "test.txt", statInfo.Name)
 		}
 	})
 
-	t.Run("testStatHttpIncorrectScheme", func(t *testing.T) {
+	// Ensure stat fails if it does not recognize the url scheme
+	t.Run("testObjectStatIncorrectScheme", func(t *testing.T) {
 		testFileContent := "test file content"
 		// Drop the testFileContent into the origin directory
 		tempFile, err := os.Create(filepath.Join(fed.Exports[0].StoragePrefix, "test.txt"))
@@ -543,10 +564,10 @@ func TestStatHttp(t *testing.T) {
 		fileName := filepath.Base(tempPath)
 		uploadURL := fmt.Sprintf("some://incorrect/scheme/%s", fileName)
 
-		// Download the file with GET. Shouldn't need a token to succeed
-		objectSize, err := client.DoStat(ctx, uploadURL)
+		// Stat the file
+		objStat, err := client.DoStat(fed.Ctx, uploadURL)
 		assert.Error(t, err)
-		assert.Equal(t, uint64(0), objectSize)
+		assert.Nil(t, objStat)
 		assert.Contains(t, err.Error(), "Do not understand the destination scheme: some. Permitted values are file, osdf, pelican, stash, ")
 	})
 }

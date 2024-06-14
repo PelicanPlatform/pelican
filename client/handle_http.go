@@ -305,7 +305,6 @@ type (
 	identTransferOptionTokenLocation struct{}
 	identTransferOptionAcquireToken  struct{}
 	identTransferOptionToken         struct{}
-	identTransferOptionLong          struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -729,11 +728,6 @@ func WithToken(token string) TransferOption {
 // disabled with this options
 func WithAcquireToken(enable bool) TransferOption {
 	return option.New(identTransferOptionAcquireToken{}, enable)
-}
-
-// Create an option to specify more information to be displayed with a 'list' command
-func WithLongOption(enable bool) TransferOption {
-	return option.New(identTransferOptionLong{}, enable)
 }
 
 // Create a new client to work with an engine
@@ -2443,12 +2437,11 @@ func getCollectionsUrl(ctx context.Context, remoteObjectUrl *url.URL, namespace 
 		} else if resp.StatusCode == http.StatusTemporaryRedirect {
 			// If the director responds with a 307 (temporary redirect), we're working with a new Director.
 			// In that event, we can get the collections URL from our redirect
-			location := resp.Header.Get("Location")
-			if location == "" {
-				return nil, errors.New("collections URL not found in director response: Location header is missing in 307 response")
+			collections := resp.Header.Get("Location")
+			if collections == "" {
+				return nil, errors.New("collections URL not found in director response")
 			}
-			// The resp redirect includes the full path to the object from the origin, we are only interested in the scheme and host
-			collectionsUrl, err = url.Parse(location)
+			collectionsUrl, err = url.Parse(collections)
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to parse collections URL from the Location header")
 			}
@@ -2504,7 +2497,6 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 	// Create the client to walk the filesystem
 	rootUrl := *url
 	if job.job.namespace.DirListHost != "" {
-		// Parse the dir list host
 		dirListURL, err := url.Parse(job.job.namespace.DirListHost)
 		if err != nil {
 			log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
@@ -2676,53 +2668,53 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 	return fileInfos, nil
 }
 
-// Invoke HEAD against a remote URL, using the provided namespace information
+// Invoke a stat request against a remote URL that accepts WebDAV protocol,
+// using the provided namespace information
 //
 // If a "dirlist host" is given, then that is used for the namespace info.
 // Otherwise, the first three caches are queried simultaneously.
 // For any of the queries, if the attempt with the proxy fails, a second attempt
 // is made without.
-func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, token string) (size uint64, err error) {
+func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, directorUrl, token string) (info FileInfo, err error) {
 	statHosts := make([]url.URL, 0, 3)
-	if namespace.DirListHost != "" {
-		var endpoint *url.URL
-		endpoint, err = url.Parse(namespace.DirListHost)
-		if err != nil {
-			return
-		}
+	var dirListNotSupported *dirListingNotSupportedError
+	collectionsUrl, err := getCollectionsUrl(ctx, dest, namespace, directorUrl)
+	// If we have a dirListingNotSupported error, we can attempt to stat the caches instead
+	if err != nil && !errors.As(err, &dirListNotSupported) {
+		return
+	}
+	if collectionsUrl != nil {
+		endpoint := collectionsUrl
 		statHosts = append(statHosts, *endpoint)
 	} else if len(namespace.SortedDirectorCaches) > 0 {
 		for idx, cache := range namespace.SortedDirectorCaches {
 			if idx > 2 {
 				break
 			}
-			var endpoint *url.URL
-			endpoint, err = url.Parse(cache.EndpointUrl)
+			endpoint, err := url.Parse(cache.EndpointUrl)
 			if err != nil {
-				return
+				return info, err
 			}
+			endpoint.Path = ""
 			statHosts = append(statHosts, *endpoint)
 		}
 	} else if namespace.WriteBackHost != "" {
-		var endpoint *url.URL
-		endpoint, err = url.Parse(namespace.WriteBackHost)
+		endpoint, err := url.Parse(namespace.WriteBackHost)
 		if err != nil {
-			return
+			return info, err
 		}
 		statHosts = append(statHosts, *endpoint)
 	}
-
 	type statResults struct {
-		size uint64
+		info FileInfo
 		err  error
 	}
 	resultsChan := make(chan statResults)
 	transport := config.GetTransport()
-	client := &http.Client{Transport: transport}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	auth := &bearerAuth{token: token}
 
 	for _, statUrl := range statHosts {
+		client := gowebdav.NewAuthClient(statUrl.String(), auth)
 		destCopy := *dest
 		destCopy.Host = statUrl.Host
 		destCopy.Scheme = statUrl.Scheme
@@ -2731,31 +2723,36 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 			canDisableProxy := CanDisableProxy()
 			disableProxy := !isProxyEnabled()
 
-			var resp *http.Response
+			var info FileInfo
 			for {
 				if disableProxy {
-					log.Debugln("Performing HEAD (without proxy)", endpoint.String())
+					log.Debugln("Performing request (without proxy)", endpoint.String())
 					transport.Proxy = nil
 				} else {
-					log.Debugln("Performing HEAD", endpoint.String())
+					log.Debugln("Performing request", endpoint.String())
 				}
+				client.SetTransport(transport)
 
-				var req *http.Request
-				req, err = http.NewRequestWithContext(ctx, http.MethodHead, endpoint.String(), nil)
-				if err != nil {
-					log.Errorln("Failed to create HTTP request:", err)
-					resultsChan <- statResults{0, err}
+				fsinfo, err := client.Stat(endpoint.Path)
+				if err == nil {
+					info = FileInfo{
+						Name:    path.Base(endpoint.Path),
+						Size:    fsinfo.Size(),
+						IsDir:   fsinfo.IsDir(),
+						ModTime: fsinfo.ModTime(),
+					}
+					break
+				} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+					err = errors.Wrapf(err, "Stat request not allowed for object at endpoint %s", endpoint.String())
+					resultsChan <- statResults{FileInfo{}, err}
+					return
+				} else if gowebdav.IsErrNotFound(err) {
+					err = errors.Wrapf(err, "object %s not found at the endpoint %s", dest.String(), endpoint.String())
+					resultsChan <- statResults{FileInfo{}, err}
 					return
 				}
 
-				if token != "" {
-					req.Header.Set("Authorization", "Bearer "+token)
-				}
-
-				resp, err = client.Do(req)
-				if err == nil {
-					break
-				}
+				// If we have a proxy error, we can try again without the proxy
 				if urle, ok := err.(*url.Error); canDisableProxy && !disableProxy && ok && urle.Unwrap() != nil {
 					if ope, ok := urle.Unwrap().(*net.OpError); ok && ope.Op == "proxyconnect" {
 						log.Warnln("Failed to connect to proxy; will retry without:", ope)
@@ -2764,37 +2761,26 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 					}
 				}
 				log.Errorln("Failed to get HTTP response:", err)
-				resultsChan <- statResults{0, err}
+				resultsChan <- statResults{FileInfo{}, err}
 				return
 			}
 
-			defer resp.Body.Close()
-			if resp.StatusCode == 200 {
-				contentLengthStr := resp.Header.Get("Content-Length")
-				if len(contentLengthStr) == 0 {
-					log.Errorln("HEAD response did not include Content-Length header")
-					err = errors.New("HEAD response did not include Content-Length header")
-					resultsChan <- statResults{0, err}
-					return
+			if info.Size == 0 {
+				if info.IsDir {
+					resultsChan <- statResults{info, nil}
 				}
-				var contentLength int64
-				contentLength, err = strconv.ParseInt(contentLengthStr, 10, 64)
-				if err != nil {
-					log.Errorf("Unable to parse Content-Length header value (%s) as integer: %s", contentLengthStr, err)
-					resultsChan <- statResults{0, err}
-					return
-				}
-				resultsChan <- statResults{uint64(contentLength), nil}
-			} else {
-				var respB []byte
-				respB, err = io.ReadAll(resp.Body)
-				if err != nil {
-					log.Errorln("Failed to read error message:", err)
-					return
-				}
-				err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s", resp.StatusCode, string(respB))}
-				resultsChan <- statResults{0, err}
+				err = errors.New("Stat response did not include a size")
+				resultsChan <- statResults{FileInfo{}, err}
+				return
 			}
+
+			resultsChan <- statResults{FileInfo{
+				Name:    path.Base(endpoint.Path),
+				Size:    info.Size,
+				IsDir:   info.IsDir,
+				ModTime: info.ModTime,
+			}, nil}
+
 		}(&destCopy)
 	}
 	success := false
@@ -2802,9 +2788,8 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 		result := <-resultsChan
 		if result.err == nil {
 			if !success {
-				cancel()
 				success = true
-				size = result.size
+				info = result.info
 			}
 		} else if err == nil && result.err != context.Canceled {
 			err = result.err
