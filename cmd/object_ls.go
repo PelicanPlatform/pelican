@@ -86,8 +86,8 @@ func listMain(cmd *cobra.Command, args []string) error {
 	asJSON, _ := cmd.Flags().GetBool("json")
 
 	if collectionOnly && objectOnly {
-		// If a user specifies dirOnly and objectOnly, this means basic functionality (list both objects and directories) so just remove the flags
-		return errors.New("cannot specify both dironly and object only flags, as they are mutually exclusive")
+		// If a user specifies collectionOnly and objectOnly, this means basic functionality (list both objects and directories) so just remove the flags
+		return errors.New("cannot specify both collectionOnly (-C) and object only (-O) flags, as they are mutually exclusive")
 	}
 
 	fileInfos, err := client.DoList(ctx, object, client.WithTokenLocation(tokenLocation))
