@@ -1,4 +1,4 @@
-import {Namespace} from "@/index";
+
 import {Authenticated, secureFetch} from "@/helpers/login";
 import React, {useRef, useState} from "react";
 import {
@@ -13,6 +13,7 @@ import {
     FormGroup,
     FormControlLabel, Portal, Alert
 } from "@mui/material";
+import { red, grey } from '@mui/material/colors';
 import {Server} from "@/index";
 import {Language} from "@mui/icons-material";
 import {NamespaceIcon} from "@/components/Namespace/index";
@@ -49,9 +50,9 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
                         borderRadius: "4px",
                         transition: "background-color 0.3s",
                         "&:hover": {
-                            bgcolor: "#ececec"
+                            bgcolor: server.healthStatus === "Error" ? red[200] : grey[200]
                         },
-                        bgcolor: server.healthStatus === "Error" ? "warning.light" : "secondary.main",
+                        bgcolor: server.healthStatus === "Error" ? red[100] : "secondary.main",
                         p: 1
                     }}
                     onClick={() => setDropdownOpen(!dropdownOpen)}

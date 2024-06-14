@@ -8,12 +8,10 @@ export const InformationSpan = ({name, value}: {name: string, value: string}) =>
                 "&:nth-of-type(odd)": {
                     bgcolor: "#ececec",
                     p: "4px 6px",
-                    m: "0px -5px",
                     borderRadius: "4px"
                 },
                 "&:nth-of-type(even)": {
                     p: "4px 6px",
-                    m: "0px -5px"
                 },
                 display: "flex",
                 justifyContent: "space-between",

@@ -1,4 +1,4 @@
-import React, {ComponentType, FunctionComponent, useMemo, useState, JSX} from "react";
+import React, { ComponentType, FunctionComponent, useMemo, useState, JSX, useEffect } from 'react';
 import {Box, Pagination, Skeleton, TextField, Typography} from "@mui/material";
 
 interface CardListProps<T> {
@@ -11,6 +11,11 @@ export function CardList<T>({ data, Card, cardProps }: CardListProps<T>) {
 
     const PAGE_SIZE = 5
     const [page, setPage] = useState<number>(1)
+
+    // Reset the page on data length change
+     useEffect(() => {
+         setPage(1)
+     }, [data?.length])
 
     const count = useMemo(() => {
         return Math.ceil((data?.length || 0) / PAGE_SIZE)

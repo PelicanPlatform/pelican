@@ -158,7 +158,7 @@ export default function Home() {
                             </Link>
                         }
                     </Typography>
-                    { approvedNamespaceData !== undefined ? <NamespaceCardList<CardProps> data={approvedNamespaceData} Card={Card} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
+                    { approvedNamespaceData !== undefined && approvedNamespaceData.length > 0 && <NamespaceCardList<CardProps> data={approvedNamespaceData} Card={Card} cardProps={{authenticated: user}} /> }
                     { approvedNamespaceData !== undefined && approvedNamespaceData.length === 0 && <CreateNamespaceCard text={"Register Namespace"} url={"namespace/register"}/>}
 
                     <Typography variant={"h6"} py={2}>
@@ -171,7 +171,7 @@ export default function Home() {
                             </Link>
                         }
                     </Typography>
-                    { approvedOriginData !== undefined ? <NamespaceCardList<CardProps> data={approvedOriginData} Card={Card} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
+                    { approvedOriginData !== undefined && approvedOriginData.length > 0 && <NamespaceCardList<CardProps> data={approvedOriginData} Card={Card} cardProps={{authenticated: user}} /> }
                     { approvedOriginData !== undefined && approvedOriginData.length === 0 && <CreateNamespaceCard text={"Register Origin"} url={"origin/register"}/>}
 
                     <Typography variant={"h6"} py={2}>
@@ -184,7 +184,7 @@ export default function Home() {
                             </Link>
                         }
                     </Typography>
-                    { approvedCacheData !== undefined ? <NamespaceCardList<CardProps> data={approvedCacheData} Card={Card} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
+                    { approvedCacheData !== undefined && approvedCacheData.length > 0 && <NamespaceCardList<CardProps> data={approvedCacheData} Card={Card} cardProps={{authenticated: user}} /> }
                     { approvedCacheData !== undefined && approvedCacheData.length === 0 && <CreateNamespaceCard text={"Register Cache"} url={"cache/register"}/>}
 
                 </Grid>
