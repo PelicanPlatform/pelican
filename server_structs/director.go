@@ -21,6 +21,7 @@ package server_structs
 import (
 	"encoding/json"
 	"net/url"
+	"sync"
 )
 
 type (
@@ -82,10 +83,12 @@ type (
 		Listings     bool         `json:"enable_listing"`       // True if the origin allows directory listings
 		DirectReads  bool         `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
 		FromTopology bool         `json:"from_topology"`
+		IOLoad       float64      `json:"io_load"`
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
 	Advertisement struct {
+		sync.RWMutex
 		ServerAd
 		NamespaceAds []NamespaceAdV2
 	}
@@ -165,6 +168,18 @@ func (ad *ServerAd) MarshalJSON() ([]byte, error) {
 		WebURL:    ad.WebURL.String(),
 		Alias:     (*Alias)(ad),
 	})
+}
+
+func (ad *Advertisement) SetIOLoad(load float64) {
+	ad.Lock()
+	defer ad.Unlock()
+	ad.IOLoad = load
+}
+
+func (ad *Advertisement) GetIOLoad() float64 {
+	ad.RLock()
+	defer ad.RUnlock()
+	return ad.IOLoad
 }
 
 func ConvertNamespaceAdsV2ToV1(nsV2 []NamespaceAdV2) []NamespaceAdV1 {

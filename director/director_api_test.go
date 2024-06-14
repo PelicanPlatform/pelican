@@ -181,11 +181,11 @@ func TestListServerAds(t *testing.T) {
 
 		adsOrigin := listAdvertisement([]server_structs.ServerType{server_structs.OriginType})
 		require.Equal(t, 1, len(adsOrigin))
-		assert.EqualValues(t, mockOriginAd, adsOrigin[0])
+		assert.EqualValues(t, &mockOriginAd, adsOrigin[0])
 
 		adsCache := listAdvertisement([]server_structs.ServerType{server_structs.CacheType})
 		require.Equal(t, 1, len(adsCache))
-		assert.EqualValues(t, mockCacheAd, adsCache[0])
+		assert.EqualValues(t, &mockCacheAd, adsCache[0])
 	})
 }
 

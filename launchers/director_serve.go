@@ -45,6 +45,10 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 	director.LaunchMapMetrics(ctx, egrp)
 
+	director.ConfigFilterdServers()
+
+	director.LaunchServerIOQuery(ctx, egrp)
+
 	if config.GetPreferredPrefix() == config.OsdfPrefix {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusWarning, "Start requesting from topology, status unknown")
 		log.Info("Generating/advertising server ads from OSG topology service...")

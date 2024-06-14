@@ -1,0 +1,7 @@
+{
+  "status" : "success",
+  "data" : {
+     "resultType" : "string",
+     "result" : [1435781451.781, "this is a string"]
+  }
+}

@@ -454,7 +454,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 			log.Infof("Updating existing Globus export %s with new token", cid)
 			globusExports[cid].HttpsServer = transferJSON.HttpsServer
 			globusExports[cid].Token = collectionToken
-			globusExports[cid].Status = globusActivated
+			globusExports[cid].Status = GlobusActivated
 			globusExports[cid].Description = ""
 			if globusExports[cid].DisplayName == "" || globusExports[cid].DisplayName == cid {
 				globusExports[cid].DisplayName = transferJSON.DisplayName
@@ -562,18 +562,30 @@ func handleGlobusAuth(ctx *gin.Context) {
 
 // Persist the access token on the disk
 func persistAccessToken(collectionID string, token *oauth2.Token) error {
+	uid, err := config.GetDaemonUID()
+	if err != nil {
+		return errors.Wrap(err, "failed to persist Globus access token on disk: failed to get uid")
+	}
+
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return errors.Wrap(err, "failed to persist Globus access token on disk: failed to get gid")
+	}
 	globusFdr := param.Origin_GlobusConfigLocation.GetString()
 	tokBase := filepath.Join(globusFdr, "tokens")
 	if filepath.Clean(tokBase) == "" {
 		return fmt.Errorf("failed to update Globus token: Origin.GlobusTokenLocation is not a valid path: %s", tokBase)
 	}
-	tokFileName := filepath.Join(tokBase, collectionID+globusTokenFileExt)
-	tmpTokFile, err := os.CreateTemp(tokBase, collectionID+globusTokenFileExt)
+	tokFileName := filepath.Join(tokBase, collectionID+GlobusTokenFileExt)
+	tmpTokFile, err := os.CreateTemp(tokBase, collectionID+GlobusTokenFileExt)
 	if err != nil {
 		return errors.Wrap(err, "failed to update Globus token: unable to create a temporary Globus token file")
 	}
+	// We need to change the directory and file permission to XRootD user/group so that it can access the token
+	if err = tmpTokFile.Chown(uid, gid); err != nil {
+		return errors.Wrapf(err, "unable to change the ownership of Globus token file at %s to xrootd daemon", tmpTokFile.Name())
+	}
 	defer tmpTokFile.Close()
-	defer os.Remove(tmpTokFile.Name())
 
 	_, err = tmpTokFile.Write([]byte(token.AccessToken + "\n"))
 	if err != nil {

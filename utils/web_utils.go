@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -206,6 +207,30 @@ func HeaderParser(values string) (retMap map[string]string) {
 	}
 
 	return retMap
+}
+
+// Determine whether the response `content-type` includes a
+// server-acceptable mime-type
+//
+// Failure should yield an HTTP 415 (`http.StatusUnsupportedMediaType`)
+//
+// Source: https://gist.github.com/rjz/fe283b02cbaa50c5991e1ba921adf7c9
+func HasContentType(r *http.Response, mimetype string) bool {
+	contentType := r.Header.Get("Content-type")
+	if contentType == "" {
+		return mimetype == "application/octet-stream"
+	}
+
+	for _, v := range strings.Split(contentType, ",") {
+		t, _, err := mime.ParseMediaType(v)
+		if err != nil {
+			break
+		}
+		if t == mimetype {
+			return true
+		}
+	}
+	return false
 }
 
 func GetJwks(ctx context.Context, location string) (jwk.Set, error) {

@@ -21,6 +21,7 @@ package director
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -47,13 +48,13 @@ func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
 }
 
 // List all advertisements in the TTL cache that match the serverType array
-func listAdvertisement(serverTypes []server_structs.ServerType) []server_structs.Advertisement {
-	ads := make([]server_structs.Advertisement, 0)
+func listAdvertisement(serverTypes []server_structs.ServerType) []*server_structs.Advertisement {
+	ads := make([]*server_structs.Advertisement, 0)
 	for _, item := range serverAds.Items() {
 		ad := item.Value()
 		for _, serverType := range serverTypes {
 			if ad.Type == serverType {
-				ads = append(ads, *ad)
+				ads = append(ads, ad)
 			}
 		}
 	}
@@ -194,4 +195,70 @@ func ConfigFilterdServers() {
 	for _, sn := range param.Director_FilteredServers.GetStringSlice() {
 		filteredServers[sn] = permFiltered
 	}
+}
+
+// Start a goroutine to query director's Prometheus endpoint for origin/cache server I/O stats
+// and save the value to the corresponding serverAd
+func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
+	serverIOQueryLoop := func(ctx context.Context) error {
+		tick := time.NewTicker(15 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-tick.C:
+				// Requests expires before the next round starts
+				ddlCtx, cancel := context.WithDeadline(ctx, time.Now().Add(10*time.Second))
+				defer cancel()
+
+				// Query all the servers and filter them out later
+				// We are interested in the derivative/rate of the total server IO over the past 5min
+				query := `rate(xrootd_server_io_total{job="origin_cache_servers"}[5m])`
+				queryResult, err := queryPromtheus(ddlCtx, query, true)
+				if err != nil {
+					log.Debugf("Failed to update IO stat: querying Prometheus responded with an error: %v", err)
+					continue
+				}
+				if queryResult.ResultType != "vector" {
+					log.Debugf("Failed to update IO stat: Prometheus response returns %s type, expected a vector", queryResult.ResultType)
+					continue
+				}
+				for _, result := range queryResult.Result {
+					serverUrlRaw, ok := result.Metric["server_url"]
+					if !ok {
+						log.Debugf("Failed to update IO stat: Prometheus query response does not contain server_url metric: %#v", result)
+						continue
+					}
+					serverUrl, ok := serverUrlRaw.(string)
+					if !ok {
+						log.Debugf("Failed to update IO stat: Prometheus query response contains invalid server_url: %#v", result)
+						continue
+					}
+					ioDerivStr := result.Values[0].Value
+					if ioDerivStr == "" {
+						log.Debugf("Skipped updating IO stat for server %s: Prometheus query responded with empty I/O value: %#v", serverUrl, result)
+						continue
+					} else {
+						ioDeriv, err := strconv.ParseFloat(ioDerivStr, 64)
+						if err != nil {
+							log.Debugf("Failed to update IO stat for server %s: failed to convert Prometheus response to a float number: %s", serverUrl, ioDerivStr)
+							continue
+						}
+						serverAd := serverAds.Get(serverUrl)
+						if serverAd == nil {
+							log.Debugf("Failed to update IO stat for server %s: server does not exist in the director", serverUrl)
+							continue
+						}
+						serverAd.Value().SetIOLoad(ioDeriv)
+					}
+				}
+				log.Debugf("Successfully updated server IO stat. Received %d updates.", len(queryResult.Result))
+			}
+		}
+	}
+
+	egrp.Go(func() error {
+		return serverIOQueryLoop(ctx)
+	})
 }

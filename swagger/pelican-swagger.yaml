@@ -426,6 +426,10 @@ definitions:
         type: string
         description: The status of director file transfer test against the server. Can be Initializing|Unknown|OK|Error
         default: Unknown
+      ioLoad:
+        type: number
+        description: The I/O load of the server, which is the average time spent waiting on I/O in the last 5 minutes.
+        default: 0
       namespacePrefixes:
         type: array
         items:

@@ -891,6 +891,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		Writes:      adV2.Caps.Writes,
 		DirectReads: adV2.Caps.DirectReads,
 		Listings:    adV2.Caps.Listings,
+		IOLoad:      0.5, // Defaults to 0.5, as 0 means the server is "very free" which is not necessarily true
 	}
 
 	recordAd(engineCtx, sAd, &adV2.Namespaces)
