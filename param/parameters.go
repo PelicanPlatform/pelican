@@ -360,6 +360,7 @@ var (
 	Transport_IdleConnTimeout = DurationParam{"Transport.IdleConnTimeout"}
 	Transport_ResponseHeaderTimeout = DurationParam{"Transport.ResponseHeaderTimeout"}
 	Transport_TLSHandshakeTimeout = DurationParam{"Transport.TLSHandshakeTimeout"}
+	Xrootd_AuthRefreshInterval = DurationParam{"Xrootd.AuthRefreshInterval"}
 )
 
 var (
