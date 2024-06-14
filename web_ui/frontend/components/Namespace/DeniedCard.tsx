@@ -3,7 +3,7 @@ import {green, red} from "@mui/material/colors";
 import {Authenticated, secureFetch} from "@/helpers/login";
 import {Avatar, Box, IconButton, Tooltip, Typography} from "@mui/material";
 import {Block, Check, Delete, Edit, Person} from "@mui/icons-material";
-import {Alert as AlertType, Alert, Namespace} from "@/components/Main";
+import {Alert as AlertType, Alert, Namespace} from "@/index";
 import InformationDropdown from "./InformationDropdown";
 import {getServerType, NamespaceIcon} from "@/components/Namespace/index";
 import {User} from "@/index";

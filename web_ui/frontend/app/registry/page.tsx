@@ -21,12 +21,11 @@
 import {Box, Button, Grid, Typography, Paper, Alert, Collapse, IconButton} from "@mui/material";
 import React, {useEffect, useMemo, useState} from "react";
 
-import {PendingCard, Card, CardSkeleton, CreateNamespaceCard} from "@/components/Namespace";
+import {PendingCard, Card, CardSkeleton, CreateNamespaceCard, NamespaceCardList} from "@/components";
 import Link from "next/link";
-import {Namespace, Alert as AlertType} from "@/components/Main";
+import {Namespace, Alert as AlertType} from "@/index";
 import {getUser} from "@/helpers/login";
 import {Add} from "@mui/icons-material";
-import CardList from "@/components/Namespace/CardList";
 import useSWR from "swr";
 import {CardProps} from "@/components/Namespace/Card";
 import {PendingCardProps} from "@/components/Namespace/PendingCard";
@@ -133,7 +132,7 @@ export default function Home() {
                                     {user !== undefined && user?.role == "admin" && "Awaiting approval from you."}
                                     {user !== undefined && user?.role != "admin" && "Awaiting approval from registry administrators."}
                                 </Typography>
-                                <CardList<PendingCardProps> data={pendingData} Card={PendingCard} cardProps={{authenticated:user, onAlert: (a: AlertType) => setAlert(a), onUpdate:_setData}}/>
+                                <NamespaceCardList<PendingCardProps> data={pendingData} Card={PendingCard} cardProps={{authenticated:user, onAlert: (a: AlertType) => setAlert(a), onUpdate:_setData}}/>
                             </Paper>
                         </Grid>
                     }
@@ -159,7 +158,7 @@ export default function Home() {
                             </Link>
                         }
                     </Typography>
-                    { approvedNamespaceData !== undefined ? <CardList<CardProps> data={approvedNamespaceData} Card={Card} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
+                    { approvedNamespaceData !== undefined && approvedNamespaceData.length > 0 && <NamespaceCardList<CardProps> data={approvedNamespaceData} Card={Card} cardProps={{authenticated: user}} /> }
                     { approvedNamespaceData !== undefined && approvedNamespaceData.length === 0 && <CreateNamespaceCard text={"Register Namespace"} url={"namespace/register"}/>}
 
                     <Typography variant={"h6"} py={2}>
@@ -172,7 +171,7 @@ export default function Home() {
                             </Link>
                         }
                     </Typography>
-                    { approvedOriginData !== undefined ? <CardList<CardProps> data={approvedOriginData} Card={Card} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
+                    { approvedOriginData !== undefined && approvedOriginData.length > 0 && <NamespaceCardList<CardProps> data={approvedOriginData} Card={Card} cardProps={{authenticated: user}} /> }
                     { approvedOriginData !== undefined && approvedOriginData.length === 0 && <CreateNamespaceCard text={"Register Origin"} url={"origin/register"}/>}
 
                     <Typography variant={"h6"} py={2}>
@@ -185,7 +184,7 @@ export default function Home() {
                             </Link>
                         }
                     </Typography>
-                    { approvedCacheData !== undefined ? <CardList<CardProps> data={approvedCacheData} Card={Card} cardProps={{authenticated: user}} /> : <CardSkeleton/> }
+                    { approvedCacheData !== undefined && approvedCacheData.length > 0 && <NamespaceCardList<CardProps> data={approvedCacheData} Card={Card} cardProps={{authenticated: user}} /> }
                     { approvedCacheData !== undefined && approvedCacheData.length === 0 && <CreateNamespaceCard text={"Register Cache"} url={"cache/register"}/>}
 
                 </Grid>

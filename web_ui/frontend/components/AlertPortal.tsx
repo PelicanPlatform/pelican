@@ -2,7 +2,7 @@ import { Portal } from '@mui/base';
 import React from "react";
 import {Alert, SnackbarProps, Snackbar} from "@mui/material";
 
-import {Alert as AlertType} from "@/components/Main";
+import {Alert as AlertType} from "@/index";
 
 export interface AlertPortalProps {
     alert?: AlertType;

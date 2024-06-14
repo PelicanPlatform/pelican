@@ -26,7 +26,7 @@ import {
 } from "@mui/material";
 import React, {useEffect, useState} from "react";
 
-import {Alert as AlertType, Namespace} from "@/components/Main";
+import {Alert as AlertType, Namespace} from "@/index";
 import Form from "@/app/registry/components/Form";
 import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
 import {submitNamespaceForm} from "@/app/registry/components/util";

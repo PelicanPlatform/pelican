@@ -29,7 +29,7 @@ import {
 import React, {ReactNode, Suspense, useEffect, useMemo, useState} from "react";
 
 import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
-import {Namespace, Alert as AlertType} from "@/components/Main";
+import {Namespace, Alert as AlertType} from "@/index";
 import Form from "@/app/registry/components/Form";
 import {getNamespace, submitNamespaceForm} from "@/app/registry/components/util";
 import type {NamespaceFormPage} from "./CustomRegistrationField/index.d";

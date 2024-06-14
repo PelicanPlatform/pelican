@@ -1,4 +1,4 @@
-import {Namespace} from "@/components/Main";
+
 import {Authenticated, secureFetch} from "@/helpers/login";
 import React, {useRef, useState} from "react";
 import {
@@ -13,13 +13,15 @@ import {
     FormGroup,
     FormControlLabel, Portal, Alert
 } from "@mui/material";
-import {Server} from "@/components/Main";
+import { red, grey } from '@mui/material/colors';
+import {Server} from "@/index";
 import {Language} from "@mui/icons-material";
 import {NamespaceIcon} from "@/components/Namespace/index";
 import useSWR from "swr";
 import Link from "next/link";
 import {User} from "@/index";
 import {getErrorMessage} from "@/helpers/util";
+import {DirectorDropdown} from "@/app/director/components/DirectorDropdown";
 
 export interface DirectorCardProps {
     server: Server
@@ -31,6 +33,7 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
     const [filtered, setFiltered] = useState<boolean>(server.filtered);
     const [error, setError] = useState<string | undefined>(undefined);
     const [disabled, setDisabled] = useState<boolean>(false);
+    const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
 
     const {mutate} = useSWR<Server[]>("getServers")
 
@@ -45,12 +48,14 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
                         justifyContent: "space-between",
                         border: "solid #ececec 1px",
                         borderRadius: "4px",
+                        transition: "background-color 0.3s",
                         "&:hover": {
-                            bgcolor: "#ececec"
+                            bgcolor: server.healthStatus === "Error" ? red[200] : grey[200]
                         },
+                        bgcolor: server.healthStatus === "Error" ? red[100] : "secondary.main",
                         p: 1
                     }}
-                    bgcolor={"secondary"}
+                    onClick={() => setDropdownOpen(!dropdownOpen)}
                 >
                     <Box my={"auto"} ml={1} display={"flex"} flexDirection={"row"}>
                         <NamespaceIcon serverType={server.type.toLowerCase() as "cache" | "origin"} />
@@ -59,54 +64,56 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
                     <Box display={"flex"} flexDirection={"row"}>
                         <Box my={"auto"} display={"flex"}>
                             {(authenticated && authenticated.role == "admin") &&
-                                <FormGroup>
+                                <Tooltip title={"Toggle Server Downtime"}>
+                                  <FormGroup>
                                     <FormControlLabel
-                                        labelPlacement="start"
-                                        control={
-                                            <Switch
-                                                key={server.name}
-                                                disabled={disabled}
-                                                checked={!filtered}
-                                                color={"success"}
-                                                onClick={async (x) => {
+                                      labelPlacement="start"
+                                      control={
+                                        <Switch
+                                          key={server.name}
+                                          disabled={disabled}
+                                          checked={!filtered}
+                                          color={"success"}
+                                          onClick={async (x) => {
 
-                                                    x.stopPropagation()
+                                            x.stopPropagation()
 
-                                                    // Disable the switch
-                                                    setDisabled(true)
+                                            // Disable the switch
+                                            setDisabled(true)
 
-                                                    // Provide optimistic feedback
-                                                    setFiltered(!filtered)
+                                            // Provide optimistic feedback
+                                            setFiltered(!filtered)
 
-                                                    // Update the server
-                                                    let error;
-                                                    if(filtered) {
-                                                        error = await allowServer(server.name)
-                                                    } else {
-                                                        error = await filterServer(server.name)
-                                                    }
+                                            // Update the server
+                                            let error;
+                                            if(filtered) {
+                                              error = await allowServer(server.name)
+                                            } else {
+                                              error = await filterServer(server.name)
+                                            }
 
-                                                    // Revert if we were too optimistic
-                                                    if(error) {
-                                                        setFiltered(!filtered)
-                                                        setError(error)
-                                                    } else {
-                                                        mutate()
-                                                    }
+                                            // Revert if we were too optimistic
+                                            if(error) {
+                                              setFiltered(!filtered)
+                                              setError(error)
+                                            } else {
+                                              mutate()
+                                            }
 
-                                                    setDisabled(false)
-                                                }}
-                                            />
-                                        }
-                                        label={!filtered ? "Active" : "Disabled"}
+                                            setDisabled(false)
+                                          }}
+                                        />
+                                      }
+                                      label={!filtered ? "Active" : "Disabled"}
                                     />
-                                </FormGroup>
+                                  </FormGroup>
+                                </Tooltip>
                             }
                             { server?.webUrl &&
                                 <Box ml={1}>
                                     <Link href={server.webUrl} target={"_blank"} >
                                         <Tooltip title={"View Server Website"}>
-                                            <IconButton>
+                                            <IconButton size={"small"}>
                                                 <Language/>
                                             </IconButton>
                                         </Tooltip>
@@ -117,6 +124,7 @@ export const DirectorCard = ({ server, authenticated } : DirectorCardProps) => {
                     </Box>
                 </Box>
             </Paper>
+            <DirectorDropdown server={server} transition={dropdownOpen}/>
             <Portal>
                 <Snackbar
                     anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
