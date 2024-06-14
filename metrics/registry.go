@@ -7,5 +7,5 @@ import (
 
 var PelicanRegistryFederationNamespaces = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "pelican_registry_federation_namespaces",
-	Help: "The number of namespaces in a federation",
+	Help: "The number of federation namespace associated with a public key, excluding server namespaces, in the registry.",
 }, []string{"status"})
