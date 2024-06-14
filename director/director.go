@@ -766,6 +766,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		path := namespace.Path
 		namespacePaths = fmt.Sprintf("%s %s", namespacePaths, path)
 	}
+	namespacePaths = strings.TrimSpace(namespacePaths)
 	ctx.Set("namespacePaths", namespacePaths)
 
 	adUrl, err := url.Parse(adV2.DataURL)
@@ -914,9 +915,12 @@ func serverAdMetricMiddleware(ctx *gin.Context) {
 	}
 
 	// Separate each path by the space separator
-	namespacePaths := strings.Split(ctx.GetString("namespacePrefixes"), " ")
+	namespacePaths := strings.Split(ctx.GetString("namespacePaths"), " ")
 	// Update metrics for each path
 	for _, namespacePath := range namespacePaths {
+		if len(namespacePath) == 0 {
+			continue
+		}
 		metrics.PelicanDirectorAdvertisementsRecievedTotal.With(
 			prometheus.Labels{
 				"server_name":      serverName,
