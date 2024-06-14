@@ -93,14 +93,14 @@ This section provides a simplified example of how data is made accessible and mo
 Pelican serves two sides of the same coin -- Data owners who want to federate their data from wherever it lives natively, and data consumers who want to access and compute on data wherever they need it.
 
 
-<ImageRow alt={"Pelican and OSDF"} src={"/pelican/arch-repo-and-consumer.png"}>
+<ImageRow alt={"Pelican and OSDF"} src={"/pelican/arch-repo-and-consumer.png"} imageContainerProps={{md: 12}} textContainerProps={{md: 12}}>
 	The federation's core goal is connecting data owners and data consumers.
 </ImageRow>
 
 
 As such, the primary prerequisite for data to be moved via a Pelican federation is for a data owner to make their data accessible to the federation. This happens when an Origin is placed in front of the repository and registered with the federation. While federations like the OSDF *may* wish to control or filter any Origin registrations to vet the data they make available, this example assumes the Origin's registration is automatically approved. The red arrow in the following graphic represents the vetting/approval step, should the federation require it.
 
-<ImageRow alt={"Pelican and OSDF"} src={"/pelican/arch-origin-registration.png"}>
+<ImageRow alt={"Pelican and OSDF"} src={"/pelican/arch-origin-registration.png"} imageContainerProps={{md: 12}} textContainerProps={{md: 12}}>
 	The Origin's owner configures a federation root before starting the service. After startup, the
 	Origin then discovers the hostnames for its Registry and Directory by using the federation root
 	to construct the URL "https://osg-htc.org/.well-known/pelican-configuration", the federation's
@@ -115,7 +115,8 @@ While somewhat simplified, this example illustrates the process origins must tak
 
 The next step is for the data consumer to actually *move* the data. Pelican assumes the data consumer already knows the federation that provides the data they want, along with the name of the object within the federation. These two pieces of information are combined and provided to the Client as a `pelican://`-schemed URL
 
-<ImageRow alt={"Pelican and OSDF"} src={"/pelican/arch-orig-discovery.png"}>
+<ImageRow alt={"Pelican and OSDF"} src={"/pelican/arch-origin-discovery.png"} imageContainerProps={{md: 12}} textContainerProps={{md: 12}}>
+
 	The data consumer provides their Pelican client of choice the pelican:// URL that defines
 	the object they want to download, where `osg-htc.org` is the federation and
 	(`/weather/cloud.jpg`) is the object. Just as the origin discovered the Director's hostname
