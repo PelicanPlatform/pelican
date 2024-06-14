@@ -1,0 +1,7 @@
+Logging:
+  Cache:
+    Scitokens: debug
+Origin:
+  StorageType: https
+  FederationPrefix: /test
+  EnablePublicReads: true

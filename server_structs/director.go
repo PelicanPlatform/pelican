@@ -48,6 +48,8 @@ type (
 	}
 
 	NamespaceAdV2 struct {
+		// TODO: Deprecate this top-level PublicRead field in favor of the Caps.PublicReads field.
+		// Should be done ~v7.10 series
 		PublicRead   bool
 		Caps         Capabilities  // Namespace capabilities should be considered independently of the origin’s capabilities.
 		Path         string        `json:"path"`
@@ -308,7 +310,7 @@ func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) 
 			}
 
 			newNS := NamespaceAdV2{
-				PublicRead: !nsAd.RequireToken,
+				PublicRead: caps.PublicReads,
 				Caps:       caps,
 				Path:       nsAd.Path,
 			}

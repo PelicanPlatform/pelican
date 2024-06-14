@@ -789,8 +789,10 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 
 	mockNamespaceAd := server_structs.NamespaceAdV2{
-		PublicRead: false,
-		Path:       "/foo/bar/",
+		Caps: server_structs.Capabilities{
+			PublicReads: false,
+		},
+		Path: "/foo/bar/",
 		Issuer: []server_structs.TokenIssuer{{
 			BasePaths: []string{""},
 			IssuerUrl: url.URL{},
@@ -1202,7 +1204,7 @@ func TestRedirects(t *testing.T) {
 		})
 
 		// Use ads generated via mock topology for generating list of caches
-		topoServer := httptest.NewServer(http.HandlerFunc(JSONHandler))
+		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 		defer topoServer.Close()
 		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 		viper.Set("Director.CacheSortMethod", "random")
@@ -1245,7 +1247,7 @@ func TestRedirects(t *testing.T) {
 			serverAds.DeleteAll()
 		})
 
-		topoServer := httptest.NewServer(http.HandlerFunc(JSONHandler))
+		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 		defer topoServer.Close()
 		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 		viper.Set("Director.CacheSortMethod", "random")

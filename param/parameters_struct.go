@@ -56,6 +56,7 @@ type Config struct {
 		WorkerCount int `mapstructure:"workercount"`
 	} `mapstructure:"client"`
 	ConfigDir string `mapstructure:"configdir"`
+	ConfigLocations []string `mapstructure:"configlocations"`
 	Debug bool `mapstructure:"debug"`
 	Director struct {
 		AdvertisementTTL time.Duration `mapstructure:"advertisementttl"`
@@ -165,6 +166,7 @@ type Config struct {
 		UserInfoEndpoint string `mapstructure:"userinfoendpoint"`
 	} `mapstructure:"oidc"`
 	Origin struct {
+		DbLocation string `mapstructure:"dblocation"`
 		EnableBroker bool `mapstructure:"enablebroker"`
 		EnableCmsd bool `mapstructure:"enablecmsd"`
 		EnableDirListing bool `mapstructure:"enabledirlisting"`
@@ -184,6 +186,12 @@ type Config struct {
 		ExportVolumes []string `mapstructure:"exportvolumes"`
 		Exports interface{} `mapstructure:"exports"`
 		FederationPrefix string `mapstructure:"federationprefix"`
+		GlobusClientIDFile string `mapstructure:"globusclientidfile"`
+		GlobusClientSecretFile string `mapstructure:"globusclientsecretfile"`
+		GlobusCollectionID string `mapstructure:"globuscollectionid"`
+		GlobusCollectionName string `mapstructure:"globuscollectionname"`
+		GlobusConfigLocation string `mapstructure:"globusconfiglocation"`
+		HttpAuthTokenFile string `mapstructure:"httpauthtokenfile"`
 		HttpServiceUrl string `mapstructure:"httpserviceurl"`
 		Mode string `mapstructure:"mode"`
 		Multiuser bool `mapstructure:"multiuser"`
@@ -283,6 +291,7 @@ type Config struct {
 		TLSHandshakeTimeout time.Duration `mapstructure:"tlshandshaketimeout"`
 	} `mapstructure:"transport"`
 	Xrootd struct {
+		AuthRefreshInterval time.Duration `mapstructure:"authrefreshinterval"`
 		Authfile string `mapstructure:"authfile"`
 		ConfigFile string `mapstructure:"configfile"`
 		DetailedMonitoringHost string `mapstructure:"detailedmonitoringhost"`
@@ -336,6 +345,7 @@ type configWithType struct {
 		WorkerCount struct { Type string; Value int }
 	}
 	ConfigDir struct { Type string; Value string }
+	ConfigLocations struct { Type string; Value []string }
 	Debug struct { Type string; Value bool }
 	Director struct {
 		AdvertisementTTL struct { Type string; Value time.Duration }
@@ -445,6 +455,7 @@ type configWithType struct {
 		UserInfoEndpoint struct { Type string; Value string }
 	}
 	Origin struct {
+		DbLocation struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }
@@ -464,6 +475,12 @@ type configWithType struct {
 		ExportVolumes struct { Type string; Value []string }
 		Exports struct { Type string; Value interface{} }
 		FederationPrefix struct { Type string; Value string }
+		GlobusClientIDFile struct { Type string; Value string }
+		GlobusClientSecretFile struct { Type string; Value string }
+		GlobusCollectionID struct { Type string; Value string }
+		GlobusCollectionName struct { Type string; Value string }
+		GlobusConfigLocation struct { Type string; Value string }
+		HttpAuthTokenFile struct { Type string; Value string }
 		HttpServiceUrl struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }
@@ -563,6 +580,7 @@ type configWithType struct {
 		TLSHandshakeTimeout struct { Type string; Value time.Duration }
 	}
 	Xrootd struct {
+		AuthRefreshInterval struct { Type string; Value time.Duration }
 		Authfile struct { Type string; Value string }
 		ConfigFile struct { Type string; Value string }
 		DetailedMonitoringHost struct { Type string; Value string }

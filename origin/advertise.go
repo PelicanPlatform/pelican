@@ -20,6 +20,7 @@ package origin
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 
 	"github.com/pkg/errors"
@@ -58,6 +59,7 @@ func (server *OriginServer) GetPids() (pids []int) {
 }
 
 func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+	isGlobusBackend := param.Origin_StorageType.GetString() == string(server_utils.OriginStorageGlobus)
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrlStr, err := config.GetServerIssuerURL()
 	if err != nil {
@@ -84,6 +86,13 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 	}
 
 	for _, export := range originExports {
+		if isGlobusBackend {
+			// Do not include the export if it's an inactive Globus collection
+			if !isExportActivated(export.FederationPrefix) {
+				log.Debugf("Origin export %s is skipped in advertisement: inactive Globus collection", export.FederationPrefix)
+				continue
+			}
+		}
 		// PublicReads implies reads
 		reads := export.Capabilities.PublicReads || export.Capabilities.Reads
 		nsAds = append(nsAds, server_structs.NamespaceAdV2{
@@ -134,7 +143,14 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		}},
 	}
 
-	if len(prefixes) == 1 {
+	if len(prefixes) == 0 {
+		if isGlobusBackend {
+			activateUrl := param.Server_ExternalWebUrl.GetString() + "/view/origin/globus"
+			return nil, fmt.Errorf("failed to create advertisement: no activated Globus collection. Go to %s to activate your collection.", activateUrl)
+		} else {
+			return nil, errors.New("failed to create advertisement: no valid export")
+		}
+	} else if len(prefixes) == 1 {
 		if param.Origin_EnableBroker.GetBool() {
 			var brokerUrl *url.URL
 			fedInfo, err := config.GetFederation(context.Background())
