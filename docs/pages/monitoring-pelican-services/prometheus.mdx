@@ -1,18 +1,16 @@
 import ExportedImage from "next-image-export-optimizer";
 
-# Prometheus
+# Query Pelican Server Metrics via Prometheus
 
 > For Pelican `>= 7.4.2`. Older version of Pelican may not include all of the metrics listed.
 
 Pelican servers have [Prometheus](https://prometheus.io/) embedded by default and provide a handful of Prometheus metrics to monitor server status. You can access the metrics endpoint at `https://<pelican-server-host>:<server-web-port>/metrics` to see all the available metrics and their current values. By default, `/metrics` is a protected endpoint and you are required to login and get authenticated to view the page. You can change `Monitoring.MetricAuthorization` to `false` in config to turn off the authentication.
 
-Pelican also exposes Prometheus [PromQL query engine](https://prometheus.io/docs/prometheus/latest/querying/basics/) at `https://<pelican-server-host>:<server-web-port>/api/v1.0/prometheus` where you can query the metrics agianst Prometheus powerful query langauge.
+Pelican also exposes Prometheus [PromQL query engine](https://prometheus.io/docs/prometheus/latest/querying/basics/) at `https://<pelican-server-host>:<server-web-port>/api/v1.0/prometheus` where you can query the metrics against Prometheus powerful query language.
 
 Example: `https://<pelican-server-host>:<server-web-port>/api/v1.0/prometheus/query?query=pelican_component_health_status[10m]` queries the `pelican_component_health_status` metric and shows data collected in past 10 min.
 
 However, Pelican does not support Prometheus native `/graph` endpoint nor other Prometheus native web services other than the two above. For custom data visualizations, [Grafana](https://grafana.com/) is one of the popular software to use.
-
-# Metrics
 
 Pelican included metrics from built-in [gin](https://gin-gonic.com/) web server, as well as Go runtime. For all metrics available, visit `https://<pelican-server-host>:<server-web-port>/api/v1.0/prometheus/label/__name__/values`.
 
@@ -198,11 +196,11 @@ All of the Pelican servers have the following metrics:
 
 ### `# of Active Origins and Caches`
 
-With the `up` metric, it is possible to count number of active origin and cache servers in the federation by a simple Promtheus query: `count(up{server_type=<"Origin">})` for counting origin servers, or `count(up{server_type=<"Cache">})` for counting cache servers.
+With the `up` metric, it is possible to count number of active origin and cache servers in the federation by a simple Prometheus query: `count(up{server_type=<"Origin">})` for counting origin servers, or `count(up{server_type=<"Cache">})` for counting cache servers.
 
 ### `pelican_director_total_ftx_test_suite`
 
-  The number of file transfer test suite the director issued. In Pelican, director creates a test file and sent to origin servers to as a health test. It issues such test suite when it receives the registration from the origin server. In a test suite, a timer was set to run a cylce of uploading, getting, and deleting the test file every 15 seconds. Such cycle is called a "test run". In theory, director should issue only one test for each origin servers; however, since the registration information was stored in a TTL cache in director, and it expires after certain period of time, and the test suite issued will be cancelled. A new test suite is issued with the new registration. Thus, director _can_ issue multiple test suites to an origin server.
+  The number of file transfer test suite the director issued. In Pelican, director creates a test file and sent to origin servers to as a health test. It issues such test suite when it receives the registration from the origin server. In a test suite, a timer was set to run a cycle of uploading, getting, and deleting the test file every 15 seconds. Such cycle is called a "test run". In theory, director should issue only one test for each origin servers; however, since the registration information was stored in a TTL cache in director, and it expires after certain period of time, and the test suite issued will be cancelled. A new test suite is issued with the new registration. Thus, director _can_ issue multiple test suites to an origin server.
 
   #### Label: `server_name`
 

@@ -1,13 +1,11 @@
 {
   "index": "About Pelican",
-  "install": "Install Pelican",
+  "install": "Installing Pelican",
   "parameters": "Configuration",
   "getting-started": "Getting Started",
-  "client-usage": "Client Usage",
-  "serving-an-origin":"Serving an Origin",
-  "serving-a-federation":"Serving a Federation",
-  "serving-a-cache":"Serving a Cache",
-  "prometheus": "Prometheus",
-  "grafana": "Grafana",
+  "getting-data-with-pelican": "Getting Data with Pelican",
+  "federating-your-data": "Federating your Data",
+  "operating-a-federation":"Operating a Federation",
+  "monitoring-pelican-services": "Monitoring Pelican Services",
   "api-docs": "API Documentation"
 }

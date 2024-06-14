@@ -1,4 +1,4 @@
-# Serve a Pelican Cache
+# Serving a Pelican Cache
 
 A [Pelican](http://pelicanplatform.org/) *Cache* creates a cache that connects to a Pelican data federation to allow faster data access. It stores data that is accessed via a Pelican origin until it gets evicted. The cache has the potential to both be faster and physically closer to your location than the Pelican origin you access the data from. This allows for faster data access when running complex workflows.
 
@@ -6,7 +6,7 @@ This document contains instructions on how to serve a Pelican cache.
 
 ## Before Starting
 
-### Install Pelican
+### Note on Installing Pelican Cache Server
 
 If you haven't installed Pelican, follow the instructions to [install pelican](/install.mdx).
 
@@ -23,14 +23,6 @@ The Pelican cache listens to two TCP ports for file transfers and Web UI. By def
 
 You may change the port numbers through the [configuration file](./parameters.mdx) with parameter [`Cache.Port`](./parameters.mdx#Cache-Port) and [`Server.WebPort`](./parameters.mdx#Server-WebPort) respectively.
 
-### Prepare TLS Credentials
-
-Pelican servers use `https` for serving its web UI and handling internal http requests. `https` requires a set of credential files in place to work. For details on how to set up the TLS credentials, refer to the [documentation in Serve an Origin](./serving_an_origin.mdx#prepare-tls-credentials)
-
-## Serve a Cache
-
-> If you are running Pelican docker image to serve a cache, please refer to the [docker image documentation](./install/docker.mdx#run-pelican-cache-server).
-
 ### Find a federation to join
 
 Before serving a cache, you need to find a Pelican federation to join in. If you are unfamiliar with the term **federation**, refer to [Useful Terminology](./client-usage.mdx#useful-terminology) before proceeding.
@@ -39,7 +31,7 @@ If you don't have a federation in mind, the Open Science Data Federation (OSDF) 
 
 The federation discovery URL for OSDF is `osg-htc.org`. You may use this as your `<federation>` argument in the next section when launching your cache.
 
-### Launch the Cache
+## Launch the Cache
 
 To launch a pelican cache, run:
 

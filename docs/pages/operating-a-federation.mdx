@@ -1,0 +1,28 @@
+import ExportedImage from "next-image-export-optimizer";
+
+# Operating a Pelican Federation
+
+A federation in Pelican refers to an instance of a data sharing ecosystem where members can share and access data as objects. To
+allow such an exchange of data to work, Pelican has two top-level *central server components* to coordinate origins and caches in the
+federation, direct client requests to the proper storage server, and manage namespace registration. They are the *director* and the *registry*.
+A Pelican federation requires both a *director* and a *registry* to be set up first before any origin or cache server can join
+the federation or any client can access objects in the federation.
+
+## Before Starting
+
+### Install Pelican
+
+If you haven't installed Pelican, follow the instructions to [install pelican](/install.mdx).
+
+### Prepare TLS Credentials
+
+Pelican servers use `https` for serving its web UI, handling objects transfer requests and internal http requests. `https` requires a set of credential files in place to work. For details on how to set up the TLS credentials, refer to the [documentation in Serve an Origin](./serving_an_origin.mdx#prepare-tls-credentials).
+
+
+## Next Steps
+
+Follow the instructions below for serving a specific Pelican federation component.
+
+* [Serve a Pelican Registry](./operating-a-federation/registry.mdx)
+* [Serve a Pelican Director](./operating-a-federation/director.mdx)
+* [Serve a Pelican Cache](./operating-a-federation/cache.mdx)

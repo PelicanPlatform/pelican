@@ -1,0 +1,90 @@
+import ExportedImage from "next-image-export-optimizer";
+
+# Serving a Pelican Director
+
+A Pelican *director* handles data distribution in a Pelican federation. It directs object requests from a Pelican client to the proper object provider (which can be a cache or an origin). It also maintains a collecti
+on of actively running origin/cache servers in the federation.
+
+## Before Starting
+
+### Get MaxMind License key (required)
+
+A Pelican director uses the [MaxMind GeoLite City database](https://dev.maxmind.com/geoip/docs/databases/city-and-country)
+to determine which cache is nearest to a client's IP address.
+The database, if not already found,
+will be downloaded automatically when a director is served and a valid key is present. The database is free to use, but you need a GeoLite2 account
+and provide a license key to Pelican so that we can download the database for you.
+Please follow the instructions [here](https://dev.maxmind.com/geoip/docs/databases/city-and-country) to [register a free account](https://www.maxmind.com/en/geolite2/signup) and [get your license key](https://www.maxmind.com/en/accounts/current/license-key/).
+
+Once you have the key, copy and paste it to a desired location on your server.
+Then pass the file location to `Director.MaxMindKeyFile`.
+
+### Set Registry URL (required)
+
+A Pelican director needs to talk to the registry to get the public keys for namespaces. You will need to set `Federation.RegistryUrl` to the public endpoint of your registry
+for your Pelican director to work. An example value looks like `https://your-registry.org:9999`
+
+### Director as a Federation
+
+For Pelican origin, cache, and client, they need to know where the *federation* they belong to so that they can make themselves known to other services or a access objects. This can be done by either manually passing configuration values (e.g. `Federation.DirectorUrl`, `Federation.RegistryUrl`, etc) or by setting the
+`Federation.DiscoveryUrl` and Pelican will fetch the metadata from the endpoint automatically. Pelican uses `Federation.DiscoveryUrl` to discover where a federation's central services live, including the registry and director.
+
+By default, Pelican director hosts the federation discovery endpoint. Therefore, for origins and caches in your federation, as well as Pelican clients that want to access objects in your federation, their `Federation.DiscoveryUrl` value can be set to the director's public URL, i.e. `https://<your-director-hostname>:<director-web-port>` or `https://<your-director-hostname>` if the port number is simply `443`.
+
+Make sure your director is up and running before starting your origins and caches.
+
+### Set Support Contact Information (Recommended)
+> `Director.SupportContact` is only available for Pelican >=7.7.0
+
+The Pelican director is your federation's entrypoint, and it is where other services in the federation can learn about each other. Because of this, it is also used to host the contact information for federation administrators. Setting values for the configuration options `Director.SupportContactEmail` and `Director.SupportContactUrl` causes the director to display the information through its website so that users know who and how to contact you for support. See [Configuration](./parameters.mdx#Director-SupportContact) page for details.
+
+```yaml filename="pelican.yaml"
+Director:
+  SupportContactEmail: <your support email>
+  SupportContactUrl: <url to other support resources>
+```
+
+Note that either `SupportContactEmail` or `SupportContactUrl` are optional. You may leave any of them empty is not needed.
+
+## Launch the Director
+
+That's it! Now you can launch the director by running the following command:
+
+```bash
+pelican director serve
+```
+
+and you will see the following message:
+
+```console
+Pelican admin interface is not initialized
+To initialize, login at https://<hostname>:8444/view/initialization/code/ with the following code:
+865309
+```
+
+By default, a director runs on port `8444`. You may change the port number by passing `-p <port>` when serving
+the director or by setting `Server.WebPort` in the configuration file.
+
+To finish setting up the web UI for the director, please refer to [Login to Admin Website](./serving_an_origin.mdx#login-to-admin-website) for details. Once you have finished the initialization and login with your admin password, you should be able to see the following page as an admin user (lists are expected to be empty at a fresh start):
+
+<ExportedImage width={1000} height={1000} src={"/pelican/director-homepage.png"} alt={"Image of director homepage in admin view"} />
+
+The "Origins" table and "Caches" table show the *active* origins and caches in the federation.
+
+## Useful Configurations for Director
+
+There are a couple of configuration parameters you could use to customize the behavior of your registry. Here we highlight the ones that are most frequently set for an admin. You may refer to the full set of director parameters in the [Parameters page](../parameters.mdx#Director-DefaultResponse).
+
+### `Director.DefaultResponse`
+
+A Pelican director by default redirects object request from clients to the geospatially nearest cache in the federation to improve data transfer efficiency. If a director is hosted at https://director.com, then a `GET` request to https://director.com/foo/bar.txt will be redirected to the nearest cache for namespace `/foo`. You may change the default response type of a redirect for director by setting `Director.DefaultResponse`. It can be either `cache` or `origin`. If set to `origin`, director will redirect the request to the origin, bypassing caches.
+
+### `GeoIPOverrides`
+
+The MaxMind database may fail to return a valid longitute/latitute pair given a server IP. For example, the database does not support IPV6 addresses. In such cases, you may pass a list of IP addresses to `GeoIPOverrides` parameter whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects both server ads (for determining the location of origins and caches) and incoming client requests (for determing where a client request is coming from).
+
+### `Director.CacheResponseHostnames` and `Director.OriginResponseHostnames`
+
+You may allow the director to redirect client traffic to both caches and origins. You can do it by adding virtual hostnames to `Director.CacheResponseHostnames` for a cache response or `Director.OriginResponseHostnames` for an origin response. If a request is sent by the client to one of these hostnames, the director assumes it should respond with a redirect to a cache/origin.
+
+If present, the hostname is taken from the `X-Forwarded-Host` header in the request. Otherwise, Host is used.

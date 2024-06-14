@@ -1,7 +1,8 @@
 import ExportedImage from "next-image-export-optimizer";
 
-# Using The Pelican Client
-It is recommended that you start with our [Quick Start Guide](./user-quickstart-guide.mdx) where you can learn the basics of Pelican client commands and learn some useful terminology.
+# Getting Data Using Pelican Client
+
+It is recommended that you start with our [Quick Start Guide](../getting-started/accessing-data.mdx) where you can learn the basics of Pelican client commands and learn some useful terminology.
 
 ## Before Starting
 
@@ -17,7 +18,7 @@ Before using the Pelican client to interact with objects from your federation, t
 	```
 
 	which should output a path to the executable. If there is no output to this command, refer to the [Pelican installation docs](./install.mdx) to acquire a working installation.
-- You are roughly familiar with Pelican client commands and terminology as demonstrated with the [Getting Started: Accessing Data](./getting_started_access_data.mdx) page.
+- You are roughly familiar with Pelican client commands and terminology as demonstrated in the [Quick Start Guide](../getting-started/accessing-data.mdx).
 
 
 ### Useful Terminology
@@ -117,7 +118,9 @@ To approve credentials for this operation, please navigate to the following URL 
 
 Pelican will display a URL in your terminal and indicate that you should visit the URL in your browser. After copying/pasting the URL to your browser, follow all the instructions there for logging in with CILogon. Once everything is successful, you should see a page like this:
 
-<ExportedImage src={"/pelican/cilogon.png"} alt={"Screenshot of CILogon success page"} />
+
+<ExportedImage src={"/pelican/cilogon.png"} width={1000} height={1000} alt={"Screenshot of CILogon success page"} />
+
 
 Finally, if the login is successful, Pelican will automatically fetch the token from the CILogon service and continue with the download.
 
