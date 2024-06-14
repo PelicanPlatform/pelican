@@ -26,10 +26,11 @@ import (
 	"path"
 	"strings"
 
-	config "github.com/pelicanplatform/pelican/config"
-	namespaces "github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	config "github.com/pelicanplatform/pelican/config"
+	namespaces "github.com/pelicanplatform/pelican/namespaces"
 )
 
 func deviceCodeSupported(grantTypes *[]string) bool {

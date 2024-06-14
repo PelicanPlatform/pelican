@@ -6,8 +6,9 @@ import (
 	"syscall"
 
 	"github.com/alecthomas/units"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func getCacheSize(cacheDir string) (cacheSize uint64, err error) {

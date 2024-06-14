@@ -25,3 +25,8 @@ linters:
   enable:
   - gofmt
   - misspell
+  - goimports
+
+linters-settings:
+  goimports:
+    local-prefixes: "github.com/pelicanplatform/pelican"

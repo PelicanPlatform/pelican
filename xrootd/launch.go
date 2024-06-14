@@ -28,12 +28,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/daemon"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 type (

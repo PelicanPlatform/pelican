@@ -35,7 +35,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/youmark/pkcs8"
@@ -43,6 +42,8 @@ import (
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // If we prompted the user for a new password while setting up the file,

@@ -24,10 +24,11 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 // Create tmpdir, change cwd, and setup clean up functions

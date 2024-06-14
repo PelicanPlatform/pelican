@@ -29,12 +29,13 @@ import (
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 func TestVerifyCreateSciTokens2(t *testing.T) {

@@ -27,11 +27,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestWaitUntilWorking(t *testing.T) {

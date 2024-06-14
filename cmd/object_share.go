@@ -22,10 +22,11 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
+
+	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/config"
 )
 
 var (

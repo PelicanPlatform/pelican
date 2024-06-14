@@ -28,12 +28,13 @@ import (
 	"time"
 
 	jwt "github.com/golang-jwt/jwt"
-	config "github.com/pelicanplatform/pelican/config"
-	namespaces "github.com/pelicanplatform/pelican/namespaces"
-	oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	oauth2_upstream "golang.org/x/oauth2"
+
+	config "github.com/pelicanplatform/pelican/config"
+	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	oauth2 "github.com/pelicanplatform/pelican/oauth2"
 )
 
 func TokenIsAcceptable(jwtSerialized string, osdfPath string, namespace namespaces.Namespace, opts config.TokenGenerationOpts) bool {

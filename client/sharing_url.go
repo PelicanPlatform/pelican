@@ -23,9 +23,10 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func getDirectorFromUrl(objectUrl *url.URL) (string, error) {
