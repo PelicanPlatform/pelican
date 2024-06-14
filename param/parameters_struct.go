@@ -191,6 +191,7 @@ type Config struct {
 		GlobusCollectionID string `mapstructure:"globuscollectionid"`
 		GlobusCollectionName string `mapstructure:"globuscollectionname"`
 		GlobusConfigLocation string `mapstructure:"globusconfiglocation"`
+		HttpAuthTokenFile string `mapstructure:"httpauthtokenfile"`
 		HttpServiceUrl string `mapstructure:"httpserviceurl"`
 		Mode string `mapstructure:"mode"`
 		Multiuser bool `mapstructure:"multiuser"`
@@ -479,6 +480,7 @@ type configWithType struct {
 		GlobusCollectionID struct { Type string; Value string }
 		GlobusCollectionName struct { Type string; Value string }
 		GlobusConfigLocation struct { Type string; Value string }
+		HttpAuthTokenFile struct { Type string; Value string }
 		HttpServiceUrl struct { Type string; Value string }
 		Mode struct { Type string; Value string }
 		Multiuser struct { Type string; Value bool }

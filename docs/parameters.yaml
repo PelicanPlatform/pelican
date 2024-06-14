@@ -907,6 +907,17 @@ type: string
 default: none
 components: ["origin"]
 ---
+name: Origin.HttpAuthTokenFile
+description: |+
+  When set, all requests from the origin to the http backend will include the contents of the file as a bearer token in the
+  Authorization header.
+
+  If the origin backend is configured with the `globus` storage type, any value set here will be overridden with the filepath to
+  the first file ending in `.tok` found in the $(Origin.GlobusConfigLocation)/tokens directory
+type: filename
+default: none
+components: ["origin"]
+---
 name: Origin.XRootServiceUrl
 description: |+
  When the origin is configured to export another XRootD storage backend by setting `Origin.StorageType = xroot`, the `XRootServiceUrl`

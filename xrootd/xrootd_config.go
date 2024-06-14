@@ -92,6 +92,7 @@ type (
 		CalculatedPort    string
 		FederationPrefix  string
 		HttpServiceUrl    string
+		HttpAuthTokenFile string
 		XRootServiceUrl   string
 		RunLocation       string
 		StorageType       string
@@ -731,6 +732,31 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 				xrdConfig.Origin.HttpServiceUrl = globusExports[0].HttpsServer
 			}
 			xrdConfig.Origin.FederationPrefix = globusExports[0].FederationPrefix
+
+			if globusExports[0].Status == origin.GlobusActivated {
+				// Check the contents of $(Origin.GlobusConfigLocation)/tokens and grab the first `.tok` file
+				// Feed this to the HTTP Plugin as the auth token file
+				tknFldr := filepath.Join(param.Origin_GlobusConfigLocation.GetString(), "tokens")
+				tokenFiles, err := os.ReadDir(tknFldr)
+				if err != nil {
+					return "", errors.Wrap(err, "failed to read Globus token directory for token files")
+				}
+
+				if len(tokenFiles) == 0 {
+					return "", errors.Errorf("failed to find a Globus auth token in %s", tknFldr)
+				}
+				var tFileName string
+				for _, tFile := range tokenFiles {
+					if ext := filepath.Ext(tFile.Name()); ext == origin.GlobusTokenFileExt {
+						tFileName = tFile.Name()
+						break
+					}
+				}
+				if tFileName == "" {
+					return "", errors.Errorf("no Globus auth tokens ending in %s could be found in %s", origin.GlobusTokenFileExt, tknFldr)
+				}
+				xrdConfig.Origin.HttpAuthTokenFile = filepath.Join(param.Origin_GlobusConfigLocation.GetString(), "tokens", tFileName)
+			}
 		}
 	}
 
@@ -757,7 +783,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		if xrdConfig.Origin.Multiuser {
 			ok, err := config.HasMultiuserCaps()
 			if err != nil {
-				return "", errors.Wrap(err, "Failed to determine if the origin can run in multiuser mode")
+				return "", errors.Wrap(err, "failed to determine if the origin can run in multiuser mode")
 			}
 			if !ok {
 				return "", errors.New("Origin.Multiuser is set to `true` but the command was run without sufficient privilege; was it launched as root?")
