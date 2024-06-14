@@ -52,6 +52,7 @@ type (
 		FilteredType      string                      `json:"filteredType"`
 		FromTopology      bool                        `json:"fromTopology"`
 		HealthStatus      HealthTestStatus            `json:"healthStatus"`
+		IOLoad            float64                     `json:"ioLoad"`
 		NamespacePrefixes []string                    `json:"namespacePrefixes"`
 	}
 
@@ -85,7 +86,7 @@ func listServers(ctx *gin.Context) {
 		})
 		return
 	}
-	var servers []server_structs.Advertisement
+	var servers []*server_structs.Advertisement
 	if queryParams.ServerType != "" {
 		if !strings.EqualFold(queryParams.ServerType, string(server_structs.OriginType)) && !strings.EqualFold(queryParams.ServerType, string(server_structs.CacheType)) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -130,6 +131,7 @@ func listServers(ctx *gin.Context) {
 			FilteredType: ft.String(),
 			FromTopology: server.FromTopology,
 			HealthStatus: healthStatus,
+			IOLoad:       server.GetIOLoad(),
 		}
 		for _, ns := range server.NamespaceAds {
 			res.NamespacePrefixes = append(res.NamespacePrefixes, ns.Path)

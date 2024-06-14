@@ -58,6 +58,7 @@ func parseServerAdFromTopology(server utils.Server, serverType server_structs.Se
 	serverAd := server_structs.ServerAd{}
 	serverAd.Type = serverType
 	serverAd.Name = server.Resource
+	serverAd.IOLoad = 0.5 // We don't have the probe for topology server load, so we default to 0.5
 
 	// Explicitly set these to false for caches, because these caps don't really translate in that case
 	if serverAd.Type == server_structs.CacheType {

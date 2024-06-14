@@ -337,7 +337,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
-		assert.Contains(t, string(content), "xrootd.fslib throttle default")
+		assert.Contains(t, string(content), "xrootd.fslib ++ throttle")
 		assert.Contains(t, string(content), "throttle.throttle concurrency 10")
 	})
 
