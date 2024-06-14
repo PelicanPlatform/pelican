@@ -36,11 +36,9 @@ jobs:
 
       # We still run this so that we can get the nice hint of gofmt issues inline
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          skip-pkg-cache: true
-          skip-build-cache: true
 
       - name: Run pre-commit
-        uses: pre-commit/action@v3.0.0
+        uses: pre-commit/action@v3.0.1
