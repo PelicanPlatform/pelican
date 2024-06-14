@@ -48,10 +48,10 @@ var (
 		Help: "The number of file transfer test runs the director issued. A test run is a cycle of upload/download/delete test file, which is executed per 15s per origin (by defult)",
 	}, []string{"server_name", "server_web_url", "server_type", "status", "report_status"})
 
-	PelicanDirectorTotalAdvertisementsReceived = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "pelican_director_total_advertisements_received",
+	PelicanDirectorAdvertisementsRecievedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_advertisements_received_total",
 		Help: "The total number of advertisement the director received from the origin and cache servers. Labelled by status_code, server_name, serve_type: Origin|Cache, server_web_url",
-	}, []string{"server_name", "server_web_url", "server_type", "status_code"})
+	}, []string{"server_name", "server_web_url", "server_type", "status_code", "namespace_prefix"})
 
 	PelicanDirectorMapItemsTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_director_map_items_total",

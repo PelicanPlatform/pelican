@@ -758,6 +758,17 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	ctx.Set("serverName", adV2.Name)
 	ctx.Set("serverWebUrl", adV2.WebURL)
 
+	// Iterate over each advertised namespace and join the paths together
+	// into a string where each path is separated by a space
+	// i.e. "<path> <path> <path>"
+	var namespacePaths string
+	for _, namespace := range adV2.Namespaces {
+		path := namespace.Path
+		namespacePaths = fmt.Sprintf("%s %s", namespacePaths, path)
+	}
+	namespacePaths = strings.TrimSpace(namespacePaths)
+	ctx.Set("namespacePaths", namespacePaths)
+
 	adUrl, err := url.Parse(adV2.DataURL)
 	if err != nil {
 		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
@@ -903,13 +914,22 @@ func serverAdMetricMiddleware(ctx *gin.Context) {
 		serverWebUrl = ctx.GetString("serverWebUrl")
 	}
 
-	metrics.PelicanDirectorTotalAdvertisementsReceived.With(
-		prometheus.Labels{
-			"server_name":    serverName,
-			"server_web_url": serverWebUrl,
-			"server_type":    ctx.GetString("serverType"),
-			"status_code":    strconv.Itoa(statusCode),
-		}).Inc()
+	// Separate each path by the space separator
+	namespacePaths := strings.Split(ctx.GetString("namespacePaths"), " ")
+	// Update metrics for each path
+	for _, namespacePath := range namespacePaths {
+		if len(namespacePath) == 0 {
+			continue
+		}
+		metrics.PelicanDirectorAdvertisementsRecievedTotal.With(
+			prometheus.Labels{
+				"server_name":      serverName,
+				"server_web_url":   serverWebUrl,
+				"server_type":      ctx.GetString("serverType"),
+				"status_code":      strconv.Itoa(statusCode),
+				"namespace_prefix": namespacePath,
+			}).Inc()
+	}
 }
 
 // Return a list of registered origins and caches in Prometheus HTTP SD format
