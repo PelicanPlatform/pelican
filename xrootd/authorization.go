@@ -342,7 +342,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 			outStr = "u * "
 		}
 		for _, ad := range server.GetNamespaceAds() {
-			if ad.PublicRead && ad.Path != "" {
+			if ad.Caps.PublicReads && ad.Path != "" {
 				outStr += ad.Path + " lr "
 			}
 		}
@@ -546,9 +546,8 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 				return errors.Wrap(err, "can't parse Server_ExternalWebUrl when generating scitokens config")
 			}
 			cacheIssuer := server_structs.NamespaceAdV2{
-				PublicRead: false,
-				Caps:       server_structs.Capabilities{PublicReads: false, Reads: true, Writes: true},
-				Path:       "/pelican/monitoring",
+				Caps: server_structs.Capabilities{PublicReads: false, Reads: true, Writes: true},
+				Path: "/pelican/monitoring",
 				Issuer: []server_structs.TokenIssuer{
 					{
 						BasePaths: []string{"/pelican/monitoring"},
@@ -618,7 +617,7 @@ func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAdV2) error {
 		return err
 	}
 	for _, ad := range nsAds {
-		if !ad.PublicRead {
+		if !ad.Caps.PublicReads {
 			for _, ti := range ad.Issuer {
 				if val, ok := cfg.IssuerMap[ti.IssuerUrl.String()]; ok {
 					val.BasePaths = append(val.BasePaths, ti.BasePaths...)

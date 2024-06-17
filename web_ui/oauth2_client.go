@@ -25,33 +25,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/oauth2"
+
 	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
+
 	"github.com/pelicanplatform/pelican/config"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/oauth2"
-)
-
-type (
-	oauthLoginRequest struct {
-		NextUrl string `form:"next_url,omitempty"`
-	}
-
-	oauthCallbackRequest struct {
-		State string `form:"state"`
-		Code  string `form:"code"`
-	}
 )
 
 const (
@@ -64,9 +53,53 @@ var (
 	oauthUserInfoUrl = "" // Value will be set at ConfigOAuthClientAPIs
 )
 
-// Generate a 16B random string and set ctx session key oauthstate as the random string
-// return the random string with URL encoded nextUrl for CSRF token validation
-func generateCSRFCookie(ctx *gin.Context, nextUrl string) (string, error) {
+// Parse the OAuth2 callback state into a key-val map. Error if keys are duplicated
+// state is the url-decoded value of the query parameter "state" in the the OAuth2 callback request
+func ParseOAuthState(state string) (metadata map[string]string, err error) {
+	metadata = map[string]string{}
+	if state == "" {
+		return metadata, nil
+	}
+
+	keyvals := strings.Split(state, "&")
+	metadata = map[string]string{}
+	for _, kvStr := range keyvals {
+		kvpair := strings.SplitN(kvStr, "=", 2)
+		if len(kvpair) < 2 {
+			continue
+		}
+		key := kvpair[0]
+		val, err := url.QueryUnescape(kvpair[1])
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to unescape the value for the key %s:%s", key, val)
+		}
+		if _, ok := metadata[key]; ok {
+			return nil, fmt.Errorf("duplicated keys %s:%s", key, state)
+		}
+		metadata[key] = val
+	}
+	return
+}
+
+// Generate the state for the authentication request in OAuth2 code flow.
+// The metadata are formatted similar to url query parameters:
+//
+// key1=val1&key2=val2
+//
+// where values are url-encoded
+func GenerateOAuthState(metadata map[string]string) string {
+	metaStr := ""
+	for key, val := range metadata {
+		metaStr += key + "=" + url.QueryEscape(val) + "&"
+	}
+	metaStr = strings.TrimSuffix(metaStr, "&")
+	return metaStr
+}
+
+// Generate a 16B random string and set as the value of ctx session key "oauthstate"
+// return a string for OAuth2 "state" query parameter including the random string and other
+// metadata
+func GenerateCSRFCookie(ctx *gin.Context, metadata map[string]string) (string, error) {
 	session := sessions.Default(ctx)
 
 	b := make([]byte, 16)
@@ -75,14 +108,18 @@ func generateCSRFCookie(ctx *gin.Context, nextUrl string) (string, error) {
 		return "", err
 	}
 
-	state := base64.URLEncoding.EncodeToString(b)
-	session.Set("oauthstate", state)
+	pkceStr := base64.URLEncoding.EncodeToString(b)
+	session.Set("oauthstate", pkceStr)
 	err = session.Save()
 	if err != nil {
 		return "", err
 	}
-
-	return fmt.Sprintf("%s:%s", state, url.QueryEscape(nextUrl)), nil
+	if _, ok := metadata["pkce"]; ok {
+		return "", errors.New("key \"pkce\" is not allowed")
+	}
+	metadata["pkce"] = pkceStr
+	metaStr := GenerateOAuthState(metadata)
+	return metaStr, nil
 }
 
 // Handler to redirect user to the login page of OAuth2 provider
@@ -90,7 +127,7 @@ func generateCSRFCookie(ctx *gin.Context, nextUrl string) (string, error) {
 // to be redirected back to where they were before hitting the login when
 // the user is successfully authenticated against the OAuth2 provider
 func handleOAuthLogin(ctx *gin.Context) {
-	req := oauthLoginRequest{}
+	req := server_structs.OAuthLoginRequest{}
 	if ctx.ShouldBindQuery(&req) != nil {
 		ctx.JSON(http.StatusBadRequest,
 			server_structs.SimpleApiResp{
@@ -100,7 +137,7 @@ func handleOAuthLogin(ctx *gin.Context) {
 	}
 
 	// CSRF token is required, embed next URL to the state
-	csrfState, err := generateCSRFCookie(ctx, req.NextUrl)
+	csrfState, err := GenerateCSRFCookie(ctx, map[string]string{"nextUrl": req.NextUrl})
 
 	if err != nil {
 		log.Errorf("Failed to generate CSRF token: %v", err)
@@ -215,7 +252,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	req := oauthCallbackRequest{}
+	req := server_structs.OAuthCallbackRequest{}
 	if ctx.ShouldBindQuery(&req) != nil {
 		ctx.JSON(http.StatusBadRequest,
 			server_structs.SimpleApiResp{
@@ -225,26 +262,28 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	// Format of state: <[16]byte>:<nextURL>
-	parts := strings.SplitN(req.State, ":", 2)
-	if len(parts) != 2 {
-		ctx.JSON(http.StatusBadRequest,
-			server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprint("Invalid OAuth callback: fail to split state param: ", ctx.Request.URL),
-			})
-		return
-	}
-	nextURL, err := url.QueryUnescape(parts[1])
+	stateMap, err := ParseOAuthState(req.State)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest,
 			server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprint("Invalid OAuth callback: fail to parse next_url: ", ctx.Request.URL),
+				Msg:    fmt.Sprint("Invalid OAuth callback: failed to parse state metadata", ctx.Request.URL),
 			})
+		return
+	}
+	pkce, ok := stateMap["pkce"]
+	if !ok {
+		ctx.JSON(http.StatusBadRequest,
+			server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprint("Invalid OAuth callback: pkce is missing from the callback state", ctx.Request.URL),
+			})
+		return
 	}
 
-	if parts[0] != csrfFromSession {
+	nextURL := stateMap["nextUrl"]
+
+	if pkce != csrfFromSession {
 		ctx.JSON(http.StatusBadRequest,
 			server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -355,54 +394,30 @@ func handleOAuthCallback(ctx *gin.Context) {
 
 // Configure OAuth2 client and register related authentication endpoints for Web UI
 func ConfigOAuthClientAPIs(engine *gin.Engine) error {
-	sessionSecretByte, err := config.LoadSessionSecret()
-	if err != nil {
-		return errors.Wrap(err, "failed to configure OAuth client")
-	}
 	oauthCommonConfig, provider, err := pelican_oauth2.ServerOIDCClient()
 	if err != nil {
 		return errors.Wrap(err, "failed to load server OIDC client config")
 	}
 	// Pelican registry relies on OAuth2 device flow for CLI-based registration
 	// and Globus does not support such flow. So users should not use Globus for the registry
-	if config.IsServerEnabled(config.RegistryType) && provider == pelican_oauth2.Globus {
+	if config.IsServerEnabled(config.RegistryType) && provider == config.Globus {
 		return errors.New("you are using Globus as the OIDC auth server. However, Pelican registry server does not support Globus. Please use CILogon as the auth server instead.")
 	}
 
 	oauthUserInfoUrl = oauthCommonConfig.Endpoint.UserInfoURL
 
-	redirectUrlStr := param.Server_ExternalWebUrl.GetString()
-	redirectUrl, err := url.Parse(redirectUrlStr)
+	ocfg, err := pelican_oauth2.ParsePelicanOAuth(oauthCommonConfig, oauthCallbackPath)
 	if err != nil {
 		return err
 	}
-	redirectUrl.Path = oauthCallbackPath
-	redirectHostname := param.OIDC_ClientRedirectHostname.GetString()
-	if redirectHostname != "" {
-		_, _, err := net.SplitHostPort(redirectHostname)
-		if err != nil {
-			// Port not present
-			redirectUrl.Host = fmt.Sprint(redirectHostname, ":", param.Server_WebPort.GetInt())
-		} else {
-			// Port present
-			redirectUrl.Host = redirectHostname
-		}
-	}
-	oauthConfig = &oauth2.Config{
-		RedirectURL:  redirectUrl.String(),
-		ClientID:     oauthCommonConfig.ClientID,
-		ClientSecret: oauthCommonConfig.ClientSecret,
-		Scopes:       oauthCommonConfig.Scopes,
-		Endpoint: oauth2.Endpoint{
-			AuthURL:  oauthCommonConfig.Endpoint.AuthURL,
-			TokenURL: oauthCommonConfig.Endpoint.TokenURL,
-		},
+	oauthConfig = &ocfg
+
+	seHandler, err := GetSessionHandler()
+	if err != nil {
+		return err
 	}
 
-	store := cookie.NewStore(sessionSecretByte)
-	sessionHandler := sessions.Sessions("pelican-session", store)
-
-	oauthGroup := engine.Group("/api/v1.0/auth/oauth", sessionHandler)
+	oauthGroup := engine.Group("/api/v1.0/auth/oauth", seHandler)
 	{
 		oauthGroup.GET("/login", handleOAuthLogin)
 		oauthGroup.GET("/callback", handleOAuthCallback)

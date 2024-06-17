@@ -39,6 +39,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -91,6 +92,7 @@ type (
 		CalculatedPort    string
 		FederationPrefix  string
 		HttpServiceUrl    string
+		HttpAuthTokenFile string
 		XRootServiceUrl   string
 		RunLocation       string
 		StorageType       string
@@ -131,6 +133,7 @@ type (
 		DetailedMonitoringHost string
 		DetailedMonitoringPort int
 		Authfile               string
+		AuthRefreshInterval    int // In the raw config we use a duration, but Xrootd needs this as a seconds integer. Conversion happens during the unmarshal
 		ScitokensConfig        string
 		Mount                  string
 		LocalMonitoringPort    int
@@ -605,8 +608,68 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 	)
 }
 
-func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
+// The default config has `Xrootd.AuthRefreshInterval: 5m`, which we need to convert
+// to an integer representation of seconds for our XRootD configuration. This hook
+// handles that conversion during unmarshalling, as well as some sanitization of user inputs.
+func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
+	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
+		// Filter out underlying data we don't want to risk manipulating
+		if t.Kind() != reflect.Struct || f.Kind() != reflect.Map || t.Name() != "XrootdOptions" {
+			return data, nil
+		}
 
+		// Get the value, load as a time.Duration, and then update the value with seconds as an int
+		dataMap, ok := data.(map[string]interface{})
+		if !ok {
+			return nil, errors.New("data is not a map[string]interface{}")
+		}
+
+		durStr, ok := dataMap["authrefreshinterval"].(string)
+		if !ok {
+			return nil, errors.New("authrefreshinterval is not a string")
+		}
+
+		// Sanitize the input to guarantee we have a unit
+		suffixes := []string{"s", "m", "h"}
+		hasSuffix := false
+		for _, suffix := range suffixes {
+			if strings.HasSuffix(durStr, suffix) {
+				hasSuffix = true
+				break
+			}
+		}
+		if !hasSuffix {
+			log.Warningf("'Xrootd.AuthRefreshInterval' does not have a time unit (s, m, h). Interpreting as seconds")
+			durStr = durStr + "s"
+		}
+
+		duration, err := time.ParseDuration(durStr)
+		if err != nil {
+			return nil, errors.Wrapf(err, "Failed to parse 'Xrootd.AuthRefreshInterval' of %s as a duration", durStr)
+		}
+
+		if duration < 60*time.Second {
+			log.Warningf("'Xrootd.AuthRefreshInterval' of %s appears as less than 60s. Using fallback of 5m", durStr)
+			duration = time.Minute * 5
+		}
+
+		dataMap["authrefreshinterval"] = int(duration.Seconds())
+		return data, nil
+	}
+}
+
+// A wrapper to combine multiple decoder hook functions for XRootD cfg unmarshalling
+func combinedDecodeHookFunc() mapstructure.DecodeHookFuncType {
+	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
+		data, err := authRefreshStrToSecondsHookFunc()(f, t, data)
+		if err != nil {
+			return data, err
+		}
+		return server_utils.StringListToCapsHookFunc()(f, t, data)
+	}
+}
+
+func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 	gid, err := config.GetDaemonGID()
 	if err != nil {
 		return "", err
@@ -614,12 +677,12 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 
 	var xrdConfig XrootdConfig
 	xrdConfig.Xrootd.LocalMonitoringPort = -1
-	if err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(server_utils.StringListToCapsHookFunc())); err != nil {
+	if err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc())); err != nil {
 		return "", errors.Wrap(err, "failed to unmarshal xrootd config")
 	}
 
 	// For cache. convert integer percentage value [0,100] to decimal fraction [0.00, 1.00]
-	if !origin {
+	if !isOrigin {
 		if num, err := strconv.Atoi(xrdConfig.Cache.HighWaterMark); err == nil {
 			if num <= 100 && num > 0 {
 				xrdConfig.Cache.HighWaterMark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
@@ -635,7 +698,7 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	// To make sure we get the correct exports, we overwrite the exports in the xrdConfig struct with the exports
 	// we get from the server_structs.GetOriginExports() function. Failure to do so will cause us to hit viper again,
 	// which in the case of tests prevents us from overwriting some exports with temp dirs.
-	if origin {
+	if isOrigin {
 		originExports, err := server_utils.GetOriginExports()
 		if err != nil {
 			return "", errors.Wrap(err, "failed to generate Origin export list for xrootd config")
@@ -643,12 +706,57 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 		xrdConfig.Origin.Exports = originExports
 	}
 
-	if xrdConfig.Origin.StorageType == "https" {
+	switch xrdConfig.Origin.StorageType {
+	case "https":
 		if xrdConfig.Origin.HttpServiceUrl == "" {
 			xrdConfig.Origin.HttpServiceUrl = param.Origin_HttpServiceUrl.GetString()
 		}
 		if xrdConfig.Origin.FederationPrefix == "" {
 			xrdConfig.Origin.FederationPrefix = param.Origin_FederationPrefix.GetString()
+		}
+	case "globus":
+		// There's no real globus backend for xrd yet! We use https as the real backend
+		xrdConfig.Origin.StorageType = "https"
+		// Set activeOnly to false so that we can use the inactive ones as placeholders
+		globusExports := origin.GetGlobusExportsValues(false)
+		// If there's no activated Globus collection, then set the Http config to empty
+		if len(globusExports) == 0 {
+			// If there's no export, we fail the start
+			return "", errors.New("failed to configure XRootD: no Globus collection exported")
+		} else if len(globusExports) > 0 {
+			if globusExports[0].HttpsServer == "" {
+				// FIXME: Once the xrd-http plugin allows the empty server URL, remove this line
+				// For now, put a placeholder here to allow XRootD start without error
+				xrdConfig.Origin.HttpServiceUrl = "https://pelicanplatform.org"
+			} else {
+				xrdConfig.Origin.HttpServiceUrl = globusExports[0].HttpsServer
+			}
+			xrdConfig.Origin.FederationPrefix = globusExports[0].FederationPrefix
+
+			if globusExports[0].Status == origin.GlobusActivated {
+				// Check the contents of $(Origin.GlobusConfigLocation)/tokens and grab the first `.tok` file
+				// Feed this to the HTTP Plugin as the auth token file
+				tknFldr := filepath.Join(param.Origin_GlobusConfigLocation.GetString(), "tokens")
+				tokenFiles, err := os.ReadDir(tknFldr)
+				if err != nil {
+					return "", errors.Wrap(err, "failed to read Globus token directory for token files")
+				}
+
+				if len(tokenFiles) == 0 {
+					return "", errors.Errorf("failed to find a Globus auth token in %s", tknFldr)
+				}
+				var tFileName string
+				for _, tFile := range tokenFiles {
+					if ext := filepath.Ext(tFile.Name()); ext == origin.GlobusTokenFileExt {
+						tFileName = tFile.Name()
+						break
+					}
+				}
+				if tFileName == "" {
+					return "", errors.Errorf("no Globus auth tokens ending in %s could be found in %s", origin.GlobusTokenFileExt, tknFldr)
+				}
+				xrdConfig.Origin.HttpAuthTokenFile = filepath.Join(param.Origin_GlobusConfigLocation.GetString(), "tokens", tFileName)
+			}
 		}
 	}
 
@@ -659,7 +767,7 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	}
 
 	runtimeCAs := filepath.Join(param.Origin_RunLocation.GetString(), "ca-bundle.crt")
-	if !origin {
+	if !isOrigin {
 		runtimeCAs = filepath.Join(param.Cache_RunLocation.GetString(), "ca-bundle.crt")
 	}
 	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, runtimeCAs, 2*time.Minute)
@@ -671,11 +779,11 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 		xrdConfig.Server.TLSCACertificateFile = runtimeCAs
 	}
 
-	if origin {
+	if isOrigin {
 		if xrdConfig.Origin.Multiuser {
 			ok, err := config.HasMultiuserCaps()
 			if err != nil {
-				return "", errors.Wrap(err, "Failed to determine if the origin can run in multiuser mode")
+				return "", errors.Wrap(err, "failed to determine if the origin can run in multiuser mode")
 			}
 			if !ok {
 				return "", errors.New("Origin.Multiuser is set to `true` but the command was run without sufficient privilege; was it launched as root?")
@@ -720,7 +828,7 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	}
 
 	var xrootdCfg string
-	if origin {
+	if isOrigin {
 		xrootdCfg = xrootdOriginCfg
 	} else {
 		xrootdCfg = xrootdCacheCfg
@@ -729,7 +837,7 @@ func ConfigXrootd(ctx context.Context, origin bool) (string, error) {
 	templ := template.Must(template.New("xrootd.cfg").Parse(xrootdCfg))
 
 	configPath := filepath.Join(param.Origin_RunLocation.GetString(), "xrootd.cfg")
-	if !origin {
+	if !isOrigin {
 		configPath = filepath.Join(param.Cache_RunLocation.GetString(), "xrootd.cfg")
 	}
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)

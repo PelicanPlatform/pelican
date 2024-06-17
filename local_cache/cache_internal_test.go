@@ -23,8 +23,9 @@ package local_cache
 import (
 	"testing"
 
-	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 func TestCalcResources(t *testing.T) {

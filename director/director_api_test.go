@@ -24,9 +24,10 @@ import (
 	"testing"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var mockOriginServerAd server_structs.ServerAd = server_structs.ServerAd{
@@ -51,7 +52,6 @@ func mockNamespaceAds(size int, serverPrefix string) []server_structs.NamespaceA
 	namespaceAds := make([]server_structs.NamespaceAdV2, size)
 	for i := 0; i < size; i++ {
 		namespaceAds[i] = server_structs.NamespaceAdV2{
-			PublicRead: false,
 			Caps: server_structs.Capabilities{
 				PublicReads: false,
 			},
@@ -182,11 +182,11 @@ func TestListServerAds(t *testing.T) {
 
 		adsOrigin := listAdvertisement([]server_structs.ServerType{server_structs.OriginType})
 		require.Equal(t, 1, len(adsOrigin))
-		assert.EqualValues(t, mockOriginAd, adsOrigin[0])
+		assert.EqualValues(t, &mockOriginAd, adsOrigin[0])
 
 		adsCache := listAdvertisement([]server_structs.ServerType{server_structs.CacheType})
 		require.Equal(t, 1, len(adsCache))
-		assert.EqualValues(t, mockCacheAd, adsCache[0])
+		assert.EqualValues(t, &mockCacheAd, adsCache[0])
 	})
 }
 

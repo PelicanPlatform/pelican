@@ -27,6 +27,7 @@ import (
 	"time"
 
 	grab "github.com/opensaucerer/grab/v3"
+
 	"github.com/pelicanplatform/pelican/config"
 )
 

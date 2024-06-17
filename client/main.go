@@ -28,6 +28,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"time"
 
 	"math/rand"
 	"os"
@@ -44,6 +45,16 @@ import (
 
 // Number of caches to attempt to use in any invocation
 var CachesToTry int = 3
+
+// Our own FileInfo structure to hold information about a file
+// NOTE: this was created to provide more flexibility to information on a file. The fs.FileInfo interface was causing some issues like not always returning a Name attribute
+// ALSO NOTE: the fields are exported so they can be marshalled into JSON, it does not work otherwise
+type FileInfo struct {
+	Name    string
+	Size    int64
+	ModTime time.Time
+	IsDir   bool
+}
 
 // Determine the token name if it is embedded in the scheme, Condor-style
 func getTokenName(destination *url.URL) (scheme, tokenName string) {
@@ -158,33 +169,33 @@ func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool
 }
 
 // Check the size of a remote file in an origin
-func DoStat(ctx context.Context, destination string, options ...TransferOption) (remoteSize uint64, err error) {
+func DoStat(ctx context.Context, destination string, options ...TransferOption) (fileInfo *FileInfo, err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
-			log.Debugln("Panic captured while attempting to perform size check:", r)
+			log.Debugln("Panic captured while attempting to stat:", r)
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
 			ret := fmt.Sprintf("Unrecoverable error (panic) while check file size: %v", r)
 			err = errors.New(ret)
-			remoteSize = 0
+			return
 		}
 	}()
 
 	destUri, err := url.Parse(destination)
 	if err != nil {
 		log.Errorln("Failed to parse destination URL")
-		return 0, err
+		return nil, err
 	}
 
 	// Check if we understand the found url scheme
 	err = schemeUnderstood(destUri.Scheme)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	te, err := NewTransferEngine(ctx)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	defer func() {
@@ -195,12 +206,12 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 
 	pelicanURL, err := te.newPelicanURL(destUri)
 	if err != nil {
-		return 0, errors.Wrap(err, "Failed to generate pelicanURL object")
+		return nil, errors.Wrap(err, "Failed to generate pelicanURL object")
 	}
 
 	ns, err := getNamespaceInfo(ctx, destUri.Path, pelicanURL.directorUrl, false, "")
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	tokenLocation := ""
@@ -220,14 +231,15 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 	if ns.UseTokenOnRead && token == "" {
 		token, err = getToken(destUri, ns, true, "", tokenLocation, acquire)
 		if err != nil {
-			return 0, fmt.Errorf("failed to get token for transfer: %v", err)
+			return nil, fmt.Errorf("failed to get token for transfer: %v", err)
 		}
 	}
 
-	if remoteSize, err = statHttp(ctx, destUri, ns, token); err == nil {
-		return remoteSize, nil
+	if statInfo, err := statHttp(ctx, destUri, ns, pelicanURL.directorUrl, token); err != nil {
+		return nil, errors.Wrap(err, "failed to do the stat")
+	} else {
+		return &statInfo, nil
 	}
-	return 0, err
 }
 
 func GetCacheHostnames(ctx context.Context, testFile string) (urls []string, err error) {
@@ -487,6 +499,80 @@ func schemeUnderstood(scheme string) error {
 			scheme, strings.Join(understoodSchemes, ", "))
 	}
 	return nil
+}
+
+// Function for the object ls command, we get target information for our remote object and eventually print out the contents of the specified object
+func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (fileInfos []FileInfo, err error) {
+	// First, create a handler for any panics that occur
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugln("Panic captured while attempting to perform transfer (DoList):", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoList: %v", r)
+			err = errors.New(ret)
+		}
+	}()
+
+	remoteObjectUrl, err := url.Parse(remoteObject)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse remote object URL")
+	}
+
+	remoteObjectScheme := remoteObjectUrl.Scheme
+
+	// Check if we understand the found url scheme
+	err = schemeUnderstood(remoteObjectScheme)
+	if err != nil {
+		return nil, err
+	}
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+
+	pelicanURL, err := te.newPelicanURL(remoteObjectUrl)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to generate pelicanURL object")
+	}
+
+	ns, err := getNamespaceInfo(ctx, remoteObjectUrl.Path, pelicanURL.directorUrl, false, "")
+	if err != nil {
+		return nil, err
+	}
+
+	// Get our token if needed
+	tokenLocation := ""
+	acquire := true
+	token := ""
+	for _, option := range options {
+		switch option.Ident() {
+		case identTransferOptionTokenLocation{}:
+			tokenLocation = option.Value().(string)
+		case identTransferOptionAcquireToken{}:
+			acquire = option.Value().(bool)
+		case identTransferOptionToken{}:
+			token = option.Value().(string)
+		}
+	}
+
+	if ns.UseTokenOnRead && token == "" {
+		token, err = getToken(remoteObjectUrl, ns, true, "", tokenLocation, acquire)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get token for transfer")
+		}
+	}
+
+	fileInfos, err = listHttp(ctx, remoteObjectUrl, pelicanURL.directorUrl, ns, token)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to do the list")
+	}
+
+	return fileInfos, nil
 }
 
 /*

@@ -19,13 +19,19 @@
 package config
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -36,6 +42,8 @@ import (
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // If we prompted the user for a new password while setting up the file,
@@ -363,4 +371,89 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 	}
 
 	return SaveEncryptedContents(pem_bytes_memory)
+}
+
+// Get a 32B secret from server IssuerKey
+//
+// How we generate the secret:
+// Concatenate the byte array pelican with the DER form of the service's private key,
+// Take a hash, and use the hash's bytes as the secret.
+func GetSecret() (string, error) {
+	// Use issuer private key as the source to generate the secret
+	issuerKeyFile := param.IssuerKey.GetString()
+	err := GeneratePrivateKey(issuerKeyFile, elliptic.P256(), false)
+	if err != nil {
+		return "", err
+	}
+	privateKey, err := LoadPrivateKey(issuerKeyFile, false)
+	if err != nil {
+		return "", err
+	}
+
+	derPrivateKey, err := x509.MarshalPKCS8PrivateKey(privateKey)
+
+	if err != nil {
+		return "", err
+	}
+	byteArray := []byte("pelican")
+
+	concatenated := append(byteArray, derPrivateKey...)
+
+	hash := sha256.Sum256(concatenated)
+
+	secret := string(hash[:])
+	return secret, nil
+}
+
+// Encrypt function
+func EncryptString(stringToEncrypt string) (encryptedString string, err error) {
+	secret, err := GetSecret()
+	if err != nil {
+		return "", err
+	}
+	key := []byte(secret)
+	plaintext := []byte(stringToEncrypt)
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+
+	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
+	iv := ciphertext[:aes.BlockSize]
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return "", err
+	}
+
+	stream := cipher.NewCFBEncrypter(block, iv)
+	stream.XORKeyStream(ciphertext[aes.BlockSize:], plaintext)
+
+	return base64.URLEncoding.EncodeToString(ciphertext), nil
+}
+
+// Decrypt function
+func DecryptString(encryptedString string) (decryptedString string, err error) {
+	secret, err := GetSecret()
+	if err != nil {
+		return "", err
+	}
+	key := []byte(secret)
+
+	ciphertext, _ := base64.URLEncoding.DecodeString(encryptedString)
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+
+	if len(ciphertext) < aes.BlockSize {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+	iv := ciphertext[:aes.BlockSize]
+	ciphertext = ciphertext[aes.BlockSize:]
+
+	stream := cipher.NewCFBDecrypter(block, iv)
+	stream.XORKeyStream(ciphertext, ciphertext)
+
+	return string(ciphertext), nil
 }

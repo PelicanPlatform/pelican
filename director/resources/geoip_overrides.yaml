@@ -50,7 +50,7 @@ GeoIPOverrides:
       Lat: 123.4
       Long: 987.6
   # Valid IPv6
-  - IP: "FD00::FAB2/112"
+  - IP: "FD00::/112"
     Coordinate:
       Lat: 43.073904
       Long: -89.384859

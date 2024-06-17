@@ -36,6 +36,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin"
@@ -43,9 +47,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -678,29 +679,25 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 
 	nsAds := []server_structs.NamespaceAdV2{
 		{
-			PublicRead: false,
-			Caps:       PrivateCaps,
+			Caps: PrivateCaps,
 			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl:       issuer1URL,
 				BasePaths:       []string{"/p1"},
 				RestrictedPaths: []string{"/p1/nope", "p1/still_nope"}}},
 		},
 		{
-			PublicRead: false,
-			Caps:       PrivateCaps,
+			Caps: PrivateCaps,
 			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl: issuer2URL,
 				BasePaths: []string{"/p2/path", "/p2/foo", "/p2/baz"},
 			}},
 		},
 		{
-			Path:       "/p3",
-			PublicRead: true,
-			Caps:       PublicCaps,
+			Path: "/p3",
+			Caps: PublicCaps,
 		},
 		{
-			PublicRead: false,
-			Caps:       PrivateCaps,
+			Caps: PrivateCaps,
 			Issuer: []server_structs.TokenIssuer{{
 				IssuerUrl: issuer1URL,
 				BasePaths: []string{"/p1_again"},
@@ -710,14 +707,12 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 			}},
 		},
 		{
-			Path:       "/p4/depth",
-			PublicRead: true,
-			Caps:       PublicCaps,
+			Path: "/p4/depth",
+			Caps: PublicCaps,
 		},
 		{
-			Path:       "/p2_noauth",
-			PublicRead: true,
-			Caps:       PublicCaps,
+			Path: "/p2_noauth",
+			Caps: PublicCaps,
 		},
 	}
 

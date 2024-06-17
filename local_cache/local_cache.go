@@ -36,15 +36,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/option"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -715,8 +716,8 @@ func (lc *LocalCache) Stat(path, token string) (uint64, error) {
 	dUrl := *lc.directorURL
 	dUrl.Path = path
 	dUrl.Scheme = "pelican"
-	size, err := client.DoStat(context.Background(), dUrl.String(), client.WithToken(token))
-	return size, err
+	statInfo, err := client.DoStat(context.Background(), dUrl.String(), client.WithToken(token))
+	return uint64(statInfo.Size), err
 }
 
 func (sc *LocalCache) updateConfig() error {

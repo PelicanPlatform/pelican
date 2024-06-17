@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link";
 import {green, grey, orange, red} from "@mui/material/colors";
 import {
     Typography,
@@ -9,23 +10,17 @@ import {
     Grid,
     Tooltip,
     Pagination, Paper,
-    Alert
+    Alert,
+    IconButton
 } from '@mui/material';
-import React, {ReactElement, useEffect, useMemo, useRef, useState} from "react";
+import React, {ReactElement, useEffect, useMemo, useState} from "react";
 import {Skeleton} from "@mui/material";
 
-import {Edit, Warning, Check, Clear} from "@mui/icons-material";
+import {Edit, Settings, Check, Clear} from "@mui/icons-material";
 import useSWR from "swr";
 import {getErrorMessage} from "@/helpers/util";
-
-interface Capabilities {
-    PublicReads: boolean;
-    Reads: boolean;
-    Writes: boolean;
-    Listings: boolean;
-    DirectReads: boolean;
-  }
-
+import type { Capabilities } from '@/index';
+import {CapabilitiesDisplay} from '@/components';
 
 type RegistrationStatus = "Not Supported" | "Completed" | "Incomplete" | "Registration Error"
 
@@ -35,7 +30,10 @@ type ExportResCommon = {
     editUrl: string;
 }
 
-type ExportRes = ExportResCommon & ({ type: "s3", exports: S3ExportEntry[] } | { type: "posix", exports: PosixExportEntry[]});
+type ExportRes = ExportResCommon &
+    ({ type: "s3", exports: S3ExportEntry[] } |
+    { type: "posix", exports: PosixExportEntry[]} |
+    { type: "globus", exports: GlobusExportEntry[]});
 
 interface ExportEntry {
     status: RegistrationStatus
@@ -43,6 +41,11 @@ interface ExportEntry {
     editUrl: string;
     federationPrefix: string;
     capabilities: Capabilities;
+}
+
+interface GlobusExportEntry extends ExportEntry {
+    globusCollectionID: string;
+    globusCollectionName: string;
 }
 
 interface S3ExportEntry extends ExportEntry {
@@ -98,39 +101,6 @@ export const DataExportStatus = (
     }
 }
 
-export const CapabilitiesTable = ({capabilities}: {capabilities: Capabilities}) => {
-
-    return (
-        <Box>
-            {Object.entries(capabilities).map(([key, value]) => {
-                return (
-                    <Tooltip title={value.toString()} key={key}>
-                        <Box
-                            sx={{
-                                borderRadius: 1,
-                                display: "flex",
-                                justifyContent: "space-between",
-                                py: .4,
-                                px: 1,
-                                mb: .2,
-                                backgroundColor: value ? green[200] : orange[200],
-                                border: "1px 1px solid black"
-                            }}
-                        >
-                            <Typography variant={"body2"}>
-                                {key}
-                            </Typography>
-                            <Box display={"flex"}>
-                                {value ? <Check fontSize="small" /> : <Clear fontSize="small" />}
-                            </Box>
-                        </Box>
-                    </Tooltip>
-                )
-            })}
-        </Box>
-    )
-}
-
 export const ValueLabel = ({value, label}: {value: string, label: string}) => {
 
     if(!value){
@@ -156,7 +126,7 @@ export const PosixDataExportCard = ({entry}: {entry: PosixExportEntry}) => {
                     <ValueLabel value={entry.sentinelLocation} label={"Sentinel Location"}/>
                 </Grid>
                 <Grid item xs={3}>
-                    <CapabilitiesTable {...entry}/>
+                    <CapabilitiesDisplay {...entry}/>
                 </Grid>
             </Grid>
         </Paper>
@@ -173,7 +143,34 @@ export const S3DataExportCard = ({entry}: {entry: S3ExportEntry}) => {
                     <ValueLabel value={entry.s3Bucket} label={"S3 Bucket"}/>
                 </Grid>
                 <Grid item xs={3}>
-                    <CapabilitiesTable {...entry}/>
+                    <CapabilitiesDisplay {...entry}/>
+                </Grid>
+            </Grid>
+        </Paper>
+    )
+}
+
+export const GlobusDataExportCard = ({entry}: {entry: GlobusExportEntry}) => {
+    return (
+        <Paper elevation={1}>
+            {entry.status != "Completed" && <DataExportStatus {...entry}/>}
+            <Grid container pt={1}>
+                <Grid item xs={9}>
+                    <ValueLabel value={entry.federationPrefix} label={"Federation Prefix"}/>
+                    <ValueLabel value={entry.globusCollectionName || ""} label={"Globus Collection Name"}/>
+                    <ValueLabel value={entry.globusCollectionID} label={"Globus Collection ID"}/>
+                </Grid>
+                <Grid item xs={3}>
+                    <Box width={"100%"} display={"flex"} justifyContent={"end"} marginBottom={"0.5em"} marginRight={"0.5em"}>
+                        <Tooltip title="Configure Globus export">
+                            <Link href={"/origin/globus"}>
+                                <IconButton aria-label="Configure Globus Export">
+                                    <Settings/>
+                                </IconButton>
+                            </Link>
+                        </Tooltip>
+                    </Box>
+                    <CapabilitiesDisplay {...entry}/>
                 </Grid>
             </Grid>
         </Paper>
@@ -226,10 +223,21 @@ export const RecordTable = ({ data }: { data: ExportRes }): ReactElement  => {
                     <Paginator data={data.exports} page={page} pageSize={2} setPage={setPage}/>
                 </>
             )
+        case "globus":
+            return (
+                <>
+                    {entryPage.map((entry, index) => (
+                        <Box key={entry.federationPrefix} pb={1}>
+                            <GlobusDataExportCard entry={entry as GlobusExportEntry}/>
+                        </Box>
+                    ))}
+                    <Paginator data={data.exports} page={page} pageSize={2} setPage={setPage}/>
+                </>
+            )
     }
 }
 
-const getExportData = async () : Promise<ExportRes> => {
+export const getExportData = async () : Promise<ExportRes> => {
     let response = await fetch("/api/v1.0/origin_ui/exports")
     if (response.ok) {
         const responseData = await response.json()

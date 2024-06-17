@@ -33,14 +33,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pelicanplatform/pelican/classads"
-	"github.com/pelicanplatform/pelican/client"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/classads"
+	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -487,7 +488,6 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				return
 			}
 			log.Debugln("Got result from transfer client")
-			startTime := time.Now().Unix()
 			resultAd := classads.NewClassAd()
 			// Set our DeveloperData:
 			developerData := make(map[string]interface{})
@@ -510,7 +510,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 
 			resultAd.Set("DeveloperData", developerData)
 
-			resultAd.Set("TransferStartTime", startTime)
+			resultAd.Set("TransferStartTime", result.TransferStartTime.Unix())
 			resultAd.Set("TransferEndTime", time.Now().Unix())
 			hostname, _ := os.Hostname()
 			resultAd.Set("TransferLocalMachineName", hostname)

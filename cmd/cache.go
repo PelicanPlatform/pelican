@@ -19,8 +19,9 @@
 package main
 
 import (
-	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/spf13/cobra"
+
+	"github.com/pelicanplatform/pelican/metrics"
 )
 
 var (

@@ -26,10 +26,11 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // MockAuthChecker is the mock implementation of AuthChecker.

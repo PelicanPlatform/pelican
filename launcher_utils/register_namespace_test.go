@@ -33,13 +33,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 type (
@@ -72,10 +73,10 @@ func TestRegistration(t *testing.T) {
 	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 
-	err = registry.InitializeDB(ctx)
+	err = registry.InitializeDB()
 	require.NoError(t, err)
 	defer func() {
-		err := registry.ShutdownDB()
+		err := registry.ShutdownRegistryDB()
 		assert.NoError(t, err)
 	}()
 

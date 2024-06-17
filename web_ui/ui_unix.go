@@ -28,10 +28,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func doReload() error {

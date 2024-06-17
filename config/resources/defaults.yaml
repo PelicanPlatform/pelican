@@ -96,6 +96,7 @@ Xrootd:
   ManagerPort: 1213
   DetailedMonitoringPort: 9930
   SummaryMonitoringPort: 9931
+  AuthRefreshInterval: 5m
 Transport:
   DialerTimeout: 10s
   DialerKeepAlive: 30s

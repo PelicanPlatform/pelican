@@ -1,0 +1,8 @@
+# This is used to test an origin with an https backend
+Logging:
+  Cache:
+    Scitokens: debug
+Origin:
+  StorageType: https
+  FederationPrefix: /test
+  EnablePublicReads: true

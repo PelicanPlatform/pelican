@@ -74,24 +74,25 @@ func (f filterType) String() string {
 
 // recordAd does following for an incoming ServerAd and []NamespaceAdV2 pair:
 //
-// 1. Update the ServerAd by setting server location and updating server topology attribute
-// 2. Record the ServerAd and NamespaceAdV2 to the TTL cache
-// 3. Set up the server `stat` call utilities
-// 4. Return the updated ServerAd. The ServerAd passed in will not be modified
-func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) (updatedAd server_structs.ServerAd) {
-	if err := updateLatLong(&ad); err != nil {
-		log.Debugln("Failed to lookup GeoIP coordinates for host", ad.URL.Host)
+//  1. Update the ServerAd by setting server location and updating server topology attribute
+//  2. Record the ServerAd and NamespaceAdV2 to the TTL cache
+//  3. Set up the server `stat` call utilities
+//  4. Set up utilities for collecting origin/health server file transfer test status
+//  5. Return the updated ServerAd. The ServerAd passed in will not be modified
+func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) (updatedAd server_structs.ServerAd) {
+	if err := updateLatLong(&sAd); err != nil {
+		log.Debugln("Failed to lookup GeoIP coordinates for host", sAd.URL.Host)
 	}
 
-	if ad.URL.String() == "" {
-		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", ad)
+	if sAd.URL.String() == "" {
+		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", sAd)
 		return
 	}
 	// Since servers from topology always use http, while servers from Pelican always use https
 	// we want to ignore the scheme difference when checking duplicates (only consider hostname:port)
-	rawURL := ad.URL.String() // could be http (topology) or https (Pelican or some topology ones)
-	httpURL := ad.URL.String()
-	httpsURL := ad.URL.String()
+	rawURL := sAd.URL.String() // could be http (topology) or https (Pelican or some topology ones)
+	httpURL := sAd.URL.String()
+	httpsURL := sAd.URL.String()
 	if strings.HasPrefix(rawURL, "https") {
 		httpURL = "http" + strings.TrimPrefix(rawURL, "https")
 	}
@@ -109,24 +110,26 @@ func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]s
 
 	// There's an existing ad in the cache
 	if existing != nil {
-		if ad.FromTopology && !existing.Value().FromTopology {
+		if sAd.FromTopology && !existing.Value().FromTopology {
 			// if the incoming is from topology but the existing is from Pelican
-			log.Debugf("The ServerAd generated from topology with name %s and URL %s was ignored because there's already a Pelican ad for this server", ad.Name, ad.URL.String())
+			log.Debugf("The ServerAd generated from topology with name %s and URL %s was ignored because there's already a Pelican ad for this server", sAd.Name, sAd.URL.String())
 			return
 		}
-		if !ad.FromTopology && existing.Value().FromTopology {
+		if !sAd.FromTopology && existing.Value().FromTopology {
 			// Pelican server will overwrite topology one. We leave a message to let admin know
-			log.Debugf("The existing ServerAd generated from topology with name %s and URL %s is replaced by the Pelican server with name %s", existing.Value().Name, existing.Value().URL.String(), ad.Name)
+			log.Debugf("The existing ServerAd generated from topology with name %s and URL %s is replaced by the Pelican server with name %s", existing.Value().Name, existing.Value().URL.String(), sAd.Name)
 			serverAds.Delete(existing.Value().URL.String())
+		}
+		if !sAd.FromTopology && !existing.Value().FromTopology { // Only copy the IO Load value for Pelican server
+			sAd.IOLoad = existing.Value().GetIOLoad() // we copy the value from the existing serverAD to be consistent
 		}
 	}
 
+	ad := server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}
+
 	customTTL := param.Director_AdvertisementTTL.GetDuration()
-	if customTTL == 0 {
-		serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: *namespaceAds}, ttlcache.DefaultTTL)
-	} else {
-		serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: ad, NamespaceAds: *namespaceAds}, customTTL)
-	}
+
+	serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}, customTTL)
 
 	// Prepare `stat` call utilities for all servers regardless of its source (topology or Pelican)
 	statUtilsMutex.Lock()
@@ -153,7 +156,7 @@ func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]s
 	healthTestUtilsMutex.Lock()
 	defer healthTestUtilsMutex.Unlock()
 	if ad.FromTopology {
-		return ad
+		return sAd
 	}
 
 	if existingUtil, ok := healthTestUtils[ad.URL.String()]; ok {
@@ -173,14 +176,14 @@ func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]s
 						Status:        HealthStatusInit,
 					}
 					errgrp.Go(func() error {
-						LaunchPeriodicDirectorTest(cancelCtx, ad)
+						LaunchPeriodicDirectorTest(cancelCtx, sAd)
 						return nil
 					})
 					log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(ad.Type), ad.URL.String())
 				} else {
 					cancelCtx, cancel := context.WithCancel(existingUtil.ErrGrpContext)
 					started := existingUtil.ErrGrp.TryGo(func() error {
-						LaunchPeriodicDirectorTest(cancelCtx, ad)
+						LaunchPeriodicDirectorTest(cancelCtx, sAd)
 						return nil
 					})
 					if !started {
@@ -210,12 +213,12 @@ func recordAd(ctx context.Context, ad server_structs.ServerAd, namespaceAds *[]s
 			Status:        HealthStatusInit,
 		}
 		errgrp.Go(func() error {
-			LaunchPeriodicDirectorTest(cancelCtx, ad)
+			LaunchPeriodicDirectorTest(cancelCtx, sAd)
 			return nil
 		})
 	}
 
-	return ad
+	return sAd
 }
 
 func updateLatLong(ad *server_structs.ServerAd) error {

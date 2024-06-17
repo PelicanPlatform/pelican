@@ -6,7 +6,7 @@ import {
 import React, {useEffect, useState, Dispatch, SetStateAction} from "react";
 import useSWR from "swr";
 
-import {Namespace} from "@/components/Main";
+import {Namespace} from "@/index";
 import CustomRegistrationField from "@/app/registry/components/CustomRegistrationField/index";
 import {calculateKeys, deleteKey, getValue, populateKey, submitNamespaceForm} from "@/app/registry/components/util";
 import {CustomRegistrationPropsEnum} from "./CustomRegistrationField/index.d";

@@ -426,6 +426,10 @@ definitions:
         type: string
         description: The status of director file transfer test against the server. Can be Initializing|Unknown|OK|Error
         default: Unknown
+      ioLoad:
+        type: number
+        description: The I/O load of the server, which is the average time spent waiting on I/O in the last 5 minutes.
+        default: 0
       namespacePrefixes:
         type: array
         items:
@@ -497,9 +501,21 @@ definitions:
         type: string
         example: "/path/to/secret"
         description: "The path to the file that contains the secret for S3 storage backend"
+      globusCollectionID:
+        type: string
+        example: "7c2dc226-767d-4770-b887-720ef547537d"
+        description: The UUID of the exported Globus collection
+      globusCollectionName:
+        type: string
+        example: "Pelican Demo"
+        description: The human-readable name of the exported Globus collection
       capabilities:
         type: object
         $ref: "#/definitions/OriginExportCapabilities"
+      sentinel_location:
+        type: string
+        example: "sentinel.txt"
+        description: "The relative path to the file that contains the sentinel file to test the storage device"
   OriginExportRes:
     type: object
     properties:
@@ -547,6 +563,37 @@ definitions:
         items:
            $ref: "#/definitions/OriginExport"
         minItems: 0
+  GlobusExport:
+    type: object
+    properties:
+      uuid:
+        type: string
+        example: "f933ab04-f34a-4a33-8e2c-cd74bc5622f4"
+        description: The UUID of the exported Globus collection
+      displayName:
+        type: string
+        example: Open Data
+        description: The human readable name of the exported Globus collection
+      status:
+        type: string
+        example: "Inactive"
+        description: >-
+          The activation status of the Globus colleciton.
+          Can be either "Inactive" or "Activated".
+      description:
+        type: string
+        example: Server Status
+        description: >-
+          The detailed description of the activation status of the Globus Collection.
+          Available when `status != Activated`
+      httpsServer:
+        type: string
+        example: "https://example-server.com"
+        description: The https server to request files in the Globus collection
+      federationPrefix:
+        type: string
+        example: "/demo"
+        description: The prefix to access the file through the Pelican federation
   DirectorContact:
     type: object
     properties:
@@ -1003,7 +1050,7 @@ paths:
       summary: Redirect user to OAuth2 authentication provider (default is CILogon) authentication page for OAuth2 third-party login
       parameters:
         - in: query
-          name: next_url
+          name: nextUrl
           type: string
           description: The path to redirect users to once they successfully authenticated against OAuth2 authentication provider
       responses:
@@ -1024,7 +1071,11 @@ paths:
         - in: query
           name: state
           type: string
-          description: The CSRF token for validation and the next_url for redirect, in the form of `"<[16]byte>:<nextURL>"`
+          description: >-
+            The state passed along from start of the authentication. In the form of `key1=val1&key2=val2`:
+              - `pkce` is a required state for CSRF verification.
+              - `nextUrl` is an optional state for redirect URL
+
         - in: query
           name: code
           type: string
@@ -1837,7 +1888,128 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModelV2"
         "500":
-          description: Error when fetching the origin exports
+          description: Error fetching the origin exports
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/globus/exports:
+    get:
+      tags:
+        - "origin_ui"
+      summary: Get a list of Globus exports
+      description: >-
+        `Authentication Required` `Admin Previlege Required`
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              type: object
+              $ref: "#/definitions/GlobusExport"
+        "401":
+          description: Authentication required
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: You need to have admin privilege to access this endpoint
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Error fetching the Globus exports
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/globus/auth/login/{id}:
+    get:
+      summary: Start the OAuth2 code flow for authenticating a Globus collection
+      description: >-
+        `Authentication Required` `Admin Previlege Required`
+      tags:
+        - "origin_ui"
+      parameters:
+        - name: id
+          in: path
+          type: string
+          required: true
+          description: The Globus collection UUID to authenticate for
+        - name: nextUrl
+          in: query
+          type: string
+          description: The redirect URL to redirect user to when authentication succeeds
+      responses:
+        "307":
+          description: Redirect to Globus authentication endpoint
+        "400":
+          description: Bad request
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: You need to have admin privilege to access this endpoint
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Error generating PKCE code
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/globus/auth/callback:
+    get:
+      summary: The callback endpoint for Globus OAuth2 code flow
+      description: >-
+        `Authentication Required` `Admin Previlege Required`
+      tags:
+        - "origin_ui"
+      parameters:
+        - in: query
+          name: state
+          type: string
+          description: >-
+            The state passed along from start of the authentication. In the form of `key1=val1&key2&val2`:
+              - `pkce`: a required state for CSRF verification.
+              - `nextUrl`: an optional state for redirect URL
+              - `id`: a required state for the Globus collection UUID
+
+        - in: query
+          name: code
+          type: string
+          description: The access token and refresh token returned from the OAuth2 authentication provider
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            properties:
+              nextUrl:
+                type: string
+                example: "/view/next"
+                description: The URL to redirect the user to
+        "400":
+          description: Bad request
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: You need to have admin privilege to access this endpoint
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Server error
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"

@@ -337,7 +337,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
-		assert.Contains(t, string(content), "xrootd.fslib throttle default")
+		assert.Contains(t, string(content), "xrootd.fslib ++ throttle")
 		assert.Contains(t, string(content), "throttle.throttle concurrency 10")
 	})
 
@@ -766,5 +766,63 @@ func TestCopyCertificates(t *testing.T) {
 	require.NoError(t, err)
 	log.Debug("Will wait to see if the new certs are copied")
 	assert.True(t, waitForCopy())
+}
+
+func TestAuthIntervalUnmarshal(t *testing.T) {
+	defer viper.Reset()
+	t.Run("test-minutes-to-seconds", func(t *testing.T) {
+		viper.Reset()
+		var xrdConfig XrootdConfig
+		viper.Set("Xrootd.AuthRefreshInterval", "5m")
+		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
+		assert.NoError(t, err)
+		assert.Equal(t, 300, xrdConfig.Xrootd.AuthRefreshInterval)
+	})
+
+	t.Run("test-hours-to-seconds", func(t *testing.T) {
+		viper.Reset()
+		var xrdConfig XrootdConfig
+		viper.Set("Xrootd.AuthRefreshInterval", "24h")
+		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
+		assert.NoError(t, err)
+		assert.Equal(t, 86400, xrdConfig.Xrootd.AuthRefreshInterval)
+	})
+
+	t.Run("test-seconds-to-seconds", func(t *testing.T) {
+		viper.Reset()
+		var xrdConfig XrootdConfig
+		viper.Set("Xrootd.AuthRefreshInterval", "100s")
+		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
+		assert.NoError(t, err)
+		assert.Equal(t, 100, xrdConfig.Xrootd.AuthRefreshInterval)
+	})
+
+	t.Run("test-less-than-60s", func(t *testing.T) {
+		viper.Reset()
+		var xrdConfig XrootdConfig
+		viper.Set("Xrootd.AuthRefreshInterval", "10")
+		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
+		assert.NoError(t, err)
+		// Should fall back to 5m, or 300s
+		assert.Equal(t, 300, xrdConfig.Xrootd.AuthRefreshInterval)
+	})
+
+	t.Run("test-no-suffix-to-seconds", func(t *testing.T) {
+		viper.Reset()
+		var xrdConfig XrootdConfig
+		viper.Set("Xrootd.AuthRefreshInterval", "99")
+		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
+		assert.NoError(t, err)
+		assert.Equal(t, 99, xrdConfig.Xrootd.AuthRefreshInterval)
+	})
+
+	t.Run("test-less-than-second", func(t *testing.T) {
+		viper.Reset()
+		var xrdConfig XrootdConfig
+		viper.Set("Xrootd.AuthRefreshInterval", "0.5s")
+		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
+		assert.NoError(t, err)
+		assert.Equal(t, 300, xrdConfig.Xrootd.AuthRefreshInterval)
+	})
 
 }

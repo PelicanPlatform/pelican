@@ -29,11 +29,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pelicanplatform/pelican/config"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func TestDirectorGeneration(t *testing.T) {

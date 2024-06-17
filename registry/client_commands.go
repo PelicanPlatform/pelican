@@ -186,6 +186,7 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	// Handle case where there was an error encoded in the body
 	if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil {
 		if err != nil {
+			log.Errorf("Server responded with an error: %v. %s. %s", respData.Message, respData.Error, err)
 			return errors.Wrapf(err, "Server responded with an error: %s. %s", respData.Message, respData.Error)
 		}
 		if respData.Message != "" {

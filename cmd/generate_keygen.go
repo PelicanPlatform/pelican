@@ -25,11 +25,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func keygenMain(cmd *cobra.Command, args []string) error {
@@ -53,6 +54,10 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 		publicKeyPath = filepath.Clean(strings.TrimSpace(publicKeyPath))
 	}
 
+	if err = os.MkdirAll(filepath.Dir(publicKeyPath), 0755); err != nil {
+		return errors.Wrapf(err, "failed to create directory for public key at %s", filepath.Dir(publicKeyPath))
+	}
+
 	_, err = os.Stat(privateKeyPath)
 	if err == nil {
 		return fmt.Errorf("file exists for private key under %s", privateKeyPath)
@@ -61,10 +66,6 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 	_, err = os.Stat(publicKeyPath)
 	if err == nil {
 		return fmt.Errorf("file exists for public key under %s", publicKeyPath)
-	}
-
-	if err = os.MkdirAll(filepath.Dir(publicKeyPath), 0755); err != nil {
-		return errors.Wrapf(err, "failed to create directory for public key at %s", filepath.Dir(privateKeyPath))
 	}
 
 	viper.Set(param.IssuerKey.GetName(), privateKeyPath)

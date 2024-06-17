@@ -34,12 +34,9 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
-
-type directorResponse struct {
-	Error string `json:"error"`
-}
 
 // Given the Director response, create the ordered list of caches
 // and store it as namespace.SortedDirectorCaches
@@ -146,27 +143,42 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 	}
 
 	defer resp.Body.Close()
-	log.Traceln("Director's response:", resp)
-
+	log.Tracef("Director's response: %#v\n", resp)
 	// Check HTTP response -- should be 307 (redirect), else something went wrong
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Errorln("Failed to read the body from the director response:", err)
+		return resp, err
+	}
+	errMsg := string(body)
+	// The Content-Type will be alike "application/json; charset=utf-8"
+	if utils.HasContentType(resp, "application/json") {
+		var respErr server_structs.SimpleApiResp
+		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
+			log.Errorln("Failed to unmarshal the director's JSON response:", err)
+			return resp, unmarshalErr
+		}
+		// In case we have old director returning "error": "message content"
+		if respErr.Msg != "" {
+			errMsg = respErr.Msg
+		}
+	}
 
 	// If we get a 404, the director will hopefully tell us why. It might be that the namespace doesn't exist
 	if resp.StatusCode == 404 && verb == "PROPFIND" {
 		// If we get a 404 response from a PROPFIND, we are likely working with an old director so we should return a response
-		return resp, errors.New("404: " + string(body))
+		return resp, errors.New("404: " + errMsg)
 	} else if resp.StatusCode == 404 {
 		// If we get a 404 response when we are not doing a PROPFIND, just return the 404 error without a response
-		return nil, errors.New("404: " + string(body))
+		return nil, errors.New("404: " + errMsg)
 	} else if resp.StatusCode == http.StatusMethodNotAllowed && verb == "PROPFIND" {
 		// If we get a 405 with a PROPFIND, the client will handle it
 		return
+	} else if resp.StatusCode == http.StatusMultiStatus && verb == "PROPFIND" {
+		// This is a director >7.9 proxy the PROPFIND response instead of redirect to the origin
+		return
 	} else if resp.StatusCode != 307 {
-		var respErr directorResponse
-		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
-			return nil, errors.Wrap(unmarshalErr, "Could not unmarshall the director's response")
-		}
-		return resp, errors.New(respErr.Error)
+		return resp, errors.Errorf("%d: %s", resp.StatusCode, errMsg)
 	}
 
 	return

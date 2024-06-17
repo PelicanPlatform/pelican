@@ -6,24 +6,26 @@ This document explains how to install Pelican on a Alpine Linux operating system
 
 You can install Pelican by downloading an `.apk` package or by downloading a binary `.tar.gz` file. You only need to follow one section below to install.
 
-### Install the Pelican using an APK pacakge
+> **Note**: Pelican Alpine Linux package does not contain dependencies such as `XRootD` for Pelican servers. Use [Pelican Docker image](./docker.mdx) instead if you want to serve a Pelican server.
 
-1. Navigate to [Pelican download page](../install.mdx) and select the Pelican APK you want to install.
+### Install the Pelican using an APK package
 
-2. In **Operating System** section, select **Linux**. In **Architectures** section, select **AMD64** (Intel/AMD) or **ARM64** (ARM) depending on the architecture of your machine.
+1. Navigate to [Pelican download page](../install.mdx#download-pelican-binary) and select the Pelican APK you want to install.
 
-3. In the list of download candidates, copy the link to `pelican_x.x.x_p1_aarch64.apk` if you select **AARCH64** (ARM), or `pelican_x.x.x_p1_x86_64.apk` if you select **X84_64** (Intel/AMD). Where `x.x.x` is the version number.
+2. In the **Operating System** section, select **Linux**. In **Architectures** section, select **X86_64** or **ARM64** depending on the architecture of your machine.
+
+3. In the list of download candidates, copy the link to `pelican_x.x.x_p1_x86_64.apk` if you select **X86_64**, or `pelican_x.x.x_p1_aarch64.apk` if you select **ARM64**, where `x.x.x` is the version number.
 
 4. Change the following command with the link to the binary you copied in the previous step and run the command
 
     ```bash
     wget <replace-with-the-link-you-copied>
-    sudo apk add --allow-untrusted pelican_7.5.8_p1_aarch64.apk
+    sudo apk add --allow-untrusted pelican_7.5.8_p1_x86_64.apk
     ```
 
-    Note that you need to replace `pelican_7.5.8_p1_aarch64.apk` with the file name you downloaded to your current directory.
+    > **Note**: You need to replace `pelican_7.5.8_p1_x86_64.apk` with `pelican_7.5.8-1_aarch64.apk` if you are running an `ARM64` machine.
 
-    Example to install Pelican `v7.5.8` APK for an Intel/AMD machine:
+    Example to install Pelican `v7.5.8` APK package on an `X86_64` machine:
 
     ```bash
     wget https://github.com/PelicanPlatform/pelican/releases/download/v7.5.8/pelican_7.5.8_p1_x86_64.apk
@@ -32,7 +34,7 @@ You can install Pelican by downloading an `.apk` package or by downloading a bin
 
 ### Install Pelican as a standalone binary
 
-Refer to the [previous section](./rhel.mdx#install-pelican-as-a-standalone-binary) on how to install Pelican as a standalone binary.
+Refer to installing [Linux Standalone Binary](./linux_binary.mdx) page for how to install Pelican as a standalone binary.
 
 ## Uninstall on Alpine
 
@@ -42,10 +44,9 @@ To uninstall Pelican, run the following command
 sudo apk del pelican
 ```
 
-## Verify Pelican is installed
-
-Refer to the [previous section](./rhel.mdx#verify-pelican-is-installed) on how to verify that Pelican is successfully installed.
-
 ## Next steps
 
-If you want to use Pelican client to download or upload files, refer to [Client Usage](../client-usage.mdx) to get started. If you want to serve a Pelican server, refer to [Serve a Pelican Origin](../serving_an_origin.mdx) and [Serve a Pelican Federation](../serving_a_federation.mdx).
+* [Verify Pelican is installed](../install.mdx#verify-pelican-is-installed)
+* [Access data with Pelican client](../client-usage.mdx)
+* [Serve your data with Pelican Origin server](../serving_an_origin.mdx)
+* [Serve a new Pelican Pelican federation](../serving_a_federation.mdx)

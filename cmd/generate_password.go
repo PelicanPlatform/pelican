@@ -27,13 +27,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/tg123/go-htpasswd"
 	"golang.org/x/term"
+
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 func getPassword() ([]byte, error) {

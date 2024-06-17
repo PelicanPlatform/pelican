@@ -1121,3 +1121,176 @@ func TestNewTransferEngine(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+// Test the functionality of getting the collections URL from the director or from the namespace ad.
+// Tests different responses from the director with and without 'dirlisthost' specified in the namespace.
+func TestGetCollectionsUrl(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	ctx := context.Background()
+	err := config.InitClient()
+	assert.NoError(t, err)
+
+	// Test we get dirlisthost with valid PROPFIND on test server
+	t.Run("testValidPropfind", func(t *testing.T) {
+		expectedLocation := "http://some/origin/path/to/object"
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Location", expectedLocation)
+			w.WriteHeader(http.StatusTemporaryRedirect)
+		}
+		server := httptest.NewServer(http.HandlerFunc(handler))
+		defer server.Close()
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+
+		dirListHost, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		require.NoError(t, err)
+		assert.Equal(t, "http://some", dirListHost.String())
+	})
+
+	// Test we get dirlist host when PROPFIND returns 405 but dirlisthost set in namespace
+	t.Run("testInvalidPropfindValidDirListInNamespace", func(t *testing.T) {
+		expectedLocation := "http://origin"
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+		server := httptest.NewServer(http.HandlerFunc(handler))
+		defer server.Close()
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+
+		dirListHost, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, server.URL)
+		require.NoError(t, err)
+		assert.Equal(t, expectedLocation, dirListHost.String())
+	})
+
+	// Test we get dirlist host when PROPFIND returns 404 but dirlisthost set in namespace
+	t.Run("test404PropfindValidDirListInNamespace", func(t *testing.T) {
+		expectedLocation := "http://origin"
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}
+		server := httptest.NewServer(http.HandlerFunc(handler))
+		defer server.Close()
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+
+		dirListHost, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, server.URL)
+		require.NoError(t, err)
+		assert.Equal(t, expectedLocation, dirListHost.String())
+	})
+
+	// Test we get dirlisthost when we are not using a director and namespace has dirlisthost set
+	t.Run("testNoDirectorValidDirListInNamespace", func(t *testing.T) {
+		expectedLocation := "http://origin"
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+		dirListHost, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, "")
+		require.NoError(t, err)
+		assert.Equal(t, expectedLocation, dirListHost.String())
+	})
+
+	// Test if PROPFIND and ns.dirlisthost fail, we get dirListingNotSupported error
+	t.Run("testInvalidPropfindNoDirListInNamespace", func(t *testing.T) {
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+		server := httptest.NewServer(http.HandlerFunc(handler))
+		defer server.Close()
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+
+		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		require.Error(t, err)
+		assert.IsType(t, &dirListingNotSupportedError{}, err)
+	})
+
+	// Test if PROPFIND if 404 and ns.dirlisthost fail, we get dirListingNotSupported error
+	t.Run("test404PropfindNoDirListInNamespace", func(t *testing.T) {
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}
+		server := httptest.NewServer(http.HandlerFunc(handler))
+		defer server.Close()
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		require.Error(t, err)
+		assert.IsType(t, &dirListingNotSupportedError{}, err)
+	})
+
+	// Test if no director and namespace doesn't contain dirlisthost, we get dirListingNotSupported error
+	t.Run("testNoDirectorNoDirListInNamespace", func(t *testing.T) {
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, "")
+		require.Error(t, err)
+		assert.IsType(t, &dirListingNotSupportedError{}, err)
+	})
+
+	// Test when director does not return 'location' header (just blank response), we fail
+	t.Run("testNoLocationHeaderReturned", func(t *testing.T) {
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusTemporaryRedirect)
+		}
+		server := httptest.NewServer(http.HandlerFunc(handler))
+		defer server.Close()
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+
+		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "collections URL not found in director response")
+	})
+
+	// Test when director returns 200 with X-Pelican-Namespace header
+	t.Run("test207ResponseWPelicanNamespaceHeader", func(t *testing.T) {
+		expectedLocation := "https://example-origin.com"
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Pelican-Namespace", "namespace=federation, require-token=false, collections-url="+expectedLocation)
+			w.WriteHeader(http.StatusMultiStatus)
+		}
+		server := httptest.NewServer(http.HandlerFunc(handler))
+		defer server.Close()
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+
+		res, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		require.NoError(t, err)
+		assert.Equal(t, expectedLocation, res.String())
+	})
+
+	t.Run("test200ResponseWOPelicanNamespaceHeader", func(t *testing.T) {
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusMultiStatus)
+		}
+		server := httptest.NewServer(http.HandlerFunc(handler))
+		defer server.Close()
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+
+		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "collections URL not found in director response: X-Pelican-Namespace header is missing in 207 response")
+	})
+
+	// Test if failure to connect to director we handle that properly
+	t.Run("testDirectorFailedToConnect", func(t *testing.T) {
+		handler := func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			err := json.NewEncoder(w).Encode(map[string]string{"status": "error", "msg": "some server error"})
+			require.NoError(t, err)
+		}
+		server := httptest.NewServer(http.HandlerFunc(handler))
+		defer server.Close()
+		testObjectUrl, err := url.Parse("pelican://federation/some/object")
+		require.NoError(t, err)
+
+		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "some server error")
+	})
+}

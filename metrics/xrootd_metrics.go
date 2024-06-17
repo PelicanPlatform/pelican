@@ -34,12 +34,13 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 type (
@@ -173,6 +174,7 @@ type (
 		SID  int64 // Provider identification
 	}
 
+	// Cache g-stream: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968526
 	CacheGS struct {
 		AccessCnt   uint32 `json:"access_cnt"`
 		AttachT     int64  `json:"attach_t"`
@@ -187,6 +189,13 @@ type (
 		NBlocksDone int    `json:"n_blks_done"`
 		NCksErrs    int    `json:"n_cks_errs"`
 		Size        int64  `json:"size"`
+	}
+
+	// Throttle plug-in g-stream
+	ThrottleGS struct {
+		IOWaitTime float64 `json:"io_wait"`
+		IOActive   int     `json:"io_active"`
+		IOTotal    int     `json:"io_total"`
 	}
 
 	CacheAccessStat struct {
@@ -308,7 +317,25 @@ var (
 		Help: "Number of bytes the data requested is in the cache or not",
 	}, []string{"path", "type"}) // type: hit/miss/bypass
 
+	ServerTotalIO = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_server_io_total",
+		Help: "Total storage operations in origin/cache server",
+	})
+
+	ServerActiveIO = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_server_io_active",
+		Help: "Number of ongoing storage operations in origin/cache server",
+	})
+
+	ServerIOWaitTime = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_server_io_wait_time",
+		Help: "The aggregate time spent in storage operations in origin/cache server",
+	})
+
 	lastStats SummaryStat
+
+	lastTotalIO  int     // The last total IO value
+	lastWaitTime float64 // The last IO wait time
 
 	// Maps the connection identifier with a user record
 	sessions = ttlcache.New[UserId, UserRecord](ttlcache.WithTTL[UserId, UserRecord](24 * time.Hour))
@@ -800,9 +827,9 @@ func HandlePacket(packet []byte) error {
 		// Extract the provider’s identifier
 		providerID := (gs.SID >> XROOTD_MON_PIDSHFT) & XROOTD_MON_PIDMASK
 		detail := NullTermToString(packet[24:])
-		if providerID == 'C' { // pfc: Cache monitoring  info
+		strJsons := strings.Split(detail, "\n")
+		if providerID == 'C' { // pfc: Cache monitoring info
 			log.Debug("HandlePacket: Received g-stream packet is from cache")
-			strJsons := strings.Split(detail, "\n")
 			aggCacheStat := make(map[string]*CacheAccessStat)
 			for _, js := range strJsons {
 				cacheStat := CacheGS{}
@@ -829,6 +856,29 @@ func HandlePacket(packet []byte) error {
 				CacheAccess.WithLabelValues(prefix, "hit").Add(float64(stat.Hit))
 				CacheAccess.WithLabelValues(prefix, "miss").Add(float64(stat.Miss))
 				CacheAccess.WithLabelValues(prefix, "bypass").Add(float64(stat.Bypass))
+			}
+		} else if providerID == 'R' { // IO activity from the throttle plugin
+			log.Debug("HandlePacket: Received g-stream packet is from the throttle plugin")
+			for _, js := range strJsons {
+				throttleGS := ThrottleGS{}
+				if err := json.Unmarshal([]byte(js), &throttleGS); err != nil {
+					return errors.Wrap(err, "failed to parse throttle plugin stat json. Raw data is "+string(js))
+				}
+				totalIOInc := 0
+				if totalIOInc = throttleGS.IOTotal - lastTotalIO; totalIOInc < 0 {
+					totalIOInc = 0
+				}
+				lastTotalIO = throttleGS.IOTotal
+
+				waitTimeInc := 0.0
+				if waitTimeInc = throttleGS.IOWaitTime - lastWaitTime; waitTimeInc < 0 {
+					waitTimeInc = 0
+				}
+				lastWaitTime = throttleGS.IOWaitTime
+
+				ServerTotalIO.Add(float64(totalIOInc))
+				ServerActiveIO.Set(float64(throttleGS.IOActive))
+				ServerIOWaitTime.Add(waitTimeInc)
 			}
 		}
 

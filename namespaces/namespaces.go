@@ -36,9 +36,10 @@ import (
 	"net/http"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	log "github.com/sirupsen/logrus"
 )
 
 // I don't think we actually want pelican to download the namespace every build

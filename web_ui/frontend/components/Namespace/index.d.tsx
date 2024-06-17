@@ -1,5 +1,3 @@
-import {Namespace} from "@/components/Main";
-import {Authenticated} from "@/helpers/login";
 import {PendingCardProps} from "./PendingCard";
 import {CardProps} from "./Card";
 

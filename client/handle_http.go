@@ -56,6 +56,7 @@ import (
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -150,12 +151,13 @@ type (
 	// Represents the results of a single object transfer,
 	// potentially across multiple attempts / retries.
 	TransferResults struct {
-		jobId            uuid.UUID // The job ID this result corresponds to
-		job              *TransferJob
-		Error            error
-		TransferredBytes int64
-		Scheme           string
-		Attempts         []TransferResult
+		jobId             uuid.UUID // The job ID this result corresponds to
+		job               *TransferJob
+		Error             error
+		TransferredBytes  int64
+		TransferStartTime time.Time
+		Scheme            string
+		Attempts          []TransferResult
 	}
 
 	TransferResult struct {
@@ -1150,48 +1152,11 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	// If we are a recursive download and using the director, we want to attempt to get directory listings from
 	// PROPFINDing the director
 	if recursive && !upload && tj.useDirector {
-		// Query the director a PROPFIND to see if we can get our directory listing
-		resp, err := queryDirector(tj.ctx, "PROPFIND", remoteUrl.Path, tj.directorUrl)
+		dirListHost, err := getCollectionsUrl(tj.ctx, remoteUrl, tj.namespace, tj.directorUrl)
 		if err != nil {
-			if resp.StatusCode == http.StatusNotFound {
-				// If we have an issue querying the director, we want to fallback to the deprecated dirlisthost from the namespace
-				// At this point, we have already queried the director (and it should have succeeded if we are here) so the error
-				// we get is most likely an issue with PROPFIND (and an outdated director). So we should try to continue.
-				if tj.namespace.DirListHost == "" {
-					err = &dirListingNotSupportedError{Err: errors.New("origin and/or namespace does not support directory listings")}
-					return nil, err
-				}
-			}
-		} else if resp.StatusCode == http.StatusMethodNotAllowed {
-			// If the director responds with 405 (method not allowed), we're working with an old Director.
-			// In that event, we try to fallback and use the deprecated dirlisthost
-			log.Debugln("Failed to find collections url from director, attempting to find directory listings host in namespace")
-			// Check for a dir list host in namespace
-			if tj.namespace.DirListHost == "" {
-				// Both methods to get directory listings failed
-				err = &dirListingNotSupportedError{Err: errors.New("origin and/or namespace does not support directory listings")}
-				return nil, err
-			}
-		} else if resp.StatusCode == http.StatusTemporaryRedirect {
-			// If the director responds with a 307 (temporary redirect), we're working with a new Director.
-			// In that event, we can get the collections URL from our redirect
-			collections := resp.Header.Get("Location")
-			if collections == "" {
-				return nil, errors.New("collections URL not found in director response")
-			}
-			// The resp redirect includes the full path to the object from the origin, we are only interested in the scheme and host
-			collectionsURL, err := url.Parse(collections)
-			if err != nil {
-				return nil, err
-			}
-			dirlisthost := url.URL{
-				Scheme: collectionsURL.Scheme,
-				Host:   collectionsURL.Host,
-			}
-			tj.namespace.DirListHost = dirlisthost.String()
-		} else {
-			return nil, fmt.Errorf("unexpected response from director when requesting collections url from origin: %v", resp.Status)
+			return nil, err
 		}
+		tj.namespace.DirListHost = dirListHost.String()
 	}
 
 	log.Debugf("Created new transfer job, ID %s client %s, for URL %s", tj.uuid.String(), tc.id.String(), remoteUrl.String())
@@ -1603,12 +1568,18 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 		tUrl := *transferEndpoint.Url
 		tUrl.Path = path
 
-		go func(idx int, tUrl string) {
+		go func(idx int, tUrl *url.URL) {
+			// If the scheme is unix://, it is a local cache and therefore, we should always try this cache first and skip the HEAD request (since it will fail)
+			if tUrl.Scheme == "unix" {
+				headChan <- checkResults{idx, 0, -1, nil}
+				return
+			}
+
 			headClient := &http.Client{Transport: transport}
 			// Note we are not using a HEAD request here but a GET request for one byte;
 			// this is because the XRootD server currently (v5.6.9) only returns the Age
 			// header for GETs
-			headRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet, tUrl, nil)
+			headRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet, tUrl.String(), nil)
 			headRequest.Header.Set("Range", "0-0")
 			var headResponse *http.Response
 			headResponse, err := headClient.Do(headRequest)
@@ -1649,7 +1620,7 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 				}
 			}
 			headChan <- checkResults{idx, uint64(size), age, err}
-		}(idx, tUrl.String())
+		}(idx, &tUrl)
 	}
 	// 1 -> success.
 	// 0 -> pending.
@@ -1732,6 +1703,9 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	transferResults = newTransferResults(transfer.job)
 	xferErrors := NewTransferErrors()
 	success := false
+	// transferStartTime is the start time of the last transfer attempt
+	// we create a var here and update it in the loop
+	var transferStartTime time.Time
 	for idx, transferEndpoint := range attempts { // For each transfer attempt (usually 3), try to download via HTTP
 		var attempt TransferResult
 		attempt.CacheAge = -1
@@ -1745,7 +1719,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		transferEndpointUrl := *transferEndpoint.Url
 		transferEndpointUrl.Path = transfer.remoteURL.Path
 		transferEndpoint.Url = &transferEndpointUrl
-		transferStartTime := time.Now()
+		transferStartTime = time.Now() // Update start time for this attempt
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, err := downloadHTTP(
 			transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, transfer.token, transfer.project,
 		)
@@ -1803,6 +1777,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			break
 		}
 	}
+	transferResults.TransferStartTime = transferStartTime
 	transferResults.TransferredBytes = downloaded
 	if !success {
 		transferResults.Error = xferErrors
@@ -2426,12 +2401,102 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 
 }
 
+// This function queries the director with a PROPFIND to attempt to get the 'collections url'. If a propfind is not allowed on the director
+// We fall back to the deprecated dirlisthost in the namespace
+func getCollectionsUrl(ctx context.Context, remoteObjectUrl *url.URL, namespace namespaces.Namespace, directorUrl string) (collectionsUrl *url.URL, err error) {
+	// If we are a recursive download and using the director, we want to attempt to get directory listings from
+	// PROPFINDing the director
+	if directorUrl != "" {
+		// Query the director a PROPFIND to see if we can get our directory listing
+		resp, err := queryDirector(ctx, "PROPFIND", remoteObjectUrl.Path, directorUrl)
+		if err != nil {
+			// If we have an issue querying the director, we want to fallback to the deprecated dirlisthost from the namespace
+			// At this point, we have already queried the director (and it should have succeeded if we are here) so the error
+			// we get is most likely an issue with PROPFIND (and an outdated director). Therefore, we should continue if we get a 404
+			if resp == nil || !(resp.StatusCode == http.StatusNotFound) {
+				// We did not get a 404 so we should return the error
+				return nil, err
+			}
+		}
+		if resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotFound {
+			// If the director responds with 405 (method not allowed) or a 404 (not found), we're working with an old Director.
+			// In that event, we try to fallback and use the deprecated dirlisthost
+			log.Debugln("Failed to find collections url from director, attempting to find directory listings host in namespace")
+			// Check for a dir list host in namespace
+			if namespace.DirListHost == "" {
+				// Both methods to get directory listings failed
+				err = &dirListingNotSupportedError{Err: errors.New("origin and/or namespace does not support directory listings")}
+				return nil, err
+			} else {
+				collectionsUrl, err = url.Parse(namespace.DirListHost)
+				if err != nil {
+					return nil, err
+				}
+				return collectionsUrl, nil
+			}
+		} else if resp.StatusCode == http.StatusTemporaryRedirect {
+			// If the director responds with a 307 (temporary redirect), we're working with a new Director.
+			// In that event, we can get the collections URL from our redirect
+			collections := resp.Header.Get("Location")
+			if collections == "" {
+				return nil, errors.New("collections URL not found in director response")
+			}
+			collectionsUrl, err = url.Parse(collections)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to parse collections URL from the Location header")
+			}
+			// We don't want anything in path for the collections url
+			collectionsUrl.Path = ""
+			return collectionsUrl, nil
+		} else if resp.StatusCode == http.StatusMultiStatus {
+			// In 7.10, we plan to proxy PROPFIND at the director for origins enabled connection broker,
+			// which will respond with 207 instead of redirect client to the origin.
+			// In this case, read from X-Pelican-Namespace header
+			pelicanNamespaceHdr := resp.Header.Values("X-Pelican-Namespace")
+			if len(pelicanNamespaceHdr) == 0 {
+				err = errors.New("collections URL not found in director response: X-Pelican-Namespace header is missing in 207 response")
+				return nil, err
+			}
+			xPelicanNamespace := utils.HeaderParser(pelicanNamespaceHdr[0])
+			dirCollectionsUrl := xPelicanNamespace["collections-url"]
+
+			collectionsUrl, err = url.Parse(dirCollectionsUrl)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to parse collections URL from the X-Pelican-Namespace header")
+			}
+			return collectionsUrl, nil
+		} else {
+			return nil, errors.Errorf("unexpected response from director when requesting collections url from origin: %v", resp.Status)
+		}
+	} else if namespace.DirListHost != "" {
+		// If we're not using the director and are using topology, we should check for a dirlisthost from the namespace
+		collectionsUrl, err = url.Parse(namespace.DirListHost)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to parse directory listing host as a url")
+		}
+	} else {
+		// If we hit this point, we are not using the director and the namespace does not have a DirListHost therefore, the origin and/or namespace does not support it
+		err = &dirListingNotSupportedError{Err: errors.New("origin and/or namespace does not support directory listings")}
+		return nil, err
+	}
+	return
+}
+
+// This helper function creates a web dav client to walkDavDir's. Used for recursive downloads and lists
+func createWebDavClient(collectionsUrl *url.URL, token string, project string) (client *gowebdav.Client) {
+	auth := &bearerAuth{token: token}
+	client = gowebdav.NewAuthClient(collectionsUrl.String(), auth)
+	client.SetHeader("User-Agent", getUserAgent(project))
+	transport := config.GetTransport()
+	client.SetTransport(transport)
+	return
+}
+
 // Walk a remote directory in a WebDAV server, emitting the files discovered
 func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
 	// Create the client to walk the filesystem
 	rootUrl := *url
 	if job.job.namespace.DirListHost != "" {
-		// Parse the dir list host
 		dirListURL, err := url.Parse(job.job.namespace.DirListHost)
 		if err != nil {
 			log.Errorln("Failed to parse dirlisthost from namespaces into URL:", err)
@@ -2445,13 +2510,7 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 	}
 	log.Debugln("Dir list host: ", rootUrl.String())
 
-	auth := &bearerAuth{token: job.job.token}
-	client := gowebdav.NewAuthClient(rootUrl.String(), auth)
-	client.SetHeader("User-Agent", getUserAgent(job.job.project))
-
-	// XRootD does not like keep alives and kills things, so turn them off.
-	transport := config.GetTransport()
-	client.SetTransport(transport)
+	client := createWebDavClient(&rootUrl, job.job.token, job.job.project)
 	return te.walkDirDownloadHelper(job, transfers, files, url.Path, client)
 }
 
@@ -2552,53 +2611,110 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	return err
 }
 
-// Invoke HEAD against a remote URL, using the provided namespace information
+// This function performs the ls command by walking through the specified directory and printing the contents of the files
+func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string, namespace namespaces.Namespace, token string) (fileInfos []FileInfo, err error) {
+	// Get our directory listing host
+	collectionsUrl, err := getCollectionsUrl(ctx, remoteObjectUrl, namespace, directorUrl)
+	if err != nil {
+		return
+	}
+	log.Debugln("Collections URL: ", collectionsUrl.String())
+
+	project := searchJobAd(projectName)
+	client := createWebDavClient(collectionsUrl, token, project)
+	remotePath := remoteObjectUrl.Path
+
+	infos, err := client.ReadDir(remotePath)
+	if err != nil {
+		// Check if we got a 404:
+		if gowebdav.IsErrNotFound(err) {
+			return nil, errors.New("404: object not found")
+		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+			// If we get an error code 500 (internal server error), we should check if the user is trying to ls on a file
+			info, err := client.Stat(remotePath)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to stat remote path")
+			}
+			// If the path leads to a file and not a directory, just add the filename
+			if !info.IsDir() {
+				// NOTE: we implement our own FileInfo here because the one we get back from stat() does not have a .name field for some reason
+				file := FileInfo{
+					Name:    path.Base(remotePath),
+					Size:    info.Size(),
+					ModTime: info.ModTime(),
+					IsDir:   false,
+				}
+				fileInfos = append(fileInfos, file)
+				return fileInfos, nil
+			}
+		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+			// We replace the error from gowebdav with our own because gowebdav returns: "ReadDir /prefix/different-path/: 405" which is not very user friendly
+			return nil, errors.Errorf("405: object listings are not supported by the discovered origin. Contact your federation admin at %s for help", directorUrl)
+		}
+		// Otherwise, a different error occurred and we should return it
+		return nil, errors.Wrap(err, "failed to read remote directory")
+	}
+
+	for _, info := range infos {
+		// Create a FileInfo for the file and append it to the slice
+		file := FileInfo{
+			Name:    info.Name(),
+			Size:    info.Size(),
+			ModTime: info.ModTime(),
+			IsDir:   info.IsDir(),
+		}
+		fileInfos = append(fileInfos, file)
+	}
+	return fileInfos, nil
+}
+
+// Invoke a stat request against a remote URL that accepts WebDAV protocol,
+// using the provided namespace information
 //
 // If a "dirlist host" is given, then that is used for the namespace info.
 // Otherwise, the first three caches are queried simultaneously.
 // For any of the queries, if the attempt with the proxy fails, a second attempt
 // is made without.
-func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, token string) (size uint64, err error) {
+func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace, directorUrl, token string) (info FileInfo, err error) {
 	statHosts := make([]url.URL, 0, 3)
-	if namespace.DirListHost != "" {
-		var endpoint *url.URL
-		endpoint, err = url.Parse(namespace.DirListHost)
-		if err != nil {
-			return
-		}
+	var dirListNotSupported *dirListingNotSupportedError
+	collectionsUrl, err := getCollectionsUrl(ctx, dest, namespace, directorUrl)
+	// If we have a dirListingNotSupported error, we can attempt to stat the caches instead
+	if err != nil && !errors.As(err, &dirListNotSupported) {
+		return
+	}
+	if collectionsUrl != nil {
+		endpoint := collectionsUrl
 		statHosts = append(statHosts, *endpoint)
 	} else if len(namespace.SortedDirectorCaches) > 0 {
 		for idx, cache := range namespace.SortedDirectorCaches {
 			if idx > 2 {
 				break
 			}
-			var endpoint *url.URL
-			endpoint, err = url.Parse(cache.EndpointUrl)
+			endpoint, err := url.Parse(cache.EndpointUrl)
 			if err != nil {
-				return
+				return info, err
 			}
+			endpoint.Path = ""
 			statHosts = append(statHosts, *endpoint)
 		}
 	} else if namespace.WriteBackHost != "" {
-		var endpoint *url.URL
-		endpoint, err = url.Parse(namespace.WriteBackHost)
+		endpoint, err := url.Parse(namespace.WriteBackHost)
 		if err != nil {
-			return
+			return info, err
 		}
 		statHosts = append(statHosts, *endpoint)
 	}
-
 	type statResults struct {
-		size uint64
+		info FileInfo
 		err  error
 	}
 	resultsChan := make(chan statResults)
 	transport := config.GetTransport()
-	client := &http.Client{Transport: transport}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	auth := &bearerAuth{token: token}
 
 	for _, statUrl := range statHosts {
+		client := gowebdav.NewAuthClient(statUrl.String(), auth)
 		destCopy := *dest
 		destCopy.Host = statUrl.Host
 		destCopy.Scheme = statUrl.Scheme
@@ -2607,31 +2723,36 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 			canDisableProxy := CanDisableProxy()
 			disableProxy := !isProxyEnabled()
 
-			var resp *http.Response
+			var info FileInfo
 			for {
 				if disableProxy {
-					log.Debugln("Performing HEAD (without proxy)", endpoint.String())
+					log.Debugln("Performing request (without proxy)", endpoint.String())
 					transport.Proxy = nil
 				} else {
-					log.Debugln("Performing HEAD", endpoint.String())
+					log.Debugln("Performing request", endpoint.String())
 				}
+				client.SetTransport(transport)
 
-				var req *http.Request
-				req, err = http.NewRequestWithContext(ctx, http.MethodHead, endpoint.String(), nil)
-				if err != nil {
-					log.Errorln("Failed to create HTTP request:", err)
-					resultsChan <- statResults{0, err}
+				fsinfo, err := client.Stat(endpoint.Path)
+				if err == nil {
+					info = FileInfo{
+						Name:    path.Base(endpoint.Path),
+						Size:    fsinfo.Size(),
+						IsDir:   fsinfo.IsDir(),
+						ModTime: fsinfo.ModTime(),
+					}
+					break
+				} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+					err = errors.Wrapf(err, "Stat request not allowed for object at endpoint %s", endpoint.String())
+					resultsChan <- statResults{FileInfo{}, err}
+					return
+				} else if gowebdav.IsErrNotFound(err) {
+					err = errors.Wrapf(err, "object %s not found at the endpoint %s", dest.String(), endpoint.String())
+					resultsChan <- statResults{FileInfo{}, err}
 					return
 				}
 
-				if token != "" {
-					req.Header.Set("Authorization", "Bearer "+token)
-				}
-
-				resp, err = client.Do(req)
-				if err == nil {
-					break
-				}
+				// If we have a proxy error, we can try again without the proxy
 				if urle, ok := err.(*url.Error); canDisableProxy && !disableProxy && ok && urle.Unwrap() != nil {
 					if ope, ok := urle.Unwrap().(*net.OpError); ok && ope.Op == "proxyconnect" {
 						log.Warnln("Failed to connect to proxy; will retry without:", ope)
@@ -2640,37 +2761,26 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 					}
 				}
 				log.Errorln("Failed to get HTTP response:", err)
-				resultsChan <- statResults{0, err}
+				resultsChan <- statResults{FileInfo{}, err}
 				return
 			}
 
-			defer resp.Body.Close()
-			if resp.StatusCode == 200 {
-				contentLengthStr := resp.Header.Get("Content-Length")
-				if len(contentLengthStr) == 0 {
-					log.Errorln("HEAD response did not include Content-Length header")
-					err = errors.New("HEAD response did not include Content-Length header")
-					resultsChan <- statResults{0, err}
-					return
+			if info.Size == 0 {
+				if info.IsDir {
+					resultsChan <- statResults{info, nil}
 				}
-				var contentLength int64
-				contentLength, err = strconv.ParseInt(contentLengthStr, 10, 64)
-				if err != nil {
-					log.Errorf("Unable to parse Content-Length header value (%s) as integer: %s", contentLengthStr, err)
-					resultsChan <- statResults{0, err}
-					return
-				}
-				resultsChan <- statResults{uint64(contentLength), nil}
-			} else {
-				var respB []byte
-				respB, err = io.ReadAll(resp.Body)
-				if err != nil {
-					log.Errorln("Failed to read error message:", err)
-					return
-				}
-				err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s", resp.StatusCode, string(respB))}
-				resultsChan <- statResults{0, err}
+				err = errors.New("Stat response did not include a size")
+				resultsChan <- statResults{FileInfo{}, err}
+				return
 			}
+
+			resultsChan <- statResults{FileInfo{
+				Name:    path.Base(endpoint.Path),
+				Size:    info.Size,
+				IsDir:   info.IsDir,
+				ModTime: info.ModTime,
+			}, nil}
+
 		}(&destCopy)
 	}
 	success := false
@@ -2678,9 +2788,8 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 		result := <-resultsChan
 		if result.err == nil {
 			if !success {
-				cancel()
 				success = true
-				size = result.size
+				info = result.info
 			}
 		} else if err == nil && result.err != context.Canceled {
 			err = result.err

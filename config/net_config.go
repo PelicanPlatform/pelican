@@ -24,9 +24,10 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/pelicanplatform/pelican/param"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func UpdateConfigFromListener(ln net.Listener) {

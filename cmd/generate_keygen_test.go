@@ -24,20 +24,28 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/pelicanplatform/pelican/config"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
-func setupTempWd(t *testing.T) string {
-	tmpDir := t.TempDir()
+// Create tmpdir, change cwd, and setup clean up functions
+func setupTestRun(t *testing.T) string {
+	config.ResetIssuerJWKPtr()
 	wd, err := os.Getwd()
 	require.NoError(t, err)
+
+	tmpDir := t.TempDir()
 	err = os.Chdir(tmpDir)
 	require.NoError(t, err)
+
 	t.Cleanup(func() {
 		err := os.Chdir(wd)
 		require.NoError(t, err)
+		viper.Reset()
+		config.ResetIssuerJWKPtr()
 	})
 	return tmpDir
 }
@@ -56,8 +64,15 @@ func checkKeys(t *testing.T, privateKey, publicKey string) {
 }
 
 func TestKeygenMain(t *testing.T) {
+	config.ResetIssuerJWKPtr()
+
+	t.Cleanup(func() {
+		viper.Reset()
+		config.ResetIssuerJWKPtr()
+	})
+
 	t.Run("no-args-gen-to-wd", func(t *testing.T) {
-		tempDir := setupTempWd(t)
+		tempDir := setupTestRun(t)
 
 		privateKeyPath = ""
 		publicKeyPath = ""
@@ -72,10 +87,10 @@ func TestKeygenMain(t *testing.T) {
 	})
 
 	t.Run("private-arg-present", func(t *testing.T) {
-		tempDir := t.TempDir()
-		tempWd := setupTempWd(t)
+		tempWd := setupTestRun(t)
+		tmpDir := filepath.Join(tempWd, "tmp")
 
-		privateKeyPath = filepath.Join(tempDir, "test.pk")
+		privateKeyPath = filepath.Join(tmpDir, "test.pk")
 		publicKeyPath = ""
 		err := keygenMain(nil, []string{})
 		require.NoError(t, err)
@@ -88,11 +103,11 @@ func TestKeygenMain(t *testing.T) {
 	})
 
 	t.Run("public-arg-present", func(t *testing.T) {
-		tempDir := t.TempDir()
-		tempWd := setupTempWd(t)
+		tempWd := setupTestRun(t)
+		tmpDir := filepath.Join(tempWd, "tmp")
 
 		privateKeyPath = ""
-		publicKeyPath = filepath.Join(tempDir, "test.pub")
+		publicKeyPath = filepath.Join(tmpDir, "test.pub")
 		err := keygenMain(nil, []string{})
 		require.NoError(t, err)
 
@@ -104,10 +119,10 @@ func TestKeygenMain(t *testing.T) {
 	})
 
 	t.Run("private-arg-with-newline", func(t *testing.T) {
-		tempDir := t.TempDir()
-		tempWd := setupTempWd(t)
+		tempWd := setupTestRun(t)
+		tmpDir := filepath.Join(tempWd, "tmp")
 
-		privateKeyPath = filepath.Join(tempDir, "test.pk")
+		privateKeyPath = filepath.Join(tmpDir, "test.pk")
 		privateKeyPath += "\n"
 		publicKeyPath = ""
 		err := keygenMain(nil, []string{})
@@ -121,11 +136,11 @@ func TestKeygenMain(t *testing.T) {
 	})
 
 	t.Run("public-arg-with-newline", func(t *testing.T) {
-		tempDir := t.TempDir()
-		tempWd := setupTempWd(t)
+		tempWd := setupTestRun(t)
+		tmpDir := filepath.Join(tempWd, "tmp")
 
 		privateKeyPath = ""
-		publicKeyPath = filepath.Join(tempDir, "test.pub")
+		publicKeyPath = filepath.Join(tmpDir, "test.pub")
 		publicKeyPath += "\n"
 		err := keygenMain(nil, []string{})
 		require.NoError(t, err)

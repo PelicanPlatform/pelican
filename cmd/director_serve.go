@@ -19,10 +19,11 @@
 package main
 
 import (
+	"github.com/spf13/cobra"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/spf13/cobra"
 )
 
 func serveDirector(cmd *cobra.Command, args []string) error {

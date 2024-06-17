@@ -1,6 +1,6 @@
 import React from "react";
 import {secureFetch} from "@/helpers/login";
-import {Alert, Namespace} from "@/components/Main";
+import {Alert, Namespace} from "@/index";
 import {getErrorMessage} from "@/helpers/util";
 
 export const populateKey = (o: any, key: string[], value: any) => {

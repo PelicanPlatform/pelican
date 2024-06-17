@@ -36,6 +36,11 @@ import (
 	"testing"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
@@ -44,10 +49,6 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -187,8 +188,6 @@ func TestHttpFailures(t *testing.T) {
 
 // Test that the client library (with authentication) works with the local cache
 func TestClient(t *testing.T) {
-	tmpDir := t.TempDir()
-
 	viper.Reset()
 	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
@@ -204,7 +203,13 @@ func TestClient(t *testing.T) {
 		Path:   param.LocalCache_Socket.GetString(),
 	}
 
+	invalidCacheUrl := &url.URL{
+		Scheme: "unix",
+		Path:   "/this/path/does/not/exist/abc1234/foo/bar/baz",
+	}
+
 	t.Run("correct-auth", func(t *testing.T) {
+		tmpDir := t.TempDir()
 		tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
 			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken(ft.Token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.NoError(t, err)
@@ -215,8 +220,13 @@ func TestClient(t *testing.T) {
 		byteBuff, err := os.ReadFile(filepath.Join(tmpDir, "hello_world.txt"))
 		assert.NoError(t, err)
 		assert.Equal(t, "Hello, World!", string(byteBuff))
+
+		// Assert our endpoint is the local cache (we should only have 1 transferResult and 1 attempt since only 1 cache listed)
+		assert.Equal(t, tr[0].Attempts[0].Endpoint, cacheUrl.Host)
 	})
+
 	t.Run("incorrect-auth", func(t *testing.T) {
+		tmpDir := t.TempDir()
 		_, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
 			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken("badtoken"), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		assert.Error(t, err)
@@ -228,7 +238,8 @@ func TestClient(t *testing.T) {
 	})
 
 	// Test the local cache works with the client when multiple are specified
-	t.Run("mutli-caches", func(t *testing.T) {
+	t.Run("multi-caches", func(t *testing.T) {
+		tmpDir := t.TempDir()
 		cacheList := []*url.URL{cacheUrl, cacheUrl2}
 		tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
 			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken(ft.Token), client.WithCaches(cacheList...), client.WithAcquireToken(false))
@@ -240,9 +251,69 @@ func TestClient(t *testing.T) {
 		byteBuff, err := os.ReadFile(filepath.Join(tmpDir, "hello_world.txt"))
 		assert.NoError(t, err)
 		assert.Equal(t, "Hello, World!", string(byteBuff))
+
+		// Assert our endpoint is the local cache (we should only have 1 transferResult and 1 attempt since only 1 cache listed)
+		assert.Equal(t, tr[0].Attempts[0].Endpoint, cacheUrl.Host)
+	})
+
+	// Test the local cache works with '+' specified (append normal list of caches as well) and that we match with the local cache
+	t.Run("append-caches-hit-local-cache", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		plusCache := &url.URL{Path: "+"}
+		cacheList := []*url.URL{cacheUrl, plusCache}
+		tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
+			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken(ft.Token), client.WithCaches(cacheList...), client.WithAcquireToken(false))
+		assert.NoError(t, err)
+		require.Equal(t, 1, len(tr))
+		assert.Equal(t, int64(13), tr[0].TransferredBytes)
+		assert.NoError(t, tr[0].Error)
+
+		byteBuff, err := os.ReadFile(filepath.Join(tmpDir, "hello_world.txt"))
+		assert.NoError(t, err)
+		assert.Equal(t, "Hello, World!", string(byteBuff))
+
+		// Assert our endpoint is the local cache
+		assert.Equal(t, tr[0].Attempts[0].Endpoint, cacheUrl.Host)
+	})
+
+	// Test the local cache works with '+' specified (append normal list of caches as well) and that we match with our fed cache when local cache fails
+	t.Run("append-caches-hit-appended-cache", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		plusCache := &url.URL{Path: "+"}
+		cacheList := []*url.URL{invalidCacheUrl, plusCache}
+		tr, err := client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt",
+			filepath.Join(tmpDir, "hello_world.txt"), false, client.WithToken(ft.Token), client.WithCaches(cacheList...), client.WithAcquireToken(false))
+		assert.NoError(t, err)
+		require.Equal(t, 1, len(tr))
+		assert.Equal(t, int64(13), tr[0].TransferredBytes)
+		assert.NoError(t, tr[0].Error)
+
+		// Check that we still successfully downloaded the file
+		byteBuff, err := os.ReadFile(filepath.Join(tmpDir, "hello_world.txt"))
+		assert.NoError(t, err)
+		assert.Equal(t, "Hello, World!", string(byteBuff))
+
+		// Check that the file was written to the fed cache by checking our endpoint
+		hitAppendedCache := false
+		cacheEndpointUrl, err := url.Parse(param.Cache_Url.GetString())
+		require.NoError(t, err)
+		cacheEndpoint := cacheEndpointUrl.Host
+
+		// We will have multiple attempts since the first attempt towards local cache will fail
+		for _, attempt := range tr[0].Attempts {
+			// If the endpoint is our faulty cache, ensure we have an error
+			if attempt.Endpoint == invalidCacheUrl.Host {
+				assert.NotNil(t, attempt.Error)
+			} else if attempt.Endpoint == cacheEndpoint {
+				hitAppendedCache = true
+				assert.Nil(t, attempt.Error)
+			}
+		}
+		assert.True(t, hitAppendedCache)
 	})
 
 	t.Run("file-not-found", func(t *testing.T) {
+		tmpDir := t.TempDir()
 		issuer, err := config.GetServerIssuerURL()
 		require.NoError(t, err)
 		tokConf := token.NewWLCGToken()
