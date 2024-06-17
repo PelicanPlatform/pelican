@@ -7,7 +7,7 @@ S3, or "Simple Storage Service" is a type of object store introduced by Amazon W
 
 Unlike POSIX, which uses "files" organized into hierarchical directories with associated owners/permissions and a host of other metadata that are packaged together to act as a fundamental unit, S3 works with "objects" stored in "buckets". Typically, objects consist of data, metadata, and a unique identifier and they are stored in a flat address space referred to as a bucket. Because of this, there is no inherent hierarchy or nesting like there would be in a file system. One goal of Pelican is to obfuscate the underlying differences between storage backends like these so that users can enjoy a common interface for all there data, wherever it may happen to come from.
 
-## Serving an S3 Origin
+## Launch the Origin with S3 Backend
 
 Serving S3 origins with Pelican is similar to serving POSIX origins, but with several key differences. The first is that Pelican must be configured to host an S3 backend, using the configuration option `Origin.StorageType = s3`. To make your work with S3, it needs to know at least four additional things:
 

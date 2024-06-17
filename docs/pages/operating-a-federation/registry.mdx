@@ -2,7 +2,7 @@ import ExportedImage from "next-image-export-optimizer";
 
 # Serving a Pelican Registry
 
-The Pelican *registry* manages namespace registration and public key distribution. An origin or cache will automatically attempt to register their namespace when they are started. A federation user may also register a namespace without running a storage server by visiting the registry website through `https://<your-registry.com>`.
+The Pelican [*Registry*](../index.mdx#registry-service) manages namespace registration and public key distribution. An Origin or Cache will automatically attempt to register their namespace when they are started. A federation user may also register a namespace without running a storage server by visiting the registry website through `https://<your-registry.com>`.
 
 ## Before Starting
 
@@ -23,7 +23,7 @@ Once approved, you will get your `client_id` and `client_secret` from CILogon. P
 * Set the `OIDC.ClientID` config parameter to your `<client_id>` value.
 * Create a file named `/etc/pelican/oidc-client-secret`
 
-  ```
+  ```bash copy
   touch /etc/pelican/oidc-client-secret
   ```
 
@@ -43,7 +43,7 @@ Note that, by doing this, when users attempt to use `CILogon` to login to the re
 
 That's it! Now you can launch the registry by running the following command:
 
-```bash
+```bash copy
 pelican registry serve
 ```
 
@@ -108,4 +108,4 @@ By default, Pelican requires namespaces requesting registration to possess a key
 
 ### `Registry.Institutions` and `Registry.InstitutionsUrl`
 
-When a user wants to register a namespace In the registry web UI they must specify which institution this namespace is for. This is a list of options you need to provide. To do so you may either feed a list of `name` and `id` pairs of available institutions to register to `Registry.Institutions` or, if you already have a web endpoint to serve such information, you may pass the URL to `Registry.InstitutionsUrl`. Please refer to https://docs.pelicanplatform.org/parameters#Registry-Institutions for details.
+When a user wants to register a namespace in the registry web UI, they must specify which institution this namespace is for. This is a list of options the Registry admin needs to provide. To do so you may either feed a list of `name` and `id` pairs of available institutions to register to [`Registry.Institutions`](../parameters.mdx#Registry-Institutions) or, if you already have a web endpoint to serve such data, you may pass the URL to [`Registry.InstitutionsUrl`](../parameters.mdx#Registry-InstitutionsUrl).

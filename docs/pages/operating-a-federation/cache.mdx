@@ -1,31 +1,31 @@
 # Serving a Pelican Cache
 
-A [Pelican](http://pelicanplatform.org/) *Cache* creates a cache that connects to a Pelican data federation to allow faster data access. It stores data that is accessed via a Pelican origin until it gets evicted. The cache has the potential to both be faster and physically closer to your location than the Pelican origin you access the data from. This allows for faster data access when running complex workflows.
+The Pelican [*Cache*](../index.mdx#caches) creates a cache that connects to a Pelican data federation to allow faster data access. It stores data that is accessed via a Pelican origin until it gets evicted. The Cache has the potential to both be faster and physically closer to your location than the Pelican Origin you access the data from. This allows for faster data access when running complex workflows.
 
-This document contains instructions on how to serve a Pelican cache.
+This document contains instructions on how to serve a Pelican Cache.
 
 ## Before Starting
 
 ### Note on Installing Pelican Cache Server
 
-If you haven't installed Pelican, follow the instructions to [install pelican](/install.mdx).
+If you haven't installed Pelican, follow the instructions to [install pelican](../install.mdx).
 
-For _Linux_ users, it is recommended to install Pelican using one of the package managers (RPM, APK, Deb, etc.) so that Pelican dependencies are automatically handled. You may also run a [Pelican docker image](./install/docker.mdx) to serve a Pelican cache.
+For _Linux_ users, it is recommended to install Pelican using one of the package managers (RPM, APK, Deb, etc.) so that Pelican dependencies are automatically handled. You may also run a [Pelican Docker image](../install/docker.mdx) to serve a Pelican cache.
 If you prefer to install Pelican as a standalone binary, you need to follow [additional instructions](https://osg-htc.org/docs/data/xrootd/install-standalone/#install-xrootd-standalone) to install dependencies for the Pelican cache.
 
 > Note that serving a Pelican cache with a standalone Pelican binary is possible, but not recommended or supported.
 
-For _macOS_ and _Windows_ users who want to serve a Pelican cache, please use [Pelican docker image](./install/docker.mdx).
+For _macOS_ and _Windows_ users who want to serve a Pelican cache, please use [Pelican Docker image](../install/docker.mdx).
 
 ### Open Firewall Port for Pelican Cache
 
 The Pelican cache listens to two TCP ports for file transfers and Web UI. By default, the file transfer port is at `8442` and the Web UI and APIs port is at `8444`. If your server has firewall policy in place, please open the two ports for both incoming the outgoing TCP requests to allow the Pelican cache to function as expected.
 
-You may change the port numbers through the [configuration file](./parameters.mdx) with parameter [`Cache.Port`](./parameters.mdx#Cache-Port) and [`Server.WebPort`](./parameters.mdx#Server-WebPort) respectively.
+You may change the port numbers through the [configuration file](../parameters.mdx) with parameter [`Cache.Port`](../parameters.mdx#Cache-Port) and [`Server.WebPort`](../parameters.mdx#Server-WebPort) respectively.
 
 ### Find a federation to join
 
-Before serving a cache, you need to find a Pelican federation to join in. If you are unfamiliar with the term **federation**, refer to [Useful Terminology](./client-usage.mdx#useful-terminology) before proceeding.
+Before serving a cache, you need to find a Pelican federation to join in. If you are unfamiliar with the term **federation**, refer to [Core Concepts and Terminology](../getting-started/accessing-data.mdx#federations) before proceeding.
 
 If you don't have a federation in mind, the Open Science Data Federation (OSDF) is an example Pelican federation that you can join in for testing purposes. If you are interesting in serving an OSDF cache, refer to the [OSDF website](https://osg-htc.org/) for details.
 
@@ -56,16 +56,16 @@ This section documents the additional arguments you can pass to the command abov
 * **-d or --debug**: Enable the debugging mode, allowing for more verbose log
 * **-l or --log**: Set the location of the file where log messages should be redirected to and not output the the console.
 
-There are other configurations available to modify via the configuration file. Refer to the [Parameters page](./parameters.mdx) for details.
+There are other configurations available to modify via the configuration file. Refer to the [Parameters](../parameters.mdx) page for details.
 
 ## Test Cache Functionality
 
 Once you have your cache set up, follow the steps below to test if your cache can access a file through a Pelican federation.
 
-1. Have data available and accessible via an origin. Since a cache only works with data available via an origin that’s in the same Pelican federation, the following assumes that you have a an accessible namespace within the same Pelican federation. For more information on how to set that up, refer to [Serving an Origin](./serving_an_origin.mdx). The following also assume that the object to test is public file. To set up a public file through a Pelican origin, refer to the [Configuration documentation](./parameters.mdx#Origin-Exports).
+1. Have data available and accessible via an origin. Since a cache only works with data available via an origin that’s in the same Pelican federation, the following assumes that you have a an accessible namespace within the same Pelican federation. For more information on how to set that up, refer to [Federating Your Data](../federating-your-data.mdx) page. The following also assume that the object to test is public file. To set up a public file through a Pelican origin, refer to the [Parameters](../parameters.mdx#Origin-Exports) page.
 2. Curl the director for the test file and ensure that the url used is the cache that you set up. Assuming your directory is `/tmp/demo`, run the following command to curl your known public file from the cache.
 
-```
+```bash
 $ curl -v https://<cache-url>/<namespace/path-to-public-file>
 ```
 

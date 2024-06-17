@@ -10,7 +10,7 @@ Before using the Pelican client to interact with objects, this guide makes sever
 - You are on a computer where you have access to a terminal. The Pelican client is a command line tool.
 - You've already installed the version of Pelican appropriate for your system, and Pelican is accessible via your path. To test this on Linux, you can run
 
-  ```bash
+  ```bash copy
   which pelican
   ```
   which should output a path to the executable. If there is no output to this command, refer to the [Pelican installation docs](../install.mdx) to acquire a working installation.
@@ -33,7 +33,7 @@ This is a simple example where the namespace prefix would be `/demo` and the obj
 
 However, things can get a little tricky when you add a longer namespace prefix and/or a longer filepath within that namespace where the object lives. For example:
 
-```bash
+```bash copy
 /ospool/uc-shared/public/OSG-Staff/validation/test.txt
 ```
 
@@ -44,12 +44,14 @@ To discover where the namespace prefix ends and the object name begins, there ar
 
 #### Federations
 Objects in Pelican belong to *federations*, which are aggregations of data that are exposed to other individuals in the federation. Each Pelican federation constitutes its own global namespace of objects and each object within a federation has its own path, much like files on a computer. Fetching any object from a federation requires at minimum two pieces of information: the federation's root (i.e. the discovery URL), and the path to the object within that federation (there is the potential that some objects require access tokens as well, but more on that later). For example, the OSDF’s federation hostname is osg-htc.org, an example path to an object in the federation is:
-```bash
+
+```bash copy
 /ospool/uc-shared/public/OSG-Staff/validation/test.txt
 ```
 
 Combining these two pieces of information, we say the the **object's URL** is:
-```bash
+
+```bash copy
 pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt
 ```
 
@@ -70,11 +72,11 @@ We can break down the components of this command before you try it yourself:
 ### Try The Command Yourself
 Now it is time for you to get your first object from a federation. Before getting your first object, be sure you are in a directory/location where you want to download this test file. To get the object, run the command below:
 
-```bash
+```bash copy
 pelican object get pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-test.txt
 ```
 
->**Note:** with pelican:// URLs like the one above, it is important to include the correct number of slashes (`/`). This is because pelican URLs rely on the hostname being the federation URL therefore, they must only contain two slashes after `pelican`. For more information, visit the [Client-Usage](./client_usage.mdx#the-different-pelican-url-schemes) page
+>**Note:** with pelican:// URLs like the one above, it is important to include the correct number of slashes (`/`). This is because pelican URLs rely on the hostname being the federation URL therefore, they must only contain two slashes after `pelican`. For more information, visit the [Client-Usage](../getting-data-with-pelican/client.mdx#the-different-pelican-url-schemes) page
 
 You should see a progress bar output and eventually a file named `downloaded-test.txt` within your local directory:
 
@@ -92,7 +94,8 @@ Hello, World!
 - Go to our website located at https://pelicanplatform.org
 
 **For Users:**
-- Learn more advanced client-usage from our [Client Usage](../client_usage.mdx) page.
+- Learn more advanced client-usage from our [Client Usage](../getting-data-with-pelican/client.mdx) page.
+- Learn how to federate your data to a Pelican federation with the [Pelican Origin](../federating-your-data.mdx)
 
 **For Admins:**
-- Learn how to serve your own [Pelican Federation](../serving_a_federation.mdx) or more simply a [Pelican Origin](../serving_an_origin.mdx)
+- Learn how to operate your own [Pelican Federation](../operating-a-federation.mdx)

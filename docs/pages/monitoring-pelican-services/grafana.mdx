@@ -4,7 +4,7 @@ import ExportedImage from "next-image-export-optimizer";
 
 > Pelican added official support for Grafana in `v7.6.0`. Older versions of Pelican are not guaranteed to work with Grafana.
 
-Pelican servers have [Prometheus](https://docs.pelicanplatform.org/prometheus) embedded. In the Web UI of the origin server, Pelican has a visualization of data transfer metrics collected. There are many other metrics that Pelican collects but are hidden from UI. You may unleash the potential of the hidden metrics by building a customized Pelican server monitoring dashboard. To do this, we recommend using [Grafana](https://grafana.com/), an open-source analytics and interactive visualization software. This documentation will get you started on connecting Grafana to Pelican.
+Pelican servers have [Prometheus](./prometheus.mdx) embedded. In the Web UI of the origin server, Pelican has a visualization of data transfer metrics collected. There are many other metrics that Pelican collects but are hidden from UI. You may unleash the potential of the hidden metrics by building a customized Pelican server monitoring dashboard. To do this, we recommend using [Grafana](https://grafana.com/), an open-source analytics and interactive visualization software. This documentation will get you started on connecting Grafana to Pelican.
 
 Before starting, make sure you have set up and run a Pelican server. For how to serve a Pelican server (origin, cache, registry, or director), please refer to previous sections.
 
@@ -18,7 +18,7 @@ This section briefly introduces downloading, installing, and starting Grafana on
 
 ### Install Grafana
 
-Follow the link https://grafana.com/grafana/download?pg=get&plcmt=selfmanaged-box1-cta1 to download Grafana based on your operating system then follow [Grafana documentation](https://grafana.com/docs/grafana/latest/) to install Grafana. This documentation uses Grafana Enterprise edition with version `10.3.3`.
+Follow the [link](https://grafana.com/grafana/download?pg=get&plcmt=selfmanaged-box1-cta1) to download Grafana based on your operating system then follow [Grafana documentation](https://grafana.com/docs/grafana/latest/) to install Grafana. This documentation uses Grafana Enterprise edition with version `10.3.3`.
 
 ### Start Grafana
 
@@ -26,15 +26,14 @@ On a Linux system, you can start Grafana with systemd. For starting Grafana on o
 
 1. To start the service, run the following commands:
 
-    ```bash filename="bash"
-    sudo systemctl daemon-reload
+    ```bash copy
+    sudo systemctl daemon-reload && \
     sudo systemctl start grafana-server
-    sudo systemctl status grafana-server
     ```
 
 2. To verify that the service is running, run the following command:
 
-    ```bash filename="bash"
+    ```bash copy
     sudo systemctl status grafana-server
     ```
 
@@ -61,13 +60,15 @@ This section describes how to connect Grafana to the Pelican Prometheus instance
 
 ### Before starting
 
-1. Run your Pelican origin server. You may run other Pelican servers, but in this documentation we will use the origin server for demonstration.
+1. If you haven't installed Pelican, follow the instructions to [install Pelican](../install.mdx).
 
-    ```bash
+2. Run your Pelican Origin server. You may run other Pelican servers, but in this documentation we will use the Origin server for demonstration. For details about serving a Pelican Origin, refer to [Federating Your Data](../federating-your-data.mdx) page.
+
+    ```bash copy
     pelican origin serve -v /tmp/stash:/test-namespace -f "osg-htc.org"
     ```
 
-2. Go to the URL for Web UI and confirm it's working. The default URL is `https://localhost:8444`. You should be directed to the Pelican login page.
+3. Go to the URL for Web UI and confirm it's working. The default URL is `https://localhost:8444`. You should be directed to the Pelican login page.
 
 ### Add a data source
 
@@ -126,7 +127,7 @@ By default, Pelican protects the Prometheus endpoint by asking for a [JWT](https
 
     * Replace `--lifetime 604800` with your desired lifetime for the token. The value is in seconds. The example below generates a token with a lifetime of 7 days.
 
-    ```bash filename="bash"
+    ```bash
     $ pelican origin token create --scope monitoring.query --claim wlcg.ver=1.0 --issuer <server-web-url> --subject grafana --audience <server-web-url> --lifetime 604800
 
     eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczovL2V4YW1wbGUuY29tIiwiaWF0IjoxNzA5NjUwMjMyLCJleHAiOjE3NDExODYyMzIsImF1ZCI6Imh0dHBzOi8vZXhhbXBsZS5jb20iLCJzdWIiOiJncmFmYW5hIiwic2NvcGUiOiJtb25pdG9yaW5nLnF1ZXJ5Iiwid2xjZy52ZXIiOiIxLjAifQ.cK5QyYJinn3QCPa6YB10Wn37MEEKzt_kyDMR9meN1Ec
@@ -150,7 +151,7 @@ The Pelican configuration file is located at `/etc/pelican/pelican.yaml` for roo
 
 Append the following lines to your `pelican.yaml` file:
 
-```yaml filename="pelican,yaml"
+```yaml filename="pelican.yaml"
 # Other configurations ...
 
 Monitoring:
@@ -165,13 +166,13 @@ The environment variable for the configuration is `PELICAN_MONITORING_PROMQLAUTH
 
 You can either `export` this environment variable or append it before your command to run Pelican.
 
-```bash
+```bash copy
 export PELICAN_MONITORING_PROMQLAUTHORIZATION=false
 ```
 
 or
 
-```bash
+```bash copy
 PELICAN_MONITORING_PROMQLAUTHORIZATION=false pelican origin serve
 ```
 
@@ -227,4 +228,4 @@ Grafana should then redirect you to the page of the import dashboard, which shou
 
 You may notice that some panels have a `No data` warning. This should go away once you have run your server for a couple of minutes and refreshed the page. It takes about 15s for Pelican to collect the initial data points and there could be delay in visualizing the data.
 
-That's it! Feel free to modify the dashboard to tailor to your needs. For a list of available Prometheus metrics to query, please refer to the [previous section](https://docs.pelicanplatform.org/prometheus).
+That's it! Feel free to modify the dashboard to tailor to your needs. For a list of available Prometheus metrics to query, please refer to the [previous section](./prometheus.mdx).

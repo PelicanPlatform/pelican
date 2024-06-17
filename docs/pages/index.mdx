@@ -17,11 +17,11 @@ The flagship federation underpinned by Pelican is called the [Open Science Data 
 Pelican is a tool for building ***data federations***, a model in which decentralized, autonomous data repositories work together to make their data broadly available to other members of the federation under a minimally-centralized structure. In this model, data is accessed through a unified namespace regardless of where the data comes from or what type of storage is used to host it -- to a user, everything feels like it's coming from the same source.
 
 Pelican federations consist of 6 core entities:
-- *Clients*
-- *Data Repositories*
-- *Origin Servers*
-- *Caches*
-- *Central Services (the Registry and Director)*
+- [*Clients*](#clients)
+- [*Data Repositories*](#data-repository)
+- [*Origin Servers*](#origins)
+- [*Caches*](#caches)
+- [*Central Services (the Registry and Director)*](#central-services)
 
 where each of these federation stakeholders represents a unique set of interests. One of Pelican's core functionalities is balancing the sometimes-competing needs of each of its constituents.
 
@@ -31,7 +31,7 @@ A description for each of these entities is provided below.
 
 Pelican views itself as serving two types of users; data providers and data consumers. *Pelican Clients* are the tools built around Pelican that support consumers, enabling them to download data via a federation. Pelican currently has three Clients, and more are under development. Existing Clients include the [Pelican CLI tool](install.mdx), the [Pelican FSSpec](https://github.com/pelicanplatform/pelicanfs) for Python, and a file transfer plugin for [HTCondor](https://htcondor.readthedocs.io/en/latest/users-manual/file-transfer.html#file-transfer-using-a-url).
 
-Pelican Clients are designed to work with `pelican://`-style URLs, which defines a metadata lookup protocol on top of HTTP. For more information on this URL specification, see Pelican's [client usage documentation](client-usage.mdx).
+Pelican Clients are designed to work with `pelican://`-style URLs, which defines a metadata lookup protocol on top of HTTP. For more information on this URL specification, see Pelican's [client usage documentation](./getting-data-with-pelican/client.mdx).
 
 Lastly, because Pelican builds on top of HTTP, most HTTP clients (e.g. curl) can be modified to interact with Pelican federations.
 
@@ -70,7 +70,7 @@ Generally, Caches are operated by the federation and placed close to computing c
 
 It was mentioned that data federations operate under a minimally-centralized structure. In Pelican, this structure is made up of the *Central Services*, namely the *Director* and the *Registry*.
 
-**NOTE**: Pelican's Central Services are responsible for connecting Repositories and data consumers, but a core part of Pelican's architecture is that objects never pass through the Central Services. In fact, the federation’s Central Services are unable to access any authorization-protected objects via Origins unless the Origin mints a token granting that permission. In this way, Origins that don’t allow their data to be staged/cached in the federation need not trust the federation operators, because each Origin acts as its own token issuer and is solely responsible for deciding which requests to respect. This architecture also prevents the creation of centralized bottlenecks as a federation grows.
+> **NOTE**: Pelican's Central Services are responsible for connecting Data Repositories and data consumers, but a core part of Pelican's architecture is that objects never pass through the Central Services. In fact, the federation’s Central Services are unable to access any authorization-protected objects via Origins unless the Origin mints a token granting that permission. In this way, Origins that don’t allow their data to be staged/cached in the federation need not trust the federation operators, because each Origin acts as its own token issuer and is solely responsible for deciding which requests to respect. This architecture also prevents the creation of centralized bottlenecks as a federation grows.
 
 #### Director Service
 
