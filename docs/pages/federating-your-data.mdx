@@ -2,7 +2,7 @@ import ExportedImage from "next-image-export-optimizer";
 
 # Federation Your Data via Pelican Origin
 
-Pelican users who want to share data within a Pelican federation do so via an [*Origin*](./index.mdx#origins). Origins are a crucial component of Pelican's architecture for two reasons: they act as an adapter between various storage backends and Pelican federations, and they provide fine-grained access controls for that data. That is, they figure out how to take data from wherever it lives (such as a POSIX filesystem, S3 buckets, HTTPS servers, etc.) and transform it into a format that the federation can utilize while respecting your data access requirements.
+Pelican users who want to share data within a Pelican federation do so via an [*Origin*](./core-concepts.mdx#origins). Origins are a crucial component of Pelican's architecture for two reasons: they act as an adapter between various storage backends and Pelican federations, and they provide fine-grained access controls for that data. That is, they figure out how to take data from wherever it lives (such as a POSIX filesystem, S3 buckets, HTTPS servers, etc.) and transform it into a format that the federation can utilize while respecting your data access requirements.
 
 > **NOTE:** An important distinction between origins and data backends is that, generally speaking, origins do **NOT** store any data themselves; their primary function is to facilitate data accessibility.
 
@@ -67,7 +67,7 @@ By default, Pelican origins serve files from a POSIX backend, the filesystem use
 
 ### Find a Federation to join
 
-Before serving an origin, you need to decide which [**federation**](./getting-started/accessing-data.mdx#federations) your data will be accessed through. For example, the Open Science Data Federation (OSDF) is Pelican's flagship federation, and if you are interested in serving an OSDF origin, you can refer to the [OSDF website](https://osg-htc.org/services/osdf.html) for details about how to join.
+Before serving an origin, you need to decide which [**federation**](./core-concepts.mdx#federations) your data will be accessed through. For example, the Open Science Data Federation (OSDF) is Pelican's flagship federation, and if you are interested in serving an OSDF origin, you can refer to the [OSDF website](https://osg-htc.org/services/osdf.html) for details about how to join.
 
 Federations are identified their URL, which is used to host information that origins need for discovering other federation services. For example, the OSDF's federation URL is `https://osg-htc.org`, and an origin that joins the OSDF will visit `https://osg-htc.org/.well-known/pelican-configuration` to get important metadata about the federation's central services (the Director and Registry).
 

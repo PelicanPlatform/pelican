@@ -2,7 +2,7 @@ import ExportedImage from "next-image-export-optimizer";
 
 # Getting Data Using Pelican Client
 
-It is recommended that you start with our [Quick Start Guide](../getting-started/accessing-data.mdx) where you can learn the basics of Pelican client commands and learn some useful terminology.
+It is recommended that you start with our [Quick Start Guide](../getting-started/accessing-data.mdx) where you can learn the basics of Pelican Client commands and learn some useful terminology.
 
 ## Before Starting
 
@@ -21,9 +21,7 @@ Before using the Pelican client to interact with objects from your federation, t
 - You are roughly familiar with Pelican client commands and terminology as demonstrated in the [Quick Start Guide](../getting-started/accessing-data.mdx).
 
 
-### Useful Terminology
-
-#### Note on Federations
+### Note on Federations
 All object paths in a federation begin with a preceding `/`, and no relative paths are allowed. Here is the example URL we used in the [Quick Start Guide](../getting-started/accessing-data.mdx#federations):
 
 ```bash copy
@@ -32,13 +30,13 @@ All object paths in a federation begin with a preceding `/`, and no relative pat
 
 This is the full object path that we will be using in examples below.
 
-#### Tokens and JWT
+### Tokens and JWT
 Some namespace prefixes are public, like `/ospool/uc-shared/public`, while others are protected (i.e. they require authorization). Objects in public namespaces can be downloaded by anybody, but downloading objects from protected namespaces requires you prove to the origin supporting that namespace that you are allowed to access the object. In Pelican, this is done using signed JSON Web Tokens, or *JWT*s for short. In many cases, these tokens can be generated automatically.
 
-## The Different Pelican URL Schemes
+### The Different Pelican URL Schemes
 When running client commands with a request URL, there are two different URL schemes a user can use: `pelican` and `osdf`. This page uses examples with the `pelican://` URL scheme. Below is a description of the two URL schemes and what to expect when they are used:
 
-### The `pelican://` URL Scheme
+#### The `pelican://` URL Scheme
 URLs that begin with `pelican://` allow you to interact with objects from any federation simply by knowing the hostname of the federation's discovery URL and the name of that object in that federation. These URLs take the form:
 
 ```bash
@@ -51,7 +49,7 @@ When a Pelican client encounters a Pelican URL, it uses the hostname in the fede
 
 >**Note:** Federation discovery URLs cannot contain a path component (e.g. https://my-federation.com/path/component). Clients that encounter a discovery URL with a path component will incorrectly assume the path is part of the namespace prefix.
 
-### The `osdf:///` URL Scheme:
+#### The `osdf:///` URL Scheme:
 When using the `osdf:///` scheme, Pelican will load in the federation metadata automatically using the defaults for accessing the Open Science Data Federation (OSDF). This scheme should only be used if your federation or data can be accessed through the OSDF. When using this scheme, you should not specify the federation URL at all, as Pelican will handle this automatically. For example:
 
 ```bash
