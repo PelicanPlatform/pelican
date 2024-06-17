@@ -4,10 +4,11 @@ import (
 	"context"
 	"time"
 
-	"github.com/pelicanplatform/pelican/metrics"
-	"github.com/pelicanplatform/pelican/server_structs"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 func getCountofFederationNamespacesByStatus(status server_structs.RegistrationStatus) (int, error) {
