@@ -62,6 +62,9 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 		// Checks topology for updates every 10 minutes
 		go registry.PeriodicTopologyReload(ctx)
+
+		// Launch Federation Institutions Metrics
+		registry.LaunchFederationInstitutionMetrics(ctx, egrp)
 	}
 
 	rootRouterGroup := engine.Group("/")
