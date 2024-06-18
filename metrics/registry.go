@@ -12,5 +12,5 @@ var PelicanRegistryFederationNamespaces = promauto.NewGaugeVec(prometheus.GaugeO
 
 var PelicanOSDFInstitutions = promauto.NewGauge(prometheus.GaugeOpts{
 	Name: "pelican_osdf_institution_count",
-	Help: "Total number of participating institutions in OSDF mode.",
+	Help: "Total number of participating institutions.",
 })

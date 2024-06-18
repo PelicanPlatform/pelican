@@ -97,7 +97,7 @@ func LaunchFederationInstitutionMetrics(ctx context.Context, egrp *errgroup.Grou
 						continue
 					}
 					institutionCount = len(institutionsList)
-				case param.StringParam: // pram.Registry_InstitutionsUrl
+				case param.StringParam: // param.Registry_InstitutionsUrl
 					url := institutions.GetString()
 					if len(url) != 0 {
 						log.Warningln("Failed to update institution count metric.")
