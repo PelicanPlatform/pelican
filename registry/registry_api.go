@@ -76,44 +76,28 @@ func LaunchFederationInstitutionMetrics(ctx context.Context, egrp *errgroup.Grou
 			case <-ctx.Done():
 				return nil
 			case <-ticker.C:
-				var institutions interface{}
-				if param.Registry_Institutions.IsSet() && param.Registry_InstitutionsUrl.IsSet() {
-					institutions = param.Registry_Institutions
-				} else if param.Registry_InstitutionsUrl.IsSet() {
-					institutions = param.Registry_InstitutionsUrl
-				} else if param.Registry_Institutions.IsSet() {
-					institutions = param.Registry_Institutions
-				} else {
-					log.Warning("No institutions specified for federation metrics")
+				institutions := []registrationFieldOption{}
+				var institutionCount int
+				if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
+					log.Warning("Failed to unmarshal institutions.", err.Error())
 					return nil
 				}
 
-				var institutionCount int
-				switch institutions := institutions.(type) {
-				case param.ObjectParam: // param.Registry_Institutions
-					institutionsList := []registrationFieldOption{}
-					if err := institutions.Unmarshal(&institutionsList); err != nil {
-						log.Warningln("Failed to update institution count metric.", err.Error())
-						continue
+				if param.Registry_InstitutionsUrl.GetString() != "" {
+					if len(institutions) > 0 {
+						log.Warning("Registry.Institutions and Registry.InstitutionsUrl are both set. Registry.InstitutionsUrl is ignored")
+						institutionCount = len(institutions)
+					} else {
+						institutions, err := getCachedOptions(param.Registry_InstitutionsUrl.GetString(), ttlcache.DefaultTTL)
+						if err != nil {
+							log.Warningln("Failed to update institution count metric.", err.Error())
+							continue
+						}
+						institutionCount = len(institutions)
 					}
-					institutionCount = len(institutionsList)
-				case param.StringParam: // param.Registry_InstitutionsUrl
-					url := institutions.GetString()
-					if len(url) != 0 {
-						log.Warningln("Failed to update institution count metric.")
-						continue
-					}
-
-					institutionsList, err := getCachedOptions(url, ttlcache.DefaultTTL)
-					if err != nil {
-						log.Warningln("Failed to update institution count metric.", err.Error())
-						continue
-					}
-					institutionCount = len(institutionsList)
 				}
 
 				metrics.PelicanOSDFInstitutions.Set(float64(institutionCount))
-
 			}
 		}
 	})
