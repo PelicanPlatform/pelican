@@ -223,8 +223,8 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 									"server_name":    serverName,
 									"server_web_url": serverWebUrl,
 									"server_type":    string(serverAd.Type),
-									"status":         string(metrics.FTXTestSucceeded),
-									"report_status":  string(metrics.FTXTestFailed),
+									"status":         string(metrics.MetricSucceeded),
+									"report_status":  string(metrics.MetricFailed),
 								},
 							).Inc()
 							// Successfully report to the origin/cache via the legacy endpoint
@@ -234,8 +234,8 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 									"server_name":    serverName,
 									"server_web_url": serverWebUrl,
 									"server_type":    string(serverAd.Type),
-									"status":         string(metrics.FTXTestSucceeded),
-									"report_status":  string(metrics.FTXTestSucceeded),
+									"status":         string(metrics.MetricSucceeded),
+									"report_status":  string(metrics.MetricSucceeded),
 								},
 							).Inc()
 						}
@@ -247,8 +247,8 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 								"server_name":    serverName,
 								"server_web_url": serverWebUrl,
 								"server_type":    string(serverAd.Type),
-								"status":         string(metrics.FTXTestSucceeded),
-								"report_status":  string(metrics.FTXTestFailed),
+								"status":         string(metrics.MetricSucceeded),
+								"report_status":  string(metrics.MetricFailed),
 							},
 						).Inc()
 					}
@@ -259,8 +259,8 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 							"server_name":    serverName,
 							"server_web_url": serverWebUrl,
 							"server_type":    string(serverAd.Type),
-							"status":         string(metrics.FTXTestSucceeded),
-							"report_status":  string(metrics.FTXTestSucceeded),
+							"status":         string(metrics.MetricSucceeded),
+							"report_status":  string(metrics.MetricSucceeded),
 						},
 					).Inc()
 				}
@@ -301,8 +301,8 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 									"server_name":    serverName,
 									"server_web_url": serverWebUrl,
 									"server_type":    string(serverAd.Type),
-									"status":         string(metrics.FTXTestFailed),
-									"report_status":  string(metrics.FTXTestFailed),
+									"status":         string(metrics.MetricFailed),
+									"report_status":  string(metrics.MetricFailed),
 								},
 							).Inc()
 							// Successfully report to the origin/cache via the legacy endpoint
@@ -312,8 +312,8 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 									"server_name":    serverName,
 									"server_web_url": serverWebUrl,
 									"server_type":    string(serverAd.Type),
-									"status":         string(metrics.FTXTestFailed),
-									"report_status":  string(metrics.FTXTestSucceeded),
+									"status":         string(metrics.MetricFailed),
+									"report_status":  string(metrics.MetricSucceeded),
 								},
 							).Inc()
 						}
@@ -325,8 +325,8 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 								"server_name":    serverName,
 								"server_web_url": serverWebUrl,
 								"server_type":    string(serverAd.Type),
-								"status":         string(metrics.FTXTestFailed),
-								"report_status":  string(metrics.FTXTestFailed),
+								"status":         string(metrics.MetricFailed),
+								"report_status":  string(metrics.MetricFailed),
 							},
 						).Inc()
 					}
@@ -338,8 +338,8 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 							"server_name":    serverName,
 							"server_web_url": serverWebUrl,
 							"server_type":    string(serverAd.Type),
-							"status":         string(metrics.FTXTestFailed),
-							"report_status":  string(metrics.FTXTestSucceeded),
+							"status":         string(metrics.MetricFailed),
+							"report_status":  string(metrics.MetricSucceeded),
 						},
 					).Inc()
 				}
