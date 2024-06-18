@@ -258,7 +258,7 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group, metricsPort int) 
 		if err != nil {
 			shovelerLogger.Errorln("Error closing UDP connection:", err)
 		} else {
-			log.Infoln("Xrootd monitoring shoveler has been stopped")
+			shovelerLogger.Infoln("Xrootd monitoring shoveler has been stopped")
 		}
 		return nil
 	})
@@ -290,7 +290,6 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group, metricsPort int) 
 			}
 
 			// Send the message to the queue
-			shovelerLogger.Debugln("Sending msg:", string(msg))
 			cq.Enqueue(msg)
 
 			// Send to the UDP destinations
