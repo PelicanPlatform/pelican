@@ -35,6 +35,7 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -51,6 +52,12 @@ var (
 )
 
 func configShoveler(c *shoveler.Config) error {
+	// Use Pelican build info for Shoveler
+	shoveler.ShovelerVersion = "Pelican-" + config.GetVersion()
+	shoveler.ShovelerBuiltBy = config.GetBuiltBy()
+	shoveler.ShovelerDate = config.GetBuiltDate()
+	shoveler.ShovelerCommit = config.GetBuiltCommit()
+
 	c.MQ = param.Shoveler_MessageQueueProtocol.GetString()
 	if c.MQ != "amqp" && c.MQ != "stomp" {
 		return fmt.Errorf("Bad config for Shoveler.MessageQueueProtocol. Expected \"amqp\" or \"stomp\", got %s", c.MQ)
