@@ -41,6 +41,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -662,13 +663,14 @@ func HandlePacket(packet []byte) error {
 					userRecord := sessions.Get(xferRecord.Value().UserId)
 					sessions.Delete(xferRecord.Value().UserId)
 					labels["path"] = xferRecord.Value().Path
+					maskedIp := utils.MaskIP(userRecord.Value().Host)
 					if userRecord != nil {
 						labels["ap"] = userRecord.Value().AuthenticationProtocol
 						labels["dn"] = userRecord.Value().DN
 						labels["role"] = userRecord.Value().Role
 						labels["org"] = userRecord.Value().Org
 						labels["proj"] = userRecord.Value().Project
-						labels["host"] = userRecord.Value().Host
+						labels["host"] = maskedIp
 					}
 					oldReadvSegs = xferRecord.Value().ReadvSegs
 					oldReadOps = xferRecord.Value().ReadOps
@@ -762,13 +764,14 @@ func HandlePacket(packet []byte) error {
 					record = item.Value()
 					userRecord := sessions.Get(record.UserId)
 					labels["path"] = record.Path
+					maskedIp := utils.MaskIP(userRecord.Value().Host)
 					if userRecord != nil {
 						labels["ap"] = userRecord.Value().AuthenticationProtocol
 						labels["dn"] = userRecord.Value().DN
 						labels["role"] = userRecord.Value().Role
 						labels["org"] = userRecord.Value().Org
 						labels["proj"] = userRecord.Value().Project
-						labels["host"] = userRecord.Value().Host
+						labels["host"] = maskedIp
 					}
 				}
 
@@ -896,9 +899,10 @@ func HandlePacket(packet []byte) error {
 				if sessions.Has(userId) {
 					existingRec := sessions.Get(userId).Value()
 					existingRec.Project = appinfo
+					existingRec.Host = xrdUserId.Host
 					sessions.Set(userId, existingRec, ttlcache.DefaultTTL)
 				} else {
-					sessions.Set(userId, UserRecord{Project: appinfo}, ttlcache.DefaultTTL)
+					sessions.Set(userId, UserRecord{Project: appinfo, Host: xrdUserId.Host}, ttlcache.DefaultTTL)
 				}
 			}
 		} else {
@@ -930,6 +934,7 @@ func HandlePacket(packet []byte) error {
 			if len(record.AuthenticationProtocol) > 0 {
 				record.User = xrdUserId.User
 			}
+			record.Host = xrdUserId.Host
 			sessions.Set(UserId{Id: dictid}, record, ttlcache.DefaultTTL)
 			userids.Set(xrdUserId, UserId{Id: dictid}, ttlcache.DefaultTTL)
 		} else {
@@ -938,11 +943,12 @@ func HandlePacket(packet []byte) error {
 	case 'T':
 		log.Debug("HandlePacket: Received a token info packet")
 		infoSize := uint32(header.Plen - 12)
-		if _, tokenauth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
+		if xrdUserId, tokenauth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			userId, userRecord, err := ParseTokenAuth(tokenauth)
 			if err != nil {
 				return err
 			}
+			userRecord.Host = xrdUserId.Host
 			sessions.Set(userId, userRecord, ttlcache.DefaultTTL)
 		} else {
 			return err
