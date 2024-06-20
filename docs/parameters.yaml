@@ -1296,6 +1296,13 @@ type: int
 default: 1
 components: ["director"]
 ---
+name: Director.DisableStat
+description: |+
+  Disable the `stat` query to the origin servers for object requests.
+type: bool
+default: false
+components: ["director"]
+---
 name: Director.StatTimeout
 description: |+
   The timeout for a single `stat` request.
