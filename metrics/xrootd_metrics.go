@@ -281,17 +281,17 @@ var (
 	TransferReadvSegs = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_readv_segments_count",
 		Help: "Number of segments in readv operations",
-	}, []string{"path", "ap", "dn", "role", "org", "proj"})
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "host"})
 
 	TransferOps = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_operations_count",
 		Help: "Number of transfer operations performed",
-	}, []string{"path", "ap", "dn", "role", "org", "proj", "type"})
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "type", "host"})
 
 	TransferBytes = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_bytes",
 		Help: "Bytes of transfers",
-	}, []string{"path", "ap", "dn", "role", "org", "proj", "type"})
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "type", "host"})
 
 	Threads = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "xrootd_sched_thread_count",
@@ -649,6 +649,7 @@ func HandlePacket(packet []byte) error {
 					"role": "",
 					"org":  "",
 					"proj": "",
+					"host": "",
 				}
 				var oldReadvSegs uint64 = 0
 				var oldReadOps uint32 = 0
