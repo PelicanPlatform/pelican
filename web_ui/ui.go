@@ -519,7 +519,9 @@ func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgro
 	}
 
 	// Add pprof endpoints for debug purposes
-	configurePprof(engine)
+	if param.Server_EnablePprof.GetBool() {
+		configurePprof(engine)
+	}
 
 	if err := configureMetrics(engine); err != nil {
 		return err
