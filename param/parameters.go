@@ -306,6 +306,7 @@ var (
 	Debug = BoolParam{"Debug"}
 	Director_EnableBroker = BoolParam{"Director.EnableBroker"}
 	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
+	Director_EnableStat = BoolParam{"Director.EnableStat"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}

@@ -53,6 +53,7 @@ Director:
   AdvertisementTTL: 15m
   OriginCacheHealthTestInterval: 15s
   EnableBroker: true
+  EnableStat: true
 Cache:
   Port: 8442
   SelfTest: true

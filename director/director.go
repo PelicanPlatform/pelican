@@ -397,8 +397,15 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
 
+	disableStat := !param.Director_EnableStat.GetBool()
+
 	// Skip the stat check for object availability
-	skipStat := ginCtx.Request.URL.Query().Has("skipstat")
+	// If either disableStat or skipstat is set, then skip the stat query
+	skipStat := ginCtx.Request.URL.Query().Has("skipstat") || disableStat
+
+	if skipStat {
+		log.Debugf("stat is skipped for object %s", reqPath)
+	}
 
 	// /pelican/monitoring is the path for director-based health test
 	// where we have /director/healthTest API to mock a file for the cache to get
