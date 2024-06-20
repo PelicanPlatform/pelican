@@ -98,39 +98,46 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go namespaceKeys.Start()
 
 	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *server_structs.Advertisement]) {
-		healthTestUtilsMutex.RLock()
-		defer healthTestUtilsMutex.RUnlock()
 		serverAd := i.Value().ServerAd
 		serverUrl := i.Key()
 
-		if util, exists := healthTestUtils[serverUrl]; exists {
-			util.Cancel()
-			if util.ErrGrp != nil {
-				err := util.ErrGrp.Wait()
-				if err != nil {
-					log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(serverAd.Type), serverAd.Name, err.Error())
+		// Always lock statUtilsMutex first then healthTestUtilsMutex to avoid cyclic dependency
+		func() {
+			if serverAd.Type == server_structs.OriginType {
+				statUtilsMutex.Lock()
+				defer statUtilsMutex.Unlock()
+				statUtil, ok := statUtils[serverUrl]
+				if ok {
+					statUtil.Cancel()
+					if err := statUtil.Errgroup.Wait(); err != nil {
+						log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", serverAd.Name, err))
+					}
+					delete(statUtils, serverUrl)
+				}
+			}
+		}()
+
+		// Always lock statUtilsMutex first then healthTestUtilsMutex to avoid cyclic dependency
+		func() {
+			healthTestUtilsMutex.RLock()
+			defer healthTestUtilsMutex.RUnlock()
+
+			if util, exists := healthTestUtils[serverUrl]; exists {
+				util.Cancel()
+				if util.ErrGrp != nil {
+					err := util.ErrGrp.Wait()
+					if err != nil {
+						log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(serverAd.Type), serverAd.Name, err.Error())
+					} else {
+						log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(serverAd.Type), serverAd.Name)
+					}
 				} else {
-					log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(serverAd.Type), serverAd.Name)
+					log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(serverAd.Type), serverAd.Name)
 				}
 			} else {
-				log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(serverAd.Type), serverAd.Name)
+				log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", serverAd.Name)
 			}
-		} else {
-			log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", serverAd.Name)
-		}
-
-		if serverAd.Type == server_structs.OriginType {
-			statUtilsMutex.Lock()
-			defer statUtilsMutex.Unlock()
-			statUtil, ok := statUtils[serverUrl]
-			if ok {
-				statUtil.Cancel()
-				if err := statUtil.Errgroup.Wait(); err != nil {
-					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", serverAd.Name, err))
-				}
-				delete(statUtils, serverUrl)
-			}
-		}
+		}()
 	})
 
 	// Put stop logic in a separate goroutine so that parent function is not blocking
