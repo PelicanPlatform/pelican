@@ -1709,6 +1709,13 @@ type: stringSlice
 default: none
 components: ["registry","origin","cache"]
 ---
+name: Server.EnablePprof
+description: |+
+  A boolean to enable or disable the [pprof](https://pkg.go.dev/runtime/pprof) endpoints for debugging.
+type: bool
+default: false
+components: ["*"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################

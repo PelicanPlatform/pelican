@@ -233,6 +233,7 @@ type Config struct {
 		RequireOriginApproval bool `mapstructure:"requireoriginapproval"`
 	} `mapstructure:"registry"`
 	Server struct {
+		EnablePprof bool `mapstructure:"enablepprof"`
 		EnableUI bool `mapstructure:"enableui"`
 		ExternalWebUrl string `mapstructure:"externalweburl"`
 		Hostname string `mapstructure:"hostname"`
@@ -522,6 +523,7 @@ type configWithType struct {
 		RequireOriginApproval struct { Type string; Value bool }
 	}
 	Server struct {
+		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }
 		Hostname struct { Type string; Value string }
