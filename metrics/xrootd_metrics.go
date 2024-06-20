@@ -668,6 +668,7 @@ func HandlePacket(packet []byte) error {
 						labels["role"] = userRecord.Value().Role
 						labels["org"] = userRecord.Value().Org
 						labels["proj"] = userRecord.Value().Project
+						labels["host"] = userRecord.Value().Host
 					}
 					oldReadvSegs = xferRecord.Value().ReadvSegs
 					oldReadOps = xferRecord.Value().ReadOps
@@ -754,6 +755,7 @@ func HandlePacket(packet []byte) error {
 					"role": "",
 					"org":  "",
 					"proj": "",
+					"host": "",
 				}
 
 				if item != nil {
@@ -766,6 +768,7 @@ func HandlePacket(packet []byte) error {
 						labels["role"] = userRecord.Value().Role
 						labels["org"] = userRecord.Value().Org
 						labels["proj"] = userRecord.Value().Project
+						labels["host"] = userRecord.Value().Host
 					}
 				}
 
