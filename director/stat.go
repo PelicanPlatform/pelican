@@ -29,9 +29,11 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -322,6 +324,20 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 		// Use an anonymous func to pass variable safely to the goroutine
 		func(sAdInt server_structs.ServerAd) {
 			statUtil.Errgroup.Go(func() error {
+				activeLabels := prometheus.Labels{
+					"server_name": sAdInt.Name,
+					"server_url":  sAdInt.URL.String(),
+					"server_type": string(sAdInt.Type),
+				}
+				totalLabels := prometheus.Labels{
+					"server_name": sAdInt.Name,
+					"server_url":  sAdInt.URL.String(),
+					"server_type": string(sAdInt.Type),
+					"result":      "",
+				}
+				metrics.PelicanDirectorStatActive.With(activeLabels).Inc()
+				defer metrics.PelicanDirectorStatActive.With(activeLabels).Dec()
+
 				metadata, err := stat.ReqHandler(maxCancelCtx, objectName, sAdInt.URL, true, cfg.token, timeout)
 
 				if err != nil {
@@ -336,25 +352,37 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 					case headReqTimeoutErr:
 						log.Debugf("Timeout querying %s server %s for object %s after %s: %s", sAdInt.Type, sAdInt.URL.String(), objectName, timeout.String(), e.Message)
 						negativeReqChan <- err
+						totalLabels["result"] = string(metrics.StatTimeout)
+						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return nil
 					case headReqNotFoundErr:
 						log.Debugf("Object %s not found at %s server %s: %s", objectName, sAdInt.Type, sAdInt.URL.String(), e.Message)
 						negativeReqChan <- err
+						totalLabels["result"] = string(metrics.StatNotFound)
+						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return nil
 					case headReqForbiddenErr:
 						fErr := err.(headReqForbiddenErr)
 						fErr.IssuerUrl = sAD.AuthURL.String()
 						log.Debugf("Access denied for object %s at %s server %s: %s", objectName, sAdInt.Type, sAdInt.URL.String(), e.Message)
 						deniedReqChan <- fErr
+						totalLabels["result"] = string(metrics.StatForbidden)
+						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return nil
 					case headReqCancelledErr:
 						// Don't send to negativeReqChan as cancellation won't count towards total requests
+						totalLabels["result"] = string(metrics.StatCancelled)
+						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return nil
 					default:
 						negativeReqChan <- err
+						totalLabels["result"] = string(metrics.StatUnkownErr)
+						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return err
 					}
 				} else {
+					totalLabels["result"] = string(metrics.StatSucceeded)
+					metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 					positiveReqChan <- metadata
 				}
 				return nil
