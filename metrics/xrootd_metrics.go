@@ -66,6 +66,7 @@ type (
 		Org                    string
 		Groups                 []string
 		Project                string
+		Host                   string
 	}
 
 	FileId struct {
