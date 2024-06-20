@@ -397,7 +397,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
 
-	disableStat := param.Director_DisableStat.GetBool()
+	disableStat := !param.Director_EnableStat.GetBool()
 
 	// Skip the stat check for object availability
 	// If either disableStat or skipstat is set, then skip the stat query

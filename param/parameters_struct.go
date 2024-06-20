@@ -63,9 +63,9 @@ type Config struct {
 		CacheResponseHostnames []string `mapstructure:"cacheresponsehostnames"`
 		CacheSortMethod string `mapstructure:"cachesortmethod"`
 		DefaultResponse string `mapstructure:"defaultresponse"`
-		DisableStat bool `mapstructure:"disablestat"`
 		EnableBroker bool `mapstructure:"enablebroker"`
 		EnableOIDC bool `mapstructure:"enableoidc"`
+		EnableStat bool `mapstructure:"enablestat"`
 		FilteredServers []string `mapstructure:"filteredservers"`
 		GeoIPLocation string `mapstructure:"geoiplocation"`
 		MaxMindKeyFile string `mapstructure:"maxmindkeyfile"`
@@ -353,9 +353,9 @@ type configWithType struct {
 		CacheResponseHostnames struct { Type string; Value []string }
 		CacheSortMethod struct { Type string; Value string }
 		DefaultResponse struct { Type string; Value string }
-		DisableStat struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
+		EnableStat struct { Type string; Value bool }
 		FilteredServers struct { Type string; Value []string }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
