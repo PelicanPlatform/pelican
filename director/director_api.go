@@ -103,17 +103,15 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 
 		// Always lock statUtilsMutex first then healthTestUtilsMutex to avoid cyclic dependency
 		func() {
-			if serverAd.Type == server_structs.OriginType {
-				statUtilsMutex.Lock()
-				defer statUtilsMutex.Unlock()
-				statUtil, ok := statUtils[serverUrl]
-				if ok {
-					statUtil.Cancel()
-					if err := statUtil.Errgroup.Wait(); err != nil {
-						log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", serverAd.Name, err))
-					}
-					delete(statUtils, serverUrl)
+			statUtilsMutex.Lock()
+			defer statUtilsMutex.Unlock()
+			statUtil, ok := statUtils[serverUrl]
+			if ok {
+				statUtil.Cancel()
+				if err := statUtil.Errgroup.Wait(); err != nil {
+					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", serverAd.Name, err))
 				}
+				delete(statUtils, serverUrl)
 			}
 		}()
 
