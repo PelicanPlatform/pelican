@@ -29,7 +29,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // Consolite two ServerAds that share the same ServerAd.URL. For all but the capability fields,
@@ -54,7 +54,7 @@ func consolidateDupServerAd(newAd, existingAd server_structs.ServerAd) server_st
 
 // Takes in server information from topology and handles converting the necessary bits into a new Pelican
 // ServerAd.
-func parseServerAdFromTopology(server utils.Server, serverType server_structs.ServerType, caps server_structs.Capabilities) server_structs.ServerAd {
+func parseServerAdFromTopology(server server_utils.Server, serverType server_structs.ServerType, caps server_structs.Capabilities) server_structs.ServerAd {
 	serverAd := server_structs.ServerAd{}
 	serverAd.Type = serverType
 	serverAd.Name = server.Resource
@@ -123,7 +123,7 @@ func parseServerAdFromTopology(server utils.Server, serverType server_structs.Se
 //
 // The excludeDowned is a list of running OSDF topology servers
 // The includeDowned is a list of running and downed OSDF topology servers
-func findDownedTopologyCache(excludeDowned, includeDowned []utils.Server) (caches []utils.Server) {
+func findDownedTopologyCache(excludeDowned, includeDowned []server_utils.Server) (caches []server_utils.Server) {
 	for _, included := range includeDowned {
 		found := false
 		for _, excluded := range excludeDowned {
@@ -140,7 +140,7 @@ func findDownedTopologyCache(excludeDowned, includeDowned []utils.Server) (cache
 }
 
 // Update filteredServers based on topology downtime
-func updateDowntimeFromTopology(excludedNss, includedNss *utils.TopologyNamespacesJSON) {
+func updateDowntimeFromTopology(excludedNss, includedNss *server_utils.TopologyNamespacesJSON) {
 	downedCaches := findDownedTopologyCache(excludedNss.Caches, includedNss.Caches)
 
 	filteredServersMutex.Lock()
@@ -165,13 +165,13 @@ func updateDowntimeFromTopology(excludedNss, includedNss *utils.TopologyNamespac
 
 // Populate internal cache with origin/cache ads
 func AdvertiseOSDF(ctx context.Context) error {
-	namespaces, err := utils.GetTopologyJSON(ctx, false)
+	namespaces, err := server_utils.GetTopologyJSON(ctx, false)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
 
 	// Second call to fetch all servers (including servers in downtime)
-	includedNss, err := utils.GetTopologyJSON(ctx, true)
+	includedNss, err := server_utils.GetTopologyJSON(ctx, true)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get topology JSON with server in downtime included (include_downed)")
 	}
