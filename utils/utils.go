@@ -19,6 +19,7 @@
 package utils
 
 import (
+	"net"
 	"net/url"
 	"strings"
 	"unicode"
@@ -101,4 +102,50 @@ func CheckValidQuery(transferUrl *url.URL) (err error) {
 	}
 
 	return errors.New("invalid query parameter(s) " + transferUrl.RawQuery + " provided in url " + transferUrl.String())
+}
+
+// Applies a \24 bit mask to an IPv4 address
+// If the input string isn't an IPv4 address then the input string is returned
+func IPv4Mask(ipStr string) string {
+	ip := net.ParseIP(ipStr).To4()
+	if ip == nil {
+		return ipStr
+	}
+	mask := net.CIDRMask(24, 32)
+	maskedIP := ip.Mask(mask)
+	return maskedIP.String()
+}
+
+// Applies a \64 bit mask to an IPv4 address
+// If the input string isn't an IPv4 address then the input string is returned
+func IPv6Mask(ipStr string) string {
+	ip := net.ParseIP(ipStr).To16()
+	if ip == nil || ip.To4() != nil {
+		return ipStr
+	}
+	mask := net.CIDRMask(64, 128)
+	maskedIP := ip.Mask(mask)
+	return maskedIP.String()
+}
+
+// MaskIP applies the appropriate subnet mask to the input IP address.
+func MaskIP(ipStr string) string {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		// Invalid IP
+		return ipStr
+	}
+
+	if ip.To4() != nil {
+		// IPv4
+		return IPv4Mask(ipStr)
+	}
+
+	if ip.To16() != nil {
+		// IPv6
+		return IPv6Mask(ipStr)
+	}
+
+	// Neither
+	return ipStr
 }
