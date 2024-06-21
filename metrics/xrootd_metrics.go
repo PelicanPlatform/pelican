@@ -663,8 +663,8 @@ func HandlePacket(packet []byte) error {
 					userRecord := sessions.Get(xferRecord.Value().UserId)
 					sessions.Delete(xferRecord.Value().UserId)
 					labels["path"] = xferRecord.Value().Path
-					maskedIp := utils.MaskIP(userRecord.Value().Host)
 					if userRecord != nil {
+						maskedIp := utils.MaskIP(userRecord.Value().Host)
 						labels["ap"] = userRecord.Value().AuthenticationProtocol
 						labels["dn"] = userRecord.Value().DN
 						labels["role"] = userRecord.Value().Role
@@ -764,8 +764,8 @@ func HandlePacket(packet []byte) error {
 					record = item.Value()
 					userRecord := sessions.Get(record.UserId)
 					labels["path"] = record.Path
-					maskedIp := utils.MaskIP(userRecord.Value().Host)
 					if userRecord != nil {
+						maskedIp := utils.MaskIP(userRecord.Value().Host)
 						labels["ap"] = userRecord.Value().AuthenticationProtocol
 						labels["dn"] = userRecord.Value().DN
 						labels["role"] = userRecord.Value().Role
