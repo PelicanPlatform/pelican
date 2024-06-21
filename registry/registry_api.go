@@ -35,7 +35,7 @@ func updateOSDFInstitutionCountMetric() error {
 	institutions := []registrationFieldOption{}
 	var institutionCount int
 	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
-		log.Warning("Failed to unmarshal institutions.", err.Error())
+		log.Warning("Failed to update institution count metric: failed to unmarshal institutions.", err.Error())
 		return err
 	}
 
