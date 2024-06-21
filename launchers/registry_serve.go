@@ -62,9 +62,6 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 		// Checks topology for updates every 10 minutes
 		go registry.PeriodicTopologyReload(ctx)
-
-		// Launch Federation Institutions Metrics
-		registry.LaunchFederationInstitutionMetrics(ctx, egrp)
 	}
 
 	rootRouterGroup := engine.Group("/")
@@ -75,8 +72,8 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		return err
 	}
 
-	// launch namespace prometheus metric
-	registry.LaunchNamespaceMetrics(ctx, egrp)
+	// Launch registry prometheus metrics
+	registry.LaunchRegistryMetrics(ctx, egrp)
 
 	egrp.Go(func() error {
 		<-ctx.Done()
