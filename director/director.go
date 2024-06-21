@@ -259,6 +259,17 @@ func redirectToCache(ginCtx *gin.Context) {
 
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/object")
+
+	disableStat := !param.Director_EnableStat.GetBool()
+
+	// Skip the stat check for object availability
+	// If either disableStat or skipstat is set, then skip the stat query
+	skipStat := ginCtx.Request.URL.Query().Has("skipstat") || disableStat
+
+	if skipStat {
+		log.Debugf("stat is skipped for object %s", reqPath)
+	}
+
 	ipAddr, err := getRealIP(ginCtx)
 	if err != nil {
 		log.Errorln("Error in getRealIP:", err)
@@ -288,9 +299,74 @@ func redirectToCache(ginCtx *gin.Context) {
 	if err != nil {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
+
+	// Stat origins and caches for object availability
+	// For origins, we only want ones with the object
+	// For caches, we still list all in the response but turn down priorities for ones that don't have the object
+	originAdsWObject := []server_structs.ServerAd{}
+	// An array to keep track of object availability of each caches
+	cachesAvailabilityMap := make(map[string]bool, len(cacheAds))
+
+	if skipStat {
+		originAdsWObject = originAds
+		for _, cAd := range cacheAds {
+			cachesAvailabilityMap[cAd.URL.String()] = true
+		}
+	} else {
+		// Query Origins and check if the object exists on the server
+		q := NewObjectStat()
+		st := config.NewServerType()
+		st.SetList([]config.ServerType{config.OriginType, config.CacheType})
+		qr := q.Query(context.Background(), reqPath, st, 1, 6,
+			withOriginAds(originAds), withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
+		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
+
+		// For successful response, we got a list of URLs to access the object.
+		// We will use the host of the object url to match the URL field in originAds and cacheAds
+		if qr.Status == querySuccessful {
+			for _, obj := range qr.Objects {
+				serverHost := obj.URL.Host
+				for _, oAd := range originAds {
+					if oAd.URL.Host == serverHost {
+						originAdsWObject = append(originAdsWObject, oAd)
+					}
+				}
+				for _, cAd := range cacheAds {
+					if cAd.URL.Host == serverHost {
+						cachesAvailabilityMap[cAd.URL.String()] = true
+					}
+				}
+			}
+		} else if qr.Status == queryFailed {
+			if qr.ErrorType != queryInsufficientResErr {
+				ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg),
+				})
+				return
+			}
+			// For denied servers, append them to availableOriginAds
+			// The qr.DeniedServers is a list of AuthURLs of servers that respond with 403
+			// Here, we need to match against the AuthURL field of originAds
+			for _, ds := range qr.DeniedServers {
+				for _, oAd := range originAds {
+					if oAd.Type == server_structs.OriginType && oAd.AuthURL.String() == ds {
+						originAdsWObject = append(originAdsWObject, oAd)
+					}
+				}
+				for _, cAd := range cacheAds {
+					if cAd.AuthURL.String() == ds {
+						cachesAvailabilityMap[cAd.URL.String()] = true
+					}
+				}
+			}
+		}
+	}
+
 	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find a valid cache.
 	if len(cacheAds) == 0 {
-		for _, originAd := range originAds {
+		for _, originAd := range originAdsWObject {
+			// Find the first origin that enables direct reads as the fallback
 			if originAd.DirectReads {
 				cacheAds = append(cacheAds, originAd)
 				break
@@ -306,7 +382,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	} else {
 		cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds)
 		if err != nil {
-			log.Error("Error determining server ordering for cacheAds: ", err)
+			log.Error("Error determining server ordering for cacheAdsWObject: ", err)
 			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Failed to determine server ordering",
@@ -314,6 +390,10 @@ func redirectToCache(ginCtx *gin.Context) {
 			return
 		}
 	}
+
+	// Re-sort by availability
+	sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
+
 	redirectURL := getRedirectURL(reqPath, cacheAds[0], !namespaceAd.Caps.PublicReads)
 
 	linkHeader := ""
@@ -364,11 +444,11 @@ func redirectToCache(ginCtx *gin.Context) {
 	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
 	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
 	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
-	if namespaceAd.Caps.Listings && len(originAds) > 0 && originAds[0].Caps.Listings {
-		if !namespaceAd.Caps.PublicReads && originAds[0].AuthURL != (url.URL{}) {
-			colUrl = originAds[0].AuthURL.String()
+	if namespaceAd.Caps.Listings && len(originAdsWObject) > 0 && originAdsWObject[0].Caps.Listings {
+		if !namespaceAd.Caps.PublicReads && originAdsWObject[0].AuthURL != (url.URL{}) {
+			colUrl = originAdsWObject[0].AuthURL.String()
 		} else {
-			colUrl = originAds[0].URL.String()
+			colUrl = originAdsWObject[0].URL.String()
 		}
 	}
 	xPelicanNamespace := fmt.Sprintf("namespace=%s, require-token=%v", namespaceAd.Path, !namespaceAd.Caps.PublicReads)
