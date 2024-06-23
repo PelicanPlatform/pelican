@@ -19,13 +19,11 @@
 package config
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -99,7 +97,7 @@ func TestDecryptString(t *testing.T) {
 		assert.Equal(t, secret, decrypted)
 	})
 
-	t.Run("decrypt-with-another-valid-key", func(t *testing.T) {
+	t.Run("decrypt-with-another-invalid-key", func(t *testing.T) {
 		secret := "Some secret to encrypt"
 		encrypted, err := EncryptString(secret)
 		require.NoError(t, err)
@@ -109,15 +107,9 @@ func TestDecryptString(t *testing.T) {
 		parts[0] = "another-valid-key-id"
 		encrypted = strings.Join(parts, ".")
 
-		// Capture log output
-		var logOutput bytes.Buffer
-		log.SetOutput(&logOutput)
-		defer log.SetOutput(os.Stderr)
-
-		decrypted, _, err := DecryptString(encrypted)
-		require.NoError(t, err)
-		assert.Equal(t, secret, decrypted)
-		assert.Contains(t, logOutput.String(), "The key used in encryption (id: another-valid-key-id) is not the current issuer key")
+		_, _, err = DecryptString(encrypted)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "the key used for encryption (with ID another-valid-key-id) is not found")
 	})
 
 	t.Run("decrypt-with-invalid-format", func(t *testing.T) {

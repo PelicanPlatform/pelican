@@ -404,6 +404,9 @@ func GetSecret(issuerKey jwk.Key) (string, error) {
 	return secret, nil
 }
 
+// Get a private-public key pair for encryption/decryption
+// The private key is derived from the issuer's private key, and the public key
+// is derived from the private key using Curve25519.
 func getEncryptionKeyPair(issuerKey jwk.Key) (privateKey, publicKey *[32]byte, err error) {
 	secret, err := GetSecret(issuerKey)
 	if err != nil {
@@ -445,14 +448,8 @@ func EncryptString(stringToEncrypt string) (encryptedString string, err error) {
 	message := []byte(stringToEncrypt)
 	encrypted := box.Seal(nil, message, &nonce, publicKey, privateKey)
 
-	// Get current issuer key
-	currentIssuerKey, err := GetIssuerPrivateJWK()
-	if err != nil {
-		return "", err
-	}
-
 	// Format as $KEYID.$NONCE.$MESSAGE
-	keyID := currentIssuerKey.KeyID()
+	keyID := issuerKey.KeyID()
 	nonceStr := base64.URLEncoding.EncodeToString(nonce[:])
 	messageStr := base64.URLEncoding.EncodeToString(encrypted)
 
@@ -476,9 +473,10 @@ func DecryptString(encryptedString string) (decryptedString string, keyID string
 	if err != nil {
 		return "", "", err
 	}
-
-	// Get all valid issuer keys
-	allIssuerKeys := GetIssuerPrivateKeys()
+	// Add a debug log when the key used in encryption does not match the current issuer key
+	if keyID != currentIssuerKey.KeyID() {
+		log.Debugf("The key used in encryption (id: %s) is not the current issuer key (id: %s)", keyID, currentIssuerKey.KeyID())
+	}
 
 	// Decode base64 components
 	nonceBytes, err := base64.URLEncoding.DecodeString(nonceB64)
@@ -497,30 +495,24 @@ func DecryptString(encryptedString string) (decryptedString string, keyID string
 	var nonce [24]byte
 	copy(nonce[:], nonceBytes)
 
-	var decryptedMsg []byte
-	var decrypted bool
-	for _, issuerKey := range allIssuerKeys {
-		// Get the keypair for decryption
-		privateKey, publicKey, err := getEncryptionKeyPair(issuerKey)
-		if err != nil {
-			return "", "", err
-		}
+	// Find the right key to decrypt the message
+	allIssuerKeys := GetIssuerPrivateKeys()
 
-		// Decrypt the message
-		msg, ok := box.Open(nil, encryptedMsg, &nonce, publicKey, privateKey)
-		if ok {
-			decryptedMsg = msg
-			decrypted = true
-			// Inform the user when the key used in encryption does not match the current issuer key
-			if keyID != currentIssuerKey.KeyID() {
-				log.Infof("The key used in encryption (id: %s) is not the current issuer key (id: %s)", keyID, currentIssuerKey.KeyID())
-			}
-			break
-		}
+	encryptionKey, found := allIssuerKeys[keyID]
+	if !found {
+		return "", "", errors.Errorf("the key used for encryption (with ID %s) is not found", keyID)
 	}
 
-	if !decrypted {
-		return "", "", errors.New("failed to decrypt message")
+	// Get the keypair for decryption
+	privateKey, publicKey, err := getEncryptionKeyPair(encryptionKey)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Decrypt the message
+	decryptedMsg, ok := box.Open(nil, encryptedMsg, &nonce, publicKey, privateKey)
+	if !ok {
+		return "", "", errors.New("decryption failed, possibly due to an incorrect key or nonce")
 	}
 
 	return string(decryptedMsg), keyID, nil
