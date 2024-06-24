@@ -33,7 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 var (
@@ -98,7 +98,7 @@ func TestConsolidateDupServerAd(t *testing.T) {
 
 func TestParseServerAdFromTopology(t *testing.T) {
 
-	server := utils.Server{
+	server := server_utils.Server{
 		Endpoint:     "http://my-endpoint.com",
 		AuthEndpoint: "https://my-auth-endpoint.com",
 		Resource:     "MY_SERVER",
@@ -302,30 +302,30 @@ func TestAdvertiseOSDF(t *testing.T) {
 }
 
 func TestFindDownedTopologyCache(t *testing.T) {
-	mockTopoCacheA := utils.Server{AuthEndpoint: "cacheA.org:8443", Endpoint: "cacheA.org:8000", Resource: "CACHE_A"}
-	mockTopoCacheB := utils.Server{AuthEndpoint: "cacheB.org:8443", Endpoint: "cacheB.org:8000", Resource: "CACHE_B"}
-	mockTopoCacheC := utils.Server{AuthEndpoint: "cacheC.org:8443", Endpoint: "cacheC.org:8000", Resource: "CACHE_C"}
-	mockTopoCacheD := utils.Server{AuthEndpoint: "cacheD.org:8443", Endpoint: "cacheD.org:8000", Resource: "CACHE_D"}
+	mockTopoCacheA := server_utils.Server{AuthEndpoint: "cacheA.org:8443", Endpoint: "cacheA.org:8000", Resource: "CACHE_A"}
+	mockTopoCacheB := server_utils.Server{AuthEndpoint: "cacheB.org:8443", Endpoint: "cacheB.org:8000", Resource: "CACHE_B"}
+	mockTopoCacheC := server_utils.Server{AuthEndpoint: "cacheC.org:8443", Endpoint: "cacheC.org:8000", Resource: "CACHE_C"}
+	mockTopoCacheD := server_utils.Server{AuthEndpoint: "cacheD.org:8443", Endpoint: "cacheD.org:8000", Resource: "CACHE_D"}
 	t.Run("empty-response", func(t *testing.T) {
 		get := findDownedTopologyCache(
-			[]utils.Server{},
-			[]utils.Server{},
+			[]server_utils.Server{},
+			[]server_utils.Server{},
 		)
 		assert.Empty(t, get)
 	})
 
 	t.Run("no-downed-cache", func(t *testing.T) {
 		get := findDownedTopologyCache(
-			[]utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
-			[]utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
+			[]server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
+			[]server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
 		)
 		assert.Empty(t, get)
 	})
 
 	t.Run("one-downed-cache", func(t *testing.T) {
 		get := findDownedTopologyCache(
-			[]utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC},
-			[]utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
+			[]server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC},
+			[]server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
 		)
 		require.Len(t, get, 1)
 		assert.EqualValues(t, mockTopoCacheD, get[0])
@@ -333,8 +333,8 @@ func TestFindDownedTopologyCache(t *testing.T) {
 
 	t.Run("two-downed-cache", func(t *testing.T) {
 		get := findDownedTopologyCache(
-			[]utils.Server{mockTopoCacheB, mockTopoCacheC},
-			[]utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
+			[]server_utils.Server{mockTopoCacheB, mockTopoCacheC},
+			[]server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
 		)
 		require.Len(t, get, 2)
 		assert.EqualValues(t, mockTopoCacheA, get[0])
@@ -343,23 +343,23 @@ func TestFindDownedTopologyCache(t *testing.T) {
 
 	t.Run("all-downed-cache", func(t *testing.T) {
 		get := findDownedTopologyCache(
-			[]utils.Server{},
-			[]utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
+			[]server_utils.Server{},
+			[]server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
 		)
-		assert.EqualValues(t, []utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD}, get)
+		assert.EqualValues(t, []server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD}, get)
 	})
 }
 
 func TestUpdateDowntimeFromTopology(t *testing.T) {
-	mockTopoCacheA := utils.Server{AuthEndpoint: "cacheA.org:8443", Endpoint: "cacheA.org:8000", Resource: "CACHE_A"}
-	mockTopoCacheB := utils.Server{AuthEndpoint: "cacheB.org:8443", Endpoint: "cacheB.org:8000", Resource: "CACHE_B"}
-	mockTopoCacheC := utils.Server{AuthEndpoint: "cacheC.org:8443", Endpoint: "cacheC.org:8000", Resource: "CACHE_C"}
+	mockTopoCacheA := server_utils.Server{AuthEndpoint: "cacheA.org:8443", Endpoint: "cacheA.org:8000", Resource: "CACHE_A"}
+	mockTopoCacheB := server_utils.Server{AuthEndpoint: "cacheB.org:8443", Endpoint: "cacheB.org:8000", Resource: "CACHE_B"}
+	mockTopoCacheC := server_utils.Server{AuthEndpoint: "cacheC.org:8443", Endpoint: "cacheC.org:8000", Resource: "CACHE_C"}
 
 	t.Run("no-change-with-same-downtime", func(t *testing.T) {
 		filteredServers = map[string]filterType{}
 		updateDowntimeFromTopology(
-			&utils.TopologyNamespacesJSON{},
-			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA, mockTopoCacheB}},
+			&server_utils.TopologyNamespacesJSON{},
+			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA, mockTopoCacheB}},
 		)
 		checkResult := func() {
 			filteredServersMutex.RLock()
@@ -374,8 +374,8 @@ func TestUpdateDowntimeFromTopology(t *testing.T) {
 
 		// second round of updates
 		updateDowntimeFromTopology(
-			&utils.TopologyNamespacesJSON{},
-			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA, mockTopoCacheB}},
+			&server_utils.TopologyNamespacesJSON{},
+			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA, mockTopoCacheB}},
 		)
 		// Same result
 		checkResult()
@@ -384,8 +384,8 @@ func TestUpdateDowntimeFromTopology(t *testing.T) {
 	t.Run("one-server-back-online", func(t *testing.T) {
 		filteredServers = map[string]filterType{}
 		updateDowntimeFromTopology(
-			&utils.TopologyNamespacesJSON{},
-			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA, mockTopoCacheB}},
+			&server_utils.TopologyNamespacesJSON{},
+			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA, mockTopoCacheB}},
 		)
 		func() {
 			filteredServersMutex.RLock()
@@ -399,8 +399,8 @@ func TestUpdateDowntimeFromTopology(t *testing.T) {
 
 		// second round of updates
 		updateDowntimeFromTopology(
-			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA}}, // A is back online
-			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA, mockTopoCacheB}},
+			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA}}, // A is back online
+			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA, mockTopoCacheB}},
 		)
 
 		func() {
@@ -415,8 +415,8 @@ func TestUpdateDowntimeFromTopology(t *testing.T) {
 	t.Run("one-more-server-in-downtime", func(t *testing.T) {
 		filteredServers = map[string]filterType{}
 		updateDowntimeFromTopology(
-			&utils.TopologyNamespacesJSON{},
-			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA, mockTopoCacheB}},
+			&server_utils.TopologyNamespacesJSON{},
+			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA, mockTopoCacheB}},
 		)
 		func() {
 			filteredServersMutex.RLock()
@@ -430,8 +430,8 @@ func TestUpdateDowntimeFromTopology(t *testing.T) {
 
 		// second round of updates
 		updateDowntimeFromTopology(
-			&utils.TopologyNamespacesJSON{Caches: []utils.Server{}},
-			&utils.TopologyNamespacesJSON{Caches: []utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC}},
+			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{}},
+			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC}},
 		)
 
 		func() {

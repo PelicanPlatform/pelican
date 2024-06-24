@@ -35,7 +35,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 type NamespaceWOPubkey struct {
@@ -521,7 +520,7 @@ func PopulateTopology(ctx context.Context) error {
 	}
 
 	// Next, get the values from topology
-	namespaces, err := utils.GetTopologyJSON(ctx, false)
+	namespaces, err := server_utils.GetTopologyJSON(ctx, false)
 	if err != nil {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
