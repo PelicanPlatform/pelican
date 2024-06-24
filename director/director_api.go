@@ -100,6 +100,7 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *server_structs.Advertisement]) {
 		serverAd := i.Value().ServerAd
 		serverUrl := i.Key()
+		log.Debugf("serverAds for %s server %s is evicted. Clean up started.", string(serverAd.Type), serverAd.Name)
 
 		// Always lock statUtilsMutex first then healthTestUtilsMutex to avoid cyclic dependency
 		func() {
@@ -112,6 +113,9 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", serverAd.Name, err))
 				}
 				delete(statUtils, serverUrl)
+				log.Debugf("Stat util for %s server %s is deleted.", string(serverAd.Type), serverAd.Name)
+			} else {
+				log.Debugf("Stat util not found for %s server %s when evicting the serverAd", string(serverAd.Type), serverAd.Name)
 			}
 		}()
 
@@ -119,21 +123,23 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		func() {
 			healthTestUtilsMutex.RLock()
 			defer healthTestUtilsMutex.RUnlock()
-
-			if util, exists := healthTestUtils[serverUrl]; exists {
+			util, exists := healthTestUtils[serverUrl]
+			if exists && util != nil {
+				log.Debugf("healthTestUtils: start clean up for %s server %s", string(serverAd.Type), serverAd.Name)
+				// Only call cancel instead of deleting the util to make sure there's no nil ptr reference
 				util.Cancel()
 				if util.ErrGrp != nil {
 					err := util.ErrGrp.Wait()
 					if err != nil {
-						log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(serverAd.Type), serverAd.Name, err.Error())
+						log.Debugf("healthTestUtils: Errgroup returns error for %s %s %s", string(serverAd.Type), serverAd.Name, err.Error())
 					} else {
-						log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(serverAd.Type), serverAd.Name)
+						log.Debugf("healthTestUtils: Errgroup successfully emptied at TTL cache eviction for %s %s", string(serverAd.Type), serverAd.Name)
 					}
 				} else {
-					log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(serverAd.Type), serverAd.Name)
+					log.Debugf("healthTestUtils: errgroup is nil when evict the registration from TTL cache for %s %s", string(serverAd.Type), serverAd.Name)
 				}
 			} else {
-				log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", serverAd.Name)
+				log.Debugf("healthTestUtil: not found for %s when evicting TTL cache item", serverAd.Name)
 			}
 		}()
 	})
