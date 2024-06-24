@@ -66,6 +66,7 @@ type (
 		Org                    string
 		Groups                 []string
 		Project                string
+		Host                   string
 	}
 
 	FileId struct {
@@ -280,17 +281,17 @@ var (
 	TransferReadvSegs = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_readv_segments_count",
 		Help: "Number of segments in readv operations",
-	}, []string{"path", "ap", "dn", "role", "org", "proj"})
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "network"})
 
 	TransferOps = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_operations_count",
 		Help: "Number of transfer operations performed",
-	}, []string{"path", "ap", "dn", "role", "org", "proj", "type"})
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "type", "network"})
 
 	TransferBytes = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_bytes",
 		Help: "Bytes of transfers",
-	}, []string{"path", "ap", "dn", "role", "org", "proj", "type"})
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "type", "network"})
 
 	Threads = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "xrootd_sched_thread_count",
@@ -642,12 +643,13 @@ func HandlePacket(packet []byte) error {
 				xferRecord := transfers.Get(fileId)
 				transfers.Delete(fileId)
 				labels := prometheus.Labels{
-					"path": "/",
-					"ap":   "",
-					"dn":   "",
-					"role": "",
-					"org":  "",
-					"proj": "",
+					"path":    "/",
+					"ap":      "",
+					"dn":      "",
+					"role":    "",
+					"org":     "",
+					"proj":    "",
+					"network": "",
 				}
 				var oldReadvSegs uint64 = 0
 				var oldReadOps uint32 = 0
@@ -746,12 +748,13 @@ func HandlePacket(packet []byte) error {
 				writeBytes := binary.BigEndian.Uint64(packet[offset+24 : offset+32])
 
 				labels := prometheus.Labels{
-					"path": "/",
-					"ap":   "",
-					"dn":   "",
-					"role": "",
-					"org":  "",
-					"proj": "",
+					"path":    "/",
+					"ap":      "",
+					"dn":      "",
+					"role":    "",
+					"org":     "",
+					"proj":    "",
+					"network": "",
 				}
 
 				if item != nil {
