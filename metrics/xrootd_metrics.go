@@ -666,7 +666,7 @@ func HandlePacket(packet []byte) error {
 					if userRecord != nil {
 						maskedIP, ok := utils.MaskIP(userRecord.Value().Host)
 						if !ok {
-							log.Warning("Failed to mask IP address")
+							log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
 						} else {
 							labels["network"] = maskedIP
 						}
@@ -771,7 +771,7 @@ func HandlePacket(packet []byte) error {
 					if userRecord != nil {
 						maskedIP, ok := utils.MaskIP(userRecord.Value().Host)
 						if !ok {
-							log.Warning("Failed to mask IP address")
+							log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
 						} else {
 							labels["network"] = maskedIP
 						}
