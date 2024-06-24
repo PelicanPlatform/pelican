@@ -104,21 +104,13 @@ func CheckValidQuery(transferUrl *url.URL) (err error) {
 	return errors.New("invalid query parameter(s) " + transferUrl.RawQuery + " provided in url " + transferUrl.String())
 }
 
-func maskIPv4(ipStr string) (masked string, ok bool) {
-	ip := net.ParseIP(ipStr).To4()
-	if ip == nil {
-		return "", false
-	}
+func maskIPv4(ip net.IP) (masked string, ok bool) {
 	mask := net.CIDRMask(24, 32)
 	maskedIP := ip.Mask(mask)
 	return maskedIP.String(), true
 }
 
-func maskIPv6(ipStr string) (masked string, ok bool) {
-	ip := net.ParseIP(ipStr).To16()
-	if ip == nil || ip.To4() != nil {
-		return "", false
-	}
+func maskIPv6(ip net.IP) (masked string, ok bool) {
 	mask := net.CIDRMask(64, 128)
 	maskedIP := ip.Mask(mask)
 	return maskedIP.String(), true
@@ -132,11 +124,11 @@ func MaskIP(ipStr string) (maskedIP string, ok bool) {
 		return "", false
 	}
 	if ip.To4() != nil {
-		return maskIPv4(ipStr)
+		return maskIPv4(ip)
 	}
 
 	if ip.To16() != nil {
-		return maskIPv6(ipStr)
+		return maskIPv6(ip)
 	}
 	return "", false
 }
