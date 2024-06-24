@@ -9,3 +9,8 @@ var PelicanRegistryFederationNamespaces = promauto.NewGaugeVec(prometheus.GaugeO
 	Name: "pelican_registry_federation_namespaces",
 	Help: "The number of federation namespace associated with a public key, excluding server namespaces, in the registry.",
 }, []string{"status"})
+
+var PelicanOSDFInstitutions = promauto.NewGauge(prometheus.GaugeOpts{
+	Name: "pelican_osdf_institution_count",
+	Help: "Total number of contributing institutions",
+})
