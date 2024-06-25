@@ -912,6 +912,8 @@ func handleContinuedCfg() error {
 }
 
 func InitConfig() {
+	// Enable BindStruct to allow unmarshal env into a nested struct
+	viper.SetOptions(viper.ExperimentalBindStruct())
 	viper.SetConfigType("yaml")
 	// 1) Set up defaults.yaml
 	err := viper.MergeConfig(strings.NewReader(defaultsYaml))
