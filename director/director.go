@@ -380,8 +380,7 @@ func redirectToCache(ginCtx *gin.Context) {
 		if len(cacheAds) == 0 {
 			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				// TODO: make this message clearer by saying no fallback origin found
-				Msg: "No cache found for path",
+				Msg:    "No cache or fallback origin found for this object. The object may not exist in the federation",
 			})
 			return
 		}
