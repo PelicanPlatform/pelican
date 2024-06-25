@@ -311,6 +311,7 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 		return
 	}
 
+	// Use RLock to allolw multiple queries
 	statUtilsMutex.RLock()
 	defer statUtilsMutex.RUnlock()
 
@@ -319,6 +320,11 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 		if !ok {
 			numTotalReq += 1
 			log.Debugf("Origin %q is missing data for stat call, skip querying...", sAD.Name)
+			continue
+		}
+		if statUtil.Context.Err() != nil {
+			numTotalReq += 1
+			log.Debugf("Origin %q is evicted from the cache, context has been cancelled, skip querying...", sAD.Name)
 			continue
 		}
 		// Use an anonymous func to pass variable safely to the goroutine
@@ -378,7 +384,7 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 						negativeReqChan <- err
 						totalLabels["result"] = string(metrics.StatUnkownErr)
 						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
-						return err
+						return nil
 					}
 				} else {
 					totalLabels["result"] = string(metrics.StatSucceeded)
