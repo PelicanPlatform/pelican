@@ -35,6 +35,7 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -51,6 +52,12 @@ var (
 )
 
 func configShoveler(c *shoveler.Config) error {
+	// Use Pelican build info for Shoveler
+	shoveler.ShovelerVersion = "Pelican-" + config.GetVersion()
+	shoveler.ShovelerBuiltBy = config.GetBuiltBy()
+	shoveler.ShovelerDate = config.GetBuiltDate()
+	shoveler.ShovelerCommit = config.GetBuiltCommit()
+
 	c.MQ = param.Shoveler_MessageQueueProtocol.GetString()
 	if c.MQ != "amqp" && c.MQ != "stomp" {
 		return fmt.Errorf("Bad config for Shoveler.MessageQueueProtocol. Expected \"amqp\" or \"stomp\", got %s", c.MQ)
@@ -258,7 +265,7 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group, metricsPort int) 
 		if err != nil {
 			shovelerLogger.Errorln("Error closing UDP connection:", err)
 		} else {
-			log.Infoln("Xrootd monitoring shoveler has been stopped")
+			shovelerLogger.Infoln("Xrootd monitoring shoveler has been stopped")
 		}
 		return nil
 	})
@@ -290,7 +297,6 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group, metricsPort int) 
 			}
 
 			// Send the message to the queue
-			shovelerLogger.Debugln("Sending msg:", string(msg))
 			cq.Enqueue(msg)
 
 			// Send to the UDP destinations
