@@ -186,6 +186,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 						})
 						log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(ad.Type), ad.URL.String())
 					} else {
+						// Existing errorgroup still working
 						cancelCtx, cancel := context.WithCancel(existingUtil.ErrGrpContext)
 						started := existingUtil.ErrGrp.TryGo(func() error {
 							LaunchPeriodicDirectorTest(cancelCtx, sAd)
