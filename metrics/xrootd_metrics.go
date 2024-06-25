@@ -515,7 +515,7 @@ func ParseXrdUserId(userid string) (xrdUserId XrdUserId, err error) {
 	xrdUserId.User = protUserIdInfo[1][:lastIdx]
 	xrdUserId.Pid = pid
 	xrdUserId.Sid = sid
-	xrdUserId.Host = string(sidAtHostname[1])
+	xrdUserId.Host = string(sidAtHostnameInfo[1])
 	return
 }
 
