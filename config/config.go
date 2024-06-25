@@ -911,10 +911,39 @@ func handleContinuedCfg() error {
 	return nil
 }
 
+// Read config file from web UI changes, and call viper.Set() to explicitly override the value
+// so that env wouldn't take precedence
+func setWebConfigOverride(v *viper.Viper, configPath string) error {
+	webConfigFile, err := os.OpenFile(configPath, os.O_RDONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return err
+	}
+	defer webConfigFile.Close()
+
+	tempV := viper.New()
+	tempV.SetConfigType("yaml")
+	err = tempV.ReadConfig(webConfigFile)
+	if err != nil {
+		return err
+	}
+
+	allKeys := tempV.AllKeys()
+	for _, key := range allKeys {
+		v.Set(key, tempV.Get(key))
+	}
+
+	return nil
+}
+
 func InitConfig() {
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
 	viper.SetConfigType("yaml")
+
+	// Initialize ConfigDir parameter based on user permission
+	if err := initConfigDir(); err != nil {
+		cobra.CheckErr(err)
+	}
 	// 1) Set up defaults.yaml
 	err := viper.MergeConfig(strings.NewReader(defaultsYaml))
 	if err != nil {
@@ -932,23 +961,17 @@ func InitConfig() {
 			cobra.CheckErr(err)
 		}
 	}
+
+	// 3) Read config (from flag) or pelican.yaml
 	if configFile := viper.GetString("config"); configFile != "" {
 		viper.SetConfigFile(configFile)
 	} else {
 		configDir := viper.GetString("ConfigDir")
 		if configDir == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
-			} else {
-				// 3) Set up pelican.yaml (has higher precedence)
-				viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
-			}
-			viper.AddConfigPath(filepath.Join("/etc", "pelican"))
-		} else {
-			viper.AddConfigPath(configDir)
+			// We've called initConfigDir but still got empty string
+			cobra.CheckErr("ConfigDir is empty after initialization")
 		}
-		viper.SetConfigType("yaml")
+		viper.AddConfigPath(configDir)
 		viper.SetConfigName("pelican")
 	}
 
@@ -970,6 +993,20 @@ func InitConfig() {
 		cobra.CheckErr(err)
 	}
 
+	// Handle web UI override. Client is not expected to set anything here
+	viper.SetDefault(param.Server_WebConfigFile.GetName(), filepath.Join(viper.GetString("ConfigDir"), "web-config.yaml"))
+
+	if webConfigPath := param.Server_WebConfigFile.GetString(); webConfigPath != "" {
+		if err := os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
+			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
+		}
+	}
+
+	if err := setWebConfigOverride(viper.GetViper(), param.Server_WebConfigFile.GetString()); err != nil {
+		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
+	}
+
+	// TODO: Refactor the error handling logic below to be consistently using cobra.CheckErr
 	logLocation := param.Logging_LogLocation.GetString()
 	if logLocation != "" {
 		dir := filepath.Dir(logLocation)
@@ -1135,22 +1172,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml becase
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
 	viper.SetDefault("Origin.S3UrlStyle", "path")
-
-	if webConfigPath := param.Server_WebConfigFile.GetString(); webConfigPath != "" {
-		err := os.MkdirAll(filepath.Dir(webConfigPath), 0700)
-		if err != nil {
-			return err
-		}
-		webConfigFile, err := os.OpenFile(webConfigPath, os.O_RDONLY|os.O_CREATE, 0644)
-		if err != nil {
-			return err
-		} else {
-			defer webConfigFile.Close()
-			if err := viper.MergeConfig(webConfigFile); err != nil {
-				return err
-			}
-		}
-	}
 
 	if param.Cache_DataLocation.IsSet() {
 		log.Warningf("Deprecated configuration key %s is set. Please migrate to use %s instead", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
