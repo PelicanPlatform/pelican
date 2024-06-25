@@ -317,7 +317,12 @@ func redirectToCache(ginCtx *gin.Context) {
 		q := NewObjectStat()
 		st := config.NewServerType()
 		st.SetList([]config.ServerType{config.OriginType, config.CacheType})
-		qr := q.Query(context.Background(), reqPath, st, 1, 6,
+		// Set max response to all available origin and cache servers to ensure we stat against origins
+		// if no cache server has the file
+		// TODO: come back and re-evaluate if we need this many responses and potential origin/cache
+		// server performance issue out of this
+		maxRes := len(cacheAds) + len(originAds)
+		qr := q.Query(context.Background(), reqPath, st, 1, maxRes,
 			withOriginAds(originAds), withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
 		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
 
@@ -375,7 +380,8 @@ func redirectToCache(ginCtx *gin.Context) {
 		if len(cacheAds) == 0 {
 			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "No cache found for path",
+				// TODO: make this message clearer by saying no fallback origin found
+				Msg: "No cache found for path",
 			})
 			return
 		}
@@ -391,13 +397,14 @@ func redirectToCache(ginCtx *gin.Context) {
 		}
 	}
 
-	// Re-sort by availability
+	// Re-sort by availability, where caches having the object have higher priority
 	sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
 
 	redirectURL := getRedirectURL(reqPath, cacheAds[0], !namespaceAd.Caps.PublicReads)
 
 	linkHeader := ""
 	first := true
+	// Only send back min(cachesToSend, len(cacheAds)) servers
 	if numCAds := len(cacheAds); numCAds < cachesToSend {
 		cachesToSend = numCAds
 	}

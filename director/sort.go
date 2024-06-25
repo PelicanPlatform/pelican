@@ -241,11 +241,15 @@ func sortServerAdsByTopo(ads []*server_structs.Advertisement) []*server_structs.
 	return ads
 }
 
+// Stable-sort the given serveAds in-place given the avaiMap, where the key of the map is serverAd.Url.String()
+// and the value is a bool suggesting if the server has the object requested.
+//
+// Smaller index in the sorted array means higher priority
 func sortServerAdsByAvailability(ads []server_structs.ServerAd, avaiMap map[string]bool) {
 	slices.SortStableFunc(ads, func(a, b server_structs.ServerAd) int {
-		if avaiMap[a.URL.String()] && !avaiMap[b.URL.String()] {
+		if !avaiMap[a.URL.String()] && avaiMap[b.URL.String()] {
 			return 1
-		} else if !avaiMap[a.URL.String()] && avaiMap[b.URL.String()] {
+		} else if avaiMap[a.URL.String()] && !avaiMap[b.URL.String()] {
 			return -1
 		} else {
 			// Preserve original ordering
