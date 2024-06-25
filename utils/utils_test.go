@@ -110,11 +110,11 @@ func TestValidQuery(t *testing.T) {
 	})
 }
 
-func TestMaskIP(t *testing.T) {
+func TestApplyIPMask(t *testing.T) {
 	t.Run("testValidIPv4", func(t *testing.T) {
 		expectedMaskedIP := "192.168.1.0"
 		validIPv4 := "192.168.1.1"
-		maskedIP, ok := MaskIP(validIPv4)
+		maskedIP, ok := ApplyIPMask(validIPv4)
 		assert.True(t, ok)
 		assert.Equal(t, expectedMaskedIP, maskedIP)
 	})
@@ -122,14 +122,14 @@ func TestMaskIP(t *testing.T) {
 	t.Run("testValidIPv6", func(t *testing.T) {
 		expectedMaskedIP := "2001:db8:3333:4444::"
 		validIPv6 := "2001:0db8:3333:4444:5555:6666:7777:8888"
-		maskedIP, ok := MaskIP(validIPv6)
+		maskedIP, ok := ApplyIPMask(validIPv6)
 		assert.True(t, ok)
 		assert.Equal(t, expectedMaskedIP, maskedIP)
 	})
 
 	t.Run("testInvalidInput", func(t *testing.T) {
 		invalid := "abc.123"
-		maskedIP, ok := MaskIP(invalid)
+		maskedIP, ok := ApplyIPMask(invalid)
 		assert.False(t, ok)
 		assert.Equal(t, maskedIP, invalid)
 	})
