@@ -247,7 +247,7 @@ func TestGetExports(t *testing.T) {
 		viper.Set("Origin.StorageType", "blah")
 		_, err = GetOriginExports()
 		assert.Error(t, err)
-		assert.ErrorIs(t, err, ErrUnknownOriginStorageType)
+		assert.ErrorIs(t, err, server_structs.ErrUnknownOriginStorageType)
 	})
 
 	// S3 tests

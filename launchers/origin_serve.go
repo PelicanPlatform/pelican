@@ -70,7 +70,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		return nil, errors.Wrap(err, "failed to initialize origin exports")
 	}
 
-	if param.Origin_StorageType.GetString() == string(server_utils.OriginStorageGlobus) {
+	if param.Origin_StorageType.GetString() == string(server_structs.OriginStorageGlobus) {
 		if err := origin.InitGlobusBackend(originExports); err != nil {
 			return nil, errors.Wrap(err, "failed to initialize Globus backend")
 		}
