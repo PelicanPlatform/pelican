@@ -687,9 +687,20 @@ type: bool
 default: false
 components: ["origin"]
 ---
+name: Origin.DirectorTest
+description: |+
+  A bool indicating whether the director should send file transfer tests to the origin.
+
+  If `Origin.StorageType` is set to values other than `POSIX`, this parameter is set to false.
+type: bool
+default: true
+components: ["origin"]
+---
 name: Origin.SelfTest
 description: |+
   A bool indicating whether the origin should perform self health checks.
+
+  If `Origin.StorageType` is set to values other than `POSIX`, this parameter is set to false.
 type: bool
 default: true
 components: ["origin"]

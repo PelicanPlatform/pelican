@@ -314,6 +314,7 @@ var (
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
 	Monitoring_PromQLAuthorization = BoolParam{"Monitoring.PromQLAuthorization"}
+	Origin_DirectorTest = BoolParam{"Origin.DirectorTest"}
 	Origin_EnableBroker = BoolParam{"Origin.EnableBroker"}
 	Origin_EnableCmsd = BoolParam{"Origin.EnableCmsd"}
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}
