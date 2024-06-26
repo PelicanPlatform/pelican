@@ -442,8 +442,92 @@ func TestHandlePacket(t *testing.T) {
 		assert.Equal(t, mockUserRecord.DN, sessionEntry.DN)
 		assert.Equal(t, mockUserRecord.Role, sessionEntry.Role)
 		assert.Equal(t, mockUserRecord.Org, sessionEntry.Org)
+		assert.Equal(t, mockXrdUserId.Host, sessionEntry.Host)
 
 		sessions.DeleteAll()
+	})
+
+	t.Run("auth-packet-u-ipv4-host", func(t *testing.T) {
+		mockUserRecord := UserRecord{
+			AuthenticationProtocol: "https",
+			DN:                     "clientName",
+			Role:                   "clientRole",
+			Org:                    "clientOrg",
+		}
+		expectedIPv4 := "192.168.1.1"
+		mockXrdUserIdIPv4 := XrdUserId{
+			Prot: "https",
+			User: "unknown",
+			Pid:  0,
+			Sid:  143152967831384,
+			Host: expectedIPv4,
+		}
+		mockInfoIPv4 := []byte(getUserIdString(mockXrdUserIdIPv4) + "\n" + getAuthInfoString(mockUserRecord))
+		mockMonMapIPv4 := XrdXrootdMonMap{
+			Hdr: XrdXrootdMonHeader{ // 8B
+				// u-stream provides client login information; enabled by the auth and use
+				Code: 'u',
+				Pseq: 1,
+				Plen: uint16(12 + len(mockInfoIPv4)),
+				Stod: int32(time.Now().Unix()),
+			},
+			Dictid: uint32(0x12345678), // 4B
+			Info:   mockInfoIPv4,
+		}
+
+		sessions.DeleteAll()
+
+		buf, err := mockMonMapIPv4.Serialize()
+		require.NoError(t, err, "Error serializing monitor packet")
+		err = HandlePacket(buf)
+		require.NoError(t, err, "Error handling packet")
+
+		require.Equal(t, 1, len(sessions.Keys()), "Session cache didn't update")
+
+		sessionEntry := sessions.Get(sessions.Keys()[0]).Value()
+		assert.Equal(t, expectedIPv4, sessionEntry.Host)
+
+	})
+
+	t.Run("auth-packet-u-ipv6-host", func(t *testing.T) {
+		mockUserRecord := UserRecord{
+			AuthenticationProtocol: "https",
+			DN:                     "clientName",
+			Role:                   "clientRole",
+			Org:                    "clientOrg",
+		}
+		expectedIPv6 := "2001:0db8:3333:4444:5555:6666:7777:8888"
+		mockXrdUserIdIPv6 := XrdUserId{
+			Prot: "https",
+			User: "unknown",
+			Pid:  0,
+			Sid:  143152967831384,
+			Host: expectedIPv6,
+		}
+		mockInfoIPv6 := []byte(getUserIdString(mockXrdUserIdIPv6) + "\n" + getAuthInfoString(mockUserRecord))
+		mockMonMapIPv6 := XrdXrootdMonMap{
+			Hdr: XrdXrootdMonHeader{ // 8B
+				// u-stream provides client login information; enabled by the auth and use
+				Code: 'u',
+				Pseq: 1,
+				Plen: uint16(12 + len(mockInfoIPv6)),
+				Stod: int32(time.Now().Unix()),
+			},
+			Dictid: uint32(0x12345678), // 4B
+			Info:   mockInfoIPv6,
+		}
+
+		sessions.DeleteAll()
+
+		buf, err := mockMonMapIPv6.Serialize()
+		require.NoError(t, err, "Error serializing monitor packet")
+		err = HandlePacket(buf)
+		require.NoError(t, err, "Error handling packet")
+
+		require.Equal(t, 1, len(sessions.Keys()), "Session cache didn't update")
+
+		sessionEntry := sessions.Get(sessions.Keys()[0]).Value()
+		assert.Equal(t, expectedIPv6, sessionEntry.Host)
 	})
 
 	t.Run("file-path-packet-d-should-register-correct-info", func(t *testing.T) {
