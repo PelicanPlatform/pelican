@@ -111,7 +111,13 @@ func listServers(ctx *gin.Context) {
 		if ok {
 			healthStatus = healthUtil.Status
 		} else {
-			log.Debugf("listServers: healthTestUtils not found for server at %s", server.URL.String())
+			if server.DisableDirectorTest {
+				healthStatus = HealthStatusDisabled
+			} else {
+				if !server.FromTopology {
+					log.Debugf("listServers: healthTestUtils not found for server at %s", server.URL.String())
+				}
+			}
 		}
 		filtered, ft := checkFilter(server.Name)
 		var auth_url string

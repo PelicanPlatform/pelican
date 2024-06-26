@@ -101,7 +101,7 @@ func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
 		return
 	}
 
-	if param.Origin_DirectorTest.GetBool() {
+	if !param.Origin_DirectorTest.GetBool() {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Origin has Origin.DirectorTest set to false. Reject the test result.",

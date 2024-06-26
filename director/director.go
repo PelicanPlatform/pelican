@@ -74,10 +74,11 @@ type (
 )
 
 const (
-	HealthStatusUnknown HealthTestStatus = "Unknown"
-	HealthStatusInit    HealthTestStatus = "Initializing"
-	HealthStatusOK      HealthTestStatus = "OK"
-	HealthStatusError   HealthTestStatus = "Error"
+	HealthStatusDisabled HealthTestStatus = "Health Test Disabled"
+	HealthStatusUnknown  HealthTestStatus = "Unknown"
+	HealthStatusInit     HealthTestStatus = "Initializing"
+	HealthStatusOK       HealthTestStatus = "OK"
+	HealthStatusError    HealthTestStatus = "Error"
 )
 
 var (
