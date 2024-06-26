@@ -45,6 +45,8 @@ import (
 )
 
 func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_structs.XRootDServer, error) {
+	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
+	metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusWarning, "CMSD is initializting")
 
 	err := xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {

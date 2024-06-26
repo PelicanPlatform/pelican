@@ -123,7 +123,7 @@ type (
 	DirectorTestResult struct {
 		Status    string `json:"status"`
 		Message   string `json:"message"`
-		Timestamp int64  `json:"timestamp"`
+		Timestamp int64  `json:"timestamp"` // Unix time, the number of seconds elapsed since January 1, 1970 UTC.
 	}
 	GetPrefixByPathRes struct {
 		Prefix string `json:"prefix"`
