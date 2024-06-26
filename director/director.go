@@ -189,7 +189,7 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 		requestParams.Add("skipstat", "")
 	}
 	if originOnly {
-		requestParams.Add("originOnly", "")
+		requestParams.Add("originonly", "")
 	}
 	return
 }
