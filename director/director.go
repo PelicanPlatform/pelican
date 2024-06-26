@@ -176,6 +176,7 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 	}
 
 	skipStat := req.URL.Query().Has("skipstat")
+	originOnly := req.URL.Query().Has("originonly")
 
 	// url.Values.Encode will help us escape all them
 	if authz != "" {
@@ -186,6 +187,9 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 	}
 	if skipStat {
 		requestParams.Add("skipstat", "")
+	}
+	if originOnly {
+		requestParams.Add("originOnly", "")
 	}
 	return
 }
@@ -424,17 +428,22 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	reqParams := getRequestParameters(ginCtx.Request)
 
-	disableStat := !param.Director_EnableStat.GetBool()
-
 	// Skip the stat check for object availability
 	// If either disableStat or skipstat is set, then skip the stat query
-	skipStat := reqParams.Has("skipstat") || disableStat
+	skipStat := reqParams.Has("skipstat") || !param.Director_EnableStat.GetBool()
 
 	if skipStat {
-		log.Debugf("stat is skipped for object %s", reqPath)
+		log.Debugf("Stat is skipped for object %s", reqPath)
 	}
 
-	namespaceAd, originAds, _ := getAdsForPath(reqPath)
+	// Include caches in the response if Director.CacheAsOrigin is enabled
+	// AND originonly query parameter is not set
+	includeCaches := param.Director_CacheAsOrigin.GetBool() && !reqParams.Has("originonly")
+	if !includeCaches {
+		log.Debugf("CachesAsOrigin disabled. Only origins are included for object %s", reqPath)
+	}
+
+	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
@@ -454,10 +463,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
-	availableOriginAds := []server_structs.ServerAd{}
+	availableAds := []server_structs.ServerAd{}
 	// Skip stat query for PUT (upload), PROPFIND (listing) or skipStat query flag is on
 	if ginCtx.Request.Method == "PUT" || ginCtx.Request.Method == "PROPFIND" || skipStat {
-		availableOriginAds = originAds
+		availableAds = originAds
 	} else {
 		// Query Origins and check if the object exists on the server
 		q := NewObjectStat()
@@ -472,7 +481,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				serverHost := obj.URL.Host
 				for _, oAd := range originAds {
 					if oAd.URL.Host == serverHost {
-						availableOriginAds = append(availableOriginAds, oAd)
+						availableAds = append(availableAds, oAd)
 					}
 				}
 			}
@@ -499,19 +508,58 @@ func redirectToOrigin(ginCtx *gin.Context) {
 			for _, ds := range qr.DeniedServers {
 				for _, oAd := range originAds {
 					if oAd.AuthURL.String() == ds {
-						availableOriginAds = append(availableOriginAds, oAd)
+						availableAds = append(availableAds, oAd)
 					}
 				}
 			}
 		}
-		if len(availableOriginAds) == 0 {
-			// No available originAds, object does not exist
-			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "There are currently no origins hosting the object: available origin Ads is 0",
-			})
-			return
+	}
+
+	// Query caches and check if the object exists on the server
+	if includeCaches {
+		q := NewObjectStat()
+		qr := q.Query(context.Background(), reqPath, config.CacheType, 1, 3,
+			withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
+		log.Debugf("CachesAsOrigin enabled. Stat result for %s among caches: %s", reqPath, qr.String())
+
+		// For successful response, we got a list of URL to access the object.
+		// We will use the host of the object url to match the URL field in cacheAds
+		if qr.Status == querySuccessful {
+			for _, obj := range qr.Objects {
+				serverHost := obj.URL.Host
+				for _, oAd := range cacheAds {
+					if oAd.URL.Host == serverHost {
+						availableAds = append(availableAds, oAd)
+					}
+				}
+			}
+		} else if qr.Status == queryFailed {
+			if qr.ErrorType != queryInsufficientResErr {
+				log.Debugf("CachesAsOrigin enabled, but error occurred when querying caches for the object %s: %s %s", reqPath, string(qr.ErrorType), qr.Msg)
+			} else if len(qr.DeniedServers) == 0 { // Insufficient response
+				log.Debugf("CachesAsOrigin enabled, but no caches found for the object %s", reqPath)
+			} else {
+				// For denied cache servers, append them to availableAds
+				// The qr.DeniedServers is a list of AuthURLs of servers that respond with 403
+				// Here, we need to match against the AuthURL field of cacheAds
+				for _, ds := range qr.DeniedServers {
+					for _, oAd := range cacheAds {
+						if oAd.AuthURL.String() == ds {
+							availableAds = append(availableAds, oAd)
+						}
+					}
+				}
+			}
 		}
+	}
+
+	// No available originAds or cacheAds if CacheAsOrigin is enabled, object does not exist
+	if len(availableAds) == 0 {
+		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "There are currently no origins hosting the object: available origin Ads is 0",
+		})
+		return
 	}
 
 	// if err != nil, depth == 0, which is the default value for depth
@@ -521,7 +569,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
 
-	availableOriginAds, err = sortServerAdsByIP(ipAddr, availableOriginAds)
+	availableAds, err = sortServerAdsByIP(ipAddr, availableAds)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -533,7 +581,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	linkHeader := ""
 	first := true
-	for idx, ad := range availableOriginAds {
+	for idx, ad := range availableAds {
 		if first {
 			first = false
 		} else {
@@ -548,11 +596,11 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
 	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
 	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
-	if namespaceAd.Caps.Listings && len(availableOriginAds) > 0 && availableOriginAds[0].Listings {
-		if !namespaceAd.PublicRead && availableOriginAds[0].AuthURL != (url.URL{}) {
-			colUrl = availableOriginAds[0].AuthURL.String()
+	if namespaceAd.Caps.Listings && len(availableAds) > 0 && availableAds[0].Listings {
+		if !namespaceAd.PublicRead && availableAds[0].AuthURL != (url.URL{}) {
+			colUrl = availableAds[0].AuthURL.String()
 		} else {
-			colUrl = availableOriginAds[0].URL.String()
+			colUrl = availableAds[0].URL.String()
 		}
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
@@ -562,10 +610,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// If we are doing a PROPFIND, check if origins enable dirlistings
 	if ginCtx.Request.Method == "PROPFIND" {
-		for idx, ad := range availableOriginAds {
+		for idx, ad := range availableAds {
 			if ad.Listings && namespaceAd.Caps.Listings {
-				redirectURL = getRedirectURL(reqPath, availableOriginAds[idx], !namespaceAd.PublicRead)
-				if brokerUrl := availableOriginAds[idx].BrokerURL; brokerUrl.String() != "" {
+				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
 				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
@@ -584,10 +632,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// Check if we are doing a DirectRead and if it is allowed
 	if ginCtx.Request.URL.Query().Has("directread") {
-		for idx, originAd := range availableOriginAds {
+		for idx, originAd := range availableAds {
 			if originAd.DirectReads && namespaceAd.Caps.DirectReads {
-				redirectURL = getRedirectURL(reqPath, availableOriginAds[idx], !namespaceAd.PublicRead)
-				if brokerUrl := availableOriginAds[idx].BrokerURL; brokerUrl.String() != "" {
+				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
 				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
@@ -603,10 +651,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// If we are doing a PUT, check to see if any origins are writeable
 	if ginCtx.Request.Method == "PUT" {
-		for idx, ad := range availableOriginAds {
+		for idx, ad := range availableAds {
 			if ad.Writes {
-				redirectURL = getRedirectURL(reqPath, availableOriginAds[idx], !namespaceAd.PublicRead)
-				if brokerUrl := availableOriginAds[idx].BrokerURL; brokerUrl.String() != "" {
+				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.PublicRead)
+				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
 				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
@@ -619,8 +667,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		})
 		return
 	} else { // Otherwise, we are doing a GET
-		redirectURL := getRedirectURL(reqPath, availableOriginAds[0], !namespaceAd.PublicRead)
-		if brokerUrl := availableOriginAds[0].BrokerURL; brokerUrl.String() != "" {
+		redirectURL := getRedirectURL(reqPath, availableAds[0], !namespaceAd.PublicRead)
+		if brokerUrl := availableAds[0].BrokerURL; brokerUrl.String() != "" {
 			ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 		}
 

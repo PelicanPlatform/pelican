@@ -45,6 +45,7 @@ Server:
   UILoginRateLimit: 1
 Director:
   DefaultResponse: cache
+  CacheAsOrigin: true
   CacheSortMethod: "distance"
   MinStatResponse: 1
   MaxStatResponse: 1

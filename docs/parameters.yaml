@@ -1228,6 +1228,14 @@ type: string
 default: cache
 components: ["director"]
 ---
+name: Director.CacheAsOrigin
+description: |+
+  In the "origin" response, the director returns a list of origins that can serve the object. If `Director.CacheAsOrigin`
+  is set to true (default), the director then append a list of caches that can serve the object as well to the original response.
+type: bool
+default: true
+components: ["director"]
+---
 name: Director.CacheResponseHostnames
 description: |+
   A list of virtual hostnames for the director. If a request is sent by the client to one of these hostnames,
