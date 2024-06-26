@@ -889,9 +889,14 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		}
 	}
 
+	st := adV2.StorageType
+	if st == "" {
+		st = server_structs.OriginStoragePosix
+	}
+
 	sAd := server_structs.ServerAd{
 		Name:                adV2.Name,
-		StorageType:         adV2.StorageType,
+		StorageType:         st,
 		DisableDirectorTest: adV2.DisableDirectorTest,
 		URL:                 *adUrl,
 		WebURL:              *adWebUrl,

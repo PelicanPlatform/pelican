@@ -71,7 +71,7 @@ type (
 
 	ServerAd struct {
 		Name                string            `json:"name"`
-		StorageType         OriginStorageType `json:"storageType"` // Only for origins
+		StorageType         OriginStorageType `json:"storageType"` // Always POSIX for caches
 		DisableDirectorTest bool              `json:"directorTest"`
 		AuthURL             url.URL           `json:"auth_url"`
 		BrokerURL           url.URL           `json:"broker_url"` // The URL of the broker service to use for this host.
