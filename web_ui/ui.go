@@ -551,7 +551,7 @@ func GetEngine() (*gin.Engine, error) {
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 	engine.Use(gin.Recovery())
-	engine.Use(gzip.Gzip(gzip.DefaultCompression))
+	engine.Use(gzip.Gzip(gzip.DefaultCompression, gzip.WithExcludedPaths([]string{"/api/v1.0/prometheus"})))
 	webLogger := log.WithFields(log.Fields{"daemon": "gin"})
 	engine.Use(func(ctx *gin.Context) {
 		startTime := time.Now()
