@@ -50,7 +50,7 @@ type clientResponseData struct {
 	Error           string `json:"error"`
 }
 
-func NamespaceRegisterWithIdentity(privateKey jwk.Key, namespaceRegistryEndpoint string, prefix string) error {
+func NamespaceRegisterWithIdentity(privateKey jwk.Key, namespaceRegistryEndpoint string, prefix string, siteName string) error {
 	identifiedPayload := map[string]interface{}{
 		"identity_required": "true",
 		"prefix":            prefix,
@@ -98,10 +98,10 @@ func NamespaceRegisterWithIdentity(privateKey jwk.Key, namespaceRegistryEndpoint
 			_, _ = reader.ReadString('\n')
 		}
 	}
-	return NamespaceRegister(privateKey, namespaceRegistryEndpoint, respData.AccessToken, prefix)
+	return NamespaceRegister(privateKey, namespaceRegistryEndpoint, respData.AccessToken, prefix, siteName)
 }
 
-func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, accessToken string, prefix string) error {
+func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, accessToken string, prefix string, siteName string) error {
 	publicKey, err := privateKey.PublicKey()
 	if err != nil {
 		return errors.Wrapf(err, "failed to generate public key for namespace registration")
@@ -168,14 +168,15 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 
 	// // Create data for the second POST request
 	unidentifiedPayload := map[string]interface{}{
+		"pubkey":            keySet,
+		"prefix":            prefix,
+		"site_name":         siteName,
 		"client_nonce":      clientNonce,
 		"server_nonce":      respData.ServerNonce,
-		"pubkey":            keySet,
 		"client_payload":    clientPayload,
 		"client_signature":  hex.EncodeToString(signature),
 		"server_payload":    respData.ServerPayload,
 		"server_signature":  respData.ServerSignature,
-		"prefix":            prefix,
 		"access_token":      accessToken,
 		"identity_required": "false",
 	}
