@@ -57,44 +57,14 @@ type (
 		Capabilities     server_structs.Capabilities `json:"capabilities"`
 		SentinelLocation string                      `json:"sentinelLocation"`
 	}
-
-	OriginStorageType string
 )
 
 var (
-	ErrUnknownOriginStorageType        = errors.New("unknown origin storage type")
-	ErrInvalidOriginConfig             = errors.New("invalid origin configuration")
-	WarnExportVolumes           string = "Passing export volumes via -v at the command line causes Pelican to ignore exports configured via the yaml file. " +
+	ErrInvalidOriginConfig        = errors.New("invalid origin configuration")
+	WarnExportVolumes      string = "Passing export volumes via -v at the command line causes Pelican to ignore exports configured via the yaml file. " +
 		"However, namespaces exported this way will inherit the Origin.Enable* settings from your configuration file. " +
 		"For finer-grained control of each export, please configure them in your pelican.yaml file via Origin.Exports"
 )
-
-const (
-	OriginStoragePosix  OriginStorageType = "posix"
-	OriginStorageS3     OriginStorageType = "s3"
-	OriginStorageHTTPS  OriginStorageType = "https"
-	OriginStorageGlobus OriginStorageType = "globus"
-	OriginStorageXRoot  OriginStorageType = "xroot" // Not meant to be extensible, but facilitates legacy OSDF --> Pelican transition
-)
-
-// Convert a string to an OriginStorageType
-func ParseOriginStorageType(storageType string) (ost OriginStorageType, err error) {
-	switch storageType {
-	case string(OriginStorageS3):
-		ost = OriginStorageS3
-	case string(OriginStorageHTTPS):
-		ost = OriginStorageHTTPS
-	case string(OriginStoragePosix):
-		ost = OriginStoragePosix
-	case string(OriginStorageXRoot):
-		ost = OriginStorageXRoot
-	case string(OriginStorageGlobus):
-		ost = OriginStorageGlobus
-	default:
-		err = errors.Wrapf(ErrUnknownOriginStorageType, "storage type %s (known types are posix, s3, https, globus, and xroot)", storageType)
-	}
-	return
-}
 
 /*
 A decoder hook we can pass to viper.Unmarshal to convert a list of strings to a struct
@@ -281,7 +251,7 @@ func GetOriginExports() ([]OriginExport, error) {
 	viper.SetDefault("Origin.StorageType", "posix")
 	storageTypeStr := param.Origin_StorageType.GetString()
 
-	storageType, err := ParseOriginStorageType(storageTypeStr)
+	storageType, err := server_structs.ParseOriginStorageType(storageTypeStr)
 	if err != nil {
 		return originExports, err
 	}
@@ -296,7 +266,7 @@ func GetOriginExports() ([]OriginExport, error) {
 
 	var originExport OriginExport
 	switch storageType {
-	case OriginStoragePosix:
+	case server_structs.OriginStoragePosix:
 		// First, we handle any exports passed via Origin.ExportVolumes to which we've bound all -v entries
 		// from the command line. When this option is used for configuration, we'll ignore exports from our
 		// pelican.yaml, but the namespaces will inherit any Origin.Enable* settings there.
@@ -385,7 +355,7 @@ func GetOriginExports() ([]OriginExport, error) {
 
 			viper.Set("Origin.EnableReads", capabilities.Reads)
 		}
-	case OriginStorageHTTPS:
+	case server_structs.OriginStorageHTTPS:
 		// Storage prefix is unused by HTTPS so we put in a dummy value of /
 		originExport = OriginExport{
 			FederationPrefix: param.Origin_FederationPrefix.GetString(),
@@ -396,7 +366,7 @@ func GetOriginExports() ([]OriginExport, error) {
 		if err = validateExportPaths("/", originExport.FederationPrefix); err != nil {
 			return nil, err
 		}
-	case OriginStorageS3:
+	case server_structs.OriginStorageS3:
 		// Handle exports configured via -v or potentially env vars
 		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
 			log.Infoln("Configuring exports from export volumes passed via command line or via yaml")
@@ -501,7 +471,7 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 			}
 			viper.Set("Origin.EnableReads", capabilities.Reads)
 		}
-	case OriginStorageGlobus:
+	case server_structs.OriginStorageGlobus:
 		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
 			return nil, errors.New("Globus backend does not support configuring via Origin.ExportVolumes or -v flag. Use Origin.Exports or single export config instead.")
 		}
@@ -566,7 +536,7 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 			}
 			viper.Set("Origin.EnableReads", capabilities.Reads)
 		}
-	case OriginStorageXRoot:
+	case server_structs.OriginStorageXRoot:
 		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
 			log.Infoln("Configuring exports from export volumes passed via command line or via yaml")
 			// This storage backend only works with unauthenticated origins. Check that now.

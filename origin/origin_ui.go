@@ -57,7 +57,7 @@ type (
 
 func handleExports(ctx *gin.Context) {
 	st := param.Origin_StorageType.GetString()
-	storageType, err := server_utils.ParseOriginStorageType(st)
+	storageType, err := server_structs.ParseOriginStorageType(st)
 	if err != nil {
 		log.Errorf("Failed to parse origin storage type: %v", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Server encountered error when parsing the storage type of the origin: " + err.Error()})
@@ -151,11 +151,11 @@ func handleExports(ctx *gin.Context) {
 	res.Exports = wrappedExports
 
 	switch storageType {
-	case server_utils.OriginStorageS3:
+	case server_structs.OriginStorageS3:
 		res.S3Region = param.Origin_S3Region.GetString()
 		res.S3ServiceUrl = param.Origin_S3ServiceUrl.GetString()
 		res.S3UrlStyle = param.Origin_S3UrlStyle.GetString()
-	case server_utils.OriginStorageHTTPS:
+	case server_structs.OriginStorageHTTPS:
 		res.HttpServiceUrl = param.Origin_HttpServiceUrl.GetString()
 	}
 	ctx.JSON(http.StatusOK, res)
@@ -168,8 +168,8 @@ func RegisterOriginWebAPI(engine *gin.Engine) error {
 	}
 
 	// Globus backend specific. Config other origin routes above this line
-	if server_utils.OriginStorageType(param.Origin_StorageType.GetString()) !=
-		server_utils.OriginStorageGlobus {
+	if server_structs.OriginStorageType(param.Origin_StorageType.GetString()) !=
+		server_structs.OriginStorageGlobus {
 		return nil
 	}
 

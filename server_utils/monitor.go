@@ -29,6 +29,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -53,6 +54,10 @@ func notifyNewDirectorResponse(ctx context.Context, nChan chan bool) {
 // Launch a go routine in errorgroup to report timeout if director-based health test
 // response was not sent within the defined time limit
 func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group, nChan chan bool) {
+	if !param.Origin_DirectorTest.GetBool() {
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, "Origin.DirectorTest is set to false. No director tests expected.")
+		return
+	}
 	directorTimeoutTicker := time.NewTicker(directorTimeoutDuration)
 
 	egrp.Go(func() error {
@@ -62,11 +67,11 @@ func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group, nC
 				// If origin can't contact the director, record the error without warning
 				status, err := metrics.GetComponentStatus(metrics.OriginCache_Federation)
 				if err == nil && status == "critical" {
-					metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "Failed to advertise to the director. Tests are not expected")
+					metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "Failed to advertise the server to the director. Director tests are not expected")
 				} else {
 					// Timer fired because no message was received in time.
 					log.Warningln("No director test report received within the time limit")
-					metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, "No director test report received within the time limit")
+					metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, fmt.Sprintf("No director test report received within the time limit of %d seconds", int(directorTimeoutDuration.Seconds())))
 				}
 			case <-nChan:
 				log.Debugln("Received director report of health test result")
@@ -96,6 +101,14 @@ func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
 		return
 	}
 
+	if !param.Origin_DirectorTest.GetBool() {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Origin has Origin.DirectorTest set to false. Reject the test result.",
+		})
+		return
+	}
+
 	dt := server_structs.DirectorTestResult{}
 	if err := ctx.ShouldBind(&dt); err != nil {
 		log.Errorf("Invalid director test response: %v", err)
@@ -105,16 +118,17 @@ func HandleDirectorTestResponse(ctx *gin.Context, nChan chan bool) {
 		})
 		return
 	}
+	updateTime := time.Unix(dt.Timestamp, 0)
 	// We will let the timer go timeout if director didn't send a valid json request
 	notifyNewDirectorResponse(ctx, nChan)
 	if dt.Status == "ok" {
-		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, fmt.Sprintf("Director timestamp: %v", dt.Timestamp))
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusOK, fmt.Sprintf("Director object transfer test succeeded at: %s", updateTime.Format("2006-01-02 15:04:05")))
 		ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
 			Status: server_structs.RespOK,
 			Msg:    "Success",
 		})
 	} else if dt.Status == "error" {
-		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, dt.Message)
+		metrics.SetComponentHealthStatus(metrics.OriginCache_Director, metrics.StatusCritical, fmt.Sprint("Director object transfer test failed: ", dt.Message))
 		ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
 			Status: server_structs.RespOK,
 			Msg:    "Success",

@@ -462,7 +462,7 @@ type ObjectParam struct {
 func GetDeprecated() map[string][]string {
     return map[string][]string{
         {{- range $key, $value := .DeprecatedMap}}
-        "{{$key}}": []string{{"{"}}{{range $i, $v := $value}}{{if $i}}, {{end}}"{{$v}}"{{end}}},
+        "{{$key}}": {{"{"}}{{range $i, $v := $value}}{{if $i}}, {{end}}"{{$v}}"{{end}}},
         {{- end}}
     }
 }
@@ -483,12 +483,20 @@ func (slP StringSliceParam) GetStringSlice() []string {
 	return viper.GetStringSlice(slP.name)
 }
 
+func (slP StringSliceParam) GetName() string {
+	return slP.name
+}
+
 func (slP StringSliceParam) IsSet() bool {
 	return viper.IsSet(slP.name)
 }
 
 func (iP IntParam) GetInt() int {
 	return viper.GetInt(iP.name)
+}
+
+func (iP IntParam) GetName() string {
+	return iP.name
 }
 
 func (iP IntParam) IsSet() bool {
@@ -499,24 +507,36 @@ func (bP BoolParam) GetBool() bool {
 	return viper.GetBool(bP.name)
 }
 
+func (bP BoolParam) GetName() string {
+	return bP.name
+}
+
 func (bP BoolParam) IsSet() bool {
 	return viper.IsSet(bP.name)
 }
 
-func (bP DurationParam) GetDuration() time.Duration {
-	return viper.GetDuration(bP.name)
+func (dP DurationParam) GetDuration() time.Duration {
+	return viper.GetDuration(dP.name)
 }
 
-func (bP DurationParam) IsSet() bool {
-	return viper.IsSet(bP.name)
+func (dP DurationParam) GetName() string {
+	return dP.name
 }
 
-func (bP ObjectParam) Unmarshal(rawVal any) error {
-	return viper.UnmarshalKey(bP.name, rawVal)
+func (dP DurationParam) IsSet() bool {
+	return viper.IsSet(dP.name)
 }
 
-func (bP ObjectParam) IsSet() bool {
-	return viper.IsSet(bP.name)
+func (oP ObjectParam) Unmarshal(rawVal any) error {
+	return viper.UnmarshalKey(oP.name, rawVal)
+}
+
+func (oP ObjectParam) GetName() string {
+	return oP.name
+}
+
+func (oP ObjectParam) IsSet() bool {
+	return viper.IsSet(oP.name)
 }
 
 var ({{range $key, $value := .StringMap}}

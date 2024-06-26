@@ -89,7 +89,7 @@ func InitGlobusBackend(exps []server_utils.OriginExport) error {
 		return errors.Wrap(err, "failed to initialize Globus backend: failed to get gid")
 	}
 
-	if server_utils.OriginStorageType(param.Origin_StorageType.GetString()) != server_utils.OriginStorageGlobus {
+	if server_structs.OriginStorageType(param.Origin_StorageType.GetString()) != server_structs.OriginStorageGlobus {
 		return errors.Errorf("failed to initialize Globus backend: Origin.StorageType is not Globus: %s",
 			param.Origin_StorageType.GetString())
 	}

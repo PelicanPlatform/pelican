@@ -370,6 +370,14 @@ definitions:
       name:
         type: string
         example: "Test Origin"
+      storageType:
+        type: string
+        example: "posix"
+        description: The server storage type. Can be one of `posix`, `s3`, `globus`, `http`, and `xroot`
+      disableDirectorTest:
+        type: boolean
+        example: true
+        description: Whether the director-based object transfer tests are disabled
       authUrl:
         type: string
         description: The URL of the issuer on the server to check token validity

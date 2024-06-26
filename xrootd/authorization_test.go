@@ -533,20 +533,21 @@ func TestGenerateConfig(t *testing.T) {
 	viper.Set("Origin.SelfTest", false)
 	issuer, err := GenerateMonitoringIssuer()
 	require.NoError(t, err)
-	assert.Equal(t, issuer.Name, "")
+	assert.Empty(t, issuer.Name)
 
 	viper.Set("Origin.SelfTest", true)
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Server.WebPort", 8443)
+	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
 	err = config.InitServer(ctx, config.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateMonitoringIssuer()
 	require.NoError(t, err)
-	assert.Equal(t, issuer.Name, "Built-in Monitoring")
-	assert.Equal(t, issuer.Issuer, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Origin_Port.GetInt()))
-	require.Equal(t, len(issuer.BasePaths), 1)
-	assert.Equal(t, issuer.BasePaths[0], "/pelican/monitoring")
-	assert.Equal(t, issuer.DefaultUser, "xrootd")
+	assert.Equal(t, "Built-in Monitoring", issuer.Name)
+	assert.Equal(t, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Origin_Port.GetInt()), issuer.Issuer)
+	require.Len(t, issuer.BasePaths, 1)
+	assert.Equal(t, "/pelican/monitoring", issuer.BasePaths[0])
+	assert.Equal(t, "xrootd", issuer.DefaultUser)
 
 	viper.Reset()
 	viper.Set("Origin.SelfTest", false)
@@ -558,13 +559,13 @@ func TestGenerateConfig(t *testing.T) {
 	require.NoError(t, err)
 	issuer, err = GenerateOriginIssuer([]string{"/foo/bar/baz", "/another/exported/path"})
 	require.NoError(t, err)
-	assert.Equal(t, issuer.Name, "Origin")
-	assert.Equal(t, issuer.Issuer, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Origin_Port.GetInt()))
-	require.Equal(t, len(issuer.BasePaths), 2)
-	assert.Equal(t, issuer.BasePaths[0], "/foo/bar/baz")
-	assert.Equal(t, issuer.BasePaths[1], "/another/exported/path")
-	assert.Equal(t, issuer.DefaultUser, "user1")
-	assert.Equal(t, issuer.MapSubject, true)
+	assert.Equal(t, "Origin", issuer.Name)
+	assert.Equal(t, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Origin_Port.GetInt()), issuer.Issuer)
+	require.Len(t, issuer.BasePaths, 2)
+	assert.Equal(t, "/foo/bar/baz", issuer.BasePaths[0])
+	assert.Equal(t, "/another/exported/path", issuer.BasePaths[1])
+	assert.Equal(t, "user1", issuer.DefaultUser)
+	assert.True(t, issuer.MapSubject)
 }
 
 func TestWriteOriginAuthFiles(t *testing.T) {
@@ -662,10 +663,6 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	issuer3URL.Scheme = "https"
 	issuer3URL.Host = "issuer3.com"
 
-	issuer4URL := url.URL{}
-	issuer4URL.Scheme = "https"
-	issuer4URL.Host = "issuer4.com"
-
 	PublicCaps := server_structs.Capabilities{
 		PublicReads: true,
 		Reads:       true,
@@ -743,6 +740,8 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Server.WebPort", 8444)
 	viper.Set("Server.Hostname", "origin.example.com")
+	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
+
 	err := config.InitServer(ctx, config.OriginType)
 	require.Nil(t, err)
 

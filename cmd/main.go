@@ -27,6 +27,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -65,9 +66,9 @@ func handleCLI(args []string) error {
 		err := Execute()
 		if errors.Is(err, server_utils.ErrInvalidOriginConfig) {
 			mode := param.Origin_StorageType.GetString()
-			backendType, _ := server_utils.ParseOriginStorageType(mode)
+			backendType, _ := server_structs.ParseOriginStorageType(mode)
 			switch backendType {
-			case server_utils.OriginStoragePosix:
+			case server_structs.OriginStoragePosix:
 				fmt.Fprintf(os.Stderr, `
 Export information was not correct.
 For POSIX, to specify exports via the command line, use:
@@ -89,7 +90,7 @@ Alternatively, specify Origin.Exports in the parameters.yaml file:
 
 to export the directories /mnt/foo and /mnt/test under the namespace prefixes /bar and /baz, respectively (with listed permissions).
 `)
-			case server_utils.OriginStorageS3:
+			case server_structs.OriginStorageS3:
 				fmt.Fprintf(os.Stderr, `
 Export information was not correct.
 To specify exports via the command line, use:
@@ -117,7 +118,7 @@ Origin:
 
 to export the S3 bucket my-bucket from https://my-s3-url.com under the namespace prefix /my/prefix (with listed permissions).
 `)
-			case server_utils.OriginStorageHTTPS:
+			case server_structs.OriginStorageHTTPS:
 				fmt.Fprintf(os.Stderr, `
 Export information was not correct.
 HTTPS exports must be specified via configuration file.  Example:
@@ -128,7 +129,7 @@ Origin:
 	HttpServiceUrl: "https://example.com/testfiles"
 	Capabilities: ["PublicReads", "Writes", "Listings"]
 `)
-			case server_utils.OriginStorageXRoot:
+			case server_structs.OriginStorageXRoot:
 				fmt.Fprintf(os.Stderr, `
 Export information was not correct.
 For xroot backends, specify exports via the command line using the -v flag.  Example:

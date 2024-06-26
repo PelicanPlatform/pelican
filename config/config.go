@@ -1331,11 +1331,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		ost := param.Origin_StorageType.GetString()
 		switch ost {
 		case "posix":
-			viper.SetDefault("Origin.SelfTest", true)
+			viper.SetDefault(param.Origin_SelfTest.GetName(), true)
+			viper.SetDefault(param.Origin_DirectorTest.GetName(), true)
 		case "https":
-			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-			viper.Set("Origin.SelfTest", false)
-
 			httpSvcUrl := param.Origin_HttpServiceUrl.GetString()
 			if httpSvcUrl == "" {
 				return errors.New("Origin.HTTPServiceUrl may not be empty when the origin is configured with an https backend")
@@ -1345,9 +1343,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 				return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
 			}
 		case "globus":
-			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-			viper.Set("Origin.SelfTest", false)
-
 			pvd, err := GetOIDCProdiver()
 			if err != nil || pvd != Globus {
 				log.Info("Server OIDC provider is not Globus. Use Origin.GlobusClientIDFile instead")
@@ -1373,9 +1368,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 				return errors.Wrap(err, "Origin.GlobusClientSecretFile is not a valid filepath")
 			}
 		case "xroot":
-			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-			viper.Set("Origin.SelfTest", false)
-
 			xrootSvcUrl := param.Origin_XRootServiceUrl.GetString()
 			if xrootSvcUrl == "" {
 				return errors.New("Origin.XRootServiceUrl may not be empty when the origin is configured with an xroot backend")
@@ -1385,9 +1377,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 				return errors.Wrap(err, "unable to parse Origin.XrootServiceUrl as a URL")
 			}
 		case "s3":
-			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-			viper.Set("Origin.SelfTest", false)
-
 			s3SvcUrl := param.Origin_S3ServiceUrl.GetString()
 			if s3SvcUrl == "" {
 				return errors.New("Origin.S3ServiceUrl may not be empty when the origin is configured with an s3 backend")
@@ -1395,6 +1384,17 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			_, err := url.Parse(s3SvcUrl)
 			if err != nil {
 				return errors.Wrap(err, "unable to parse Origin.S3ServiceUrl as a URL")
+			}
+		}
+
+		if ost != "posix" {
+			if param.Origin_SelfTest.GetBool() {
+				log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+				viper.Set(param.Origin_SelfTest.GetName(), false)
+			}
+			if param.Origin_DirectorTest.GetBool() {
+				log.Warning("Origin.DirectorTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+				viper.Set(param.Origin_DirectorTest.GetName(), false)
 			}
 		}
 	}
