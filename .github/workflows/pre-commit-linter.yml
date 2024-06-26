@@ -8,7 +8,7 @@ on:
       - main
   pull_request:
 jobs:
-  linter:
+  go-linter:
     name: linter
     runs-on: ubuntu-latest
     steps:
@@ -42,3 +42,20 @@ jobs:
 
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
+
+  prettier-linter:
+    name: prettier-linter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Move to the web repository
+        run: |
+          cd web_ui/frontend
+          npm install
+          npm run format
