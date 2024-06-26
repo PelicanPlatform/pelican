@@ -155,6 +155,7 @@ func getLinkDepth(filepath, prefix string) (int, error) {
 	return pathDepth, nil
 }
 
+// Aggregate various request parameters from header and query to a single url.Values struct
 func getRequestParameters(req *http.Request) (requestParams url.Values) {
 	requestParams = url.Values{}
 	authz := ""
@@ -174,12 +175,17 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 		timeout = timeoutHeader[0]
 	}
 
+	skipStat := req.URL.Query().Has("skipstat")
+
 	// url.Values.Encode will help us escape all them
 	if authz != "" {
 		requestParams.Add("authz", authz)
 	}
 	if timeout != "" {
 		requestParams.Add("pelican.timeout", timeout)
+	}
+	if skipStat {
+		requestParams.Add("skipstat", "")
 	}
 	return
 }
@@ -397,16 +403,6 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
 
-	disableStat := !param.Director_EnableStat.GetBool()
-
-	// Skip the stat check for object availability
-	// If either disableStat or skipstat is set, then skip the stat query
-	skipStat := ginCtx.Request.URL.Query().Has("skipstat") || disableStat
-
-	if skipStat {
-		log.Debugf("stat is skipped for object %s", reqPath)
-	}
-
 	// /pelican/monitoring is the path for director-based health test
 	// where we have /director/healthTest API to mock a file for the cache to get
 	if strings.HasPrefix(reqPath, "/pelican/monitoring/") {
@@ -418,10 +414,25 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// do the geolocation song and dance if we want to get the closest origin...
 	ipAddr, err := getRealIP(ginCtx)
 	if err != nil {
+		log.Errorln("Error in getRealIP:", err)
+		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Internal error: Unable to determine client IP",
+		})
 		return
 	}
 
 	reqParams := getRequestParameters(ginCtx.Request)
+
+	disableStat := !param.Director_EnableStat.GetBool()
+
+	// Skip the stat check for object availability
+	// If either disableStat or skipstat is set, then skip the stat query
+	skipStat := reqParams.Has("skipstat") || disableStat
+
+	if skipStat {
+		log.Debugf("stat is skipped for object %s", reqPath)
+	}
 
 	namespaceAd, originAds, _ := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should

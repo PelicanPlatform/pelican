@@ -731,6 +731,22 @@ func TestGetRequestParameters(t *testing.T) {
 	expected = url.Values{"pelican.timeout": []string{"3s"}}
 	assert.EqualValues(t, expected, escapedParam)
 
+	// Test passing skipstat via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?skipstat", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{"skipstat": []string{""}}
+	assert.EqualValues(t, expected, escapedParam)
+	assert.True(t, escapedParam.Has("skipstat"))
+
+	// Test passing skipstat with value via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?skipstat=true", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{"skipstat": []string{""}}
+	assert.EqualValues(t, expected, escapedParam)
+	assert.True(t, escapedParam.Has("skipstat"))
+
 	// Test passing nothing
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
