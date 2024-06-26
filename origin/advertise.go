@@ -80,6 +80,10 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 
 	var nsAds []server_structs.NamespaceAdV2
 	var prefixes []string
+	ost, err := server_structs.ParseOriginStorageType(param.Origin_StorageType.GetString())
+	if err != nil {
+		return nil, err
+	}
 	originExports, err := server_utils.GetOriginExports()
 	if err != nil {
 		return nil, err
@@ -141,6 +145,8 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 			BasePaths: prefixes,
 			IssuerUrl: *issuerUrl,
 		}},
+		StorageType:         ost,
+		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
 	}
 
 	if len(prefixes) == 0 {

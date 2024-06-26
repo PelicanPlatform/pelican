@@ -70,20 +70,22 @@ type (
 	}
 
 	ServerAd struct {
-		Name         string       `json:"name"`
-		AuthURL      url.URL      `json:"auth_url"`
-		BrokerURL    url.URL      `json:"broker_url"` // The URL of the broker service to use for this host.
-		URL          url.URL      `json:"url"`        // This is server's XRootD URL for file transfer
-		WebURL       url.URL      `json:"web_url"`    // This is server's Web interface and API
-		Type         ServerType   `json:"type"`
-		Latitude     float64      `json:"latitude"`
-		Longitude    float64      `json:"longitude"`
-		Caps         Capabilities `json:"capabilities"` // TODO: Get rid of Writes, Listings, DirectReads in favor of Caps.Writes, Caps.Listings, Caps.DirectReads
-		Writes       bool         `json:"enable_write"`
-		Listings     bool         `json:"enable_listing"`       // True if the origin allows directory listings
-		DirectReads  bool         `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
-		FromTopology bool         `json:"from_topology"`
-		IOLoad       float64      `json:"io_load"`
+		Name                string            `json:"name"`
+		StorageType         OriginStorageType `json:"storageType"` // Only for origins
+		DisableDirectorTest bool              `json:"directorTest"`
+		AuthURL             url.URL           `json:"auth_url"`
+		BrokerURL           url.URL           `json:"broker_url"` // The URL of the broker service to use for this host.
+		URL                 url.URL           `json:"url"`        // This is server's XRootD URL for file transfer
+		WebURL              url.URL           `json:"web_url"`    // This is server's Web interface and API
+		Type                ServerType        `json:"type"`
+		Latitude            float64           `json:"latitude"`
+		Longitude           float64           `json:"longitude"`
+		Caps                Capabilities      `json:"capabilities"` // TODO: Get rid of Writes, Listings, DirectReads in favor of Caps.Writes, Caps.Listings, Caps.DirectReads
+		Writes              bool              `json:"enable_write"`
+		Listings            bool              `json:"enable_listing"`       // True if the origin allows directory listings
+		DirectReads         bool              `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
+		FromTopology        bool              `json:"from_topology"`
+		IOLoad              float64           `json:"io_load"`
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
@@ -102,13 +104,15 @@ type (
 		Name string `json:"name"`
 		// The namespace prefix to register/look up the server in the registry.
 		// The value is /caches/{Xrootd.Sitename} for cache servers and /origins/{Xrootd.Sitename} for the origin servers
-		RegistryPrefix string          `json:"registry-prefix"`
-		BrokerURL      string          `json:"broker-url,omitempty"`
-		DataURL        string          `json:"data-url" binding:"required"`
-		WebURL         string          `json:"web-url,omitempty"`
-		Caps           Capabilities    `json:"capabilities"`
-		Namespaces     []NamespaceAdV2 `json:"namespaces"`
-		Issuer         []TokenIssuer   `json:"token-issuer"`
+		RegistryPrefix      string            `json:"registry-prefix"`
+		BrokerURL           string            `json:"broker-url,omitempty"`
+		DataURL             string            `json:"data-url" binding:"required"`
+		WebURL              string            `json:"web-url,omitempty"`
+		Caps                Capabilities      `json:"capabilities"`
+		Namespaces          []NamespaceAdV2   `json:"namespaces"`
+		Issuer              []TokenIssuer     `json:"token-issuer"`
+		StorageType         OriginStorageType `json:"storageType"`
+		DisableDirectorTest bool              `json:"directorTest"` // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
 	}
 
 	OriginAdvertiseV1 struct {

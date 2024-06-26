@@ -890,16 +890,18 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	}
 
 	sAd := server_structs.ServerAd{
-		Name:        adV2.Name,
-		URL:         *adUrl,
-		WebURL:      *adWebUrl,
-		BrokerURL:   *brokerUrl,
-		Type:        sType,
-		Caps:        adV2.Caps,
-		Writes:      adV2.Caps.Writes,
-		DirectReads: adV2.Caps.DirectReads,
-		Listings:    adV2.Caps.Listings,
-		IOLoad:      0.5, // Defaults to 0.5, as 0 means the server is "very free" which is not necessarily true
+		Name:                adV2.Name,
+		StorageType:         adV2.StorageType,
+		DisableDirectorTest: adV2.DisableDirectorTest,
+		URL:                 *adUrl,
+		WebURL:              *adWebUrl,
+		BrokerURL:           *brokerUrl,
+		Type:                sType,
+		Caps:                adV2.Caps,
+		Writes:              adV2.Caps.Writes,
+		DirectReads:         adV2.Caps.DirectReads,
+		Listings:            adV2.Caps.Listings,
+		IOLoad:              0.5, // Defaults to 0.5, as 0 means the server is "very free" which is not necessarily true
 	}
 
 	recordAd(engineCtx, sAd, &adV2.Namespaces)
