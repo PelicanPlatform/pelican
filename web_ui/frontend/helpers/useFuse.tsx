@@ -1,19 +1,19 @@
-import {useMemo} from 'react'
-import Fuse, {IFuseOptions} from 'fuse.js'
+import { useMemo } from 'react';
+import Fuse, { IFuseOptions } from 'fuse.js';
 
 /**
  * A utility function to get all keys of an object recursively returning a array of keys with . notation
  */
 function getKeys(obj: any, parentKey: string = ''): string[] {
-    let keys: string[] = []
-    for (const key in obj) {
-        if (typeof obj[key] === 'object') {
-            keys = keys.concat(getKeys(obj[key], parentKey + key + '.'))
-        } else {
-            keys.push(parentKey + key)
-        }
+  let keys: string[] = [];
+  for (const key in obj) {
+    if (typeof obj[key] === 'object') {
+      keys = keys.concat(getKeys(obj[key], parentKey + key + '.'));
+    } else {
+      keys.push(parentKey + key);
     }
-    return keys
+  }
+  return keys;
 }
 
 /**
@@ -28,37 +28,36 @@ function getKeys(obj: any, parentKey: string = ''): string[] {
  * @see https://fusejs.io/
  */
 function useFuse<T>(
-    list: T[],
-    searchTerm: string,
-    fuseOptions: IFuseOptions<T> = {}
+  list: T[],
+  searchTerm: string,
+  fuseOptions: IFuseOptions<T> = {}
 ) {
+  const keys = useMemo((): string[] => {
+    if (list.length > 0) {
+      return getKeys(list[0]);
+    }
+    return [];
+  }, [list]);
 
-    const keys = useMemo(() : string[] => {
-        if (list.length > 0) {
-            return getKeys(list[0])
-        }
-        return []
-    }, [list])
+  const options = useMemo(() => {
+    return {
+      ...fuseOptions,
+      keys: keys,
+    };
+  }, [fuseOptions, keys]);
 
-    const options = useMemo(() => {
-        return {
-            ...fuseOptions,
-            keys: keys
-        }
-    }, [fuseOptions, keys])
+  const fuse = useMemo(() => {
+    return new Fuse(list, options);
+  }, [list, options]);
 
-    const fuse = useMemo(() => {
-        return new Fuse(list, options)
-    }, [list, options])
+  const results = useMemo(() => {
+    if (searchTerm === '') {
+      return list;
+    }
+    return fuse.search(searchTerm).map((result) => result.item);
+  }, [fuse, searchTerm]);
 
-    const results = useMemo(() => {
-        if(searchTerm === '') {
-            return list
-        }
-        return fuse.search(searchTerm).map(result => result.item)
-    }, [fuse, searchTerm])
-
-    return results
+  return results;
 }
 
-export default useFuse
+export default useFuse;

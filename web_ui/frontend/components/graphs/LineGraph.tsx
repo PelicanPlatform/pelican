@@ -16,127 +16,177 @@
  *
  ***************************************************************/
 
-"use client"
+'use client';
 
-import dynamic from "next/dynamic";
-import React, {useCallback, useState} from "react";
+import dynamic from 'next/dynamic';
+import React, { useCallback, useState } from 'react';
+import { ChartOptions, ChartDataset } from 'chart.js';
+import { ChartData } from 'chart.js';
+import { DateTime } from 'luxon';
+import { BoxProps, Grid } from '@mui/material';
+
 import {
-    ChartOptions,
-    ChartDataset,
-} from 'chart.js';
-import {ChartData} from "chart.js";
-import {DateTime} from "luxon";
-import {BoxProps, Grid} from "@mui/material";
-
-import {query_basic, query_rate, TimeDuration} from "@/components/graphs/prometheus";
-import {GraphDrawer, RateInput, ResolutionInput} from "@/components/graphs/Drawer";
-const Graph = dynamic(
-    () => import('@/components/graphs/Graph'),
-    { ssr: false }
-)
+  query_basic,
+  query_rate,
+  TimeDuration,
+} from '@/components/graphs/prometheus';
+import {
+  GraphDrawer,
+  RateInput,
+  ResolutionInput,
+} from '@/components/graphs/Drawer';
+const Graph = dynamic(() => import('@/components/graphs/Graph'), {
+  ssr: false,
+});
 
 interface RateGraphDrawerProps {
-    reset: Function;
-    resolution: TimeDuration;
-    duration: TimeDuration;
-    time: DateTime;
-    setResolution: Function
-    setDuration: Function
-    setTime: Function
+  reset: Function;
+  resolution: TimeDuration;
+  duration: TimeDuration;
+  time: DateTime;
+  setResolution: Function;
+  setDuration: Function;
+  setTime: Function;
 }
 
-function LineGraphDrawer({reset, resolution, duration, time, setResolution, setDuration, setTime}: RateGraphDrawerProps) {
-    return (
-        <GraphDrawer duration={duration} time={time} setDuration={setDuration} setTime={setTime} reset={reset}>
-            <Grid container spacing={2}>
-                <Grid item xs={12}>
-                    <ResolutionInput resolution={resolution} setResolution={setResolution} />
-                </Grid>
-            </Grid>
-        </GraphDrawer>
-    )
+function LineGraphDrawer({
+  reset,
+  resolution,
+  duration,
+  time,
+  setResolution,
+  setDuration,
+  setTime,
+}: RateGraphDrawerProps) {
+  return (
+    <GraphDrawer
+      duration={duration}
+      time={time}
+      setDuration={setDuration}
+      setTime={setTime}
+      reset={reset}
+    >
+      <Grid container spacing={2}>
+        <Grid item xs={12}>
+          <ResolutionInput
+            resolution={resolution}
+            setResolution={setResolution}
+          />
+        </Grid>
+      </Grid>
+    </GraphDrawer>
+  );
 }
 
 interface LineGraphProps {
-    boxProps?: BoxProps;
-    metrics: string[];
-    duration?: TimeDuration;
-    resolution?: TimeDuration;
-    options?: ChartOptions<"line">
-    datasetOptions?: Partial<ChartDataset<"line">> | Partial<ChartDataset<"line">>[];
-    datasetTransform?: (x: ChartDataset<"line">) => ChartDataset<"line">
+  boxProps?: BoxProps;
+  metrics: string[];
+  duration?: TimeDuration;
+  resolution?: TimeDuration;
+  options?: ChartOptions<'line'>;
+  datasetOptions?:
+    | Partial<ChartDataset<'line'>>
+    | Partial<ChartDataset<'line'>>[];
+  datasetTransform?: (x: ChartDataset<'line'>) => ChartDataset<'line'>;
 }
 
 async function getData(
-    metrics: string[],
-    duration: TimeDuration,
-    resolution: TimeDuration,
-    time: DateTime,
-    datasetOptions: Partial<ChartDataset<"line">> | Partial<ChartDataset<"line">>[],
-    datasetTranform?: (x: ChartDataset<"line">) => ChartDataset<"line">
+  metrics: string[],
+  duration: TimeDuration,
+  resolution: TimeDuration,
+  time: DateTime,
+  datasetOptions:
+    | Partial<ChartDataset<'line'>>
+    | Partial<ChartDataset<'line'>>[],
+  datasetTranform?: (x: ChartDataset<'line'>) => ChartDataset<'line'>
 ) {
-    let chartData: ChartData<"line", any, any> = {
-        datasets: await Promise.all(metrics.map(async (metric, index) => {
+  let chartData: ChartData<'line', any, any> = {
+    datasets: await Promise.all(
+      metrics.map(async (metric, index) => {
+        let datasetOption: Partial<ChartDataset<'line'>> = {};
+        if (datasetOptions instanceof Array) {
+          try {
+            datasetOption = datasetOptions[index];
+          } catch (e) {
+            console.error(
+              'datasetOptions is an array, but the number of elements < the number of metrics'
+            );
+          }
+        } else {
+          datasetOption = datasetOptions;
+        }
 
-            let datasetOption: Partial<ChartDataset<"line">> = {}
-            if(datasetOptions instanceof Array){
-                try {
-                    datasetOption = datasetOptions[index]
-                } catch (e) {
-                    console.error("datasetOptions is an array, but the number of elements < the number of metrics")
-                }
-            } else {
-                datasetOption = datasetOptions
-            }
+        let updatedTime = time;
+        if (updatedTime.hasSame(DateTime.now(), 'day')) {
+          updatedTime = DateTime.now();
+        }
 
-            let updatedTime = time
-            if (updatedTime.hasSame(DateTime.now(), "day")) {
-                updatedTime = DateTime.now()
-            }
+        let dataset = {
+          data: await query_basic({
+            metric,
+            duration: duration,
+            resolution: resolution,
+            time: updatedTime,
+          }),
+          ...datasetOption,
+        };
 
-            let dataset = {
-                data: (await query_basic({metric, duration:duration, resolution:resolution, time:updatedTime})),
-                ...datasetOption
-            }
+        if (datasetTranform) {
+          return datasetTranform(dataset);
+        }
 
-            if(datasetTranform){
-                return datasetTranform(dataset)
-            }
+        return dataset;
+      })
+    ),
+  };
 
-            return dataset
-        }))
-    }
-
-    return chartData
+  return chartData;
 }
 
-export default function LineGraph({ boxProps, metrics, duration=new TimeDuration(31, "d"), resolution=new TimeDuration(1, "h"), options, datasetOptions = {}, datasetTransform}: LineGraphProps) {
+export default function LineGraph({
+  boxProps,
+  metrics,
+  duration = new TimeDuration(31, 'd'),
+  resolution = new TimeDuration(1, 'h'),
+  options,
+  datasetOptions = {},
+  datasetTransform,
+}: LineGraphProps) {
+  let reset = useCallback(() => {
+    setDuration(duration.copy());
+    setResolution(resolution.copy());
+    setTime(DateTime.now());
+  }, [duration, resolution]);
 
-    let reset = useCallback(() => {
-        setDuration(duration.copy())
-        setResolution(resolution.copy())
-        setTime(DateTime.now())
-    }, [duration, resolution])
+  let [_duration, setDuration] = useState(duration);
+  let [_resolution, setResolution] = useState(resolution);
+  let [_time, setTime] = useState<DateTime>(DateTime.now());
 
-    let [_duration, setDuration] = useState(duration)
-    let [_resolution, setResolution] = useState(resolution)
-    let [_time, setTime] = useState<DateTime>(DateTime.now())
-
-    return (
-        <Graph
-            getData={() => getData(metrics, _duration, _resolution, _time, datasetOptions, datasetTransform)}
-            options={options}
-            drawer={<LineGraphDrawer
-                reset={reset}
-                duration={_duration}
-                setDuration={setDuration}
-                resolution={_resolution}
-                setResolution={setResolution}
-                time={_time}
-                setTime={setTime}
-            />}
-            boxProps={boxProps}
+  return (
+    <Graph
+      getData={() =>
+        getData(
+          metrics,
+          _duration,
+          _resolution,
+          _time,
+          datasetOptions,
+          datasetTransform
+        )
+      }
+      options={options}
+      drawer={
+        <LineGraphDrawer
+          reset={reset}
+          duration={_duration}
+          setDuration={setDuration}
+          resolution={_resolution}
+          setResolution={setResolution}
+          time={_time}
+          setTime={setTime}
         />
-    )
-
+      }
+      boxProps={boxProps}
+    />
+  );
 }

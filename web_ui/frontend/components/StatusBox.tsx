@@ -16,147 +16,157 @@
  *
  ***************************************************************/
 
-"use client"
+'use client';
 
-import {Box, Grid, Skeleton, Typography} from "@mui/material";
-import React, {useEffect, useState} from "react";
-import {DateTime} from "luxon";
-import { alpha, useTheme } from "@mui/material";
-import {getErrorMessage} from "@/helpers/util";
+import { Box, Grid, Skeleton, Typography } from '@mui/material';
+import React, { useEffect, useState } from 'react';
+import { DateTime } from 'luxon';
+import { alpha, useTheme } from '@mui/material';
+import { getErrorMessage } from '@/helpers/util';
 
 interface StatusDisplayProps {
-    component: string;
-    status: string;
-    message?: string;
+  component: string;
+  status: string;
+  message?: string;
 }
 
-function StatusDisplay({component, status, message}: StatusDisplayProps) {
+function StatusDisplay({ component, status, message }: StatusDisplayProps) {
+  const theme = useTheme();
 
-    const theme = useTheme()
+  let backgroundColor: string;
+  switch (status) {
+    case 'ok':
+      backgroundColor = theme.palette.success.light;
+      break;
+    case 'warning':
+      backgroundColor = theme.palette.warning.light;
+      break;
+    case 'critical':
+      backgroundColor = theme.palette.error.light;
+      break;
+    default:
+      backgroundColor = theme.palette.warning.light;
+  }
 
-    let backgroundColor: string
-    switch (status) {
-        case "ok":
-            backgroundColor = theme.palette.success.light
-            break
-        case "warning":
-            backgroundColor = theme.palette.warning.light
-            break
-        case "critical":
-            backgroundColor = theme.palette.error.light
-            break
-        default:
-            backgroundColor = theme.palette.warning.light
-    }
+  let backgroundColorFinal = alpha(backgroundColor, 0.5);
 
-    let backgroundColorFinal = alpha(backgroundColor, 0.5)
+  switch (component) {
+    case 'xrootd':
+      component = 'XRootD';
+      break;
+    case 'web-ui':
+      component = 'Web UI';
+      break;
+    case 'cmsd':
+      component = 'CMSD';
+      break;
+    case 'federation':
+      component = 'Federation';
+      break;
+    case 'director':
+      component = 'Director';
+      break;
+    case 'registry':
+      component = 'Registry';
+      break;
+    default:
+      // Capitalize the component name by default if it has more than 1 letters
+      component =
+        component.length > 1
+          ? component.charAt(0).toUpperCase() + component.slice(1)
+          : component;
+  }
 
-    switch (component) {
-        case "xrootd":
-            component = "XRootD"
-            break
-        case "web-ui":
-            component = "Web UI"
-            break
-        case "cmsd":
-            component = "CMSD"
-            break
-        case "federation":
-            component = "Federation"
-            break
-        case "director":
-            component = "Director"
-            break
-        case "registry":
-            component = "Registry"
-            break
-        default:
-            // Capitalize the component name by default if it has more than 1 letters
-            component = component.length > 1 ? component.charAt(0).toUpperCase() + component.slice(1) : component
-    }
-
-    return (
-        <Box p={1} px={2} display={"flex"} flexDirection={"column"} bgcolor={backgroundColorFinal} borderRadius={2} mb={1}>
-            <Box>
-                <Typography>
-                    {component}
-                </Typography>
-            </Box>
-            { message ?
-                <Box>
-                    <Typography variant={"body2"}>
-                        {message}
-                    </Typography>
-                </Box> :
-                undefined
-            }
+  return (
+    <Box
+      p={1}
+      px={2}
+      display={'flex'}
+      flexDirection={'column'}
+      bgcolor={backgroundColorFinal}
+      borderRadius={2}
+      mb={1}
+    >
+      <Box>
+        <Typography>{component}</Typography>
+      </Box>
+      {message ? (
+        <Box>
+          <Typography variant={'body2'}>{message}</Typography>
         </Box>
-    )
+      ) : undefined}
+    </Box>
+  );
 }
-
 
 export default function StatusBox() {
+  const [status, setStatus] = useState<any>(undefined);
+  const [updated, setUpdated] = useState<DateTime>(DateTime.now());
+  const [error, setError] = useState<string | undefined>(undefined);
 
-    const [status, setStatus] = useState<any>(undefined)
-    const [updated, setUpdated] = useState<DateTime>(DateTime.now())
-    const [error, setError] = useState<string | undefined>(undefined)
+  let getStatus = async () => {
+    let response = await fetch('/api/v1.0/metrics/health');
 
-    let getStatus = async () => {
-        let response = await fetch("/api/v1.0/metrics/health")
-
-        if(response.ok) {
-            let data = await response.json()
-            setUpdated(DateTime.now())
-            setStatus(data)
-        } else {
-            setError(await getErrorMessage(response))
-        }
-
+    if (response.ok) {
+      let data = await response.json();
+      setUpdated(DateTime.now());
+      setStatus(data);
+    } else {
+      setError(await getErrorMessage(response));
     }
+  };
 
-    useEffect(() => {
-        getStatus()
+  useEffect(() => {
+    getStatus();
 
-        const interval = setInterval(() => getStatus(), 60000);
-        return () => clearInterval(interval)
-    }, [])
+    const interval = setInterval(() => getStatus(), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
-    if(status === undefined || error !== undefined) {
-        return (
-            <Box>
-                <Box minHeight={"300px"}>
-                    {
-                        error ?
-                            <Typography sx={{color: "red"}} variant={"subtitle2"}>{error}</Typography> :
-                            <Box sx={{borderRadius: 2, overflow: "hidden"}}><Skeleton variant={"rectangular"} height={200} width={"100%"} /></Box>
-                    }
-                </Box>
-            </Box>
-        )
-    }
-
-    let statusComponents: any[] = []
-    try {
-        statusComponents = Object.entries(status['components']).map(([component, status]: [string, any]) => {
-            return (
-                <StatusDisplay key={component} component={component} status={status['status']} message={status['message']}/>
-            )
-        })
-    } catch (e) {
-        setError("Error parsing status json: " + e)
-    }
-
-
-
-
+  if (status === undefined || error !== undefined) {
     return (
-        <Box>
-            <Box>
-                {statusComponents}
+      <Box>
+        <Box minHeight={'300px'}>
+          {error ? (
+            <Typography sx={{ color: 'red' }} variant={'subtitle2'}>
+              {error}
+            </Typography>
+          ) : (
+            <Box sx={{ borderRadius: 2, overflow: 'hidden' }}>
+              <Skeleton variant={'rectangular'} height={200} width={'100%'} />
             </Box>
-            <Box>
-                <Typography sx={{color: "grey"}} variant={"subtitle2"}>Last Updated: {updated.toLocaleString(DateTime.DATETIME_MED)}</Typography>
-            </Box>
+          )}
         </Box>
-    )
+      </Box>
+    );
+  }
+
+  let statusComponents: any[] = [];
+  try {
+    statusComponents = Object.entries(status['components']).map(
+      ([component, status]: [string, any]) => {
+        return (
+          <StatusDisplay
+            key={component}
+            component={component}
+            status={status['status']}
+            message={status['message']}
+          />
+        );
+      }
+    );
+  } catch (e) {
+    setError('Error parsing status json: ' + e);
+  }
+
+  return (
+    <Box>
+      <Box>{statusComponents}</Box>
+      <Box>
+        <Typography sx={{ color: 'grey' }} variant={'subtitle2'}>
+          Last Updated: {updated.toLocaleString(DateTime.DATETIME_MED)}
+        </Typography>
+      </Box>
+    </Box>
+  );
 }
