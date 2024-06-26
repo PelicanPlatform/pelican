@@ -16,62 +16,54 @@
  *
  ***************************************************************/
 
-"use client"
+'use client';
 
-import {
-    Box,
-    Grid,
-    Collapse,
-    Alert, Skeleton
-} from "@mui/material";
-import React, {useEffect, useState} from "react";
+import { Box, Grid, Collapse, Alert, Skeleton } from '@mui/material';
+import React, { useEffect, useState } from 'react';
 
-import {Alert as AlertType, Namespace} from "@/index";
-import Form from "@/app/registry/components/Form";
-import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
-import {submitNamespaceForm} from "@/app/registry/components/util";
-import type {NamespaceFormPage} from "./CustomRegistrationField/index.d";
+import { Alert as AlertType, Namespace } from '@/index';
+import Form from '@/app/registry/components/Form';
+import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
+import { submitNamespaceForm } from '@/app/registry/components/util';
+import type { NamespaceFormPage } from './CustomRegistrationField/index.d';
 
+const PostPage = ({ update }: NamespaceFormPage) => {
+  const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined);
+  const [alert, setAlert] = useState<AlertType | undefined>(undefined);
 
-const PostPage = ({update}: NamespaceFormPage) => {
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const fromUrl = urlParams.get('fromUrl');
 
-    const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined)
-    const [alert, setAlert] = useState<AlertType | undefined>(undefined)
+    try {
+      if (fromUrl != undefined) {
+        const parsedUrl = new URL(fromUrl);
+        setFromUrl(parsedUrl);
+      }
+    } catch (e) {
+      setAlert({ severity: 'error', message: 'Invalid fromUrl provided' });
+    }
+  }, []);
 
-    useEffect(() => {
-        const urlParams = new URLSearchParams(window.location.search);
-        const fromUrl = urlParams.get('fromUrl')
+  return (
+    <AuthenticatedContent redirect={true} boxProps={{ width: '100%' }}>
+      <Grid container spacing={2}>
+        <Grid item xs={12} lg={7} justifyContent={'space-between'}>
+          <Collapse in={alert !== undefined}>
+            <Box mb={2}>
+              <Alert severity={alert?.severity}>{alert?.message}</Alert>
+            </Box>
+          </Collapse>
+          <Form
+            onSubmit={async (data) => {
+              setAlert(await submitNamespaceForm(data, fromUrl, update));
+            }}
+          />
+        </Grid>
+        <Grid item lg={2}></Grid>
+      </Grid>
+    </AuthenticatedContent>
+  );
+};
 
-        try {
-            if (fromUrl != undefined) {
-                const parsedUrl = new URL(fromUrl)
-                setFromUrl(parsedUrl)
-            }
-        } catch (e) {
-            setAlert({severity: "error", message: "Invalid fromUrl provided"})
-        }
-    }, [])
-
-    return (
-        <AuthenticatedContent redirect={true} boxProps={{width:"100%"}}>
-            <Grid container spacing={2}>
-                <Grid item xs={12} lg={7} justifyContent={"space-between"}>
-                    <Collapse in={alert !== undefined}>
-                        <Box mb={2}>
-                            <Alert severity={alert?.severity}>{alert?.message}</Alert>
-                        </Box>
-                    </Collapse>
-                    <Form
-                        onSubmit={async (data) => {
-                            setAlert(await submitNamespaceForm(data, fromUrl, update))
-                        }}
-                    />
-                </Grid>
-                <Grid item lg={2}>
-                </Grid>
-            </Grid>
-        </AuthenticatedContent>
-    )
-}
-
-export {PostPage}
+export { PostPage };

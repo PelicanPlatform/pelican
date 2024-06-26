@@ -1,2 +1,2 @@
-export * from "./DirectorCard";
-export * from "./DirectorCardList";
+export * from './DirectorCard';
+export * from './DirectorCardList';

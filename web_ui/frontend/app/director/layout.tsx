@@ -16,42 +16,40 @@
  *
  ***************************************************************/
 
-import {Box, Tooltip} from "@mui/material";
+import { Box, Tooltip } from '@mui/material';
 
-import {Sidebar} from "@/components/layout/Sidebar";
-import Link from "next/link";
-import Image from "next/image";
-import PelicanLogo from "@/public/static/images/PelicanPlatformLogo_Icon.png";
-import IconButton from "@mui/material/IconButton";
-import BuildIcon from "@mui/icons-material/Build";
-import Main from "@/components/layout/Main";
+import { Sidebar } from '@/components/layout/Sidebar';
+import Link from 'next/link';
+import Image from 'next/image';
+import PelicanLogo from '@/public/static/images/PelicanPlatformLogo_Icon.png';
+import IconButton from '@mui/material/IconButton';
+import BuildIcon from '@mui/icons-material/Build';
+import Main from '@/components/layout/Main';
 
 export const metadata = {
-    title: 'Pelican Director',
-    description: 'Software designed to make data distribution easy',
-}
+  title: 'Pelican Director',
+  description: 'Software designed to make data distribution easy',
+};
 
 export default function RootLayout({
-                                       children,
-                                   }: {
-    children: React.ReactNode
+  children,
+}: {
+  children: React.ReactNode;
 }) {
-    return (
-        <Box display={"flex"} flexDirection={"row"}>
-            <Sidebar>
-                <Box pt={1}>
-                    <Tooltip title={"Config"} placement={"right"}>
-                        <Link href={"/config/"}>
-                            <IconButton>
-                                <BuildIcon/>
-                            </IconButton>
-                        </Link>
-                    </Tooltip>
-                </Box>
-            </Sidebar>
-            <Main>
-                {children}
-            </Main>
+  return (
+    <Box display={'flex'} flexDirection={'row'}>
+      <Sidebar>
+        <Box pt={1}>
+          <Tooltip title={'Config'} placement={'right'}>
+            <Link href={'/config/'}>
+              <IconButton>
+                <BuildIcon />
+              </IconButton>
+            </Link>
+          </Tooltip>
         </Box>
-    )
+      </Sidebar>
+      <Main>{children}</Main>
+    </Box>
+  );
 }

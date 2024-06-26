@@ -1,39 +1,47 @@
-import {FormControl, InputLabel, MenuItem, Select, Checkbox} from "@mui/material";
-import React, {ChangeEvent, ReactNode, SyntheticEvent, useMemo} from "react";
+import {
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Checkbox,
+} from '@mui/material';
+import React, { ChangeEvent, ReactNode, SyntheticEvent, useMemo } from 'react';
 
-import { createId} from "@/components/Config/util";
-import FormHelperText from "@mui/material/FormHelperText";
-import type { CustomRegistrationFieldProps } from "./index.d";
+import { createId } from '@/components/Config/util';
+import FormHelperText from '@mui/material/FormHelperText';
+import type { CustomRegistrationFieldProps } from './index.d';
 
+const BooleanField = ({
+  onChange,
+  displayed_name,
+  name,
+  required,
+  description,
+  value,
+}: CustomRegistrationFieldProps<boolean>) => {
+  const id = useMemo(() => createId(name), [name]);
+  const labelId = useMemo(() => `${id}-label`, [id]);
 
-const BooleanField = ({onChange, displayed_name, name, required, description, value}: CustomRegistrationFieldProps<boolean>) => {
-
-    const id = useMemo(() => createId(name), [name])
-    const labelId = useMemo(() => `${id}-label`, [id])
-
-    return  (
-        <FormControl
-            fullWidth
-            size={"small"}
-        >
-            <InputLabel id={labelId}>{displayed_name}</InputLabel>
-            <Select
-                size="small"
-                labelId={labelId}
-                id={id}
-                label={displayed_name}
-                name={name}
-                required={required}
-                value={value == undefined ? "" : value.toString()}
-                onChange={(e) => onChange(e.target.value === "true")}
-            >
-                <MenuItem value={"true"}>True</MenuItem>
-                <MenuItem value={"false"}>False</MenuItem>
-            </Select>
-            { description && <FormHelperText>{description}</FormHelperText> }
-        </FormControl>
-    )
-}
+  return (
+    <FormControl fullWidth size={'small'}>
+      <InputLabel id={labelId}>{displayed_name}</InputLabel>
+      <Select
+        size='small'
+        labelId={labelId}
+        id={id}
+        label={displayed_name}
+        name={name}
+        required={required}
+        value={value == undefined ? '' : value.toString()}
+        onChange={(e) => onChange(e.target.value === 'true')}
+      >
+        <MenuItem value={'true'}>True</MenuItem>
+        <MenuItem value={'false'}>False</MenuItem>
+      </Select>
+      {description && <FormHelperText>{description}</FormHelperText>}
+    </FormControl>
+  );
+};
 
 export default BooleanField;
-export {BooleanField};
+export { BooleanField };

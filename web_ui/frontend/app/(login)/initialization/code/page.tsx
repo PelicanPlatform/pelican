@@ -16,109 +16,110 @@
  *
  ***************************************************************/
 
-"use client"
+'use client';
 
-import {Box, Typography, Grow} from "@mui/material";
-import { useRouter } from 'next/navigation'
-import { useState } from "react";
+import { Box, Typography, Grow } from '@mui/material';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
-import CodeInput, {Code} from "../../components/CodeInput";
-import LoadingButton from "../../components/LoadingButton";
-import {getErrorMessage} from "@/helpers/util";
+import CodeInput, { Code } from '../../components/CodeInput';
+import LoadingButton from '../../components/LoadingButton';
+import { getErrorMessage } from '@/helpers/util';
 
 export default function Home() {
+  const router = useRouter();
+  let [code, _setCode] = useState<Code>([
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+  ]);
+  let [loading, setLoading] = useState(false);
+  let [error, setError] = useState<string | undefined>(undefined);
 
-    const router = useRouter()
-    let [code, _setCode] = useState<Code>([undefined, undefined, undefined, undefined, undefined, undefined])
-    let [loading, setLoading] = useState(false);
-    let [error, setError] = useState<string | undefined>(undefined);
+  const setCode = (code: Code) => {
+    _setCode(code);
+    setError(undefined);
 
-    const setCode = (code: Code ) => {
-
-        _setCode(code)
-        setError(undefined)
-
-        if(!code.includes(undefined)) {
-            submit(code.map(x => x!.toString()).join(""))
-        }
+    if (!code.includes(undefined)) {
+      submit(code.map((x) => x!.toString()).join(''));
     }
+  };
 
-    async function submit(code: string) {
+  async function submit(code: string) {
+    setLoading(true);
 
-        setLoading(true)
+    try {
+      let response = await fetch('/api/v1.0/auth/initLogin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code: code,
+        }),
+      });
 
-        try {
-            let response = await fetch("/api/v1.0/auth/initLogin", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    "code": code
-                })
-            })
-
-            if(response.ok){
-                router.push("../password/")
-            } else {
-                setLoading(false)
-                setError(await getErrorMessage(response))
-            }
-        } catch {
-            setLoading(false)
-            setError("Could not connect to server")
-        }
-
+      if (response.ok) {
+        router.push('../password/');
+      } else {
+        setLoading(false);
+        setError(await getErrorMessage(response));
+      }
+    } catch {
+      setLoading(false);
+      setError('Could not connect to server');
     }
+  }
 
-    function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
 
-        e.preventDefault()
-
-        if(!code.includes(undefined)) {
-            submit(code.map(x => x!.toString()).join(""))
-        }
+    if (!code.includes(undefined)) {
+      submit(code.map((x) => x!.toString()).join(''));
     }
+  }
 
-    return (
-        <>
-            <Box m={"auto"} mt={12}  display={"flex"} flexDirection={"column"}>
-                <Box>
-                    <Typography textAlign={"center"} variant={"h3"} component={"h3"}>
-                        Activate Website
-                    </Typography>
-                    <Typography textAlign={"center"} variant={"h6"} component={"p"}>
-                        Enter the activation code displayed on the command line
-                    </Typography>
-                </Box>
-                <Box pt={3} mx={"auto"}>
-                    <form onSubmit={onSubmit} action="#">
-                        <CodeInput setCode={setCode} length={6}/>
-                        <Box mt={2} display={"flex"} flexDirection={"column"}>
-                            <Grow in={error !== undefined}>
-                                <Typography
-                                    textAlign={"center"}
-                                    variant={"subtitle2"}
-                                    color={"error.main"}
-                                    mb={1}
-                                >
-                                    {error}
-                                </Typography>
-                            </Grow>
-                            <LoadingButton
-                                variant="outlined"
-                                sx={{margin: "auto"}}
-                                color={"primary"}
-                                type={"submit"}
-                                loading={loading}
-                            >
-                                <span>Activate</span>
-                            </LoadingButton>
-                        </Box>
-                    </form>
-
-                </Box>
+  return (
+    <>
+      <Box m={'auto'} mt={12} display={'flex'} flexDirection={'column'}>
+        <Box>
+          <Typography textAlign={'center'} variant={'h3'} component={'h3'}>
+            Activate Website
+          </Typography>
+          <Typography textAlign={'center'} variant={'h6'} component={'p'}>
+            Enter the activation code displayed on the command line
+          </Typography>
+        </Box>
+        <Box pt={3} mx={'auto'}>
+          <form onSubmit={onSubmit} action='#'>
+            <CodeInput setCode={setCode} length={6} />
+            <Box mt={2} display={'flex'} flexDirection={'column'}>
+              <Grow in={error !== undefined}>
+                <Typography
+                  textAlign={'center'}
+                  variant={'subtitle2'}
+                  color={'error.main'}
+                  mb={1}
+                >
+                  {error}
+                </Typography>
+              </Grow>
+              <LoadingButton
+                variant='outlined'
+                sx={{ margin: 'auto' }}
+                color={'primary'}
+                type={'submit'}
+                loading={loading}
+              >
+                <span>Activate</span>
+              </LoadingButton>
             </Box>
-        </>
-    )
+          </form>
+        </Box>
+      </Box>
+    </>
+  );
 }

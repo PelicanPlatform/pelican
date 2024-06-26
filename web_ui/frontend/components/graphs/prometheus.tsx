@@ -16,123 +16,140 @@
  *
  ***************************************************************/
 
+import { ChartData } from 'chart.js';
 
-import {ChartData} from "chart.js";
-
-import {DateTime} from "luxon";
+import { DateTime } from 'luxon';
 
 let getTimeDuration = (value: string, defaultValue: number = 1) => {
-    let _value = value.match(/\d+/)
-    if(_value){
-        return parseInt(_value[0])
-    }
+  let _value = value.match(/\d+/);
+  if (_value) {
+    return parseInt(_value[0]);
+  }
 
-    console.error("Invalid time duration, using default value: " + defaultValue.toString())
-    return defaultValue
-}
+  console.error(
+    'Invalid time duration, using default value: ' + defaultValue.toString()
+  );
+  return defaultValue;
+};
 
-let getDurationType = (value: string, defaultType: string = "h") => {
-    let _type = value.match(/\D+/)
-    if(_type){
-        return _type[0]
-    }
+let getDurationType = (value: string, defaultType: string = 'h') => {
+  let _type = value.match(/\D+/);
+  if (_type) {
+    return _type[0];
+  }
 
-    console.error(`Invalid time duration type (${value}), using default value: ` + defaultType.toString())
-    return defaultType
-}
+  console.error(
+    `Invalid time duration type (${value}), using default value: ` +
+      defaultType.toString()
+  );
+  return defaultType;
+};
 
-export type DurationType = "ms" | "s" | "m" | "h" | "d" | "w" | "y";
+export type DurationType = 'ms' | 's' | 'm' | 'h' | 'd' | 'w' | 'y';
 
 export class TimeDuration {
-    value: number;
-    type: DurationType;
+  value: number;
+  type: DurationType;
 
-    constructor(value: number, type: DurationType) {
-        this.value = value;
-        this.type = type;
-    }
+  constructor(value: number, type: DurationType) {
+    this.value = value;
+    this.type = type;
+  }
 
-    toString(){
-        return `${this.value}${this.type}`
-    }
+  toString() {
+    return `${this.value}${this.type}`;
+  }
 
-    static fromString(value: string){
-        let _value= getTimeDuration(value)
-        let _type = getDurationType(value) as DurationType
+  static fromString(value: string) {
+    let _value = getTimeDuration(value);
+    let _type = getDurationType(value) as DurationType;
 
-        return new TimeDuration(_value, _type)
-    }
+    return new TimeDuration(_value, _type);
+  }
 
-    copy(){
-        return new TimeDuration(this.value, this.type)
-    }
+  copy() {
+    return new TimeDuration(this.value, this.type);
+  }
 }
 
 export interface getDataFunction {
-    (): Promise<ChartData<"line", any, any>>
+  (): Promise<ChartData<'line', any, any>>;
 }
 
 export interface DataPoint {
-    x: number;
-    y: number;
+  x: number;
+  y: number;
 }
 
-export async function query_raw(query: string, time?: Number): Promise<DataPoint[]> {
+export async function query_raw(
+  query: string,
+  time?: Number
+): Promise<DataPoint[]> {
+  const url = new URL(window.location.origin + '/api/v1.0/prometheus/query');
+  url.searchParams.append('query', query);
+  if (time) {
+    url.searchParams.append('time', time.toString());
+  }
 
-    const url = new URL(window.location.origin + "/api/v1.0/prometheus/query")
-    url.searchParams.append("query", query)
-    if(time) {
-        url.searchParams.append("time", time.toString())
-    }
+  let response = await fetch(url.href);
 
+  if (response.status !== 200) {
+    throw new Error(`Prometheus query returned status ${response.status}`);
+  }
 
-    let response = await fetch(url.href)
+  let json = await response.json();
 
-    if (response.status !== 200) {
-        throw new Error(`Prometheus query returned status ${response.status}`)
-    }
+  if (json.status !== 'success') {
+    throw new Error(`Prometheus query returned status ${json.status}`);
+  }
 
-    let json = await response.json()
+  if (json.data.result.length == 0) {
+    return [];
+  }
 
-    if (json.status !== "success") {
-        throw new Error(`Prometheus query returned status ${json.status}`)
-    }
+  // This will return the list of time and value tuples [1693918800,"0"],[1693919100,"0"]...
+  let prometheusTuples = json.data.result[0].values;
 
+  // Chart.js expects milliseconds since epoch
+  let data: DataPoint[] = prometheusTuples.map((tuple: any) => {
+    return { x: tuple[0] * 1000, y: parseFloat(tuple[1]) };
+  });
 
-    if(json.data.result.length == 0){
-        return []
-    }
-
-    // This will return the list of time and value tuples [1693918800,"0"],[1693919100,"0"]...
-    let prometheusTuples = json.data.result[0].values
-
-    // Chart.js expects milliseconds since epoch
-    let data: DataPoint[] = prometheusTuples.map((tuple: any) => { return {x: tuple[0] * 1000, y: parseFloat(tuple[1])}})
-
-    return data
+  return data;
 }
 
 interface QueryBasicOptions {
-    metric: string;
-    duration: TimeDuration;
-    resolution: TimeDuration;
-    time?: DateTime;
+  metric: string;
+  duration: TimeDuration;
+  resolution: TimeDuration;
+  time?: DateTime;
 }
 
-export async function query_basic({metric, duration, resolution, time}: QueryBasicOptions): Promise<DataPoint[]> {
-    let query = `${metric}[${duration.toString()}:${resolution.toString()}]`
-    return query_raw(query, time?.toSeconds())
+export async function query_basic({
+  metric,
+  duration,
+  resolution,
+  time,
+}: QueryBasicOptions): Promise<DataPoint[]> {
+  let query = `${metric}[${duration.toString()}:${resolution.toString()}]`;
+  return query_raw(query, time?.toSeconds());
 }
 
 interface QueryRateOptions {
-    metric: string;
-    rate: TimeDuration;
-    duration: TimeDuration;
-    resolution: TimeDuration;
-    time?: DateTime;
+  metric: string;
+  rate: TimeDuration;
+  duration: TimeDuration;
+  resolution: TimeDuration;
+  time?: DateTime;
 }
 
-export async function query_rate({metric, rate, duration, resolution, time}: QueryRateOptions): Promise<DataPoint[]>  {
-    let query = `rate(${metric}[${rate.toString()}])[${duration.toString()}:${resolution.toString()}]`
-    return query_raw(query, time?.toSeconds())
+export async function query_rate({
+  metric,
+  rate,
+  duration,
+  resolution,
+  time,
+}: QueryRateOptions): Promise<DataPoint[]> {
+  let query = `rate(${metric}[${rate.toString()}])[${duration.toString()}:${resolution.toString()}]`;
+  return query_raw(query, time?.toSeconds());
 }

@@ -1,5 +1,5 @@
-'use client'
+'use client';
 
-import SwaggerUI from "swagger-ui-react";
+import SwaggerUI from 'swagger-ui-react';
 
-export default SwaggerUI
+export default SwaggerUI;

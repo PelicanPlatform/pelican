@@ -16,79 +16,83 @@
  *
  ***************************************************************/
 
+import { Box, Tooltip } from '@mui/material';
+import Link from 'next/link';
+import {
+  Build,
+  FolderOpen,
+  TripOrigin,
+  Storage,
+  Block,
+} from '@mui/icons-material';
 
-import {Box, Tooltip} from "@mui/material";
-import Link from "next/link";
-import {Build, FolderOpen, TripOrigin, Storage, Block} from "@mui/icons-material";
-
-import {Sidebar} from "@/components/layout/Sidebar";
-import IconButton from "@mui/material/IconButton";
-import {Main} from "@/components/layout/Main"
-import SpeedDial, {SpeedButtonControlledProps} from "@/components/layout/SidebarSpeedDial";
-import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
+import { Sidebar } from '@/components/layout/Sidebar';
+import IconButton from '@mui/material/IconButton';
+import { Main } from '@/components/layout/Main';
+import SpeedDial, {
+  SpeedButtonControlledProps,
+} from '@/components/layout/SidebarSpeedDial';
+import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 
 export const metadata = {
-    title: 'Pelican Registry',
-    description: 'Software designed to make data distribution easy',
-}
+  title: 'Pelican Registry',
+  description: 'Software designed to make data distribution easy',
+};
 
 export default function RootLayout({
-                                       children,
-                                   }: {
-    children: React.ReactNode
+  children,
+}: {
+  children: React.ReactNode;
 }) {
+  const actions: SpeedButtonControlledProps[] = [
+    {
+      href: '/registry/namespace/register/',
+      icon: <FolderOpen />,
+      text: 'Namespace',
+      title: 'Register a new Namespace',
+    },
+    {
+      href: '/registry/origin/register/',
+      icon: <TripOrigin />,
+      text: 'Origin',
+      title: 'Register a new Origin',
+    },
+    {
+      href: '/registry/cache/register/',
+      icon: <Storage />,
+      text: 'Cache',
+      title: 'Register a new Cache',
+    },
+  ];
 
-    const actions: SpeedButtonControlledProps[] = [
-        {
-            href: "/registry/namespace/register/",
-            icon: <FolderOpen/>,
-            text: "Namespace",
-            title: "Register a new Namespace"
-        },
-        {
-            href: "/registry/origin/register/",
-            icon: <TripOrigin/>,
-            text: "Origin",
-            title: "Register a new Origin"
-        },
-        {
-            href: "/registry/cache/register/",
-            icon: <Storage/>,
-            text: "Cache",
-            title: "Register a new Cache"
-        }
-    ]
-
-    return (
-        <Box display={"flex"} flexDirection={"row"}>
-            <Sidebar>
-                <Box pt={1}>
-                    <SpeedDial actions={actions}/>
-                </Box>
-                <AuthenticatedContent>
-                    <Box pt={1}>
-                        <Tooltip title={"Denied Namespaces"} placement={"right"}>
-                            <Link href={"/registry/denied/"}>
-                                <IconButton>
-                                    <Block/>
-                                </IconButton>
-                            </Link>
-                        </Tooltip>
-                    </Box>
-                </AuthenticatedContent>
-                <Box pt={1}>
-                    <Tooltip title={"Config"} placement={"right"}>
-                        <Link href={"/config/"}>
-                            <IconButton>
-                                <Build/>
-                            </IconButton>
-                        </Link>
-                    </Tooltip>
-                </Box>
-            </Sidebar>
-            <Main>
-                {children}
-            </Main>
+  return (
+    <Box display={'flex'} flexDirection={'row'}>
+      <Sidebar>
+        <Box pt={1}>
+          <SpeedDial actions={actions} />
         </Box>
-    )
+        <AuthenticatedContent>
+          <Box pt={1}>
+            <Tooltip title={'Denied Namespaces'} placement={'right'}>
+              <Link href={'/registry/denied/'}>
+                <IconButton>
+                  <Block />
+                </IconButton>
+              </Link>
+            </Tooltip>
+          </Box>
+        </AuthenticatedContent>
+        <Box pt={1}>
+          <Tooltip title={'Config'} placement={'right'}>
+            <Link href={'/config/'}>
+              <IconButton>
+                <Build />
+              </IconButton>
+            </Link>
+          </Tooltip>
+        </Box>
+      </Sidebar>
+      <Main>{children}</Main>
+    </Box>
+  );
 }

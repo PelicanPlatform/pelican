@@ -16,21 +16,26 @@
  *
  ***************************************************************/
 
-"use client"
+'use client';
 
-import {Box, Typography} from "@mui/material";
+import { Box, Typography } from '@mui/material';
 
-import {User} from "@/index";
-import AuthenticatedContent from "@/components/layout/AuthenticatedContent";
-import { GlobusExportTable } from "@/components/GlobusExportTable";
+import { User } from '@/index';
+import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
+import { GlobusExportTable } from '@/components/GlobusExportTable';
 
 export default function Home() {
-    return (
-        <AuthenticatedContent redirect={true} checkAuthentication={(u: User) => u?.role == "admin"}>
-            <Box width={"100%"}>
-                <Typography variant="h4" mb={2}>Globus Exports</Typography>
-                <GlobusExportTable />
-            </Box>
-        </AuthenticatedContent>
-    )
+  return (
+    <AuthenticatedContent
+      redirect={true}
+      checkAuthentication={(u: User) => u?.role == 'admin'}
+    >
+      <Box width={'100%'}>
+        <Typography variant='h4' mb={2}>
+          Globus Exports
+        </Typography>
+        <GlobusExportTable />
+      </Box>
+    </AuthenticatedContent>
+  );
 }

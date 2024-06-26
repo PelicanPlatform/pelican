@@ -16,31 +16,37 @@
  *
  ***************************************************************/
 
-"use client"
+'use client';
 
-import {namespaceToOrigin, postGeneralNamespace} from "@/app/registry/components/util";
-import {PostPage} from "@/app/registry/components/PostPage";
-import {Box, Grid, Typography} from "@mui/material";
-import React from "react";
+import {
+  namespaceToOrigin,
+  postGeneralNamespace,
+} from '@/app/registry/components/util';
+import { PostPage } from '@/app/registry/components/PostPage';
+import { Box, Grid, Typography } from '@mui/material';
+import React from 'react';
 
-export default function Page () {
+export default function Page() {
+  const postCache = async (data: any) => {
+    const origin = namespaceToOrigin(structuredClone(data));
+    return postGeneralNamespace(origin);
+  };
 
-    const postCache = async (data: any) => {
-        const origin = namespaceToOrigin(structuredClone(data))
-        return postGeneralNamespace(origin)
-    }
-
-    return (
-        <Box width={"100%"}>
-            <Grid container>
-                <Grid item xs={12}>
-                    <Typography variant={"h4"} pb={3}>Namespace Registry</Typography>
-                    <Typography variant={"h5"} pb={3}>Register New Origin</Typography>
-                </Grid>
-                <Grid item xs={12}>
-                    <PostPage update={postCache}/>
-                </Grid>
-            </Grid>
-        </Box>
-    )
+  return (
+    <Box width={'100%'}>
+      <Grid container>
+        <Grid item xs={12}>
+          <Typography variant={'h4'} pb={3}>
+            Namespace Registry
+          </Typography>
+          <Typography variant={'h5'} pb={3}>
+            Register New Origin
+          </Typography>
+        </Grid>
+        <Grid item xs={12}>
+          <PostPage update={postCache} />
+        </Grid>
+      </Grid>
+    </Box>
+  );
 }

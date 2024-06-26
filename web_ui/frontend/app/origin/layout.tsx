@@ -16,26 +16,24 @@
  *
  ***************************************************************/
 
-import {Box} from "@mui/material";
-import Main from "@/components/layout/Main";
-import { OriginSidebar } from "@/components/layout/OriginSidebar";
+import { Box } from '@mui/material';
+import Main from '@/components/layout/Main';
+import { OriginSidebar } from '@/components/layout/OriginSidebar';
 
 export const metadata = {
-    title: 'Pelican Origin',
-    description: 'Software designed to make data distribution easy',
-}
+  title: 'Pelican Origin',
+  description: 'Software designed to make data distribution easy',
+};
 
 export default function RootLayout({
-                                       children,
-                                   }: {
-    children: React.ReactNode
+  children,
+}: {
+  children: React.ReactNode;
 }) {
-    return (
-        <Box display={"flex"} flexDirection={"row"}>
-            <OriginSidebar/>
-            <Main>
-                {children}
-            </Main>
-        </Box>
-    )
+  return (
+    <Box display={'flex'} flexDirection={'row'}>
+      <OriginSidebar />
+      <Main>{children}</Main>
+    </Box>
+  );
 }
