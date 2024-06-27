@@ -22,7 +22,7 @@ All of the Pelican servers have the following metrics:
 
 ### `pelican_component_health_status`
 
-  The health status of Pelican server components. The value can be converted into following status:
+  The health status of Pelican server components. The metric value can be converted into following status:
 
   ```
   1: Critical
@@ -33,17 +33,15 @@ All of the Pelican servers have the following metrics:
 
   #### Label: `component`
 
-  Label values:
-  ```
-  "web-ui":       Web interface
-  "xrootd"*:      XRootD process
-  "cmsd"*:        CMSD process
-  "federation"*:  Advertisement to central service
-  "director"*:    File transfer test (health test) with the director
-  "topology":     Data fetch from Topology server
-
-  *: only available at origin and cache servers
-  ```
+  | Label Value           | Description                                    | Availability                 |
+  |---------------|------------------------------------------------|------------------------------|
+  | `web-ui`      | Admin website                                  | All servers                  |
+  | `xrootd`     | XRootD process                                 | Origin and cache servers     |
+  | `cmsd`       | CMSD process                                   | Origin and cache servers     |
+  | `federation` | Advertisement to the Director                | Origin and cache servers     |
+  | `registry`   | Namespace registration at the Registry | Origin and cache servers     |
+  | `director`   | Object transfer tests from the Director | Origin and cache servers     |
+  | `topology`    | Data fetch from the OSDF topology server                 | All servers (OSDF mode only)                  |
 
 ### `pelican_component_health_status_last_update`
 
@@ -63,11 +61,11 @@ All of the Pelican servers have the following metrics:
 
   #### Label: `status`
 
-  Label values:
-  ```
-  "idle": Scheduler threads waiting for work
-  "running": Scheduler threads running
-  ```
+  | Label Value       | Description                               |
+  |-----------|-------------------------------------------|
+  | `idle`    | Scheduler threads waiting for work        |
+  | `running` | Scheduler threads running                 |
+
 
 ### `xrootd_server_bytes`
 
@@ -75,11 +73,10 @@ All of the Pelican servers have the following metrics:
 
   #### Label: `direction`
 
-  Label values:
-  ```
-  "tx": Bytes sent
-  "rx": Bytes received
-  ```
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `tx`         | Bytes sent      |
+  | `rx`         | Bytes received  |
 
 ### `xrootd_server_connection_count`
 
@@ -91,19 +88,17 @@ All of the Pelican servers have the following metrics:
 
   #### Label: `type`
 
-  Label values:
-  ```
-  "total":  Total bytes visible on the storage server
-  "free":   Available bytes to use
-  ```
+  | Label Values | Description                              |
+  |--------------|------------------------------------------|
+  | `total`      | Total bytes visible on the storage server|
+  | `free`       | Available bytes to use                   |
 
   #### Label: `server_type`
 
-  Label values:
-  ```
-  "origin":  Origin server
-  "cache":   Cache server
-  ```
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `Origin`     | Origin server   |
+  | `Cache`      | Cache server    |
 
   #### Label: `ns`
 
@@ -139,12 +134,11 @@ All of the Pelican servers have the following metrics:
 
   #### Label: `type`
 
-  Label values:
-  ```
-  "read":   Bytes read from file using read()
-  "readv":  Bytes read from file using readv()
-  "write":  Bytes written to file
-  ```
+  | Label Values | Description                              |
+  |--------------|------------------------------------------|
+  | `read`       | Bytes read from file using read()        |
+  | `readv`      | Bytes read from file using readv()       |
+  | `write`      | Bytes written to file                    |
 
 ### `xrootd_transfer_operations_count`
 
@@ -167,11 +161,10 @@ All of the Pelican servers have the following metrics:
 
   #### Label: `server_type`
 
-  Label values:
-  ```
-  "Origin": Origin server
-  "Cache":  Cache server
-  ```
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `Origin`     | Origin server   |
+  | `Cache`      | Cache server    |
 
   #### Label: `server_url`
 
@@ -208,11 +201,10 @@ With the `up` metric, it is possible to count number of active origin and cache 
 
   #### Label: `server_type`
 
-  Label values:
-  ```
-  "Origin": Origin server
-  "Cache":  Cache server
-  ```
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `Origin`     | Origin server   |
+  | `Cache`      | Cache server    |
 
   #### Label: `server_web_url`
 
@@ -232,16 +224,14 @@ With the `up` metric, it is possible to count number of active origin and cache 
 
   #### Label: `status`
 
-  Label values:
-  ```
-  "Success":  The test run succeeded
-  "Failed":   The test run failed
-  ```
+  | Label Values | Description             |
+  |--------------|-------------------------|
+  | `Success`    | The test run succeeded  |
+  | `Failed`     | The test run failed     |
 
   #### Label: `report_status`
 
-  Label values:
-  ```
-  "Success":  The reporting to the origin of test run status succeeded
-  "Failed":   The reporting to the origin of test run status failed
-  ```
+  | Label Values | Description                                                        |
+  |--------------|--------------------------------------------------------------------|
+  | `Success`    | The reporting to the origin of test run status succeeded           |
+  | `Failed`     | The reporting to the origin of test run status failed              |
