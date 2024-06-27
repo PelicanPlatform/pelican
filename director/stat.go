@@ -336,8 +336,9 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 			statUtil.Errgroup.Go(func() error {
 				baseUrl := sAdInt.URL
 
-				// If token is provided, then it's safe to assume this request goes to authenticated endpoint
-				if cfg.token != "" {
+				// If the server does not support public read,
+				// or the token is provided, then it's safe to assume this request goes to authenticated endpoint
+				if !sAdInt.Caps.PublicReads || cfg.token != "" {
 					baseUrl = sAD.AuthURL
 				}
 
@@ -359,7 +360,8 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 					metadata, err = stat.ReqHandler(maxCancelCtx, objectName, baseUrl, false, cfg.token, timeout)
 				}
 
-				if err != nil {
+				// If baseUrl is already AuthURL, then we can skip the last attempt
+				if err != nil && baseUrl != sAD.AuthURL {
 					// If there's still error, then we try the authURL.
 					// For topology servers, they have different URLs for projected objects than public objects.
 					// If the origin server does not have public objects, then it's sAD.URL is not accessible
