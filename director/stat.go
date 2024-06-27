@@ -160,7 +160,11 @@ func (q queryResult) String() string {
 		}
 		return res
 	} else {
-		return fmt.Sprintf("Query failed with error %s: %s", q.ErrorType, q.Msg)
+		if len(q.DeniedServers) == 0 {
+			return fmt.Sprintf("Query failed with error %s: %s", q.ErrorType, q.Msg)
+		} else {
+			return fmt.Sprintf("Query failed with error %s: %s %d servers require authentication to access the object", q.ErrorType, q.Msg, len(q.DeniedServers))
+		}
 	}
 }
 
@@ -330,29 +334,45 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 		// Use an anonymous func to pass variable safely to the goroutine
 		func(sAdInt server_structs.ServerAd) {
 			statUtil.Errgroup.Go(func() error {
+				baseUrl := sAdInt.URL
+
+				// If token is provided, then it's safe to assume this request goes to authenticated endpoint
+				if cfg.token != "" {
+					baseUrl = sAD.AuthURL
+				}
+
 				activeLabels := prometheus.Labels{
 					"server_name": sAdInt.Name,
 					"server_url":  sAdInt.URL.String(),
 					"server_type": string(sAdInt.Type),
 				}
-				totalLabels := prometheus.Labels{
-					"server_name": sAdInt.Name,
-					"server_url":  sAdInt.URL.String(),
-					"server_type": string(sAdInt.Type),
-					"result":      "",
-				}
 				metrics.PelicanDirectorStatActive.With(activeLabels).Inc()
 				defer metrics.PelicanDirectorStatActive.With(activeLabels).Dec()
 
-				metadata, err := stat.ReqHandler(maxCancelCtx, objectName, sAdInt.URL, true, cfg.token, timeout)
+				metadata, err := stat.ReqHandler(maxCancelCtx, objectName, baseUrl, true, cfg.token, timeout)
 
 				if err != nil {
 					// If the request returns 403 or 500, it could be because we request a digest and xrootd
-					// either not has this turned on, or had trouble calculating the checksum
+					// does not have this turned on, or had trouble calculating the checksum
+					// For old origins/caches, it has different URLs for public VS protected data
 					// Retry without digest
-					metadata, err = stat.ReqHandler(maxCancelCtx, objectName, sAdInt.URL, false, cfg.token, timeout)
+					metadata, err = stat.ReqHandler(maxCancelCtx, objectName, baseUrl, false, cfg.token, timeout)
 				}
 
+				if err != nil {
+					// If there's still error, then we try the authURL.
+					// For topology servers, they have different URLs for projected objects than public objects.
+					// If the origin server does not have public objects, then it's sAD.URL is not accessible
+					baseUrl = sAD.AuthURL
+					metadata, err = stat.ReqHandler(maxCancelCtx, objectName, baseUrl, false, cfg.token, timeout)
+				}
+
+				totalLabels := prometheus.Labels{
+					"server_name": sAdInt.Name,
+					"server_url":  baseUrl.String(),
+					"server_type": string(sAdInt.Type),
+					"result":      "",
+				}
 				if err != nil {
 					switch e := err.(type) {
 					case headReqTimeoutErr:
