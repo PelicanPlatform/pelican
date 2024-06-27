@@ -455,13 +455,15 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
+	var q *ObjectStat
+
 	availableAds := []server_structs.ServerAd{}
 	// Skip stat query for PUT (upload), PROPFIND (listing) or skipStat query flag is on
 	if ginCtx.Request.Method == "PUT" || ginCtx.Request.Method == "PROPFIND" || skipStat {
 		availableAds = originAds
 	} else {
 		// Query Origins and check if the object exists on the server
-		q := NewObjectStat()
+		q = NewObjectStat()
 		qr := q.Query(context.Background(), reqPath, config.OriginType, 1, 3,
 			withOriginAds(originAds), WithToken(reqParams.Get("authz")))
 		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
@@ -499,9 +501,17 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		}
 	}
 
-	// Query caches and check if the object exists on the server
-	if includeCaches {
-		q := NewObjectStat()
+	// If CachesAdOrigins is enabled, we stat caches and append cache servers that have the object,
+	// with the following exceptions:
+	// - This is an upload request (PUT) or listing request (PROPFIND)
+	// - The request has directread, which requests direct read to the origin
+	if includeCaches &&
+		ginCtx.Request.Method != "PUT" &&
+		ginCtx.Request.Method != "PROPFIND" &&
+		!ginCtx.Request.URL.Query().Has("directread") {
+		if q == nil {
+			q = NewObjectStat()
+		}
 		qr := q.Query(context.Background(), reqPath, config.CacheType, 1, 3,
 			withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
 		log.Debugf("CachesAsOrigin enabled. Stat result for %s among caches: %s", reqPath, qr.String())
