@@ -454,14 +454,6 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		})
 		return
 	}
-	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find the origin.
-	if len(originAds) == 0 {
-		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "There are currently no origins exporting the provided namespace prefix",
-		})
-		return
-	}
 
 	availableAds := []server_structs.ServerAd{}
 	// Skip stat query for PUT (upload), PROPFIND (listing) or skipStat query flag is on
@@ -493,16 +485,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				})
 				return
 			}
-			// Insufficient response
-			if len(qr.DeniedServers) == 0 {
-				// No denied server, the object was not found on any origins
-				ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "There are currently no origins hosting the object",
-				})
-				return
-			}
-			// For denied servers, append them to availableOriginAds
+			// For denied servers, append them to availableOriginAds,
+			// we don't check if DeniedServers is empty as we might be able to pull the object from other caches.
 			// The qr.DeniedServers is a list of AuthURLs of servers that respond with 403
 			// Here, we need to match against the AuthURL field of originAds
 			for _, ds := range qr.DeniedServers {
