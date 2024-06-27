@@ -253,7 +253,7 @@ func WithToken(tk string) queryOption {
 // sType can be config.OriginType, config.CacheType, or both.
 //
 // Returns the object metadata with available urls, a message indicating the stat result, and error if any.
-func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, objectName string, sType config.ServerType, minimum, maximum int, options ...queryOption) (qResult queryResult) {
+func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName string, sType config.ServerType, minimum, maximum int, options ...queryOption) (qResult queryResult) {
 	cfg := queryConfig{}
 	for _, option := range options {
 		option(&cfg)
@@ -298,7 +298,7 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 	negativeReqChan := make(chan error)
 	deniedReqChan := make(chan headReqForbiddenErr) // Requests with 403 response
 	// Cancel the rest of the requests when requests received >= max required
-	maxCancelCtx, maxCancel := context.WithCancel(context.Background())
+	maxCancelCtx, maxCancel := context.WithCancel(ctx)
 	numTotalReq := 0
 	successResult := make([]*objectMetadata, 0)
 	deniedResult := make([]headReqForbiddenErr, 0)
@@ -414,7 +414,7 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 				qResult.Msg = "Maximum responses reached for stat. Return result and cancel ongoing requests."
 				return
 			}
-		case <-cancelContext.Done():
+		case <-ctx.Done():
 			maxCancel()
 			qResult.Status = queryFailed
 			qResult.ErrorType = queryCancelledErr
