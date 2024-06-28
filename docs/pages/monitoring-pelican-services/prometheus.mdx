@@ -20,6 +20,16 @@ Pelican also has a set of built-in metrics to monitor Pelican server's status, l
 
 All of the Pelican servers have the following metrics:
 
+### `process_start_time_seconds`
+
+The UNIX epoch time in seconds since the Pelican process started. To get the duration of the Pelican server running time, use the following PromQL:
+
+```plaintext filename="PromQL" copy
+time() - process_start_time_seconds
+```
+
+This yields the duration in seconds.
+
 ### `pelican_component_health_status`
 
   The health status of Pelican server components. The metric value can be converted into following status:
