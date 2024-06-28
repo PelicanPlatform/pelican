@@ -44,7 +44,7 @@ You need to contact a Certificate Authority (CA) who owns the root certificate f
 Once you go through the process, locate your credential files and set the following parameters to the file locations or copy the credential files to the default locations of the parameters:
 
 - `Server.TLSCertificate`
-  - The certicate file from Let's Encrypt (or another CA), usually named as `example.com.crt` or `example.com.pem`
+  - The certificate file from Let's Encrypt (or another CA), usually named as `example.com.crt` or `example.com.pem`
   - Default location: `~/.config/pelican/certificates/tls.crt` for non-root users or `/etc/pelican/certificates/tls.crt` for root users.
 
 - `Server.TLSKey`
@@ -195,7 +195,7 @@ This section documents additional arguments you can pass via the command line wh
 * **-h or --help**: Output documentation on the `serve` command and its arguments.
 * **-m or --mode**: Set the mode for the origin service ('posix'|'s3, default to 'posix').
 * **-p or --port**: Set the port at which the Pelican admin website should be accessible.
-* **--writeable**: A boolean value to allow or disable writting to the origin (default is true).
+* **--writeable**: A boolean value to allow or disable writing to the origin (default is true).
 
 * **--config**: Set the location of the configuration file.
 * **-d or --debug**: Enable debugging mode, which greatly increases the Pelican's logging verbosity
@@ -229,7 +229,7 @@ Once the password is confirmed, you will be redirected to the origin's dashboard
 
 <ExportedImage width={1000} height={1000} src={"/pelican/origin-web-dashboard.png"} alt={"Screenshot of Pelican origin website dashboard page"} />
 
-Here, the graph on the right visualizes object transfer metrics like transfer **speed** for both receiving (rx) and transmitting (tx) data. You may change the time range of the graph by changing the **Reporting Period** and **Gragh Settings**.
+Here, the graph on the right visualizes object transfer metrics like transfer **speed** for both receiving (rx) and transmitting (tx) data. You may change the time range of the graph by changing the **Reporting Period** and **Graph Settings**.
 
 > **NOTE:** This graph may be empty when the origin first starts, as it takes several minutes to collect enough data for the display. Try refreshing the page after the origin has been running for ~5 minutes and you you should see data being aggregated.
 
@@ -250,7 +250,7 @@ When you hit the URL at https://localhost:8444/view/initialization/code/, You ma
 
 <ExportedImage width={1000} height={1000} src={"/pelican/invalid_certificate.png"} alt={"Image of a safari browser invalid certificate warning"} />
 
-The warning is due to the fact that Pelican servers by default use `https` for network requests, which requires a set of TLS certificates to secure the connection between the server and the browser. If you don't have TLS certifacates properly configured and you turned on the `TLSSkipVerify` configuration parameter, then the origin will generate a set of self-signed certifacates that are not trusted by the browser.
+The warning is due to the fact that Pelican servers by default use `https` for network requests, which requires a set of TLS certificates to secure the connection between the server and the browser. If you don't have TLS certificates properly configured and you turned on the `TLSSkipVerify` configuration parameter, then the origin will generate a set of self-signed certificates that are not trusted by the browser.
 
 For local testing, it's OK to proceed with the warning for local deployment.
 
@@ -272,7 +272,7 @@ Once you have your origin set up, follow the steps below to test if your origin 
     ```
 
       Where:
-      * `cd ~` switches the working directory to your `home` direcotry
+      * `cd ~` switches the working directory to your `home` directory
       * `<federation>` is the same URL you pass to `-f` argument when running the origin
       * `<namespace_prefix>` is the `-v <local_directory>:<namespace_prefix>` argument when running the origin.
 
