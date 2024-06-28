@@ -1,4 +1,5 @@
 import ExportedImage from "next-image-export-optimizer";
+import { Key } from '@mui/icons-material';
 
 # Federation Your Data via Pelican Origin
 
@@ -121,7 +122,7 @@ pelican origin serve
 Pelican will read the config file and apply it to your origin.
 
 
-Finally, origins can be configured to a limited extent with environment variables. In Pelican's environment variable model, configuration options are taken from `pelican.yaml`, flattened, and prepended with either `PELICAN_` or `OSDF_`, depending on the name of the binary you're using (i.e. whether you run `osdf serve` or `pelican serve` commands).
+Finally, origins can be configured to a limited extent with environment variables. In Pelican's environment variable model, configuration options are taken from `pelican.yaml`, flattened, and prepended with `PELICAN` prefix.
 
 For example, you might configure the origin's storage type by setting the environment variable `PELICAN_ORIGIN_STORAGETYPE=posix`.
 
@@ -229,20 +230,40 @@ Once the password is confirmed, you will be redirected to the origin's dashboard
 
 <ExportedImage width={1000} height={1000} src={"/pelican/origin-web-dashboard.png"} alt={"Screenshot of Pelican origin website dashboard page"} />
 
-Here, the graph on the right visualizes object transfer metrics like transfer **speed** for both receiving (rx) and transmitting (tx) data. You may change the time range of the graph by changing the **Reporting Period** and **Graph Settings**.
+The origin dashboard page consists of the following panels:
+- Status
+- Data Exports
+- Federation Overview
+- Transfer Rate
+
+The **Status** panel shows information about the health status of the origin, delineated by the following components:
+
+* **CMSD** indicates whether the [Cluster Management Service Distributed (CMSD)](https://xrootd.slac.stanford.edu/doc/dev410/cms_config.htm) daemon is running.
+* **Director** indicates whether the origin can advertise itself to its federation director, which is required for other members in the federation to discover your origin's existence and how to access objects from it.
+* **Federation** indicates whether the origin can fetch from the federation discovery URL, which contains locations of central services (Director and Registry).
+* **Registry** indicates whether the origin successfully registered the namespaces prefixes it exports at the Registry
+* **Web UI** indicates whether the admin website is configured and running.
+* **XRootD** indicates whether Pelican's underlying file transfer software is functioning as expected.
+
+<ExportedImage width={1000} height={1000} src={"/pelican/origin-dashboard-status.png"} alt={"Screenshot of the Status panel on Pelican origin website dashboard page"} />
+
+The **Data Exports** panel lists information about the federation prefixes that are currently being exported by the origin. It also shows the capabilities each exported namespace prefixes have.
+
+If any of the namespace prefix registration is missing required information, there will be a warning message and a button to "Complete Registration". Note that each federation namespace prefixes is registered separately, and the Origin server itself also registers at the registry.  **It is advised that the Origin admin completes the registration as soon as they can**.
+
+<ExportedImage width={1000} height={1000} src={"/pelican/origin-dashboard-data-exports.png"} alt={"Screenshot of the Data Exports panel on Pelican origin website dashboard page"} />
+
+The **Federation Overview** panel lists links to various federation services (director, registry, etc.). Note that the link to the **Discovery** item is the federation discovery URL where the metadata of a federation is located.
+
+<ExportedImage width={1000} height={1000} src={"/pelican/origin-dashboard-fed-overview.png"} alt={"Screenshot of the Data Exports panel on Pelican origin website dashboard page"} />
+
+
+The **Transfer Rate** graph visualizes object transfer metrics like transfer **speed** for both receiving (rx) and transmitting (tx) data. You may change the time range of the graph by changing the **Reporting Period** and **Graph Settings**.
+
+<ExportedImage width={1000} height={1000} src={"/pelican/origin-dashboard-graph.png"} alt={"Screenshot of the graph panel on Pelican origin website dashboard page"} style={{marginTop: 30}} />
+
 
 > **NOTE:** This graph may be empty when the origin first starts, as it takes several minutes to collect enough data for the display. Try refreshing the page after the origin has been running for ~5 minutes and you you should see data being aggregated.
-
-The **Status** panel shows information about your origin's health. It's components are:
-
-* **Director** This indicates whether the origin can advertise itself to its federation director, which is required for other members in the federation to discover your origin's existence and how to access objects from it.
-* **Federation** This indicates whether the origin can fetch metadata from the federation URL, which the origin uses to discover the federation's central services (Director and Registry).
-* **Web UI** This indicates whether the admin website is successfully configured and running.
-* **XRootD** This indicates whether Pelican's underlying file transfer software is functioning as expected.
-
-The **Data Exports** panel lists information about the federation prefixes that are currently being exported by the origin
-
-The **Federation Overview** panel lists the links to various federation services (director, registry, etc.). Note that the link to the **Discovery** item is the endpoint where the metadata of a federation is located.
 
 ### For local deployment
 
@@ -292,11 +313,25 @@ Once you have your origin set up, follow the steps below to test if your origin 
 
 Congratulations! Your have finished setting up and running your origin.
 
-## Obtain the Public Key of the Origin
+## Next Steps
+
+### Obtain the Public Key of the Origin
 
 Pelican origins follow [OpenID Connect (OIDC)](https://openid.net/developers/how-connect-works/) protocol for authenticating users for object access. In the OIDC setup, a user's identity is encoded in a _token_ that is _signed_ by the origin, using its _private key_. The private key only lives on the origin server and is never exposed to the public. To verify the integrity the token and make sure it's not tampered by malicious attackers, a _public key_ generated from the _private key_ is available for others to use to check the signature of the token.
 
-The _public keys_ are used in a Pelican federation to facilitate user authentication and server identity verification. They are also used to register a namespace at the Pelican registry. The public key used to register a namespace at the Pelican registry should be the public key of the Pelican origin that exports and hosts the namespace. This is because the Pelican origin manages user identity verification and authorization for the namespaces it exports. To look up the public key of a Pelican origin, go to `https://<your-origin-hostname>:<origin-web-port>/.well-known/issuer.jwks`. The public key will be automatically downloaded as a `JSON` file. An example file is as following:
+The _public keys_ are used in a Pelican federation to facilitate user authentication and server identity verification. They are also used to register a namespace at the Pelican registry. The public key used to register a namespace at the Pelican registry should be the public key of the Pelican origin that exports and hosts the namespace. This is because the Pelican origin manages user identity verification and authorization for the namespaces it exports.
+
+#### Obtain the Public Key via the Admin Website
+
+To get the public key of via the admin website, follow the steps below.
+
+- [Setup and login to Pelican Origin admin website](#login-to-admin-website)
+- On the home page, navigate to the **Data Exports** panel on the top right
+- Click the <Key aria-label="Download public key button" /> icon to download the public key
+
+#### Obtain the Public Key via Direct Download
+
+To get the public key of via direct download, go to `https://<origin-hostname>:<origin-web-port>/.well-known/issuer.jwks`. The public key will be automatically downloaded as a `JSON` file. An example file is as following:
 
 ```json filename="issuer.jwks" copy
 {
