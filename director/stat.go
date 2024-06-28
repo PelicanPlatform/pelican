@@ -117,19 +117,19 @@ const (
 	queryCancelledErr       queryErrorType = "CancelledError"
 )
 
-func (e headReqTimeoutErr) Error() string {
+func (e *headReqTimeoutErr) Error() string {
 	return e.Message
 }
 
-func (e headReqNotFoundErr) Error() string {
+func (e *headReqNotFoundErr) Error() string {
 	return e.Message
 }
 
-func (e headReqForbiddenErr) Error() string {
+func (e *headReqForbiddenErr) Error() string {
 	return e.Message
 }
 
-func (e headReqCancelledErr) Error() string {
+func (e *headReqCancelledErr) Error() string {
 	return e.Message
 }
 
@@ -199,18 +199,18 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 			return nil, errors.Wrap(err, "unknown request error")
 		} else {
 			if urlErr.Err == context.Canceled {
-				return nil, headReqCancelledErr{"request was cancelled by context"}
+				return nil, &headReqCancelledErr{"request was cancelled by context"}
 			}
 			if urlErr.Timeout() {
-				return nil, headReqTimeoutErr{fmt.Sprintf("request timeout after %dms", timeout.Milliseconds())}
+				return nil, &headReqTimeoutErr{fmt.Sprintf("request timeout after %dms", timeout.Milliseconds())}
 			}
 			return nil, errors.Wrap(err, "unknown request error")
 		}
 	}
 	if res.StatusCode == 404 {
-		return nil, headReqNotFoundErr{"file not found on the server " + dataUrl.String()}
+		return nil, &headReqNotFoundErr{"file not found on the server " + dataUrl.String()}
 	} else if res.StatusCode == 403 {
-		return nil, headReqForbiddenErr{fmt.Sprintf("authorization failed for origin %s. Token is required", dataUrl.String()), ""}
+		return nil, &headReqForbiddenErr{fmt.Sprintf("authorization failed for origin %s. Token is required", dataUrl.String()), ""}
 	} else if res.StatusCode != 200 {
 		resBody, err := io.ReadAll(res.Body)
 		if err != nil {
@@ -300,12 +300,12 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 	timeout := param.Director_StatTimeout.GetDuration()
 	positiveReqChan := make(chan *objectMetadata)
 	negativeReqChan := make(chan error)
-	deniedReqChan := make(chan headReqForbiddenErr) // Requests with 403 response
+	deniedReqChan := make(chan *headReqForbiddenErr) // Requests with 403 response
 	// Cancel the rest of the requests when requests received >= max required
 	maxCancelCtx, maxCancel := context.WithCancel(context.Background())
 	numTotalReq := 0
 	successResult := make([]*objectMetadata, 0)
-	deniedResult := make([]headReqForbiddenErr, 0)
+	deniedResult := make([]*headReqForbiddenErr, 0)
 
 	if len(ads) < 1 {
 		maxCancel()
@@ -353,7 +353,8 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 
 				metadata, err := stat.ReqHandler(maxCancelCtx, objectName, baseUrl, true, cfg.token, timeout)
 
-				if err != nil {
+				cancelErr := &headReqCancelledErr{}
+				if err != nil && !errors.As(err, &cancelErr) { // Skip additional requests if the previous one is cancelled
 					// If the request returns 403 or 500, it could be because we request a digest and xrootd
 					// does not have this turned on, or had trouble calculating the checksum
 					// For old origins/caches, it has different URLs for public VS protected data
@@ -362,7 +363,7 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 				}
 
 				// If baseUrl is already AuthURL, or AuthURL is not set, then we can skip the last attempt
-				if err != nil && baseUrl != sAD.AuthURL && sAD.AuthURL.String() != "" {
+				if err != nil && baseUrl != sAD.AuthURL && sAD.AuthURL.String() != "" && !errors.As(err, &cancelErr) {
 					// If there's still error, then we try the authURL.
 					// For topology servers, they have different URLs for projected objects than public objects.
 					// If the origin server does not have public objects, then it's sAD.URL is not accessible
@@ -378,27 +379,27 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 				}
 				if err != nil {
 					switch e := err.(type) {
-					case headReqTimeoutErr:
+					case *headReqTimeoutErr:
 						log.Debugf("Timeout querying %s server %s for object %s after %s: %s", sAdInt.Type, sAdInt.URL.String(), objectName, timeout.String(), e.Message)
 						negativeReqChan <- err
 						totalLabels["result"] = string(metrics.StatTimeout)
 						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return nil
-					case headReqNotFoundErr:
+					case *headReqNotFoundErr:
 						log.Debugf("Object %s not found at %s server %s: %s", objectName, sAdInt.Type, sAdInt.URL.String(), e.Message)
 						negativeReqChan <- err
 						totalLabels["result"] = string(metrics.StatNotFound)
 						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return nil
-					case headReqForbiddenErr:
-						fErr := err.(headReqForbiddenErr)
+					case *headReqForbiddenErr:
+						fErr := err.(*headReqForbiddenErr)
 						fErr.IssuerUrl = sAD.AuthURL.String()
 						log.Debugf("Access denied for object %s at %s server %s: %s", objectName, sAdInt.Type, sAdInt.URL.String(), e.Message)
 						deniedReqChan <- fErr
 						totalLabels["result"] = string(metrics.StatForbidden)
 						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return nil
-					case headReqCancelledErr:
+					case *headReqCancelledErr:
 						// Don't send to negativeReqChan as cancellation won't count towards total requests
 						totalLabels["result"] = string(metrics.StatCancelled)
 						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()

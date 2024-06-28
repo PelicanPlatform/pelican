@@ -61,27 +61,32 @@ func TestQueryServersForObject(t *testing.T) {
 		mockServerAd1 := server_structs.ServerAd{
 			Name:    "origin1",
 			URL:     url.URL{Host: "example1.com", Scheme: "https"},
-			AuthURL: url.URL{Host: "example1.com:8444", Scheme: "https"},
+			AuthURL: url.URL{Host: "example1-auth.com:8444", Scheme: "https"},
+			Caps:    server_structs.Capabilities{PublicReads: true},
 			Type:    server_structs.OriginType}
 		mockServerAd2 := server_structs.ServerAd{
 			Name:    "origin2",
 			URL:     url.URL{Host: "example2.com", Scheme: "https"},
-			AuthURL: url.URL{Host: "example2.com:8444", Scheme: "https"},
+			AuthURL: url.URL{Host: "example2-auth.com:8444", Scheme: "https"},
+			Caps:    server_structs.Capabilities{PublicReads: true},
 			Type:    server_structs.OriginType}
 		mockServerAd3 := server_structs.ServerAd{
 			Name:    "origin3",
 			URL:     url.URL{Host: "example3.com", Scheme: "https"},
-			AuthURL: url.URL{Host: "example3.com:8444", Scheme: "https"},
+			AuthURL: url.URL{Host: "example3-auth.com:8444", Scheme: "https"},
+			Caps:    server_structs.Capabilities{PublicReads: true},
 			Type:    server_structs.OriginType}
 		mockServerAd4 := server_structs.ServerAd{
 			Name:    "origin4",
 			URL:     url.URL{Host: "example4.com", Scheme: "https"},
-			AuthURL: url.URL{Host: "example4.com:8444", Scheme: "https"},
+			AuthURL: url.URL{Host: "example4-auth.com:8444", Scheme: "https"},
+			Caps:    server_structs.Capabilities{PublicReads: true},
 			Type:    server_structs.OriginType}
 		mockServerAd5 := server_structs.ServerAd{
 			Name:    "cache1",
 			URL:     url.URL{Host: "cache1.com", Scheme: "https"},
-			AuthURL: url.URL{Host: "cache1.com:8444", Scheme: "https"},
+			AuthURL: url.URL{Host: "cache1-auth.com:8444", Scheme: "https"},
+			Caps:    server_structs.Capabilities{PublicReads: true},
 			Type:    server_structs.CacheType}
 		mockNsAd0 := server_structs.NamespaceAdV2{Path: "/foo"}
 		mockNsAd1 := server_structs.NamespaceAdV2{Path: "/foo/bar"}
@@ -507,10 +512,10 @@ func TestQueryServersForObject(t *testing.T) {
 
 		stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error) {
 			if dataUrl.Host == "example2.com" {
-				return nil, headReqTimeoutErr{}
+				return nil, &headReqTimeoutErr{}
 			}
 			if dataUrl.Host == "example3.com" {
-				return nil, headReqNotFoundErr{}
+				return nil, &headReqNotFoundErr{}
 			}
 			return nil, errors.New("Default error")
 		}
@@ -592,7 +597,7 @@ func TestSendHeadReq(t *testing.T) {
 		defer cancel()
 		meta, err := stat.sendHeadReq(ctx, "/foo/bar/dne", mockOriginAd.URL, true, "", time.Second)
 		require.Error(t, err)
-		_, ok := err.(headReqNotFoundErr)
+		_, ok := err.(*headReqNotFoundErr)
 		assert.True(t, ok)
 		assert.Nil(t, meta)
 	})
@@ -604,7 +609,7 @@ func TestSendHeadReq(t *testing.T) {
 		defer cancel()
 		meta, err := stat.sendHeadReq(ctx, "/foo/bar/timeout.txt", mockOriginAd.URL, true, "", 200*time.Millisecond)
 		require.Error(t, err)
-		_, ok := err.(headReqTimeoutErr)
+		_, ok := err.(*headReqTimeoutErr)
 		assert.True(t, ok)
 		assert.Nil(t, meta)
 	})
@@ -621,7 +626,7 @@ func TestSendHeadReq(t *testing.T) {
 		meta, err := stat.sendHeadReq(ctx, "/foo/bar/timeout.txt", mockOriginAd.URL, true, "", 5*time.Second)
 
 		require.Error(t, err)
-		_, ok := err.(headReqCancelledErr)
+		_, ok := err.(*headReqCancelledErr)
 		assert.True(t, ok)
 		assert.Nil(t, meta)
 	})
