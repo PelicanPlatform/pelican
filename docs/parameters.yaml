@@ -131,7 +131,7 @@ description: |+
 
   Configuration takes an IP address (both regular and CIDR) and a Coordinate made up of a lat/long pair in decimal format. For example:
 
-  ```
+  ```yaml
   GeoIPOverrides:
     - IP: "123.234.123.234"
       Coordinate:
@@ -1422,9 +1422,9 @@ description: |+
 
   For example:
 
-  ```
-  - name: University of Wisconsin - Madison
-    id: https://osg-htc.org/iid/01y2jtd41
+  ```yaml
+    - name: University of Wisconsin - Madison
+      id: https://osg-htc.org/iid/01y2jtd41
   ```
 
   Note that this value will take precedence over Registry.InstitutionsUrl if both are set.
@@ -1437,25 +1437,27 @@ description: |+
   An array of objects specifying **additional** fields when registering namespaces.
 
   The schema of the object is as follows:
-  ```
-  - name: department_name
-    type: enum
-    required: true
-    options:
-      - name: Math
-        id: math
-      - name: Computer Science
-        id: cs
-    optionsUrl: https://example.com/options
-    description: The department of the organization that holds this namespace
+
+  ```yaml
+    - name: department_name
+      type: enum
+      required: true
+      options:
+        - name: Math
+          id: math
+        - name: Computer Science
+          id: cs
+      optionsUrl: https://example.com/options
+      description: The department of the organization that holds this namespace
   ```
 
   Note the following requirements:
-  - "name" must be snake case with underline connecting words, i.e. department_name.
+
+  - `name` must be snake case with underline connecting words, i.e. department_name.
     The name displayed in the registration table will be converted from this field
     into a human-readble, space-separated name with the first letter(s) capitalized. i.e. department_name -> Department Name
-  - "type" must be one of "string", "int", "bool", "datetime" (Unix time in seconds), or "enum".
-  - "options" must be a non-empty yaml array for field with type "enum". "optionsUrl" will be ignored if "options" is set.
+  - `type` must be one of `string`, `int`, `bool`, `datetime` (Unix time in seconds), or `enum`.
+  - `options` must be a non-empty yaml array for field with type `enum`. `optionsUrl` will be ignored if `options` is set.
 
     Example:
 
@@ -1464,8 +1466,8 @@ description: |+
         - name: "Option A"
           id: "optionA"
       ```
-  - "description" will show up in the web UI as helper text to help user understand the field
-  - "optionsUrl": a URL to provide a list of options for "enum" type field.
+  - `description` will show up in the web UI as helper text to help user understand the field
+  - `optionsUrl` is a URL to provide a list of options for `enum` type field.
     The URL should respond to an anonymous GET request and return JSON response in the same format as the options field above
 type: object
 default: none
@@ -1476,7 +1478,8 @@ description: |+
   A url to get a list of available institutions for users to register their namespaces to.
   The url must accept a GET request with 200 response in JSON/YAML content with the following format:
 
-  JSON:
+  `JSON`:
+
   ```json
     [
       {
@@ -1486,9 +1489,9 @@ description: |+
     ]
   ```
 
-  YAML:
+  `YAML`:
+
   ```yaml
-    ---
     - name: University of Wisconsin - Madison
       id: " https://osg-htc.org/iid/01y2jtd41"
   ```
@@ -1496,7 +1499,7 @@ description: |+
   Where the id field will be stored in registry database and must be unique, and name field will be displayed in UI as the option.
 
   Note that Pelican will cache the response of the url in a TTL cache with default refresh time of 15 minutes.
-  Also note that Registry.Institutions will take precedence over this value if both are set.
+  Also note that `Registry.Institutions`` will take precedence over this value if both are set.
 type: url
 default: none
 components: ["registry"]
@@ -1770,7 +1773,7 @@ description: |+
 
   Example:
 
-  ```
+  ```yaml
   - claim: idp_name
     value: University of Wisconsin-Madison
   ```
@@ -1851,7 +1854,7 @@ description: |+
   For example, if the request is authenticated as user `bbockelm` with groups `dept_a` and `dept_b`, then
   the following configuration:
 
-  ```
+  ```yaml
   - actions: ["read", "create"]
     prefix: /projects/$GROUP
   - actions: ["read", "modify"]
@@ -2351,7 +2354,7 @@ description: |+
 
   One-to-all mapping:
 
-  ```
+  ```yaml
   IPMapping:
     - All: "172.0.0.4"
   ```
@@ -2361,7 +2364,7 @@ description: |+
 
   One-to-one mapping:
 
-  ```
+  ```yaml
   IPMapping:
     - Source: "192.168.0.5"
       Dest: "172.0.0.5"
@@ -2446,6 +2449,7 @@ name: Lotman.Lots
 description: |+
   Declarative configuration for LotMan.  This is a list of objects, each of which describes a "lot". Every lot
   can be defined with the following:
+
   - `LotName`: REQUIRED. The name of the lot.  This is used to identify the lot in the LotMan database.
   - `Owner`: REQUIRED. A string identifying the owner of the lot's data (as opposed to someone who can modify the lot itself).
     The Owner field should generally be set to the issue for the lot's namespace path. For example, if the lot
