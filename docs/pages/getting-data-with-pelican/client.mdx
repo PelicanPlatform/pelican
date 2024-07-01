@@ -126,9 +126,7 @@ Finally, if the login is successful, Pelican will automatically fetch the token 
 
 Some origins do not support authentication though CILogon. In this case, users must supply their own JWT that's signed by the origin.
 
-> We are working hard to document how to generate a token from protected origins. If you have any questions or need help getting a token from the origin, please email us at [help@pelicanplatform.com](mailto:help@pelicanplatform.com) or open a discussion on our [GitHub discussions page](https://github.com/PelicanPlatform/pelican/discussions) and we are happy to assist you.
-
-Contact your federation administrator to get a token for downloading a protected object. For OSDF users, contact [support@osg-htc.org](mailto:support@osg-htc.org) for help.
+Contact your federation administrator to get a token for downloading a protected object. For Origin and federation admins, follow the documentation to [generate an object access token](../federating-your-data/generating-tokens.mdx) for your users. For OSDF users, contact [support@osg-htc.org](mailto:support@osg-htc.org) for help.
 
 Once you have the token, copy and paste it into a file on your machine, and pass the path to the file containing the token to the Pelican client with `-t` flag.
 
