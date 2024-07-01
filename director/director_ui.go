@@ -41,7 +41,8 @@ type (
 	listServerResponse struct {
 		Name string `json:"name"`
 		// AuthURL is Deprecated, for Pelican severs, URL is used as the base URL for object access.
-		// This is to maintain compatibility with the topology servers
+		// This is to maintain compatibility with the topology servers, where it uses AuthURL for
+		// accessing protected objects and URL for public objects.
 		AuthURL           string                      `json:"authUrl"`
 		BrokerURL         string                      `json:"brokerUrl"`
 		URL               string                      `json:"url"`    // This is server's XRootD URL for file transfer

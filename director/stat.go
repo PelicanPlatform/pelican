@@ -339,7 +339,7 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 				// For the topology server, if the server does not support public read,
 				// or the token is provided, then it's safe to assume this request goes to authenticated endpoint
 				// For Pelican server, we don't populate authURL and only use server URL as the base URL
-				if (!sAdInt.Caps.PublicReads || cfg.token != "") && sAD.AuthURL.String() != "" {
+				if sAdInt.FromTopology && (!sAdInt.Caps.PublicReads || cfg.token != "") && sAdInt.AuthURL.String() != "" {
 					baseUrl = sAD.AuthURL
 				}
 
@@ -359,15 +359,6 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 					// does not have this turned on, or had trouble calculating the checksum
 					// For old origins/caches, it has different URLs for public VS protected data
 					// Retry without digest
-					metadata, err = stat.ReqHandler(maxCancelCtx, objectName, baseUrl, false, cfg.token, timeout)
-				}
-
-				// If baseUrl is already AuthURL, or AuthURL is not set, then we can skip the last attempt
-				if err != nil && baseUrl != sAD.AuthURL && sAD.AuthURL.String() != "" && !errors.As(err, &cancelErr) {
-					// If there's still error, then we try the authURL.
-					// For topology servers, they have different URLs for projected objects than public objects.
-					// If the origin server does not have public objects, then it's sAD.URL is not accessible
-					baseUrl = sAD.AuthURL
 					metadata, err = stat.ReqHandler(maxCancelCtx, objectName, baseUrl, false, cfg.token, timeout)
 				}
 
