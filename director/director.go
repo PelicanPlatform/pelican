@@ -1079,7 +1079,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		Writes:              adV2.Caps.Writes,
 		DirectReads:         adV2.Caps.DirectReads,
 		Listings:            adV2.Caps.Listings,
-		IOLoad:              0.5, // Defaults to 0.5, as 0 means the server is "very free" which is not necessarily true
+		IOLoad:      0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
 	}
 
 	recordAd(engineCtx, sAd, &adV2.Namespaces)
