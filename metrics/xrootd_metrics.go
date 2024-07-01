@@ -664,7 +664,7 @@ func HandlePacket(packet []byte) error {
 					sessions.Delete(xferRecord.Value().UserId)
 					labels["path"] = xferRecord.Value().Path
 					if userRecord != nil {
-						maskedIP, ok := utils.ApplyIPMask(userRecord.Value().Host)
+						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().Host)
 						if !ok {
 							log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
 						} else {
@@ -769,7 +769,7 @@ func HandlePacket(packet []byte) error {
 					userRecord := sessions.Get(record.UserId)
 					labels["path"] = record.Path
 					if userRecord != nil {
-						maskedIP, ok := utils.ApplyIPMask(userRecord.Value().Host)
+						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().Host)
 						if !ok {
 							log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
 						} else {
