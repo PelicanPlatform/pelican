@@ -286,7 +286,7 @@ func TestSortServerAdsByAvailability(t *testing.T) {
 	firstUrl := url.URL{Host: "first.org", Scheme: "https"}
 	secondUrl := url.URL{Host: "second.org", Scheme: "https"}
 	thirdUrl := url.URL{Host: "third.org", Scheme: "https"}
-	forthUrl := url.URL{Host: "forth.org", Scheme: "https"}
+	forthUrl := url.URL{Host: "fourth.org", Scheme: "https"}
 
 	firstServer := server_structs.ServerAd{URL: firstUrl}
 	secondServer := server_structs.ServerAd{URL: secondUrl}
