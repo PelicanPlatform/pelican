@@ -132,3 +132,14 @@ func ApplyIPMask(ipStr string) (maskedIP string, ok bool) {
 	}
 	return ipStr, false
 }
+
+// ExtractAndMaskIP will extract an IP address from a leading "[" and trailing "]".
+// Then the function will apply the ApplyIPMask function
+func ExtractAndMaskIP(ipStr string) (maskedIP string, ok bool) {
+	if strings.HasPrefix(ipStr, "[") && strings.HasSuffix(ipStr, "]") {
+		extractedIP := ipStr[1 : len(ipStr)-1]
+		return ApplyIPMask(extractedIP)
+	} else {
+		return ApplyIPMask(ipStr)
+	}
+}
