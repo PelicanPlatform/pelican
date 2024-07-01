@@ -60,6 +60,7 @@ type Config struct {
 	Debug bool `mapstructure:"debug"`
 	Director struct {
 		AdvertisementTTL time.Duration `mapstructure:"advertisementttl"`
+		CacheAsOrigin bool `mapstructure:"cacheasorigin"`
 		CacheResponseHostnames []string `mapstructure:"cacheresponsehostnames"`
 		CacheSortMethod string `mapstructure:"cachesortmethod"`
 		DefaultResponse string `mapstructure:"defaultresponse"`
@@ -351,6 +352,7 @@ type configWithType struct {
 	Debug struct { Type string; Value bool }
 	Director struct {
 		AdvertisementTTL struct { Type string; Value time.Duration }
+		CacheAsOrigin struct { Type string; Value bool }
 		CacheResponseHostnames struct { Type string; Value []string }
 		CacheSortMethod struct { Type string; Value string }
 		DefaultResponse struct { Type string; Value string }

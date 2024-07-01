@@ -77,6 +77,8 @@ func CheckValidQuery(transferUrl *url.URL) (err error) {
 	recursive, hasRecursive := query["recursive"]
 	_, hasPack := query["pack"]
 	directRead, hasDirectRead := query["directread"]
+	_, hasSkipStat := query["skipstat"]
+	_, hasOriginOnly := query["originonly"]
 
 	// If we have both recursive and pack, we should return a failure
 	if hasRecursive && hasPack {
@@ -96,7 +98,7 @@ func CheckValidQuery(transferUrl *url.URL) (err error) {
 	}
 
 	// If we have no query, or we have recursive or pack, we are good
-	if len(query) == 0 || hasRecursive || hasPack || hasDirectRead {
+	if len(query) == 0 || hasRecursive || hasPack || hasDirectRead || hasSkipStat || hasOriginOnly {
 		return nil
 	}
 

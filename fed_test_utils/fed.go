@@ -143,6 +143,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set("LocalCache.RunLocation", filepath.Join(tmpPath, "local-cache"))
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
+	viper.Set("Director.CacheSortMethod", "distance")
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
