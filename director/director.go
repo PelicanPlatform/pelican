@@ -439,9 +439,19 @@ func redirectToCache(ginCtx *gin.Context) {
 			})
 			return
 		}
+	} else {
+		cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds, nil)
+		if err != nil {
+			log.Error("Error determining server ordering for cacheAds: ", err)
+			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to determine server ordering",
+			})
+			return
+		}
 	}
 
-	cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds)
+	cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds, cachesAvailabilityMap)
 	if err != nil {
 		log.Error("Error determining server ordering for cacheAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -669,7 +679,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
 
-	availableAds, err = sortServerAdsByIP(ipAddr, availableAds)
+	availableAds, err = sortServerAdsByIP(ipAddr, availableAds, nil)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{

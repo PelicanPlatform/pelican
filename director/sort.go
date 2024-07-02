@@ -43,18 +43,33 @@ type (
 	SwapMaps []SwapMap
 )
 
-type Coordinate struct {
-	Lat  float64 `mapstructure:"lat"`
-	Long float64 `mapstructure:"long"`
-}
+type (
+	Coordinate struct {
+		Lat  float64 `mapstructure:"lat"`
+		Long float64 `mapstructure:"long"`
+	}
 
-type GeoIPOverride struct {
-	IP         string     `mapstructure:"IP"`
-	Coordinate Coordinate `mapstructure:"Coordinate"`
-}
+	GeoIPOverride struct {
+		IP         string     `mapstructure:"IP"`
+		Coordinate Coordinate `mapstructure:"Coordinate"`
+	}
+)
 
-var invalidOverrideLogOnce = map[string]bool{}
-var geoIPOverrides []GeoIPOverride
+var (
+	invalidOverrideLogOnce = map[string]bool{}
+	geoIPOverrides         []GeoIPOverride
+)
+
+// Constants for the director sorting algorithm
+const (
+	souceServerAdsLimit      = 6    // Number of servers under consideration
+	distanceHalvingThreshold = 10   // Threshold where the distance havling factor kicks in, in miles
+	distanceHalvingFactor    = 200  // Halving distance for the GeoIP weight, in miles
+	objAvailabilityFactor    = 2    // Multiplier for knowing whether an object is present
+	loadHalvingThreshold     = 10.0 // Threshold where the load havling factor kicks in
+	loadHalvingFactor        = 4.0  // Halving interval for load
+	candidateLimit           = 3    // Number of servers return
+)
 
 func (me SwapMaps) Len() int {
 	return len(me)
@@ -156,7 +171,7 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate, ok bool) {
 
 // Sort serverAds based on the IP address of the client with shorter distance between
 // server IP and client having higher priority
-func sortServerAdsByIP(clientAddr netip.Addr, ads []server_structs.ServerAd) ([]server_structs.ServerAd, error) {
+func sortServerAdsByIP(clientAddr netip.Addr, ads []server_structs.ServerAd, availabilityMap map[string]bool) ([]server_structs.ServerAd, error) {
 	// Each entry in weights will map a priority to an index in the original ads slice.
 	// A larger weight is a higher priority.
 	weights := make(SwapMaps, len(ads))
@@ -178,18 +193,50 @@ func sortServerAdsByIP(clientAddr netip.Addr, ads []server_structs.ServerAd) ([]
 				// causing them to always be at the end of the sorted list.
 				weights[idx] = SwapMap{0 - rand.Float64(), idx}
 			} else {
-				weights[idx] = SwapMap{distanceWeight(clientCoord, ad),
+				weights[idx] = SwapMap{distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, false),
 					idx}
 			}
 		case "distanceAndLoad":
+			weight := 1.0
+			// Distance weight
 			clientCoord, ok := getClientLatLong(clientAddr)
-			if !ok {
-				weights[idx] = SwapMap{0 - rand.Float64(), idx}
-			} else {
-				// Each server ad will have a load value that we can use for sorting
-				weights[idx] = SwapMap{distanceAndLoadWeight(clientCoord, ad),
-					idx}
+			if ok {
+				distance := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
+				dWeighted := gatedHavlingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
+				weight *= dWeighted
 			}
+
+			// Load weight
+			lWeighted := gatedHavlingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
+			weight *= lWeighted
+
+			weights[idx] = SwapMap{weight, idx}
+		case "smart":
+			weight := 1.0
+			// Distance weight
+			clientCoord, ok := getClientLatLong(clientAddr)
+			if ok {
+				distance := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
+				dWeighted := gatedHavlingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
+				weight *= dWeighted
+			}
+			// Availability weight
+			if availabilityMap == nil {
+				weight *= 1.0
+			} else if hasObj, ok := availabilityMap[ad.URL.String()]; ok && hasObj {
+				weight *= 2.0
+			} else if !ok {
+				weight *= 1.0
+			} else { // ok but does not have the object
+				weight *= 0.5
+			}
+
+			// Load weight
+			lWeighted := gatedHavlingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
+			weight *= lWeighted
+
+			weights[idx] = SwapMap{weight, idx}
+
 		case "random":
 			weights[idx] = SwapMap{rand.Float64(), idx}
 		default:
@@ -198,13 +245,22 @@ func sortServerAdsByIP(clientAddr netip.Addr, ads []server_structs.ServerAd) ([]
 		}
 	}
 
-	// Larger weight = higher priority, so we reverse the sort (which would otherwise default to ascending)
-	sort.Sort(sort.Reverse(weights))
-	resultAds := make([]server_structs.ServerAd, len(ads))
-	for idx, weight := range weights {
-		resultAds[idx] = ads[weight.Index]
+	if sortMethod == "smart" {
+		candidates, _ := stochasticSort(weights, candidateLimit)
+		resultAds := make([]server_structs.ServerAd, candidateLimit)
+		for _, cidx := range candidates {
+			resultAds = append(resultAds, ads[cidx])
+		}
+		return resultAds, nil
+	} else {
+		// Larger weight = higher priority, so we reverse the sort (which would otherwise default to ascending)
+		sort.Sort(sort.Reverse(weights))
+		resultAds := make([]server_structs.ServerAd, len(ads))
+		for idx, weight := range weights {
+			resultAds[idx] = ads[weight.Index]
+		}
+		return resultAds, nil
 	}
-	return resultAds, nil
 }
 
 // Sort a list of ServerAds with the following rule:

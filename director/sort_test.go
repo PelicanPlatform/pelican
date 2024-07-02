@@ -239,7 +239,7 @@ func TestSortServerAdsByIP(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distance")
 		expected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
 			daejeonServer, mcMurdoServer}
-		sorted, err := sortServerAdsByIP(clientIP, randAds)
+		sorted, err := sortServerAdsByIP(clientIP, randAds, nil)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
 	})
@@ -249,7 +249,7 @@ func TestSortServerAdsByIP(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
 		expected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
 			daejeonServer, mcMurdoServer}
-		sorted, err := sortServerAdsByIP(clientIP, randAds)
+		sorted, err := sortServerAdsByIP(clientIP, randAds, nil)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
 	})
@@ -269,7 +269,7 @@ func TestSortServerAdsByIP(t *testing.T) {
 		// of failure. If you run thrice and you still get the distance-sorted slice, you might consider buying a powerball ticket
 		// (1/292,201,338 chance of winning).
 		for i := 0; i < 3; i++ {
-			sorted, err = sortServerAdsByIP(clientIP, randAds)
+			sorted, err = sortServerAdsByIP(clientIP, randAds, nil)
 			require.NoError(t, err)
 
 			// If the values are not equal, break the loop
