@@ -101,11 +101,12 @@ type registrationData struct {
 	ServerSignature string `json:"server_signature"`
 
 	Pubkey           json.RawMessage `json:"pubkey"`
+	Prefix           string          `json:"prefix"`
+	SiteName         string          `json:"site_name"`
 	AccessToken      string          `json:"access_token"`
 	Identity         string          `json:"identity"`
 	IdentityRequired string          `json:"identity_required"`
 	DeviceCode       string          `json:"device_code"`
-	Prefix           string          `json:"prefix"`
 }
 type permissionDeniedError struct {
 	Message string
@@ -315,6 +316,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		}
 		ns.Pubkey = string(pubkeyData)
 		ns.Identity = data.Identity
+		ns.AdminMetadata.SiteName = data.SiteName
 
 		if data.Identity != "" {
 			idMap := map[string]interface{}{}

@@ -40,17 +40,8 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
-)
-
-type (
-	namespaceEntry struct {
-		ID            int    `json:"ID"`
-		Prefix        string `json:"Prefix"`
-		Pubkey        string `json:"Pubkey"`
-		Identity      string `json:"Identity"`
-		AdminMetadata string `json:"AdminMetadata"`
-	}
 )
 
 func TestRegistration(t *testing.T) {
@@ -114,7 +105,7 @@ func TestRegistration(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, isRegistered)
 	assert.Equal(t, registerURL, svr.URL+"/api/v1.0/registry")
-	err = registerNamespaceImpl(key, prefix, registerURL)
+	err = registerNamespaceImpl(key, prefix, "mock_site_name", registerURL)
 	require.NoError(t, err)
 
 	// Test we can query for the new key
@@ -133,7 +124,7 @@ func TestRegistration(t *testing.T) {
 	require.Equal(t, 200, resp.StatusCode)
 
 	// Test new key is the same one we registered.
-	entries := []namespaceEntry{}
+	entries := []server_structs.Namespace{}
 	err = json.Unmarshal(body, &entries)
 	require.NoError(t, err)
 	require.Equal(t, len(entries), 1)
@@ -143,6 +134,7 @@ func TestRegistration(t *testing.T) {
 	registryKey, isPresent := keySet.LookupKeyID(keyId)
 	assert.True(t, isPresent)
 	assert.True(t, jwk.Equal(registryKey, key))
+	assert.Equal(t, "mock_site_name", entries[0].AdminMetadata.SiteName)
 
 	// Test the functionality of the keyIsRegistered function
 	keyStatus, err := keyIsRegistered(key, svr.URL+"/api/v1.0/registry", "/test123")

@@ -255,8 +255,8 @@ func registerNamespacePrep(ctx context.Context, prefix string) (key jwk.Key, reg
 	return
 }
 
-func registerNamespaceImpl(key jwk.Key, prefix string, registrationEndpointURL string) error {
-	if err := registry.NamespaceRegister(key, registrationEndpointURL, "", prefix); err != nil {
+func registerNamespaceImpl(key jwk.Key, prefix string, siteName string, registrationEndpointURL string) error {
+	if err := registry.NamespaceRegister(key, registrationEndpointURL, "", prefix, siteName); err != nil {
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusCritical, fmt.Sprintf("XRootD server failed to register its namespace %s at the registry: %v", prefix, err))
 		return errors.Wrapf(err, "Failed to register prefix %s", prefix)
 	}
@@ -271,6 +271,7 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 		log.Warning("Server.RegistrationRetryInterval is 0. Fall back to 10s")
 		retryInterval = 10 * time.Second
 	}
+	siteName := param.Xrootd_Sitename.GetString()
 
 	key, url, isRegistered, err := registerNamespacePrep(ctx, prefix)
 	if err != nil {
@@ -285,7 +286,7 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 		return nil
 	}
 
-	if err = registerNamespaceImpl(key, prefix, url); err == nil {
+	if err = registerNamespaceImpl(key, prefix, siteName, url); err == nil {
 		return nil
 	}
 	log.Errorf("Failed to register with namespace service: %v; will automatically retry in 10 seconds\n", err)
@@ -297,7 +298,7 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 		for {
 			select {
 			case <-ticker.C:
-				if err := registerNamespaceImpl(key, prefix, url); err == nil {
+				if err := registerNamespaceImpl(key, prefix, siteName, url); err == nil {
 					if err := origin.FetchAndSetRegStatus(prefix); err != nil {
 						log.Errorf("failed to fetch registration status for the prefix %s: %v", prefix, err)
 					}
