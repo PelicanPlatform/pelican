@@ -38,13 +38,9 @@ sudo ln -s $PWD/release_dir/lib/libSciTokens*.dylib /usr/local/lib
 popd
 
 # Build XRootD from source
-# TODO: Remove this patch and install from brew instead when XRootD releases 5.7.0
+# Add patches to xrootd source code if needed
 git clone --depth=1 https://github.com/xrootd/xrootd.git
 pushd xrootd
-patch -p1 < $scriptdir/pelican_protocol.patch
-patch -p1 < $scriptdir/gstream.patch
-patch -p1 < $scriptdir/gstream_clock_fix.patch
-patch -p1 < $scriptdir/gstream_enable_throttle_osx.patch
 mkdir xrootd_build
 cd xrootd_build
 cmake .. -GNinja
