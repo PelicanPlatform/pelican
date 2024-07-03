@@ -241,15 +241,15 @@ The **Status** panel shows information about the health status of the origin, de
 * **CMSD** indicates whether the [Cluster Management Service Distributed (CMSD)](https://xrootd.slac.stanford.edu/doc/dev410/cms_config.htm) daemon is running.
 * **Director** indicates whether the origin can advertise itself to its federation director, which is required for other members in the federation to discover your origin's existence and how to access objects from it.
 * **Federation** indicates whether the origin can fetch from the federation discovery URL, which contains locations of central services (Director and Registry).
-* **Registry** indicates whether the origin successfully registered the namespaces prefixes it exports at the Registry
+* **Registry** indicates whether the origin successfully registered the federation prefixes it exports at the Registry.
 * **Web UI** indicates whether the admin website is configured and running.
 * **XRootD** indicates whether Pelican's underlying file transfer software is functioning as expected.
 
 <ExportedImage width={1000} height={1000} src={"/pelican/origin-dashboard-status.png"} alt={"Screenshot of the Status panel on Pelican origin website dashboard page"} />
 
-The **Data Exports** panel lists information about the federation prefixes that are currently being exported by the origin. It also shows the capabilities each exported namespace prefixes have.
+The **Data Exports** panel lists information about the federation prefixes that are currently being exported by the origin. It also shows each prefix's advertised capabilities, like "reads", "writes", or "listings".
 
-If any of the namespace prefix registration is missing required information, there will be a warning message and a button to "Complete Registration". Note that each federation namespace prefixes is registered separately, and the Origin server itself also registers at the registry.  **It is advised that the Origin admin completes the registration as soon as they can**.
+If any of the namespace prefix registrations is missing required information, there will be a warning message and a button to "Complete Registration". Note that each namespace prefix is registered separately, and the Origin server itself also registers at the registry.  **It is advised that the Origin admin completes the registration as soon as they can**.
 
 <ExportedImage width={1000} height={1000} src={"/pelican/origin-dashboard-data-exports.png"} alt={"Screenshot of the Data Exports panel on Pelican origin website dashboard page"} />
 

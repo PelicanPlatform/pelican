@@ -6,9 +6,11 @@ This page documents advanced usage of Pelican servers. Features listed below are
 
 ### Server Private Key
 
-Pelican servers relies on a ECDSA key-pair for signing and verifying tokens used in API requests and object accesses. Pelican servers automatically generate a private key in ECDSA form at the server start, and provide the public key through the OIDC-style discovery endpoint at `/.well-known/openid-configuration`. The public key is useful for various things including Origin namespace prefix registration at the registry (see details [here](../federating-your-data.mdx#obtain-the-public-key-of-the-origin)).
+> **Note**: The server private key should be treated as a **secret** and never shared with the public.
 
-In deployment, it can be convenient to generate the key-pair in advance and mount the private key file to the Pelican server via configuration variable, especially in a container environment. Pelican CLI comes with a command `pelican generate keygen` for generating server private/public key pair:
+Pelican servers rely on an ECDSA key-pair for signing and verifying tokens used in API requests and object accesses. Pelican servers automatically generate a private key in ECDSA form at the server start, and provide the public key through the OIDC-style discovery endpoint at `/.well-known/openid-configuration`. The public key is useful for various things including Origin namespace prefix registration at the registry (see details [here](../federating-your-data.mdx#obtain-the-public-key-of-the-origin)).
+
+In deployment, it can be convenient to generate the key-pair in advance and mount the private key file to the Pelican server via configuration variable, especially in a container environment. The Pelican CLI comes with a command `pelican generate keygen` for generating private/public key pairs:
 
 ```bash copy
 pelican generate keygen
