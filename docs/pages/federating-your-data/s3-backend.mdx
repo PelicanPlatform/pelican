@@ -1,0 +1,97 @@
+
+# S3 Storage Backend
+
+## What is S3?
+
+S3, or "Simple Storage Service" is a type of object store introduced by Amazon Web Services (AWS) in 2006. Since then, the term S3 has grown to represent both the _service_ offered by Amazon as well as the _protocol_ used both by Amazon and many other providers who have no AWS affiliation. In general, Pelican works with any S3 provider and is not limited to what's offered by AWS. References to "S3" in Pelican documentation should be interpreted as "S3 the protocol."
+
+Unlike POSIX, which uses "files" organized into hierarchical directories with associated owners/permissions and a host of other metadata that are packaged together to act as a fundamental unit, S3 works with "objects" stored in "buckets". Typically, objects consist of data, metadata, and a unique identifier and they are stored in a flat address space referred to as a bucket. Because of this, there is no inherent hierarchy or nesting like there would be in a file system. One goal of Pelican is to obfuscate the underlying differences between storage backends like these so that users can enjoy a common interface for all there data, wherever it may happen to come from.
+
+## Launch the Origin with S3 Backend
+
+Serving S3 origins with Pelican is similar to serving POSIX origins, but with several key differences. The first is that Pelican must be configured to host an S3 backend, using the configuration option `Origin.StorageType = s3`. To make your work with S3, it needs to know at least four additional things:
+
+- The URL you use to access objects from S3, also known as the _S3 Service URL_
+- The _region_ that your S3 instance is hosted out of (almost always `us-east-1` unless you're actually using S3 from Amazon)
+- The name of the _bucket_ your objects are stored in
+- The type of bucket hosting used at the S3 service URL, which can be either _path_ or _virtual_. This determines whether objects are normally accessed like `https://<S3 service url>/<bucket name>/<object name>` (path-style hosting) or `https://<bucket name>.<S3 service url>/<object name>` (virtual-style hosting), but does not change the way you access objects through Pelican. In many cases, it's safe to assume _path_-style hosting, and this is set to Pelican's default. For more information about different hosting styles in S3, see the [AWS documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html).
+
+> **NOTE:** Pelican has a special mode where no bucket information is provided that allows you to export objects from all public buckets at a given service URL. This is covered in further detail [later in this section](#exporting-an-entire-s3-endpoint).
+
+The service URL, region, and hosting style can be configured using the Pelican config variables `Origin.S3ServiceUrl`, `Origin.S3Region`, and `Origin.S3UrlStyle`.
+
+Additionally, some buckets might require credentials that prove you're allowed to access the objects they contain. In S3, these credentials are called the _access_ key and _secret_ key (In some cases the access key may also be referred to as the _API_ key). Essentially, they can be treated like a username and password, where the access/API key is your username and the secret key is your password. When a bucket you'd like to export requires authentication, you'll need to pass these values to Pelican by putting your keys in separate files and telling Pelican where those files can be found via either the `Origin.S3AccessKeyfile` variable or the `Origin.Exports.S3AccessKeyfile`. See below for examples of S3 origin configurations that use these values, along with an explanation of how to choose which one is right for you.
+
+## Configuration Examples
+
+Origins can be configured with multiple exports by using the `Origin.Exports` block of your configuration:
+
+```yaml filename="pelican.yaml" copy
+Origin:
+  # Things that configure the origin itself
+  # Tell the origin it will be serving objects from S3
+  StorageType: "s3"
+  S3ServiceUrl: "https://my-s3.com"
+  S3Region: "us-east-1"
+  S3UrlStyle: "virtual"
+
+  # The actual namespaces we export. Each export is defined
+  # via its own export block
+  Exports:
+    - S3Bucket: "first-bucket"
+      FederationPrefix: /first/namespace
+      Capabilities: ["PublicReads", "Writes", "Listings", "DirectReads"]
+    - S3Bucket: "second-bucket"
+      S3AccessKeyfile: "/path/to/second/access.key"
+      S3SecretKeyfile: "/path/to/second/secret.key"
+      FederationPrefix: /second/namespace
+      # Notice we designate "Reads" and not "PublicReads" for this bucket
+      # because we assume that if the bucket requires credentials to access,
+      # the origin should, too.
+      Capabilities: ["Reads", "Writes"]
+```
+
+In this example, the object `foo` from the bucket `first-bucket` would be accessible without any token authorization at the namespace path `/first/namespace/foo`. Getting the object `bar` from `second-bucket` would require a valid access token, and would be accessed via `/second/namespace/bar`. In this example, the actual bucket names hosting `foo` and `bar` are elided from a Pelican user's perspective, because they are accessed through the namespace. If you'd like make users aware of the underlying bucket name, you can use the bucket name as your `FederationPrefix`.
+
+Alternatively, if your origin only exports a single bucket, the origin can be configured with top-level config variables (which could also be configured with their equivalent environment variables):
+
+```yaml filename="pelican.yaml" copy
+Origin:
+  StorageType: "s3"
+  S3ServiceUrl: "https://my-s3.com"
+  S3Region: "us-west-2"
+  S3UrlStyle: "path"
+
+  FederationPrefix: /my/namespace
+  S3Bucket: "my-bucket"
+  S3AccessKeyfile: "/path/to/access.key"
+  S3SecretKeyfile: "/path/to/secret.key"
+
+  # Set up origin capabilities that are also applied to the bucket
+  EnableWrites: false
+  EnableReads: true
+  EnableListings: false
+  EnableDirectReads: true
+```
+
+### Exporting An Entire S3 Endpoint
+
+In some cases, it may be infeasible to set up an origin that exports every bucket you'd like to make accessible via a Pelican federation. For example, [Amazon's Open Data program](https://aws.amazon.com/opendata) hosts many terabytes of public data across thousands of buckets and a handful of regions. Manually enumerating all of these buckets in an origin config would quickly become intractable. Instead, Pelican provides a mechanism that allows you to export all the public buckets from an S3 endpoint. This is accomplished by omitting the bucket field when you set up the export. The following example could be used to set up an origin that exports AWS public data from the `us-east-1` region.
+
+```yaml filename="pelican.yaml" copy
+Origin:
+  # Things that configure the origin itself
+  # Tell the origin it will be serving objects from S3
+  StorageType: "s3"
+  S3ServiceUrl: "https://s3.us-east-1.amazonaws.com"
+  S3Region: "us-east-1"
+  S3UrlStyle: "virtual"
+
+  # The actual namespaces we export. Each export is defined
+  # via its own export block
+  Exports:
+    - FederationPrefix: /aws-public
+      Capabilities: ["PublicReads", "Listings", "DirectReads"]
+```
+
+In this configuration, users who wish to fetch objects from the origin will still need to know the name of the bucket that hosts those objects. For example, the AWS public bucket `noaa-wod-pds` has an object called `MD5SUMS`, and with this configuration the object can be fetched at `/aws-public/noaa-wod-pds/MD5SUMS`.

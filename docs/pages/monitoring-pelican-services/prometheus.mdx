@@ -1,0 +1,332 @@
+import ExportedImage from "next-image-export-optimizer";
+
+# Query Pelican Server Metrics via Prometheus
+
+> For Pelican `>= 7.4.2`. Older version of Pelican may not include all of the metrics listed.
+
+Pelican servers have [Prometheus](https://prometheus.io/) embedded by default and provide a handful of Prometheus metrics to monitor server status. You can access the metrics endpoint at `https://<pelican-server-host>:<server-web-port>/metrics` to see all the available metrics and their current values. By default, `/metrics` is a protected endpoint and you are required to login and get authenticated to view the page. You can change `Monitoring.MetricAuthorization` to `false` in config to turn off the authentication.
+
+Pelican also exposes Prometheus [PromQL query engine](https://prometheus.io/docs/prometheus/latest/querying/basics/) at `https://<pelican-server-host>:<server-web-port>/api/v1.0/prometheus` where you can query the metrics against Prometheus powerful query language.
+
+Example: `https://<pelican-server-host>:<server-web-port>/api/v1.0/prometheus/query?query=pelican_component_health_status[10m]` queries the `pelican_component_health_status` metric and shows data collected in past 10 min.
+
+However, Pelican does not support Prometheus native `/graph` endpoint nor other Prometheus native web services other than the two above. For custom data visualizations, [Grafana](https://grafana.com/) is one of the popular software to use.
+
+Pelican included metrics from built-in [gin](https://gin-gonic.com/) web server, as well as Go runtime. For all metrics available, visit `https://<pelican-server-host>:<server-web-port>/api/v1.0/prometheus/label/__name__/values`.
+
+Pelican also has a set of built-in metrics to monitor Pelican server's status, listed below.
+
+## All Servers
+
+All of the Pelican servers have the following metrics:
+
+### `process_start_time_seconds`
+
+The UNIX epoch time in seconds since the Pelican process started. To get the duration of the Pelican server running time, use the following PromQL:
+
+```plaintext filename="PromQL" copy
+time() - process_start_time_seconds
+```
+
+This yields the duration in seconds.
+
+### `pelican_component_health_status`
+
+  The health status of Pelican server components. The metric value can be converted into following status:
+
+  ```
+  1: Critical
+  2: Warning
+  3: OK
+  4: Unknown
+  ```
+
+  #### Label: `component`
+
+  | Label Value           | Description                                    | Availability                 |
+  |---------------|------------------------------------------------|------------------------------|
+  | `web-ui`      | Admin website                                  | All servers                  |
+  | `xrootd`     | XRootD process                                 | Origin and cache servers     |
+  | `cmsd`       | CMSD process                                   | Origin and cache servers     |
+  | `federation` | Advertisement to the Director                | Origin and cache servers     |
+  | `registry`   | Namespace registration at the Registry | Origin and cache servers     |
+  | `director`   | Object transfer tests from the Director | Origin and cache servers     |
+  | `topology`    | Data fetch from the OSDF topology server                 | All servers (OSDF mode only)                  |
+
+### `pelican_component_health_status_last_update`
+
+  The timestamp of last update of health status of Pelican server components. The value is UNIX time in seconds. It shares the same label as `pelican_component_health_status`
+
+
+## Storage Servers (Origin and Cache)
+
+### `xrootd_monitoring_packets_received`
+
+  The total number of [XRootD monitoring](https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm) UDP packets received.
+
+
+### `xrootd_sched_thread_count`
+
+  The number of XRootD scheduler threads. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968509
+
+  #### Label: `status`
+
+  | Label Value       | Description                               |
+  |-----------|-------------------------------------------|
+  | `idle`    | Scheduler threads waiting for work        |
+  | `running` | Scheduler threads running                 |
+
+
+### `xrootd_server_bytes`
+
+  The total number of bytes XRootD sent/received. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968503 (See `link.in` and `link.out`)
+
+  #### Label: `direction`
+
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `tx`         | Bytes sent      |
+  | `rx`         | Bytes received  |
+
+### `xrootd_server_connection_count`
+
+  The total number of server connections to XRootD.
+
+### `xrootd_storage_volume_bytes`
+
+  The storage volume usage on the storage server.
+
+  #### Label: `type`
+
+  | Label Values | Description                              |
+  |--------------|------------------------------------------|
+  | `total`      | Total bytes visible on the storage server|
+  | `free`       | Available bytes to use                   |
+
+  #### Label: `server_type`
+
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `Origin`     | Origin server   |
+  | `Cache`      | Cache server    |
+
+  #### Label: `ns`
+
+  The top-level namespace the XRootD is serving for. Example: `/foo`
+
+### `xrootd_transfer_bytes`
+
+  The bytes of transfers for individual object. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968522 (See XrdXrootdMonStatXFR)
+
+  #### Label: `path`
+
+  The path to the object (filename).
+
+  #### Label: `ap`
+
+  Authentication protocol name used to authenticate the client. Default is `https`
+
+  #### Label: `dn`
+
+  Client’s distinguished name as reported by ap. If no name is present, the variable data is null.
+
+  #### Label: `role`
+
+  Client’s role name as reported by prot. If no role name is present, the variable data is null.
+
+  #### Label: `org`
+
+  Client’s group names in a space-separated list. If no groups are present, the tag variable data is null.
+
+  #### Label: `proj`
+
+  Client’s `User-Agent` header when requesting the file. This is used to label the project name that accesses the file.
+
+  #### Label: `type`
+
+  | Label Values | Description                              |
+  |--------------|------------------------------------------|
+  | `read`       | Bytes read from file using read()        |
+  | `readv`      | Bytes read from file using readv()       |
+  | `write`      | Bytes written to file                    |
+
+### `xrootd_transfer_operations_count`
+
+  The number of transfer operations performed for individual object. The labels for this metric is the same as the ones in `xrootd_transfer_bytes`
+
+### `xrootd_transfer_readv_segments_count`
+
+  The number of segments in readv operations for individual object. The labels for this metric is the same as the ones in `xrootd_transfer_bytes` except that `type` label isn't available in this metric.
+
+
+## Director
+
+### `up`
+
+  The Pelican director scrapes Prometheus metrics from all origins and cache servers that successfully advertise to the director. This metric reflects the Pelican origin or cache servers that are scraped by the director.
+
+  #### Label: `server_name`
+
+  The name of the storage server. By default it's the hostname.
+
+  #### Label: `server_type`
+
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `Origin`     | Origin server   |
+  | `Cache`      | Cache server    |
+
+  #### Label: `server_url`
+
+  The storage server XRootD url.
+
+  #### Label: `server_web_url`
+
+  The storage server web url.
+
+  #### Label: `server_auth_url`
+
+  The storage server authentication url.
+
+  #### Label: `server_lat`
+
+  The storage server latitude.
+
+  #### Label: `server_long`
+
+  The storage server longitude.
+
+
+### `# of Active Origins and Caches`
+
+With the `up` metric, it is possible to count number of active origin and cache servers in the federation by a simple Prometheus query: `count(up{server_type=<"Origin">})` for counting origin servers, or `count(up{server_type=<"Cache">})` for counting cache servers.
+
+### `pelican_director_advertisements_received_total`
+
+  The accumulated number of origin/cache advertisements to the director. This metric shows if an origin/cache server successfully joins the federation or not. For origin servers, it also shows if each federation namespace prefix it exports passed director verification.
+
+  #### Label: `server_name`
+
+  The name of the storage server. By default it's the hostname.
+
+  #### Label: `server_type`
+
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `Origin`     | Origin server   |
+  | `Cache`      | Cache server    |
+
+  #### Label: `server_web_url`
+
+  The storage server web url.
+
+  ### Label: `namespace_prefix`
+
+  The federation namespace prefix the storage server exported.
+
+  ### Label: `status_code`
+
+  The status code of the director's response. The most useful value is `403`, which means the server advertisement didn't pass director's verification.
+
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `200`     | Advertisement succeeded   |
+  | `403`      | Advertisement verification failed    |
+  | `500`      | Director has errors when verifying or saving the advertisement    |
+
+### `pelican_director_stat_total`
+
+  The accumulated number of `stat` query the director made to origin/cache servers to check for object availability. Only available when `Director.EnableStat` is set to true. This metric is a good indicator of object availability and origin/cache service quality.
+
+  #### Label: `server_name`
+
+  The name of the storage server. By default it's the hostname.
+
+  #### Label: `server_type`
+
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `Origin`     | Origin server   |
+  | `Cache`      | Cache server    |
+
+  #### Label: `server_url`
+
+  The storage server XRootD url.
+
+  #### Label: `result`
+
+  The `stat` query result.
+
+| Label Values | Description                                                          |
+|--------------|----------------------------------------------------------------------|
+| `Succeeded`  | The object requested is on the server            |
+| `NotFound`   | The requested object could not be found on the server                  |
+| `Timeout`    | The query exceeded the allotted time and was not completed.     |
+| `Cancelled`  | The query is cancelled as maximum number of responses has been reached          |
+| `Forbidden`  | The object request was denied due to lack of permissions or missing token |
+| `UnknownErr` | An unexpected error occurred. Typically when the server refused to connect  |
+
+
+### `pelican_director_stat_active`
+
+ The ongoing `stat` queries at the server. Note that Prometheus samples the metric value per 15s, and each `stat` request only takes ~10-100ms to finish. The value of this metric can't capture per-second transient requests.
+
+  #### Label: `server_name`
+
+  The name of the storage server. By default it's the hostname.
+
+  #### Label: `server_type`
+
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `Origin`     | Origin server   |
+  | `Cache`      | Cache server    |
+
+  #### Label: `server_url`
+
+  The storage server XRootD url.
+
+### `pelican_director_total_ftx_test_suite`
+
+  The number of file transfer test suite the director issued. In Pelican, director creates a test file and sent to origin servers to as a health test. It issues such test suite when it receives the registration from the origin server. In a test suite, a timer was set to run a cycle of uploading, getting, and deleting the test file every 15 seconds. Such cycle is called a "test run". In theory, director should issue only one test for each origin servers; however, since the registration information was stored in a TTL cache in director, and it expires after certain period of time, and the test suite issued will be cancelled. A new test suite is issued with the new registration. Thus, director _can_ issue multiple test suites to an origin server.
+
+  #### Label: `server_name`
+
+  The name of the storage server. By default it's the hostname.
+
+  #### Label: `server_type`
+
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `Origin`     | Origin server   |
+  | `Cache`      | Cache server    |
+
+  #### Label: `server_web_url`
+
+  The storage server web url.
+
+### `pelican_director_active_ftx_test_suite`
+
+  The number of _active_ director file transfer test suite. As mentioned in previous metric, the test suites are individual tasks running independently from the main program logic. This can cause race condition in some condition where an expired test suite was not cleared but a new test suite is issued for the same origin. This metric records such condition for debugging and monitoring. The value of the metric _should_ be 1 for all the time.
+
+  This metric shares the same label as `pelican_director_total_ftx_test_suite`
+
+### `pelican_director_total_ftx_test_runs`
+
+  The number of file transfer test runs the director issued. A "test run" is a set of upload/get/delete of test files to a origin. It executes in a cycle of 15s (by default).
+
+  This metric shares the same label as `pelican_director_total_ftx_test_suite`, with two additions:
+
+  #### Label: `status`
+
+  | Label Values | Description             |
+  |--------------|-------------------------|
+  | `Success`    | The test run succeeded  |
+  | `Failed`     | The test run failed     |
+
+  #### Label: `report_status`
+
+  | Label Values | Description                                                        |
+  |--------------|--------------------------------------------------------------------|
+  | `Success`    | The reporting to the origin of test run status succeeded           |
+  | `Failed`     | The reporting to the origin of test run status failed              |

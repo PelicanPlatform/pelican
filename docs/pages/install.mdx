@@ -47,6 +47,7 @@ The download table above includes Pelican versions as old as `7.6.x` To download
 * [Install Pelican on Red Hat Enterprise Linux (CentOS, Fedora, Alma, Rocky, or openSUSE)](./install/rhel.mdx)
 * [Install Pelican on Debian or Ubuntu](./install/debian.mdx)
 * [Install Pelican on Alpine Linux](./install/alpine.mdx)
+* [Install Pelican as a standalone binary](./install/linux-binary.mdx)
 
 ### macOS
 
@@ -69,6 +70,8 @@ Problem: conflicting requests
 ```
 
 To fix the issue, install the Pelican package first by following [the instructions](#install-pelican-binary) above.
+
+The server components require `xrootd-server >= 5.6.3` because of some of the patches Pelican needs. For Ubuntu users, it is required to install Pelican server package on `Ubuntu 24.04` ("noble") and above.
 
 ## Verify Pelican Is Installed
 
