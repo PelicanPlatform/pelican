@@ -80,6 +80,13 @@ const (
 	HealthStatusError   HealthTestStatus = "Error"
 )
 
+const (
+	// The number of caches to send in the Link header. As discussed in issue
+	// https://github.com/PelicanPlatform/pelican/issues/1247, the client stops
+	// after three attempts, so there's really no need to send every cache we know
+	serverResLimit = 6
+)
+
 var (
 	minClientVersion, _ = version.NewVersion("7.0.0")
 	minOriginVersion, _ = version.NewVersion("7.0.0")
@@ -90,11 +97,6 @@ var (
 
 	statUtils      = make(map[string]serverStatUtil) // The utilities for the stat call. The key is string form of ServerAd.URL
 	statUtilsMutex = sync.RWMutex{}
-
-	// The number of caches to send in the Link header. As discussed in issue
-	// https://github.com/PelicanPlatform/pelican/issues/1247, the client stops
-	// after three attempts, so there's really no need to send every cache we know
-	cachesToSend = 6
 )
 
 func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth bool) (redirectURL url.URL) {
@@ -332,7 +334,8 @@ func redirectToCache(ginCtx *gin.Context) {
 
 	linkHeader := ""
 	first := true
-	if numCAds := len(cacheAds); numCAds < cachesToSend {
+	cachesToSend := serverResLimit
+	if numCAds := len(cacheAds); numCAds < serverResLimit {
 		cachesToSend = numCAds
 	}
 	for idx, ad := range cacheAds[:cachesToSend] {
@@ -502,11 +505,13 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		}
 	}
 
-	// If CachesAdOrigins is enabled, we stat caches and append cache servers that have the object,
+	// If CachesPullFromCaches is enabled, we stat caches and append cache servers that have the object,
 	// with the following exceptions:
+	// - Number of available Origins >= serverResLimit
 	// - This is an upload request (PUT) or listing request (PROPFIND)
-	// - The request has directread, which requests direct read to the origin
-	if includeCaches &&
+	// - The request has directread, which means direct read to the origin
+	if len(availableAds) < serverResLimit &&
+		includeCaches &&
 		ginCtx.Request.Method != http.MethodPut &&
 		ginCtx.Request.Method != "PROPFIND" &&
 		!reqParams.Has(utils.QueryDirectRead.String()) {
@@ -576,7 +581,11 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	linkHeader := ""
 	first := true
-	for idx, ad := range availableAds {
+	serversToSend := serverResLimit
+	if numCAds := len(availableAds); numCAds < serverResLimit {
+		serversToSend = numCAds
+	}
+	for idx, ad := range availableAds[:serversToSend] {
 		if first {
 			first = false
 		} else {
