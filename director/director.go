@@ -411,7 +411,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// Include caches in the response if Director.CacheAsOrigin is enabled
 	// AND originonly query parameter is not set
-	includeCaches := param.Director_CacheAsOrigin.GetBool() && !reqParams.Has("originonly")
+	includeCaches := param.Director_CachesPullFromCaches.GetBool() && !reqParams.Has("originonly")
 	if !includeCaches {
 		log.Debugf("CachesAsOrigin disabled. Only origins are included for object %s", reqPath)
 	}

@@ -1228,9 +1228,9 @@ type: string
 default: cache
 components: ["director"]
 ---
-name: Director.CacheAsOrigin
+name: Director.CachesPullFromCaches
 description: |+
-  In the "origin" response, the director returns a list of origins that can serve the object. If `Director.CacheAsOrigin`
+  In the "origin" response, the director returns a list of origins that can serve the object. If `Director.CachesPullFromCaches`
   is set to true (default is false), the director then appends a list of caches that can serve the object to the original response.
 type: bool
 default: false
