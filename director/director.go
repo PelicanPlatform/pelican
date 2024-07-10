@@ -198,7 +198,7 @@ func getFinalRedirectURL(rurl url.URL, requstParams url.Values) string {
 	return rurl.String()
 }
 
-func versionCompatCheck(ginCtx *gin.Context) error {
+func checkVersionCompat(ginCtx *gin.Context) error {
 	// Check that the version of whichever service (eg client, origin, etc) is talking to the Director
 	// is actually something the Director thinks it can communicate with
 
@@ -249,13 +249,32 @@ func versionCompatCheck(ginCtx *gin.Context) error {
 	return nil
 }
 
+// Check and validate the director-specific query params from the redirect request
+func checkRedirectQuery(query url.Values) error {
+	_, hasDirectRead := query[utils.QueryDirectRead.String()]
+	_, hasPreferCached := query[utils.QueryPreferPrefetched.String()]
+
+	if hasDirectRead && hasPreferCached {
+		return errors.New("cannot have both directread and prefercached query parameters")
+	}
+	return nil
+}
+
 func redirectToCache(ginCtx *gin.Context) {
-	err := versionCompatCheck(ginCtx)
+	err := checkVersionCompat(ginCtx)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Incompatible versions detected: " + fmt.Sprintf("%v", err),
+		})
+		return
+	}
+
+	if err = checkRedirectQuery(ginCtx.Request.URL.Query()); err != nil {
+		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid query parameters: " + err.Error(),
 		})
 		return
 	}
@@ -379,12 +398,20 @@ func redirectToCache(ginCtx *gin.Context) {
 }
 
 func redirectToOrigin(ginCtx *gin.Context) {
-	err := versionCompatCheck(ginCtx)
+	err := checkVersionCompat(ginCtx)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Incompatible versions detected: " + fmt.Sprintf("%v", err),
+		})
+		return
+	}
+
+	if err = checkRedirectQuery(ginCtx.Request.URL.Query()); err != nil {
+		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid query parameters: " + err.Error(),
 		})
 		return
 	}
@@ -759,7 +786,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		return
 	}
 
-	err := versionCompatCheck(ctx)
+	err := checkVersionCompat(ctx)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while registering %s and no response was served: %v", sType, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
