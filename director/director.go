@@ -164,8 +164,9 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 		timeout = timeoutHeader[0]
 	}
 
-	skipStat := req.URL.Query().Has("skipstat")
-	originOnly := req.URL.Query().Has("originonly")
+	directRead := req.URL.Query().Has(utils.QueryDirectRead.String())
+	skipStat := req.URL.Query().Has(utils.QuerySkipStat.String())
+	preferCached := req.URL.Query().Has(utils.QueryPreferPrefetched.String())
 
 	// url.Values.Encode will help us escape all them
 	if authz != "" {
@@ -175,10 +176,13 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 		requestParams.Add("pelican.timeout", timeout)
 	}
 	if skipStat {
-		requestParams.Add("skipstat", "")
+		requestParams.Add(utils.QuerySkipStat.String(), "")
 	}
-	if originOnly {
-		requestParams.Add("originonly", "")
+	if preferCached {
+		requestParams.Add(utils.QueryPreferPrefetched.String(), "")
+	}
+	if directRead {
+		requestParams.Add(utils.QueryDirectRead.String(), "")
 	}
 	return
 }
@@ -403,18 +407,15 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// Skip the stat check for object availability
 	// If either disableStat or skipstat is set, then skip the stat query
-	skipStat := reqParams.Has("skipstat") || !param.Director_EnableStat.GetBool()
+	skipStat := reqParams.Has(utils.QuerySkipStat.String()) || !param.Director_EnableStat.GetBool()
 
 	if skipStat {
 		log.Debugf("Stat is skipped for object %s", reqPath)
 	}
 
-	// Include caches in the response if Director.CacheAsOrigin is enabled
-	// AND originonly query parameter is not set
-	includeCaches := param.Director_CachesPullFromCaches.GetBool() && !reqParams.Has("originonly")
-	if !includeCaches {
-		log.Debugf("CachesAsOrigin disabled. Only origins are included for object %s", reqPath)
-	}
+	// Include caches in the response if Director.CachesPullFromCaches is enabled
+	// AND prefercached query parameter is set
+	includeCaches := param.Director_CachesPullFromCaches.GetBool() && reqParams.Has(utils.QueryPreferPrefetched.String())
 
 	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
@@ -432,7 +433,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	availableAds := []server_structs.ServerAd{}
 	// Skip stat query for PUT (upload), PROPFIND (listing) or skipStat query flag is on
-	if ginCtx.Request.Method == "PUT" || ginCtx.Request.Method == "PROPFIND" || skipStat {
+	if ginCtx.Request.Method == http.MethodPut || ginCtx.Request.Method == "PROPFIND" || skipStat {
 		availableAds = originAds
 	} else {
 		// Query Origins and check if the object exists on the server
@@ -479,15 +480,15 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// - This is an upload request (PUT) or listing request (PROPFIND)
 	// - The request has directread, which requests direct read to the origin
 	if includeCaches &&
-		ginCtx.Request.Method != "PUT" &&
+		ginCtx.Request.Method != http.MethodPut &&
 		ginCtx.Request.Method != "PROPFIND" &&
-		!ginCtx.Request.URL.Query().Has("directread") {
+		!reqParams.Has(utils.QueryDirectRead.String()) {
 		if q == nil {
 			q = NewObjectStat()
 		}
 		qr := q.Query(context.Background(), reqPath, config.CacheType, 1, 3,
 			withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
-		log.Debugf("CachesAsOrigin enabled. Stat result for %s among caches: %s", reqPath, qr.String())
+		log.Debugf("CachesPullFromCaches is enabled. Stat result for %s among caches: %s", reqPath, qr.String())
 
 		// For successful response, we got a list of URL to access the object.
 		// We will use the host of the object url to match the URL field in cacheAds
@@ -502,9 +503,9 @@ func redirectToOrigin(ginCtx *gin.Context) {
 			}
 		} else if qr.Status == queryFailed {
 			if qr.ErrorType != queryInsufficientResErr {
-				log.Debugf("CachesAsOrigin enabled, but error occurred when querying caches for the object %s: %s %s", reqPath, string(qr.ErrorType), qr.Msg)
+				log.Debugf("CachesPullFromCaches is enabled, but error occurred when querying caches for the object %s: %s %s", reqPath, string(qr.ErrorType), qr.Msg)
 			} else if len(qr.DeniedServers) == 0 { // Insufficient response
-				log.Debugf("CachesAsOrigin enabled, but no caches found for the object %s", reqPath)
+				log.Debugf("CachesPullFromCaches is enabled, but no caches found for the object %s", reqPath)
 			} else {
 				// For denied cache servers, append them to availableAds
 				// The qr.DeniedServers is a list of AuthURLs of servers that respond with 403
@@ -598,7 +599,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// Any client that uses this api that doesn't set directreads can talk directly to an origin
 
 	// Check if we are doing a DirectRead and if it is allowed
-	if ginCtx.Request.URL.Query().Has("directread") {
+	if reqParams.Has(utils.QueryDirectRead.String()) {
 		for idx, originAd := range availableAds {
 			if originAd.DirectReads && namespaceAd.Caps.DirectReads {
 				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.PublicRead)
@@ -715,7 +716,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		}
 
 		// Check for the DirectRead query paramater and redirect to the origin if it's set if the origin allows DirectReads
-		if c.Request.URL.Query().Has("directread") {
+		if c.Request.URL.Query().Has(utils.QueryDirectRead.String()) {
 			log.Debugln("directread query parameter detected, redirecting to origin")
 			// We'll redirect to origin here and the origin will decide if it can serve the request (if direct reads are enabled)
 			redirectToOrigin(c)
