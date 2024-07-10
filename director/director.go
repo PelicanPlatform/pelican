@@ -548,7 +548,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		}
 	}
 
-	// No available originAds or cacheAds if CacheAsOrigin is enabled, object does not exist
+	// No available originAds or cacheAds if CachesPullFromCaches is enabled, object does not exist
 	if len(availableAds) == 0 {
 		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
