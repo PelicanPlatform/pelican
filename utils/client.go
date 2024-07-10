@@ -29,11 +29,11 @@ import (
 type ClientQueryName string
 
 const (
-	QueryRecursive        ClientQueryName = "recursive"
-	QueryPack             ClientQueryName = "pack"
-	QueryDirectRead       ClientQueryName = "directread"
-	QuerySkipStat         ClientQueryName = "skipstat"
-	QueryPreferPrefetched ClientQueryName = "prefercached"
+	QueryRecursive    ClientQueryName = "recursive"
+	QueryPack         ClientQueryName = "pack"
+	QueryDirectRead   ClientQueryName = "directread"
+	QuerySkipStat     ClientQueryName = "skipstat"
+	QueryPreferCached ClientQueryName = "prefercached"
 )
 
 func (q ClientQueryName) String() string {
@@ -47,7 +47,7 @@ func CheckValidQuery(transferUrl *url.URL) (err error) {
 	_, hasPack := query[QueryPack.String()]
 	directRead, hasDirectRead := query[QueryDirectRead.String()]
 	_, hasSkipStat := query[QuerySkipStat.String()]
-	_, hasPreferCached := query[QueryPreferPrefetched.String()]
+	_, hasPreferCached := query[QueryPreferCached.String()]
 
 	// If we have both recursive and pack, we should return a failure
 	if hasRecursive && hasPack {

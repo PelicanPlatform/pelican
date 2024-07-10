@@ -166,7 +166,7 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 
 	directRead := req.URL.Query().Has(utils.QueryDirectRead.String())
 	skipStat := req.URL.Query().Has(utils.QuerySkipStat.String())
-	preferCached := req.URL.Query().Has(utils.QueryPreferPrefetched.String())
+	preferCached := req.URL.Query().Has(utils.QueryPreferCached.String())
 
 	// url.Values.Encode will help us escape all them
 	if authz != "" {
@@ -179,7 +179,7 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 		requestParams.Add(utils.QuerySkipStat.String(), "")
 	}
 	if preferCached {
-		requestParams.Add(utils.QueryPreferPrefetched.String(), "")
+		requestParams.Add(utils.QueryPreferCached.String(), "")
 	}
 	if directRead {
 		requestParams.Add(utils.QueryDirectRead.String(), "")
@@ -252,7 +252,7 @@ func checkVersionCompat(ginCtx *gin.Context) error {
 // Check and validate the director-specific query params from the redirect request
 func checkRedirectQuery(query url.Values) error {
 	_, hasDirectRead := query[utils.QueryDirectRead.String()]
-	_, hasPreferCached := query[utils.QueryPreferPrefetched.String()]
+	_, hasPreferCached := query[utils.QueryPreferCached.String()]
 
 	if hasDirectRead && hasPreferCached {
 		return errors.New("cannot have both directread and prefercached query parameters")
@@ -442,7 +442,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// Include caches in the response if Director.CachesPullFromCaches is enabled
 	// AND prefercached query parameter is set
-	includeCaches := param.Director_CachesPullFromCaches.GetBool() && reqParams.Has(utils.QueryPreferPrefetched.String())
+	includeCaches := param.Director_CachesPullFromCaches.GetBool() && reqParams.Has(utils.QueryPreferCached.String())
 
 	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
