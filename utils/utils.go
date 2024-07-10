@@ -19,6 +19,7 @@
 package utils
 
 import (
+	"net"
 	"net/url"
 	"strings"
 	"unicode"
@@ -69,4 +70,44 @@ func GetPreferredCaches(preferredCaches string) (caches []*url.URL, err error) {
 		}
 	}
 	return
+}
+
+func maskIPv4With24(ip net.IP) (masked string, ok bool) {
+	mask := net.CIDRMask(24, 32)
+	maskedIP := ip.Mask(mask)
+	return maskedIP.String(), true
+}
+
+func maskIPv6With64(ip net.IP) (masked string, ok bool) {
+	mask := net.CIDRMask(64, 128)
+	maskedIP := ip.Mask(mask)
+	return maskedIP.String(), true
+}
+
+// ApplyIPMask will apply a /24 bit mask to IPv4 addresses and a /64 bit mask to IPv6
+// Will return the input string along with ok == false if there is any error while masking
+func ApplyIPMask(ipStr string) (maskedIP string, ok bool) {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return ipStr, false
+	}
+	if ip.To4() != nil {
+		return maskIPv4With24(ip)
+	}
+
+	if ip.To16() != nil {
+		return maskIPv6With64(ip)
+	}
+	return ipStr, false
+}
+
+// ExtractAndMaskIP will extract an IP address from a leading "[" and trailing "]".
+// Then the function will apply the ApplyIPMask function
+func ExtractAndMaskIP(ipStr string) (maskedIP string, ok bool) {
+	if strings.HasPrefix(ipStr, "[") && strings.HasSuffix(ipStr, "]") {
+		extractedIP := ipStr[1 : len(ipStr)-1]
+		return ApplyIPMask(extractedIP)
+	} else {
+		return ApplyIPMask(ipStr)
+	}
 }
