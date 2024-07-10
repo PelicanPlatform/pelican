@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"path"
 	"regexp"
@@ -45,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -119,17 +119,6 @@ func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth boo
 	redirectURL.Host = serverURL.Host
 	redirectURL.Path = reqPath
 	return
-}
-
-func getRealIP(ginCtx *gin.Context) (ipAddr netip.Addr, err error) {
-	ip_addr_list := ginCtx.Request.Header["X-Real-Ip"]
-	if len(ip_addr_list) == 0 {
-		ipAddr, err = netip.ParseAddr(ginCtx.RemoteIP())
-		return
-	} else {
-		ipAddr, err = netip.ParseAddr(ip_addr_list[0])
-		return
-	}
 }
 
 // Calculate the depth attribute of Link header given the path to the file
@@ -269,15 +258,7 @@ func redirectToCache(ginCtx *gin.Context) {
 
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/object")
-	ipAddr, err := getRealIP(ginCtx)
-	if err != nil {
-		log.Errorln("Error in getRealIP:", err)
-		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Internal error: Unable to determine client IP",
-		})
-		return
-	}
+	ipAddr := utils.ClientIPAddr(ginCtx)
 
 	reqParams := getRequestParameters(ginCtx.Request)
 
@@ -416,15 +397,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// Each namespace may be exported by several origins, so we must still
 	// do the geolocation song and dance if we want to get the closest origin...
-	ipAddr, err := getRealIP(ginCtx)
-	if err != nil {
-		log.Errorln("Error in getRealIP:", err)
-		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Internal error: Unable to determine client IP",
-		})
-		return
-	}
+	ipAddr := utils.ClientIPAddr(ginCtx)
 
 	reqParams := getRequestParameters(ginCtx.Request)
 
