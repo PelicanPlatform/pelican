@@ -366,6 +366,7 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 					"server_url":  baseUrl.String(),
 					"server_type": string(serverAd.Type),
 					"result":      "",
+					"message":     "",
 				}
 				if err != nil {
 					switch e := err.(type) {
@@ -397,6 +398,7 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 					default:
 						negativeReqChan <- err
 						totalLabels["result"] = string(metrics.StatUnkownErr)
+						totalLabels["message"] = err.Error()
 						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return nil
 					}
