@@ -43,6 +43,7 @@ type (
 		originAds         []server_structs.ServerAd
 		cacheAds          []server_structs.ServerAd
 		token             string
+		protected         bool
 		originAdsProvided bool // Explicitly mark the originAds are provided, not based on the length of the array
 		cacheAdsProvided  bool // Explicitly mark the cacheAds are provided, not based on the length of the array
 	}
@@ -244,6 +245,14 @@ func withCacheAds(ads []server_structs.ServerAd) queryOption {
 	}
 }
 
+// For internal use only. Use to specify if the object is protected based on
+// namespace capability
+func withAuth(auth bool) queryOption {
+	return func(c *queryConfig) {
+		c.protected = auth
+	}
+}
+
 // Issue the stat call with a token
 func WithToken(tk string) queryOption {
 	return func(c *queryConfig) {
@@ -337,9 +346,9 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 				baseUrl := serverAd.URL
 
 				// For the topology server, if the server does not support public read,
-				// or the token is provided, then it's safe to assume this request goes to authenticated endpoint
+				// or the token is provided, or the object is protected, then it's safe to assume this request goes to authenticated endpoint
 				// For Pelican server, we don't populate authURL and only use server URL as the base URL
-				if serverAd.FromTopology && (!serverAd.Caps.PublicReads || cfg.token != "") && serverAd.AuthURL.String() != "" {
+				if serverAd.FromTopology && (!serverAd.Caps.PublicReads || cfg.protected || cfg.token != "") && serverAd.AuthURL.String() != "" {
 					baseUrl = serverAd.AuthURL
 				}
 
