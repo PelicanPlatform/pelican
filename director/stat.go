@@ -213,7 +213,7 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 	if res.StatusCode == 404 {
 		return nil, &headReqNotFoundErr{"file not found on the server " + dataUrl.String()}
 	} else if res.StatusCode == 403 {
-		return nil, &headReqForbiddenErr{fmt.Sprintf("authorization failed for origin %s. Token is required", dataUrl.String()), ""}
+		return nil, &headReqForbiddenErr{fmt.Sprintf("authorization failed for the server at %s. Token is required", dataUrl.String()), ""}
 	} else if res.StatusCode != 200 {
 		resBody, err := io.ReadAll(res.Body)
 		if err != nil {
@@ -322,34 +322,34 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 	statUtilsMutex.RLock()
 	defer statUtilsMutex.RUnlock()
 
-	for _, sAD := range ads {
-		statUtil, ok := statUtils[sAD.URL.String()]
+	for _, adExt := range ads {
+		statUtil, ok := statUtils[adExt.URL.String()]
 		if !ok {
 			numTotalReq += 1
-			log.Debugf("Origin %q is missing data for stat call, skip querying...", sAD.Name)
+			log.Debugf("Server %q is missing data for stat call, skip querying...", adExt.Name)
 			continue
 		}
 		if statUtil.Context.Err() != nil {
 			numTotalReq += 1
-			log.Debugf("Origin %q is evicted from the cache, context has been cancelled, skip querying...", sAD.Name)
+			log.Debugf("Server %q is evicted from the cache, context has been cancelled, skip querying...", adExt.Name)
 			continue
 		}
 		// Use an anonymous func to pass variable safely to the goroutine
-		func(sAdInt server_structs.ServerAd) {
+		func(serverAd server_structs.ServerAd) {
 			statUtil.Errgroup.Go(func() error {
-				baseUrl := sAdInt.URL
+				baseUrl := serverAd.URL
 
 				// For the topology server, if the server does not support public read,
 				// or the token is provided, then it's safe to assume this request goes to authenticated endpoint
 				// For Pelican server, we don't populate authURL and only use server URL as the base URL
-				if sAdInt.FromTopology && (!sAdInt.Caps.PublicReads || cfg.token != "") && sAdInt.AuthURL.String() != "" {
-					baseUrl = sAD.AuthURL
+				if serverAd.FromTopology && (!serverAd.Caps.PublicReads || cfg.token != "") && serverAd.AuthURL.String() != "" {
+					baseUrl = serverAd.AuthURL
 				}
 
 				activeLabels := prometheus.Labels{
-					"server_name": sAdInt.Name,
-					"server_url":  sAdInt.URL.String(),
-					"server_type": string(sAdInt.Type),
+					"server_name": serverAd.Name,
+					"server_url":  baseUrl.String(),
+					"server_type": string(serverAd.Type),
 				}
 				metrics.PelicanDirectorStatActive.With(activeLabels).Inc()
 				defer metrics.PelicanDirectorStatActive.With(activeLabels).Dec()
@@ -360,35 +360,34 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 				if err != nil && !errors.As(err, &cancelErr) { // Skip additional requests if the previous one is cancelled
 					// If the request returns 403 or 500, it could be because we request a digest and xrootd
 					// does not have this turned on, or had trouble calculating the checksum
-					// For old origins/caches, it has different URLs for public VS protected data
 					// Retry without digest
 					metadata, err = stat.ReqHandler(maxCancelCtx, objectName, baseUrl, false, cfg.token, timeout)
 				}
 
 				totalLabels := prometheus.Labels{
-					"server_name": sAdInt.Name,
+					"server_name": serverAd.Name,
 					"server_url":  baseUrl.String(),
-					"server_type": string(sAdInt.Type),
+					"server_type": string(serverAd.Type),
 					"result":      "",
 				}
 				if err != nil {
 					switch e := err.(type) {
 					case *headReqTimeoutErr:
-						log.Debugf("Timeout querying %s server %s for object %s after %s: %s", sAdInt.Type, sAdInt.URL.String(), objectName, timeout.String(), e.Message)
+						log.Debugf("Timeout querying %s server %s for object %s after %s: %s", serverAd.Type, baseUrl.String(), objectName, timeout.String(), e.Message)
 						negativeReqChan <- err
 						totalLabels["result"] = string(metrics.StatTimeout)
 						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return nil
 					case *headReqNotFoundErr:
-						log.Debugf("Object %s not found at %s server %s: %s", objectName, sAdInt.Type, sAdInt.URL.String(), e.Message)
+						log.Debugf("Object %s not found at %s server %s: %s", objectName, serverAd.Type, baseUrl.String(), e.Message)
 						negativeReqChan <- err
 						totalLabels["result"] = string(metrics.StatNotFound)
 						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return nil
 					case *headReqForbiddenErr:
 						fErr := err.(*headReqForbiddenErr)
-						fErr.IssuerUrl = sAD.AuthURL.String()
-						log.Debugf("Access denied for object %s at %s server %s: %s", objectName, sAdInt.Type, sAdInt.URL.String(), e.Message)
+						fErr.IssuerUrl = serverAd.AuthURL.String()
+						log.Debugf("Access denied for object %s at %s server %s: %s", objectName, serverAd.Type, baseUrl.String(), e.Message)
 						deniedReqChan <- fErr
 						totalLabels["result"] = string(metrics.StatForbidden)
 						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
@@ -411,7 +410,7 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 				}
 				return nil
 			})
-		}(sAD)
+		}(adExt)
 	}
 
 	for {
