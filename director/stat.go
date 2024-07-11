@@ -369,6 +369,7 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 					"server_url":  baseUrl.String(),
 					"server_type": string(serverAd.Type),
 					"result":      "",
+					"message":     "",
 				}
 				if err != nil {
 					switch e := err.(type) {
@@ -400,6 +401,7 @@ func (stat *ObjectStat) queryServersForObject(cancelContext context.Context, obj
 					default:
 						negativeReqChan <- err
 						totalLabels["result"] = string(metrics.StatUnkownErr)
+						totalLabels["message"] = err.Error()
 						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return nil
 					}
