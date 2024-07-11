@@ -478,7 +478,9 @@ func redirectToOrigin(ginCtx *gin.Context) {
 			for _, obj := range qr.Objects {
 				serverHost := obj.URL.Host
 				for _, oAd := range originAds {
-					if oAd.URL.Host == serverHost {
+					// TODO: have a UNIQUE id for each server
+					// Also check AuthURL in case we retried on the AuthURL for some servers
+					if oAd.URL.Host == serverHost || oAd.AuthURL.Host == serverHost {
 						availableAds = append(availableAds, oAd)
 					}
 				}
@@ -528,7 +530,9 @@ func redirectToOrigin(ginCtx *gin.Context) {
 			for _, obj := range qr.Objects {
 				serverHost := obj.URL.Host
 				for _, oAd := range cacheAds {
-					if oAd.URL.Host == serverHost {
+					// TODO: have a UNIQUE id for each server
+					// Also check AuthURL in case we retried on the AuthURL for some servers
+					if oAd.URL.Host == serverHost || oAd.AuthURL.Host == serverHost {
 						availableAds = append(availableAds, oAd)
 					}
 				}
