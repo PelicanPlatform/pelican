@@ -479,7 +479,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 			for _, obj := range qr.Objects {
 				serverHost := obj.URL.Host
 				for _, oAd := range originAds {
-					if oAd.URL.Host == serverHost {
+					if oAd.URL.Host == serverHost || oAd.AuthURL.Host == serverHost {
 						availableOriginAds = append(availableOriginAds, oAd)
 					}
 				}
