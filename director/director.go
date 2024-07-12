@@ -250,9 +250,9 @@ func redirectToCache(ginCtx *gin.Context) {
 	err := versionCompatCheck(ginCtx)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
-		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Incompatible versions detected: " + fmt.Sprintf("%v", err),
+			Msg:    fmt.Sprintf("Incompatible versions detected: %v", err),
 		})
 		return
 	}
@@ -387,9 +387,9 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	err := versionCompatCheck(ginCtx)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
-		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Incompatible versions detected: " + fmt.Sprintf("%v", err),
+			Msg:    fmt.Sprintf("Incompatible versions detected: %v", err),
 		})
 		return
 	}
