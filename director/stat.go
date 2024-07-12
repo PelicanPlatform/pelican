@@ -134,7 +134,7 @@ func (e *headReqCancelledErr) Error() string {
 }
 
 func (meta objectMetadata) String() string {
-	return fmt.Sprintf("Object Meatadata: File URL %q; Content-length:%d; Checksum: %s\n",
+	return fmt.Sprintf("Object URL: %q; Content-length:%d; Checksum: %s",
 		meta.URL.String(),
 		meta.ContentLength,
 		meta.Checksum,
@@ -154,9 +154,12 @@ func (m *objectMetadata) MarshalJSON() ([]byte, error) {
 
 func (q queryResult) String() string {
 	if q.Status == querySuccessful {
-		res := fmt.Sprintf("Query is successful: %s\nObjects: \n", q.Msg)
-		for _, obj := range q.Objects {
-			res += obj.String() + "\n"
+		res := fmt.Sprintf("Query is successful: %s Servers with the object: %d. Servers return denial: %d. Top-3 servers: ", q.Msg, len(q.Objects), len(q.DeniedServers))
+		for idx, obj := range q.Objects {
+			res += obj.String() + " "
+			if idx >= 2 {
+				break
+			}
 		}
 		return res
 	} else {

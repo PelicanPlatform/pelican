@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"net"
 	"net/netip"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -279,4 +280,27 @@ func TestSortServerAdsByIP(t *testing.T) {
 
 		assert.NotEqualValues(t, notExpected, sorted)
 	})
+}
+
+func TestSortServerAdsByAvailability(t *testing.T) {
+	firstUrl := url.URL{Host: "first.org", Scheme: "https"}
+	secondUrl := url.URL{Host: "second.org", Scheme: "https"}
+	thirdUrl := url.URL{Host: "third.org", Scheme: "https"}
+	forthUrl := url.URL{Host: "fourth.org", Scheme: "https"}
+
+	firstServer := server_structs.ServerAd{URL: firstUrl}
+	secondServer := server_structs.ServerAd{URL: secondUrl}
+	thirdServer := server_structs.ServerAd{URL: thirdUrl}
+	forthServer := server_structs.ServerAd{URL: forthUrl}
+
+	randomOrder := []server_structs.ServerAd{thirdServer, firstServer, forthServer, secondServer}
+	expected := []server_structs.ServerAd{firstServer, secondServer, thirdServer, forthServer}
+	avaiMap := map[string]bool{}
+	avaiMap[firstUrl.String()] = true
+	avaiMap[secondUrl.String()] = true
+	avaiMap[thirdUrl.String()] = false
+	avaiMap[forthUrl.String()] = false
+
+	sortServerAdsByAvailability(randomOrder, avaiMap)
+	assert.EqualValues(t, expected, randomOrder)
 }
