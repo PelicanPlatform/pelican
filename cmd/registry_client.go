@@ -121,13 +121,14 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 	}
 
 	if withIdentity {
-		err := registry.NamespaceRegisterWithIdentity(privateKey, registrationEndpointURL, prefix)
+		// We haven't added support to pass sitename from CLI, so leave it empty
+		err := registry.NamespaceRegisterWithIdentity(privateKey, registrationEndpointURL, prefix, "")
 		if err != nil {
 			log.Errorf("Failed to register prefix %s with identity: %v", prefix, err)
 			os.Exit(1)
 		}
 	} else {
-		err := registry.NamespaceRegister(privateKey, registrationEndpointURL, "", prefix)
+		err := registry.NamespaceRegister(privateKey, registrationEndpointURL, "", prefix, "")
 		if err != nil {
 			log.Errorf("Failed to register prefix %s: %v", prefix, err)
 			os.Exit(1)
