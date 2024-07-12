@@ -52,7 +52,7 @@ func TestQueryServersForObject(t *testing.T) {
 	stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error) {
 		// For a protected origin with an authURL, if it's from topology, then the serverAd.URL is likely timeout
 		if dataUrl.String() == "https://mock-private-topo-origin.com" ||
-			(dataUrl.String() == "https://mock-mix-ns-topo-origin.com" && strings.HasPrefix(objectName, "/mix/private")) {
+			(dataUrl.String() == "http://mock-mix-ns-topo-origin.com" && strings.HasPrefix(objectName, "/mix/private")) {
 			return nil, &headReqTimeoutErr{"Request timeout"}
 		} else {
 			return &objectMetadata{URL: *dataUrl.JoinPath(objectName)}, nil
@@ -91,27 +91,27 @@ func TestQueryServersForObject(t *testing.T) {
 			Type:    server_structs.OriginType}
 		mockServerAdPrivateTopology := server_structs.ServerAd{
 			Name:         "originPrivateTopology",
-			URL:          url.URL{Host: "mock-private-topo-origin.com", Scheme: "https"},
+			URL:          url.URL{Host: "mock-private-topo-origin.com", Scheme: "http"},
 			AuthURL:      url.URL{Host: "mock-private-topo-origin-auth.com:8444", Scheme: "https"},
 			Caps:         server_structs.Capabilities{PublicReads: false},
 			Type:         server_structs.OriginType,
 			FromTopology: true}
 		mockServerAdPublicTopology := server_structs.ServerAd{
 			Name:         "originPublicTopology",
-			URL:          url.URL{Host: "mock-public-topo-origin.com", Scheme: "https"},
+			URL:          url.URL{Host: "mock-public-topo-origin.com", Scheme: "http"},
 			AuthURL:      url.URL{Host: "mock-public-topo-origin-auth.com:8444", Scheme: "https"},
 			Caps:         server_structs.Capabilities{PublicReads: true},
 			Type:         server_structs.OriginType,
 			FromTopology: true}
 		mockServerAdPrivateTopologyWOAuthUrl := server_structs.ServerAd{
 			Name:         "originPrivateTopologyNoAuthUrl",
-			URL:          url.URL{Host: "mock-private-topo-origin-no-authurl.com", Scheme: "https"},
+			URL:          url.URL{Host: "mock-private-topo-origin-no-authurl.com", Scheme: "http"},
 			Caps:         server_structs.Capabilities{PublicReads: false},
 			Type:         server_structs.OriginType,
 			FromTopology: true}
 		mockTopoPubServerMixNs := server_structs.ServerAd{
 			Name:         "originMixNsTopology",
-			URL:          url.URL{Host: "mock-mix-ns-topo-origin.com", Scheme: "https"},
+			URL:          url.URL{Host: "mock-mix-ns-topo-origin.com", Scheme: "http"},
 			AuthURL:      url.URL{Host: "mock-mix-ns-topo-origin-auth.com:8444", Scheme: "https"},
 			Caps:         server_structs.Capabilities{PublicReads: true},
 			Type:         server_structs.OriginType,
@@ -635,7 +635,7 @@ func TestQueryServersForObject(t *testing.T) {
 
 		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
 		require.Equal(t, 1, len(result.Objects))
-		assert.Equal(t, "https://mock-public-topo-origin.com/public/topology/test.txt", result.Objects[0].URL.String(),
+		assert.Equal(t, "http://mock-public-topo-origin.com/public/topology/test.txt", result.Objects[0].URL.String(),
 			"Return value is not expected:", result.Objects[0].URL.String())
 	})
 
@@ -654,7 +654,7 @@ func TestQueryServersForObject(t *testing.T) {
 
 		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
 		require.Equal(t, 1, len(result.Objects))
-		assert.Equal(t, "https://mock-private-topo-origin-no-authurl.com/protected/topology/noauth/test.txt", result.Objects[0].URL.String(),
+		assert.Equal(t, "http://mock-private-topo-origin-no-authurl.com/protected/topology/noauth/test.txt", result.Objects[0].URL.String(),
 			"Return value is not expected:", result.Objects[0].URL.String())
 	})
 
@@ -692,7 +692,7 @@ func TestQueryServersForObject(t *testing.T) {
 
 		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
 		require.Equal(t, 1, len(result.Objects))
-		assert.Equal(t, "https://mock-mix-ns-topo-origin.com/mix/public/test.txt", result.Objects[0].URL.String(),
+		assert.Equal(t, "http://mock-mix-ns-topo-origin.com/mix/public/test.txt", result.Objects[0].URL.String(),
 			"Return value is not expected:", result.Objects[0].URL.String())
 	})
 }
