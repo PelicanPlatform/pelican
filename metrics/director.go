@@ -81,4 +81,9 @@ var (
 		Name: "pelican_director_stat_total",
 		Help: "The total stat queries the director issues. The status can be Succeeded, Cancelled, Timeout, Forbidden, or UnknownErr",
 	}, []string{"server_name", "server_url", "server_type", "result"}) // status: see enums for DirectorStatResult
+
+	PelicanDirectorClientVersionTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_client_version_total",
+		Help: "The total amount of requests from client versions.",
+	}, []string{"version"})
 )

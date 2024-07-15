@@ -1156,15 +1156,33 @@ func getHealthTestFile(ctx *gin.Context) {
 	}
 }
 
+func collectClientVersionMiddleware(c *gin.Context) {
+	userAgentSlc := c.Request.Header["User-Agent"]
+	if len(userAgentSlc) < 1 {
+		log.Error("Failed to parse User-Agent")
+	}
+
+	userAgent := userAgentSlc[0]
+
+	uaRegExp := regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
+	if matches := uaRegExp.MatchString(userAgent); !matches {
+		log.Error("Failed to match User-Agent for Pelican client version")
+	}
+
+	userAgentSplit := strings.Split(userAgent, "/")
+	reqVerStr := userAgentSplit[1]
+	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": reqVerStr}).Inc()
+}
+
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 	directorAPIV1 := router.Group("/api/v1.0/director")
 	{
 		// Establish the routes used for cache/origin redirection
-		directorAPIV1.GET("/object/*any", redirectToCache)
-		directorAPIV1.HEAD("/object/*any", redirectToCache)
-		directorAPIV1.GET("/origin/*any", redirectToOrigin)
-		directorAPIV1.HEAD("/origin/*any", redirectToOrigin)
-		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
+		directorAPIV1.GET("/object/*any", collectClientVersionMiddleware, redirectToCache)
+		directorAPIV1.HEAD("/object/*any", collectClientVersionMiddleware, redirectToCache)
+		directorAPIV1.GET("/origin/*any", collectClientVersionMiddleware, redirectToOrigin)
+		directorAPIV1.HEAD("/origin/*any", collectClientVersionMiddleware, redirectToOrigin)
+		directorAPIV1.PUT("/origin/*any", collectClientVersionMiddleware, redirectToOrigin)
 		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
 		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
