@@ -1160,13 +1160,14 @@ func collectClientVersionMiddleware(c *gin.Context) {
 	userAgentSlc := c.Request.Header["User-Agent"]
 	if len(userAgentSlc) < 1 {
 		log.Error("Failed to parse User-Agent")
+		return
 	}
 
 	userAgent := userAgentSlc[0]
-
 	uaRegExp := regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
 	if matches := uaRegExp.MatchString(userAgent); !matches {
 		log.Error("Failed to match User-Agent for Pelican client version")
+		return
 	}
 
 	userAgentSplit := strings.Split(userAgent, "/")
