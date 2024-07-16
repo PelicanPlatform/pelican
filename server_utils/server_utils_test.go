@@ -30,6 +30,7 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -134,5 +135,25 @@ func TestWaitUntilWorking(t *testing.T) {
 		expectedErrorMsg := fmt.Sprintf("Failed to send request to testServer at %s; likely server is not up (will retry in 50ms):", server.URL)
 		assert.Equal(t, logrus.InfoLevel, hook.LastEntry().Level)
 		assert.Contains(t, hook.LastEntry().Message, expectedErrorMsg)
+	})
+
+	t.Run("server-short-timeout", func(t *testing.T) {
+		viper.Set("Server.StartupTimeout", "1s")
+		earlyCancelCtx, earlyCancel := context.WithCancel(ctx)
+		go func() {
+			<-time.After(1500 * time.Millisecond)
+			earlyCancel()
+		}()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// WaitUntilWorking as a 1s timeout, so we make sure to wait longer than that
+			<-time.After(2000 * time.Millisecond)
+			w.WriteHeader(http.StatusOK) // 200
+		}))
+		defer server.Close()
+
+		err := WaitUntilWorking(earlyCancelCtx, "GET", server.URL, "testServer", http.StatusOK, false)
+		require.Error(t, err)
+		expectedErrorMsg := fmt.Sprintf("The testServer server at %s either did not startup or did not respond quickly enough after 1s of waiting", server.URL)
+		assert.Equal(t, expectedErrorMsg, err.Error())
 	})
 }
