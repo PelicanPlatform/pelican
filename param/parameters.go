@@ -357,6 +357,7 @@ var (
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
 	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
 	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
+	Server_StartupTimeout = DurationParam{"Server.StartupTimeout"}
 	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}
 	Transport_DialerTimeout = DurationParam{"Transport.DialerTimeout"}
 	Transport_ExpectContinueTimeout = DurationParam{"Transport.ExpectContinueTimeout"}
