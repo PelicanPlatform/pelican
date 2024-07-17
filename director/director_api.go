@@ -21,7 +21,6 @@ package director
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strconv"
 	"time"
 
@@ -211,21 +210,14 @@ func LaunchServerCountMetric(ctx context.Context, egrp *errgroup.Group) {
 			case <-ticker.C:
 				for _, ad := range serverAds.Items() {
 					serverAd := ad.Value()
-					var auth_url string
-					if serverAd.AuthURL == (url.URL{}) {
-						auth_url = serverAd.URL.String()
-					} else {
-						auth_url = serverAd.AuthURL.String()
-					}
 					metrics.PelicanDirectorServerCount.With(prometheus.Labels{
-						"server_type":     string(serverAd.Type),
-						"server_name":     serverAd.Name,
-						"server_auth_url": auth_url,
-						"server_url":      serverAd.URL.String(),
-						"server_web_url":  serverAd.WebURL.String(),
-						"server_lat":      fmt.Sprintf("%.4f", serverAd.Latitude),
-						"server_long":     fmt.Sprintf("%.4f", serverAd.Longitude),
-						"from_topology":   strconv.FormatBool(serverAd.FromTopology),
+						"server_name":    serverAd.Name,
+						"server_type":    string(serverAd.Type),
+						"server_url":     serverAd.URL.String(),
+						"server_web_url": serverAd.WebURL.String(),
+						"server_lat":     fmt.Sprintf("%.4f", serverAd.Latitude),
+						"server_long":    fmt.Sprintf("%.4f", serverAd.Longitude),
+						"from_topology":  strconv.FormatBool(serverAd.FromTopology),
 					}).Inc()
 				}
 			}
