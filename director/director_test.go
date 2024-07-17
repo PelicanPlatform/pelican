@@ -1311,6 +1311,102 @@ func TestRedirects(t *testing.T) {
 		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Namespace"))
 	})
 }
+func TestHeaderGenFuncs(t *testing.T) {
+	issUrl := url.URL{
+		Scheme: "https",
+		Host:   "my-issuer.com",
+	}
+	tGen := server_structs.TokenGen{
+		Strategy:         server_structs.OAuthStrategy,
+		MaxScopeDepth:    3,
+		CredentialIssuer: issUrl,
+	}
+
+	tIss := server_structs.TokenIssuer{
+		BasePaths: []string{"/my/server"},
+		IssuerUrl: issUrl,
+	}
+	authedNamespaceAd := server_structs.NamespaceAdV2{
+		Caps: server_structs.Capabilities{
+			PublicReads: false,
+			Reads:       true,
+		},
+		Generation: []server_structs.TokenGen{tGen},
+		Issuer:     []server_structs.TokenIssuer{tIss},
+		Path:       "/my/server",
+	}
+
+	publicNamespaceAd := server_structs.NamespaceAdV2{
+		Caps: server_structs.Capabilities{
+			PublicReads: true,
+		},
+		Path: "/different/server",
+	}
+
+	authReq, _ := http.NewRequest("GET", "/my/server", nil)
+	authReq.Header.Add("User-Agent", "pelican-v7.999.999")
+	authReq.Header.Add("X-Real-Ip", "128.104.153.60")
+
+	pubReq, _ := http.NewRequest("GET", "/different/server", nil)
+	pubReq.Header.Add("User-Agent", "pelican-v7.999.999")
+	pubReq.Header.Add("X-Real-Ip", "128.104.153.60")
+
+	// recorder := httptest.NewRecorder()
+	t.Run("test-x-pel-auth", func(t *testing.T) {
+		authedRecorder := httptest.NewRecorder()
+		cAuth, _ := gin.CreateTestContext(authedRecorder)
+		cAuth.Request = authReq
+		generateXAuthHeader(cAuth, authedNamespaceAd)
+		assert.NotEmpty(t, cAuth.Writer.Header().Get("X-Pelican-Authorization"))
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Authorization"), "issuer=https://my-issuer.com")
+
+		pubRecorder := httptest.NewRecorder()
+		cPub, _ := gin.CreateTestContext(pubRecorder)
+		cPub.Request = pubReq
+		generateXAuthHeader(cPub, publicNamespaceAd)
+		assert.Empty(t, cPub.Writer.Header().Get("X-Pelican-Authorization"))
+	})
+
+	t.Run("test-x-pel-tok-gen", func(t *testing.T) {
+		authedRecorder := httptest.NewRecorder()
+		cAuth, _ := gin.CreateTestContext(authedRecorder)
+		cAuth.Request = authReq
+
+		generateXTokenGenHeader(cAuth, authedNamespaceAd)
+		assert.NotEmpty(t, cAuth.Writer.Header().Get("X-Pelican-Token-Generation"))
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Token-Generation"), "issuer=https://my-issuer.com")
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Token-Generation"), "strategy=OAuth2")
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Token-Generation"), "max-scope-depth=3")
+
+		pubRecorder := httptest.NewRecorder()
+		cPub, _ := gin.CreateTestContext(pubRecorder)
+		cPub.Request = pubReq
+		generateXTokenGenHeader(cPub, publicNamespaceAd)
+		assert.Empty(t, cPub.Writer.Header().Get("X-Pelican-Token-Generation"))
+	})
+
+	t.Run("test-x-pel-namespace", func(t *testing.T) {
+		authedRecorder := httptest.NewRecorder()
+		cAuth, _ := gin.CreateTestContext(authedRecorder)
+		cAuth.Request = authReq
+
+		collUrl := "https://my-origin.com"
+		generateXNamespaceHeader(cAuth, authedNamespaceAd, collUrl)
+		assert.NotEmpty(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"))
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"), "namespace=/my/server")
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"), "require-token=true")
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"), "collections-url=https://my-origin.com")
+
+		pubRecorder := httptest.NewRecorder()
+		cPub, _ := gin.CreateTestContext(pubRecorder)
+		cPub.Request = pubReq
+		generateXNamespaceHeader(cPub, publicNamespaceAd, "")
+		assert.NotEmpty(t, cPub.Writer.Header().Get("X-Pelican-Namespace"))
+		assert.Contains(t, cPub.Writer.Header().Get("X-Pelican-Namespace"), "namespace=/different/server")
+		assert.Contains(t, cPub.Writer.Header().Get("X-Pelican-Namespace"), "require-token=false")
+		assert.NotContains(t, cPub.Writer.Header().Get("X-Pelican-Namespace"), "collections-url")
+	})
+}
 
 func TestGetHealthTestFile(t *testing.T) {
 	router := gin.Default()
