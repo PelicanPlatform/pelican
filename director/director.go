@@ -184,6 +184,44 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 	return
 }
 
+// Generates the X-Pelican-Authorization header (when applicable) for responses that have
+// issued a request where token generation may be needed. This header informs the client
+// of the issuer that can be used to generate a token for the requested resource.
+func generateXAuthHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAdV2) {
+	if len(namespaceAd.Issuer) != 0 {
+		issStrings := []string{}
+		for _, tokIss := range namespaceAd.Issuer {
+			issStrings = append(issStrings, "issuer="+tokIss.IssuerUrl.String())
+		}
+		ginCtx.Writer.Header()["X-Pelican-Authorization"] = issStrings
+	}
+}
+
+// Generates the X-Pelican-Token-Generation header (when applicable) for responses that have
+// issued a request where token generation may be needed.
+func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAdV2) {
+	if len(namespaceAd.Generation) != 0 {
+		tokenGen := ""
+		first := true
+		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth),
+			string(namespaceAd.Generation[0].Strategy)}
+		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy"} {
+			hdrVal := hdrVals[idx]
+			if hdrVal == "" {
+				continue
+			}
+			if !first {
+				tokenGen += ", "
+			}
+			first = false
+			tokenGen += hdrKey + "=" + hdrVal
+		}
+		if tokenGen != "" {
+			ginCtx.Writer.Header()["X-Pelican-Token-Generation"] = []string{tokenGen}
+		}
+	}
+}
+
 func getFinalRedirectURL(rurl url.URL, requstParams url.Values) string {
 	rQuery := rurl.Query()
 	for key, vals := range requstParams {
@@ -331,34 +369,10 @@ func redirectToCache(ginCtx *gin.Context) {
 		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
 	}
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
-	if len(namespaceAd.Issuer) != 0 {
 
-		issStrings := []string{}
-		for _, tokIss := range namespaceAd.Issuer {
-			issStrings = append(issStrings, "issuer="+tokIss.IssuerUrl.String())
-		}
-		ginCtx.Writer.Header()["X-Pelican-Authorization"] = issStrings
-	}
-
-	if len(namespaceAd.Generation) != 0 {
-		tokenGen := ""
-		first := true
-		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth), string(namespaceAd.Generation[0].Strategy)}
-		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy"} {
-			hdrVal := hdrVals[idx]
-			if hdrVal == "" {
-				continue
-			}
-			if !first {
-				tokenGen += ", "
-			}
-			first = false
-			tokenGen += hdrKey + "=" + hdrVal
-		}
-		if tokenGen != "" {
-			ginCtx.Writer.Header()["X-Pelican-Token-Generation"] = []string{tokenGen}
-		}
-	}
+	// Generate headers needed for token generation/verification
+	generateXAuthHeader(ginCtx, namespaceAd)
+	generateXTokenGenHeader(ginCtx, namespaceAd)
 
 	var colUrl string
 	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
@@ -589,6 +603,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		})
 		return
 	}
+
+	// Generate headers needed for token generation/verification
+	generateXAuthHeader(ginCtx, namespaceAd)
+	generateXTokenGenHeader(ginCtx, namespaceAd)
 
 	// If we are doing a PUT, check to see if any origins are writeable
 	if ginCtx.Request.Method == "PUT" {
