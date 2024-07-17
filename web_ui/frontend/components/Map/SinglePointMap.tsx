@@ -1,49 +1,28 @@
-import React from "react"
-import Map, { AttributionControl, LngLatLike, Marker } from 'react-map-gl/maplibre';
-import {FmdGood} from "@mui/icons-material";
+import React from 'react';
+import { FmdGood } from '@mui/icons-material';
+import { Marker } from 'react-map-gl/maplibre';
 
-import 'maplibre-gl/dist/maplibre-gl.css';
+import { DefaultMap } from './';
 
 export interface SinglePointMapProps {
-  point: {lng: number, lat: number},
-  zoom?: number
+  point: { lng: number; lat: number };
+  zoom?: number;
 }
 
-export const SinglePointMap = ({point, zoom} : SinglePointMapProps) => {
+export const SinglePointMap = ({ point, zoom }: SinglePointMapProps) => {
   return (
-    <Map
+    <DefaultMap
       initialViewState={{
         longitude: point.lng,
         latitude: point.lat,
-        zoom: zoom || 1
+        zoom: zoom || 1,
       }}
       scrollZoom={false}
-      style={{ width: "100%", height: "100%" }}
-      mapStyle={{
-        'version': 8,
-        'sources': {
-          'raster-tiles': {
-            'type': 'raster',
-            'tiles': ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-            'tileSize': 256,
-            'attribution':
-              '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          }
-        },
-        'layers': [
-          {
-            'id': 'simple-tiles',
-            'type': 'raster',
-            'source': 'raster-tiles',
-            'minzoom': 0,
-            'maxzoom': 22
-          }
-        ]
-      }}
+      style={{ width: '100%', height: '100%' }}
     >
-      <Marker longitude={point.lng} latitude={point.lat} anchor="bottom">
-        <FmdGood/>
+      <Marker longitude={point.lng} latitude={point.lat} anchor='bottom'>
+        <FmdGood />
       </Marker>
-    </Map>
-  )
-}
+    </DefaultMap>
+  );
+};

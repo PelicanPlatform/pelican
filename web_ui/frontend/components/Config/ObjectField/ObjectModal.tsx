@@ -1,4 +1,4 @@
-import { Institution } from '@/components/Config/index.d';
+import { Institution } from '@/components/Config/index';
 import React from 'react';
 import { IconButton, Modal, Portal, Typography } from '@mui/material';
 import { Box, Button, TextField } from '@mui/material';

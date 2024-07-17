@@ -6,7 +6,7 @@ import React, {
   ChangeEvent,
 } from 'react';
 
-import { ParameterInputProps } from '@/components/Config/index.d';
+import { ParameterInputProps } from '@/components/Config/index';
 import { createId, buildPatch } from './util';
 import { DateTime } from 'luxon';
 import 'chartjs-adapter-luxon';

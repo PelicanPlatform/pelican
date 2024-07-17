@@ -1,4 +1,4 @@
-import { Action, IPMapping, IPMappingFine } from '@/components/Config/index.d';
+import { Action, IPMapping, IPMappingFine } from '@/components/Config/index';
 import React from 'react';
 import { Box, Button, TextField } from '@mui/material';
 

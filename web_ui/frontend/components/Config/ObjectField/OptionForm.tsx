@@ -1,4 +1,4 @@
-import { Option } from '@/components/Config/index.d';
+import { Option } from '@/components/Config/index';
 import React, { MouseEventHandler } from 'react';
 import { Box, Button, TextField } from '@mui/material';
 

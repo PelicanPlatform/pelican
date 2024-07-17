@@ -1,5 +1,5 @@
 import { Box, Tooltip, Typography } from '@mui/material';
-import {grey} from '@mui/material/colors';
+import { grey } from '@mui/material/colors';
 import React from 'react';
 
 export const InformationSpan = ({
@@ -25,10 +25,7 @@ export const InformationSpan = ({
           justifyContent: 'space-between',
         }}
       >
-        <Typography
-          variant={'body2'}
-          sx={{ display: 'inline', mr: 2 }}
-        >
+        <Typography variant={'body2'} sx={{ display: 'inline', mr: 2 }}>
           {name}
         </Typography>
         <Typography variant={'body2'} sx={{ display: 'inline' }}>

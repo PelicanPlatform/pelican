@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2023, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -16,27 +16,32 @@
  *
  ***************************************************************/
 
+'use client';
+
 import { Box } from '@mui/material';
-import Main from '@/components/layout/Main';
-import { OriginSidebar } from '@/components/layout/OriginSidebar';
-import { PaddedContent } from '@/components/layout';
+import useSWR from 'swr';
+import { Server } from '@/index';
+import { ServerMap } from '@/components/Map';
 
-export const metadata = {
-  title: 'Pelican Origin',
-  description: 'Software designed to make data distribution easy',
-};
+export default function Page() {
+  const { data } = useSWR<Server[]>('getServers', getServers);
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
   return (
-    <Box display={'flex'} flexDirection={'row'}>
-      <OriginSidebar />
-      <Main>
-        <PaddedContent>{children}</PaddedContent>
-      </Main>
+    <Box width={'100%'}>
+      <ServerMap servers={data} />
     </Box>
   );
 }
+
+const getServers = async (): Promise<Server[]> => {
+  const url = new URL('/api/v1.0/director_ui/servers', window.location.origin);
+
+  let response = await fetch(url);
+  if (response.ok) {
+    const responseData: Server[] = await response.json();
+    responseData.sort((a, b) => a.name.localeCompare(b.name));
+    return responseData;
+  }
+
+  throw new Error('Failed to fetch servers');
+};

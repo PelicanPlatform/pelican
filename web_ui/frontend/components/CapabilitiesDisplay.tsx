@@ -39,7 +39,7 @@ export const CapabilitiesChip = ({
         px: 1,
         mb: 0.2,
         backgroundColor: value ? grey[300] : grey[100],
-        color: value ? "black" : grey[700],
+        color: value ? 'black' : grey[700],
         border: '1px 1px solid black',
       }}
     >

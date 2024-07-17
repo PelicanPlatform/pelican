@@ -19,7 +19,7 @@ import {
 } from '@mui/icons-material';
 import React, { useMemo, useCallback, ChangeEvent, KeyboardEvent } from 'react';
 
-import { ParameterInputProps } from '@/components/Config/index.d';
+import { ParameterInputProps } from '@/components/Config/index';
 import { createId, buildPatch, stringSort } from './util';
 
 interface StringSliceCardProps {

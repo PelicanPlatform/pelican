@@ -1,4 +1,4 @@
-import { Action, AuthorizationTemplate } from '@/components/Config/index.d';
+import { Action, AuthorizationTemplate } from '@/components/Config/index';
 import React from 'react';
 import { Box, Button } from '@mui/material';
 

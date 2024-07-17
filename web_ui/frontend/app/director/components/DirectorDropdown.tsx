@@ -26,12 +26,27 @@ export const DirectorDropdown = ({
           <InformationSpan name={'Type'} value={server.type} />
           <InformationSpan name={'Status'} value={server.healthStatus} />
           <InformationSpan name={'URL'} value={server.url} />
-          <InformationSpan name={'Longitude'} value={server.longitude.toString()} />
-          <InformationSpan name={'Latitude'} value={server.latitude.toString()} />
+          <InformationSpan
+            name={'Longitude'}
+            value={server.longitude.toString()}
+          />
+          <InformationSpan
+            name={'Latitude'}
+            value={server.latitude.toString()}
+          />
         </Grid>
         <Grid item xs={12} md={5}>
-          <Box borderRadius={1} height={"100%"} minHeight={"140px"} overflow={"hidden"}>
-            { transition && <SinglePointMap point={{ lat: server.latitude, lng: server.longitude }} /> }
+          <Box
+            borderRadius={1}
+            height={'100%'}
+            minHeight={'140px'}
+            overflow={'hidden'}
+          >
+            {transition && (
+              <SinglePointMap
+                point={{ lat: server.latitude, lng: server.longitude }}
+              />
+            )}
           </Box>
         </Grid>
       </Grid>

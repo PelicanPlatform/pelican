@@ -5,9 +5,8 @@ export const Main = ({ children }: { children: ReactNode }) => {
   return (
     <Box
       component={'main'}
-      p={2}
       pl={0}
-      ml={'90px'}
+      ml={'72px'}
       display={'flex'}
       minHeight={'100vh'}
       flexGrow={1}
