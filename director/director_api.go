@@ -21,6 +21,7 @@ package director
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -193,6 +194,40 @@ func LaunchMapMetrics(ctx context.Context, egrp *errgroup.Group) {
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("filteredServers").Set(float64(len(filteredServers)))
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("healthTestUtils").Set(float64(len(healthTestUtils)))
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("originStatUtils").Set(float64(len(statUtils)))
+			}
+		}
+	})
+}
+
+func LaunchServerCountMetric(ctx context.Context, egrp *errgroup.Group) {
+	egrp.Go(func() error {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				for _, ad := range serverAds.Items() {
+					serverAd := ad.Value()
+					var auth_url string
+					if serverAd.AuthURL == (url.URL{}) {
+						auth_url = serverAd.URL.String()
+					} else {
+						auth_url = serverAd.AuthURL.String()
+					}
+					metrics.PelicanDirectorServerCount.With(prometheus.Labels{
+						"server_type":     string(serverAd.Type),
+						"server_name":     serverAd.Name,
+						"server_auth_url": auth_url,
+						"server_url":      serverAd.URL.String(),
+						"server_web_url":  serverAd.WebURL.String(),
+						"server_lat":      fmt.Sprintf("%.4f", serverAd.Latitude),
+						"server_long":     fmt.Sprintf("%.4f", serverAd.Longitude),
+						"from_topology":   strconv.FormatBool(serverAd.FromTopology),
+					}).Inc()
+				}
 			}
 		}
 	})
