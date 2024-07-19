@@ -216,7 +216,7 @@ func versionCompatCheck(ginCtx *gin.Context) error {
 	// requirements between origins, clients, and other services.
 	reqVerStr, service := utils.ExtractVersionAndServiceFromUserAgent(userAgent)
 	if reqVerStr == "" || service == "" {
-		return errors.New("Could not extract service or client version")
+		return nil
 	}
 	reqVer, err := version.NewVersion(reqVerStr)
 	if err != nil {
