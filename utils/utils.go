@@ -21,6 +21,7 @@ package utils
 import (
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -142,4 +143,16 @@ func ExtractAndMaskIP(ipStr string) (maskedIP string, ok bool) {
 	} else {
 		return ApplyIPMask(ipStr)
 	}
+}
+
+func ExtractVersionAndServiceFromUserAgent(userAgent string) (reqVer, service string) {
+	uaRegExp := regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
+	if matches := uaRegExp.MatchString(userAgent); !matches {
+		return "", ""
+	}
+
+	userAgentSplit := strings.Split(userAgent, "/")
+	reqVer = userAgentSplit[1]
+	service = (strings.Split(userAgentSplit[0], "-"))[1]
+	return reqVer, service
 }

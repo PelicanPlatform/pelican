@@ -25,7 +25,6 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -212,16 +212,12 @@ func versionCompatCheck(ginCtx *gin.Context) error {
 	// Make sure we're working with something that's formatted the way we expect. If we
 	// don't match, then we're definitely not coming from one of the services, so we
 	// let things go without an error. Maybe someone is using curl?
-	uaRegExp := regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
-	if matches := uaRegExp.MatchString(userAgent); !matches {
-		return nil
-	}
-
-	userAgentSplit := strings.Split(userAgent, "/")
 	// Grab the actual service/version that's using the Director. There may be different versioning
 	// requirements between origins, clients, and other services.
-	service := (strings.Split(userAgentSplit[0], "-"))[1]
-	reqVerStr := userAgentSplit[1]
+	reqVerStr, service := utils.ExtractVersionAndServiceFromUserAgent(userAgent)
+	if reqVerStr == "" || service == "" {
+		return errors.New("Could not extract service or client version")
+	}
 	reqVer, err := version.NewVersion(reqVerStr)
 	if err != nil {
 		return errors.Wrapf(err, "Could not parse service version as a semantic version: %s\n", reqVerStr)
@@ -1162,16 +1158,7 @@ func collectClientVersionMiddleware(c *gin.Context) {
 		log.Error("Failed to parse User-Agent")
 		return
 	}
-
-	userAgent := userAgentSlc[0]
-	uaRegExp := regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
-	if matches := uaRegExp.MatchString(userAgent); !matches {
-		log.Error("Failed to match User-Agent for Pelican client version")
-		return
-	}
-
-	userAgentSplit := strings.Split(userAgent, "/")
-	reqVerStr := userAgentSplit[1]
+	reqVerStr, _ := utils.ExtractVersionAndServiceFromUserAgent(userAgentSlc[0])
 	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": reqVerStr}).Inc()
 }
 
