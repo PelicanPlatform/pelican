@@ -253,6 +253,8 @@ func redirectToCache(ginCtx *gin.Context) {
 		return
 	}
 
+	collectClientVersionMetric(ginCtx)
+
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/object")
 
@@ -475,6 +477,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		})
 		return
 	}
+
+	collectClientVersionMetric(ginCtx)
 
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
@@ -1152,25 +1156,42 @@ func getHealthTestFile(ctx *gin.Context) {
 	}
 }
 
-func collectClientVersionMiddleware(c *gin.Context) {
+func collectClientVersionMetric(c *gin.Context) {
 	userAgentSlc := c.Request.Header["User-Agent"]
 	if len(userAgentSlc) < 1 {
 		log.Error("Failed to parse User-Agent")
 		return
 	}
 	reqVerStr, _ := utils.ExtractVersionAndServiceFromUserAgent(userAgentSlc[0])
-	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": reqVerStr}).Inc()
+
+	reqVer, err := version.NewVersion(reqVerStr)
+	if err != nil {
+		return
+	}
+	versionSegments := reqVer.Segments()
+	if len(versionSegments) < 2 {
+		return
+	}
+
+	strSegments := []string{
+		fmt.Sprintf("%d", versionSegments[0]),
+		fmt.Sprintf("%d", versionSegments[1]),
+	}
+
+	shortendVersion := strings.Join(strSegments, ".")
+
+	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": shortendVersion}).Inc()
 }
 
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 	directorAPIV1 := router.Group("/api/v1.0/director")
 	{
 		// Establish the routes used for cache/origin redirection
-		directorAPIV1.GET("/object/*any", collectClientVersionMiddleware, redirectToCache)
-		directorAPIV1.HEAD("/object/*any", collectClientVersionMiddleware, redirectToCache)
-		directorAPIV1.GET("/origin/*any", collectClientVersionMiddleware, redirectToOrigin)
-		directorAPIV1.HEAD("/origin/*any", collectClientVersionMiddleware, redirectToOrigin)
-		directorAPIV1.PUT("/origin/*any", collectClientVersionMiddleware, redirectToOrigin)
+		directorAPIV1.GET("/object/*any", redirectToCache)
+		directorAPIV1.HEAD("/object/*any", redirectToCache)
+		directorAPIV1.GET("/origin/*any", redirectToOrigin)
+		directorAPIV1.HEAD("/origin/*any", redirectToOrigin)
+		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
 		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
 		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
