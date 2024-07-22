@@ -44,7 +44,7 @@ var (
 func init() {
 	flagSet := lsCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
-	flagSet.BoolP("long", "L", false, "Include extended information")
+	flagSet.BoolP("long", "l", false, "Include extended information")
 	flagSet.BoolP("collectionOnly", "C", false, "List collections only")
 	flagSet.BoolP("objectonly", "O", false, "List objects only")
 	flagSet.BoolP("json", "j", false, "Print results in JSON format")
