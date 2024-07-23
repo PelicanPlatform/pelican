@@ -1166,6 +1166,7 @@ func collectClientVersionMetric(c *gin.Context) {
 
 	reqVer, err := version.NewVersion(reqVerStr)
 	if err != nil {
+		log.Error("Failed to parse client version")
 		return
 	}
 	versionSegments := reqVer.Segments()

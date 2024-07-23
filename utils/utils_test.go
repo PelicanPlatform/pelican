@@ -184,3 +184,29 @@ func TestExtractAndMaskIP(t *testing.T) {
 		assert.Equal(t, expected, maskedIP)
 	})
 }
+
+func TestExtractVersionAndServiceFromUserAgent(t *testing.T) {
+	t.Run("testNormalUserAgent", func(t *testing.T) {
+		userAgent := "pelican-origin/7.9.0"
+		expectedVersion := "7.9.0"
+		expectedService := "origin"
+		version, service := ExtractVersionAndServiceFromUserAgent(userAgent)
+
+		assert.Equal(t, expectedVersion, version)
+		assert.Equal(t, expectedService, service)
+	})
+
+	t.Run("testInvalidUserAgent", func(t *testing.T) {
+		invalidUserAgent := "thisisnotvalid"
+		version, service := ExtractVersionAndServiceFromUserAgent(invalidUserAgent)
+		assert.Equal(t, 0, len(version))
+		assert.Equal(t, 0, len(service))
+	})
+
+	t.Run("testEmptyUserAgent", func(t *testing.T) {
+		emptyUserAgent := ""
+		version, service := ExtractVersionAndServiceFromUserAgent(emptyUserAgent)
+		assert.Equal(t, 0, len(version))
+		assert.Equal(t, 0, len(service))
+	})
+}

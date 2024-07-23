@@ -145,6 +145,9 @@ func ExtractAndMaskIP(ipStr string) (maskedIP string, ok bool) {
 	}
 }
 
+// ExtractVersionAndServiceFromUserAgent will extract the Pelican version and service from
+// the user agent.
+// It will return empty strings if the provided userAgent failes to match against the parser
 func ExtractVersionAndServiceFromUserAgent(userAgent string) (reqVer, service string) {
 	uaRegExp := regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
 	if matches := uaRegExp.MatchString(userAgent); !matches {
