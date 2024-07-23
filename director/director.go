@@ -1156,6 +1156,10 @@ func getHealthTestFile(ctx *gin.Context) {
 	}
 }
 
+// collectClientVersionMetric will get the user agent of an incoming request
+// parse out the version from it and update the pelican_director_client_version_total metric
+//
+// In the case that parser fails, then metric is not updated
 func collectClientVersionMetric(c *gin.Context) {
 	userAgentSlc := c.Request.Header["User-Agent"]
 	if len(userAgentSlc) < 1 {
