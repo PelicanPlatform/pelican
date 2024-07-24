@@ -581,7 +581,7 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 	}
 
 	// With an osdf:// url scheme, we assume the user will be using the OSDF so load in our osdf metadata for our url
-	if scheme == "osdf" {
+	if scheme == "osdf" || scheme == "stash" {
 		// If we are using an osdf/stash binary, we discovered the federation already --> load into local url metadata
 		if config.GetPreferredPrefix() == config.OsdfPrefix {
 			log.Debugln("In OSDF mode with osdf:// url; populating metadata with OSDF defaults")
