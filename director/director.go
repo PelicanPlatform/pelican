@@ -1168,6 +1168,13 @@ func collectClientVersionMetric(c *gin.Context) {
 	}
 	reqVerStr, _ := utils.ExtractVersionAndServiceFromUserAgent(userAgentSlc[0])
 
+	// non-pelican client
+	if len(reqVerStr) == 0 {
+		// non-pelican clients will be marked as "other"
+		metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": "other"}).Inc()
+		return
+	}
+
 	reqVer, err := version.NewVersion(reqVerStr)
 	if err != nil {
 		log.Error("Failed to parse client version")
