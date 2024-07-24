@@ -453,14 +453,8 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			if upload {
 				log.Debugln("Uploading:", transfer.localFile, "to", transfer.url)
 			} else {
-				log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
-
-				// When we want to auto-unpack files, we should do this to the containing directory, not the destination
-				// file which HTCondor prepares
-				if transfer.url.Query().Get("pack") != "" {
-					transfer.localFile = filepath.Dir(transfer.localFile)
-				}
 				transfer.localFile = parseDestination(transfer)
+				log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
 			}
 
 			urlCopy := *transfer.url
@@ -578,16 +572,25 @@ func failTransfer(remoteUrl string, localFile string, results chan<- *classads.C
 func parseDestination(transfer PluginTransfer) (parsedDest string) {
 	// get absolute path
 	destPath, _ := filepath.Abs(transfer.localFile)
+
+	// When we want to auto-unpack files, we should do this to the containing directory, not the destination
+	// file which HTCondor prepares
+	isPack := transfer.url.Query().Get("pack") != ""
+	if isPack {
+		destPath = filepath.Dir(transfer.localFile)
+	}
+
 	// Check if path exists or if its in a folder
 	if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
 		return destPath
-	} else if destStat.IsDir() {
+	} else if destStat.IsDir() && !isPack {
 		// If we are a directory, add the source filename to the destination dir
 		sourceFilename := path.Base(transfer.url.Path)
 		parsedDest = path.Join(destPath, sourceFilename)
 		return parsedDest
 	}
-	return transfer.localFile
+
+	return destPath
 }
 
 // WriteOutfile takes in the result ads from the job and the file to be outputted, it returns a boolean indicating:
