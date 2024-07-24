@@ -928,39 +928,41 @@ func (te *TransferEngine) runMux() error {
 			clientJob := tmpResults[id][0]
 			job := clientJob.job
 			job.activeXfer.Add(-1)
+			// Test to see if the transfer job is done (true if job-to-file translation
+			// has completed and there are no remaining active transfers)
+			if job.lookupDone.Load() && job.activeXfer.Load() == 0 {
+				if len(activeJobs[id]) == 1 {
+					log.Debugln("Job", job.ID(), "is done for client", id.String(), " which has no active jobs remaining")
+					// Delete the job from the list of active jobs
+					delete(activeJobs, id)
+					func() {
+						te.clientLock.Lock()
+						defer te.clientLock.Unlock()
+						// If the client is closed and there are no remaining
+						// jobs for that client, we can close the results channel
+						// for the client -- a clean shutdown of the client.
+						if te.workMap[id] == nil {
+							close(te.resultsMap[id])
+							log.Debugln("Client", id.String(), "has no more work and is finished shutting down")
+						}
+					}()
+				} else {
+					// Scan through the list of active jobs, removing the recently
+					// completed one and saving the updated list.
+					newJobList := make([]*TransferJob, 0, len(activeJobs[id]))
+					for _, oldJob := range activeJobs[id] {
+						if oldJob.uuid != job.uuid {
+							newJobList = append(newJobList, oldJob)
+						}
+					}
+					activeJobs[id] = newJobList
+					log.Debugln("Job", job.ID(), "is done for client", id.String(), " which has ", len(newJobList), "jobs remaining")
+				}
+			}
 			if len(tmpResults[id]) == 1 {
 				// The last result back to this client has been sent; delete the
 				// slice from the map and check if the overall job is done.
 				delete(tmpResults, id)
-				// Test to see if the transfer job is done (true if job-to-file translation
-				// has completed and there are no remaining active transfers)
-				if job.lookupDone.Load() && job.activeXfer.Load() == 0 {
-					log.Debugln("Job is done")
-					if len(activeJobs[id]) == 1 {
-						// Delete the job from the list of active jobs
-						delete(activeJobs, id)
-						func() {
-							te.clientLock.Lock()
-							defer te.clientLock.Unlock()
-							// If the client is closed and there are no remaining
-							// jobs for that client, we can close the results channel
-							// for the client -- a clean shutdown of the client.
-							if te.workMap[id] == nil {
-								close(te.resultsMap[id])
-							}
-						}()
-					} else {
-						// Scan through the list of active jobs, removing the recently
-						// completed one and saving the updated list.
-						newJobList := make([]*TransferJob, 0, len(activeJobs[id]))
-						for _, oldJob := range activeJobs[id] {
-							if oldJob.uuid != job.uuid {
-								newJobList = append(newJobList, oldJob)
-							}
-						}
-						activeJobs[id] = newJobList
-					}
-				}
 			} else {
 				tmpResults[id] = tmpResults[id][1:]
 			}
@@ -1191,6 +1193,7 @@ func (tc *TransferClient) Submit(tj *TransferJob) error {
 // Any subsequent job submissions will cause a panic
 func (tc *TransferClient) Close() {
 	if !tc.closed {
+		log.Debugln("Closing transfer client", tc.id.String())
 		close(tc.work)
 		tc.closed = true
 	}
@@ -1223,13 +1226,13 @@ func (tc *TransferClient) Results() chan TransferResults {
 	tc.setupResults.Do(func() {
 		tc.finalResults = make(chan TransferResults)
 		go func() {
+			defer close(tc.finalResults)
 			for {
 				select {
 				case <-tc.ctx.Done():
 					return
 				case result, ok := <-tc.results:
 					if !ok {
-						close(tc.finalResults)
 						return
 					}
 					newResult := *result
