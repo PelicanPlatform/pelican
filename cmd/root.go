@@ -147,7 +147,7 @@ func init() {
 		panic(err)
 	}
 
-	rootCmd.PersistentFlags().StringP("log", "l", "", "Specified log output file")
+	rootCmd.PersistentFlags().StringP("log", "L", "", "Specified log output file")
 	if err := viper.BindPFlag("Logging.LogLocation", rootCmd.PersistentFlags().Lookup("log")); err != nil {
 		panic(err)
 	}
