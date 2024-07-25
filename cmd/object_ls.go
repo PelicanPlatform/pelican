@@ -122,7 +122,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 	}
 
 	// Take our fileInfos and print them in a nice way
-	// if the -L flag was set, we print more information
+	// if the -l flag was set, we print more information
 	if long {
 		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
 		// If we want JSON format, we append the file info to a slice of fileInfo structs so that we can marshal it
@@ -140,7 +140,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 		}
 		w.Flush()
 	} else if asJSON {
-		// In this case, we are not using the long option (-L) and want a JSON format
+		// In this case, we are not using the long option (-l) and want a JSON format
 		jsonInfo := []string{}
 		for _, info := range filteredInfos {
 			jsonInfo = append(jsonInfo, info.Name)
