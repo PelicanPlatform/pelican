@@ -97,7 +97,7 @@ func statMain(cmd *cobra.Command, args []string) {
 		// Print our stat info in JSON format:
 		jsonData, err := json.Marshal(statInfo)
 		if err != nil {
-			log.Errorf("Failed to parse object/directory stat info to JSON format: %v", err)
+			log.Errorf("Failed to parse object/collection stat info to JSON format: %v", err)
 			os.Exit(1)
 		}
 		fmt.Println(string(jsonData))
@@ -107,7 +107,7 @@ func statMain(cmd *cobra.Command, args []string) {
 		fmt.Println("Name:", statInfo.Name)
 		fmt.Println("Size:", statInfo.Size)
 		fmt.Println("ModTime:", statInfo.ModTime)
-		fmt.Println("IsDir:", statInfo.IsDir)
+		fmt.Println("IsCollection:", statInfo.IsCollection)
 		return
 	}
 }

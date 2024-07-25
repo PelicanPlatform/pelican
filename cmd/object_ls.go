@@ -110,12 +110,12 @@ func listMain(cmd *cobra.Command, args []string) error {
 
 	filteredInfos := []client.FileInfo{}
 
-	// Filter by object or directory
+	// Filter by object or collection
 	for _, info := range fileInfos {
-		if collectionOnly && !info.IsDir {
+		if collectionOnly && !info.IsCollection {
 			continue
 		}
-		if objectOnly && info.IsDir {
+		if objectOnly && info.IsCollection {
 			continue
 		}
 		filteredInfos = append(filteredInfos, info)
@@ -129,7 +129,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 		if asJSON {
 			jsonData, err := json.Marshal(filteredInfos)
 			if err != nil {
-				return errors.Errorf("failed to marshal object/directory info to JSON format: %v", err)
+				return errors.Errorf("failed to marshal object/collection info to JSON format: %v", err)
 			}
 			fmt.Println(string(jsonData))
 			return nil
@@ -148,7 +148,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 		// Convert the FileInfo to JSON and print it
 		jsonData, err := json.Marshal(jsonInfo)
 		if err != nil {
-			return errors.Errorf("failed to marshal object/directory info to JSON format: %v", err)
+			return errors.Errorf("failed to marshal object/collection info to JSON format: %v", err)
 		}
 		fmt.Println(string(jsonData))
 	} else {

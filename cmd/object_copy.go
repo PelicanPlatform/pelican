@@ -55,7 +55,7 @@ func init() {
 	flagSet := copyCmd.Flags()
 	flagSet.StringP("cache", "c", "", "Cache to use")
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
-	flagSet.BoolP("recursive", "r", false, "Recursively copy a directory.  Forces methods to only be http to get the freshest directory contents")
+	flagSet.BoolP("recursive", "r", false, "Recursively copy a collection.  Forces methods to only be http to get the freshest collection contents")
 	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
 	flagSet.Lookup("cache-list-name").Hidden = true
 	// All the deprecated or hidden flags that are only relevant if we are in historical "stashcp mode"
@@ -193,7 +193,7 @@ func copyMain(cmd *cobra.Command, args []string) {
 			log.Errorln("Destination does not exist")
 			os.Exit(1)
 		} else if !destStat.IsDir() {
-			log.Errorln("Destination is not a directory")
+			log.Errorln("Destination is not a collection")
 			os.Exit(1)
 		}
 	}

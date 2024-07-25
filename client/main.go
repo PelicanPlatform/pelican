@@ -50,10 +50,10 @@ var CachesToTry int = 3
 // NOTE: this was created to provide more flexibility to information on a file. The fs.FileInfo interface was causing some issues like not always returning a Name attribute
 // ALSO NOTE: the fields are exported so they can be marshalled into JSON, it does not work otherwise
 type FileInfo struct {
-	Name    string
-	Size    int64
-	ModTime time.Time
-	IsDir   bool
+	Name         string
+	Size         int64
+	ModTime      time.Time
+	IsCollection bool
 }
 
 // Determine the token name if it is embedded in the scheme, Condor-style

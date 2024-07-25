@@ -2407,10 +2407,10 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 // This function queries the director with a PROPFIND to attempt to get the 'collections url'. If a propfind is not allowed on the director
 // We fall back to the deprecated dirlisthost in the namespace
 func getCollectionsUrl(ctx context.Context, remoteObjectUrl *url.URL, namespace namespaces.Namespace, directorUrl string) (collectionsUrl *url.URL, err error) {
-	// If we are a recursive download and using the director, we want to attempt to get directory listings from
+	// If we are a recursive download and using the director, we want to attempt to get collection listings from
 	// PROPFINDing the director
 	if directorUrl != "" {
-		// Query the director a PROPFIND to see if we can get our directory listing
+		// Query the director a PROPFIND to see if we can get our collection listing
 		resp, err := queryDirector(ctx, "PROPFIND", remoteObjectUrl.Path, directorUrl)
 		if err != nil {
 			// If we have an issue querying the director, we want to fallback to the deprecated dirlisthost from the namespace
@@ -2424,11 +2424,11 @@ func getCollectionsUrl(ctx context.Context, remoteObjectUrl *url.URL, namespace 
 		if resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotFound {
 			// If the director responds with 405 (method not allowed) or a 404 (not found), we're working with an old Director.
 			// In that event, we try to fallback and use the deprecated dirlisthost
-			log.Debugln("Failed to find collections url from director, attempting to find directory listings host in namespace")
+			log.Debugln("Failed to find collections url from director, attempting to find collection listings host in namespace")
 			// Check for a dir list host in namespace
 			if namespace.DirListHost == "" {
-				// Both methods to get directory listings failed
-				err = &dirListingNotSupportedError{Err: errors.New("origin and/or namespace does not support directory listings")}
+				// Both methods to get collection listings failed
+				err = &dirListingNotSupportedError{Err: errors.New("origin and/or namespace does not support collection listings")}
 				return nil, err
 			} else {
 				collectionsUrl, err = url.Parse(namespace.DirListHost)
@@ -2475,11 +2475,11 @@ func getCollectionsUrl(ctx context.Context, remoteObjectUrl *url.URL, namespace 
 		// If we're not using the director and are using topology, we should check for a dirlisthost from the namespace
 		collectionsUrl, err = url.Parse(namespace.DirListHost)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to parse directory listing host as a url")
+			return nil, errors.Wrap(err, "failed to parse collection listing host as a url")
 		}
 	} else {
 		// If we hit this point, we are not using the director and the namespace does not have a DirListHost therefore, the origin and/or namespace does not support it
-		err = &dirListingNotSupportedError{Err: errors.New("origin and/or namespace does not support directory listings")}
+		err = &dirListingNotSupportedError{Err: errors.New("origin and/or namespace does not support collection listings")}
 		return nil, err
 	}
 	return
@@ -2495,7 +2495,7 @@ func createWebDavClient(collectionsUrl *url.URL, token string, project string) (
 	return
 }
 
-// Walk a remote directory in a WebDAV server, emitting the files discovered
+// Walk a remote collection in a WebDAV server, emitting the files discovered
 func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
 	// Create the client to walk the filesystem
 	rootUrl := *url
@@ -2508,8 +2508,8 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 		rootUrl = *dirListURL
 
 	} else {
-		log.Errorln("Host for directory listings is unknown")
-		return errors.New("Host for directory listings is unknown")
+		log.Errorln("Host for collection listings is unknown")
+		return errors.New("Host for collection listings is unknown")
 	}
 	log.Debugln("Dir list host: ", rootUrl.String())
 
@@ -2519,7 +2519,7 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 
 // Helper function for the `walkDirDownload`.
 //
-// Recursively walks through the remote server directory, emitting transfer files
+// Recursively walks through the remote server collection, emitting transfer files
 // for the engine to process.
 func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remotePath string, client *gowebdav.Client) error {
 	// Check for cancelation since the client does not respect the context
@@ -2528,7 +2528,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	}
 	infos, err := client.ReadDir(remotePath)
 	if err != nil {
-		return errors.Wrap(err, "failed to read remote directory")
+		return errors.Wrap(err, "failed to read remote collection")
 	}
 	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {
@@ -2614,9 +2614,9 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	return err
 }
 
-// This function performs the ls command by walking through the specified directory and printing the contents of the files
+// This function performs the ls command by walking through the specified collection and printing the contents of the files
 func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string, namespace namespaces.Namespace, token string) (fileInfos []FileInfo, err error) {
-	// Get our directory listing host
+	// Get our collection listing host
 	collectionsUrl, err := getCollectionsUrl(ctx, remoteObjectUrl, namespace, directorUrl)
 	if err != nil {
 		return
@@ -2638,14 +2638,14 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to stat remote path")
 			}
-			// If the path leads to a file and not a directory, just add the filename
+			// If the path leads to a file and not a collection, just add the filename
 			if !info.IsDir() {
 				// NOTE: we implement our own FileInfo here because the one we get back from stat() does not have a .name field for some reason
 				file := FileInfo{
-					Name:    path.Base(remotePath),
-					Size:    info.Size(),
-					ModTime: info.ModTime(),
-					IsDir:   false,
+					Name:         path.Base(remotePath),
+					Size:         info.Size(),
+					ModTime:      info.ModTime(),
+					IsCollection: false,
 				}
 				fileInfos = append(fileInfos, file)
 				return fileInfos, nil
@@ -2655,16 +2655,16 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 			return nil, errors.Errorf("405: object listings are not supported by the discovered origin. Contact your federation admin at %s for help", directorUrl)
 		}
 		// Otherwise, a different error occurred and we should return it
-		return nil, errors.Wrap(err, "failed to read remote directory")
+		return nil, errors.Wrap(err, "failed to read remote collection")
 	}
 
 	for _, info := range infos {
 		// Create a FileInfo for the file and append it to the slice
 		file := FileInfo{
-			Name:    info.Name(),
-			Size:    info.Size(),
-			ModTime: info.ModTime(),
-			IsDir:   info.IsDir(),
+			Name:         info.Name(),
+			Size:         info.Size(),
+			ModTime:      info.ModTime(),
+			IsCollection: info.IsDir(),
 		}
 		fileInfos = append(fileInfos, file)
 	}
@@ -2739,10 +2739,10 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 				fsinfo, err := client.Stat(endpoint.Path)
 				if err == nil {
 					info = FileInfo{
-						Name:    path.Base(endpoint.Path),
-						Size:    fsinfo.Size(),
-						IsDir:   fsinfo.IsDir(),
-						ModTime: fsinfo.ModTime(),
+						Name:         path.Base(endpoint.Path),
+						Size:         fsinfo.Size(),
+						IsCollection: fsinfo.IsDir(),
+						ModTime:      fsinfo.ModTime(),
 					}
 					break
 				} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
@@ -2769,7 +2769,7 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 			}
 
 			if info.Size == 0 {
-				if info.IsDir {
+				if info.IsCollection {
 					resultsChan <- statResults{info, nil}
 				}
 				err = errors.New("Stat response did not include a size")
@@ -2778,10 +2778,10 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 			}
 
 			resultsChan <- statResults{FileInfo{
-				Name:    path.Base(endpoint.Path),
-				Size:    info.Size,
-				IsDir:   info.IsDir,
-				ModTime: info.ModTime,
+				Name:         path.Base(endpoint.Path),
+				Size:         info.Size,
+				IsCollection: info.IsCollection,
+				ModTime:      info.ModTime,
 			}, nil}
 
 		}(&destCopy)
