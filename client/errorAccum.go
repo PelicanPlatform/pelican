@@ -157,6 +157,9 @@ func IsRetryable(err error) bool {
 		// that enables dirlistings or the admin must enable dirlistings on the origin/namespace
 		return false
 	}
+	if errors.Is(err, &HeaderTimeoutError{}) {
+		return true
+	}
 	var cse *ConnectionSetupError
 	if errors.As(err, &cse) {
 		if sce, ok := cse.Unwrap().(grab.StatusCodeError); ok {

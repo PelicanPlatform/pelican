@@ -338,6 +338,11 @@ func (e *HeaderTimeoutError) Error() string {
 	return "timeout waiting for HTTP response (TCP connection successful)"
 }
 
+func (e *HeaderTimeoutError) Is(target error) bool {
+	_, ok := target.(*HeaderTimeoutError)
+	return ok
+}
+
 func (e *StoppedTransferError) Error() (errMsg string) {
 	if e.StoppedTime > 0 {
 		errMsg = "no progress for more than " + e.StoppedTime.Truncate(time.Millisecond).String()
