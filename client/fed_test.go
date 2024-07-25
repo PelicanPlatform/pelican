@@ -488,7 +488,7 @@ func TestObjectStat(t *testing.T) {
 				require.NoError(t, err)
 			}
 			assert.Equal(t, int64(13), got.Size)
-			assert.Equal(t, "hello_world.txt", got.Name)
+			assert.Equal(t, fmt.Sprintf("%s/hello_world.txt", export.FederationPrefix), got.Name)
 		}
 	})
 
@@ -544,7 +544,7 @@ func TestObjectStat(t *testing.T) {
 		assert.NoError(t, err)
 		if err == nil {
 			assert.Equal(t, int64(17), int64(statInfo.Size))
-			assert.Equal(t, "test.txt", statInfo.Name)
+			assert.Equal(t, fmt.Sprintf("%s/%s", fed.Exports[0].FederationPrefix, fileName), statInfo.Name)
 		}
 	})
 
