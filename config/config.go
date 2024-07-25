@@ -448,6 +448,31 @@ func GetAllPrefixes() []ConfigPrefix {
 	return prefixes
 }
 
+// Helper function to start a metadata request.
+//
+// We see periodic timeouts when doing metadata lookup at sites.
+// Adding a modest retry will, hopefully, reduce the number of errors
+// that propagate out to users
+func startMetadataQuery(ctx context.Context, httpClient *http.Client, discoveryUrl *url.URL) (result *http.Response, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryUrl.String(), nil)
+	if err != nil {
+		err = errors.Wrapf(err, "Failure when doing federation metadata request creation for %s", discoveryUrl)
+		return
+	}
+	req.Header.Set("User-Agent", "pelican/"+version)
+
+	result, err = httpClient.Do(req)
+	if err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			err = MetadataTimeoutErr.Wrap(err)
+		} else {
+			err = NewMetadataError(err, "Error occurred when querying for metadata")
+		}
+	}
+	return
+}
+
 // This function is for discovering federations as specified by a url during a pelican:// transfer.
 // this does not populate global fields and is more temporary per url
 func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (metadata FederationDiscovery, err error) {
@@ -478,23 +503,22 @@ func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (
 		Transport: GetTransport(),
 		Timeout:   time.Second * 5,
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryUrl.String(), nil)
-	if err != nil {
-		err = errors.Wrapf(err, "Failure when doing federation metadata request creation for %s", discoveryUrl)
-		return
-	}
-	req.Header.Set("User-Agent", "pelican/"+version)
 
-	result, err := httpClient.Do(req)
-	if err != nil {
-		var netErr net.Error
-		if errors.As(err, &netErr) && netErr.Timeout() {
-			err = MetadataTimeoutErr.Wrap(err)
-			return
+	var result *http.Response
+	for idx := 1; idx <= 3; idx++ {
+		result, err = startMetadataQuery(ctx, &httpClient, discoveryUrl)
+		if err == nil {
+			break
+		} else if errors.Is(err, MetadataTimeoutErr) && ctx.Err() == nil {
+			log.Warningln("Timeout occurred when querying discovery URL", discoveryUrl.String(), "for metadata;", 3-idx, "retries remaining")
+			time.Sleep(2 * time.Second)
 		} else {
-			err = NewMetadataError(err, "Error occurred when querying for metadata")
 			return
 		}
+	}
+	if errors.Is(err, MetadataTimeoutErr) {
+		log.Errorln("3 timeouts occurred when querying discovery URL", discoveryUrl.String())
+		return
 	}
 
 	if result.Body != nil {
