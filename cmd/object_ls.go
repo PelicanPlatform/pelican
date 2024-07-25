@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strconv"
 	"text/tabwriter"
 
@@ -159,7 +160,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
 		var line string
 		for _, info := range filteredInfos {
-			line += info.Name
+			line += path.Base(info.Name)
 			//increase our counter
 			column++
 

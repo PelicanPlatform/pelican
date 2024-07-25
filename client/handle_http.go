@@ -2665,7 +2665,7 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 			if !info.IsDir() {
 				// NOTE: we implement our own FileInfo here because the one we get back from stat() does not have a .name field for some reason
 				file := FileInfo{
-					Name:    path.Base(remotePath),
+					Name:    remotePath,
 					Size:    info.Size(),
 					ModTime: info.ModTime(),
 					IsDir:   false,
@@ -2762,7 +2762,7 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 				fsinfo, err := client.Stat(endpoint.Path)
 				if err == nil {
 					info = FileInfo{
-						Name:    path.Base(endpoint.Path),
+						Name:    endpoint.Path,
 						Size:    fsinfo.Size(),
 						IsDir:   fsinfo.IsDir(),
 						ModTime: fsinfo.ModTime(),
@@ -2801,7 +2801,7 @@ func statHttp(ctx context.Context, dest *url.URL, namespace namespaces.Namespace
 			}
 
 			resultsChan <- statResults{FileInfo{
-				Name:    path.Base(endpoint.Path),
+				Name:    endpoint.Path,
 				Size:    info.Size,
 				IsDir:   info.IsDir,
 				ModTime: info.ModTime,
