@@ -747,6 +747,23 @@ func WithAcquireToken(enable bool) TransferOption {
 	return option.New(identTransferOptionAcquireToken{}, enable)
 }
 
+// Create an option to provide a specific source token to the transfer
+//
+// The contents of the token will be used as part of the HTTP request
+// for a third-party-copy
+func WithSourceToken(token string) TransferOption {
+	return option.New(identTransferOptionSourceToken{}, token)
+}
+
+// Create an option to override the source token location logic
+//
+// This will force the transfer to use a specific file for the token
+// contents instead of doing any sort of auto-detection; this option
+// is only used for third-party-copy.
+func WithSourceTokenLocation(location string) TransferOption {
+	return option.New(identTransferOptionSourceTokenLocation{}, location)
+}
+
 // Create a new client to work with an engine
 func (te *TransferEngine) NewClient(options ...TransferOption) (client *TransferClient, err error) {
 	log.Debugln("Making new clients")
