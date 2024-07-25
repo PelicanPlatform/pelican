@@ -124,6 +124,8 @@ type (
 
 	HeaderTimeoutError struct{}
 
+	NetworkResetError struct{}
+
 	allocateMemoryError struct {
 		Err error
 	}
@@ -336,6 +338,10 @@ func getProgressContainer() *mpb.Progress {
 
 func (e *HeaderTimeoutError) Error() string {
 	return "timeout waiting for HTTP response (TCP connection successful)"
+}
+
+func (e *NetworkResetError) Error() string {
+	return "the existing TCP connection was broken (potentially caused by server restart or NAT/firewall issue)"
 }
 
 func (e *StoppedTransferError) Error() (errMsg string) {
@@ -1751,6 +1757,8 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 					proxyStr += "(" + ope.Addr.String() + ")"
 				}
 				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, true, false, err)
+			} else if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
+				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, &NetworkResetError{})
 			} else if errors.As(err, &cse) {
 				if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
 					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, sce)
@@ -2339,6 +2347,9 @@ Loop:
 				if err.Error() == "net/http: timeout awaiting response headers" {
 					err = &HeaderTimeoutError{}
 				}
+			}
+			if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
+				err = &NetworkResetError{}
 			}
 			lastError = err
 			break Loop
