@@ -477,24 +477,24 @@ func TestSortAttempts(t *testing.T) {
 
 	defer cancel()
 
-	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3})
+	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, "")
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 	assert.Equal(t, svr1.URL, results[2].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3, attempt1})
+	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3, attempt1}, "")
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 	assert.Equal(t, svr1.URL, results[2].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt1})
+	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt1}, "")
 	assert.Equal(t, int64(-1), size)
 	assert.Equal(t, svr1.URL, results[0].Url.String())
 	assert.Equal(t, svr1.URL, results[1].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3})
+	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3}, "")
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
