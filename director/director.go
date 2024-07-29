@@ -195,32 +195,32 @@ func getFinalRedirectURL(rurl url.URL, requstParams url.Values) string {
 	return rurl.String()
 }
 
-func versionCompatCheck(ginCtx *gin.Context) error {
-	// Check that the version of whichever service (eg client, origin, etc) is talking to the Director
-	// is actually something the Director thinks it can communicate with
-
-	// The service/version is sent via User-Agent header in the form "pelican-<service>/<version>"
+// Helper function to extract version and service from User-Agent
+func extractVersionAndService(ginCtx *gin.Context) (reqVer *version.Version, service string, err error) {
 	userAgentSlc := ginCtx.Request.Header["User-Agent"]
 	if len(userAgentSlc) < 1 {
-		return errors.New("No user agent could be found")
+		return nil, "", errors.New("No user agent could be found")
 	}
 
-	// gin gives us a slice of user agents. Since pelican services should only ever
-	// send one UA, assume that it is the 0-th element of the slice.
 	userAgent := userAgentSlc[0]
-
-	// Make sure we're working with something that's formatted the way we expect. If we
-	// don't match, then we're definitely not coming from one of the services, so we
-	// let things go without an error. Maybe someone is using curl?
-	// Grab the actual service/version that's using the Director. There may be different versioning
-	// requirements between origins, clients, and other services.
 	reqVerStr, service := utils.ExtractVersionAndServiceFromUserAgent(userAgent)
 	if reqVerStr == "" || service == "" {
-		return nil
+		return nil, "", nil
 	}
-	reqVer, err := version.NewVersion(reqVerStr)
+	reqVer, err = version.NewVersion(reqVerStr)
 	if err != nil {
-		return errors.Wrapf(err, "Could not parse service version as a semantic version: %s\n", reqVerStr)
+		return nil, "", errors.Wrapf(err, "Could not parse service version as a semantic version: %s\n", reqVerStr)
+	}
+	return reqVer, service, nil
+}
+
+func versionCompatCheck(ginCtx *gin.Context) error {
+	reqVer, service, err := extractVersionAndService(ginCtx)
+	if err != nil {
+		return err
+	}
+	if reqVer == nil {
+		return nil
 	}
 
 	var minCompatVer *version.Version
@@ -253,7 +253,8 @@ func redirectToCache(ginCtx *gin.Context) {
 		return
 	}
 
-	collectClientVersionMetric(ginCtx)
+	reqVer, service, _ := extractVersionAndService(ginCtx)
+	collectClientVersionMetric(reqVer, service)
 
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/object")
@@ -478,7 +479,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
-	collectClientVersionMetric(ginCtx)
+	reqVer, service, _ := extractVersionAndService(ginCtx)
+	collectClientVersionMetric(reqVer, service)
 
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
@@ -1160,26 +1162,12 @@ func getHealthTestFile(ctx *gin.Context) {
 // parse out the version from it and update the pelican_director_client_version_total metric
 //
 // In the case that parser fails, then metric is not updated
-func collectClientVersionMetric(c *gin.Context) {
-	userAgentSlc := c.Request.Header["User-Agent"]
-	if len(userAgentSlc) < 1 {
-		log.Error("Failed to parse User-Agent")
-		return
-	}
-	reqVerStr, _ := utils.ExtractVersionAndServiceFromUserAgent(userAgentSlc[0])
-
-	// non-pelican client
-	if len(reqVerStr) == 0 {
-		// non-pelican clients will be marked as "other"
-		metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": "other"}).Inc()
+func collectClientVersionMetric(reqVer *version.Version, service string) {
+	if reqVer == nil || service == "" {
+		metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": "other", "service": "other"}).Inc()
 		return
 	}
 
-	reqVer, err := version.NewVersion(reqVerStr)
-	if err != nil {
-		log.Error("Failed to parse client version")
-		return
-	}
 	versionSegments := reqVer.Segments()
 	if len(versionSegments) < 2 {
 		return
