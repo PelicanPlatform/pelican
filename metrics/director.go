@@ -85,5 +85,5 @@ var (
 	PelicanDirectorClientVersionTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_client_version_total",
 		Help: "The total number of requests from client versions.",
-	}, []string{"version"})
+	}, []string{"version", "service"})
 )

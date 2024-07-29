@@ -1180,7 +1180,7 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 
 	shortendVersion := strings.Join(strSegments, ".")
 
-	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": shortendVersion}).Inc()
+	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": shortendVersion, "service": service}).Inc()
 }
 
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
