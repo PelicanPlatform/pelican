@@ -146,6 +146,12 @@ func IsRetryable(err error) bool {
 	if errors.Is(err, config.MetadataTimeoutErr) {
 		return true
 	}
+	// There's little a user can do about a TCP connection reset besides retry; if it
+	// was due to the server crashing, then on a subsequent retry they should get a different
+	// error message (connection refused).
+	if errors.Is(err, &NetworkResetError{}) {
+		return true
+	}
 	if errors.Is(err, &StoppedTransferError{}) {
 		return true
 	}
