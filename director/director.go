@@ -339,10 +339,6 @@ func redirectToCache(ginCtx *gin.Context) {
 	// If either disableStat or skipstat is set, then skip the stat query
 	skipStat := ginCtx.Request.URL.Query().Has("skipstat") || disableStat
 
-	if skipStat {
-		log.Debugf("stat is skipped for object %s", reqPath)
-	}
-
 	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
@@ -393,12 +389,12 @@ func redirectToCache(ginCtx *gin.Context) {
 			for _, obj := range qr.Objects {
 				serverHost := obj.URL.Host
 				for _, oAd := range originAds {
-					if oAd.URL.Host == serverHost {
+					if oAd.URL.Host == serverHost || oAd.AuthURL.Host == serverHost {
 						originAdsWObject = append(originAdsWObject, oAd)
 					}
 				}
 				for _, cAd := range cacheAds {
-					if cAd.URL.Host == serverHost {
+					if cAd.URL.Host == serverHost || cAd.AuthURL.Host == serverHost {
 						cachesAvailabilityMap[cAd.URL.String()] = true
 					}
 				}
@@ -430,6 +426,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	}
 
 	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find a valid cache.
+	// In this case, we append originAd(s) to cacheAds if the origin enabled DirectReads
 	if len(cacheAds) == 0 {
 		for _, originAd := range originAdsWObject {
 			// Find the first origin that enables direct reads as the fallback
@@ -445,16 +442,16 @@ func redirectToCache(ginCtx *gin.Context) {
 			})
 			return
 		}
-	} else {
-		cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds)
-		if err != nil {
-			log.Error("Error determining server ordering for cacheAdsWObject: ", err)
-			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Failed to determine server ordering",
-			})
-			return
-		}
+	}
+
+	cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds)
+	if err != nil {
+		log.Error("Error determining server ordering for cacheAds: ", err)
+		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to determine server ordering",
+		})
+		return
 	}
 
 	// Re-sort by availability, where caches having the object have higher priority
@@ -541,10 +538,6 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// Skip the stat check for object availability
 	// If either disableStat or skipstat is set, then skip the stat query
 	skipStat := reqParams.Has(utils.QuerySkipStat.String()) || !param.Director_EnableStat.GetBool()
-
-	if skipStat {
-		log.Debugf("Stat is skipped for object %s", reqPath)
-	}
 
 	// Include caches in the response if Director.CachesPullFromCaches is enabled
 	// AND prefercached query parameter is set
