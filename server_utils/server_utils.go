@@ -140,7 +140,7 @@ func GetTopologyJSON(ctx context.Context, includeDowned bool) (*TopologyNamespac
 // Logging messages emitted will refer to `server` (e.g., origin, cache, director)
 // Pass true to statusMismatch to allow a mismatch of expected status code and what's returned not fail immediately
 func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expectedStatus int, statusMismatch bool) error {
-	expiry := time.Now().Add(10 * time.Second)
+	expiry := time.Now().Add(param.Server_StartupTimeout.GetDuration())
 	ctx, cancel := context.WithDeadline(ctx, expiry)
 	defer cancel()
 	ticker := time.NewTicker(50 * time.Millisecond)
@@ -215,7 +215,7 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 			}
 		case <-ctx.Done():
 			if statusError != nil {
-				return errors.Wrapf(statusError, "url %s didn't respond with the expected status code %d within 10s", reqUrl, expectedStatus)
+				return errors.Wrapf(statusError, "url %s didn't respond with the expected status code %d within %s", reqUrl, expectedStatus, param.Server_StartupTimeout.GetDuration().String())
 			}
 			return ctx.Err()
 		}
@@ -224,7 +224,7 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 	if statusError != nil {
 		return errors.Wrapf(statusError, "url %s didn't respond with the expected status code %d within 10s", reqUrl, expectedStatus)
 	} else {
-		return errors.Errorf("The %s server at %s either did not startup or did not respond quickly enough after 10s of waiting", server, reqUrl)
+		return errors.Errorf("The %s server at %s either did not startup or did not respond quickly enough after %s of waiting", server, reqUrl, param.Server_StartupTimeout.GetDuration().String())
 	}
 }
 

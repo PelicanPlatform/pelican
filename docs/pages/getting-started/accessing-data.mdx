@@ -1,0 +1,65 @@
+# Getting Started: Accessing Data
+The developers of the Pelican Platform believe data is the lifeblood of science. That's why Pelican provides a suite of tools that make it easy for researchers to federate their data, giving them the ability to share objects from a broad range of data repositories and allowing them to connect their data with distributed computational capacity, such as the OSPool. For more information on Pelican, visit the [About Pelican](../index.mdx) page.
+
+## Before Starting
+
+### Assumptions
+
+Before using the Pelican client to interact with objects, this guide makes several assumptions:
+
+- You are on a computer where you have access to a terminal. The Pelican client is a command line tool.
+- You've already installed the version of Pelican appropriate for your system, and Pelican is accessible via your path. To test this on Linux, you can run
+
+  ```bash copy
+  which pelican
+  ```
+  which should output a path to the executable. If there is no output to this command, refer to the [Pelican installation docs](../install.mdx) to acquire a working installation.
+
+### Useful Terminology
+
+To learn our terminology and about Pelican's architecture, we recommend you read through the [About Pelican](../index.mdx) page and [Core Concepts and Terminology](../core-concepts.mdx) page to learn how Pelican works and how it can be useful to you.
+
+## Your First Pelican Client Command
+You can easily access public objects from a Pelican federation with the use of the Pelican client commands. Here we will be using the `pelican object get` command to get an object from a federation. This command is formatted like so:
+
+```bash
+pelican object get pelican://<federation-url>/<object-path> </local/path/to/destination>
+```
+
+We can break down the components of this command before you try it yourself:
+- `pelican object get`: This is the client command we are utilizing. `object` because we want to interact with Pelican objects and `get` because we want to GET the file from our federation.
+- `pelican://`: This is the URL scheme for accessing this object. Pelican accepts different URL schemes which are detailed in the [Pelican Client usage](./client_usage.mdx#the-different-pelican-url-schemes) page.
+- `<federation-url>`: The URL indicating which federation you would like to interact with.
+- `<object-path>`: The path to the object we would like to get.
+- `</local/path/to/destination>`: The local destination where we want the file to download to (can be a local or absolute path)
+
+### Try The Command Yourself
+Now it is time for you to get your first object from a federation. Before getting your first object, be sure you are in a directory/location where you want to download this test file. To get the object, run the command below:
+
+```bash copy
+pelican object get pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-test.txt
+```
+
+>**Note:** with pelican:// URLs like the one above, it is important to include the correct number of slashes (`/`). This is because pelican URLs rely on the hostname being the federation URL therefore, they must only contain two slashes after `pelican`. For more information, visit the [Pelican Client Usage](../getting-data-with-pelican/client.mdx#the-different-pelican-url-schemes) page
+
+You should see a progress bar output and eventually a file named `downloaded-test.txt` within your local directory:
+
+```bash
+$ pelican object get pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-test.txt
+downloaded-test.txt 14.00 b / 14.00 b [==============================================================================] Done!
+$ ls
+downloaded-test.txt
+$ cat downloaded-test.txt
+Hello, World!
+```
+
+## Where to Go from Here
+**For More Info on Pelican:**
+- Go to our website located at https://pelicanplatform.org
+
+**For Users:**
+- Learn more advanced client-usage from the [Pelican Client Usage](../getting-data-with-pelican/client.mdx) page.
+- Learn how to federate your data to a Pelican federation with the [Pelican Origin](../federating-your-data.mdx)
+
+**For Admins:**
+- Learn how to operate your own [Pelican Federation](../operating-a-federation.mdx)

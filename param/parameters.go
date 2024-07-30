@@ -324,6 +324,7 @@ var (
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
 	Debug = BoolParam{"Debug"}
+	Director_CachesPullFromCaches = BoolParam{"Director.CachesPullFromCaches"}
 	Director_EnableBroker = BoolParam{"Director.EnableBroker"}
 	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
 	Director_EnableStat = BoolParam{"Director.EnableStat"}
@@ -378,6 +379,7 @@ var (
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
 	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
 	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
+	Server_StartupTimeout = DurationParam{"Server.StartupTimeout"}
 	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}
 	Transport_DialerTimeout = DurationParam{"Transport.DialerTimeout"}
 	Transport_ExpectContinueTimeout = DurationParam{"Transport.ExpectContinueTimeout"}

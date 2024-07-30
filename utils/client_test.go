@@ -108,4 +108,107 @@ func TestValidQuery(t *testing.T) {
 		err = CheckValidQuery(transferUrl)
 		assert.NoError(t, err)
 	})
+
+	t.Run("testValidSkipStat", func(t *testing.T) {
+		transferStr := "pelican://something/here?skipstat"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = CheckValidQuery(transferUrl)
+		assert.NoError(t, err)
+	})
+
+	t.Run("testValidPreferCached", func(t *testing.T) {
+		transferStr := "pelican://something/here?prefercached"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = CheckValidQuery(transferUrl)
+		assert.NoError(t, err)
+	})
+
+	t.Run("testInvalidDirectReadAndPreferCached", func(t *testing.T) {
+		transferStr := "pelican://something/here?prefercached&directread"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = CheckValidQuery(transferUrl)
+		assert.Error(t, err)
+		assert.Equal(t, "cannot have both directread and prefercached query parameters", err.Error())
+	})
+}
+
+func TestApplyIPMask(t *testing.T) {
+	t.Run("testValidIPv4", func(t *testing.T) {
+		expectedMaskedIP := "192.168.1.0"
+		validIPv4 := "192.168.1.1"
+		maskedIP, ok := ApplyIPMask(validIPv4)
+		assert.True(t, ok)
+		assert.Equal(t, expectedMaskedIP, maskedIP)
+	})
+
+	t.Run("testValidIPv6", func(t *testing.T) {
+		expectedMaskedIP := "2001:db8:3333:4444::"
+		validIPv6 := "2001:0db8:3333:4444:5555:6666:7777:8888"
+		maskedIP, ok := ApplyIPMask(validIPv6)
+		assert.True(t, ok)
+		assert.Equal(t, expectedMaskedIP, maskedIP)
+	})
+
+	t.Run("testInvalidInput", func(t *testing.T) {
+		invalid := "abc.123"
+		maskedIP, ok := ApplyIPMask(invalid)
+		assert.False(t, ok)
+		assert.Equal(t, maskedIP, invalid)
+	})
+}
+
+func TestExtractAndMaskIP(t *testing.T) {
+	t.Run("testWrappedIPv4", func(t *testing.T) {
+		expectedMaskedIP := "192.168.1.0"
+		wrappedValidIPv4 := "[192.168.1.1]"
+		maskedIP, ok := ExtractAndMaskIP(wrappedValidIPv4)
+		assert.True(t, ok)
+		assert.Equal(t, expectedMaskedIP, maskedIP)
+	})
+
+	t.Run("testWrappedIPv6", func(t *testing.T) {
+		expectedMaskedIP := "2001:db8:3333:4444::"
+		wrappedValidIPv6 := "[2001:0db8:3333:4444:5555:6666:7777:8888]"
+		maskedIP, ok := ExtractAndMaskIP(wrappedValidIPv6)
+		assert.True(t, ok)
+		assert.Equal(t, expectedMaskedIP, maskedIP)
+	})
+
+	t.Run("testWrappedInvalid", func(t *testing.T) {
+		invalid := "[abc.123]"
+		expected := "abc.123"
+		maskedIP, ok := ExtractAndMaskIP(invalid)
+		assert.False(t, ok)
+		assert.Equal(t, maskedIP, expected)
+	})
+
+	t.Run("testUnwrappedIPv4", func(t *testing.T) {
+		expectedMaskedIP := "192.168.1.0"
+		validIPv4 := "192.168.1.1"
+		maskedIP, ok := ExtractAndMaskIP(validIPv4)
+		assert.True(t, ok)
+		assert.Equal(t, expectedMaskedIP, maskedIP)
+	})
+
+	t.Run("testUnwrappedIPv6", func(t *testing.T) {
+		expectedMaskedIP := "2001:db8:3333:4444::"
+		validIPv6 := "2001:0db8:3333:4444:5555:6666:7777:8888"
+		maskedIP, ok := ExtractAndMaskIP(validIPv6)
+		assert.True(t, ok)
+		assert.Equal(t, expectedMaskedIP, maskedIP)
+	})
+
+	t.Run("testWrappedReal", func(t *testing.T) {
+		real := "[::ffff:79.110.62.117]"
+		expected := "79.110.62.0"
+		maskedIP, ok := ExtractAndMaskIP(real)
+		assert.True(t, ok)
+		assert.Equal(t, expected, maskedIP)
+	})
 }

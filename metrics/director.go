@@ -80,5 +80,10 @@ var (
 	PelicanDirectorStatTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_director_stat_total",
 		Help: "The total stat queries the director issues. The status can be Succeeded, Cancelled, Timeout, Forbidden, or UnknownErr",
-	}, []string{"server_name", "server_url", "server_type", "result"}) // status: see enums for DirectorStatResult
+	}, []string{"server_name", "server_url", "server_type", "result", "message"}) // result: see enums for DirectorStatResult. message: error message if result  == StatUnkownErr
+
+	PelicanDirectorServerCount = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_server_count",
+		Help: "Total number of servers, delineated by pelican/non-pelican and origin/cache",
+	}, []string{"server_name", "server_type", "server_url", "server_web_url", "server_lat", "server_long", "from_topology"})
 )
