@@ -1727,6 +1727,14 @@ type: stringSlice
 default: none
 components: ["registry","origin","cache"]
 ---
+name: Server.StartupTimeout
+description: |+
+  The amount of time the pelican server will wait for its components and services to startup.
+  If the timeout is hit while waiting on a component, the server will shutdown.
+type: duration
+default: 10s
+components: ["origin", "cache", "registry", "director"]
+---
 name: Server.EnablePprof
 description: |+
   A boolean to enable or disable the [pprof](https://pkg.go.dev/runtime/pprof) endpoints for debugging.

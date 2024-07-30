@@ -246,6 +246,7 @@ type Config struct {
 		Modules []string `mapstructure:"modules"`
 		RegistrationRetryInterval time.Duration `mapstructure:"registrationretryinterval"`
 		SessionSecretFile string `mapstructure:"sessionsecretfile"`
+		StartupTimeout time.Duration `mapstructure:"startuptimeout"`
 		TLSCACertificateDirectory string `mapstructure:"tlscacertificatedirectory"`
 		TLSCACertificateFile string `mapstructure:"tlscacertificatefile"`
 		TLSCAKey string `mapstructure:"tlscakey"`
@@ -538,6 +539,7 @@ type configWithType struct {
 		Modules struct { Type string; Value []string }
 		RegistrationRetryInterval struct { Type string; Value time.Duration }
 		SessionSecretFile struct { Type string; Value string }
+		StartupTimeout struct { Type string; Value time.Duration }
 		TLSCACertificateDirectory struct { Type string; Value string }
 		TLSCACertificateFile struct { Type string; Value string }
 		TLSCAKey struct { Type string; Value string }

@@ -1116,6 +1116,18 @@ func TestRedirects(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
+	// Use ads generated via mock topology for generating list of caches
+	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
+	defer topoServer.Close()
+	viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+	// viper.Set("Director.CacheSortMethod", "random")
+	// Populate ads for redirectToCache to use
+	err := AdvertiseOSDF(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		serverAds.DeleteAll()
+	})
+
 	router := gin.Default()
 	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
 
@@ -1268,25 +1280,12 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("redirect-link-header-length", func(t *testing.T) {
-		ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-		defer func() { require.NoError(t, egrp.Wait()) }()
-		defer cancel()
-
 		viper.Reset()
-		serverAds.DeleteAll()
 		t.Cleanup(func() {
 			viper.Reset()
-			serverAds.DeleteAll()
 		})
 
-		// Use ads generated via mock topology for generating list of caches
-		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
-		defer topoServer.Close()
-		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 		viper.Set("Director.CacheSortMethod", "random")
-		// Populate ads for redirectToCache to use
-		err := AdvertiseOSDF(ctx)
-		require.NoError(t, err)
 
 		req, _ := http.NewRequest("GET", "/my/server", nil)
 		// Provide a few things so that redirectToCache doesn't choke
@@ -1317,18 +1316,11 @@ func TestRedirects(t *testing.T) {
 	// Make sure collections-url is correctly populated when the ns/origin comes from topology
 	t.Run("collections-url-from-topology", func(t *testing.T) {
 		viper.Reset()
-		serverAds.DeleteAll()
 		t.Cleanup(func() {
 			viper.Reset()
-			serverAds.DeleteAll()
 		})
 
-		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
-		defer topoServer.Close()
-		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 		viper.Set("Director.CacheSortMethod", "random")
-		err := AdvertiseOSDF(ctx)
-		require.NoError(t, err)
 
 		// This one should have a collections url because it has a dirlisthost
 		req, _ := http.NewRequest("GET", "/my/server", nil)
@@ -1347,6 +1339,148 @@ func TestRedirects(t *testing.T) {
 		c.Request = req
 		redirectToCache(c)
 		assert.NotContains(t, c.Writer.Header().Get("X-Pelican-Namespace"), "collections-url")
+	})
+
+	t.Run("object-endpoint-returns-all-headers", func(t *testing.T) {
+		viper.Reset()
+		t.Cleanup(func() {
+			viper.Reset()
+		})
+
+		viper.Set("Director.CacheSortMethod", "random")
+
+		req, _ := http.NewRequest("GET", "/my/server", nil)
+		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = req
+		redirectToCache(c)
+
+		assert.NotEmpty(t, c.Writer.Header().Get("Location"))
+		assert.NotEmpty(t, c.Writer.Header().Get("Link"))
+		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Authorization"))
+		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Token-Generation"))
+		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Namespace"))
+	})
+
+	t.Run("origin-endpoint-returns-all-headers", func(t *testing.T) {
+		viper.Reset()
+		t.Cleanup(func() {
+			viper.Reset()
+		})
+
+		viper.Set("Director.CacheSortMethod", "random")
+
+		req, _ := http.NewRequest("GET", "/my/server", nil)
+		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = req
+		redirectToOrigin(c)
+
+		assert.NotEmpty(t, c.Writer.Header().Get("Location"))
+		assert.NotEmpty(t, c.Writer.Header().Get("Link"))
+		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Authorization"))
+		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Token-Generation"))
+		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Namespace"))
+	})
+}
+func TestHeaderGenFuncs(t *testing.T) {
+	issUrl := url.URL{
+		Scheme: "https",
+		Host:   "my-issuer.com",
+	}
+	tGen := server_structs.TokenGen{
+		Strategy:         server_structs.OAuthStrategy,
+		MaxScopeDepth:    3,
+		CredentialIssuer: issUrl,
+	}
+
+	tIss := server_structs.TokenIssuer{
+		BasePaths: []string{"/my/server"},
+		IssuerUrl: issUrl,
+	}
+	authedNamespaceAd := server_structs.NamespaceAdV2{
+		Caps: server_structs.Capabilities{
+			PublicReads: false,
+			Reads:       true,
+		},
+		Generation: []server_structs.TokenGen{tGen},
+		Issuer:     []server_structs.TokenIssuer{tIss},
+		Path:       "/my/server",
+	}
+
+	publicNamespaceAd := server_structs.NamespaceAdV2{
+		Caps: server_structs.Capabilities{
+			PublicReads: true,
+		},
+		Path: "/different/server",
+	}
+
+	authReq, _ := http.NewRequest("GET", "/my/server", nil)
+	authReq.Header.Add("User-Agent", "pelican-v7.999.999")
+	authReq.Header.Add("X-Real-Ip", "128.104.153.60")
+
+	pubReq, _ := http.NewRequest("GET", "/different/server", nil)
+	pubReq.Header.Add("User-Agent", "pelican-v7.999.999")
+	pubReq.Header.Add("X-Real-Ip", "128.104.153.60")
+
+	// recorder := httptest.NewRecorder()
+	t.Run("test-x-pel-auth", func(t *testing.T) {
+		authedRecorder := httptest.NewRecorder()
+		cAuth, _ := gin.CreateTestContext(authedRecorder)
+		cAuth.Request = authReq
+		generateXAuthHeader(cAuth, authedNamespaceAd)
+		assert.NotEmpty(t, cAuth.Writer.Header().Get("X-Pelican-Authorization"))
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Authorization"), "issuer=https://my-issuer.com")
+
+		pubRecorder := httptest.NewRecorder()
+		cPub, _ := gin.CreateTestContext(pubRecorder)
+		cPub.Request = pubReq
+		generateXAuthHeader(cPub, publicNamespaceAd)
+		assert.Empty(t, cPub.Writer.Header().Get("X-Pelican-Authorization"))
+	})
+
+	t.Run("test-x-pel-tok-gen", func(t *testing.T) {
+		authedRecorder := httptest.NewRecorder()
+		cAuth, _ := gin.CreateTestContext(authedRecorder)
+		cAuth.Request = authReq
+
+		generateXTokenGenHeader(cAuth, authedNamespaceAd)
+		assert.NotEmpty(t, cAuth.Writer.Header().Get("X-Pelican-Token-Generation"))
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Token-Generation"), "issuer=https://my-issuer.com")
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Token-Generation"), "strategy=OAuth2")
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Token-Generation"), "max-scope-depth=3")
+
+		pubRecorder := httptest.NewRecorder()
+		cPub, _ := gin.CreateTestContext(pubRecorder)
+		cPub.Request = pubReq
+		generateXTokenGenHeader(cPub, publicNamespaceAd)
+		assert.Empty(t, cPub.Writer.Header().Get("X-Pelican-Token-Generation"))
+	})
+
+	t.Run("test-x-pel-namespace", func(t *testing.T) {
+		authedRecorder := httptest.NewRecorder()
+		cAuth, _ := gin.CreateTestContext(authedRecorder)
+		cAuth.Request = authReq
+
+		collUrl := "https://my-origin.com"
+		generateXNamespaceHeader(cAuth, authedNamespaceAd, collUrl)
+		assert.NotEmpty(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"))
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"), "namespace=/my/server")
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"), "require-token=true")
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"), "collections-url=https://my-origin.com")
+
+		pubRecorder := httptest.NewRecorder()
+		cPub, _ := gin.CreateTestContext(pubRecorder)
+		cPub.Request = pubReq
+		generateXNamespaceHeader(cPub, publicNamespaceAd, "")
+		assert.NotEmpty(t, cPub.Writer.Header().Get("X-Pelican-Namespace"))
+		assert.Contains(t, cPub.Writer.Header().Get("X-Pelican-Namespace"), "namespace=/different/server")
+		assert.Contains(t, cPub.Writer.Header().Get("X-Pelican-Namespace"), "require-token=false")
+		assert.NotContains(t, cPub.Writer.Header().Get("X-Pelican-Namespace"), "collections-url")
 	})
 }
 

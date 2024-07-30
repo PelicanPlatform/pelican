@@ -189,6 +189,52 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 	return
 }
 
+// Generates the X-Pelican-Authorization header (when applicable) for responses that have
+// issued a request where token generation may be needed. This header informs the client
+// of the issuer that can be used to generate a token for the requested resource.
+func generateXAuthHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAdV2) {
+	if len(namespaceAd.Issuer) != 0 {
+		issStrings := []string{}
+		for _, tokIss := range namespaceAd.Issuer {
+			issStrings = append(issStrings, "issuer="+tokIss.IssuerUrl.String())
+		}
+		ginCtx.Writer.Header()["X-Pelican-Authorization"] = issStrings
+	}
+}
+
+// Generates the X-Pelican-Token-Generation header (when applicable) for responses that have
+// issued a request where token generation may be needed.
+func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAdV2) {
+	if len(namespaceAd.Generation) != 0 {
+		tokenGen := ""
+		first := true
+		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth),
+			string(namespaceAd.Generation[0].Strategy)}
+		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy"} {
+			hdrVal := hdrVals[idx]
+			if hdrVal == "" {
+				continue
+			}
+			if !first {
+				tokenGen += ", "
+			}
+			first = false
+			tokenGen += hdrKey + "=" + hdrVal
+		}
+		if tokenGen != "" {
+			ginCtx.Writer.Header()["X-Pelican-Token-Generation"] = []string{tokenGen}
+		}
+	}
+}
+
+func generateXNamespaceHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAdV2, collUrl string) {
+	xPelicanNamespace := fmt.Sprintf("namespace=%s, require-token=%v", namespaceAd.Path, !namespaceAd.Caps.PublicReads)
+	if collUrl != "" {
+		xPelicanNamespace += fmt.Sprintf(", collections-url=%s", collUrl)
+	}
+	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{xPelicanNamespace}
+}
+
 func getFinalRedirectURL(rurl url.URL, requstParams url.Values) string {
 	rQuery := rurl.Query()
 	for key, vals := range requstParams {
@@ -266,9 +312,9 @@ func redirectToCache(ginCtx *gin.Context) {
 	err := checkVersionCompat(ginCtx)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
-		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Incompatible versions detected: " + fmt.Sprintf("%v", err),
+			Msg:    fmt.Sprintf("Incompatible versions detected: %v", err),
 		})
 		return
 	}
@@ -287,6 +333,16 @@ func redirectToCache(ginCtx *gin.Context) {
 
 	reqParams := getRequestParameters(ginCtx.Request)
 
+	disableStat := !param.Director_EnableStat.GetBool()
+
+	// Skip the stat check for object availability
+	// If either disableStat or skipstat is set, then skip the stat query
+	skipStat := ginCtx.Request.URL.Query().Has("skipstat") || disableStat
+
+	if skipStat {
+		log.Debugf("stat is skipped for object %s", reqPath)
+	}
+
 	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
@@ -304,9 +360,79 @@ func redirectToCache(ginCtx *gin.Context) {
 	if err != nil {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
+
+	// Stat origins and caches for object availability
+	// For origins, we only want ones with the object
+	// For caches, we still list all in the response but turn down priorities for ones that don't have the object
+	originAdsWObject := []server_structs.ServerAd{}
+	// An array to keep track of object availability of each caches
+	cachesAvailabilityMap := make(map[string]bool, len(cacheAds))
+
+	if skipStat {
+		originAdsWObject = originAds
+		for _, cAd := range cacheAds {
+			cachesAvailabilityMap[cAd.URL.String()] = true
+		}
+	} else {
+		// Query Origins and check if the object exists on the server
+		q := NewObjectStat()
+		st := config.NewServerType()
+		st.SetList([]config.ServerType{config.OriginType, config.CacheType})
+		// Set max response to all available origin and cache servers to ensure we stat against origins
+		// if no cache server has the file
+		// TODO: come back and re-evaluate if we need this many responses and potential origin/cache
+		// server performance issue out of this
+		maxRes := len(cacheAds) + len(originAds)
+		qr := q.Query(context.Background(), reqPath, st, 1, maxRes,
+			withOriginAds(originAds), withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
+		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
+
+		// For successful response, we got a list of URLs to access the object.
+		// We will use the host of the object url to match the URL field in originAds and cacheAds
+		if qr.Status == querySuccessful {
+			for _, obj := range qr.Objects {
+				serverHost := obj.URL.Host
+				for _, oAd := range originAds {
+					if oAd.URL.Host == serverHost {
+						originAdsWObject = append(originAdsWObject, oAd)
+					}
+				}
+				for _, cAd := range cacheAds {
+					if cAd.URL.Host == serverHost {
+						cachesAvailabilityMap[cAd.URL.String()] = true
+					}
+				}
+			}
+		} else if qr.Status == queryFailed {
+			if qr.ErrorType != queryInsufficientResErr {
+				ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg),
+				})
+				return
+			}
+			// For denied servers, append them to availableOriginAds
+			// The qr.DeniedServers is a list of AuthURLs of servers that respond with 403
+			// Here, we need to match against the AuthURL field of originAds
+			for _, ds := range qr.DeniedServers {
+				for _, oAd := range originAds {
+					if oAd.Type == server_structs.OriginType && oAd.AuthURL.String() == ds {
+						originAdsWObject = append(originAdsWObject, oAd)
+					}
+				}
+				for _, cAd := range cacheAds {
+					if cAd.AuthURL.String() == ds {
+						cachesAvailabilityMap[cAd.URL.String()] = true
+					}
+				}
+			}
+		}
+	}
+
 	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find a valid cache.
 	if len(cacheAds) == 0 {
-		for _, originAd := range originAds {
+		for _, originAd := range originAdsWObject {
+			// Find the first origin that enables direct reads as the fallback
 			if originAd.DirectReads {
 				cacheAds = append(cacheAds, originAd)
 				break
@@ -315,14 +441,14 @@ func redirectToCache(ginCtx *gin.Context) {
 		if len(cacheAds) == 0 {
 			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "No cache found for path",
+				Msg:    "No cache or fallback origin found for this object. The object may not exist in the federation",
 			})
 			return
 		}
 	} else {
 		cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds)
 		if err != nil {
-			log.Error("Error determining server ordering for cacheAds: ", err)
+			log.Error("Error determining server ordering for cacheAdsWObject: ", err)
 			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Failed to determine server ordering",
@@ -330,6 +456,10 @@ func redirectToCache(ginCtx *gin.Context) {
 			return
 		}
 	}
+
+	// Re-sort by availability, where caches having the object have higher priority
+	sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
+
 	redirectURL := getRedirectURL(reqPath, cacheAds[0], !namespaceAd.Caps.PublicReads)
 
 	linkHeader := ""
@@ -348,51 +478,24 @@ func redirectToCache(ginCtx *gin.Context) {
 		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
 	}
 	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
-	if len(namespaceAd.Issuer) != 0 {
 
-		issStrings := []string{}
-		for _, tokIss := range namespaceAd.Issuer {
-			issStrings = append(issStrings, "issuer="+tokIss.IssuerUrl.String())
-		}
-		ginCtx.Writer.Header()["X-Pelican-Authorization"] = issStrings
-	}
-
-	if len(namespaceAd.Generation) != 0 {
-		tokenGen := ""
-		first := true
-		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth), string(namespaceAd.Generation[0].Strategy)}
-		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy"} {
-			hdrVal := hdrVals[idx]
-			if hdrVal == "" {
-				continue
-			}
-			if !first {
-				tokenGen += ", "
-			}
-			first = false
-			tokenGen += hdrKey + "=" + hdrVal
-		}
-		if tokenGen != "" {
-			ginCtx.Writer.Header()["X-Pelican-Token-Generation"] = []string{tokenGen}
-		}
-	}
+	// Generate headers needed for token generation/verification
+	generateXAuthHeader(ginCtx, namespaceAd)
+	generateXTokenGenHeader(ginCtx, namespaceAd)
 
 	var colUrl string
 	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
 	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
 	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
-	if namespaceAd.Caps.Listings && len(originAds) > 0 && originAds[0].Caps.Listings {
-		if !namespaceAd.Caps.PublicReads && originAds[0].AuthURL != (url.URL{}) {
-			colUrl = originAds[0].AuthURL.String()
+	if namespaceAd.Caps.Listings && len(originAdsWObject) > 0 && originAdsWObject[0].Caps.Listings {
+		if !namespaceAd.Caps.PublicReads && originAdsWObject[0].AuthURL != (url.URL{}) {
+			colUrl = originAdsWObject[0].AuthURL.String()
 		} else {
-			colUrl = originAds[0].URL.String()
+			colUrl = originAdsWObject[0].URL.String()
 		}
 	}
-	xPelicanNamespace := fmt.Sprintf("namespace=%s, require-token=%v", namespaceAd.Path, !namespaceAd.Caps.PublicReads)
-	if colUrl != "" {
-		xPelicanNamespace += fmt.Sprintf(", collections-url=%s", colUrl)
-	}
-	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{xPelicanNamespace}
+	generateXNamespaceHeader(ginCtx, namespaceAd, colUrl)
+
 	// Note we only append the `authz` query parameter in the case of the redirect response and not the
 	// duplicate link metadata above.  This is purposeful: the Link header might get too long if we repeat
 	// the token 20 times for 20 caches.  This means a "normal HTTP client" will correctly redirect but
@@ -404,9 +507,9 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	err := checkVersionCompat(ginCtx)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
-		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Incompatible versions detected: " + fmt.Sprintf("%v", err),
+			Msg:    fmt.Sprintf("Incompatible versions detected: %v", err),
 		})
 		return
 	}
@@ -611,8 +714,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 			colUrl = availableAds[0].URL.String()
 		}
 	}
-	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{fmt.Sprintf("namespace=%s, require-token=%v, collections-url=%s",
-		namespaceAd.Path, !namespaceAd.Caps.PublicReads, colUrl)}
+	generateXNamespaceHeader(ginCtx, namespaceAd, colUrl)
 
 	var redirectURL url.URL
 
@@ -656,6 +758,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		})
 		return
 	}
+
+	// Generate headers needed for token generation/verification
+	generateXAuthHeader(ginCtx, namespaceAd)
+	generateXTokenGenHeader(ginCtx, namespaceAd)
 
 	// If we are doing a PUT, check to see if any origins are writeable
 	if ginCtx.Request.Method == "PUT" {

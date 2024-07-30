@@ -567,7 +567,7 @@ func GetEngine() (*gin.Engine, error) {
 		webLogger.WithFields(log.Fields{"method": ctx.Request.Method,
 			"status":   ctx.Writer.Status(),
 			"time":     latency.String(),
-			"client":   ctx.RemoteIP(),
+			"client":   ctx.ClientIP(),
 			"resource": ctx.Request.URL.Path},
 		).Info("Served Request")
 	})
