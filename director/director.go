@@ -556,7 +556,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		// Query Origins and check if the object exists on the server
 		q := NewObjectStat()
 		qr := q.Query(context.Background(), reqPath, config.OriginType, 1, 3,
-			withOriginAds(originAds), WithToken(reqParams.Get("authz")))
+			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.PublicRead))
 		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
 
 		// For successful response, we got a list of URL to access the object.
@@ -565,7 +565,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 			for _, obj := range qr.Objects {
 				serverHost := obj.URL.Host
 				for _, oAd := range originAds {
-					if oAd.URL.Host == serverHost {
+					if oAd.URL.Host == serverHost || oAd.AuthURL.Host == serverHost {
 						availableOriginAds = append(availableOriginAds, oAd)
 					}
 				}
