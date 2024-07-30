@@ -177,17 +177,22 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate, ok bool) {
 
 // Sort serverAds based on the IP address of the client with shorter distance between
 // server IP and client having higher priority
-func sortServerAdsByIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server_structs.ServerAd, error) {
+func sortServerAdsByIP(clientAddr netip.Addr, ads []server_structs.ServerAd) ([]server_structs.ServerAd, error) {
 	// Each entry in weights will map a priority to an index in the original ads slice.
 	// A larger weight is a higher priority.
 	weights := make(SwapMaps, len(ads))
 	sortMethod := param.Director_CacheSortMethod.GetString()
 
+	// If the client addr is not valid, we use random sort
+	if !clientAddr.IsValid() {
+		sortMethod = "random"
+	}
+
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {
 		switch sortMethod {
 		case "distance":
-			clientCoord, ok := getClientLatLong(addr)
+			clientCoord, ok := getClientLatLong(clientAddr)
 			if !ok {
 				// Unable to compute distances for this server; just do random distances.
 				// Below we sort weights in descending order, so we assign negative value here,
@@ -198,7 +203,7 @@ func sortServerAdsByIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server
 					idx}
 			}
 		case "distanceAndLoad":
-			clientCoord, ok := getClientLatLong(addr)
+			clientCoord, ok := getClientLatLong(clientAddr)
 			if !ok {
 				weights[idx] = SwapMap{0 - rand.Float64(), idx}
 			} else {

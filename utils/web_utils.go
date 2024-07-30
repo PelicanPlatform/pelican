@@ -26,8 +26,10 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/netip"
 	"strings"
 
+	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 
@@ -167,4 +169,14 @@ func GetJwks(ctx context.Context, location string) (jwk.Set, error) {
 	} else {
 		return key, nil
 	}
+}
+
+// Equivalent to c.ClientIP() except that it returns netip.Addr instead of net.IP
+//
+// If the IP string is invalid, it returns netip.Addr{}. Use netip.Addr.ISValid() to
+// check the validity of the returned value
+func ClientIPAddr(c *gin.Context) netip.Addr {
+	ipStr := c.ClientIP()
+	ip, _ := netip.ParseAddr(ipStr)
+	return ip
 }

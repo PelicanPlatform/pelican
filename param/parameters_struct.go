@@ -62,6 +62,7 @@ type Config struct {
 		AdvertisementTTL time.Duration `mapstructure:"advertisementttl"`
 		CacheResponseHostnames []string `mapstructure:"cacheresponsehostnames"`
 		CacheSortMethod string `mapstructure:"cachesortmethod"`
+		CachesPullFromCaches bool `mapstructure:"cachespullfromcaches"`
 		DefaultResponse string `mapstructure:"defaultresponse"`
 		EnableBroker bool `mapstructure:"enablebroker"`
 		EnableOIDC bool `mapstructure:"enableoidc"`
@@ -354,6 +355,7 @@ type configWithType struct {
 		AdvertisementTTL struct { Type string; Value time.Duration }
 		CacheResponseHostnames struct { Type string; Value []string }
 		CacheSortMethod struct { Type string; Value string }
+		CachesPullFromCaches struct { Type string; Value bool }
 		DefaultResponse struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }

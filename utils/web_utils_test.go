@@ -19,9 +19,14 @@
 package utils
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/netip"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHeaderParser(t *testing.T) {
@@ -35,4 +40,69 @@ func TestHeaderParser(t *testing.T) {
 	header2 := ""
 	newMap2 := HeaderParser(header2)
 	assert.Equal(t, map[string]string{}, newMap2)
+}
+
+func TestClientIPAddr(t *testing.T) {
+	r := gin.Default()
+
+	r.GET("/test", func(c *gin.Context) {
+		ip := ClientIPAddr(c)
+		c.String(http.StatusOK, ip.String())
+	})
+
+	t.Run("correct-ip-addr", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "/test", nil)
+		if err != nil {
+			require.NoError(t, err)
+		}
+
+		req.RemoteAddr = "192.168.1.1:12345"
+
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		// Check the response status code
+		assert.Equal(t, http.StatusOK, w.Code)
+		expectedIP, _ := netip.ParseAddr("192.168.1.1")
+		assert.Equal(t, expectedIP.String(), w.Body.String())
+	})
+
+	t.Run("correct-ip-forward-header", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "/test", nil)
+		if err != nil {
+			require.NoError(t, err)
+		}
+
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("X-Forwarded-For", "192.168.1.1")
+
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		// Check the response status code
+		assert.Equal(t, http.StatusOK, w.Code)
+		expectedIP, _ := netip.ParseAddr("192.168.1.1")
+		assert.Equal(t, expectedIP.String(), w.Body.String())
+	})
+
+	t.Run("correct-ip-real-ip-header", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "/test", nil)
+		if err != nil {
+			require.NoError(t, err)
+		}
+
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("X-Real-IP", "192.168.1.1")
+
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		// Check the response status code
+		assert.Equal(t, http.StatusOK, w.Code)
+		expectedIP, _ := netip.ParseAddr("192.168.1.1")
+		assert.Equal(t, expectedIP.String(), w.Body.String())
+	})
 }

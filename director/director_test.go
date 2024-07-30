@@ -731,6 +731,38 @@ func TestGetRequestParameters(t *testing.T) {
 	expected = url.Values{"pelican.timeout": []string{"3s"}}
 	assert.EqualValues(t, expected, escapedParam)
 
+	// Test passing skipstat via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?skipstat", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{"skipstat": []string{""}}
+	assert.EqualValues(t, expected, escapedParam)
+	assert.True(t, escapedParam.Has("skipstat"))
+
+	// Test passing skipstat with value via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?skipstat=true", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{"skipstat": []string{""}}
+	assert.EqualValues(t, expected, escapedParam)
+	assert.True(t, escapedParam.Has("skipstat"))
+
+	// Test passing prefercached via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?prefercached", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{"prefercached": []string{""}}
+	assert.EqualValues(t, expected, escapedParam)
+	assert.True(t, escapedParam.Has("prefercached"))
+
+	// Test passing prefercached with value via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?prefercached=true", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{"prefercached": []string{""}}
+	assert.EqualValues(t, expected, escapedParam)
+	assert.True(t, escapedParam.Has("prefercached"))
+
 	// Test passing nothing
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
@@ -744,6 +776,50 @@ func TestGetRequestParameters(t *testing.T) {
 	escapedParam = getRequestParameters(req)
 	expected = url.Values{"authz": []string{"tokenstring"}, "pelican.timeout": []string{"3s"}}
 	assert.EqualValues(t, expected, escapedParam)
+}
+
+func TestCheckRedirectQuery(t *testing.T) {
+	t.Run("valid-directread-only", func(t *testing.T) {
+		mockQueryStr := "directread"
+		mockQuery, err := url.ParseQuery(mockQueryStr)
+		require.NoError(t, err)
+
+		assert.NoError(t, checkRedirectQuery(mockQuery))
+	})
+
+	t.Run("valid-prefercached-only", func(t *testing.T) {
+		mockQueryStr := "prefercached"
+		mockQuery, err := url.ParseQuery(mockQueryStr)
+		require.NoError(t, err)
+
+		assert.NoError(t, checkRedirectQuery(mockQuery))
+	})
+
+	t.Run("invalid-both-directread-and-prefercached", func(t *testing.T) {
+		mockQueryStr := "directread&prefercached"
+		mockQuery, err := url.ParseQuery(mockQueryStr)
+		require.NoError(t, err)
+
+		checkErr := checkRedirectQuery(mockQuery)
+		require.Error(t, checkErr)
+		assert.Equal(t, "cannot have both directread and prefercached query parameters", checkErr.Error())
+	})
+
+	t.Run("valid-nothing", func(t *testing.T) {
+		mockQueryStr := ""
+		mockQuery, err := url.ParseQuery(mockQueryStr)
+		require.NoError(t, err)
+
+		assert.NoError(t, checkRedirectQuery(mockQuery))
+	})
+
+	t.Run("valid-random-param", func(t *testing.T) {
+		mockQueryStr := "foo=bar&pelican.timeout=12"
+		mockQuery, err := url.ParseQuery(mockQueryStr)
+		require.NoError(t, err)
+
+		assert.NoError(t, checkRedirectQuery(mockQuery))
+	})
 }
 
 func TestDiscoverOriginCache(t *testing.T) {
