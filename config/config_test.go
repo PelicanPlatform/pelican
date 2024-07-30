@@ -33,6 +33,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -832,6 +833,49 @@ func TestDiscoverUrlFederation(t *testing.T) {
 		// Assert that the error is the expected metadata timeout error
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, MetadataTimeoutErr))
+		viper.Reset()
+	})
+
+	t.Run("TestMetadataDiscoveryTimeoutRetry", func(t *testing.T) {
+		viper.Set("tlsskipverify", true)
+		viper.Set("Logging.Level", "Debug")
+		viper.Set("Transport.ResponseHeaderTimeout", "300ms")
+		InitConfig()
+		err := InitClient()
+		require.NoError(t, err)
+
+		hook := test.NewGlobal()
+		logrus.SetLevel(logrus.WarnLevel)
+
+		// Create a server that sleeps for a longer duration than the timeout
+		ctr := 0
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ctr < 1 {
+				time.Sleep(2 * time.Second)
+			}
+
+			ctr += 1
+			w.WriteHeader(200)
+			_, err := w.Write([]byte("{\"director_endpoint\": \"https://osdf-director.osg-htc.org\", \"namespace_registration_endpoint\": \"https://osdf-registry.osg-htc.org\", \"jwks_uri\": \"https://osg-htc.org/osdf/public_signing_key.jwks\"}"))
+			assert.NoError(t, err)
+		}))
+		defer server.Close()
+
+		// Set a short timeout for the test
+		timeout := 5 * time.Second
+
+		// Create a context with the timeout
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		// Call the function with the server URL and the context
+		_, err = DiscoverUrlFederation(ctx, server.URL)
+
+		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
+		assert.Equal(t, "Timeout occurred when querying discovery URL "+server.URL+"/.well-known/pelican-configuration for metadata; 2 retries remaining", hook.LastEntry().Message)
+
+		// Assert that the error is the expected metadata timeout error
+		assert.NoError(t, err)
 		viper.Reset()
 	})
 

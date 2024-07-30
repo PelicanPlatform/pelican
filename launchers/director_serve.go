@@ -45,6 +45,8 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 	director.LaunchMapMetrics(ctx, egrp)
 
+	director.LaunchServerCountMetric(ctx, egrp)
+
 	director.ConfigFilterdServers()
 
 	director.LaunchServerIOQuery(ctx, egrp)

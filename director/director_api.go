@@ -198,6 +198,33 @@ func LaunchMapMetrics(ctx context.Context, egrp *errgroup.Group) {
 	})
 }
 
+func LaunchServerCountMetric(ctx context.Context, egrp *errgroup.Group) {
+	egrp.Go(func() error {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				for _, ad := range serverAds.Items() {
+					serverAd := ad.Value()
+					metrics.PelicanDirectorServerCount.With(prometheus.Labels{
+						"server_name":    serverAd.Name,
+						"server_type":    string(serverAd.Type),
+						"server_url":     serverAd.URL.String(),
+						"server_web_url": serverAd.WebURL.String(),
+						"server_lat":     fmt.Sprintf("%.4f", serverAd.Latitude),
+						"server_long":    fmt.Sprintf("%.4f", serverAd.Longitude),
+						"from_topology":  strconv.FormatBool(serverAd.FromTopology),
+					}).Inc()
+				}
+			}
+		}
+	})
+}
+
 // Populate internal filteredServers map by Director.FilteredServers
 func ConfigFilterdServers() {
 	filteredServersMutex.Lock()
