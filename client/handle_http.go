@@ -340,8 +340,14 @@ func (e *HeaderTimeoutError) Error() string {
 	return "timeout waiting for HTTP response (TCP connection successful)"
 }
 
+func (e *HeaderTimeoutError) Is(target error) bool {
+	_, ok := target.(*HeaderTimeoutError)
+	return ok
+}
+
 func (e *NetworkResetError) Error() string {
 	return "the existing TCP connection was broken (potentially caused by server restart or NAT/firewall issue)"
+
 }
 
 func (e *StoppedTransferError) Error() (errMsg string) {

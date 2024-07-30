@@ -1011,7 +1011,8 @@ func TestFailedConnectionSetupError(t *testing.T) {
 	} else {
 		require.Fail(t, "Slow server did not generate a HeaderTimeoutError")
 	}
-	require.Error(t, err)
+	assert.True(t, IsRetryable(err))
+	assert.Error(t, err)
 }
 
 // Test error message generated on a failed upload
