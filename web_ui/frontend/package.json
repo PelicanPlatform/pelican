@@ -1,6 +1,6 @@
 {
   "name": "src",
-  "version": "7.9.7",
+  "version": "7.9.8",
   "private": true,
   "scripts": {
     "dev": "export NODE_ENV=development && next dev",
