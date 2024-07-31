@@ -439,18 +439,9 @@ func redirectToCache(ginCtx *gin.Context) {
 			})
 			return
 		}
-	} else {
-		cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds, nil)
-		if err != nil {
-			log.Error("Error determining server ordering for cacheAds: ", err)
-			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Failed to determine server ordering",
-			})
-			return
-		}
 	}
 
+<<<<<<< HEAD
 	cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds, cachesAvailabilityMap)
 	if err != nil {
 		log.Error("Error determining server ordering for cacheAds: ", err)
@@ -461,8 +452,18 @@ func redirectToCache(ginCtx *gin.Context) {
 		return
 	}
 
-	// Re-sort by availability, where caches having the object have higher priority
-	sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
+	// "smart" sorting method takes care of availability factor
+	if param.Director_CacheSortMethod.GetString() != "smart" {
+		// Re-sort by availability, where caches having the object have higher priority
+		sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
+	}
+=======
+	// "smart" sorting method takes care of availability factor
+	if param.Director_CacheSortMethod.GetString() != "smart" {
+		// Re-sort by availability, where caches having the object have higher priority
+		sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
+	}
+>>>>>>> 7754850b (Only sort by availability if sort method is not `smart`)
 
 	redirectURL := getRedirectURL(reqPath, cacheAds[0], !namespaceAd.Caps.PublicReads)
 
