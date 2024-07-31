@@ -62,6 +62,7 @@ type Config struct {
 		AdvertisementTTL time.Duration `mapstructure:"advertisementttl"`
 		CacheResponseHostnames []string `mapstructure:"cacheresponsehostnames"`
 		CacheSortMethod string `mapstructure:"cachesortmethod"`
+		CachesPullFromCaches bool `mapstructure:"cachespullfromcaches"`
 		DefaultResponse string `mapstructure:"defaultresponse"`
 		EnableBroker bool `mapstructure:"enablebroker"`
 		EnableOIDC bool `mapstructure:"enableoidc"`
@@ -168,6 +169,7 @@ type Config struct {
 	} `mapstructure:"oidc"`
 	Origin struct {
 		DbLocation string `mapstructure:"dblocation"`
+		DirectorTest bool `mapstructure:"directortest"`
 		EnableBroker bool `mapstructure:"enablebroker"`
 		EnableCmsd bool `mapstructure:"enablecmsd"`
 		EnableDirListing bool `mapstructure:"enabledirlisting"`
@@ -245,6 +247,7 @@ type Config struct {
 		Modules []string `mapstructure:"modules"`
 		RegistrationRetryInterval time.Duration `mapstructure:"registrationretryinterval"`
 		SessionSecretFile string `mapstructure:"sessionsecretfile"`
+		StartupTimeout time.Duration `mapstructure:"startuptimeout"`
 		TLSCACertificateDirectory string `mapstructure:"tlscacertificatedirectory"`
 		TLSCACertificateFile string `mapstructure:"tlscacertificatefile"`
 		TLSCAKey string `mapstructure:"tlscakey"`
@@ -353,6 +356,7 @@ type configWithType struct {
 		AdvertisementTTL struct { Type string; Value time.Duration }
 		CacheResponseHostnames struct { Type string; Value []string }
 		CacheSortMethod struct { Type string; Value string }
+		CachesPullFromCaches struct { Type string; Value bool }
 		DefaultResponse struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
@@ -459,6 +463,7 @@ type configWithType struct {
 	}
 	Origin struct {
 		DbLocation struct { Type string; Value string }
+		DirectorTest struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }
@@ -536,6 +541,7 @@ type configWithType struct {
 		Modules struct { Type string; Value []string }
 		RegistrationRetryInterval struct { Type string; Value time.Duration }
 		SessionSecretFile struct { Type string; Value string }
+		StartupTimeout struct { Type string; Value time.Duration }
 		TLSCACertificateDirectory struct { Type string; Value string }
 		TLSCACertificateFile struct { Type string; Value string }
 		TLSCAKey struct { Type string; Value string }

@@ -296,9 +296,12 @@ func TestDirectorRegistration(t *testing.T) {
 		// Check to see that the code exits with status code 200 after given it a good token
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
-		namaspaceADs := listNamespacesFromOrigins()
-		// If the origin was successfully registered at director, we should be able to find it in director's originAds
-		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
+		get := serverAds.Get("https://or-url.org")
+		getAd := get.Value()
+		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		assert.Equal(t, getAd.Name, ad.Name)
+		require.Len(t, getAd.NamespaceAds, 1)
+		assert.Equal(t, getAd.NamespaceAds[0].Path, "/foo/bar")
 		teardown()
 	})
 
@@ -333,9 +336,12 @@ func TestDirectorRegistration(t *testing.T) {
 		// Check to see that the code exits with status code 200 after given it a good token
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
-		namaspaceADs := listNamespacesFromOrigins()
-		// If the origin was successfully registered at director, we should be able to find it in director's originAds
-		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
+		get := serverAds.Get("https://or-url.org")
+		getAd := get.Value()
+		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		assert.Equal(t, getAd.Name, ad.Name)
+		require.Len(t, getAd.NamespaceAds, 1)
+		assert.Equal(t, getAd.NamespaceAds[0].Path, "/foo/bar")
 		teardown()
 	})
 
@@ -677,6 +683,196 @@ func TestDirectorRegistration(t *testing.T) {
 		teardown()
 	})
 
+	t.Run("origin-s3-type-and-disable-test", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name", // This is for web UI to display
+			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+			StorageType:         "s3",
+			DisableDirectorTest: true,
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+
+		r.ServeHTTP(w, c.Request)
+
+		get := serverAds.Get("https://data-url.org")
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.NotNil(t, get, "Origin fail to register at serverAds")
+
+		getAd := get.Value()
+		assert.Equal(t, server_structs.OriginStorageS3, getAd.StorageType)
+		assert.True(t, getAd.DisableDirectorTest)
+		teardown()
+	})
+
+	t.Run("origin-s3-type-and-enable-test", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name", // This is for web UI to display
+			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+			StorageType: "s3",
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+
+		r.ServeHTTP(w, c.Request)
+
+		get := serverAds.Get("https://data-url.org")
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.NotNil(t, get, "Origin fail to register at serverAds")
+
+		getAd := get.Value()
+		assert.Equal(t, server_structs.OriginStorageS3, getAd.StorageType)
+		assert.True(t, getAd.DisableDirectorTest)
+		teardown()
+	})
+
+	t.Run("origin-POSIX-type-and-enable-test", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name", // This is for web UI to display
+			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+			StorageType: "posix",
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+
+		r.ServeHTTP(w, c.Request)
+
+		get := serverAds.Get("https://data-url.org")
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.NotNil(t, get, "Origin fail to register at serverAds")
+
+		getAd := get.Value()
+		assert.Equal(t, server_structs.OriginStoragePosix, getAd.StorageType)
+		assert.False(t, getAd.DisableDirectorTest)
+		teardown()
+	})
+
+	t.Run("origin-POSIX-type-and-disable-test", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name", // This is for web UI to display
+			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+			StorageType:         "posix",
+			DisableDirectorTest: true,
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+
+		r.ServeHTTP(w, c.Request)
+
+		get := serverAds.Get("https://data-url.org")
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.NotNil(t, get, "Origin fail to register at serverAds")
+
+		getAd := get.Value()
+		assert.Equal(t, server_structs.OriginStoragePosix, getAd.StorageType)
+		assert.True(t, getAd.DisableDirectorTest)
+		teardown()
+	})
+
+	t.Run("origin-storage-type-and-test-V1", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/foo/bar", publicKey)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV1{URL: "https://v1-url.org", Namespaces: []server_structs.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		get := serverAds.Get("https://v1-url.org")
+		assert.NotNil(t, get, "Origin fail to register at serverAds")
+
+		getAd := get.Value()
+		assert.Equal(t, server_structs.OriginStoragePosix, getAd.StorageType)
+		assert.False(t, getAd.DisableDirectorTest)
+		teardown()
+	})
 }
 
 func TestGetAuthzEscaped(t *testing.T) {
@@ -731,6 +927,38 @@ func TestGetRequestParameters(t *testing.T) {
 	expected = url.Values{"pelican.timeout": []string{"3s"}}
 	assert.EqualValues(t, expected, escapedParam)
 
+	// Test passing skipstat via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?skipstat", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{"skipstat": []string{""}}
+	assert.EqualValues(t, expected, escapedParam)
+	assert.True(t, escapedParam.Has("skipstat"))
+
+	// Test passing skipstat with value via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?skipstat=true", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{"skipstat": []string{""}}
+	assert.EqualValues(t, expected, escapedParam)
+	assert.True(t, escapedParam.Has("skipstat"))
+
+	// Test passing prefercached via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?prefercached", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{"prefercached": []string{""}}
+	assert.EqualValues(t, expected, escapedParam)
+	assert.True(t, escapedParam.Has("prefercached"))
+
+	// Test passing prefercached with value via query
+	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo?prefercached=true", bytes.NewBuffer([]byte("a body")))
+	assert.NoError(t, err)
+	escapedParam = getRequestParameters(req)
+	expected = url.Values{"prefercached": []string{""}}
+	assert.EqualValues(t, expected, escapedParam)
+	assert.True(t, escapedParam.Has("prefercached"))
+
 	// Test passing nothing
 	req, err = http.NewRequest(http.MethodPost, "http://fake-server.com/foo", bytes.NewBuffer([]byte("a body")))
 	assert.NoError(t, err)
@@ -744,6 +972,50 @@ func TestGetRequestParameters(t *testing.T) {
 	escapedParam = getRequestParameters(req)
 	expected = url.Values{"authz": []string{"tokenstring"}, "pelican.timeout": []string{"3s"}}
 	assert.EqualValues(t, expected, escapedParam)
+}
+
+func TestCheckRedirectQuery(t *testing.T) {
+	t.Run("valid-directread-only", func(t *testing.T) {
+		mockQueryStr := "directread"
+		mockQuery, err := url.ParseQuery(mockQueryStr)
+		require.NoError(t, err)
+
+		assert.NoError(t, checkRedirectQuery(mockQuery))
+	})
+
+	t.Run("valid-prefercached-only", func(t *testing.T) {
+		mockQueryStr := "prefercached"
+		mockQuery, err := url.ParseQuery(mockQueryStr)
+		require.NoError(t, err)
+
+		assert.NoError(t, checkRedirectQuery(mockQuery))
+	})
+
+	t.Run("invalid-both-directread-and-prefercached", func(t *testing.T) {
+		mockQueryStr := "directread&prefercached"
+		mockQuery, err := url.ParseQuery(mockQueryStr)
+		require.NoError(t, err)
+
+		checkErr := checkRedirectQuery(mockQuery)
+		require.Error(t, checkErr)
+		assert.Equal(t, "cannot have both directread and prefercached query parameters", checkErr.Error())
+	})
+
+	t.Run("valid-nothing", func(t *testing.T) {
+		mockQueryStr := ""
+		mockQuery, err := url.ParseQuery(mockQueryStr)
+		require.NoError(t, err)
+
+		assert.NoError(t, checkRedirectQuery(mockQuery))
+	})
+
+	t.Run("valid-random-param", func(t *testing.T) {
+		mockQueryStr := "foo=bar&pelican.timeout=12"
+		mockQuery, err := url.ParseQuery(mockQueryStr)
+		require.NoError(t, err)
+
+		assert.NoError(t, checkRedirectQuery(mockQuery))
+	})
 }
 
 func TestDiscoverOriginCache(t *testing.T) {
@@ -1040,6 +1312,18 @@ func TestRedirects(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
+	// Use ads generated via mock topology for generating list of caches
+	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
+	defer topoServer.Close()
+	viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+	// viper.Set("Director.CacheSortMethod", "random")
+	// Populate ads for redirectToCache to use
+	err := AdvertiseOSDF(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		serverAds.DeleteAll()
+	})
+
 	router := gin.Default()
 	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
 
@@ -1192,25 +1476,12 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("redirect-link-header-length", func(t *testing.T) {
-		ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-		defer func() { require.NoError(t, egrp.Wait()) }()
-		defer cancel()
-
 		viper.Reset()
-		serverAds.DeleteAll()
 		t.Cleanup(func() {
 			viper.Reset()
-			serverAds.DeleteAll()
 		})
 
-		// Use ads generated via mock topology for generating list of caches
-		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
-		defer topoServer.Close()
-		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 		viper.Set("Director.CacheSortMethod", "random")
-		// Populate ads for redirectToCache to use
-		err := AdvertiseOSDF(ctx)
-		require.NoError(t, err)
 
 		req, _ := http.NewRequest("GET", "/my/server", nil)
 		// Provide a few things so that redirectToCache doesn't choke
@@ -1241,18 +1512,11 @@ func TestRedirects(t *testing.T) {
 	// Make sure collections-url is correctly populated when the ns/origin comes from topology
 	t.Run("collections-url-from-topology", func(t *testing.T) {
 		viper.Reset()
-		serverAds.DeleteAll()
 		t.Cleanup(func() {
 			viper.Reset()
-			serverAds.DeleteAll()
 		})
 
-		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
-		defer topoServer.Close()
-		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 		viper.Set("Director.CacheSortMethod", "random")
-		err := AdvertiseOSDF(ctx)
-		require.NoError(t, err)
 
 		// This one should have a collections url because it has a dirlisthost
 		req, _ := http.NewRequest("GET", "/my/server", nil)
@@ -1271,6 +1535,148 @@ func TestRedirects(t *testing.T) {
 		c.Request = req
 		redirectToCache(c)
 		assert.NotContains(t, c.Writer.Header().Get("X-Pelican-Namespace"), "collections-url")
+	})
+
+	t.Run("object-endpoint-returns-all-headers", func(t *testing.T) {
+		viper.Reset()
+		t.Cleanup(func() {
+			viper.Reset()
+		})
+
+		viper.Set("Director.CacheSortMethod", "random")
+
+		req, _ := http.NewRequest("GET", "/my/server", nil)
+		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = req
+		redirectToCache(c)
+
+		assert.NotEmpty(t, c.Writer.Header().Get("Location"))
+		assert.NotEmpty(t, c.Writer.Header().Get("Link"))
+		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Authorization"))
+		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Token-Generation"))
+		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Namespace"))
+	})
+
+	t.Run("origin-endpoint-returns-all-headers", func(t *testing.T) {
+		viper.Reset()
+		t.Cleanup(func() {
+			viper.Reset()
+		})
+
+		viper.Set("Director.CacheSortMethod", "random")
+
+		req, _ := http.NewRequest("GET", "/my/server", nil)
+		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = req
+		redirectToOrigin(c)
+
+		assert.NotEmpty(t, c.Writer.Header().Get("Location"))
+		assert.NotEmpty(t, c.Writer.Header().Get("Link"))
+		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Authorization"))
+		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Token-Generation"))
+		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Namespace"))
+	})
+}
+func TestHeaderGenFuncs(t *testing.T) {
+	issUrl := url.URL{
+		Scheme: "https",
+		Host:   "my-issuer.com",
+	}
+	tGen := server_structs.TokenGen{
+		Strategy:         server_structs.OAuthStrategy,
+		MaxScopeDepth:    3,
+		CredentialIssuer: issUrl,
+	}
+
+	tIss := server_structs.TokenIssuer{
+		BasePaths: []string{"/my/server"},
+		IssuerUrl: issUrl,
+	}
+	authedNamespaceAd := server_structs.NamespaceAdV2{
+		Caps: server_structs.Capabilities{
+			PublicReads: false,
+			Reads:       true,
+		},
+		Generation: []server_structs.TokenGen{tGen},
+		Issuer:     []server_structs.TokenIssuer{tIss},
+		Path:       "/my/server",
+	}
+
+	publicNamespaceAd := server_structs.NamespaceAdV2{
+		Caps: server_structs.Capabilities{
+			PublicReads: true,
+		},
+		Path: "/different/server",
+	}
+
+	authReq, _ := http.NewRequest("GET", "/my/server", nil)
+	authReq.Header.Add("User-Agent", "pelican-v7.999.999")
+	authReq.Header.Add("X-Real-Ip", "128.104.153.60")
+
+	pubReq, _ := http.NewRequest("GET", "/different/server", nil)
+	pubReq.Header.Add("User-Agent", "pelican-v7.999.999")
+	pubReq.Header.Add("X-Real-Ip", "128.104.153.60")
+
+	// recorder := httptest.NewRecorder()
+	t.Run("test-x-pel-auth", func(t *testing.T) {
+		authedRecorder := httptest.NewRecorder()
+		cAuth, _ := gin.CreateTestContext(authedRecorder)
+		cAuth.Request = authReq
+		generateXAuthHeader(cAuth, authedNamespaceAd)
+		assert.NotEmpty(t, cAuth.Writer.Header().Get("X-Pelican-Authorization"))
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Authorization"), "issuer=https://my-issuer.com")
+
+		pubRecorder := httptest.NewRecorder()
+		cPub, _ := gin.CreateTestContext(pubRecorder)
+		cPub.Request = pubReq
+		generateXAuthHeader(cPub, publicNamespaceAd)
+		assert.Empty(t, cPub.Writer.Header().Get("X-Pelican-Authorization"))
+	})
+
+	t.Run("test-x-pel-tok-gen", func(t *testing.T) {
+		authedRecorder := httptest.NewRecorder()
+		cAuth, _ := gin.CreateTestContext(authedRecorder)
+		cAuth.Request = authReq
+
+		generateXTokenGenHeader(cAuth, authedNamespaceAd)
+		assert.NotEmpty(t, cAuth.Writer.Header().Get("X-Pelican-Token-Generation"))
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Token-Generation"), "issuer=https://my-issuer.com")
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Token-Generation"), "strategy=OAuth2")
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Token-Generation"), "max-scope-depth=3")
+
+		pubRecorder := httptest.NewRecorder()
+		cPub, _ := gin.CreateTestContext(pubRecorder)
+		cPub.Request = pubReq
+		generateXTokenGenHeader(cPub, publicNamespaceAd)
+		assert.Empty(t, cPub.Writer.Header().Get("X-Pelican-Token-Generation"))
+	})
+
+	t.Run("test-x-pel-namespace", func(t *testing.T) {
+		authedRecorder := httptest.NewRecorder()
+		cAuth, _ := gin.CreateTestContext(authedRecorder)
+		cAuth.Request = authReq
+
+		collUrl := "https://my-origin.com"
+		generateXNamespaceHeader(cAuth, authedNamespaceAd, collUrl)
+		assert.NotEmpty(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"))
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"), "namespace=/my/server")
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"), "require-token=true")
+		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"), "collections-url=https://my-origin.com")
+
+		pubRecorder := httptest.NewRecorder()
+		cPub, _ := gin.CreateTestContext(pubRecorder)
+		cPub.Request = pubReq
+		generateXNamespaceHeader(cPub, publicNamespaceAd, "")
+		assert.NotEmpty(t, cPub.Writer.Header().Get("X-Pelican-Namespace"))
+		assert.Contains(t, cPub.Writer.Header().Get("X-Pelican-Namespace"), "namespace=/different/server")
+		assert.Contains(t, cPub.Writer.Header().Get("X-Pelican-Namespace"), "require-token=false")
+		assert.NotContains(t, cPub.Writer.Header().Get("X-Pelican-Namespace"), "collections-url")
 	})
 }
 

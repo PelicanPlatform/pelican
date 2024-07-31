@@ -108,6 +108,34 @@ func TestValidQuery(t *testing.T) {
 		err = CheckValidQuery(transferUrl)
 		assert.NoError(t, err)
 	})
+
+	t.Run("testValidSkipStat", func(t *testing.T) {
+		transferStr := "pelican://something/here?skipstat"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = CheckValidQuery(transferUrl)
+		assert.NoError(t, err)
+	})
+
+	t.Run("testValidPreferCached", func(t *testing.T) {
+		transferStr := "pelican://something/here?prefercached"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = CheckValidQuery(transferUrl)
+		assert.NoError(t, err)
+	})
+
+	t.Run("testInvalidDirectReadAndPreferCached", func(t *testing.T) {
+		transferStr := "pelican://something/here?prefercached&directread"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = CheckValidQuery(transferUrl)
+		assert.Error(t, err)
+		assert.Equal(t, "cannot have both directread and prefercached query parameters", err.Error())
+	})
 }
 
 func TestApplyIPMask(t *testing.T) {

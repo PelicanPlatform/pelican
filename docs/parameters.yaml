@@ -687,9 +687,20 @@ type: bool
 default: false
 components: ["origin"]
 ---
+name: Origin.DirectorTest
+description: |+
+  A bool indicating whether the director should send file transfer tests to the origin.
+
+  If `Origin.StorageType` is set to values other than `POSIX`, this parameter is set to false.
+type: bool
+default: true
+components: ["origin"]
+---
 name: Origin.SelfTest
 description: |+
   A bool indicating whether the origin should perform self health checks.
+
+  If `Origin.StorageType` is set to values other than `POSIX`, this parameter is set to false.
 type: bool
 default: true
 components: ["origin"]
@@ -1228,6 +1239,14 @@ type: string
 default: cache
 components: ["director"]
 ---
+name: Director.CachesPullFromCaches
+description: |+
+  In the "origin" response, the director returns a list of origins that can serve the object. If `Director.CachesPullFromCaches`
+  is set to true (default is false), the director then appends a list of caches that can serve the object to the original response.
+type: bool
+default: false
+components: ["director"]
+---
 name: Director.CacheResponseHostnames
 description: |+
   A list of virtual hostnames for the director. If a request is sent by the client to one of these hostnames,
@@ -1718,6 +1737,14 @@ description: |+
 type: stringSlice
 default: none
 components: ["registry","origin","cache"]
+---
+name: Server.StartupTimeout
+description: |+
+  The amount of time the pelican server will wait for its components and services to startup.
+  If the timeout is hit while waiting on a component, the server will shutdown.
+type: duration
+default: 10s
+components: ["origin", "cache", "registry", "director"]
 ---
 name: Server.EnablePprof
 description: |+
