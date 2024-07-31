@@ -533,20 +533,17 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
 
 	// /pelican/monitoring is the path for director-based health test
-	// where we have /director/healthTest API to mock a file for the cache to get
+	// where we have /director/healthTest API to mock a test object for caches to pull (as if it's from an origin)
 	if strings.HasPrefix(reqPath, "/pelican/monitoring/") {
 		ginCtx.Redirect(http.StatusTemporaryRedirect, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/director/healthTest"+reqPath)
 		return
 	}
 
-	// Each namespace may be exported by several origins, so we must still
-	// do the geolocation song and dance if we want to get the closest origin...
 	ipAddr := utils.ClientIPAddr(ginCtx)
 
 	reqParams := getRequestParameters(ginCtx.Request)
 
-	// Skip the stat check for object availability
-	// If either disableStat or skipstat is set, then skip the stat query
+	// Skip the stat check for object availability if either disableStat or skipstat is set
 	skipStat := reqParams.Has(utils.QuerySkipStat.String()) || !param.Director_EnableStat.GetBool()
 
 	// Include caches in the response if Director.CachesPullFromCaches is enabled
@@ -568,18 +565,18 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	var q *ObjectStat
 
 	availableAds := []server_structs.ServerAd{}
-	// Skip stat query for PUT (upload), PROPFIND (listing) or skipStat query flag is on
+	// Skip stat query for PUT (upload), PROPFIND (listing) or whenever the skipStat query flag is on
 	if ginCtx.Request.Method == http.MethodPut || ginCtx.Request.Method == "PROPFIND" || skipStat {
 		availableAds = originAds
 	} else {
-		// Query Origins and check if the object exists on the server
+		// Query Origins and check if the object exists
 		q = NewObjectStat()
 		qr := q.Query(context.Background(), reqPath, config.OriginType, 1, 3,
 			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.PublicRead))
 		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
 
-		// For successful response, we got a list of URL to access the object.
-		// We will use the host of the object url to match the URL field in originAds
+		// For a successful response, we got a list of object URLs.
+		// We then use the host of the object url to match the URL field in originAds
 		if qr.Status == querySuccessful {
 			for _, obj := range qr.Objects {
 				serverHost := obj.URL.Host
