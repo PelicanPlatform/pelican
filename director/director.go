@@ -1064,8 +1064,14 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	}
 
 	st := adV2.StorageType
+	// Defaults to POSIX
 	if st == "" {
 		st = server_structs.OriginStoragePosix
+	}
+	// Disable director test if the server isn't POSIX
+	if st != server_structs.OriginStoragePosix && !adV2.DisableDirectorTest {
+		log.Warningf("%s server %s with storage type %s enabled director test. This is not supported.", sType, adV2.Name, string(st))
+		adV2.DisableDirectorTest = true
 	}
 
 	sAd := server_structs.ServerAd{
