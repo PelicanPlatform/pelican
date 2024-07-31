@@ -439,6 +439,7 @@ func redirectToCache(ginCtx *gin.Context) {
 			})
 			return
 		}
+<<<<<<< HEAD
 	}
 
 <<<<<<< HEAD
@@ -450,6 +451,18 @@ func redirectToCache(ginCtx *gin.Context) {
 			Msg:    "Failed to determine server ordering",
 		})
 		return
+=======
+	} else {
+		cacheAds, err = sortServerAds(ipAddr, cacheAds, nil)
+		if err != nil {
+			log.Error("Error determining server ordering for cacheAdsWObject: ", err)
+			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Failed to determine server ordering",
+			})
+			return
+		}
+>>>>>>> 43c4af30 (Rename `sortServerAdsByIP` to `sortServerAds`)
 	}
 
 	// "smart" sorting method takes care of availability factor
@@ -677,7 +690,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
 
-	availableAds, err = sortServerAdsByIP(ipAddr, availableAds, nil)
+	availableAds, err = sortServerAds(ipAddr, availableAds, nil)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{

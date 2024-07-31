@@ -169,9 +169,16 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate, ok bool) {
 	return
 }
 
-// Sort serverAds based on the IP address of the client with shorter distance between
-// server IP and client having higher priority
-func sortServerAdsByIP(clientAddr netip.Addr, ads []server_structs.ServerAd, availabilityMap map[string]bool) ([]server_structs.ServerAd, error) {
+// The all-in-one method to sort serverAds based on Dirtector.CacheSortMethod configuration parameter
+//   - distance: sort serverAds by the distance between the geolocation of the servers and the client
+//   - distanceAndLoad: sort serverAds by the distance and the server IO load derived from XRootD
+//   - random: sort serverAds randomly
+//   - smart:  sort serverAds based on rules discussed here: https://github.com/PelicanPlatform/pelican/discussions/1198
+//
+// Note that if the client has invalid IP address or MaxMind is unable to get the coordinates out of
+// the client IP, any distance-related steps are skipped. If the sort method is "distance", then
+// the serverAds are randomly sorted.
+func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availabilityMap map[string]bool) ([]server_structs.ServerAd, error) {
 	// Each entry in weights will map a priority to an index in the original ads slice.
 	// A larger weight is a higher priority.
 	weights := make(SwapMaps, len(ads))
