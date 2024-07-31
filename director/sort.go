@@ -177,18 +177,26 @@ func sortServerAdsByIP(clientAddr netip.Addr, ads []server_structs.ServerAd, ava
 	weights := make(SwapMaps, len(ads))
 	sortMethod := param.Director_CacheSortMethod.GetString()
 
-	// If the client addr is not valid, we use random sort
-	if !clientAddr.IsValid() {
-		sortMethod = "random"
+	clientCoord := Coordinate{}
+	clientCoordOk := false
+
+	if clientAddr.IsValid() {
+		clientCoord, clientCoordOk = getClientLatLong(clientAddr)
+	} else {
+		log.Warningf("Unable to sort servers based on client-server distance. Invalid client IP address: %s", clientAddr.String())
 	}
 
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {
 		switch sortMethod {
 		case "distance":
-			clientCoord, ok := getClientLatLong(clientAddr)
-			if !ok {
-				// Unable to compute distances for this server; just do random distances.
+			// If we can't get the client coordinates, then simply use random sort
+			if !clientCoordOk {
+				weights[idx] = SwapMap{rand.Float64(), idx}
+				continue
+			}
+			if ad.Latitude == 0 && ad.Longitude == 0 {
+				// If server lat and long are 0, the server geolocation is unknown
 				// Below we sort weights in descending order, so we assign negative value here,
 				// causing them to always be at the end of the sorted list.
 				weights[idx] = SwapMap{0 - rand.Float64(), idx}
@@ -199,8 +207,7 @@ func sortServerAdsByIP(clientAddr netip.Addr, ads []server_structs.ServerAd, ava
 		case "distanceAndLoad":
 			weight := 1.0
 			// Distance weight
-			clientCoord, ok := getClientLatLong(clientAddr)
-			if ok {
+			if clientCoordOk {
 				distance := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
 				dWeighted := gatedHavlingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
 				weight *= dWeighted
@@ -214,8 +221,7 @@ func sortServerAdsByIP(clientAddr netip.Addr, ads []server_structs.ServerAd, ava
 		case "smart":
 			weight := 1.0
 			// Distance weight
-			clientCoord, ok := getClientLatLong(clientAddr)
-			if ok {
+			if clientCoordOk {
 				distance := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
 				dWeighted := gatedHavlingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
 				weight *= dWeighted
@@ -236,7 +242,6 @@ func sortServerAdsByIP(clientAddr netip.Addr, ads []server_structs.ServerAd, ava
 			weight *= lWeighted
 
 			weights[idx] = SwapMap{weight, idx}
-
 		case "random":
 			weights[idx] = SwapMap{rand.Float64(), idx}
 		default:
