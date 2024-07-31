@@ -159,6 +159,11 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 		return sAd
 	}
 
+	if ad.DisableDirectorTest {
+		log.Debugf("%s server %s at %s has DisableDirectorTest set. Skip health test for this server.", ad.Type, ad.Name, ad.URL.String())
+		return
+	}
+
 	// Prepare and launch the director file transfer tests to the origins/caches if it's not from the topology AND it's not already been registered
 	func() {
 		healthTestUtilsMutex.Lock()

@@ -296,9 +296,12 @@ func TestDirectorRegistration(t *testing.T) {
 		// Check to see that the code exits with status code 200 after given it a good token
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
-		namaspaceADs := listNamespacesFromOrigins()
-		// If the origin was successfully registered at director, we should be able to find it in director's originAds
-		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
+		get := serverAds.Get("https://or-url.org")
+		getAd := get.Value()
+		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		assert.Equal(t, getAd.Name, ad.Name)
+		require.Len(t, getAd.NamespaceAds, 1)
+		assert.Equal(t, getAd.NamespaceAds[0].Path, "/foo/bar")
 		teardown()
 	})
 
@@ -333,9 +336,12 @@ func TestDirectorRegistration(t *testing.T) {
 		// Check to see that the code exits with status code 200 after given it a good token
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
-		namaspaceADs := listNamespacesFromOrigins()
-		// If the origin was successfully registered at director, we should be able to find it in director's originAds
-		assert.True(t, NamespaceAdContainsPath(namaspaceADs, "/foo/bar"), "Coudln't find namespace in the director cache.")
+		get := serverAds.Get("https://or-url.org")
+		getAd := get.Value()
+		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		assert.Equal(t, getAd.Name, ad.Name)
+		require.Len(t, getAd.NamespaceAds, 1)
+		assert.Equal(t, getAd.NamespaceAds[0].Path, "/foo/bar")
 		teardown()
 	})
 
@@ -677,6 +683,196 @@ func TestDirectorRegistration(t *testing.T) {
 		teardown()
 	})
 
+	t.Run("origin-s3-type-and-disable-test", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name", // This is for web UI to display
+			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+			StorageType:         "s3",
+			DisableDirectorTest: true,
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+
+		r.ServeHTTP(w, c.Request)
+
+		get := serverAds.Get("https://data-url.org")
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.NotNil(t, get, "Origin fail to register at serverAds")
+
+		getAd := get.Value()
+		assert.Equal(t, server_structs.OriginStorageS3, getAd.StorageType)
+		assert.True(t, getAd.DisableDirectorTest)
+		teardown()
+	})
+
+	t.Run("origin-s3-type-and-enable-test", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name", // This is for web UI to display
+			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+			StorageType: "s3",
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+
+		r.ServeHTTP(w, c.Request)
+
+		get := serverAds.Get("https://data-url.org")
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.NotNil(t, get, "Origin fail to register at serverAds")
+
+		getAd := get.Value()
+		assert.Equal(t, server_structs.OriginStorageS3, getAd.StorageType)
+		assert.True(t, getAd.DisableDirectorTest)
+		teardown()
+	})
+
+	t.Run("origin-POSIX-type-and-enable-test", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name", // This is for web UI to display
+			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+			StorageType: "posix",
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+
+		r.ServeHTTP(w, c.Request)
+
+		get := serverAds.Get("https://data-url.org")
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.NotNil(t, get, "Origin fail to register at serverAds")
+
+		getAd := get.Value()
+		assert.Equal(t, server_structs.OriginStoragePosix, getAd.StorageType)
+		assert.False(t, getAd.DisableDirectorTest)
+		teardown()
+	})
+
+	t.Run("origin-POSIX-type-and-disable-test", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/origins/test", publicKey) // for origin
+		setupJwksCache(t, "/foo/bar", publicKey)      // for namespace
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name", // This is for web UI to display
+			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+			StorageType:         "posix",
+			DisableDirectorTest: true,
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+
+		r.ServeHTTP(w, c.Request)
+
+		get := serverAds.Get("https://data-url.org")
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.NotNil(t, get, "Origin fail to register at serverAds")
+
+		getAd := get.Value()
+		assert.Equal(t, server_structs.OriginStoragePosix, getAd.StorageType)
+		assert.True(t, getAd.DisableDirectorTest)
+		teardown()
+	})
+
+	t.Run("origin-storage-type-and-test-V1", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/foo/bar", publicKey)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV1{URL: "https://v1-url.org", Namespaces: []server_structs.NamespaceAdV1{{Path: "/foo/bar", Issuer: isurl}}}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		get := serverAds.Get("https://v1-url.org")
+		assert.NotNil(t, get, "Origin fail to register at serverAds")
+
+		getAd := get.Value()
+		assert.Equal(t, server_structs.OriginStoragePosix, getAd.StorageType)
+		assert.False(t, getAd.DisableDirectorTest)
+		teardown()
+	})
 }
 
 func TestGetAuthzEscaped(t *testing.T) {

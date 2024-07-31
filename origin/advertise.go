@@ -59,7 +59,7 @@ func (server *OriginServer) GetPids() (pids []int) {
 }
 
 func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
-	isGlobusBackend := param.Origin_StorageType.GetString() == string(server_utils.OriginStorageGlobus)
+	isGlobusBackend := param.Origin_StorageType.GetString() == string(server_structs.OriginStorageGlobus)
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
 	issuerUrlStr, err := config.GetServerIssuerURL()
 	if err != nil {
@@ -80,6 +80,10 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 
 	var nsAds []server_structs.NamespaceAdV2
 	var prefixes []string
+	ost, err := server_structs.ParseOriginStorageType(param.Origin_StorageType.GetString())
+	if err != nil {
+		return nil, err
+	}
 	originExports, err := server_utils.GetOriginExports()
 	if err != nil {
 		return nil, err
@@ -141,6 +145,8 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 			BasePaths: prefixes,
 			IssuerUrl: *issuerUrl,
 		}},
+		StorageType:         ost,
+		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
 	}
 
 	if len(prefixes) == 0 {

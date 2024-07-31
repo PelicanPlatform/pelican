@@ -74,10 +74,11 @@ type (
 )
 
 const (
-	HealthStatusUnknown HealthTestStatus = "Unknown"
-	HealthStatusInit    HealthTestStatus = "Initializing"
-	HealthStatusOK      HealthTestStatus = "OK"
-	HealthStatusError   HealthTestStatus = "Error"
+	HealthStatusDisabled HealthTestStatus = "Health Test Disabled"
+	HealthStatusUnknown  HealthTestStatus = "Unknown"
+	HealthStatusInit     HealthTestStatus = "Initializing"
+	HealthStatusOK       HealthTestStatus = "OK"
+	HealthStatusError    HealthTestStatus = "Error"
 )
 
 const (
@@ -1062,17 +1063,30 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		}
 	}
 
+	st := adV2.StorageType
+	// Defaults to POSIX
+	if st == "" {
+		st = server_structs.OriginStoragePosix
+	}
+	// Disable director test if the server isn't POSIX
+	if st != server_structs.OriginStoragePosix && !adV2.DisableDirectorTest {
+		log.Warningf("%s server %s with storage type %s enabled director test. This is not supported.", sType, adV2.Name, string(st))
+		adV2.DisableDirectorTest = true
+	}
+
 	sAd := server_structs.ServerAd{
-		Name:        adV2.Name,
-		URL:         *adUrl,
-		WebURL:      *adWebUrl,
-		BrokerURL:   *brokerUrl,
-		Type:        sType,
-		Caps:        adV2.Caps,
-		Writes:      adV2.Caps.Writes,
-		DirectReads: adV2.Caps.DirectReads,
-		Listings:    adV2.Caps.Listings,
-		IOLoad:      0.5, // Defaults to 0.5, as 0 means the server is "very free" which is not necessarily true
+		Name:                adV2.Name,
+		StorageType:         st,
+		DisableDirectorTest: adV2.DisableDirectorTest,
+		URL:                 *adUrl,
+		WebURL:              *adWebUrl,
+		BrokerURL:           *brokerUrl,
+		Type:                sType,
+		Caps:                adV2.Caps,
+		Writes:              adV2.Caps.Writes,
+		DirectReads:         adV2.Caps.DirectReads,
+		Listings:            adV2.Caps.Listings,
+		IOLoad:              0.5, // Defaults to 0.5, as 0 means the server is "very free" which is not necessarily true
 	}
 
 	recordAd(engineCtx, sAd, &adV2.Namespaces)

@@ -169,6 +169,7 @@ type Config struct {
 	} `mapstructure:"oidc"`
 	Origin struct {
 		DbLocation string `mapstructure:"dblocation"`
+		DirectorTest bool `mapstructure:"directortest"`
 		EnableBroker bool `mapstructure:"enablebroker"`
 		EnableCmsd bool `mapstructure:"enablecmsd"`
 		EnableDirListing bool `mapstructure:"enabledirlisting"`
@@ -462,6 +463,7 @@ type configWithType struct {
 	}
 	Origin struct {
 		DbLocation struct { Type string; Value string }
+		DirectorTest struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }
