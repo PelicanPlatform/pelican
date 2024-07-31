@@ -214,15 +214,7 @@ func extractVersionAndService(ginCtx *gin.Context) (reqVer *version.Version, ser
 	return reqVer, service, nil
 }
 
-func versionCompatCheck(ginCtx *gin.Context) error {
-	reqVer, service, err := extractVersionAndService(ginCtx)
-	if err != nil {
-		return err
-	}
-	if reqVer == nil {
-		return nil
-	}
-
+func versionCompatCheck(reqVer *version.Version, service string) error {
 	var minCompatVer *version.Version
 	switch service {
 	case "client":
@@ -231,8 +223,14 @@ func versionCompatCheck(ginCtx *gin.Context) error {
 		minCompatVer = minOriginVersion
 	case "cache":
 		minCompatVer = minCacheVersion
+	case "": // service not provided, ie: using curl
+		return nil
 	default:
 		return errors.Errorf("Invalid version format. The director does not support your %s version (%s).", service, reqVer.String())
+	}
+
+	if reqVer == nil { // version not provided, ie: using curl
+		return nil
 	}
 
 	if reqVer.LessThan(minCompatVer) {
@@ -243,7 +241,8 @@ func versionCompatCheck(ginCtx *gin.Context) error {
 }
 
 func redirectToCache(ginCtx *gin.Context) {
-	err := versionCompatCheck(ginCtx)
+	reqVer, service, _ := extractVersionAndService(ginCtx)
+	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
 		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -253,7 +252,6 @@ func redirectToCache(ginCtx *gin.Context) {
 		return
 	}
 
-	reqVer, service, _ := extractVersionAndService(ginCtx)
 	collectClientVersionMetric(reqVer, service)
 
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
@@ -469,7 +467,8 @@ func redirectToCache(ginCtx *gin.Context) {
 }
 
 func redirectToOrigin(ginCtx *gin.Context) {
-	err := versionCompatCheck(ginCtx)
+	reqVer, service, _ := extractVersionAndService(ginCtx)
+	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
 		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -479,7 +478,6 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		return
 	}
 
-	reqVer, service, _ := extractVersionAndService(ginCtx)
 	collectClientVersionMetric(reqVer, service)
 
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
@@ -820,7 +818,8 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		return
 	}
 
-	err := versionCompatCheck(ctx)
+	reqVer, service, _ := extractVersionAndService(ctx)
+	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while registering %s and no response was served: %v", sType, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -1166,6 +1165,15 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 	if reqVer == nil || service == "" {
 		metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": "other", "service": "other"}).Inc()
 		return
+	}
+
+	directorVersion, err := version.NewVersion(config.GetVersion())
+	if err != nil {
+		return
+	}
+
+	if reqVer.GreaterThan(directorVersion) {
+		metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": "pelican-future", "service": service}).Inc()
 	}
 
 	versionSegments := reqVer.Segments()
