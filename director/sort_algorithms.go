@@ -74,7 +74,6 @@ func distanceWeight(lat1 float64, long1 float64, lat2 float64, long2 float64, re
 }
 
 // Given the input value, return a weight [0, 1.0] based on the gated havling of the base weight 1.0.
-//   - If the input value is unknown (0.0), return 1.
 //   - If the input value is between 0.0 and the threshold, return 1.0.
 //   - If the input value is above the threshold, the weight decreases by half for every halvingFactor units of the input value
 func gatedHavlingMultiplier(val float64, threshold float64, halvingFactor float64) float64 {

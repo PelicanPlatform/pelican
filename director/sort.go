@@ -171,7 +171,8 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate, ok bool) {
 
 // The all-in-one method to sort serverAds based on Dirtector.CacheSortMethod configuration parameter
 //   - distance: sort serverAds by the distance between the geolocation of the servers and the client
-//   - distanceAndLoad: sort serverAds by the distance and the server IO load derived from XRootD
+//   - distanceAndLoad: sort serverAds by the distance with gated halving factor (see details in the smart method)
+//     and the server IO load
 //   - random: sort serverAds randomly
 //   - smart:  sort serverAds based on rules discussed here: https://github.com/PelicanPlatform/pelican/discussions/1198
 //
