@@ -29,6 +29,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -2684,7 +2685,7 @@ func listHttp(ctx context.Context, remoteObjectUrl *url.URL, directorUrl string,
 	for _, info := range infos {
 		// Create a FileInfo for the file and append it to the slice
 		file := FileInfo{
-			Name:    info.Name(),
+			Name:    filepath.Join(remotePath, info.Name()),
 			Size:    info.Size(),
 			ModTime: info.ModTime(),
 			IsDir:   info.IsDir(),

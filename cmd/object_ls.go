@@ -144,7 +144,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 		// In this case, we are not using the long option (-l) and want a JSON format
 		jsonInfo := []string{}
 		for _, info := range filteredInfos {
-			jsonInfo = append(jsonInfo, info.Name)
+			jsonInfo = append(jsonInfo, path.Base(info.Name))
 		}
 		// Convert the FileInfo to JSON and print it
 		jsonData, err := json.Marshal(jsonInfo)
