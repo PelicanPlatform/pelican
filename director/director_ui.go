@@ -39,8 +39,10 @@ type (
 	}
 
 	listServerResponse struct {
-		Name string `json:"name"`
-		// AuthURL is Deprecated, for Pelican severs, URL is used as the base URL for object access.
+		Name                string                           `json:"name"`
+		StorageType         server_structs.OriginStorageType `json:"storageType"`
+		DisableDirectorTest bool                             `json:"disableDirectorTest"`
+		// AuthURL is Deprecated. For Pelican severs, URL is used as the base URL for object access.
 		// This is to maintain compatibility with the topology servers, where it uses AuthURL for
 		// accessing protected objects and URL for public objects.
 		AuthURL           string                      `json:"authUrl"`
@@ -111,13 +113,21 @@ func listServers(ctx *gin.Context) {
 		if ok {
 			healthStatus = healthUtil.Status
 		} else {
-			log.Debugf("listServers: healthTestUtils not found for server at %s", server.URL.String())
+			if server.DisableDirectorTest {
+				healthStatus = HealthStatusDisabled
+			} else {
+				if !server.FromTopology {
+					log.Debugf("listServers: healthTestUtils not found for server at %s", server.URL.String())
+				}
+			}
 		}
 		filtered, ft := checkFilter(server.Name)
 
 		res := listServerResponse{
-			Name:      server.Name,
-			BrokerURL: server.BrokerURL.String(),
+			Name:                server.Name,
+			StorageType:         server.StorageType,
+			DisableDirectorTest: server.DisableDirectorTest,
+			BrokerURL:           server.BrokerURL.String(),
 			// For web UI, if authURL is not set, we don't want to confuse user by copying server URL as authURL
 			AuthURL:      server.AuthURL.String(),
 			URL:          server.URL.String(),

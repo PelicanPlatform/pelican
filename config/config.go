@@ -448,6 +448,31 @@ func GetAllPrefixes() []ConfigPrefix {
 	return prefixes
 }
 
+// Helper function to start a metadata request.
+//
+// We see periodic timeouts when doing metadata lookup at sites.
+// Adding a modest retry will, hopefully, reduce the number of errors
+// that propagate out to users
+func startMetadataQuery(ctx context.Context, httpClient *http.Client, discoveryUrl *url.URL) (result *http.Response, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryUrl.String(), nil)
+	if err != nil {
+		err = errors.Wrapf(err, "Failure when doing federation metadata request creation for %s", discoveryUrl)
+		return
+	}
+	req.Header.Set("User-Agent", "pelican/"+version)
+
+	result, err = httpClient.Do(req)
+	if err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			err = MetadataTimeoutErr.Wrap(err)
+		} else {
+			err = NewMetadataError(err, "Error occurred when querying for metadata")
+		}
+	}
+	return
+}
+
 // This function is for discovering federations as specified by a url during a pelican:// transfer.
 // this does not populate global fields and is more temporary per url
 func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (metadata FederationDiscovery, err error) {
@@ -478,23 +503,22 @@ func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (
 		Transport: GetTransport(),
 		Timeout:   time.Second * 5,
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryUrl.String(), nil)
-	if err != nil {
-		err = errors.Wrapf(err, "Failure when doing federation metadata request creation for %s", discoveryUrl)
-		return
-	}
-	req.Header.Set("User-Agent", "pelican/"+version)
 
-	result, err := httpClient.Do(req)
-	if err != nil {
-		var netErr net.Error
-		if errors.As(err, &netErr) && netErr.Timeout() {
-			err = MetadataTimeoutErr.Wrap(err)
-			return
+	var result *http.Response
+	for idx := 1; idx <= 3; idx++ {
+		result, err = startMetadataQuery(ctx, &httpClient, discoveryUrl)
+		if err == nil {
+			break
+		} else if errors.Is(err, MetadataTimeoutErr) && ctx.Err() == nil {
+			log.Warningln("Timeout occurred when querying discovery URL", discoveryUrl.String(), "for metadata;", 3-idx, "retries remaining")
+			time.Sleep(2 * time.Second)
 		} else {
-			err = NewMetadataError(err, "Error occurred when querying for metadata")
 			return
 		}
+	}
+	if errors.Is(err, MetadataTimeoutErr) {
+		log.Errorln("3 timeouts occurred when querying discovery URL", discoveryUrl.String())
+		return
 	}
 
 	if result.Body != nil {
@@ -1352,11 +1376,9 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		ost := param.Origin_StorageType.GetString()
 		switch ost {
 		case "posix":
-			viper.SetDefault("Origin.SelfTest", true)
+			viper.SetDefault(param.Origin_SelfTest.GetName(), true)
+			viper.SetDefault(param.Origin_DirectorTest.GetName(), true)
 		case "https":
-			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-			viper.Set("Origin.SelfTest", false)
-
 			httpSvcUrl := param.Origin_HttpServiceUrl.GetString()
 			if httpSvcUrl == "" {
 				return errors.New("Origin.HTTPServiceUrl may not be empty when the origin is configured with an https backend")
@@ -1366,9 +1388,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 				return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
 			}
 		case "globus":
-			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-			viper.Set("Origin.SelfTest", false)
-
 			pvd, err := GetOIDCProdiver()
 			if err != nil || pvd != Globus {
 				log.Info("Server OIDC provider is not Globus. Use Origin.GlobusClientIDFile instead")
@@ -1394,9 +1413,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 				return errors.Wrap(err, "Origin.GlobusClientSecretFile is not a valid filepath")
 			}
 		case "xroot":
-			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-			viper.Set("Origin.SelfTest", false)
-
 			xrootSvcUrl := param.Origin_XRootServiceUrl.GetString()
 			if xrootSvcUrl == "" {
 				return errors.New("Origin.XRootServiceUrl may not be empty when the origin is configured with an xroot backend")
@@ -1406,9 +1422,6 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 				return errors.Wrap(err, "unable to parse Origin.XrootServiceUrl as a URL")
 			}
 		case "s3":
-			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-			viper.Set("Origin.SelfTest", false)
-
 			s3SvcUrl := param.Origin_S3ServiceUrl.GetString()
 			if s3SvcUrl == "" {
 				return errors.New("Origin.S3ServiceUrl may not be empty when the origin is configured with an s3 backend")
@@ -1416,6 +1429,17 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			_, err := url.Parse(s3SvcUrl)
 			if err != nil {
 				return errors.Wrap(err, "unable to parse Origin.S3ServiceUrl as a URL")
+			}
+		}
+
+		if ost != "posix" {
+			if param.Origin_SelfTest.GetBool() {
+				log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+				viper.Set(param.Origin_SelfTest.GetName(), false)
+			}
+			if param.Origin_DirectorTest.GetBool() {
+				log.Warning("Origin.DirectorTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+				viper.Set(param.Origin_DirectorTest.GetName(), false)
 			}
 		}
 	}

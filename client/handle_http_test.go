@@ -693,6 +693,31 @@ func TestNewPelicanURL(t *testing.T) {
 		// Note: can't really test this for an error since that would require osg-htc.org to be down
 	})
 
+	t.Run("TestStashSchemeWithPelicanPrefixNoError", func(t *testing.T) {
+		test_utils.InitClient(t, map[string]any{})
+		te, err := NewTransferEngine(ctx)
+		require.NoError(t, err)
+		defer func() {
+			require.NoError(t, te.Shutdown())
+		}()
+
+		mock.MockOSDFDiscovery(t, config.GetTransport())
+		_, err = config.SetPreferredPrefix(config.PelicanPrefix)
+		config.InitConfig()
+		assert.NoError(t, err)
+		remoteObject := "stash:///something/somewhere/thatdoesnotexist.txt"
+		remoteObjectURL, err := url.Parse(remoteObject)
+		assert.NoError(t, err)
+
+		pelicanURL, err := te.newPelicanURL(remoteObjectURL)
+		assert.NoError(t, err)
+
+		// Check pelicanURL properly filled out
+		assert.Equal(t, "https://osdf-director.osg-htc.org", pelicanURL.directorUrl)
+		viper.Reset()
+		// Note: can't really test this for an error since that would require osg-htc.org to be down
+	})
+
 	t.Run("TestPelicanSchemeNoError", func(t *testing.T) {
 		test_utils.InitClient(t, map[string]any{
 			"TLSSkipVerify": true,
@@ -986,7 +1011,8 @@ func TestFailedConnectionSetupError(t *testing.T) {
 	} else {
 		require.Fail(t, "Slow server did not generate a HeaderTimeoutError")
 	}
-	require.Error(t, err)
+	assert.True(t, IsRetryable(err))
+	assert.Error(t, err)
 }
 
 // Test error message generated on a failed upload

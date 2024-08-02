@@ -150,8 +150,11 @@ func RegisterClient(namespace namespaces.Namespace) (*config.PrefixEntry, error)
 func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts config.TokenGenerationOpts) (string, error) {
 	log.Debugln("Acquiring a token from configuration and OAuth2")
 
-	if namespace.CredentialGen == nil || namespace.CredentialGen.Strategy == nil {
-		return "", fmt.Errorf("Credential generation scheme unknown for prefix %s", namespace.Path)
+	if namespace.CredentialGen == nil {
+		return "", errors.Errorf("Credential generation scheme information not provided for prefix %s", namespace.Path)
+	}
+	if namespace.CredentialGen.Strategy == nil {
+		return "", errors.Errorf("Credential generation strategy not provided for prefix %s", namespace.Path)
 	}
 	switch strategy := *namespace.CredentialGen.Strategy; strategy {
 	case "OAuth2":
