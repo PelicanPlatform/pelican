@@ -35,15 +35,15 @@ export const OriginSidebar = () => {
 
   return (
     <Sidebar>
-      <ButtonLink title={'Dashboard'} href={'/origin'}>
+      <ButtonLink title={'Dashboard'} href={'/origin/'}>
         <Dashboard />
       </ButtonLink>
       {data?.type === 'globus' && (
-        <ButtonLink title={'Globus Configurations'} href={'/origin/globus'}>
+        <ButtonLink title={'Globus Configurations'} href={'/origin/globus/'}>
           <Public />
         </ButtonLink>
       )}
-      <ButtonLink title={'Config'} href={'/config'}>
+      <ButtonLink title={'Config'} href={'/config/'}>
         <Build />
       </ButtonLink>
     </Sidebar>

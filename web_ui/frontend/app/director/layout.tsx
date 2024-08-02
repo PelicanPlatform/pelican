@@ -40,7 +40,7 @@ export default function RootLayout({
   return (
     <Box display={'flex'} flexDirection={'row'}>
       <Sidebar>
-        <ButtonLink title={'Dashboard'} href={'/director'}>
+        <ButtonLink title={'Dashboard'} href={'/director/'}>
           <Dashboard />
         </ButtonLink>
         <ButtonLink title={'Map'} href={'/director/map/'}>

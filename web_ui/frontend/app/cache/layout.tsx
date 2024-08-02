@@ -41,7 +41,7 @@ export default function RootLayout({
   return (
     <Box display={'flex'} flexDirection={'row'}>
       <Sidebar>
-        <ButtonLink title={'Cache'} href={'/cache'}>
+        <ButtonLink title={'Cache'} href={'/cache/'}>
           <Dashboard />
         </ButtonLink>
         <ButtonLink title={'Config'} href={'/config/'}>
