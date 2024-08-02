@@ -1,6 +1,6 @@
 import React from 'react';
 import { FmdGood } from '@mui/icons-material';
-import { Marker } from 'react-map-gl/maplibre';
+import { Marker, NavigationControl } from 'react-map-gl/maplibre';
 
 import { DefaultMap } from './';
 
@@ -20,6 +20,7 @@ export const SinglePointMap = ({ point, zoom }: SinglePointMapProps) => {
       scrollZoom={false}
       style={{ width: '100%', height: '100%' }}
     >
+      <NavigationControl />
       <Marker longitude={point.lng} latitude={point.lat} anchor='bottom'>
         <FmdGood />
       </Marker>
