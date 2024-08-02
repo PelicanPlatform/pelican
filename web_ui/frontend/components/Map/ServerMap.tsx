@@ -6,7 +6,7 @@ import {
   Popup,
 } from 'react-map-gl/maplibre';
 import { FmdGood } from '@mui/icons-material';
-import { ClickAwayListener } from '@mui/base'
+import { ClickAwayListener } from '@mui/base';
 
 import { DefaultMap } from './';
 import { Server } from '@/index';
