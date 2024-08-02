@@ -6,6 +6,7 @@ import {
   Popup,
 } from 'react-map-gl/maplibre';
 import { FmdGood } from '@mui/icons-material';
+import { ClickAwayListener } from '@mui/base'
 
 import { DefaultMap } from './';
 import { Server } from '@/index';
@@ -46,17 +47,20 @@ const ServerMarker = ({ server }: { server: Server }) => {
         <FmdGood />
       </Marker>
       {showPopup && (
-        <Popup
-          longitude={server.longitude}
-          latitude={server.latitude}
-          closeOnClick={false}
-          onClose={() => setShowPopup(false)}
-          offset={[0, -24] as [number, number]}
-        >
-          <Box>
-            <Typography variant={'body1'}>{server.name} TEst</Typography>
-          </Box>
-        </Popup>
+        <ClickAwayListener onClickAway={() => setShowPopup(false)}>
+          <Popup
+            longitude={server.longitude}
+            latitude={server.latitude}
+            closeOnClick={false}
+            onClose={() => setShowPopup(false)}
+            offset={[0, -24] as [number, number]}
+            maxWidth={'auto'}
+          >
+            <Box>
+              <Typography variant={'body1'}>{server.name}</Typography>
+            </Box>
+          </Popup>
+        </ClickAwayListener>
       )}
     </>
   );
