@@ -260,8 +260,8 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 
 	if sortMethod == "smart" {
 		candidates, _ := stochasticSort(weights, candidateLimit)
-		resultAds := make([]server_structs.ServerAd, candidateLimit)
-		for _, cidx := range candidates {
+		resultAds := []server_structs.ServerAd{}
+		for _, cidx := range candidates[:candidateLimit] {
 			resultAds = append(resultAds, ads[cidx])
 		}
 		return resultAds, nil
