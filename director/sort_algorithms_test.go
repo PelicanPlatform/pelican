@@ -32,25 +32,25 @@ func TestDistanceWeight(t *testing.T) {
 	assert.Equal(t, 50.0, math.Round(distanceWeight(43.0753, -90.4114, 43.0753, -89.4114, true)))
 }
 
-func TestGatedHavlingMultiplier(t *testing.T) {
+func TestGatedHalvingMultiplier(t *testing.T) {
 	// return 1.0 if the havlvingFactor is zero
-	assert.Equal(t, 1.0, gatedHavlingMultiplier(1.0, 10.0, 0.0))
+	assert.Equal(t, 1.0, gatedHalvingMultiplier(1.0, 10.0, 0.0))
 	// return 1.0 if the threshold is zero
-	assert.Equal(t, 1.0, gatedHavlingMultiplier(10.0, 0.0, 0.0))
+	assert.Equal(t, 1.0, gatedHalvingMultiplier(10.0, 0.0, 0.0))
 
 	// return 1.0 if load < threshold
-	assert.Equal(t, 1.0, gatedHavlingMultiplier(1.0, 10.0, 4.0))
-	assert.Equal(t, 1.0, gatedHavlingMultiplier(10.0, 10.0, 4.0))
+	assert.Equal(t, 1.0, gatedHalvingMultiplier(1.0, 10.0, 4.0))
+	assert.Equal(t, 1.0, gatedHalvingMultiplier(10.0, 10.0, 4.0))
 
 	// return 1.0 if threshold <= load < threshold + havlvingFactor
-	assert.Equal(t, 1.0, gatedHavlingMultiplier(10.1, 10.0, 4.0))
-	assert.Equal(t, 1.0, gatedHavlingMultiplier(13.9, 10.0, 4.0))
+	assert.Equal(t, 1.0, gatedHalvingMultiplier(10.1, 10.0, 4.0))
+	assert.Equal(t, 1.0, gatedHalvingMultiplier(13.9, 10.0, 4.0))
 
 	// return half if load >= threshold + havlvingFactor
-	assert.Equal(t, 0.5, gatedHavlingMultiplier(14, 10.0, 4.0))
+	assert.Equal(t, 0.5, gatedHalvingMultiplier(14, 10.0, 4.0))
 
 	// return 1/4 if load >= threshold + 2* havlvingFactor
-	assert.Equal(t, 0.25, gatedHavlingMultiplier(18, 10.0, 4.0))
+	assert.Equal(t, 0.25, gatedHalvingMultiplier(18, 10.0, 4.0))
 }
 
 func TestStochasticSort(t *testing.T) {
@@ -63,16 +63,24 @@ func TestStochasticSort(t *testing.T) {
 		{Weight: 8, Index: 5},
 		{Weight: 2.1, Index: 0},
 	}
-	t.Run("0-maxOut-returns-all", func(t *testing.T) {
+	t.Run("non-positive-maxOut-returns-all", func(t *testing.T) {
 		c, r := stochasticSort(mockSwapMaps, 0)
+		assert.Len(t, c, len(mockSwapMaps))
+		assert.Len(t, r, len(mockSwapMaps))
+
+		c, r = stochasticSort(mockSwapMaps, -1)
+		assert.Len(t, c, len(mockSwapMaps))
+		assert.Len(t, r, len(mockSwapMaps))
+
+		c, r = stochasticSort(mockSwapMaps, -10)
 		assert.Len(t, c, len(mockSwapMaps))
 		assert.Len(t, r, len(mockSwapMaps))
 	})
 
-	t.Run("maxOut-greater-than-length-returns-nothing", func(t *testing.T) {
+	t.Run("maxOut-greater-than-length-returns-len-of-sm", func(t *testing.T) {
 		c, r := stochasticSort(mockSwapMaps, len(mockSwapMaps)+1)
-		assert.Len(t, c, 0)
-		assert.Len(t, r, 0)
+		assert.Len(t, c, len(mockSwapMaps))
+		assert.Len(t, r, len(mockSwapMaps))
 	})
 
 	t.Run("maxOut-returns-correctly", func(t *testing.T) {

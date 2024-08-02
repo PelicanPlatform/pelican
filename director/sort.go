@@ -217,12 +217,12 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 			// Distance weight
 			if clientCoordOk {
 				distance := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
-				dWeighted := gatedHavlingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
+				dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
 				weight *= dWeighted
 			}
 
 			// Load weight
-			lWeighted := gatedHavlingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
+			lWeighted := gatedHalvingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
 			weight *= lWeighted
 
 			weights[idx] = SwapMap{weight, idx}
@@ -231,7 +231,7 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 			// Distance weight
 			if clientCoordOk {
 				distance := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
-				dWeighted := gatedHavlingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
+				dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
 				weight *= dWeighted
 			}
 			// Availability weight
@@ -246,7 +246,7 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 			}
 
 			// Load weight
-			lWeighted := gatedHavlingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
+			lWeighted := gatedHalvingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
 			weight *= lWeighted
 
 			weights[idx] = SwapMap{weight, idx}

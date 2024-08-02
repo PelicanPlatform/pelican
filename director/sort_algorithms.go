@@ -76,7 +76,7 @@ func distanceWeight(lat1 float64, long1 float64, lat2 float64, long2 float64, re
 // Given the input value, return a weight [0, 1.0] based on the gated havling of the base weight 1.0.
 //   - If the input value is between 0.0 and the threshold, return 1.0.
 //   - If the input value is above the threshold, the weight decreases by half for every halvingFactor units of the input value
-func gatedHavlingMultiplier(val float64, threshold float64, halvingFactor float64) float64 {
+func gatedHalvingMultiplier(val float64, threshold float64, halvingFactor float64) float64 {
 	if halvingFactor == 0 || threshold == 0 {
 		return 1.0
 	}
@@ -103,11 +103,10 @@ func gatedHavlingMultiplier(val float64, threshold float64, halvingFactor float6
 // Returnss the sorted list of SwapMap.Index and the generated random weights for reference.
 // You may specify the maxOut argument to limit the output.
 func stochasticSort(sm SwapMaps, maxOut int) (candidates []int, randWeights []float64) {
-	if maxOut == 0 {
+	if maxOut <= 0 {
 		maxOut = len(sm)
-	} else if maxOut > len(sm) {
-		return
 	}
+	maxOut = min(maxOut, len(sm))
 
 	wSum := 0.0
 	ranges := [][]float64{} // items in ranges should corresponds to items in sm

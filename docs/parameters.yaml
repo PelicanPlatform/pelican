@@ -1268,7 +1268,8 @@ description: |+
   - "distanceAndLoad": Sorts caches according to both their distance and a calculated load. This is currently a placeholder,
     and returns the same ordering as "distance".
   - "random": Sorts caches randomly.
-  - "smart": Sorts caches by distance from the client, server IO load, object availability, and stochastically sort the result.
+  - "smart": Sorts caches according to stochastically-generated weights that consider a combination of factors,
+      including a cache's distance from the client, its IO load, and whether the cache already has the requested object.
       See details at https://github.com/PelicanPlatform/pelican/discussions/1198
 type: string
 default: distance
