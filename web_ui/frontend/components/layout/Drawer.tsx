@@ -1,9 +1,3 @@
-
-
 export function Drawer() {
-    return (
-        <div>
-
-        </div>
-    )
+  return <div></div>;
 }

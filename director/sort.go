@@ -177,17 +177,22 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate, ok bool) {
 
 // Sort serverAds based on the IP address of the client with shorter distance between
 // server IP and client having higher priority
-func sortServerAdsByIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server_structs.ServerAd, error) {
+func sortServerAdsByIP(clientAddr netip.Addr, ads []server_structs.ServerAd) ([]server_structs.ServerAd, error) {
 	// Each entry in weights will map a priority to an index in the original ads slice.
 	// A larger weight is a higher priority.
 	weights := make(SwapMaps, len(ads))
 	sortMethod := param.Director_CacheSortMethod.GetString()
 
+	// If the client addr is not valid, we use random sort
+	if !clientAddr.IsValid() {
+		sortMethod = "random"
+	}
+
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {
 		switch sortMethod {
 		case "distance":
-			clientCoord, ok := getClientLatLong(addr)
+			clientCoord, ok := getClientLatLong(clientAddr)
 			if !ok {
 				// Unable to compute distances for this server; just do random distances.
 				// Below we sort weights in descending order, so we assign negative value here,
@@ -198,7 +203,7 @@ func sortServerAdsByIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server
 					idx}
 			}
 		case "distanceAndLoad":
-			clientCoord, ok := getClientLatLong(addr)
+			clientCoord, ok := getClientLatLong(clientAddr)
 			if !ok {
 				weights[idx] = SwapMap{0 - rand.Float64(), idx}
 			} else {
@@ -224,8 +229,10 @@ func sortServerAdsByIP(addr netip.Addr, ads []server_structs.ServerAd) ([]server
 }
 
 // Sort a list of ServerAds with the following rule:
-// * if a ServerAds has FromTopology = true, then it will be moved to the end of the list
-// * if two ServerAds has the SAME FromTopology value (both true or false), then
+//   - if a ServerAds has FromTopology = true, then it will be moved to the end of the list
+//   - if two ServerAds has the SAME FromTopology value (both true or false), then break tie them by name
+//
+// TODO: remove the return statement as slices.SortStableFunc sorts the slice in-place
 func sortServerAdsByTopo(ads []*server_structs.Advertisement) []*server_structs.Advertisement {
 	slices.SortStableFunc(ads, func(a, b *server_structs.Advertisement) int {
 		if a.FromTopology && !b.FromTopology {
@@ -237,6 +244,23 @@ func sortServerAdsByTopo(ads []*server_structs.Advertisement) []*server_structs.
 		}
 	})
 	return ads
+}
+
+// Stable-sort the given serveAds in-place given the avaiMap, where the key of the map is serverAd.Url.String()
+// and the value is a bool suggesting if the server has the object requested.
+//
+// Smaller index in the sorted array means higher priority
+func sortServerAdsByAvailability(ads []server_structs.ServerAd, avaiMap map[string]bool) {
+	slices.SortStableFunc(ads, func(a, b server_structs.ServerAd) int {
+		if !avaiMap[a.URL.String()] && avaiMap[b.URL.String()] {
+			return 1
+		} else if avaiMap[a.URL.String()] && !avaiMap[b.URL.String()] {
+			return -1
+		} else {
+			// Preserve original ordering
+			return 0
+		}
+	})
 }
 
 func downloadDB(localFile string) error {

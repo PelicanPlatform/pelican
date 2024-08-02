@@ -132,91 +132,103 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}, customTTL)
 
 	// Prepare `stat` call utilities for all servers regardless of its source (topology or Pelican)
-	statUtilsMutex.Lock()
-	defer statUtilsMutex.Unlock()
-	statUtil, ok := statUtils[ad.URL.String()]
-	if !ok || statUtil.Errgroup == nil {
-		baseCtx, cancel := context.WithCancel(ctx)
-		concLimit := param.Director_StatConcurrencyLimit.GetInt()
-		// If the value is not set, set to -1 to remove the limit
-		if concLimit == 0 {
-			concLimit = -1
+	func() {
+		statUtilsMutex.Lock()
+		defer statUtilsMutex.Unlock()
+		statUtil, ok := statUtils[ad.URL.String()]
+		if !ok || statUtil.Errgroup == nil {
+			baseCtx, cancel := context.WithCancel(ctx)
+			concLimit := param.Director_StatConcurrencyLimit.GetInt()
+			// If the value is not set, set to -1 to remove the limit
+			if concLimit == 0 {
+				concLimit = -1
+			}
+			statErrGrp := errgroup.Group{}
+			statErrGrp.SetLimit(concLimit)
+			newUtil := serverStatUtil{
+				Errgroup: &statErrGrp,
+				Cancel:   cancel,
+				Context:  baseCtx,
+			}
+			statUtils[ad.URL.String()] = newUtil
 		}
-		statErrGrp := errgroup.Group{}
-		statErrGrp.SetLimit(concLimit)
-		newUtil := serverStatUtil{
-			Errgroup: &statErrGrp,
-			Cancel:   cancel,
-			Context:  baseCtx,
-		}
-		statUtils[ad.URL.String()] = newUtil
-	}
+	}()
 
-	// Prepare and launch the director file transfer tests to the origins/caches if it's not from the topology AND it's not already been registered
-	healthTestUtilsMutex.Lock()
-	defer healthTestUtilsMutex.Unlock()
+	// We don't have health tests for the topology servers so just return
 	if ad.FromTopology {
 		return sAd
 	}
 
-	if existingUtil, ok := healthTestUtils[ad.URL.String()]; ok {
-		// Existing registration
-		if existingUtil != nil {
-			if existingUtil.ErrGrp != nil {
-				if existingUtil.ErrGrpContext.Err() != nil {
-					// ErrGroup has been Done. Start a new one
-					errgrp, errgrpCtx := errgroup.WithContext(ctx)
-					cancelCtx, cancel := context.WithCancel(errgrpCtx)
+	if ad.DisableDirectorTest {
+		log.Debugf("%s server %s at %s has DisableDirectorTest set. Skip health test for this server.", ad.Type, ad.Name, ad.URL.String())
+		return
+	}
 
-					errgrp.SetLimit(1)
-					healthTestUtils[ad.URL.String()] = &healthTestUtil{
-						Cancel:        cancel,
-						ErrGrp:        errgrp,
-						ErrGrpContext: errgrpCtx,
-						Status:        HealthStatusInit,
-					}
-					errgrp.Go(func() error {
-						LaunchPeriodicDirectorTest(cancelCtx, sAd)
-						return nil
-					})
-					log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(ad.Type), ad.URL.String())
-				} else {
-					cancelCtx, cancel := context.WithCancel(existingUtil.ErrGrpContext)
-					started := existingUtil.ErrGrp.TryGo(func() error {
-						LaunchPeriodicDirectorTest(cancelCtx, sAd)
-						return nil
-					})
-					if !started {
-						cancel()
-						log.Debugf("New director test suite blocked for %s %s, existing test has been running", string(ad.Type), ad.URL.String())
+	// Prepare and launch the director file transfer tests to the origins/caches if it's not from the topology AND it's not already been registered
+	func() {
+		healthTestUtilsMutex.Lock()
+		defer healthTestUtilsMutex.Unlock()
+
+		if existingUtil, ok := healthTestUtils[ad.URL.String()]; ok {
+			// Existing registration
+			if existingUtil != nil {
+				if existingUtil.ErrGrp != nil {
+					if existingUtil.ErrGrpContext.Err() != nil {
+						// ErrGroup has been Done. Start a new one
+						errgrp, errgrpCtx := errgroup.WithContext(ctx)
+						cancelCtx, cancel := context.WithCancel(errgrpCtx)
+
+						errgrp.SetLimit(1)
+						healthTestUtils[ad.URL.String()] = &healthTestUtil{
+							Cancel:        cancel,
+							ErrGrp:        errgrp,
+							ErrGrpContext: errgrpCtx,
+							Status:        HealthStatusInit,
+						}
+						errgrp.Go(func() error {
+							LaunchPeriodicDirectorTest(cancelCtx, sAd)
+							return nil
+						})
+						log.Debugf("New director test suite issued for %s %s. Errgroup was evicted", string(ad.Type), ad.URL.String())
 					} else {
-						log.Debugf("New director test suite issued for %s %s. Existing registration", string(ad.Type), ad.URL.String())
-						existingUtil.Cancel()
-						existingUtil.Cancel = cancel
+						// Existing errorgroup still working
+						cancelCtx, cancel := context.WithCancel(existingUtil.ErrGrpContext)
+						started := existingUtil.ErrGrp.TryGo(func() error {
+							LaunchPeriodicDirectorTest(cancelCtx, sAd)
+							return nil
+						})
+						if !started {
+							cancel()
+							log.Debugf("New director test suite blocked for %s %s, existing test has been running", string(ad.Type), ad.URL.String())
+						} else {
+							log.Debugf("New director test suite issued for %s %s. Existing registration", string(ad.Type), ad.URL.String())
+							existingUtil.Cancel()
+							existingUtil.Cancel = cancel
+						}
 					}
+				} else {
+					log.Errorf("%s %s registration didn't start a new director test cycle: errgroup is nil", string(ad.Type), &ad.URL)
 				}
 			} else {
-				log.Errorf("%s %s registration didn't start a new director test cycle: errgroup is nil", string(ad.Type), &ad.URL)
+				log.Errorf("%s %s registration didn't start a new director test cycle: healthTestUtils item is nil", string(ad.Type), &ad.URL)
 			}
-		} else {
-			log.Errorf("%s %s registration didn't start a new director test cycle: healthTestUtils item is nil", string(ad.Type), &ad.URL)
-		}
-	} else { // No healthTestUtils found, new registration
-		errgrp, errgrpCtx := errgroup.WithContext(ctx)
-		cancelCtx, cancel := context.WithCancel(errgrpCtx)
+		} else { // No healthTestUtils found, new registration
+			errgrp, errgrpCtx := errgroup.WithContext(ctx)
+			cancelCtx, cancel := context.WithCancel(errgrpCtx)
 
-		errgrp.SetLimit(1)
-		healthTestUtils[ad.URL.String()] = &healthTestUtil{
-			Cancel:        cancel,
-			ErrGrp:        errgrp,
-			ErrGrpContext: errgrpCtx,
-			Status:        HealthStatusInit,
+			errgrp.SetLimit(1)
+			healthTestUtils[ad.URL.String()] = &healthTestUtil{
+				Cancel:        cancel,
+				ErrGrp:        errgrp,
+				ErrGrpContext: errgrpCtx,
+				Status:        HealthStatusInit,
+			}
+			errgrp.Go(func() error {
+				LaunchPeriodicDirectorTest(cancelCtx, sAd)
+				return nil
+			})
 		}
-		errgrp.Go(func() error {
-			LaunchPeriodicDirectorTest(cancelCtx, sAd)
-			return nil
-		})
-	}
+	}()
 
 	return sAd
 }

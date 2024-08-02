@@ -26,6 +26,8 @@ package server_utils
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"reflect"
@@ -37,13 +39,108 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
 )
+
+type (
+	Server struct {
+		AuthEndpoint string `json:"auth_endpoint"`
+		Endpoint     string `json:"endpoint"`
+		Resource     string `json:"resource"`
+	}
+
+	Scitokens struct {
+		BasePath   []string `json:"base_path"`
+		Issuer     string   `json:"issuer"`
+		Restricted []string `json:"restricted_path"`
+	}
+
+	CredentialGeneration struct {
+		BasePath      string `json:"base_path"`
+		Issuer        string `json:"issuer"`
+		MaxScopeDepth int    `json:"max_scope_depth"`
+		Strategy      string `json:"strategy"`
+		VaultIssuer   string `json:"vault_issuer"`
+		VaultServer   string `json:"vault_server"`
+	}
+
+	Namespace struct {
+		Caches               []Server             `json:"caches"`
+		Origins              []Server             `json:"origins"`
+		CredentialGeneration CredentialGeneration `json:"credential_generation"`
+		DirlistHost          string               `json:"dirlisthost"`
+		Path                 string               `json:"path"`
+		ReadHTTPS            bool                 `json:"readhttps"`
+		Scitokens            []Scitokens          `json:"scitokens"`
+		UseTokenOnRead       bool                 `json:"usetokenonread"`
+		WritebackHost        string               `json:"writebackhost"`
+	}
+
+	TopologyNamespacesJSON struct {
+		Caches     []Server    `json:"caches"`
+		Namespaces []Namespace `json:"namespaces"`
+	}
+)
+
+// GetTopologyJSON returns the namespaces and caches from OSDF topology
+func GetTopologyJSON(ctx context.Context, includeDowned bool) (*TopologyNamespacesJSON, error) {
+	topoNamespaceUrl := param.Federation_TopologyNamespaceUrl.GetString()
+	if topoNamespaceUrl == "" {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
+		return nil, errors.New("Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, topoNamespaceUrl, nil)
+	if err != nil {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Failure when getting OSDF namespace data from topology")
+		return nil, errors.Wrap(err, "Failure when getting OSDF namespace data from topology")
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	q := req.URL.Query()
+	if includeDowned {
+		q.Add("include_downed", "1")
+	}
+	req.URL.RawQuery = q.Encode()
+
+	// Use the transport to include timeouts
+	client := http.Client{Transport: config.GetTransport()}
+	resp, err := client.Do(req)
+	if err != nil {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Failure when getting response for OSDF namespace data")
+		return nil, errors.Wrap(err, "Failure when getting response for OSDF namespace data")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode > 299 {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, fmt.Sprintf("Error response %v from OSDF namespace endpoint: %v", resp.StatusCode, resp.Status))
+		return nil, fmt.Errorf("error response %v from OSDF namespace endpoint: %v", resp.StatusCode, resp.Status)
+	}
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Failure when reading OSDF namespace response")
+		return nil, errors.Wrap(err, "Failure when reading OSDF namespace response")
+	}
+
+	var namespaces TopologyNamespacesJSON
+	if err = json.Unmarshal(respBytes, &namespaces); err != nil {
+		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, fmt.Sprintf("Failure when parsing JSON response from topology URL %v", topoNamespaceUrl))
+		return nil, errors.Wrapf(err, "Failure when parsing JSON response from topology URL %v", topoNamespaceUrl)
+	}
+
+	metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusOK, "")
+
+	return &namespaces, nil
+}
 
 // Wait until given `reqUrl` returns the expected status.
 // Logging messages emitted will refer to `server` (e.g., origin, cache, director)
 // Pass true to statusMismatch to allow a mismatch of expected status code and what's returned not fail immediately
 func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expectedStatus int, statusMismatch bool) error {
-	expiry := time.Now().Add(10 * time.Second)
+	expiry := time.Now().Add(param.Server_StartupTimeout.GetDuration())
 	ctx, cancel := context.WithDeadline(ctx, expiry)
 	defer cancel()
 	ticker := time.NewTicker(50 * time.Millisecond)
@@ -118,7 +215,7 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 			}
 		case <-ctx.Done():
 			if statusError != nil {
-				return errors.Wrapf(statusError, "url %s didn't respond with the expected status code %d within 10s", reqUrl, expectedStatus)
+				return errors.Wrapf(statusError, "url %s didn't respond with the expected status code %d within %s", reqUrl, expectedStatus, param.Server_StartupTimeout.GetDuration().String())
 			}
 			return ctx.Err()
 		}
@@ -127,7 +224,7 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 	if statusError != nil {
 		return errors.Wrapf(statusError, "url %s didn't respond with the expected status code %d within 10s", reqUrl, expectedStatus)
 	} else {
-		return errors.Errorf("The %s server at %s either did not startup or did not respond quickly enough after 10s of waiting", server, reqUrl)
+		return errors.Errorf("The %s server at %s either did not startup or did not respond quickly enough after %s of waiting", server, reqUrl, param.Server_StartupTimeout.GetDuration().String())
 	}
 }
 

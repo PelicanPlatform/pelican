@@ -21,7 +21,6 @@ package director
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 	"path"
 	"strings"
 
@@ -40,7 +39,12 @@ type (
 	}
 
 	listServerResponse struct {
-		Name              string                      `json:"name"`
+		Name                string                           `json:"name"`
+		StorageType         server_structs.OriginStorageType `json:"storageType"`
+		DisableDirectorTest bool                             `json:"disableDirectorTest"`
+		// AuthURL is Deprecated. For Pelican severs, URL is used as the base URL for object access.
+		// This is to maintain compatibility with the topology servers, where it uses AuthURL for
+		// accessing protected objects and URL for public objects.
 		AuthURL           string                      `json:"authUrl"`
 		BrokerURL         string                      `json:"brokerUrl"`
 		URL               string                      `json:"url"`    // This is server's XRootD URL for file transfer
@@ -109,19 +113,23 @@ func listServers(ctx *gin.Context) {
 		if ok {
 			healthStatus = healthUtil.Status
 		} else {
-			log.Debugf("listServers: healthTestUtils not found for server at %s", server.URL.String())
+			if server.DisableDirectorTest {
+				healthStatus = HealthStatusDisabled
+			} else {
+				if !server.FromTopology {
+					log.Debugf("listServers: healthTestUtils not found for server at %s", server.URL.String())
+				}
+			}
 		}
 		filtered, ft := checkFilter(server.Name)
-		var auth_url string
-		if server.AuthURL == (url.URL{}) {
-			auth_url = server.URL.String()
-		} else {
-			auth_url = server.AuthURL.String()
-		}
+
 		res := listServerResponse{
-			Name:         server.Name,
-			BrokerURL:    server.BrokerURL.String(),
-			AuthURL:      auth_url,
+			Name:                server.Name,
+			StorageType:         server.StorageType,
+			DisableDirectorTest: server.DisableDirectorTest,
+			BrokerURL:           server.BrokerURL.String(),
+			// For web UI, if authURL is not set, we don't want to confuse user by copying server URL as authURL
+			AuthURL:      server.AuthURL.String(),
 			URL:          server.URL.String(),
 			WebURL:       server.WebURL.String(),
 			Type:         server.Type,

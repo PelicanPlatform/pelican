@@ -98,28 +98,12 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go namespaceKeys.Start()
 
 	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *server_structs.Advertisement]) {
-		healthTestUtilsMutex.RLock()
-		defer healthTestUtilsMutex.RUnlock()
 		serverAd := i.Value().ServerAd
 		serverUrl := i.Key()
+		log.Debugf("serverAds for %s server %s is evicted. Clean up started.", string(serverAd.Type), serverAd.Name)
 
-		if util, exists := healthTestUtils[serverUrl]; exists {
-			util.Cancel()
-			if util.ErrGrp != nil {
-				err := util.ErrGrp.Wait()
-				if err != nil {
-					log.Debugf("Error from errgroup when evict the registration from TTL cache for %s %s %s", string(serverAd.Type), serverAd.Name, err.Error())
-				} else {
-					log.Debugf("Errgroup successfully emptied at TTL cache eviction for %s %s", string(serverAd.Type), serverAd.Name)
-				}
-			} else {
-				log.Debugf("errgroup is nil when evict the registration from TTL cache for %s %s", string(serverAd.Type), serverAd.Name)
-			}
-		} else {
-			log.Debugf("healthTestUtil not found for %s when evicting TTL cache item", serverAd.Name)
-		}
-
-		if serverAd.Type == server_structs.OriginType {
+		// Always lock statUtilsMutex first then healthTestUtilsMutex to avoid cyclic dependency
+		func() {
 			statUtilsMutex.Lock()
 			defer statUtilsMutex.Unlock()
 			statUtil, ok := statUtils[serverUrl]
@@ -129,7 +113,38 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 					log.Info(fmt.Sprintf("Error happened when stopping origin %q stat goroutine group: %v", serverAd.Name, err))
 				}
 				delete(statUtils, serverUrl)
+				log.Debugf("Stat util for %s server %s is deleted.", string(serverAd.Type), serverAd.Name)
+			} else {
+				log.Debugf("Stat util not found for %s server %s when evicting the serverAd", string(serverAd.Type), serverAd.Name)
 			}
+		}()
+
+		// Always lock statUtilsMutex first then healthTestUtilsMutex to avoid cyclic dependency
+		var util *healthTestUtil
+		var exists bool
+		func() {
+			healthTestUtilsMutex.RLock()
+			defer healthTestUtilsMutex.RUnlock()
+			util, exists = healthTestUtils[serverUrl]
+		}()
+		if exists && util != nil {
+			log.Debugf("healthTestUtils: start clean up for %s server %s", string(serverAd.Type), serverAd.Name)
+			// Only call cancel instead of deleting the util to make sure there's no nil ptr reference
+			util.Cancel()
+			if util.ErrGrp != nil {
+				// Wait blocks until all Go function in errgroup return. Ideally, calling util.Cancel() cancels Go function
+				// but deadlock can happen if the serverAd evcited is recording the test result (by acquiring the lock)
+				err := util.ErrGrp.Wait()
+				if err != nil {
+					log.Debugf("healthTestUtils: Errgroup returns error for %s %s %s", string(serverAd.Type), serverAd.Name, err.Error())
+				} else {
+					log.Debugf("healthTestUtils: Errgroup successfully emptied at TTL cache eviction for %s %s", string(serverAd.Type), serverAd.Name)
+				}
+			} else {
+				log.Debugf("healthTestUtils: errgroup is nil when evict the registration from TTL cache for %s %s", string(serverAd.Type), serverAd.Name)
+			}
+		} else {
+			log.Debugf("healthTestUtil: not found for %s when evicting TTL cache item", serverAd.Name)
 		}
 	})
 
@@ -178,6 +193,33 @@ func LaunchMapMetrics(ctx context.Context, egrp *errgroup.Group) {
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("filteredServers").Set(float64(len(filteredServers)))
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("healthTestUtils").Set(float64(len(healthTestUtils)))
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("originStatUtils").Set(float64(len(statUtils)))
+			}
+		}
+	})
+}
+
+func LaunchServerCountMetric(ctx context.Context, egrp *errgroup.Group) {
+	egrp.Go(func() error {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				for _, ad := range serverAds.Items() {
+					serverAd := ad.Value()
+					metrics.PelicanDirectorServerCount.With(prometheus.Labels{
+						"server_name":    serverAd.Name,
+						"server_type":    string(serverAd.Type),
+						"server_url":     serverAd.URL.String(),
+						"server_web_url": serverAd.WebURL.String(),
+						"server_lat":     fmt.Sprintf("%.4f", serverAd.Latitude),
+						"server_long":    fmt.Sprintf("%.4f", serverAd.Longitude),
+						"from_topology":  strconv.FormatBool(serverAd.FromTopology),
+					}).Inc()
+				}
 			}
 		}
 	})

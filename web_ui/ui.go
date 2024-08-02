@@ -517,6 +517,12 @@ func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgro
 	if err := configureCommonEndpoints(engine); err != nil {
 		return err
 	}
+
+	// Add pprof endpoints for debug purposes
+	if param.Server_EnablePprof.GetBool() {
+		configurePprof(engine)
+	}
+
 	if err := configureMetrics(engine); err != nil {
 		return err
 	}
@@ -562,7 +568,7 @@ func GetEngine() (*gin.Engine, error) {
 		webLogger.WithFields(log.Fields{"method": ctx.Request.Method,
 			"status":   ctx.Writer.Status(),
 			"time":     latency.String(),
-			"client":   ctx.RemoteIP(),
+			"client":   ctx.ClientIP(),
 			"resource": ctx.Request.URL.Path},
 		).Info("Served Request")
 	})

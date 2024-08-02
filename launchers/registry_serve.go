@@ -72,8 +72,8 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		return err
 	}
 
-	// launch namespace prometheus metric
-	registry.LaunchNamespaceMetrics(ctx, egrp)
+	// Launch registry prometheus metrics
+	registry.LaunchRegistryMetrics(ctx, egrp)
 
 	egrp.Go(func() error {
 		<-ctx.Done()

@@ -16,22 +16,21 @@
  *
  ***************************************************************/
 
-import {Box} from "@mui/material";
+import { Box } from '@mui/material';
 
 export const metadata = {
-    title: 'Pelican Configuration',
-    description: 'Software designed to make data distribution easy',
-}
+  title: 'Pelican Configuration',
+  description: 'Software designed to make data distribution easy',
+};
 
 export default function RootLayout({
-                                       children,
-                                   }: {
-    children: React.ReactNode
+  children,
+}: {
+  children: React.ReactNode;
 }) {
-
-    return (
-        <Box display={"flex"} flexDirection={"row"}>
-            {children}
-        </Box>
-    )
+  return (
+    <Box display={'flex'} flexDirection={'row'}>
+      {children}
+    </Box>
+  );
 }

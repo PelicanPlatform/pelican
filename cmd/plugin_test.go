@@ -1013,14 +1013,20 @@ func TestParseDestination(t *testing.T) {
 			},
 			want: tempFile.Name(),
 		},
+		{
+			name: "destination is unpacked file",
+			transfer: PluginTransfer{
+				localFile: filepath.Join(tempDir, "test.tar"),
+				url:       &url.URL{Path: "/path/to/source", RawQuery: "pack=auto", Scheme: "pelican"},
+			},
+			want: tempDir,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got := parseDestination(test.transfer)
-			if got != test.want {
-				t.Errorf("parseDestination() = %v, want %v", got, test.want)
-			}
+			assert.Equal(t, test.want, got)
 		})
 	}
 }

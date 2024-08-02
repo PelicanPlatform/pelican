@@ -16,30 +16,37 @@
  *
  ***************************************************************/
 
-"use client"
+'use client';
 
-import {PutPage} from "@/app/registry/components/PutPage";
-import {namespaceToOrigin, putGeneralNamespace} from "@/app/registry/components/util";
-import {Box, Grid, Typography} from "@mui/material";
-import React from "react";
+import { PutPage } from '@/app/registry/components/PutPage';
+import {
+  namespaceToOrigin,
+  putGeneralNamespace,
+} from '@/app/registry/components/util';
+import { Box, Grid, Typography } from '@mui/material';
+import React from 'react';
 
-export default function Page () {
-    const putCache = async (data: any) => {
-        const origin = namespaceToOrigin(structuredClone(data))
-        return putGeneralNamespace(origin)
-    }
+export default function Page() {
+  const putCache = async (data: any) => {
+    const origin = namespaceToOrigin(structuredClone(data));
+    return putGeneralNamespace(origin);
+  };
 
-    return (
-        <Box width={"100%"}>
-            <Grid container>
-                <Grid item xs={12}>
-                    <Typography variant={"h4"} pb={3}>Namespace Registry</Typography>
-                    <Typography variant={"h5"} pb={3}>Edit Origin</Typography>
-                </Grid>
-                <Grid item xs={12}>
-                    <PutPage update={putCache}/>
-                </Grid>
-            </Grid>
-        </Box>
-    )
+  return (
+    <Box width={'100%'}>
+      <Grid container>
+        <Grid item xs={12}>
+          <Typography variant={'h4'} pb={3}>
+            Namespace Registry
+          </Typography>
+          <Typography variant={'h5'} pb={3}>
+            Edit Origin
+          </Typography>
+        </Grid>
+        <Grid item xs={12}>
+          <PutPage update={putCache} />
+        </Grid>
+      </Grid>
+    </Box>
+  );
 }

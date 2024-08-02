@@ -51,17 +51,17 @@ type ObjectParam struct {
 
 func GetDeprecated() map[string][]string {
     return map[string][]string{
-        "Cache.DataLocation": []string{"Cache.LocalRoot"},
-        "Origin.EnableDirListing": []string{"Origin.EnableListings"},
-        "Origin.EnableFallbackRead": []string{"Origin.EnableDirectReads"},
-        "Origin.EnableWrite": []string{"Origin.EnableWrites"},
-        "Origin.ExportVolume": []string{"Origin.ExportVolumes"},
-        "Origin.Mode": []string{"Origin.StorageType"},
-        "Origin.NamespacePrefix": []string{"Origin.FederationPrefix"},
-        "Origin.S3ServiceName": []string{"none"},
-        "Registry.AdminUsers": []string{"Server.UIAdminUsers"},
-        "Xrootd.Port": []string{"Origin.Port", "Cache.Port"},
-        "Xrootd.RunLocation": []string{"Cache.RunLocation", "Origin.RunLocation"},
+        "Cache.DataLocation": {"Cache.LocalRoot"},
+        "Origin.EnableDirListing": {"Origin.EnableListings"},
+        "Origin.EnableFallbackRead": {"Origin.EnableDirectReads"},
+        "Origin.EnableWrite": {"Origin.EnableWrites"},
+        "Origin.ExportVolume": {"Origin.ExportVolumes"},
+        "Origin.Mode": {"Origin.StorageType"},
+        "Origin.NamespacePrefix": {"Origin.FederationPrefix"},
+        "Origin.S3ServiceName": {"none"},
+        "Registry.AdminUsers": {"Server.UIAdminUsers"},
+        "Xrootd.Port": {"Origin.Port", "Cache.Port"},
+        "Xrootd.RunLocation": {"Cache.RunLocation", "Origin.RunLocation"},
     }
 }
 
@@ -81,12 +81,20 @@ func (slP StringSliceParam) GetStringSlice() []string {
 	return viper.GetStringSlice(slP.name)
 }
 
+func (slP StringSliceParam) GetName() string {
+	return slP.name
+}
+
 func (slP StringSliceParam) IsSet() bool {
 	return viper.IsSet(slP.name)
 }
 
 func (iP IntParam) GetInt() int {
 	return viper.GetInt(iP.name)
+}
+
+func (iP IntParam) GetName() string {
+	return iP.name
 }
 
 func (iP IntParam) IsSet() bool {
@@ -97,24 +105,36 @@ func (bP BoolParam) GetBool() bool {
 	return viper.GetBool(bP.name)
 }
 
+func (bP BoolParam) GetName() string {
+	return bP.name
+}
+
 func (bP BoolParam) IsSet() bool {
 	return viper.IsSet(bP.name)
 }
 
-func (bP DurationParam) GetDuration() time.Duration {
-	return viper.GetDuration(bP.name)
+func (dP DurationParam) GetDuration() time.Duration {
+	return viper.GetDuration(dP.name)
 }
 
-func (bP DurationParam) IsSet() bool {
-	return viper.IsSet(bP.name)
+func (dP DurationParam) GetName() string {
+	return dP.name
 }
 
-func (bP ObjectParam) Unmarshal(rawVal any) error {
-	return viper.UnmarshalKey(bP.name, rawVal)
+func (dP DurationParam) IsSet() bool {
+	return viper.IsSet(dP.name)
 }
 
-func (bP ObjectParam) IsSet() bool {
-	return viper.IsSet(bP.name)
+func (oP ObjectParam) Unmarshal(rawVal any) error {
+	return viper.UnmarshalKey(oP.name, rawVal)
+}
+
+func (oP ObjectParam) GetName() string {
+	return oP.name
+}
+
+func (oP ObjectParam) IsSet() bool {
+	return viper.IsSet(oP.name)
 }
 
 var (
@@ -304,8 +324,10 @@ var (
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
 	Debug = BoolParam{"Debug"}
+	Director_CachesPullFromCaches = BoolParam{"Director.CachesPullFromCaches"}
 	Director_EnableBroker = BoolParam{"Director.EnableBroker"}
 	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
+	Director_EnableStat = BoolParam{"Director.EnableStat"}
 	DisableHttpProxy = BoolParam{"DisableHttpProxy"}
 	DisableProxyFallback = BoolParam{"DisableProxyFallback"}
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
@@ -313,6 +335,7 @@ var (
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
 	Monitoring_PromQLAuthorization = BoolParam{"Monitoring.PromQLAuthorization"}
+	Origin_DirectorTest = BoolParam{"Origin.DirectorTest"}
 	Origin_EnableBroker = BoolParam{"Origin.EnableBroker"}
 	Origin_EnableCmsd = BoolParam{"Origin.EnableCmsd"}
 	Origin_EnableDirListing = BoolParam{"Origin.EnableDirListing"}
@@ -334,6 +357,7 @@ var (
 	Registry_RequireCacheApproval = BoolParam{"Registry.RequireCacheApproval"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
+	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	Shoveler_Enable = BoolParam{"Shoveler.Enable"}
 	Shoveler_VerifyHeader = BoolParam{"Shoveler.VerifyHeader"}
@@ -355,6 +379,7 @@ var (
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
 	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
 	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
+	Server_StartupTimeout = DurationParam{"Server.StartupTimeout"}
 	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}
 	Transport_DialerTimeout = DurationParam{"Transport.DialerTimeout"}
 	Transport_ExpectContinueTimeout = DurationParam{"Transport.ExpectContinueTimeout"}

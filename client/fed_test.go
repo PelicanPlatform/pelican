@@ -21,6 +21,7 @@
 package client_test
 
 import (
+	"archive/tar"
 	"context"
 	_ "embed"
 	"fmt"
@@ -862,4 +863,65 @@ func TestObjectList405Error(t *testing.T) {
 	_, err = client.DoList(fed.Ctx, "pelican://"+host+"/test/hello_world")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "405: object listings are not supported by the discovered origin")
+}
+
+// Startup a mini-federation and ensure the "pack=auto" functionality works
+// end-to-end
+func TestClientUnpack(t *testing.T) {
+	viper.Reset()
+	server_utils.ResetOriginExports()
+	defer server_utils.ResetOriginExports()
+	err := config.InitClient()
+	require.NoError(t, err)
+
+	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
+	export := fed.Exports[0]
+
+	tmpDir := t.TempDir()
+	fooLocation := filepath.Join(tmpDir, "foo.txt")
+	err = os.WriteFile(fooLocation, []byte("hello world"), os.FileMode(0600))
+	require.NoError(t, err)
+	fi, err := os.Stat(fooLocation)
+	require.NoError(t, err)
+	sourceTarLocation := filepath.Join(export.StoragePrefix, "testfile.tar")
+	fd, err := os.OpenFile(sourceTarLocation, os.O_CREATE|os.O_WRONLY, os.FileMode(0644))
+	require.NoError(t, err)
+	defer func() {
+		err := fd.Close()
+		require.NoError(t, err)
+	}()
+	tf := tar.NewWriter(fd)
+	hdr, err := tar.FileInfoHeader(fi, "")
+	require.NoError(t, err)
+	err = tf.WriteHeader(hdr)
+	require.NoError(t, err)
+	err = os.Remove(fooLocation)
+	require.NoError(t, err)
+	_, err = os.Stat(fooLocation)
+	require.Error(t, err) // Double-check the file is gone
+
+	_, err = tf.Write([]byte("hello world"))
+	require.NoError(t, err)
+	err = tf.Close()
+	require.NoError(t, err)
+	fi, err = os.Stat(sourceTarLocation)
+	require.NoError(t, err)
+	tarSize := fi.Size()
+
+	downloadURL := fmt.Sprintf("pelican://%s:%s%s/testfile.tar?pack=auto&directread",
+		param.Server_Hostname.GetString(),
+		strconv.Itoa(param.Server_WebPort.GetInt()),
+		export.FederationPrefix,
+	)
+	results, err := client.DoGet(fed.Ctx, downloadURL, tmpDir, false)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(results))
+	require.NoError(t, results[0].Error)
+	assert.Equal(t, tarSize, results[0].TransferredBytes)
+
+	// If the file was automatically unpacked, then instead of downloading something named
+	// "testfile.tar", we should only have a file named "foo.txt"
+	fi, err = os.Stat(fooLocation)
+	require.NoError(t, err)
+	assert.Equal(t, int64(11), fi.Size())
 }

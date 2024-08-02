@@ -41,6 +41,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -66,6 +67,7 @@ type (
 		Org                    string
 		Groups                 []string
 		Project                string
+		Host                   string
 	}
 
 	FileId struct {
@@ -280,17 +282,17 @@ var (
 	TransferReadvSegs = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_readv_segments_count",
 		Help: "Number of segments in readv operations",
-	}, []string{"path", "ap", "dn", "role", "org", "proj"})
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "network"})
 
 	TransferOps = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_operations_count",
 		Help: "Number of transfer operations performed",
-	}, []string{"path", "ap", "dn", "role", "org", "proj", "type"})
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "type", "network"})
 
 	TransferBytes = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_bytes",
 		Help: "Bytes of transfers",
-	}, []string{"path", "ap", "dn", "role", "org", "proj", "type"})
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "type", "network"})
 
 	Threads = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "xrootd_sched_thread_count",
@@ -513,7 +515,7 @@ func ParseXrdUserId(userid string) (xrdUserId XrdUserId, err error) {
 	xrdUserId.User = protUserIdInfo[1][:lastIdx]
 	xrdUserId.Pid = pid
 	xrdUserId.Sid = sid
-	xrdUserId.Host = string(sidAtHostname[1])
+	xrdUserId.Host = string(sidAtHostnameInfo[1])
 	return
 }
 
@@ -642,12 +644,13 @@ func HandlePacket(packet []byte) error {
 				xferRecord := transfers.Get(fileId)
 				transfers.Delete(fileId)
 				labels := prometheus.Labels{
-					"path": "/",
-					"ap":   "",
-					"dn":   "",
-					"role": "",
-					"org":  "",
-					"proj": "",
+					"path":    "/",
+					"ap":      "",
+					"dn":      "",
+					"role":    "",
+					"org":     "",
+					"proj":    "",
+					"network": "",
 				}
 				var oldReadvSegs uint64 = 0
 				var oldReadOps uint32 = 0
@@ -661,6 +664,12 @@ func HandlePacket(packet []byte) error {
 					sessions.Delete(xferRecord.Value().UserId)
 					labels["path"] = xferRecord.Value().Path
 					if userRecord != nil {
+						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().Host)
+						if !ok {
+							log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
+						} else {
+							labels["network"] = maskedIP
+						}
 						labels["ap"] = userRecord.Value().AuthenticationProtocol
 						labels["dn"] = userRecord.Value().DN
 						labels["role"] = userRecord.Value().Role
@@ -746,12 +755,13 @@ func HandlePacket(packet []byte) error {
 				writeBytes := binary.BigEndian.Uint64(packet[offset+24 : offset+32])
 
 				labels := prometheus.Labels{
-					"path": "/",
-					"ap":   "",
-					"dn":   "",
-					"role": "",
-					"org":  "",
-					"proj": "",
+					"path":    "/",
+					"ap":      "",
+					"dn":      "",
+					"role":    "",
+					"org":     "",
+					"proj":    "",
+					"network": "",
 				}
 
 				if item != nil {
@@ -759,6 +769,12 @@ func HandlePacket(packet []byte) error {
 					userRecord := sessions.Get(record.UserId)
 					labels["path"] = record.Path
 					if userRecord != nil {
+						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().Host)
+						if !ok {
+							log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
+						} else {
+							labels["network"] = maskedIP
+						}
 						labels["ap"] = userRecord.Value().AuthenticationProtocol
 						labels["dn"] = userRecord.Value().DN
 						labels["role"] = userRecord.Value().Role
@@ -891,9 +907,10 @@ func HandlePacket(packet []byte) error {
 				if sessions.Has(userId) {
 					existingRec := sessions.Get(userId).Value()
 					existingRec.Project = appinfo
+					existingRec.Host = xrdUserId.Host
 					sessions.Set(userId, existingRec, ttlcache.DefaultTTL)
 				} else {
-					sessions.Set(userId, UserRecord{Project: appinfo}, ttlcache.DefaultTTL)
+					sessions.Set(userId, UserRecord{Project: appinfo, Host: xrdUserId.Host}, ttlcache.DefaultTTL)
 				}
 			}
 		} else {
@@ -925,6 +942,7 @@ func HandlePacket(packet []byte) error {
 			if len(record.AuthenticationProtocol) > 0 {
 				record.User = xrdUserId.User
 			}
+			record.Host = xrdUserId.Host
 			sessions.Set(UserId{Id: dictid}, record, ttlcache.DefaultTTL)
 			userids.Set(xrdUserId, UserId{Id: dictid}, ttlcache.DefaultTTL)
 		} else {
@@ -933,11 +951,12 @@ func HandlePacket(packet []byte) error {
 	case 'T':
 		log.Debug("HandlePacket: Received a token info packet")
 		infoSize := uint32(header.Plen - 12)
-		if _, tokenauth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
+		if xrdUserId, tokenauth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			userId, userRecord, err := ParseTokenAuth(tokenauth)
 			if err != nil {
 				return err
 			}
+			userRecord.Host = xrdUserId.Host
 			sessions.Set(userId, userRecord, ttlcache.DefaultTTL)
 		} else {
 			return err

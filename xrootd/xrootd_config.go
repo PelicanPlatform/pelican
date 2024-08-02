@@ -194,11 +194,11 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 		return err
 	}
 
-	backendType, err := server_utils.ParseOriginStorageType(param.Origin_StorageType.GetString())
+	backendType, err := server_structs.ParseOriginStorageType(param.Origin_StorageType.GetString())
 	if err != nil {
 		return err
 	}
-	if backendType == server_utils.OriginStoragePosix {
+	if backendType == server_structs.OriginStoragePosix {
 		// For each export, we symlink the exported directory, currently at /var/run/pelican/export/<export.FederationPrefix>,
 		// to the actual data source, which is what we get from the Export object's StoragePrefix
 		for _, export := range originExports {

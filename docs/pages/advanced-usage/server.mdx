@@ -1,0 +1,70 @@
+# Advanced Usage - Servers
+
+This page documents advanced usage of Pelican servers. Features listed below are for server admins familiar with Pelican Servers.
+
+## Pre-generate Server Credentials
+
+### Server Private Key
+
+> **Note**: The server private key should be treated as a **secret** and never shared with the public.
+
+Pelican servers rely on an ECDSA key-pair for signing and verifying tokens used in API requests and object accesses. Pelican servers automatically generate a private key in ECDSA form at the server start, and provide the public key through the OIDC-style discovery endpoint at `/.well-known/openid-configuration`. The public key is useful for various things including Origin namespace prefix registration at the registry (see details [here](../federating-your-data.mdx#obtain-the-public-key-of-the-origin)).
+
+In deployment, it can be convenient to generate the key-pair in advance and mount the private key file to the Pelican server via configuration variable, especially in a container environment. The Pelican CLI comes with a command `pelican generate keygen` for generating private/public key pairs:
+
+```bash copy
+pelican generate keygen
+```
+
+and Pelican will generate both the private key and the public key under the current working directory:
+
+```console
+Successfully generated keys at:
+Private key: /path/to/issuer.jwk
+Public Key: /path/to/issuer-pub.jwks
+```
+
+You can change the location of the generated keys by passing in  arguments `private-key` and/or `public-key`:
+
+
+```bash copy
+pelican generate keygen --private-key /tmp/foo --public-key /tmp/bar
+```
+
+The generated *private key* can be passed to a Pelican server via `IssuerKey` configuration parameter so that the server will take advantage of the generated key instead of generating a new key.
+
+
+```yaml filename="pelican.yaml" copy
+IssuerKey: /path/to/generated/issuer.jwk
+```
+
+
+### Admin Website Password
+
+The `pelican generate` command generates the [htpasswd](https://httpd.apache.org/docs/2.4/programs/htpasswd.html) password file for storing the admin website login password. By pre-generating the htpasswd file, Pelican server admin can skip the initial website setup with the one-time passcode. To generate a password file, run:
+
+```bash copy
+pelican generate password
+```
+
+and Pelican will prompt you to enter and confirm the password:
+
+```console
+Enter your password:
+Confirm the password:
+
+Successfully generated the admin password file at: /path/to/server-web-passwd
+```
+
+You can change the location of the generated htpasswd file by the `-o` or `--output` argument. You can also provide the file that contains your password through the `-p` or `--password` argument.
+
+```bash copy
+pelican generate password -o /path/to/generated-htpasswd-file -p /path/to/password
+```
+
+The generated htpasswd file can then be passed to the Pelican server via `Server.UIPasswordFile` configuration parameter.
+
+```yaml filename="pelican.yaml" copy
+Server:
+  UIPasswordFile: /path/to/generated-htpasswd-file
+```

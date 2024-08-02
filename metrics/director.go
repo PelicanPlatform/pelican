@@ -24,12 +24,21 @@ import (
 )
 
 type (
-	DirectorFTXTestStatus string
+	MetricSimpleStatus    string
+	DirectorFTXTestStatus MetricSimpleStatus
+	DirectorStatResult    string
 )
 
 const (
-	FTXTestSucceeded DirectorFTXTestStatus = "Succeeded"
-	FTXTestFailed    DirectorFTXTestStatus = "Failed"
+	MetricSucceeded MetricSimpleStatus = "Succeeded"
+	MetricFailed    MetricSimpleStatus = "Failed"
+
+	StatSucceeded DirectorStatResult = "Succeeded"
+	StatNotFound  DirectorStatResult = "NotFound"
+	StatTimeout   DirectorStatResult = "Timeout"
+	StatCancelled DirectorStatResult = "Cancelled"
+	StatForbidden DirectorStatResult = "Forbidden"
+	StatUnkownErr DirectorStatResult = "UnknownErr"
 )
 
 var (
@@ -62,4 +71,19 @@ var (
 		Name: "pelican_director_ttl_cache",
 		Help: "The statistics of various TTL caches",
 	}, []string{"name", "type"}) // name: serverAds, jwks; type: evictions, insersions, hits, misses, total
+
+	PelicanDirectorStatActive = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pelican_director_stat_active",
+		Help: "The active stat queries in the director",
+	}, []string{"server_name", "server_url", "server_type"})
+
+	PelicanDirectorStatTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "pelican_director_stat_total",
+		Help: "The total stat queries the director issues. The status can be Succeeded, Cancelled, Timeout, Forbidden, or UnknownErr",
+	}, []string{"server_name", "server_url", "server_type", "result"}) // result: see enums for DirectorStatResult
+
+	PelicanDirectorServerCount = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_server_count",
+		Help: "Total number of servers, delineated by pelican/non-pelican and origin/cache",
+	}, []string{"server_name", "server_type", "server_url", "server_web_url", "server_lat", "server_long", "from_topology"})
 )
