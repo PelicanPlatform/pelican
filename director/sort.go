@@ -171,10 +171,10 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate, ok bool) {
 
 // The all-in-one method to sort serverAds based on Dirtector.CacheSortMethod configuration parameter
 //   - distance: sort serverAds by the distance between the geolocation of the servers and the client
-//   - distanceAndLoad: sort serverAds by the distance with gated halving factor (see details in the smart method)
+//   - distanceAndLoad: sort serverAds by the distance with gated halving factor (see details in the adaptive method)
 //     and the server IO load
 //   - random: sort serverAds randomly
-//   - smart:  sort serverAds based on rules discussed here: https://github.com/PelicanPlatform/pelican/discussions/1198
+//   - adaptive:  sort serverAds based on rules discussed here: https://github.com/PelicanPlatform/pelican/discussions/1198
 //
 // Note that if the client has invalid IP address or MaxMind is unable to get the coordinates out of
 // the client IP, any distance-related steps are skipped. If the sort method is "distance", then
@@ -226,7 +226,7 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 			weight *= lWeighted
 
 			weights[idx] = SwapMap{weight, idx}
-		case "smart":
+		case "adaptive":
 			weight := 1.0
 			// Distance weight
 			if clientCoordOk {
@@ -254,11 +254,11 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 			weights[idx] = SwapMap{rand.Float64(), idx}
 		default:
 			return nil, errors.Errorf("Invalid sort method '%s' set in Director.CacheSortMethod. Valid methods are 'distance',"+
-				"'distanceAndLoad', and 'random.'", param.Director_CacheSortMethod.GetString())
+				"'distanceAndLoad', 'adaptive', and 'random.'", param.Director_CacheSortMethod.GetString())
 		}
 	}
 
-	if sortMethod == "smart" {
+	if sortMethod == "adaptive" {
 		candidates, _ := stochasticSort(weights, candidateLimit)
 		resultAds := []server_structs.ServerAd{}
 		for _, cidx := range candidates[:candidateLimit] {
