@@ -786,10 +786,12 @@ func TestObjectList(t *testing.T) {
 				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(""))
 				require.NoError(t, err)
 				require.Len(t, get, 2)
+				require.Equal(t, fmt.Sprintf("%s/hello_world.txt", export.FederationPrefix), get[0].Name)
 			} else {
 				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()))
 				require.NoError(t, err)
 				require.Len(t, get, 2)
+				require.Equal(t, fmt.Sprintf("%s/hello_world.txt", export.FederationPrefix), get[0].Name)
 			}
 		}
 	})
