@@ -1967,6 +1967,9 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	if totalSize <= 0 && !resp.IsComplete() {
 		headClient := &http.Client{Transport: transport}
 		headRequest, _ := http.NewRequest(http.MethodHead, transferUrl.String(), nil)
+		if token != "" {
+			headRequest.Header.Set("Authorization", "Bearer "+token)
+		}
 		var headResponse *http.Response
 		headResponse, err = headClient.Do(headRequest)
 		if err != nil {

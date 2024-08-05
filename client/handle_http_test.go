@@ -1014,6 +1014,33 @@ func TestFailedConnectionSetupError(t *testing.T) {
 	require.Error(t, err)
 }
 
+// Test that head requests with downloads contain the download token if it exists
+func TestHeadRequestWithDownloadToken(t *testing.T) {
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		}
+	}))
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: "/dev/null",
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+		token: "test-token",
+	}
+	_, _ = downloadObject(transfer)
+}
+
 // Test error message generated on a failed upload
 //
 // Creates a server that does nothing but stall; examines the
