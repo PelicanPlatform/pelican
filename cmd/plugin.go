@@ -198,18 +198,18 @@ func stashPluginMain(args []string) {
 	}
 
 	if getCaches {
-		urls, err := client.GetCacheHostnames(context.Background(), testCachePath)
+		urls, err := client.GetObjectServerHostnames(context.Background(), testCachePath)
 		if err != nil {
-			log.Errorln("Failed to get cache URLs:", err)
+			log.Errorln("Failed to get object server URLs:", err)
 			os.Exit(1)
 		}
 
-		cachesToTry := client.CachesToTry
-		if cachesToTry > len(urls) {
-			cachesToTry = len(urls)
+		serversToTry := client.ObjectServersToTry
+		if serversToTry > len(urls) {
+			serversToTry = len(urls)
 		}
 
-		for _, url := range urls[:cachesToTry] {
+		for _, url := range urls[:serversToTry] {
 			fmt.Println(url)
 		}
 		os.Exit(0)

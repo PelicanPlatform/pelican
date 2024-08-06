@@ -208,8 +208,23 @@ func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.Nam
 	if len(namespaceAd.Generation) != 0 {
 		tokenGen := ""
 		first := true
+		// TODO: At some point, the director stopped sending the `base-path` key in the token gen header. I'm unsure of the _proper_ way
+		// to fix this because the token gen header uses the issuer URL from NamespaceAdV2.Generation.CredentialIssuer, whereas basepaths
+		// come from NamespaceAdV2.Issuer.BasePaths. For now, connecting these two means checking if they have the same issuer URL. This
+		// really needs to be cleaned up in the future, and maybe we need to give more thought to why we have these two structs in the
+		// ad. See https://github.com/PelicanPlatform/pelican/issues/1540
+		var basePath string
+		for _, issuer := range namespaceAd.Issuer {
+			if issuer.IssuerUrl.String() == namespaceAd.Generation[0].CredentialIssuer.String() {
+				if len(issuer.BasePaths) > 0 {
+					basePath = issuer.BasePaths[0]
+				}
+				break
+			}
+		}
+
 		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth),
-			string(namespaceAd.Generation[0].Strategy)}
+			string(namespaceAd.Generation[0].Strategy), basePath}
 		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy"} {
 			hdrVal := hdrVals[idx]
 			if hdrVal == "" {
@@ -221,6 +236,11 @@ func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.Nam
 			first = false
 			tokenGen += hdrKey + "=" + hdrVal
 		}
+
+		if basePath != "" {
+			tokenGen += ", base-path=" + basePath
+		}
+
 		if tokenGen != "" {
 			ginCtx.Writer.Header()["X-Pelican-Token-Generation"] = []string{tokenGen}
 		}

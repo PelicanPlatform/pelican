@@ -94,7 +94,7 @@ func CreateSharingUrl(ctx context.Context, objectUrl *url.URL, isWrite bool) (st
 		log.Errorln("Error while querying the Director:", err)
 		return "", errors.Wrapf(err, "Error while querying the director at %s", directorUrl)
 	}
-	namespace, err := CreateNsFromDirectorResp(dirResp)
+	parsedDirResp, err := ParseDirectorInfo(dirResp)
 	if err != nil {
 		return "", errors.Wrapf(err, "Unable to parse response from director at %s", directorUrl)
 	}
@@ -103,7 +103,7 @@ func CreateSharingUrl(ctx context.Context, objectUrl *url.URL, isWrite bool) (st
 	if isWrite {
 		opts.Operation = config.TokenSharedWrite
 	}
-	token, err := AcquireToken(objectUrl, namespace, opts)
+	token, err := AcquireToken(objectUrl, parsedDirResp, opts)
 	if err != nil {
 		err = errors.Wrap(err, "Failed to acquire token")
 	}
