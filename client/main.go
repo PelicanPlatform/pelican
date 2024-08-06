@@ -706,6 +706,11 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		remoteObject = "/" + remoteObject
 	}
 
+	qIndex := strings.Index(remoteObject, "?")
+	if qIndex != -1 {
+		remoteObject = remoteObject[:qIndex]
+	}
+
 	// get absolute path
 	localDestPath, _ := filepath.Abs(localDestination)
 
@@ -873,6 +878,11 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 
 		if string(sourceFile[0]) != "/" {
 			sourceFile = "/" + sourceFile
+		}
+
+		qIndex := strings.Index(sourceFile, "?")
+		if qIndex != -1 {
+			sourceFile = sourceFile[:qIndex]
 		}
 
 		// get absolute path

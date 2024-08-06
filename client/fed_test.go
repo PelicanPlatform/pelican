@@ -156,6 +156,42 @@ func TestGetAndPutAuth(t *testing.T) {
 		}
 	})
 
+	t.Run("testPelicanObjectPutAndGetWithQueryAndDestDir", func(t *testing.T) {
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
+		assert.NoError(t, err)
+
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			tempPath := tempFile.Name()
+			fileName := filepath.Base(tempPath)
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+				export.FederationPrefix, "osdf_osdf", fileName)
+
+			// Upload the file with PUT
+			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
+			assert.NoError(t, err)
+			if err == nil {
+				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
+			}
+
+			queryURL := uploadURL + "?directread"
+			tempDir := t.TempDir()
+			// Download that same file with GET
+			transferResultsDownload, err := client.DoGet(fed.Ctx, queryURL, tempDir, false, client.WithTokenLocation(tempToken.Name()))
+			assert.NoError(t, err)
+			if err == nil {
+				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+				stats, err := os.Stat(filepath.Join(tempDir, fileName))
+				assert.NoError(t, err)
+				assert.NotNil(t, stats)
+			}
+		}
+	})
+
 	// We ran into a bug with the token option not working how it should. This test ensures that transfer option works how it should
 	t.Run("testPelicanObjectPutAndGetWithWithTokenOption", func(t *testing.T) {
 		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
@@ -306,18 +342,54 @@ func TestCopyAuth(t *testing.T) {
 			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
 				export.FederationPrefix, "osdf_osdf", fileName)
 
-			// Upload the file with PUT
+			// Upload the file with COPY
 			transferResultsUpload, err := client.DoCopy(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, int64(17), transferResultsUpload[0].TransferredBytes)
 			}
 
-			// Download that same file with GET
+			// Download that same file with COPY
 			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			if err == nil {
 				assert.Equal(t, int64(17), transferResultsDownload[0].TransferredBytes)
+			}
+		}
+	})
+
+	t.Run("testPelicanObjectCopyWithQueryAndDestDir", func(t *testing.T) {
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		assert.NoError(t, err)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
+
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			tempPath := tempFile.Name()
+			fileName := filepath.Base(tempPath)
+			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+				export.FederationPrefix, "osdf_osdf", fileName)
+
+			// Upload the file with COPY
+			transferResultsUpload, err := client.DoCopy(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
+			assert.NoError(t, err)
+			if err == nil {
+				assert.Equal(t, int64(17), transferResultsUpload[0].TransferredBytes)
+			}
+
+			queryURL := uploadURL + "?directread"
+			tempDir := t.TempDir()
+			// Download that same file with COPY
+			transferResultsDownload, err := client.DoCopy(fed.Ctx, queryURL, tempDir, false, client.WithTokenLocation(tempToken.Name()))
+			assert.NoError(t, err)
+			if err == nil {
+				assert.Equal(t, int64(17), transferResultsDownload[0].TransferredBytes)
+				stats, err := os.Stat(filepath.Join(tempDir, fileName))
+				assert.NoError(t, err)
+				assert.NotNil(t, stats)
 			}
 		}
 	})
