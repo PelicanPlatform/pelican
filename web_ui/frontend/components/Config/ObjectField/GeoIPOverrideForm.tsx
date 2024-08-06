@@ -1,4 +1,4 @@
-import { GeoIPOverride, Institution } from '@/components/Config/index.d';
+import { GeoIPOverride, Institution } from '@/components/Config/index';
 import React from 'react';
 import { Box, Button, TextField, Typography } from '@mui/material';
 

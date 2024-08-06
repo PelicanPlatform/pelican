@@ -8,6 +8,7 @@ import {
 import { Box, Grid, Typography } from '@mui/material';
 import DirectoryTree from '@/components/DirectoryTree';
 import React from 'react';
+import { SinglePointMap } from '@/components/Map';
 
 interface DirectorDropdownProps {
   server: Server;
@@ -20,11 +21,35 @@ export const DirectorDropdown = ({
 }: DirectorDropdownProps) => {
   return (
     <Dropdown transition={transition} flexDirection={'column'}>
-      <InformationSpan name={'Type'} value={server.type} />
-      <InformationSpan name={'Status'} value={server.healthStatus} />
-      <InformationSpan name={'URL'} value={server.url} />
-      <InformationSpan name={'Longitude'} value={server.longitude.toString()} />
-      <InformationSpan name={'Latitude'} value={server.latitude.toString()} />
+      <Grid container spacing={1}>
+        <Grid item xs={12} md={7}>
+          <InformationSpan name={'Type'} value={server.type} />
+          <InformationSpan name={'Status'} value={server.healthStatus} />
+          <InformationSpan name={'URL'} value={server.url} />
+          <InformationSpan
+            name={'Longitude'}
+            value={server.longitude.toString()}
+          />
+          <InformationSpan
+            name={'Latitude'}
+            value={server.latitude.toString()}
+          />
+        </Grid>
+        <Grid item xs={12} md={5}>
+          <Box
+            borderRadius={1}
+            height={'100%'}
+            minHeight={'140px'}
+            overflow={'hidden'}
+          >
+            {transition && (
+              <SinglePointMap
+                point={{ lat: server.latitude, lng: server.longitude }}
+              />
+            )}
+          </Box>
+        </Grid>
+      </Grid>
       {server.capabilities && (
         <Box mt={1}>
           <CapabilitiesRow capabilities={server.capabilities} />

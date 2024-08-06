@@ -23,7 +23,7 @@ import { Build, Dashboard, Public } from '@mui/icons-material';
 import IconButton from '@mui/material/IconButton';
 import useSWR from 'swr';
 
-import { Sidebar } from '@/components/layout/Sidebar';
+import { ButtonLink, Sidebar } from '@/components/layout/Sidebar';
 import { getExportData } from '../DataExportTable';
 
 export const OriginSidebar = () => {
@@ -35,37 +35,17 @@ export const OriginSidebar = () => {
 
   return (
     <Sidebar>
+      <ButtonLink title={'Dashboard'} href={'/origin/'}>
+        <Dashboard />
+      </ButtonLink>
       {data?.type === 'globus' && (
-        <>
-          <Box pt={1}>
-            <Tooltip title={'Dashboard'} placement={'right'}>
-              <Link href={'/origin/'}>
-                <IconButton>
-                  <Dashboard />
-                </IconButton>
-              </Link>
-            </Tooltip>
-          </Box>
-          <Box pt={1}>
-            <Tooltip title={'Globus Configurations'} placement={'right'}>
-              <Link href={'/origin/globus/'}>
-                <IconButton>
-                  <Public />
-                </IconButton>
-              </Link>
-            </Tooltip>
-          </Box>
-        </>
+        <ButtonLink title={'Globus Configurations'} href={'/origin/globus/'}>
+          <Public />
+        </ButtonLink>
       )}
-      <Box pt={1}>
-        <Tooltip title={'Config'} placement={'right'}>
-          <Link href={'/config/'}>
-            <IconButton>
-              <Build />
-            </IconButton>
-          </Link>
-        </Tooltip>
-      </Box>
+      <ButtonLink title={'Config'} href={'/config/'}>
+        <Build />
+      </ButtonLink>
     </Sidebar>
   );
 };

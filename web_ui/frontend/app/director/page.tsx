@@ -30,6 +30,7 @@ import {
 import { getUser } from '@/helpers/login';
 import FederationOverview from '@/components/FederationOverview';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
+import { PaddedContent } from '@/components/layout';
 
 export default function Page() {
   const { data } = useSWR<Server[]>('getServers', getServers);
@@ -45,49 +46,51 @@ export default function Page() {
   }, [data]);
 
   return (
-    <Box width={'100%'}>
-      <Grid container spacing={2}>
-        <Grid item xs={12} lg={8} xl={6}>
-          <Typography variant={'h4'} pb={2}>
-            Origins
-          </Typography>
-          {originData ? (
-            <DirectorCardList
-              cardProps={{ authenticated: user }}
-              data={originData.map((x) => {
-                return { server: x };
-              })}
-            />
-          ) : (
-            <Box>
-              <Skeleton variant='rectangular' height={118} />
-            </Box>
-          )}
+    <PaddedContent>
+      <Box width={'100%'}>
+        <Grid container spacing={2}>
+          <Grid item xs={12} lg={8} xl={6}>
+            <Typography variant={'h4'} pb={2}>
+              Origins
+            </Typography>
+            {originData ? (
+              <DirectorCardList
+                cardProps={{ authenticated: user }}
+                data={originData.map((x) => {
+                  return { server: x };
+                })}
+              />
+            ) : (
+              <Box>
+                <Skeleton variant='rectangular' height={118} />
+              </Box>
+            )}
+          </Grid>
+          <Grid item xs={12} lg={8} xl={6}>
+            <Typography variant={'h4'} pb={2}>
+              Caches
+            </Typography>
+            {cacheData ? (
+              <DirectorCardList
+                cardProps={{ authenticated: user }}
+                data={cacheData.map((x) => {
+                  return { server: x };
+                })}
+              />
+            ) : (
+              <Box>
+                <Skeleton variant='rectangular' height={118} />
+              </Box>
+            )}
+          </Grid>
+          <Grid item xs={12} lg={8} xl={6}>
+            <AuthenticatedContent>
+              <FederationOverview />
+            </AuthenticatedContent>
+          </Grid>
         </Grid>
-        <Grid item xs={12} lg={8} xl={6}>
-          <Typography variant={'h4'} pb={2}>
-            Caches
-          </Typography>
-          {cacheData ? (
-            <DirectorCardList
-              cardProps={{ authenticated: user }}
-              data={cacheData.map((x) => {
-                return { server: x };
-              })}
-            />
-          ) : (
-            <Box>
-              <Skeleton variant='rectangular' height={118} />
-            </Box>
-          )}
-        </Grid>
-        <Grid item xs={12} lg={8} xl={6}>
-          <AuthenticatedContent>
-            <FederationOverview />
-          </AuthenticatedContent>
-        </Grid>
-      </Grid>
-    </Box>
+      </Box>
+    </PaddedContent>
   );
 }
 

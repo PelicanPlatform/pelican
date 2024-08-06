@@ -1,4 +1,4 @@
-import { Capability, Institution } from '@/components/Config/index.d';
+import { Capability, Institution } from '@/components/Config/index';
 import React from 'react';
 import { Box, Button } from '@mui/material';
 
@@ -7,7 +7,7 @@ import {
   ModalProps,
 } from '@/components/Config/ObjectField/ObjectField';
 import { MultiSelectField, SelectField, StringField } from '../../Config';
-import { Export } from '@/components/Config/index.d';
+import { Export } from '@/components/Config/index';
 
 const verifyForm = (x: Export) => {
   return (
