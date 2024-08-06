@@ -86,4 +86,9 @@ var (
 		Name: "pelican_director_server_count",
 		Help: "Total number of servers, delineated by pelican/non-pelican and origin/cache",
 	}, []string{"server_name", "server_type", "server_url", "server_web_url", "server_lat", "server_long", "from_topology"})
+
+	PelicanDirectorClientVersionTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_client_version_total",
+		Help: "The total number of requests from client versions.",
+	}, []string{"version", "service"})
 )

@@ -1467,7 +1467,7 @@ func TestRedirects(t *testing.T) {
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/api/v1.0/director/origin/pelican/monitoring/test.txt", nil)
-		req.Header.Add("User-Agent", "pelican-v7.6.1")
+		req.Header.Add("User-Agent", "pelican-client/7.6.1")
 		router.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusTemporaryRedirect, w.Code)
@@ -1485,7 +1485,7 @@ func TestRedirects(t *testing.T) {
 
 		req, _ := http.NewRequest("GET", "/my/server", nil)
 		// Provide a few things so that redirectToCache doesn't choke
-		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("User-Agent", "pelican-client/7.6.1")
 		req.Header.Add("X-Real-Ip", "128.104.153.60")
 
 		recorder := httptest.NewRecorder()
@@ -1500,7 +1500,7 @@ func TestRedirects(t *testing.T) {
 
 		// Make sure we can still get a cache list with a smaller number of caches
 		req, _ = http.NewRequest("GET", "/my/server/2", nil)
-		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("User-Agent", "pelican-client/7.6.1")
 		req.Header.Add("X-Real-Ip", "128.104.153.60")
 		c.Request = req
 
@@ -1520,7 +1520,7 @@ func TestRedirects(t *testing.T) {
 
 		// This one should have a collections url because it has a dirlisthost
 		req, _ := http.NewRequest("GET", "/my/server", nil)
-		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("User-Agent", "pelican-client/7.6.1")
 		req.Header.Add("X-Real-Ip", "128.104.153.60")
 		recorder := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(recorder)
@@ -1530,7 +1530,7 @@ func TestRedirects(t *testing.T) {
 
 		// This one has no dirlisthost
 		req, _ = http.NewRequest("GET", "/my/server/2", nil)
-		req.Header.Add("User-Agent", "pelican-v7.999.999")
+		req.Header.Add("User-Agent", "pelican-client/7.6.1")
 		req.Header.Add("X-Real-Ip", "128.104.153.60")
 		c.Request = req
 		redirectToCache(c)

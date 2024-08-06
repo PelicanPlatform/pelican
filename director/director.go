@@ -24,7 +24,6 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -247,38 +246,26 @@ func getFinalRedirectURL(rurl url.URL, requstParams url.Values) string {
 	return rurl.String()
 }
 
-func checkVersionCompat(ginCtx *gin.Context) error {
-	// Check that the version of whichever service (eg client, origin, etc) is talking to the Director
-	// is actually something the Director thinks it can communicate with
-
-	// The service/version is sent via User-Agent header in the form "pelican-<service>/<version>"
+// Helper function to extract version and service from User-Agent
+func extractVersionAndService(ginCtx *gin.Context) (reqVer *version.Version, service string, err error) {
 	userAgentSlc := ginCtx.Request.Header["User-Agent"]
 	if len(userAgentSlc) < 1 {
-		return errors.New("No user agent could be found")
+		return nil, "", errors.New("No user agent could be found")
 	}
 
-	// gin gives us a slice of user agents. Since pelican services should only ever
-	// send one UA, assume that it is the 0-th element of the slice.
 	userAgent := userAgentSlc[0]
-
-	// Make sure we're working with something that's formatted the way we expect. If we
-	// don't match, then we're definitely not coming from one of the services, so we
-	// let things go without an error. Maybe someone is using curl?
-	uaRegExp := regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
-	if matches := uaRegExp.MatchString(userAgent); !matches {
-		return nil
+	reqVerStr, service := utils.ExtractVersionAndServiceFromUserAgent(userAgent)
+	if reqVerStr == "" || service == "" {
+		return nil, "", nil
 	}
-
-	userAgentSplit := strings.Split(userAgent, "/")
-	// Grab the actual service/version that's using the Director. There may be different versioning
-	// requirements between origins, clients, and other services.
-	service := (strings.Split(userAgentSplit[0], "-"))[1]
-	reqVerStr := userAgentSplit[1]
-	reqVer, err := version.NewVersion(reqVerStr)
+	reqVer, err = version.NewVersion(reqVerStr)
 	if err != nil {
-		return errors.Wrapf(err, "Could not parse service version as a semantic version: %s\n", reqVerStr)
+		return nil, "", errors.Wrapf(err, "Could not parse service version as a semantic version: %s\n", reqVerStr)
 	}
+	return reqVer, service, nil
+}
 
+func versionCompatCheck(reqVer *version.Version, service string) error {
 	var minCompatVer *version.Version
 	switch service {
 	case "client":
@@ -287,8 +274,14 @@ func checkVersionCompat(ginCtx *gin.Context) error {
 		minCompatVer = minOriginVersion
 	case "cache":
 		minCompatVer = minCacheVersion
+	case "": // service not provided, ie: using curl
+		return nil
 	default:
 		return errors.Errorf("Invalid version format. The director does not support your %s version (%s).", service, reqVer.String())
+	}
+
+	if reqVer == nil { // version not provided, ie: using curl
+		return nil
 	}
 
 	if reqVer.LessThan(minCompatVer) {
@@ -310,7 +303,8 @@ func checkRedirectQuery(query url.Values) error {
 }
 
 func redirectToCache(ginCtx *gin.Context) {
-	err := checkVersionCompat(ginCtx)
+	reqVer, service, _ := extractVersionAndService(ginCtx)
+	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
 		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -327,6 +321,8 @@ func redirectToCache(ginCtx *gin.Context) {
 		})
 		return
 	}
+
+	collectClientVersionMetric(reqVer, service)
 
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/object")
@@ -502,7 +498,8 @@ func redirectToCache(ginCtx *gin.Context) {
 }
 
 func redirectToOrigin(ginCtx *gin.Context) {
-	err := checkVersionCompat(ginCtx)
+	reqVer, service, _ := extractVersionAndService(ginCtx)
+	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
 		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -519,6 +516,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		})
 		return
 	}
+
+	collectClientVersionMetric(reqVer, service)
 
 	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
@@ -899,7 +898,8 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		return
 	}
 
-	err := checkVersionCompat(ctx)
+	reqVer, service, _ := extractVersionAndService(ctx)
+	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while registering %s and no response was served: %v", sType, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -1248,6 +1248,40 @@ func getHealthTestFile(ctx *gin.Context) {
 	} else {
 		ctx.String(http.StatusOK, fileContent)
 	}
+}
+
+// collectClientVersionMetric will get the user agent of an incoming request
+// parse out the version from it and update the pelican_director_client_version_total metric
+//
+// In the case that parser fails, then metric is not updated
+func collectClientVersionMetric(reqVer *version.Version, service string) {
+	if reqVer == nil || service == "" {
+		metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": "other", "service": "other"}).Inc()
+		return
+	}
+
+	directorVersion, err := version.NewVersion(config.GetVersion())
+	if err != nil {
+		return
+	}
+
+	if reqVer.GreaterThan(directorVersion) {
+		metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": "pelican-future", "service": service}).Inc()
+	}
+
+	versionSegments := reqVer.Segments()
+	if len(versionSegments) < 2 {
+		return
+	}
+
+	strSegments := []string{
+		fmt.Sprintf("%d", versionSegments[0]),
+		fmt.Sprintf("%d", versionSegments[1]),
+	}
+
+	shortendVersion := strings.Join(strSegments, ".")
+
+	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": shortendVersion, "service": service}).Inc()
 }
 
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
