@@ -68,7 +68,6 @@ const (
 	objAvailabilityFactor    = 2    // Multiplier for knowing whether an object is present
 	loadHalvingThreshold     = 10.0 // Threshold where the load havling factor kicks in
 	loadHalvingFactor        = 4.0  // Halving interval for load
-	candidateLimit           = 3    // Number of servers return
 )
 
 func (me SwapMaps) Len() int {
@@ -253,15 +252,15 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 		case server_structs.RandomType:
 			weights[idx] = SwapMap{rand.Float64(), idx}
 		default:
-			return nil, errors.Errorf("Invalid sort method '%s' set in Director.CacheSortMethod. Valid methods are 'distance',"+
-				"'distanceAndLoad', 'adaptive', and 'random.'", param.Director_CacheSortMethod.GetString())
+			// Never say never, but this should never get hit because we validate the value on startup.
+			return nil, errors.Errorf("Invalid sort method '%s' set in Director.CacheSortMethod.", param.Director_CacheSortMethod.GetString())
 		}
 	}
 
 	if sortMethod == string(server_structs.AdaptiveType) {
-		candidates, _ := stochasticSort(weights, candidateLimit)
+		candidates, _ := stochasticSort(weights, serverResLimit)
 		resultAds := []server_structs.ServerAd{}
-		for _, cidx := range candidates[:candidateLimit] {
+		for _, cidx := range candidates[:serverResLimit] {
 			resultAds = append(resultAds, ads[cidx])
 		}
 		return resultAds, nil
