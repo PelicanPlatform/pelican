@@ -1553,7 +1553,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 //
 // Attempts a HEAD against all the endpoints simultaneously.  Put any that don't respond within
 // a second behind those that do respond.
-func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDetails) (size int64, results []transferAttemptDetails) {
+func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDetails, token string) (size int64, results []transferAttemptDetails) {
 	size = -1
 	if len(attempts) < 2 {
 		results = attempts
@@ -1596,6 +1596,9 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 			// header for GETs
 			headRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet, tUrl.String(), nil)
 			headRequest.Header.Set("Range", "0-0")
+			if token != "" {
+				headRequest.Header.Set("Authorization", "Bearer "+token)
+			}
 			var headResponse *http.Response
 			headResponse, err := headClient.Do(headRequest)
 			if err != nil {
@@ -1713,7 +1716,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		return
 	}
 
-	size, attempts := sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts)
+	size, attempts := sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token)
 
 	transferResults = newTransferResults(transfer.job)
 	xferErrors := NewTransferErrors()
@@ -1978,6 +1981,9 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	if totalSize <= 0 && !resp.IsComplete() {
 		headClient := &http.Client{Transport: transport}
 		headRequest, _ := http.NewRequest(http.MethodHead, transferUrl.String(), nil)
+		if token != "" {
+			headRequest.Header.Set("Authorization", "Bearer "+token)
+		}
 		var headResponse *http.Response
 		headResponse, err = headClient.Do(headRequest)
 		if err != nil {

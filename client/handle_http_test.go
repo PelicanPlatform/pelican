@@ -477,24 +477,24 @@ func TestSortAttempts(t *testing.T) {
 
 	defer cancel()
 
-	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3})
+	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, "")
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 	assert.Equal(t, svr1.URL, results[2].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3, attempt1})
+	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3, attempt1}, "")
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 	assert.Equal(t, svr1.URL, results[2].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt1})
+	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt1}, "")
 	assert.Equal(t, int64(-1), size)
 	assert.Equal(t, svr1.URL, results[0].Url.String())
 	assert.Equal(t, svr1.URL, results[1].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3})
+	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3}, "")
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
@@ -1013,6 +1013,33 @@ func TestFailedConnectionSetupError(t *testing.T) {
 	}
 	assert.True(t, IsRetryable(err))
 	assert.Error(t, err)
+}
+
+// Test that head requests with downloads contain the download token if it exists
+func TestHeadRequestWithDownloadToken(t *testing.T) {
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		}
+	}))
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: "/dev/null",
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+		token: "test-token",
+	}
+	_, _ = downloadObject(transfer)
 }
 
 // Test error message generated on a failed upload
