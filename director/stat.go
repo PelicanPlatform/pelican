@@ -266,7 +266,7 @@ func WithToken(tk string) queryOption {
 // Implementation of querying origins/cache servers for their availability of an object.
 // It blocks until max successful requests has been received, all potential origins/caches responded (or timeout), or cancelContext was closed.
 //
-// sType can be config.OriginType, config.CacheType, or both.
+// sType can be server_structs.OriginType, server_structs.CacheType, or both.
 //
 // Returns the object metadata with available urls, a message indicating the stat result, and error if any.
 func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName string, sType server_structs.ServerType, minimum, maximum int, options ...queryOption) (qResult queryResult) {
