@@ -184,6 +184,6 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 	return nil
 }
 
-func (server *CacheServer) GetServerType() config.ServerType {
-	return config.CacheType
+func (server *CacheServer) GetServerType() server_structs.ServerType {
+	return server_structs.CacheType
 }

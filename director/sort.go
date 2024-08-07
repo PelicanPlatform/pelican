@@ -196,8 +196,8 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {
-		switch sortMethod {
-		case "distance":
+		switch server_structs.SortType(sortMethod) {
+		case server_structs.DistanceType:
 			// If we can't get the client coordinates, then simply use random sort
 			if !clientCoordOk {
 				weights[idx] = SwapMap{rand.Float64(), idx}
@@ -212,7 +212,7 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 				weights[idx] = SwapMap{distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, false),
 					idx}
 			}
-		case "distanceAndLoad":
+		case server_structs.DistanceAndLoadType:
 			weight := 1.0
 			// Distance weight
 			if clientCoordOk {
@@ -226,7 +226,7 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 			weight *= lWeighted
 
 			weights[idx] = SwapMap{weight, idx}
-		case "adaptive":
+		case server_structs.AdaptiveType:
 			weight := 1.0
 			// Distance weight
 			if clientCoordOk {
@@ -250,7 +250,7 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 			weight *= lWeighted
 
 			weights[idx] = SwapMap{weight, idx}
-		case "random":
+		case server_structs.RandomType:
 			weights[idx] = SwapMap{rand.Float64(), idx}
 		default:
 			return nil, errors.Errorf("Invalid sort method '%s' set in Director.CacheSortMethod. Valid methods are 'distance',"+
@@ -258,7 +258,7 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 		}
 	}
 
-	if sortMethod == "adaptive" {
+	if sortMethod == string(server_structs.AdaptiveType) {
 		candidates, _ := stochasticSort(weights, candidateLimit)
 		resultAds := []server_structs.ServerAd{}
 		for _, cidx := range candidates[:candidateLimit] {

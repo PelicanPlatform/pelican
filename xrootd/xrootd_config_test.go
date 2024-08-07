@@ -41,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -603,7 +604,7 @@ func TestUpdateAuth(t *testing.T) {
 	viper.Set("Origin.StoragePrefix", "/")
 	config.InitConfig()
 
-	err := config.InitServer(ctx, config.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	scitokensCfgDemo := `
@@ -695,7 +696,7 @@ func TestCopyCertificates(t *testing.T) {
 	err := CopyXrootdCertificates(&origin.OriginServer{})
 	assert.ErrorIs(t, err, errBadKeyPair)
 
-	err = config.InitServer(ctx, config.OriginType)
+	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	err = config.MkdirAll(path.Dir(param.Xrootd_Authfile.GetString()), 0755, -1, -1)
 	require.NoError(t, err)
@@ -725,7 +726,7 @@ func TestCopyCertificates(t *testing.T) {
 	err = os.Rename(keyName, keyName+".orig")
 	require.NoError(t, err)
 
-	err = config.InitServer(ctx, config.OriginType)
+	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	err = CopyXrootdCertificates(&origin.OriginServer{})

@@ -27,7 +27,6 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/web_ui"
@@ -49,7 +48,7 @@ type (
 		BrokerURL         string                      `json:"brokerUrl"`
 		URL               string                      `json:"url"`    // This is server's XRootD URL for file transfer
 		WebURL            string                      `json:"webUrl"` // This is server's Web interface and API
-		Type              server_structs.ServerType   `json:"type"`
+		Type              string                      `json:"type"`
 		Latitude          float64                     `json:"latitude"`
 		Longitude         float64                     `json:"longitude"`
 		Caps              server_structs.Capabilities `json:"capabilities"`
@@ -73,13 +72,13 @@ type (
 )
 
 func (req listServerRequest) ToInternalServerType() server_structs.ServerType {
-	if req.ServerType == "cache" {
+	if req.ServerType == strings.ToLower(server_structs.CacheType.String()) {
 		return server_structs.CacheType
 	}
-	if req.ServerType == "origin" {
+	if req.ServerType == strings.ToLower(server_structs.OriginType.String()) {
 		return server_structs.OriginType
 	}
-	return ""
+	return server_structs.ServerType(0)
 }
 
 func listServers(ctx *gin.Context) {
@@ -93,7 +92,7 @@ func listServers(ctx *gin.Context) {
 	}
 	var servers []*server_structs.Advertisement
 	if queryParams.ServerType != "" {
-		if !strings.EqualFold(queryParams.ServerType, string(server_structs.OriginType)) && !strings.EqualFold(queryParams.ServerType, string(server_structs.CacheType)) {
+		if !strings.EqualFold(queryParams.ServerType, server_structs.OriginType.String()) && !strings.EqualFold(queryParams.ServerType, server_structs.CacheType.String()) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Invalid server type",
@@ -177,7 +176,7 @@ func queryOrigins(ctx *gin.Context) {
 	qr := NewObjectStat().Query(
 		ctx,
 		path,
-		config.OriginType,
+		server_structs.OriginType,
 		queryParams.MinResponses,
 		queryParams.MaxResponses,
 		WithToken(token),

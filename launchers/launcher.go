@@ -50,7 +50,7 @@ var (
 	ErrRestart      error = errors.New("Restart program")
 )
 
-func LaunchModules(ctx context.Context, modules config.ServerType) (servers []server_structs.XRootDServer, shutdownCancel context.CancelFunc, err error) {
+func LaunchModules(ctx context.Context, modules server_structs.ServerType) (servers []server_structs.XRootDServer, shutdownCancel context.CancelFunc, err error) {
 	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
 	if !ok {
 		egrp = &errgroup.Group{}
@@ -104,30 +104,30 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 
 	// Register OIDC endpoint
 	if param.Server_EnableUI.GetBool() {
-		if modules.IsEnabled(config.RegistryType) ||
-			(modules.IsEnabled(config.OriginType) && param.Origin_EnableOIDC.GetBool()) ||
-			(modules.IsEnabled(config.CacheType) && param.Cache_EnableOIDC.GetBool()) ||
-			(modules.IsEnabled(config.DirectorType) && param.Director_EnableOIDC.GetBool()) {
+		if modules.IsEnabled(server_structs.RegistryType) ||
+			(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableOIDC.GetBool()) ||
+			(modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableOIDC.GetBool()) ||
+			(modules.IsEnabled(server_structs.DirectorType) && param.Director_EnableOIDC.GetBool()) {
 			if err = web_ui.ConfigOAuthClientAPIs(engine); err != nil {
 				return
 			}
 		}
 	}
 
-	if modules.IsEnabled(config.RegistryType) {
+	if modules.IsEnabled(server_structs.RegistryType) {
 		// Federation.RegistryUrl defaults to Server.ExternalUrl in InitServer()
 		if err = RegistryServe(ctx, engine, egrp); err != nil {
 			return
 		}
 	}
 
-	if modules.IsEnabled(config.BrokerType) {
+	if modules.IsEnabled(server_structs.BrokerType) {
 		rootGroup := engine.Group("/")
 		broker.RegisterBroker(ctx, rootGroup)
 		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
 	}
 
-	if modules.IsEnabled(config.DirectorType) {
+	if modules.IsEnabled(server_structs.DirectorType) {
 		// Director.DefaultResponse defaults to "cache" through default.yaml
 		// Federation.DirectorUrl defaults to Server.ExternalUrl in InitServer()
 		// Duplicated set are removed
@@ -154,7 +154,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 
 	servers = make([]server_structs.XRootDServer, 0)
 
-	if modules.IsEnabled(config.OriginType) {
+	if modules.IsEnabled(server_structs.OriginType) {
 
 		var originExports []server_utils.OriginExport
 		originExports, err = server_utils.GetOriginExports()
@@ -186,7 +186,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	}
 
 	var lc *local_cache.LocalCache
-	if modules.IsEnabled(config.LocalCacheType) {
+	if modules.IsEnabled(server_structs.LocalCacheType) {
 		// Create and register the cache routines before the web interface is up
 		lc, err = local_cache.NewLocalCache(ctx, egrp, local_cache.WithDeferConfig(true))
 		if err != nil {
@@ -221,7 +221,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		}
 	}
 
-	if modules.IsEnabled(config.OriginType) {
+	if modules.IsEnabled(server_structs.OriginType) {
 		log.Debug("Finishing origin server configuration")
 		if err = OriginServeFinish(ctx, egrp); err != nil {
 			return
@@ -234,7 +234,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	}
 
 	// Origin needs to advertise once before the cache starts
-	if modules.IsEnabled(config.CacheType) && modules.IsEnabled(config.OriginType) {
+	if modules.IsEnabled(server_structs.CacheType) && modules.IsEnabled(server_structs.OriginType) {
 		log.Debug("Advertise Origin and Cache to the Director")
 		if err = launcher_utils.Advertise(ctx, servers); err != nil {
 			return
@@ -303,7 +303,7 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 	}
 
 	var cacheServer server_structs.XRootDServer
-	if modules.IsEnabled(config.CacheType) {
+	if modules.IsEnabled(server_structs.CacheType) {
 		// Give five seconds for the origin to finish advertising to the director
 		desiredURL := fedInfo.DirectorEndpoint + "/.well-known/openid-configuration"
 		if err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false); err != nil {
@@ -318,21 +318,21 @@ func LaunchModules(ctx context.Context, modules config.ServerType) (servers []se
 		servers = append(servers, cacheServer)
 	}
 
-	if modules.IsEnabled(config.CacheType) {
+	if modules.IsEnabled(server_structs.CacheType) {
 		log.Debug("Finishing cache server configuration")
 		if err = CacheServeFinish(ctx, egrp, cacheServer); err != nil {
 			return
 		}
 	}
 
-	if modules.IsEnabled(config.OriginType) || modules.IsEnabled(config.CacheType) {
+	if modules.IsEnabled(server_structs.OriginType) || modules.IsEnabled(server_structs.CacheType) {
 		log.Debug("Launching periodic advertise of origin/cache server to the director")
 		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {
 			return
 		}
 	}
 
-	if modules.IsEnabled(config.LocalCacheType) {
+	if modules.IsEnabled(server_structs.LocalCacheType) {
 		log.Debugln("Starting local cache listener at", param.LocalCache_Socket.GetString())
 		if err := lc.Config(egrp); err != nil {
 			log.Warning("Failure when configuring the local cache; cache may incorrectly generate 403 errors until reconfiguration runs")

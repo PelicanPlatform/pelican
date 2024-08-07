@@ -41,6 +41,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -53,7 +54,7 @@ func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (c
 	viper.Set("Server.WebPort", 8444)
 	viper.Set("Origin.Port", 8443)
 	config.InitConfig()
-	err := config.InitServer(ctx, config.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -172,7 +173,7 @@ func TestUpdateCert(t *testing.T) {
 	// Next, trigger a reload of the cert
 	require.NoError(t, os.Remove(certFile))
 	require.NoError(t, os.Remove(keyFile))
-	require.NoError(t, config.InitServer(ctx, config.OriginType))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
 
 	newDiskFingerprint := getDiskFingerprint()
 	assert.NotEqual(t, diskFingerprint, newDiskFingerprint)

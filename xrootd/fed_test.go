@@ -38,6 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -72,10 +73,10 @@ func TestHttpOriginConfig(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	modules := config.ServerType(0)
-	modules.Set(config.OriginType)
-	modules.Set(config.DirectorType)
-	modules.Set(config.RegistryType)
+	modules := server_structs.ServerType(0)
+	modules.Set(server_structs.OriginType)
+	modules.Set(server_structs.DirectorType)
+	modules.Set(server_structs.RegistryType)
 
 	viper.Set("Origin.HttpServiceUrl", srv.URL+"/test2")
 	viper.Set("Origin.FederationPrefix", "/test")

@@ -77,7 +77,7 @@ type (
 		BrokerURL           url.URL           `json:"broker_url"` // The URL of the broker service to use for this host.
 		URL                 url.URL           `json:"url"`        // This is server's XRootD URL for file transfer
 		WebURL              url.URL           `json:"web_url"`    // This is server's Web interface and API
-		Type                ServerType        `json:"type"`
+		Type                string            `json:"type"`
 		Latitude            float64           `json:"latitude"`
 		Longitude           float64           `json:"longitude"`
 		Caps                Capabilities      `json:"capabilities"` // TODO: Get rid of Writes, Listings, DirectReads in favor of Caps.Writes, Caps.Listings, Caps.DirectReads
@@ -95,8 +95,8 @@ type (
 		NamespaceAds []NamespaceAdV2
 	}
 
-	ServerType   string
 	StrategyType string
+	SortType     string
 
 	OriginAdvertiseV2 struct {
 		// The displayed name of the server.
@@ -148,13 +148,16 @@ type (
 )
 
 const (
-	CacheType  ServerType = "Cache"
-	OriginType ServerType = "Origin"
+	OAuthStrategy StrategyType = "OAuth2"
+	VaultStrategy StrategyType = "Vault"
 )
 
 const (
-	OAuthStrategy StrategyType = "OAuth2"
-	VaultStrategy StrategyType = "Vault"
+	// SortType for sorting the server ads
+	DistanceType        SortType = "distance"
+	DistanceAndLoadType SortType = "distanceAndLoad"
+	RandomType          SortType = "random"
+	AdaptiveType        SortType = "adaptive"
 )
 
 func (ad *ServerAd) MarshalJSON() ([]byte, error) {

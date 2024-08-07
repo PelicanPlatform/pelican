@@ -43,6 +43,7 @@ import (
 
 	pelican_config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
@@ -310,7 +311,7 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 	// This is fine if each process has only one server enabled
 	// Since the "federation-in-the-box" feature won't include any web components
 	// we can assume that this is the only server to enable
-	isDirector := pelican_config.IsServerEnabled(pelican_config.DirectorType)
+	isDirector := pelican_config.IsServerEnabled(server_structs.DirectorType)
 	cfg := flagConfig{}
 	ListenAddress := fmt.Sprintf("0.0.0.0:%v", param.Server_WebPort.GetInt())
 	cfg.webTimeout = model.Duration(5 * time.Minute)

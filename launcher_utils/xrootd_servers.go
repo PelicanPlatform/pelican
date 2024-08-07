@@ -27,7 +27,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -57,7 +56,7 @@ func CheckDefaults(server server_structs.XRootDServer) error {
 
 	runDir := param.Origin_RunLocation.GetString()
 	paramName := "param.Origin_RunLocation"
-	if server.GetServerType().IsEnabled(config.CacheType) {
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		runDir = param.Cache_RunLocation.GetString()
 		paramName = "param.Cache_RunLocation"
 	}
@@ -93,7 +92,7 @@ func CheckDefaults(server server_structs.XRootDServer) error {
 	// Fail if either condition isn't met, although note that url.Parse doesn't
 	// generate errors for many things that are not recognizable urls.
 
-	if server.GetServerType().IsEnabled(config.CacheType) {
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		cacheUrlStr := param.Cache_Url.GetString()
 		if cacheUrlStr == "" {
 			return errors.New("CacheUrl must be configured to serve a cache")

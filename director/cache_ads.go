@@ -324,10 +324,10 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 				// If anything was previously set by a namespace that constituted a shorter
 				// prefix, we overwrite that here because we found a better ns. We also clear
 				// the other slice of server ads, because we know those aren't good anymore
-				if ad.Type == server_structs.OriginType {
+				if ad.Type == server_structs.OriginType.String() {
 					originAds = []server_structs.ServerAd{ad.ServerAd}
 					cacheAds = []server_structs.ServerAd{}
-				} else if ad.Type == server_structs.CacheType {
+				} else if ad.Type == server_structs.CacheType.String() {
 					originAds = []server_structs.ServerAd{}
 					cacheAds = []server_structs.ServerAd{ad.ServerAd}
 				}
@@ -338,7 +338,7 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 					best = ns
 				}
 				// We treat serverAds differently from namespace
-				if ad.Type == server_structs.OriginType {
+				if ad.Type == server_structs.OriginType.String() {
 					// For origin, if there's no origin in the list yet, and there's a matched one from topology, then add it
 					// However, if the first one is from Topology but the second matched one is from Pelican, replace it (repeat this process)
 					if len(originAds) == 0 {
@@ -357,7 +357,7 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 							continue
 						}
 					}
-				} else if ad.Type == server_structs.CacheType {
+				} else if ad.Type == server_structs.CacheType.String() {
 					// For caches, we allow both server from Topology and Pelican to serve the same namespace
 					cacheAds = append(cacheAds, ad.ServerAd)
 				}

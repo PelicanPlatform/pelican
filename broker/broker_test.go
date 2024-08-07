@@ -84,7 +84,7 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	viper.Set("Registry.DbLocation", filepath.Join(dirpath, "ns-registry.sqlite"))
 	viper.Set("Origin.FederationPrefix", "/foo")
 
-	err := config.InitServer(ctx, config.BrokerType)
+	err := config.InitServer(ctx, server_structs.BrokerType)
 	require.NoError(t, err)
 
 	err = registry.InitializeDB()

@@ -29,6 +29,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 )
 
@@ -94,7 +95,7 @@ func cliTokenCreate(cmd *cobra.Command, args []string) error {
 	// Although we don't actually run any server stuff, we need access to the Origin's configuration
 	// to know where private keys live for token signing, so we still need to call InitServer()
 	ctx := context.Background()
-	err := config.InitServer(ctx, config.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	if err != nil {
 		return errors.Wrap(err, "Cannot create token, failed to initialize configuration")
 	}
