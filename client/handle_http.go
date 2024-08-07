@@ -1101,16 +1101,16 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	copyUrl := *remoteUrl // Make a copy of the input URL to avoid concurrent issues.
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
-		recursive:     recursive,
-		localPath:     localPath,
-		remoteURL:     &copyUrl,
-		callback:      tc.callback,
-		skipAcquire:   tc.skipAcquire,
-		tokenLocation: tc.tokenLocation,
-		upload:        upload,
-		uuid:          id,
-		token:         tc.token,
-		project:       project,
+		recursive:      recursive,
+		localPath:      localPath,
+		remoteURL:      &copyUrl,
+		callback:       tc.callback,
+		skipAcquire:    tc.skipAcquire,
+		tokenLocation:  tc.tokenLocation,
+		upload:         upload,
+		uuid:           id,
+		token:          tc.token,
+		project:        project,
 	}
 
 	mergeCancel := func(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {

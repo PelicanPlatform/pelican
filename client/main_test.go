@@ -121,7 +121,6 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 			{Scheme: "https", Host: "preferred1.com", Path: "/foo"},
 			{Scheme: "", Host: "", Path: "+"},
 			{Scheme: "https", Host: "preferred2.com", Path: "/foo"},
-
 		}
 		_, err := generateSortedObjServers(dirResp, preferredOServers)
 		assert.Error(t, err)
