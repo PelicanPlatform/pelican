@@ -19,7 +19,7 @@
 
 import { Box, Tooltip } from '@mui/material';
 import Link from 'next/link';
-import { Build, Dashboard, Public } from '@mui/icons-material';
+import { Build, Dashboard, Public, Lock } from '@mui/icons-material';
 import IconButton from '@mui/material/IconButton';
 import useSWR from 'swr';
 
@@ -43,6 +43,9 @@ export const OriginSidebar = () => {
           <Public />
         </ButtonLink>
       )}
+      <ButtonLink title={'Issuer'} href={'/origin/issuer'}>
+        <Lock />
+      </ButtonLink>
       <ButtonLink title={'Config'} href={'/config/'}>
         <Build />
       </ButtonLink>

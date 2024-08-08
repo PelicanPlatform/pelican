@@ -19,8 +19,133 @@ import {
 } from '@mui/icons-material';
 import React, { useMemo, useCallback, ChangeEvent, KeyboardEvent } from 'react';
 
-import { ParameterInputProps } from '@/components/Config/index';
-import { createId, buildPatch, stringSort } from './util';
+import { createId, buildPatch, stringSort } from '../util';
+
+export type StringSliceFieldProps = {
+  name: string;
+  value: string[];
+  focused?: boolean;
+  onChange: (value: string[]) => void;
+};
+
+const StringSliceField = ({
+  onChange,
+  name,
+  value,
+  focused,
+}: StringSliceFieldProps) => {
+  const id = useMemo(() => createId(name), [name]);
+
+  const transformedValue = useMemo(() => (value == null ? [] : value), [value]);
+
+  const [inputValue, setInputValue] = React.useState<string>('');
+
+  const [dropdownHeight, setDropdownHeight] = React.useState<
+    string | undefined
+  >('0px');
+
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      if (
+        event.key == 'Enter' &&
+        event.target instanceof HTMLInputElement &&
+        event.target.value != ''
+      ) {
+        const newValue = [
+          ...new Set<string>([...transformedValue, event.target.value]),
+        ].sort(stringSort);
+
+        onChange(newValue);
+        setInputValue('');
+      }
+    },
+    [onChange, inputValue]
+  );
+
+  return (
+    <>
+      <TextField
+        fullWidth
+        size='small'
+        id={id}
+        label={name}
+        variant={'outlined'}
+        value={inputValue}
+        focused={focused}
+        helperText={inputValue == '' ? undefined : 'Press enter to add'}
+        onChange={(e) => setInputValue(e.target.value)}
+        InputProps={{ onKeyDown: handleKeyDown }}
+      />
+      <Box>
+        {transformedValue.length > 0 && (
+          <Box
+            sx={{
+              display: 'flex',
+              borderRadius: 1,
+              border: '1px solid #c4c4c4',
+            }}
+          >
+            <Box mx={'auto'}>
+              <Tooltip title={'Minimize'}>
+                <IconButton
+                  size='small'
+                  onClick={() => setDropdownHeight('0px')}
+                >
+                  <KeyboardArrowUp />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title={'Scroll View'}>
+                <IconButton
+                  size='small'
+                  onClick={() => setDropdownHeight('10rem')}
+                >
+                  <KeyboardArrowDown />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title={'Maximize'}>
+                <IconButton
+                  size='small'
+                  onClick={() => setDropdownHeight('auto')}
+                >
+                  <KeyboardDoubleArrowDown />
+                </IconButton>
+              </Tooltip>
+              <Box ml={1} display={'inline'}>
+                <Typography variant={'caption'}>
+                  {transformedValue.length} Items
+                </Typography>
+              </Box>
+            </Box>
+          </Box>
+        )}
+        <Box
+          sx={{
+            maxHeight: dropdownHeight,
+            overflowY: 'scroll',
+            borderBottom:
+              transformedValue.length == 0 || dropdownHeight == '0px'
+                ? undefined
+                : 'black 1px solid',
+          }}
+        >
+          {transformedValue.map((val) => {
+            return (
+              <StringSliceCard
+                key={val}
+                value={val}
+                onClick={() => {
+                  const newValue = transformedValue.filter((v) => v != val);
+                  onChange(newValue);
+                  setInputValue(val);
+                }}
+              />
+            );
+          })}
+        </Box>
+      </Box>
+    </>
+  );
+};
 
 interface StringSliceCardProps {
   value: string;
@@ -58,135 +183,6 @@ const StringSliceCard = ({ value, onClick }: StringSliceCardProps) => {
         <Close />
       </IconButton>
     </Box>
-  );
-};
-
-export type StringSliceFieldProps = {
-  name: string;
-  value: string[];
-  onChange: (value: string[]) => void;
-};
-
-const StringSliceField = ({ onChange, name, value }: StringSliceFieldProps) => {
-  const id = useMemo(() => createId(name), [name]);
-  const startingState = useMemo(() => (value == null ? [] : value), [value]);
-
-  const [localValue, setLocalValue] = React.useState<string[]>(startingState);
-  const [inputValue, setInputValue] = React.useState<string>('');
-
-  const [dropdownHeight, setDropdownHeight] = React.useState<
-    string | undefined
-  >('0px');
-
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent) => {
-      if (
-        event.key == 'Enter' &&
-        event.target instanceof HTMLInputElement &&
-        event.target.value != ''
-      ) {
-        const newValue = [
-          ...new Set<string>([...localValue, event.target.value]),
-        ].sort(stringSort);
-
-        setLocalValue(newValue);
-        onChange(newValue);
-        setInputValue('');
-      }
-    },
-    [onChange, inputValue]
-  );
-
-  const handleOnChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      setInputValue(event.target.value);
-    },
-    []
-  );
-
-  return (
-    <>
-      <TextField
-        fullWidth
-        size='small'
-        id={id}
-        label={name}
-        variant={'outlined'}
-        value={inputValue}
-        focused={localValue.toString() != startingState.toString()}
-        helperText={inputValue == '' ? undefined : 'Press enter to add'}
-        onChange={handleOnChange}
-        InputProps={{ onKeyDown: handleKeyDown }}
-      />
-      <Box>
-        {localValue.length > 0 && (
-          <Box
-            sx={{
-              display: 'flex',
-              borderRadius: 1,
-              border: '1px solid #c4c4c4',
-            }}
-          >
-            <Box mx={'auto'}>
-              <Tooltip title={'Minimize'}>
-                <IconButton
-                  size='small'
-                  onClick={() => setDropdownHeight('0px')}
-                >
-                  <KeyboardArrowUp />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title={'Scroll View'}>
-                <IconButton
-                  size='small'
-                  onClick={() => setDropdownHeight('10rem')}
-                >
-                  <KeyboardArrowDown />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title={'Maximize'}>
-                <IconButton
-                  size='small'
-                  onClick={() => setDropdownHeight('auto')}
-                >
-                  <KeyboardDoubleArrowDown />
-                </IconButton>
-              </Tooltip>
-              <Box ml={1} display={'inline'}>
-                <Typography variant={'caption'}>
-                  {localValue.length} Items
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-        )}
-        <Box
-          sx={{
-            maxHeight: dropdownHeight,
-            overflowY: 'scroll',
-            borderBottom:
-              localValue.length == 0 || dropdownHeight == '0px'
-                ? undefined
-                : 'black 1px solid',
-          }}
-        >
-          {localValue.map((val) => {
-            return (
-              <StringSliceCard
-                key={val}
-                value={val}
-                onClick={() => {
-                  const newValue = localValue.filter((v) => v != val);
-                  setLocalValue(newValue);
-                  onChange(buildPatch(name, newValue));
-                  setInputValue(val);
-                }}
-              />
-            );
-          })}
-        </Box>
-      </Box>
-    </>
   );
 };
 

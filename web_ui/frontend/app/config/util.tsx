@@ -1,26 +1,36 @@
 import {
   Config,
-  ConfigMetadata,
+  ParameterMetadata,
   ParameterInputProps,
-} from '@/components/Config';
+  ParameterMetadataList,
+  ParameterMetadataRecord,
+  Export,
+} from '@/components/configuration';
 
-export const getConfigMetadata = async () => {
-  try {
-    const res = await fetch('/view/data/parameters.json');
-    const data = (await res.json()) as ConfigMetadata[];
-    const metadata = data.reduce(
-      (acc: ConfigMetadata, curr: ConfigMetadata) => {
-        const [key, value] = Object.entries(curr)[0];
-        acc[key] = value;
-        return acc;
-      },
-      {}
-    );
+/**
+ * The parameters are stored as a list keyed by the parameter name. This function
+ * converts the list into a record that is keyed by the parameter name. This
+ * parameter name can be resolved to multiple keys.
+ * @param metadata
+ */
+export const convertFlatConfigToRecord = (metadata: ParameterMetadataList) => {
+  let metadataRecord: ParameterMetadataRecord = {};
 
-    return metadata;
-  } catch {
-    return undefined;
-  }
+  metadata.forEach((record) => {
+    const [key, value] = Object.entries(record)[0];
+    const keys = key.split('.');
+    const lastKey = keys.pop() as string;
+    let current: Record<string, any> = metadataRecord;
+    keys.forEach((k) => {
+      if (!current[k]) {
+        current[k] = {};
+      }
+      current = current[k];
+    });
+    current[lastKey] = value;
+  });
+
+  return metadataRecord;
 };
 
 /**
@@ -61,9 +71,10 @@ export const stripNulls = (config: any) => {
  * Check if a value is a Config value or a ParameterInputProps value
  * @param value
  */
-export const isConfig = (value: ParameterInputProps | Config): boolean => {
-  const isConfig = (value as Config)?.Type === undefined;
-  return isConfig;
+export const isParameterMetadata = (
+  value: ExpandedObject<ParameterMetadata> | ParameterMetadata
+): boolean => {
+  return (value as Config)?.type !== undefined;
 };
 
 /**
@@ -71,14 +82,14 @@ export const isConfig = (value: ParameterInputProps | Config): boolean => {
  * @param a
  * @param b
  */
-export function sortConfig(
-  a: [string, ParameterInputProps | Config],
-  b: [string, ParameterInputProps | Config]
+export function sortMetadata(
+  a: [string, ExpandedObject<ParameterMetadata> | ParameterMetadata],
+  b: [string, ExpandedObject<ParameterMetadata> | ParameterMetadata]
 ) {
-  if (isConfig(a[1]) && !isConfig(b[1])) {
+  if (!isParameterMetadata(a[1]) && isParameterMetadata(b[1])) {
     return 1;
   }
-  if (!isConfig(a[1]) && isConfig(b[1])) {
+  if (isParameterMetadata(a[1]) && !isParameterMetadata(b[1])) {
     return -1;
   }
   return a[0].localeCompare(b[0]);
@@ -104,7 +115,7 @@ export function deleteKey(
   }
 }
 
-type NestedRecord = { [k: string]: any | NestedRecord };
+type NestedRecord = { [k: string]: any | undefined | NestedRecord };
 
 /**
  * Update a value in an object recursively
@@ -119,4 +130,87 @@ export function updateValue(obj: NestedRecord, key: string[], value: any) {
   } else {
     updateValue(obj[key[0]], key.slice(1), value);
   }
+}
+
+type GeneralNestedRecord<T> = { [k: string]: T | GeneralNestedRecord<T> };
+
+/**
+ * Drill down into an object and return a list of keys that point to objects
+ * that pass a function check
+ */
+export function objectDrill<T>(
+  obj: GeneralNestedRecord<T>,
+  check: (value: T | any) => boolean
+): string[][] {
+  let keys: string[][] = [];
+  Object.entries(obj).forEach(([key, value]) => {
+    if (check(value)) {
+      keys.push([key]);
+    } else {
+      keys = keys.concat(
+        objectDrill(value as GeneralNestedRecord<T>, check).map((k) => [
+          key,
+          ...k,
+        ])
+      );
+    }
+  });
+
+  return keys;
+}
+
+/*
+ * Flatten object so that all nested objects have keys in the first level
+ *
+ * For example:
+ *
+ * {
+ *  a: {
+ *   b: 1
+ *  }
+ * }
+ *
+ * becomes
+ *
+ * {
+ *  a.b: 1
+ * }
+ */
+export const flattenObject = (object: any): Record<string, any> => {
+  let flatObject: Record<string, any> = {};
+  for (const [key, value] of Object.entries(object)) {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      const nestedObject = flattenObject(value);
+      for (const [nestedKey, nestedValue] of Object.entries(nestedObject)) {
+        flatObject[key + '.' + nestedKey] = nestedValue;
+      }
+    } else {
+      flatObject[key] = value;
+    }
+  }
+  return flatObject;
+};
+
+export type ExpandedObject<T> = { [k: string]: T | ExpandedObject<T> };
+
+/*
+ * Expand object so that all keys with dots are nested objects
+ */
+export function expandObject<T>(object: Record<string, T>): ExpandedObject<T> {
+  let expandedObject: ExpandedObject<T> = {};
+  for (const [key, value] of Object.entries(object)) {
+    const keys = key.split('.');
+    let currentObject = expandedObject;
+    keys.forEach((key, index) => {
+      if (index === keys.length - 1) {
+        currentObject[key] = value;
+      } else {
+        if (!currentObject[key]) {
+          currentObject[key] = {};
+        }
+        currentObject = currentObject[key] as ExpandedObject<T>;
+      }
+    });
+  }
+  return expandedObject;
 }

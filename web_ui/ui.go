@@ -81,9 +81,8 @@ func getConfigValues(ctx *gin.Context) {
 		})
 		return
 	}
-	configWithType := param.ConvertToConfigWithType(rawConfig)
 
-	ctx.JSON(http.StatusOK, configWithType)
+	ctx.JSON(http.StatusOK, rawConfig)
 }
 
 func updateConfigValues(ctx *gin.Context) {

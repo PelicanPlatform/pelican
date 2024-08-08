@@ -1,4 +1,4 @@
-import ObjectField from './ObjectField';
+export * from './ObjectField';
 import InstitutionForm from './InstitutionForm';
 import GeoIPOverrideForm from './GeoIPOverrideForm';
 import OIDCAuthenticationRequirementForm from './OIDCAuthenticationRequirementForm';
@@ -7,9 +7,11 @@ import CustomRegistrationFieldForm from './CustomRegistrationFieldForm';
 import OptionForm from './OptionForm';
 import ExportForm from './ExportForm';
 import LotForm from './LotForm';
+import PathForm from './PathForm';
+import AuthorizationTemplateForm from './AuthorizationTemplateForm';
 
 export {
-  ObjectField,
+  AuthorizationTemplateForm,
   InstitutionForm,
   GeoIPOverrideForm,
   OIDCAuthenticationRequirementForm,
@@ -18,4 +20,5 @@ export {
   CustomRegistrationFieldForm,
   ExportForm,
   LotForm,
+  PathForm,
 };

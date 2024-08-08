@@ -1,3 +1,5 @@
+import React, { useMemo } from 'react';
+
 import {
   AuthorizationTemplate,
   CustomRegistrationField,
@@ -8,18 +10,12 @@ import {
   IPMapping,
   Lot,
   OIDCAuthenticationRequirement,
-  Parameter,
   ParameterInputProps,
-} from '@/components/Config/index';
-import {
   BooleanField,
   DurationField,
   IntegerField,
   StringField,
   StringSliceField,
-} from '../Config';
-import React from 'react';
-import {
   CustomRegistrationFieldForm,
   ExportForm,
   ObjectField,
@@ -27,81 +23,103 @@ import {
   InstitutionForm,
   OIDCAuthenticationRequirementForm,
   LotForm,
-} from './ObjectField';
-import { buildPatch } from '@/components/Config/util';
-import IPMappingForm from '@/components/Config/ObjectField/IPMappingForm';
-import AuthorizationTemplateForm from '@/components/Config/ObjectField/AuthorizationTemplateForm';
+  IPMappingForm,
+  AuthorizationTemplateForm,
+} from '@/components/configuration';
+import { buildPatch } from '@/components/configuration/util';
+import { LoadingField } from '@/components/configuration/Fields/LoadingField';
 
-const Field = ({ onChange, ...props }: ParameterInputProps) => {
-  function handleChange<T>(value: T) {
-    onChange(buildPatch(props.name, value));
+const Field = ({
+  onChange,
+  value,
+  name,
+  focused,
+  ...props
+}: ParameterInputProps) => {
+  const handleChange = useMemo(() => {
+    return <T,>(value: T) => {
+      return onChange({ [name]: value });
+    };
+  }, [value, name, onChange]);
+
+  // If the value is undefined then return loading field
+  if (value === undefined) {
+    return <LoadingField name={name} />;
   }
 
+  // Otherwise use the field that corresponds to the identified type
   switch (props.type) {
     case 'bool':
       return (
         <BooleanField
+          focused={focused}
           onChange={handleChange<boolean>}
-          name={props.name}
-          value={props.Value as boolean}
+          name={name}
+          value={value as boolean}
         />
       );
     case 'duration':
       return (
         <DurationField
+          focused={focused}
           onChange={handleChange<Duration>}
-          name={props.name}
-          value={props.Value as number}
+          name={name}
+          value={value as number}
         />
       );
     case 'stringSlice':
       return (
         <StringSliceField
+          focused={focused}
           onChange={handleChange<string[]>}
-          name={props.name}
-          value={props.Value as string[]}
+          name={name}
+          value={value as string[]}
         />
       );
     case 'string':
       return (
         <StringField
+          focused={focused}
           onChange={handleChange<string>}
-          name={props.name}
-          value={props.Value as string}
+          name={name}
+          value={value as string}
         />
       );
     case 'filename':
       return (
         <StringField
+          focused={focused}
           onChange={handleChange<string>}
-          name={props.name}
-          value={props.Value as string}
+          name={name}
+          value={value as string}
         />
       );
     case 'url':
       return (
         <StringField
+          focused={focused}
           onChange={handleChange<string>}
-          name={props.name}
-          value={props.Value as string}
+          name={name}
+          value={value as string}
         />
       );
     case 'int':
       return (
         <IntegerField
+          focused={focused}
           onChange={handleChange<number>}
-          name={props.name}
-          value={props.Value as number}
+          name={name}
+          value={value as number}
         />
       );
     case 'object':
-      switch (props.name.split('.').slice(-1)[0]) {
+      switch (name.split('.').slice(-1)[0]) {
         case 'Institutions':
           return (
             <ObjectField<Institution>
               onChange={handleChange<Institution[]>}
-              name={props.name}
-              value={props.Value as Institution[]}
+              name={name}
+              value={value as Institution[]}
               Form={InstitutionForm}
               keyGetter={(v) => v.name}
             />
@@ -109,9 +127,10 @@ const Field = ({ onChange, ...props }: ParameterInputProps) => {
         case 'GeoIPOverrides':
           return (
             <ObjectField
+              focused={focused}
               onChange={handleChange<GeoIPOverride[]>}
-              name={props.name}
-              value={props.Value as GeoIPOverride[]}
+              name={name}
+              value={value as GeoIPOverride[]}
               Form={GeoIPOverrideForm}
               keyGetter={(v) => v.ip}
             />
@@ -119,9 +138,10 @@ const Field = ({ onChange, ...props }: ParameterInputProps) => {
         case 'OIDCAuthenticationRequirements':
           return (
             <ObjectField
+              focused={focused}
               onChange={handleChange<OIDCAuthenticationRequirement[]>}
-              name={props.name}
-              value={props.Value as OIDCAuthenticationRequirement[]}
+              name={name}
+              value={value as OIDCAuthenticationRequirement[]}
               Form={OIDCAuthenticationRequirementForm}
               keyGetter={(v) => v.value + v.claim}
             />
@@ -129,9 +149,10 @@ const Field = ({ onChange, ...props }: ParameterInputProps) => {
         case 'AuthorizationTemplates':
           return (
             <ObjectField
+              focused={focused}
               onChange={handleChange<AuthorizationTemplate[]>}
-              name={props.name}
-              value={props.Value as AuthorizationTemplate[]}
+              name={name}
+              value={value as AuthorizationTemplate[]}
               Form={AuthorizationTemplateForm}
               keyGetter={(v) => v.prefix}
             />
@@ -139,9 +160,10 @@ const Field = ({ onChange, ...props }: ParameterInputProps) => {
         case 'IPMapping':
           return (
             <ObjectField
+              focused={focused}
               onChange={handleChange<IPMapping[]>}
-              name={props.name}
-              value={props.Value as IPMapping[]}
+              name={name}
+              value={value as IPMapping[]}
               Form={IPMappingForm}
               keyGetter={(v) => ('all' in v ? v.all : v.source)}
             />
@@ -149,9 +171,10 @@ const Field = ({ onChange, ...props }: ParameterInputProps) => {
         case 'CustomRegistrationFields':
           return (
             <ObjectField
+              focused={focused}
               onChange={handleChange<CustomRegistrationField[]>}
-              name={props.name}
-              value={props.Value as CustomRegistrationField[]}
+              name={name}
+              value={value as CustomRegistrationField[]}
               Form={CustomRegistrationFieldForm}
               keyGetter={(v) => v.name}
             />
@@ -159,9 +182,10 @@ const Field = ({ onChange, ...props }: ParameterInputProps) => {
         case 'Exports':
           return (
             <ObjectField
+              focused={focused}
               onChange={handleChange<Export[]>}
-              name={props.name}
-              value={props.Value as Export[]}
+              name={name}
+              value={value as Export[]}
               Form={ExportForm}
               keyGetter={(v) => v.federationprefix}
             />
@@ -169,9 +193,10 @@ const Field = ({ onChange, ...props }: ParameterInputProps) => {
         case 'Lots':
           return (
             <ObjectField
+              focused={focused}
               onChange={handleChange<Lot[]>}
-              name={props.name}
-              value={props.Value as Lot[]}
+              name={name}
+              value={value as Lot[]}
               Form={LotForm}
               keyGetter={(v) => v.lotname}
             />

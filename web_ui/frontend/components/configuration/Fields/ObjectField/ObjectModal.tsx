@@ -1,11 +1,16 @@
-import { Institution } from '@/components/Config/index';
 import React from 'react';
-import { IconButton, Modal, Portal, Typography } from '@mui/material';
-import { Box, Button, TextField } from '@mui/material';
-
-import { ModalProps } from '@/components/Config/ObjectField/ObjectField';
-import { ClickAwayListener } from '@mui/base';
+import {
+  IconButton,
+  Modal,
+  Portal,
+  Typography,
+  Box,
+  Button,
+  TextField,
+} from '@mui/material';
 import { Close } from '@mui/icons-material';
+
+import { ModalProps } from '@/components/configuration';
 
 const ObjectModal = ({ name, open, handleClose, children }: ModalProps) => {
   return (

@@ -8,6 +8,7 @@ import SelectField from './SelectField';
 import DateTimeField from './DateTimeField';
 import Field from './Field';
 
+export * from './ObjectField';
 export {
   BooleanField,
   StringField,
@@ -19,8 +20,6 @@ export {
   DateTimeField,
   Field,
 };
-
-export type Parameter = ParameterMetadata & ParameterValue;
 
 export interface ParameterMetadata {
   name: string;
@@ -38,26 +37,33 @@ export interface ParameterMetadata {
   components: string[];
 }
 
-export interface ParameterValue {
-  Type: string;
-  Value:
-    | string
-    | number
-    | boolean
-    | string[]
-    | undefined
-    | Coordinate[]
-    | Institution[]
-    | CustomRegistrationField[]
-    | OIDCAuthenticationRequirement[]
-    | AuthorizationTemplate[]
-    | IPMapping[]
-    | GeoIPOverride[]
-    | Export[]
-    | Lot[];
-}
+export type ParameterValue =
+  | string
+  | number
+  | boolean
+  | string[]
+  | undefined
+  | Coordinate[]
+  | Institution[]
+  | CustomRegistrationField[]
+  | OIDCAuthenticationRequirement[]
+  | AuthorizationTemplate[]
+  | IPMapping[]
+  | GeoIPOverride[]
+  | Export[]
+  | Lot[];
 
-export type ParameterInputProps = Parameter & {
+export type ParameterValueRecord = { [key: string]: ParameterValue };
+
+// This is how we receive the metadata from the backend API
+export type ParameterMetadataList = { [key: string]: ParameterMetadata }[];
+
+// This is how we want to store it for future interactions
+export type ParameterMetadataRecord = { [key: string]: ParameterMetadata };
+
+export type ParameterInputProps = ParameterMetadata & {
+  focused?: boolean;
+  value?: ParameterValue;
   onChange: (patch: any) => void;
 };
 
@@ -164,18 +170,6 @@ export interface Lot {
   managementpolicyattrs: ManagementPolicyAttrs;
 }
 
-export interface ConfigMetadata {
-  [key: string]: ConfigMetadataValue;
-}
-
-export interface ConfigMetadataValue {
-  components: string[];
-  default: boolean;
-  description: string;
-  name: string;
-  type: string;
-}
-
 export type Config = {
-  [key: string]: ParameterInputProps | Config;
+  [key: string]: ParameterValue | Config;
 };

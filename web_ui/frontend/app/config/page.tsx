@@ -22,12 +22,11 @@ import {
   Box,
   Grid,
   Typography,
-  Skeleton,
   Snackbar,
   Button,
   IconButton,
 } from '@mui/material';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AppRegistration,
   AssistantDirection,
@@ -36,44 +35,48 @@ import {
   Download,
 } from '@mui/icons-material';
 import useSWR from 'swr';
-import { merge, isMatch } from 'lodash';
+import { merge, isMatch, isEqual } from 'lodash';
 import * as yaml from 'js-yaml';
 import { ButtonLink, Sidebar } from '@/components/layout/Sidebar';
 import { Main } from '@/components/layout/Main';
-import { submitConfigChange } from '@/components/Config/util';
+import { submitConfigChange } from '@/components/configuration/util';
 import {
-  ParameterInputProps,
-  Config,
-  ConfigMetadata,
-} from '@/components/Config/index';
-import {
-  deleteKey,
-  getConfigMetadata,
-  stripNulls,
-  stripTypes,
-  updateValue,
-} from './util';
+  ParameterMetadataList,
+  ParameterValueRecord,
+} from '@/components/configuration';
+import { stripNulls, flattenObject } from './util';
 import StatusSnackBar, {
   StatusSnackBarProps,
 } from '@/components/StatusSnackBar';
-import { useRouter } from 'next/navigation';
-import { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 import { ServerType } from '@/index';
 import { getEnabledServers } from '@/helpers/util';
 import DownloadButton from '@/components/DownloadButton';
 import { PaddedContent } from '@/components/layout';
-import { ConfigDisplay, TableOfContents } from '@/app/config/components';
+import {
+  ConfigDisplay as NonMemoizedConfigDisplay,
+  TableOfContents,
+} from '@/app/config/components';
+import _metadata from '@/public/data/parameters.json';
+import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
+
+// Memoize expensive components
+const ConfigDisplay = memo(NonMemoizedConfigDisplay);
 
 function Config() {
-  const router = useRouter();
+  const metadataList = _metadata as unknown as ParameterMetadataList;
+  // @ts-ignore
+  const metadata = useMemo(() => merge(...metadataList), [metadataList]);
 
   const [status, setStatus] = useState<StatusSnackBarProps | undefined>(
     undefined
   );
-  const [config, setConfig] = useState<Config | undefined>(undefined);
-  const [configKey, setConfigKey] = useState<number>(0);
-  const [patch, _setPatch] = useState<any>({});
+  const [patch, _setPatch] = useState<ParameterValueRecord>({});
 
+  const {
+    data: serverConfig,
+    mutate,
+    error,
+  } = useSWR<ParameterValueRecord>('getConfig', getConfig);
   const { data: enabledServers } = useSWR<ServerType[]>(
     'getEnabledServers',
     getEnabledServers,
@@ -81,30 +84,21 @@ function Config() {
       fallbackData: ['origin', 'registry', 'director', 'cache'],
     }
   );
-  const { data: configMetadata } = useSWR<ConfigMetadata | undefined>(
-    'getConfigMetadata',
-    getConfigMetadata
-  );
 
   const setPatch = useCallback(
     (fieldPatch: any) => {
-      _setPatch((p: any) => structuredClone(merge(p, fieldPatch)));
+      _setPatch((p: any) => {
+        return {...p, ...fieldPatch}
+      })
     },
     [_setPatch]
   );
 
-  const _getConfig = useCallback(
-    () => getConfig(setConfig, setConfigKey, setStatus, router),
-    [setConfig, setConfigKey, setStatus, router]
-  );
-
-  useEffect(() => {
-    _getConfig();
-  }, []);
-
-  const filteredConfig = useMemo(() => {
-    return filterConfig(config, configMetadata, enabledServers);
-  }, [config, enabledServers, configMetadata]);
+  const updatesPending = useMemo(() => {
+    return !Object.keys(patch).every((key) =>
+      isEqual(patch[key], serverConfig?.[key])
+    );
+  }, [serverConfig, patch]);
 
   return (
     <>
@@ -132,180 +126,101 @@ function Config() {
       </Sidebar>
       <Main>
         <PaddedContent>
-          <Box display={'flex'} flexDirection={'row'}>
-            <Typography variant={'h4'} component={'h2'} mb={1}>
-              Configuration
-            </Typography>
-            {config && (
-              <Box ml={2}>
-                <DownloadButton
-                  Button={IconButton}
-                  mimeType={'text/yaml'}
-                  data={yaml.dump(
-                    stripNulls(stripTypes(structuredClone(config)))
-                  )}
-                >
-                  <Download />
-                </DownloadButton>
-              </Box>
-            )}
-          </Box>
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={8} lg={6}>
-              <form>
-                {filteredConfig === undefined ||
-                configMetadata === undefined ? (
-                  <Box borderRadius={1} overflow={'hidden'}>
-                    <Skeleton
-                      variant='rectangular'
-                      animation='wave'
-                      height={'90vh'}
-                    />
+          <AuthenticatedContent redirect={true}>
+            <Box display={'flex'} flexDirection={'row'}>
+              <Typography variant={'h4'} component={'h2'} mb={1}>
+                Configuration
+                {serverConfig && (
+                  <Box ml={2} display={'inline'}>
+                    <DownloadButton
+                      Button={IconButton}
+                      mimeType={'text/yaml'}
+                      data={yaml.dump(
+                        stripNulls(structuredClone(serverConfig))
+                      )}
+                    >
+                      <Download />
+                    </DownloadButton>
                   </Box>
-                ) : (
+                )}
+              </Typography>
+            </Box>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={8} lg={6}>
+                <form>
                   <ConfigDisplay
-                    key={configKey.toString()}
-                    id={[]}
-                    name={''}
-                    value={filteredConfig}
-                    level={4}
+                    config={serverConfig}
+                    patch={patch}
+                    metadata={metadata}
                     onChange={setPatch}
                   />
-                )}
-              </form>
-              <Snackbar
-                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-                open={!isMatch(config === undefined ? {} : config, patch)}
-                message='Save Changes'
-                action={
-                  <Box>
-                    <Button
-                      onClick={async () => {
-                        try {
-                          await submitConfigChange(patch);
+                </form>
+                <Snackbar
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                  open={updatesPending}
+                  message='Save Changes'
+                  action={
+                    <Box>
+                      <Button
+                        onClick={async () => {
+                          try {
+                            await submitConfigChange(patch);
+                            setStatus({
+                              message: 'Changes Saved, Restarting Server',
+                            });
+
+                            // Refresh the page after 3 seconds
+                            setTimeout(() => {
+                              mutate()
+                              setStatus(undefined)
+                              _setPatch({})
+                            }, 3000);
+                          } catch (e) {
+                            setStatus({
+                              severity: 'error',
+                              message: (e as string).toString(),
+                            });
+                          }
+                        }}
+                      >
+                        Save
+                      </Button>
+                      <Button
+                        onClick={() => {
                           _setPatch({});
-                          setStatus({
-                            message: 'Changes Saved, Restarting Server',
-                          });
-                          setTimeout(_getConfig, 3000);
-                        } catch (e) {
-                          setStatus({
-                            severity: 'error',
-                            message: (e as string).toString(),
-                          });
-                        }
-                      }}
-                    >
-                      Save
-                    </Button>
-                    <Button
-                      onClick={() => {
-                        _setPatch({});
-                        _getConfig();
-                      }}
-                    >
-                      Clear
-                    </Button>
-                  </Box>
-                }
-              />
-              {status && <StatusSnackBar key={status.message} {...status} />}
-            </Grid>
-            <Grid
-              item
-              xs={12}
-              md={4}
-              lg={3}
-              display={{ xs: 'none', md: 'block' }}
-            >
-              {filteredConfig === undefined ? (
-                <Box borderRadius={1} overflow={'hidden'}>
-                  <Skeleton
-                    variant='rectangular'
-                    animation='wave'
-                    height={'500px'}
-                  />
-                </Box>
-              ) : (
+                        }}
+                      >
+                        Clear
+                      </Button>
+                    </Box>
+                  }
+                />
+                {status && <StatusSnackBar key={status.message} {...status} />}
+              </Grid>
+              <Grid
+                item
+                xs={12}
+                md={4}
+                lg={3}
+                display={{ xs: 'none', md: 'block' }}
+              >
                 <Box pt={2}>
-                  <TableOfContents
-                    id={[]}
-                    name={''}
-                    value={filteredConfig}
-                    level={1}
-                  />
+                  <TableOfContents metadata={metadata} />
                 </Box>
-              )}
+              </Grid>
             </Grid>
-          </Grid>
+          </AuthenticatedContent>
         </PaddedContent>
       </Main>
     </>
   );
 }
 
-const filterConfig = (
-  config?: Config,
-  configMetadata?: ConfigMetadata,
-  enabledServers?: ServerType[]
-) => {
-  if (!config) {
-    return undefined;
-  }
-
-  if (!enabledServers || !configMetadata) {
-    return config;
-  }
-
-  // Filter out the inactive config values
-  const filteredConfig: Config = structuredClone(config);
-  Object.entries(configMetadata).forEach(([key, value]) => {
-    if (
-      [...enabledServers, '*'].filter((i) => value.components.includes(i))
-        .length === 0
-    ) {
-      deleteKey(filteredConfig, key.split('.'));
-    } else {
-      updateValue(filteredConfig, key.split('.'), configMetadata[key]);
-    }
-  });
-
-  // Filter out read-only values
-  deleteKey(filteredConfig, ['ConfigDir']);
-
-  return filteredConfig;
-};
-
-const getConfig = async (
-  setConfig: (c?: Config) => void,
-  setConfigKey: (f: (k: number) => number) => void,
-  setStatus: (s?: StatusSnackBarProps) => void,
-  router: AppRouterInstance
-) => {
+const getConfig = async (): Promise<ParameterValueRecord> => {
   let response = await fetch('/api/v1.0/config');
-  if (response.ok) {
-    const data = await response.json();
-    setConfig(data);
-    setStatus(undefined);
-    setConfigKey((k) => k + 1);
-  } else {
-    setConfig(undefined);
-    if (response.status === 401) {
-      setStatus({
-        severity: 'error',
-        message: 'Unauthorized',
-        action: {
-          label: 'Login',
-          onClick: () => router.push('/login/?returnURL=/view/config/'),
-        },
-      });
-    } else {
-      setTimeout(
-        () => getConfig(setConfig, setConfigKey, setStatus, router),
-        2000
-      );
-    }
-  }
+  let data = await response.json();
+  let flatData = flattenObject(data);
+  return flatData;
 };
 
 export default Config;

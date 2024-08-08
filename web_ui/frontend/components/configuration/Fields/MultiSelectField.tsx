@@ -12,14 +12,14 @@ import React, {
   SetStateAction,
   ChangeEvent,
 } from 'react';
-
-import { ParameterInputProps } from '@/components/Config/index';
-import { createId, buildPatch } from './util';
 import OutlinedInput from '@mui/material/OutlinedInput';
+
+import { createId, buildPatch } from '../util';
 
 export type MultiSelectFieldProps<T extends string> = {
   name: string;
   value: T[];
+  focused?: boolean;
   onChange: (x: T[]) => void;
   possibleValues: T[];
 };
@@ -29,11 +29,9 @@ function MultiSelectField<T extends string>({
   name,
   value,
   possibleValues,
+  focused,
 }: MultiSelectFieldProps<T>) {
   const id = useMemo(() => createId(name), [name]);
-
-  const [localValue, setLocalValue] = React.useState<T[]>(value);
-
   const handleChange = (event: SelectChangeEvent<T[]>) => {
     const {
       target: { value },
@@ -41,19 +39,18 @@ function MultiSelectField<T extends string>({
 
     const newValue =
       typeof value === 'string' ? (value.split(',') as T[]) : value;
-    setLocalValue(newValue);
     onChange(newValue);
   };
 
   return (
     <div>
-      <FormControl fullWidth size={'small'} focused={value != localValue}>
+      <FormControl fullWidth size={'small'} focused={focused}>
         <InputLabel id={id}>Name</InputLabel>
         <Select<T[]>
           labelId='demo-multiple-name-label'
           id='demo-multiple-name'
           multiple
-          value={localValue}
+          value={value}
           onChange={handleChange}
           input={<OutlinedInput label='Name' />}
         >

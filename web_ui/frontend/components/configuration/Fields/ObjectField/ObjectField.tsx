@@ -1,3 +1,4 @@
+import React, { ReactElement, useCallback, useMemo } from 'react';
 import {
   Box,
   Button,
@@ -8,7 +9,6 @@ import {
   Checkbox,
   FormControlLabel,
 } from '@mui/material';
-import React, { ReactElement, useCallback, useMemo } from 'react';
 import {
   Edit,
   Add,
@@ -17,11 +17,10 @@ import {
   KeyboardDoubleArrowDown,
   Delete,
 } from '@mui/icons-material';
-import { ParameterInputProps } from '@/components/Config/index';
-import { isEmpty, isEqual, merge } from 'lodash';
-import { buildPatch } from '@/components/Config/util';
-import ObjectModal from './ObjectModal';
 import { ClickAwayListener } from '@mui/base';
+import { isEmpty, isEqual, merge } from 'lodash';
+
+import ObjectModal from './ObjectModal';
 
 interface ListCardProps {
   value: string;
@@ -157,7 +156,7 @@ const ListCard = ({ value, handleDelete, handleEdit }: ListCardProps) => {
 interface ObjectCardProps {
   name: string;
   onClick: () => void;
-  updated: boolean;
+  updated?: boolean;
 }
 
 const ObjectCard = ({ name, updated, onClick }: ObjectCardProps) => {
@@ -213,40 +212,44 @@ export type ObjectFieldProps<T> = {
   name: string;
   // @ts-ignore
   Form: React.JSX<FormProps<T>>;
-  value: T[];
+  value: T[] | null;
   keyGetter: (v: T) => string;
+  focused?: boolean;
   onChange: (localValue: T[]) => void;
 };
 
-function ObjectField<T>({
+export function ObjectField<T>({
   name,
   Form,
   value,
   keyGetter,
   onChange,
+  focused,
 }: ObjectFieldProps<T>) {
   const [open, setOpen] = React.useState<boolean>(false);
   const [error, setError] = React.useState<string | undefined>(undefined);
-  const [localValue, setLocalValue] = React.useState<T[]>(value || []);
-  const [editValue, setEditValue] = React.useState<T | {}>({});
+  const [editValue, setEditValue] = React.useState<T | undefined>(undefined);
   const [dropdownHeight, setDropdownHeight] = React.useState<
     string | undefined
   >('0px');
 
+  // If the value is null lets set it to an empty list to make the objects more uniform
+  const validValue = value || [];
+
   const handleChange = useCallback(
     (submittedValue: T) => {
-      let newValue = [...localValue];
+      let newValue = [...validValue];
 
       // If the editValue is defined, then we are editing an existing value
       // Filter out the old value so the replacement can be added
       if (!isEmpty(editValue)) {
-        newValue = localValue.filter(
+        newValue = validValue.filter(
           (v) => keyGetter(v) != keyGetter(editValue as T)
         );
 
         // Don't allow duplicate values
       } else if (
-        localValue.some((v) => keyGetter(v) == keyGetter(submittedValue))
+        validValue.some((v) => keyGetter(v) == keyGetter(submittedValue))
       ) {
         setError('Tried to add duplicate value');
         setTimeout(() => setError(undefined), 3000);
@@ -254,21 +257,16 @@ function ObjectField<T>({
       }
 
       newValue = [...newValue, submittedValue];
-      setLocalValue(newValue);
       onChange(newValue);
     },
-    [localValue, onChange, editValue]
+    [validValue, onChange, editValue]
   );
 
   const sortedValue = useMemo(() => {
-    const valueArray = structuredClone(localValue);
+    const valueArray = structuredClone(validValue);
     valueArray.sort((a, b) => keyGetter(a).localeCompare(keyGetter(b)));
     return valueArray;
-  }, [localValue]);
-
-  const updated = useMemo(() => {
-    return !isEqual(value, localValue);
-  }, [sortedValue]);
+  }, [validValue]);
 
   return (
     <>
@@ -276,10 +274,10 @@ function ObjectField<T>({
         <ObjectCard
           name={name}
           onClick={() => {
-            setEditValue({});
+            setEditValue(undefined);
             setOpen(true);
           }}
-          updated={updated}
+          updated={focused}
         />
       </Box>
       <Box>
@@ -299,7 +297,7 @@ function ObjectField<T>({
         )}
       </Box>
       <Box>
-        {localValue.length > 0 && (
+        {validValue.length > 0 && (
           <Box
             sx={{
               display: 'flex',
@@ -334,7 +332,7 @@ function ObjectField<T>({
               </Tooltip>
               <Box ml={1} display={'inline'}>
                 <Typography variant={'caption'}>
-                  {localValue.length} Items
+                  {validValue.length} Items
                 </Typography>
               </Box>
             </Box>
@@ -345,7 +343,7 @@ function ObjectField<T>({
             maxHeight: dropdownHeight,
             overflowY: 'scroll',
             borderBottom:
-              localValue.length == 0 || dropdownHeight == '0px'
+              validValue.length == 0 || dropdownHeight == '0px'
                 ? undefined
                 : 'black 1px solid',
           }}
@@ -356,10 +354,9 @@ function ObjectField<T>({
                 key={keyGetter(val)}
                 value={keyGetter(val)}
                 handleDelete={() => {
-                  const newValue = localValue.filter(
+                  const newValue = validValue.filter(
                     (v) => keyGetter(v) != keyGetter(val)
                   );
-                  setLocalValue(newValue);
                   onChange(newValue);
                 }}
                 handleEdit={() => {

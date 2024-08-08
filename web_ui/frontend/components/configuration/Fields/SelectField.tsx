@@ -6,20 +6,15 @@ import {
   SelectChangeEvent,
   TextField,
 } from '@mui/material';
-import React, {
-  useMemo,
-  useCallback,
-  SetStateAction,
-  ChangeEvent,
-} from 'react';
+import React, { useMemo } from 'react';
 
-import { ParameterInputProps } from '@/components/Config/index';
-import { createId, buildPatch } from './util';
+import { createId } from '../util';
 import OutlinedInput from '@mui/material/OutlinedInput';
 
 export type SelectFieldProps<T extends string> = {
   name: string;
   value: T;
+  focused?: boolean;
   onChange: (x: T) => void;
   possibleValues: T[];
 };
@@ -28,30 +23,20 @@ function SelectField<T extends string>({
   onChange,
   name,
   value,
+  focused,
   possibleValues,
 }: SelectFieldProps<T>) {
   const id = useMemo(() => createId(name), [name]);
 
-  const [localValue, setLocalValue] = React.useState<T>(value);
-
-  const handleChange = (event: SelectChangeEvent<T>) => {
-    const {
-      target: { value },
-    } = event;
-
-    setLocalValue(value as T);
-    onChange(value as T);
-  };
-
   return (
     <div>
-      <FormControl size={'small'} focused={value != localValue} fullWidth>
+      <FormControl size={'small'} focused={focused} fullWidth>
         <InputLabel id={`${id}-label`}>{name}</InputLabel>
         <Select<T>
           labelId={`${id}-label`}
           id={id}
-          value={localValue}
-          onChange={handleChange}
+          value={value}
+          onChange={(e) => onChange(e.target.value as T)}
           input={<OutlinedInput label='Name' />}
         >
           {possibleValues.map((v) => (

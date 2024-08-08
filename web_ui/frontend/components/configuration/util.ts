@@ -1,4 +1,8 @@
 import { getErrorMessage } from '@/helpers/util';
+import {
+  ParameterMetadata,
+  ParameterMetadataRecord,
+} from '@/components/configuration';
 
 export const stringSort = (a: string, b: string) => {
   return a.localeCompare(b);
@@ -55,4 +59,29 @@ export const verifyLongitude = (longitude: string) => {
       longitude
     );
   return isValid ? undefined : 'Invalid Longitude';
+};
+
+/**
+ * The input is a record with . delimited keys and the output is a nested object
+ *
+ * @param parameters
+ */
+export const expandParameterKeys = (
+  parameters: Record<string, ParameterMetadata>[]
+): ParameterMetadataRecord => {
+  const output: ParameterMetadataRecord = {};
+  parameters.forEach((record) => {
+    const [key, value] = Object.entries(record)[0];
+    const keys = key.split('.');
+    const lastKey = keys.pop() as string;
+    let current: Record<string, any> = output;
+    keys.forEach((k) => {
+      if (!current[k]) {
+        current[k] = {};
+      }
+      current = current[k];
+    });
+    current[lastKey] = value;
+  });
+  return output;
 };
