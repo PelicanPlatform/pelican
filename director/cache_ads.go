@@ -249,6 +249,8 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 	if !ok {
 		return errors.New("Failed to create address object from IP")
 	}
+	// NOTE: If GeoIP resolution of this address fails, lat/long are set to 0.0 (the null lat/long)
+	// This causes the server to be sorted to the end of the list whenever the Director requires distance-aware sorting.
 	lat, long, err := getLatLong(addr)
 	if err != nil {
 		return err
