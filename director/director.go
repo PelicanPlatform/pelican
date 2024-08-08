@@ -369,8 +369,8 @@ func redirectToCache(ginCtx *gin.Context) {
 	} else {
 		// Query Origins and check if the object exists on the server
 		q := NewObjectStat()
-		st := config.NewServerType()
-		st.SetList([]config.ServerType{config.OriginType, config.CacheType})
+		st := server_structs.NewServerType()
+		st.SetList([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
 		// Set max response to all available origin and cache servers to ensure we stat against origins
 		// if no cache server has the file
 		// TODO: come back and re-evaluate if we need this many responses and potential origin/cache
@@ -409,7 +409,7 @@ func redirectToCache(ginCtx *gin.Context) {
 			// Here, we need to match against the AuthURL field of originAds
 			for _, ds := range qr.DeniedServers {
 				for _, oAd := range originAds {
-					if oAd.Type == server_structs.OriginType && oAd.AuthURL.String() == ds {
+					if oAd.Type == server_structs.OriginType.String() && oAd.AuthURL.String() == ds {
 						originAdsWObject = append(originAdsWObject, oAd)
 					}
 				}
@@ -564,7 +564,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	} else {
 		// Query Origins and check if the object exists
 		q = NewObjectStat()
-		qr := q.Query(context.Background(), reqPath, config.OriginType, 1, 3,
+		qr := q.Query(context.Background(), reqPath, server_structs.OriginType, 1, 3,
 			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.PublicRead))
 		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
 
@@ -616,7 +616,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		if q == nil {
 			q = NewObjectStat()
 		}
-		qr := q.Query(context.Background(), reqPath, config.CacheType, 1, 3,
+		qr := q.Query(context.Background(), reqPath, server_structs.CacheType, 1, 3,
 			withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
 		log.Debugf("CachesPullFromCaches is enabled. Stat result for %s among caches: %s", reqPath, qr.String())
 
@@ -888,7 +888,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 }
 
 func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_structs.ServerType) {
-	ctx.Set("serverType", string(sType))
+	ctx.Set("serverType", sType.String())
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
@@ -1002,8 +1002,8 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
 		if err != nil {
 			if err == adminApprovalErr {
-				log.Warningf("Failed to verify token. %s %q was not approved", string(sType), adV2.Name)
-				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", string(sType), ad.Name, approvalErrMsg)})
+				log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), adV2.Name)
+				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), ad.Name, approvalErrMsg)})
 				return
 			} else {
 				log.Warningln("Failed to verify token:", err)
@@ -1074,7 +1074,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		URL:                 *adUrl,
 		WebURL:              *adWebUrl,
 		BrokerURL:           *brokerUrl,
-		Type:                sType,
+		Type:                sType.String(),
 		Caps:                adV2.Caps,
 		Writes:              adV2.Caps.Writes,
 		DirectReads:         adV2.Caps.DirectReads,
