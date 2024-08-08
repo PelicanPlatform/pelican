@@ -70,51 +70,51 @@ func TestQueryServersForObject(t *testing.T) {
 			URL:     url.URL{Host: "mock-origin-1.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "mock-origin-1-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
-			Type:    server_structs.OriginType}
+			Type:    server_structs.OriginType.String()}
 		mockServerAd2 := server_structs.ServerAd{
 			Name:    "origin2",
 			URL:     url.URL{Host: "mock-origin-2.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "mock-origin-2-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
-			Type:    server_structs.OriginType}
+			Type:    server_structs.OriginType.String()}
 		mockServerAd3 := server_structs.ServerAd{
 			Name:    "origin3",
 			URL:     url.URL{Host: "mock-origin-3.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "mock-origin-3-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
-			Type:    server_structs.OriginType}
+			Type:    server_structs.OriginType.String()}
 		mockServerAd4 := server_structs.ServerAd{
 			Name:    "origin4",
 			URL:     url.URL{Host: "mock-origin-4.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "mock-origin-4-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
-			Type:    server_structs.OriginType}
+			Type:    server_structs.OriginType.String()}
 		mockServerAdPrivateTopology := server_structs.ServerAd{
 			Name:         "originPrivateTopology",
 			URL:          url.URL{Host: "mock-private-topo-origin.com", Scheme: "http"},
 			AuthURL:      url.URL{Host: "mock-private-topo-origin-auth.com:8444", Scheme: "https"},
 			Caps:         server_structs.Capabilities{PublicReads: false},
-			Type:         server_structs.OriginType,
+			Type:         server_structs.OriginType.String(),
 			FromTopology: true}
 		mockServerAdPublicTopology := server_structs.ServerAd{
 			Name:         "originPublicTopology",
 			URL:          url.URL{Host: "mock-public-topo-origin.com", Scheme: "http"},
 			AuthURL:      url.URL{Host: "mock-public-topo-origin-auth.com:8444", Scheme: "https"},
 			Caps:         server_structs.Capabilities{PublicReads: true},
-			Type:         server_structs.OriginType,
+			Type:         server_structs.OriginType.String(),
 			FromTopology: true}
 		mockServerAdPrivateTopologyWOAuthUrl := server_structs.ServerAd{
 			Name:         "originPrivateTopologyNoAuthUrl",
 			URL:          url.URL{Host: "mock-private-topo-origin-no-authurl.com", Scheme: "http"},
 			Caps:         server_structs.Capabilities{PublicReads: false},
-			Type:         server_structs.OriginType,
+			Type:         server_structs.OriginType.String(),
 			FromTopology: true}
 		mockTopoPubServerMixNs := server_structs.ServerAd{
 			Name:         "originMixNsTopology",
 			URL:          url.URL{Host: "mock-mix-ns-topo-origin.com", Scheme: "http"},
 			AuthURL:      url.URL{Host: "mock-mix-ns-topo-origin-auth.com:8444", Scheme: "https"},
 			Caps:         server_structs.Capabilities{PublicReads: true},
-			Type:         server_structs.OriginType,
+			Type:         server_structs.OriginType.String(),
 			FromTopology: true,
 		}
 		mockServerAd5 := server_structs.ServerAd{
@@ -122,7 +122,7 @@ func TestQueryServersForObject(t *testing.T) {
 			URL:     url.URL{Host: "cache1.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "cache1-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
-			Type:    server_structs.CacheType}
+			Type:    server_structs.CacheType.String()}
 		mockNsAd0 := server_structs.NamespaceAdV2{Path: "/foo"}
 		mockNsAd1 := server_structs.NamespaceAdV2{Path: "/foo/bar"}
 		mockNsAd2 := server_structs.NamespaceAdV2{Path: "/foo/x"}
@@ -224,7 +224,7 @@ func TestQueryServersForObject(t *testing.T) {
 		defer cancel()
 		cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -236,7 +236,7 @@ func TestQueryServersForObject(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 3, 1)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 3, 1)
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -251,7 +251,7 @@ func TestQueryServersForObject(t *testing.T) {
 		mockTTLCache()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/dne/random.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/dne/random.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -266,7 +266,7 @@ func TestQueryServersForObject(t *testing.T) {
 		mockTTLCache()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		assert.Equal(t, queryInsufficientResErr, result.ErrorType)
@@ -282,7 +282,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -303,7 +303,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -319,7 +319,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/barz/test.txt", config.CacheType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/barz/test.txt", server_structs.CacheType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -335,7 +335,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", config.CacheType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", server_structs.CacheType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -356,8 +356,8 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		sType := config.CacheType
-		sType.Set(config.OriginType)
+		sType := server_structs.CacheType
+		sType.Set(server_structs.OriginType)
 
 		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", sType, 0, 0)
 
@@ -393,7 +393,7 @@ func TestQueryServersForObject(t *testing.T) {
 		}
 		statUtilsMutex.Unlock()
 
-		result := stat.queryServersForObject(ctx, "/overwrites/test.txt", config.CacheType, 0, 0, withCacheAds(mockCacheServer))
+		result := stat.queryServersForObject(ctx, "/overwrites/test.txt", server_structs.CacheType, 0, 0, withCacheAds(mockCacheServer))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -427,7 +427,7 @@ func TestQueryServersForObject(t *testing.T) {
 		}
 		statUtilsMutex.Unlock()
 
-		result := stat.queryServersForObject(ctx, "/overwrites/test.txt", config.OriginType, 0, 0, withOriginAds(mockOrigin))
+		result := stat.queryServersForObject(ctx, "/overwrites/test.txt", server_structs.OriginType, 0, 0, withOriginAds(mockOrigin))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -454,7 +454,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -475,7 +475,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -499,7 +499,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -519,7 +519,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 1, 1)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 1, 1)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -548,7 +548,7 @@ func TestQueryServersForObject(t *testing.T) {
 		msgChan := make(chan string)
 
 		go func() {
-			result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+			result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 			msgChan <- result.Msg
 		}()
 
@@ -594,7 +594,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		assert.Equal(t, "Number of success response: 0 is less than MinStatResponse (1) required.", result.Msg)
@@ -609,7 +609,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/protected/topology/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/protected/topology/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -628,7 +628,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/public/topology/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/public/topology/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -647,7 +647,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/protected/topology/noauth/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/protected/topology/noauth/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -666,7 +666,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/mix/protected/test.txt", config.OriginType, 0, 0, withAuth(true))
+		result := stat.queryServersForObject(ctx, "/mix/protected/test.txt", server_structs.OriginType, 0, 0, withAuth(true))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -685,7 +685,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/mix/public/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/mix/public/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -730,7 +730,7 @@ func TestSendHeadReq(t *testing.T) {
 	realServerUrl, err := url.Parse(server.URL)
 	require.NoError(t, err)
 
-	mockOriginAd := server_structs.ServerAd{Type: server_structs.OriginType}
+	mockOriginAd := server_structs.ServerAd{Type: server_structs.OriginType.String()}
 	mockOriginAd.URL = *realServerUrl
 
 	tDir := t.TempDir()

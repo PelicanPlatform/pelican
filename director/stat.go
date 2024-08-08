@@ -82,7 +82,7 @@ type (
 		// token: a bearer token to be used when issuing the request
 		ReqHandler func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error)
 		// Manage a `stat` request to origin servers given an objectName
-		Query func(cancelContext context.Context, objectName string, sType config.ServerType, mininum, maximum int, options ...queryOption) queryResult
+		Query func(cancelContext context.Context, objectName string, sType server_structs.ServerType, mininum, maximum int, options ...queryOption) queryResult
 	}
 )
 
@@ -266,10 +266,10 @@ func WithToken(tk string) queryOption {
 // Implementation of querying origins/cache servers for their availability of an object.
 // It blocks until max successful requests has been received, all potential origins/caches responded (or timeout), or cancelContext was closed.
 //
-// sType can be config.OriginType, config.CacheType, or both.
+// sType can be server_structs.OriginType, server_structs.CacheType, or both.
 //
 // Returns the object metadata with available urls, a message indicating the stat result, and error if any.
-func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName string, sType config.ServerType, minimum, maximum int, options ...queryOption) (qResult queryResult) {
+func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName string, sType server_structs.ServerType, minimum, maximum int, options ...queryOption) (qResult queryResult) {
 	cfg := queryConfig{}
 	for _, option := range options {
 		option(&cfg)
@@ -278,7 +278,7 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 	ads := []server_structs.ServerAd{}
 
 	// Only fetch origin/cacheAds if it's not provided AND the sType has the corresponding server type
-	if sType.IsEnabled(config.OriginType) {
+	if sType.IsEnabled(server_structs.OriginType) {
 		if !cfg.originAdsProvided {
 			_, originAds, _ := getAdsForPath(objectName)
 			ads = append(ads, originAds...)
@@ -286,7 +286,7 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 			ads = append(ads, cfg.originAds...)
 		}
 	}
-	if sType.IsEnabled(config.CacheType) {
+	if sType.IsEnabled(server_structs.CacheType) {
 		if !cfg.cacheAdsProvided {
 			_, _, cacheAds := getAdsForPath(objectName)
 			ads = append(ads, cacheAds...)

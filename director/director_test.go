@@ -1029,7 +1029,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 			Scheme: "https",
 			Host:   "fake-origin.org:8444",
 		},
-		Type:      server_structs.OriginType,
+		Type:      server_structs.OriginType.String(),
 		Latitude:  123.05,
 		Longitude: 456.78,
 	}
@@ -1040,7 +1040,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 			Scheme: "https",
 			Host:   "fake-topology-origin.org:8443",
 		},
-		Type:      server_structs.OriginType,
+		Type:      server_structs.OriginType.String(),
 		Latitude:  123.05,
 		Longitude: 456.78,
 	}
@@ -1055,7 +1055,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 			Scheme: "https",
 			Host:   "fake-cache.org:8444",
 		},
-		Type:      server_structs.CacheType,
+		Type:      server_structs.CacheType.String(),
 		Latitude:  45.67,
 		Longitude: 123.05,
 	}
@@ -1089,7 +1089,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
-	err := config.InitServer(ctx, config.DirectorType)
+	err := config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
 	// Generate a private key to use for the test

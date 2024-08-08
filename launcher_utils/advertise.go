@@ -135,7 +135,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	name := ""
 	var err error
 	// Fetch site name from the registry, if not, fall back to Xrootd.Sitename.
-	if server.GetServerType().IsEnabled(config.OriginType) {
+	if server.GetServerType().IsEnabled(server_structs.OriginType) {
 		// Note we use Server_ExternalWebUrl as the origin prefix
 		// But caches still use Xrootd_Sitename, which will be changed to Server_ExternalWebUrl in
 		// https://github.com/PelicanPlatform/pelican/issues/1351
@@ -147,7 +147,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 		if err != nil {
 			log.Errorf("Failed to get sitename from the registry for the origin. Will fallback to use Xrootd.Sitename: %v", err)
 		}
-	} else if server.GetServerType().IsEnabled(config.CacheType) {
+	} else if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		cachePrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
 		name, err = getSitenameFromReg(ctx, cachePrefix)
 		if err != nil {
@@ -173,7 +173,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 		return errors.Wrap(err, "failed to get server issuer URL")
 	}
 
-	if server.GetServerType().IsEnabled(config.CacheType) {
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		serverUrl = param.Cache_Url.GetString()
 	}
 
@@ -206,9 +206,9 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	advTokenCfg.Lifetime = time.Minute
 	advTokenCfg.Issuer = serverIssuer
 	advTokenCfg.AddAudiences(fedInfo.DirectorEndpoint)
-	if server.GetServerType().IsEnabled(config.CacheType) {
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		advTokenCfg.Subject = "cache"
-	} else if server.GetServerType().IsEnabled(config.OriginType) {
+	} else if server.GetServerType().IsEnabled(server_structs.OriginType) {
 		advTokenCfg.Subject = "origin"
 	}
 	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)

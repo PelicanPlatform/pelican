@@ -20,13 +20,14 @@ package director
 
 import (
 	"math"
-
-	"github.com/pelicanplatform/pelican/server_structs"
+	"math/rand"
 )
+
+const earthRadiusToMilesFactor = 3960
 
 // Mathematical function, not implementation, came from
 // http://www.johndcook.com/python_longitude_latitude.html
-// Returned values are not actual distances, but normalized between [0,1]
+// Returned values are not actual distances, but is relative to earth's radius
 func distanceOnSphere(lat1 float64, long1 float64, lat2 float64, long2 float64) float64 {
 
 	if (lat1 == lat2) && (long1 == long2) {
@@ -57,29 +58,82 @@ func distanceOnSphere(lat1 float64, long1 float64, lat2 float64, long2 float64) 
 		math.Cos(phi1)*math.Cos(phi2))
 	arc := math.Acos(cos)
 
-	// Finally, standardize the distance to be between [0,1]
-	return arc / math.Pi
+	return arc
 }
 
 // Create a weight between [0,1] that indicates a priority. The returned weight is directly correlated
 // with priority (higher weight is higher priority is lower distance)
-func distanceWeight(coord Coordinate, ad server_structs.ServerAd) float64 {
-	return 1 - distanceOnSphere(coord.Lat, coord.Long, ad.Latitude, ad.Longitude)
+//
+// Is realD set to true, then return the distance between the two coordinates in miles
+func distanceWeight(lat1 float64, long1 float64, lat2 float64, long2 float64, realD bool) float64 {
+	if realD {
+		return distanceOnSphere(lat1, long1, lat2, long2) * earthRadiusToMilesFactor
+	} else {
+		return 1 - (distanceOnSphere(lat1, long1, lat2, long2) / math.Pi)
+	}
 }
 
-// Create a weight between [0,1] that indicates a priority. The returned weight is directly correlated
-// with priority (higher weight is higher priority)
-func distanceAndLoadWeight(coord Coordinate, sAd server_structs.ServerAd) float64 {
-	distance := distanceOnSphere(coord.Lat, coord.Long, sAd.Latitude, sAd.Longitude)
+// Given the input value, return a weight [0, 1.0] based on the gated havling of the base weight 1.0.
+//   - If the input value is between 0.0 and the threshold, return 1.0.
+//   - If the input value is above the threshold, the weight decreases by half for every halvingFactor units of the input value
+func gatedHalvingMultiplier(val float64, threshold float64, halvingFactor float64) float64 {
+	if halvingFactor == 0 || threshold == 0 {
+		return 1.0
+	}
+	if val >= 0.0 && val <= threshold {
+		return 1.0
+	} else {
+		// multiplier decreases by half for every havlvingFactor units of the value for value above the threshold
+		base := math.Max(1, (math.Floor((val-threshold)/halvingFactor))*2)
+		multiplier := 1.0 / base
+		return multiplier
+	}
+}
 
-	// For now, load is always 0.5. Eventually we'll pull this value from the server ad. Furthermore,
-	// assume a server's load has more impact on its performance than its distance does. As long as load is
-	// hard coded, this function should act exactly like distanceWeight.
-	// TODO: Come up with a better function once we have an actual load value and know how it works
-	load := 0.5
+// Given a SwapMaps struct, stochasticlly sort the weights based on the folliwng procedure:
+//
+//  1. Create ranges [0, weight_1), [weight_1, weight_1 + weight_2), ... for each weight.
+//
+//  2. Select a random number in the range [0, sum(weights)).
+//
+//  3. If the number falls within the range corresponding to the weight, it is sorted to the top.
+//
+//  4. Repeat step 2-3 to select a the rest weights
+//
+// Returnss the sorted list of SwapMap.Index and the generated random weights for reference.
+// You may specify the maxOut argument to limit the output.
+func stochasticSort(sm SwapMaps, maxOut int) (candidates []int, randWeights []float64) {
+	if maxOut <= 0 {
+		maxOut = len(sm)
+	}
+	maxOut = min(maxOut, len(sm))
 
-	a1 := 1.0 / 3.0
-	a2 := 2.0 / 3.0
+	wSum := 0.0
+	ranges := [][]float64{} // items in ranges should corresponds to items in sm
+	visited := make([]bool, len(sm))
+	for idx, val := range sm {
+		if idx == 0 {
+			ranges = append(ranges, []float64{0.0, val.Weight})
+		} else {
+			prev := ranges[idx-1][1]
+			ranges = append(ranges, []float64{prev, prev + val.Weight})
+		}
+		wSum += val.Weight
+		visited[idx] = false
+	}
 
-	return 1 - a1*distance - a2*load
+	for len(candidates) < maxOut {
+		ranNum := rand.Float64() * wSum
+		for idx, r := range ranges {
+			if ranNum >= r[0] && ranNum < r[1] && !visited[idx] {
+				// Here, we append Index of the SwapMaps[idx] as that's the
+				// true index to sort
+				candidates = append(candidates, sm[idx].Index)
+				randWeights = append(randWeights, ranNum)
+				visited[idx] = true
+				break
+			}
+		}
+	}
+	return
 }

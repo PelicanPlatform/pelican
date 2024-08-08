@@ -82,7 +82,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	viper.Set("Federation.RegistryUrl", ts.URL)
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
-	err := config.InitServer(ctx, config.DirectorType)
+	err := config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
 	kSet, err := config.GetIssuerPublicJWKS()

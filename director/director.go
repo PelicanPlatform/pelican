@@ -369,8 +369,8 @@ func redirectToCache(ginCtx *gin.Context) {
 	} else {
 		// Query Origins and check if the object exists on the server
 		q := NewObjectStat()
-		st := config.NewServerType()
-		st.SetList([]config.ServerType{config.OriginType, config.CacheType})
+		st := server_structs.NewServerType()
+		st.SetList([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
 		// Set max response to all available origin and cache servers to ensure we stat against origins
 		// if no cache server has the file
 		// TODO: come back and re-evaluate if we need this many responses and potential origin/cache
@@ -409,7 +409,7 @@ func redirectToCache(ginCtx *gin.Context) {
 			// Here, we need to match against the AuthURL field of originAds
 			for _, ds := range qr.DeniedServers {
 				for _, oAd := range originAds {
-					if oAd.Type == server_structs.OriginType && oAd.AuthURL.String() == ds {
+					if oAd.Type == server_structs.OriginType.String() && oAd.AuthURL.String() == ds {
 						originAdsWObject = append(originAdsWObject, oAd)
 					}
 				}
@@ -441,7 +441,7 @@ func redirectToCache(ginCtx *gin.Context) {
 		}
 	}
 
-	cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds)
+	cacheAds, err = sortServerAds(ipAddr, cacheAds, cachesAvailabilityMap)
 	if err != nil {
 		log.Error("Error determining server ordering for cacheAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -451,8 +451,11 @@ func redirectToCache(ginCtx *gin.Context) {
 		return
 	}
 
-	// Re-sort by availability, where caches having the object have higher priority
-	sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
+	// "smart" sorting method takes care of availability factor
+	if param.Director_CacheSortMethod.GetString() != "smart" {
+		// Re-sort by availability, where caches having the object have higher priority
+		sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
+	}
 
 	redirectURL := getRedirectURL(reqPath, cacheAds[0], !namespaceAd.Caps.PublicReads)
 
@@ -523,20 +526,17 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
 
 	// /pelican/monitoring is the path for director-based health test
-	// where we have /director/healthTest API to mock a file for the cache to get
+	// where we have /director/healthTest API to mock a test object for caches to pull (as if it's from an origin)
 	if strings.HasPrefix(reqPath, "/pelican/monitoring/") {
 		ginCtx.Redirect(http.StatusTemporaryRedirect, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/director/healthTest"+reqPath)
 		return
 	}
 
-	// Each namespace may be exported by several origins, so we must still
-	// do the geolocation song and dance if we want to get the closest origin...
 	ipAddr := utils.ClientIPAddr(ginCtx)
 
 	reqParams := getRequestParameters(ginCtx.Request)
 
-	// Skip the stat check for object availability
-	// If either disableStat or skipstat is set, then skip the stat query
+	// Skip the stat check for object availability if either disableStat or skipstat is set
 	skipStat := reqParams.Has(utils.QuerySkipStat.String()) || !param.Director_EnableStat.GetBool()
 
 	// Include caches in the response if Director.CachesPullFromCaches is enabled
@@ -558,18 +558,18 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	var q *ObjectStat
 
 	availableAds := []server_structs.ServerAd{}
-	// Skip stat query for PUT (upload), PROPFIND (listing) or skipStat query flag is on
+	// Skip stat query for PUT (upload), PROPFIND (listing) or whenever the skipStat query flag is on
 	if ginCtx.Request.Method == http.MethodPut || ginCtx.Request.Method == "PROPFIND" || skipStat {
 		availableAds = originAds
 	} else {
-		// Query Origins and check if the object exists on the server
+		// Query Origins and check if the object exists
 		q = NewObjectStat()
-		qr := q.Query(context.Background(), reqPath, config.OriginType, 1, 3,
+		qr := q.Query(context.Background(), reqPath, server_structs.OriginType, 1, 3,
 			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.PublicRead))
 		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
 
-		// For successful response, we got a list of URL to access the object.
-		// We will use the host of the object url to match the URL field in originAds
+		// For a successful response, we got a list of object URLs.
+		// We then use the host of the object url to match the URL field in originAds
 		if qr.Status == querySuccessful {
 			for _, obj := range qr.Objects {
 				serverHost := obj.URL.Host
@@ -616,7 +616,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		if q == nil {
 			q = NewObjectStat()
 		}
-		qr := q.Query(context.Background(), reqPath, config.CacheType, 1, 3,
+		qr := q.Query(context.Background(), reqPath, server_structs.CacheType, 1, 3,
 			withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
 		log.Debugf("CachesPullFromCaches is enabled. Stat result for %s among caches: %s", reqPath, qr.String())
 
@@ -669,7 +669,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
 
-	availableAds, err = sortServerAdsByIP(ipAddr, availableAds)
+	availableAds, err = sortServerAds(ipAddr, availableAds, nil)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -888,7 +888,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 }
 
 func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_structs.ServerType) {
-	ctx.Set("serverType", string(sType))
+	ctx.Set("serverType", sType.String())
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
@@ -1002,8 +1002,8 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
 		if err != nil {
 			if err == adminApprovalErr {
-				log.Warningf("Failed to verify token. %s %q was not approved", string(sType), adV2.Name)
-				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", string(sType), ad.Name, approvalErrMsg)})
+				log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), adV2.Name)
+				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), ad.Name, approvalErrMsg)})
 				return
 			} else {
 				log.Warningln("Failed to verify token:", err)
@@ -1074,12 +1074,12 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		URL:                 *adUrl,
 		WebURL:              *adWebUrl,
 		BrokerURL:           *brokerUrl,
-		Type:                sType,
+		Type:                sType.String(),
 		Caps:                adV2.Caps,
 		Writes:              adV2.Caps.Writes,
 		DirectReads:         adV2.Caps.DirectReads,
 		Listings:            adV2.Caps.Listings,
-		IOLoad:              0.5, // Defaults to 0.5, as 0 means the server is "very free" which is not necessarily true
+		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
 	}
 
 	recordAd(engineCtx, sAd, &adV2.Namespaces)

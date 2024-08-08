@@ -21,12 +21,12 @@ package main
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 func serveRegistry(cmd *cobra.Command, _ []string) error {
-	_, cancel, err := launchers.LaunchModules(cmd.Context(), config.RegistryType)
+	_, cancel, err := launchers.LaunchModules(cmd.Context(), server_structs.RegistryType)
 	if err != nil {
 		cancel()
 	}

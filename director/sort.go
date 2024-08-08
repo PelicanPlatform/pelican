@@ -19,40 +19,19 @@
 package director
 
 import (
-	"archive/tar"
 	"cmp"
-	"compress/gzip"
-	"context"
-	"fmt"
-	"io"
 	"math/rand"
 	"net"
-	"net/http"
 	"net/netip"
-	"os"
-	"path"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
-	"sync/atomic"
-	"time"
 
-	"github.com/oschwald/geoip2-golang"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-)
-
-const (
-	maxMindURL string = "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=%s&suffix=tar.gz"
-)
-
-var (
-	maxMindReader atomic.Pointer[geoip2.Reader]
 )
 
 type (
@@ -64,18 +43,32 @@ type (
 	SwapMaps []SwapMap
 )
 
-type Coordinate struct {
-	Lat  float64 `mapstructure:"lat"`
-	Long float64 `mapstructure:"long"`
-}
+type (
+	Coordinate struct {
+		Lat  float64 `mapstructure:"lat"`
+		Long float64 `mapstructure:"long"`
+	}
 
-type GeoIPOverride struct {
-	IP         string     `mapstructure:"IP"`
-	Coordinate Coordinate `mapstructure:"Coordinate"`
-}
+	GeoIPOverride struct {
+		IP         string     `mapstructure:"IP"`
+		Coordinate Coordinate `mapstructure:"Coordinate"`
+	}
+)
 
-var invalidOverrideLogOnce = map[string]bool{}
-var geoIPOverrides []GeoIPOverride
+var (
+	invalidOverrideLogOnce = map[string]bool{}
+	geoIPOverrides         []GeoIPOverride
+)
+
+// Constants for the director sorting algorithm
+const (
+	souceServerAdsLimit      = 6    // Number of servers under consideration
+	distanceHalvingThreshold = 10   // Threshold where the distance havling factor kicks in, in miles
+	distanceHalvingFactor    = 200  // Halving distance for the GeoIP weight, in miles
+	objAvailabilityFactor    = 2    // Multiplier for knowing whether an object is present
+	loadHalvingThreshold     = 10.0 // Threshold where the load havling factor kicks in
+	loadHalvingFactor        = 4.0  // Halving interval for load
+)
 
 func (me SwapMaps) Len() int {
 	return len(me)
@@ -175,57 +168,111 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate, ok bool) {
 	return
 }
 
-// Sort serverAds based on the IP address of the client with shorter distance between
-// server IP and client having higher priority
-func sortServerAdsByIP(clientAddr netip.Addr, ads []server_structs.ServerAd) ([]server_structs.ServerAd, error) {
+// The all-in-one method to sort serverAds based on Dirtector.CacheSortMethod configuration parameter
+//   - distance: sort serverAds by the distance between the geolocation of the servers and the client
+//   - distanceAndLoad: sort serverAds by the distance with gated halving factor (see details in the adaptive method)
+//     and the server IO load
+//   - random: sort serverAds randomly
+//   - adaptive:  sort serverAds based on rules discussed here: https://github.com/PelicanPlatform/pelican/discussions/1198
+//
+// Note that if the client has invalid IP address or MaxMind is unable to get the coordinates out of
+// the client IP, any distance-related steps are skipped. If the sort method is "distance", then
+// the serverAds are randomly sorted.
+func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availabilityMap map[string]bool) ([]server_structs.ServerAd, error) {
 	// Each entry in weights will map a priority to an index in the original ads slice.
 	// A larger weight is a higher priority.
 	weights := make(SwapMaps, len(ads))
 	sortMethod := param.Director_CacheSortMethod.GetString()
 
-	// If the client addr is not valid, we use random sort
-	if !clientAddr.IsValid() {
-		sortMethod = "random"
+	clientCoord := Coordinate{}
+	clientCoordOk := false
+
+	if clientAddr.IsValid() {
+		clientCoord, clientCoordOk = getClientLatLong(clientAddr)
+	} else {
+		log.Warningf("Unable to sort servers based on client-server distance. Invalid client IP address: %s", clientAddr.String())
 	}
 
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {
-		switch sortMethod {
-		case "distance":
-			clientCoord, ok := getClientLatLong(clientAddr)
-			if !ok {
-				// Unable to compute distances for this server; just do random distances.
+		switch server_structs.SortType(sortMethod) {
+		case server_structs.DistanceType:
+			// If we can't get the client coordinates, then simply use random sort
+			if !clientCoordOk {
+				weights[idx] = SwapMap{rand.Float64(), idx}
+				continue
+			}
+			if ad.Latitude == 0 && ad.Longitude == 0 {
+				// If server lat and long are 0, the server geolocation is unknown
 				// Below we sort weights in descending order, so we assign negative value here,
 				// causing them to always be at the end of the sorted list.
 				weights[idx] = SwapMap{0 - rand.Float64(), idx}
 			} else {
-				weights[idx] = SwapMap{distanceWeight(clientCoord, ad),
+				weights[idx] = SwapMap{distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, false),
 					idx}
 			}
-		case "distanceAndLoad":
-			clientCoord, ok := getClientLatLong(clientAddr)
-			if !ok {
-				weights[idx] = SwapMap{0 - rand.Float64(), idx}
-			} else {
-				// Each server ad will have a load value that we can use for sorting
-				weights[idx] = SwapMap{distanceAndLoadWeight(clientCoord, ad),
-					idx}
+		case server_structs.DistanceAndLoadType:
+			weight := 1.0
+			// Distance weight
+			if clientCoordOk {
+				distance := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
+				dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
+				weight *= dWeighted
 			}
-		case "random":
+
+			// Load weight
+			lWeighted := gatedHalvingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
+			weight *= lWeighted
+
+			weights[idx] = SwapMap{weight, idx}
+		case server_structs.AdaptiveType:
+			weight := 1.0
+			// Distance weight
+			if clientCoordOk {
+				distance := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
+				dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
+				weight *= dWeighted
+			}
+			// Availability weight
+			if availabilityMap == nil {
+				weight *= 1.0
+			} else if hasObj, ok := availabilityMap[ad.URL.String()]; ok && hasObj {
+				weight *= 2.0
+			} else if !ok {
+				weight *= 1.0
+			} else { // ok but does not have the object
+				weight *= 0.5
+			}
+
+			// Load weight
+			lWeighted := gatedHalvingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
+			weight *= lWeighted
+
+			weights[idx] = SwapMap{weight, idx}
+		case server_structs.RandomType:
 			weights[idx] = SwapMap{rand.Float64(), idx}
 		default:
-			return nil, errors.Errorf("Invalid sort method '%s' set in Director.CacheSortMethod. Valid methods are 'distance',"+
-				"'distanceAndLoad', and 'random.'", param.Director_CacheSortMethod.GetString())
+			// Never say never, but this should never get hit because we validate the value on startup.
+			return nil, errors.Errorf("Invalid sort method '%s' set in Director.CacheSortMethod.", param.Director_CacheSortMethod.GetString())
 		}
 	}
 
-	// Larger weight = higher priority, so we reverse the sort (which would otherwise default to ascending)
-	sort.Sort(sort.Reverse(weights))
-	resultAds := make([]server_structs.ServerAd, len(ads))
-	for idx, weight := range weights {
-		resultAds[idx] = ads[weight.Index]
+	if sortMethod == string(server_structs.AdaptiveType) {
+		candidates, _ := stochasticSort(weights, serverResLimit)
+		resultAds := []server_structs.ServerAd{}
+		for _, cidx := range candidates[:serverResLimit] {
+			resultAds = append(resultAds, ads[cidx])
+		}
+		return resultAds, nil
+	} else {
+		// Larger weight = higher priority, so we reverse the sort (which would otherwise default to ascending)
+		sort.Sort(sort.Reverse(weights))
+		resultAds := make([]server_structs.ServerAd, len(ads))
+		for idx, weight := range weights {
+			resultAds[idx] = ads[weight.Index]
+		}
+		return resultAds, nil
 	}
-	return resultAds, nil
 }
 
 // Sort a list of ServerAds with the following rule:
@@ -261,119 +308,4 @@ func sortServerAdsByAvailability(ads []server_structs.ServerAd, avaiMap map[stri
 			return 0
 		}
 	})
-}
-
-func downloadDB(localFile string) error {
-	err := os.MkdirAll(filepath.Dir(localFile), 0755)
-	if err != nil {
-		return err
-	}
-
-	var licenseKey string
-	keyFile := param.Director_MaxMindKeyFile.GetString()
-	keyFromEnv := viper.GetString("MAXMINDKEY")
-	if keyFile != "" {
-		contents, err := os.ReadFile(keyFile)
-		if err != nil {
-			return err
-		}
-		licenseKey = strings.TrimSpace(string(contents))
-	} else if keyFromEnv != "" {
-		licenseKey = keyFromEnv
-	} else {
-		return errors.New("A MaxMind key file must be specified in the config (Director.MaxMindKeyFile), in the environment (PELICAN_DIRECTOR_MAXMINDKEYFILE), or the key must be provided via the environment variable PELICAN_MAXMINDKEY)")
-	}
-
-	url := fmt.Sprintf(maxMindURL, licenseKey)
-	localDir := filepath.Dir(localFile)
-	fileHandle, err := os.CreateTemp(localDir, filepath.Base(localFile)+".tmp")
-	if err != nil {
-		return err
-	}
-	defer fileHandle.Close()
-	resp, err := http.Get(url)
-	if err != nil {
-		os.Remove(fileHandle.Name())
-		return err
-	}
-	defer resp.Body.Close()
-
-	gz, err := gzip.NewReader(resp.Body)
-	if err != nil {
-		return err
-	}
-	tr := tar.NewReader(gz)
-	foundDB := false
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return err
-		}
-		baseName := path.Base(hdr.Name)
-		if baseName != "GeoLite2-City.mmdb" {
-			continue
-		}
-		if _, err = io.Copy(fileHandle, tr); err != nil {
-			os.Remove(fileHandle.Name())
-			return err
-		}
-		foundDB = true
-		break
-	}
-	if !foundDB {
-		return errors.New("GeoIP database not found in downloaded resource")
-	}
-	if err = os.Rename(fileHandle.Name(), localFile); err != nil {
-		return err
-	}
-	return nil
-}
-
-func periodicMaxMindReload(ctx context.Context) {
-	// The MaxMindDB updates Tuesday/Thursday. While a free API key
-	// does get 1000 downloads a month, we might still want to change
-	// this eventually to guarantee we only update on those days...
-
-	// Update once every other day
-	ticker := time.NewTicker(48 * time.Hour)
-	for {
-		select {
-		case <-ticker.C:
-			localFile := param.Director_GeoIPLocation.GetString()
-			if err := downloadDB(localFile); err != nil {
-				log.Warningln("Failed to download GeoIP database:", err)
-			} else {
-				localReader, err := geoip2.Open(localFile)
-				if err != nil {
-					log.Warningln("Failed to re-open GeoIP database:", err)
-				} else {
-					maxMindReader.Store(localReader)
-				}
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func InitializeDB(ctx context.Context) {
-	go periodicMaxMindReload(ctx)
-	localFile := param.Director_GeoIPLocation.GetString()
-	localReader, err := geoip2.Open(localFile)
-	if err != nil {
-		log.Warningln("Local GeoIP database file not present; will attempt a download.", err)
-		err = downloadDB(localFile)
-		if err != nil {
-			log.Errorln("Failed to download GeoIP database!  Will not be available:", err)
-			return
-		}
-		localReader, err = geoip2.Open(localFile)
-		if err != nil {
-			log.Errorln("Failed to reopen GeoIP database!  Will not be available:", err)
-			return
-		}
-	}
-	maxMindReader.Store(localReader)
 }

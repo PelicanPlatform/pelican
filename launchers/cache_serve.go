@@ -35,7 +35,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache"
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/lotman"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -45,7 +44,7 @@ import (
 	"github.com/pelicanplatform/pelican/xrootd"
 )
 
-func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_structs.XRootDServer, error) {
+func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
 	err := xrootd.SetUpMonitoring(ctx, egrp)
 	if err != nil {
 		return nil, err
@@ -102,7 +101,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	}
 
 	// Director and origin also registers this metadata URL; avoid registering twice.
-	if !modules.IsEnabled(config.DirectorType) && !modules.IsEnabled(config.OriginType) {
+	if !modules.IsEnabled(server_structs.DirectorType) && !modules.IsEnabled(server_structs.OriginType) {
 		server_utils.RegisterOIDCAPI(engine.Group("/"), false)
 	}
 

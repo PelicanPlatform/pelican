@@ -224,10 +224,10 @@ func handleWebUIRedirect(ctx *gin.Context) {
 	// Only attempt to serve UI for servers enabled
 	serverName := strings.Split(strings.TrimPrefix(requestPath, "/"), "/")[0]
 	if slices.Contains(serverPages, serverName) {
-		if (serverName == "director" && !config.IsServerEnabled(config.DirectorType)) ||
-			(serverName == "registry" && !config.IsServerEnabled(config.RegistryType)) ||
-			(serverName == "origin" && !config.IsServerEnabled(config.OriginType)) ||
-			(serverName == "cache" && !config.IsServerEnabled(config.CacheType)) {
+		if (serverName == "director" && !config.IsServerEnabled(server_structs.DirectorType)) ||
+			(serverName == "registry" && !config.IsServerEnabled(server_structs.RegistryType)) ||
+			(serverName == "origin" && !config.IsServerEnabled(server_structs.OriginType)) ||
+			(serverName == "cache" && !config.IsServerEnabled(server_structs.CacheType)) {
 			file, _ := webAssets.ReadFile(notFoundFilePath)
 			ctx.Data(
 				http.StatusNotFound,
@@ -294,8 +294,8 @@ func handleWebUIAuth(ctx *gin.Context) {
 		if err != nil || user == "" {
 			// If director or registry server is up and user is at /view/
 			// then we allow them to choose the server without logging in
-			if (config.IsServerEnabled(config.DirectorType) ||
-				config.IsServerEnabled(config.RegistryType)) &&
+			if (config.IsServerEnabled(server_structs.DirectorType) ||
+				config.IsServerEnabled(server_structs.RegistryType)) &&
 				rootPage == "" {
 				ctx.Next()
 				return
@@ -309,8 +309,8 @@ func handleWebUIAuth(ctx *gin.Context) {
 		if slices.Contains(adminAccessPages, rootPage) {
 			// If director or registry server is up and user is at /view/
 			// then we allow them to choose the server without being an admin
-			if (config.IsServerEnabled(config.DirectorType) ||
-				config.IsServerEnabled(config.RegistryType)) &&
+			if (config.IsServerEnabled(server_structs.DirectorType) ||
+				config.IsServerEnabled(server_structs.RegistryType)) &&
 				rootPage == "" {
 				ctx.Next()
 				return

@@ -41,6 +41,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var server *httptest.Server
@@ -352,7 +353,7 @@ func TestDeprecateLogMessage(t *testing.T) {
 }
 
 func TestEnabledServers(t *testing.T) {
-	allServerTypes := []ServerType{OriginType, CacheType, DirectorType, RegistryType}
+	allServerTypes := []server_structs.ServerType{server_structs.OriginType, server_structs.CacheType, server_structs.DirectorType, server_structs.RegistryType}
 	allServerStrs := make([]string, 0)
 	allServerStrsLower := make([]string, 0)
 	for _, st := range allServerTypes {
@@ -373,7 +374,7 @@ func TestEnabledServers(t *testing.T) {
 		for _, server := range allServerTypes {
 			enabledServers = 0
 			// We didn't call setEnabledServer as it will only set once per process
-			enabledServers.SetList([]ServerType{server})
+			enabledServers.SetList([]server_structs.ServerType{server})
 			assert.True(t, IsServerEnabled(server))
 			assert.Equal(t, []string{server.String()}, GetEnabledServerString(false))
 			assert.Equal(t, []string{strings.ToLower(server.String())}, GetEnabledServerString(true))
@@ -382,13 +383,13 @@ func TestEnabledServers(t *testing.T) {
 
 	t.Run("enable-multiple-servers", func(t *testing.T) {
 		enabledServers = 0
-		enabledServers.SetList([]ServerType{OriginType, CacheType})
-		serverStr := []string{OriginType.String(), CacheType.String()}
-		serverStrLower := []string{strings.ToLower(OriginType.String()), strings.ToLower(CacheType.String())}
+		enabledServers.SetList([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
+		serverStr := []string{server_structs.OriginType.String(), server_structs.CacheType.String()}
+		serverStrLower := []string{strings.ToLower(server_structs.OriginType.String()), strings.ToLower(server_structs.CacheType.String())}
 		sort.Strings(serverStr)
 		sort.Strings(serverStrLower)
-		assert.True(t, IsServerEnabled(OriginType))
-		assert.True(t, IsServerEnabled(CacheType))
+		assert.True(t, IsServerEnabled(server_structs.OriginType))
+		assert.True(t, IsServerEnabled(server_structs.CacheType))
 		assert.Equal(t, serverStr, GetEnabledServerString(false))
 		assert.Equal(t, serverStrLower, GetEnabledServerString(true))
 	})
@@ -396,30 +397,30 @@ func TestEnabledServers(t *testing.T) {
 	t.Run("enable-all-servers", func(t *testing.T) {
 		enabledServers = 0
 		enabledServers.SetList(allServerTypes)
-		assert.True(t, IsServerEnabled(OriginType))
-		assert.True(t, IsServerEnabled(CacheType))
-		assert.True(t, IsServerEnabled(RegistryType))
-		assert.True(t, IsServerEnabled(DirectorType))
+		assert.True(t, IsServerEnabled(server_structs.OriginType))
+		assert.True(t, IsServerEnabled(server_structs.CacheType))
+		assert.True(t, IsServerEnabled(server_structs.RegistryType))
+		assert.True(t, IsServerEnabled(server_structs.DirectorType))
 		assert.Equal(t, allServerStrs, GetEnabledServerString(false))
 		assert.Equal(t, allServerStrsLower, GetEnabledServerString(true))
 	})
 
 	t.Run("setEnabledServer-only-set-once", func(t *testing.T) {
 		enabledServers = 0
-		sType := OriginType
-		sType.Set(CacheType)
+		sType := server_structs.OriginType
+		sType.Set(server_structs.CacheType)
 		setEnabledServer(sType)
-		assert.True(t, IsServerEnabled(OriginType))
-		assert.True(t, IsServerEnabled(CacheType))
+		assert.True(t, IsServerEnabled(server_structs.OriginType))
+		assert.True(t, IsServerEnabled(server_structs.CacheType))
 
 		sType.Clear()
-		sType.Set(DirectorType)
-		sType.Set(RegistryType)
+		sType.Set(server_structs.DirectorType)
+		sType.Set(server_structs.RegistryType)
 		setEnabledServer(sType)
-		assert.True(t, IsServerEnabled(OriginType))
-		assert.True(t, IsServerEnabled(CacheType))
-		assert.False(t, IsServerEnabled(DirectorType))
-		assert.False(t, IsServerEnabled(RegistryType))
+		assert.True(t, IsServerEnabled(server_structs.OriginType))
+		assert.True(t, IsServerEnabled(server_structs.CacheType))
+		assert.False(t, IsServerEnabled(server_structs.DirectorType))
+		assert.False(t, IsServerEnabled(server_structs.RegistryType))
 	})
 }
 
@@ -717,7 +718,7 @@ func TestInitServerUrl(t *testing.T) {
 		// In this case, the port is 443, so Federation_DirectorUrl = https://example.com
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mock443Port)
-		err := InitServer(ctx, DirectorType)
+		err := InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
 		require.NoError(t, err)
@@ -727,7 +728,7 @@ func TestInitServerUrl(t *testing.T) {
 		// But 443 port is stripped if provided
 		initDirectoryConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
-		err = InitServer(ctx, DirectorType)
+		err = InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
@@ -736,7 +737,7 @@ func TestInitServerUrl(t *testing.T) {
 		initDirectoryConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
 		viper.Set("Federation.DirectorUrl", "https://example-director.com")
-		err = InitServer(ctx, DirectorType)
+		err = InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
@@ -750,7 +751,7 @@ func TestInitServerUrl(t *testing.T) {
 		// In this case, the port is 443, so Federation_RegistryUrl = https://example.com
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mock443Port)
-		err := InitServer(ctx, RegistryType)
+		err := InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
 		require.NoError(t, err)
@@ -760,7 +761,7 @@ func TestInitServerUrl(t *testing.T) {
 		// But 443 port is stripped if provided
 		initConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
-		err = InitServer(ctx, RegistryType)
+		err = InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
@@ -769,7 +770,7 @@ func TestInitServerUrl(t *testing.T) {
 		initConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
 		viper.Set("Federation.RegistryUrl", "https://example-registry.com")
-		err = InitServer(ctx, RegistryType)
+		err = InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
@@ -783,7 +784,7 @@ func TestInitServerUrl(t *testing.T) {
 		// In this case, the port is 443, so Federation_BrokerUrl = https://example.com
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mock443Port)
-		err := InitServer(ctx, BrokerType)
+		err := InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
 		require.NoError(t, err)
@@ -793,7 +794,7 @@ func TestInitServerUrl(t *testing.T) {
 		// But 443 port is stripped if provided
 		initConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
-		err = InitServer(ctx, BrokerType)
+		err = InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
@@ -802,7 +803,7 @@ func TestInitServerUrl(t *testing.T) {
 		initConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
 		viper.Set("Federation.BrokerUrl", "https://example-registry.com")
-		err = InitServer(ctx, BrokerType)
+		err = InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)

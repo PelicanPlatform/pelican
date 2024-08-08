@@ -156,7 +156,7 @@ func deduplicateBasePaths(cfg *ScitokensCfg) {
 
 // Given a reference to a Scitokens configuration, write it out to a known location
 // on disk for the xrootd server
-func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) error {
+func writeScitokensConfiguration(modules server_structs.ServerType, cfg *ScitokensCfg) error {
 
 	JSONify := func(v any) (string, error) {
 		result, err := json.Marshal(v)
@@ -172,7 +172,7 @@ func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) e
 	}
 
 	xrootdRun := param.Origin_RunLocation.GetString()
-	if modules.IsEnabled(config.CacheType) {
+	if modules.IsEnabled(server_structs.CacheType) {
 		xrootdRun = param.Cache_RunLocation.GetString()
 	}
 
@@ -197,7 +197,7 @@ func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) e
 	// xrootd daemon will periodically reload the scitokens.cfg and, in some cases,
 	// we may want to update it without restarting the server.
 	finalConfigPath := filepath.Join(xrootdRun, "scitokens-origin-generated.cfg")
-	if modules.IsEnabled(config.CacheType) {
+	if modules.IsEnabled(server_structs.CacheType) {
 		finalConfigPath = filepath.Join(xrootdRun, "scitokens-cache-generated.cfg")
 	}
 	if err = os.Rename(configPath, finalConfigPath); err != nil {
@@ -212,7 +212,7 @@ func writeScitokensConfiguration(modules config.ServerType, cfg *ScitokensCfg) e
 // authfile doesn't exist - considering it an empty file
 func getOSDFAuthFiles(server server_structs.XRootDServer) ([]byte, error) {
 	var stype string
-	if server.GetServerType().IsEnabled(config.OriginType) {
+	if server.GetServerType().IsEnabled(server_structs.OriginType) {
 		stype = "origin"
 	} else {
 		stype = "cache"
@@ -290,7 +290,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 		words := strings.Fields(lineContents)
 		if len(words) >= 2 && words[0] == "u" && words[1] == "*" {
 			// There exists a public access already in the authfile
-			if server.GetServerType().IsEnabled(config.OriginType) {
+			if server.GetServerType().IsEnabled(server_structs.OriginType) {
 				outStr := "u * /.well-known lr "
 				// Set up public reads only for the namespaces that are public
 				originExports, err := server_utils.GetOriginExports()
@@ -315,7 +315,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 		}
 	}
 	// If Origin has no authfile already exists, add the ./well-known to the authfile
-	if !foundPublicLine && server.GetServerType().IsEnabled(config.OriginType) {
+	if !foundPublicLine && server.GetServerType().IsEnabled(server_structs.OriginType) {
 		outStr := "u * /.well-known lr"
 
 		// Configure the Authfile for each of the public exports we have in the origin
@@ -335,7 +335,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 	}
 
 	// For the cache, add the public namespaces
-	if server.GetServerType().IsEnabled(config.CacheType) {
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		// If nothing has been written to the output yet
 		var outStr string
 		if !foundPublicLine {
@@ -359,12 +359,12 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 
 	xrootdRun := param.Origin_RunLocation.GetString()
 
-	if server.GetServerType().IsEnabled(config.CacheType) {
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		xrootdRun = param.Cache_RunLocation.GetString()
 	}
 
 	finalAuthPath := filepath.Join(xrootdRun, "authfile-origin-generated")
-	if server.GetServerType().IsEnabled(config.CacheType) {
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		finalAuthPath = filepath.Join(xrootdRun, "authfile-cache-generated")
 	}
 	file, err := os.OpenFile(finalAuthPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
@@ -607,7 +607,7 @@ func WriteOriginScitokensConfig(authedPaths []string) error {
 		return errors.Wrap(err, "failed to generate xrootd issuer for director-based monitoring")
 	}
 
-	return writeScitokensConfiguration(config.OriginType, &cfg)
+	return writeScitokensConfiguration(server_structs.OriginType, &cfg)
 }
 
 // Writes out the cache's scitokens.cfg configuration
@@ -629,7 +629,7 @@ func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAdV2) error {
 		}
 	}
 
-	return writeScitokensConfiguration(config.CacheType, &cfg)
+	return writeScitokensConfiguration(server_structs.CacheType, &cfg)
 }
 
 func EmitIssuerMetadata(exportPath string, xServeUrl string) error {

@@ -56,12 +56,12 @@ func consolidateDupServerAd(newAd, existingAd server_structs.ServerAd) server_st
 // ServerAd.
 func parseServerAdFromTopology(server server_utils.Server, serverType server_structs.ServerType, caps server_structs.Capabilities) server_structs.ServerAd {
 	serverAd := server_structs.ServerAd{}
-	serverAd.Type = serverType
+	serverAd.Type = serverType.String()
 	serverAd.Name = server.Resource
-	serverAd.IOLoad = 0.5 // We don't have the probe for topology server load, so we default to 0.5
+	serverAd.IOLoad = 0.0 // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
 
 	// Explicitly set these to false for caches, because these caps don't really translate in that case
-	if serverAd.Type == server_structs.CacheType {
+	if serverAd.Type == server_structs.CacheType.String() {
 		serverAd.Caps = server_structs.Capabilities{}
 		serverAd.Writes = false
 		serverAd.Listings = false

@@ -50,6 +50,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
@@ -92,7 +93,7 @@ type (
 		Operation TokenOperation
 	}
 
-	ServerType int // ServerType is a bit mask indicating which Pelican server(s) are running in the current process
+	// ServerType int // ServerType is a bit mask indicating which Pelican server(s) are running in the current process
 
 	ContextKey string
 
@@ -109,13 +110,6 @@ const (
 )
 
 const (
-	CacheType ServerType = 1 << iota
-	OriginType
-	DirectorType
-	RegistryType
-	BrokerType
-	LocalCacheType
-
 	EgrpKey ContextKey = "egrp"
 )
 
@@ -173,7 +167,7 @@ var (
 	translator *ut.Translator
 
 	// A variable indicating enabled Pelican servers in the current process
-	enabledServers ServerType
+	enabledServers server_structs.ServerType
 	setServerOnce  sync.Once
 
 	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
@@ -237,35 +231,12 @@ func init() {
 	validate = validator.New(validator.WithRequiredStructEnabled())
 }
 
-// Set sets a list of newServers to ServerType instance
-func (sType *ServerType) SetList(newServers []ServerType) {
-	for _, server := range newServers {
-		*sType |= server
-	}
-}
-
-// Enable a single server type in the bitmask
-func (sType *ServerType) Set(server ServerType) ServerType {
-	*sType |= server
-	return *sType
-}
-
-// IsEnabled checks if a testServer is in the ServerType instance
-func (sType ServerType) IsEnabled(testServer ServerType) bool {
-	return sType&testServer == testServer
-}
-
-// Clear all values in a server type
-func (sType *ServerType) Clear() {
-	*sType = ServerType(0)
-}
-
 // setEnabledServer sets the global variable config.EnabledServers to include newServers.
 // Since this function should only be called in config package, we mark it "private" to avoid
 // reset value in other package
 //
 // This will only be called once in a single process
-func setEnabledServer(newServers ServerType) {
+func setEnabledServer(newServers server_structs.ServerType) {
 	setServerOnce.Do(func() {
 		// For each process, we only want to set enabled servers once
 		enabledServers.Set(newServers)
@@ -275,7 +246,7 @@ func setEnabledServer(newServers ServerType) {
 // IsServerEnabled checks if testServer is enabled in the current process.
 //
 // Use this function to check which server(s) are running in the current process.
-func IsServerEnabled(testServer ServerType) bool {
+func IsServerEnabled(testServer server_structs.ServerType) bool {
 	return enabledServers.IsEnabled(testServer)
 }
 
@@ -324,20 +295,20 @@ func (cp ConfigPrefix) String() string {
 // To get strings in lowerCase, set lowerCase = true.
 func GetEnabledServerString(lowerCase bool) []string {
 	servers := make([]string, 0)
-	if enabledServers.IsEnabled(CacheType) {
-		servers = append(servers, CacheType.String())
+	if enabledServers.IsEnabled(server_structs.CacheType) {
+		servers = append(servers, server_structs.CacheType.String())
 	}
-	if enabledServers.IsEnabled(LocalCacheType) {
-		servers = append(servers, LocalCacheType.String())
+	if enabledServers.IsEnabled(server_structs.LocalCacheType) {
+		servers = append(servers, server_structs.LocalCacheType.String())
 	}
-	if enabledServers.IsEnabled(OriginType) {
-		servers = append(servers, OriginType.String())
+	if enabledServers.IsEnabled(server_structs.OriginType) {
+		servers = append(servers, server_structs.OriginType.String())
 	}
-	if enabledServers.IsEnabled(DirectorType) {
-		servers = append(servers, DirectorType.String())
+	if enabledServers.IsEnabled(server_structs.DirectorType) {
+		servers = append(servers, server_structs.DirectorType.String())
 	}
-	if enabledServers.IsEnabled(RegistryType) {
-		servers = append(servers, RegistryType.String())
+	if enabledServers.IsEnabled(server_structs.RegistryType) {
+		servers = append(servers, server_structs.RegistryType.String())
 	}
 	sort.Strings(servers)
 	if lowerCase {
@@ -348,56 +319,6 @@ func GetEnabledServerString(lowerCase bool) []string {
 	} else {
 		return servers
 	}
-}
-
-// Create a new, empty ServerType bitmask
-func NewServerType() ServerType {
-	return ServerType(0)
-}
-
-// Get the string representation of a ServerType instance. This is intended
-// for getting the string form of a single ServerType contant, such as CacheType
-// OriginType, etc. To get a string slice of enabled servers, use EnabledServerString()
-func (sType ServerType) String() string {
-	switch sType {
-	case CacheType:
-		return "Cache"
-	case LocalCacheType:
-		return "LocalCache"
-	case OriginType:
-		return "Origin"
-	case DirectorType:
-		return "Director"
-	case RegistryType:
-		return "Registry"
-	case BrokerType:
-		return "Broker"
-	}
-	return "Unknown"
-}
-
-func (sType *ServerType) SetString(name string) bool {
-	switch strings.ToLower(name) {
-	case "cache":
-		*sType |= CacheType
-		return true
-	case "localcache":
-		*sType |= LocalCacheType
-		return true
-	case "origin":
-		*sType |= OriginType
-		return true
-	case "director":
-		*sType |= DirectorType
-		return true
-	case "registry":
-		*sType |= RegistryType
-		return true
-	case "broker":
-		*sType |= BrokerType
-		return true
-	}
-	return false
 }
 
 // Based on the name of the current binary, determine the preferred "style"
@@ -560,16 +481,16 @@ func discoverFederationImpl(ctx context.Context) (fedInfo FederationDiscovery, e
 	externalUrlStr := param.Server_ExternalWebUrl.GetString()
 	defer func() {
 		// Set default guesses if these values are still unset.
-		if fedInfo.DirectorEndpoint == "" && enabledServers.IsEnabled(DirectorType) {
+		if fedInfo.DirectorEndpoint == "" && enabledServers.IsEnabled(server_structs.DirectorType) {
 			fedInfo.DirectorEndpoint = externalUrlStr
 		}
-		if fedInfo.NamespaceRegistrationEndpoint == "" && enabledServers.IsEnabled(RegistryType) {
+		if fedInfo.NamespaceRegistrationEndpoint == "" && enabledServers.IsEnabled(server_structs.RegistryType) {
 			fedInfo.NamespaceRegistrationEndpoint = externalUrlStr
 		}
-		if fedInfo.JwksUri == "" && enabledServers.IsEnabled(DirectorType) {
+		if fedInfo.JwksUri == "" && enabledServers.IsEnabled(server_structs.DirectorType) {
 			fedInfo.JwksUri = externalUrlStr + "/.well-known/issuer.jwks"
 		}
-		if fedInfo.BrokerEndpoint == "" && enabledServers.IsEnabled(BrokerType) {
+		if fedInfo.BrokerEndpoint == "" && enabledServers.IsEnabled(server_structs.BrokerType) {
 			fedInfo.BrokerEndpoint = externalUrlStr
 		}
 	}()
@@ -1101,14 +1022,14 @@ func initConfigDir() error {
 //   - If neither keys are set and Xrootd.RunLocation is, then use that and emit a warning
 //   - If neither key is set, Xrootd.Runlocation is, and both modules are enabled, then we don't
 //     know the next steps -- throw an error
-func setXrootdRunLocations(currentServers ServerType, dir string) error {
+func setXrootdRunLocations(currentServers server_structs.ServerType, dir string) error {
 	cacheLocation := viper.GetString("Cache.RunLocation")
 	originLocation := viper.GetString("Origin.RunLocation")
 	xrootdLocation := viper.GetString("Xrootd.RunLocation")
 	xrootdLocationIsSet := viper.IsSet("Xrootd.RunLocation")
 	cacheLocFallbackToXrootd := false
 	originLocFallbackToXrootd := false
-	if currentServers.IsEnabled(CacheType) {
+	if currentServers.IsEnabled(server_structs.CacheType) {
 		if !viper.IsSet("Cache.RunLocation") {
 			if xrootdLocationIsSet {
 				cacheLocFallbackToXrootd = true
@@ -1118,7 +1039,7 @@ func setXrootdRunLocations(currentServers ServerType, dir string) error {
 			}
 		}
 	}
-	if currentServers.IsEnabled(OriginType) && !viper.IsSet("Origin.RunLocation") {
+	if currentServers.IsEnabled(server_structs.OriginType) && !viper.IsSet("Origin.RunLocation") {
 		if xrootdLocationIsSet {
 			originLocFallbackToXrootd = true
 			originLocation = xrootdLocation
@@ -1129,10 +1050,10 @@ func setXrootdRunLocations(currentServers ServerType, dir string) error {
 	if cacheLocFallbackToXrootd && originLocFallbackToXrootd {
 		return errors.New("Xrootd.RunLocation is set, but both modules are enabled.  Please set Cache.RunLocation and Origin.RunLocation or disable Xrootd.RunLocation so the default location can be used.")
 	}
-	if currentServers.IsEnabled(OriginType) {
+	if currentServers.IsEnabled(server_structs.OriginType) {
 		viper.SetDefault("Origin.RunLocation", originLocation)
 	}
-	if currentServers.IsEnabled(CacheType) {
+	if currentServers.IsEnabled(server_structs.CacheType) {
 		viper.SetDefault("Cache.RunLocation", cacheLocation)
 	}
 	return nil
@@ -1166,7 +1087,7 @@ func PrintConfig() error {
 // Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
-func InitServer(ctx context.Context, currentServers ServerType) error {
+func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
 	if err := initConfigDir(); err != nil {
 		return errors.Wrap(err, "Failed to initialize the server configuration")
 	}
@@ -1203,10 +1124,10 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	}
 
 	if IsRootExecution() {
-		if currentServers.IsEnabled(OriginType) {
+		if currentServers.IsEnabled(server_structs.OriginType) {
 			viper.SetDefault("Origin.RunLocation", filepath.Join("/run", "pelican", "xrootd", "origin"))
 		}
-		if currentServers.IsEnabled(CacheType) {
+		if currentServers.IsEnabled(server_structs.CacheType) {
 			viper.SetDefault("Cache.RunLocation", filepath.Join("/run", "pelican", "xrootd", "cache"))
 		}
 
@@ -1327,7 +1248,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 	xrootdPortIsSet := viper.IsSet("Xrootd.Port")
 	cacheFallbackToXrootd := false
 	originFallbackToXrootd := false
-	if currentServers.IsEnabled(CacheType) {
+	if currentServers.IsEnabled(server_structs.CacheType) {
 		if !viper.IsSet("Cache.Port") {
 			if xrootdPortIsSet {
 				cacheFallbackToXrootd = true
@@ -1337,7 +1258,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 			}
 		}
 	}
-	if currentServers.IsEnabled(OriginType) && !viper.IsSet("Origin.Port") {
+	if currentServers.IsEnabled(server_structs.OriginType) && !viper.IsSet("Origin.Port") {
 		if xrootdPortIsSet {
 			originFallbackToXrootd = true
 			originPort = xrootdPort
@@ -1372,7 +1293,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		viper.SetDefault("Cache.Url", fmt.Sprintf("https://%v", param.Server_Hostname.GetString()))
 	}
 
-	if currentServers.IsEnabled(OriginType) {
+	if currentServers.IsEnabled(server_structs.OriginType) {
 		ost := param.Origin_StorageType.GetString()
 		switch ost {
 		case "posix":
@@ -1481,7 +1402,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		}
 	}
 
-	if currentServers.IsEnabled(DirectorType) {
+	if currentServers.IsEnabled(server_structs.DirectorType) {
 		// Default to Server.ExternalWebUrl. Provided Federation.DirectorUrl will overwrite this if any
 		viper.SetDefault("Federation.DirectorUrl", param.Server_ExternalWebUrl.GetString())
 
@@ -1493,13 +1414,23 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		if maxStatRes < minStatRes {
 			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
 		}
+
+		switch s := (server_structs.SortType)(param.Director_CacheSortMethod.GetString()); s {
+		case server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType:
+			break
+		case server_structs.SortType(""):
+			viper.Set("Director.CacheSortMethod", server_structs.DistanceType)
+		default:
+			return errors.New(fmt.Sprintf("Invalid Director.CacheSortMethod. Must be one of '%s', '%s', '%s', or '%s', but you configured '%s'.",
+				server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType, s))
+		}
 	}
 
-	if currentServers.IsEnabled(RegistryType) {
+	if currentServers.IsEnabled(server_structs.RegistryType) {
 		viper.SetDefault("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
 	}
 
-	if currentServers.IsEnabled(BrokerType) {
+	if currentServers.IsEnabled(server_structs.BrokerType) {
 		viper.SetDefault("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
 	}
 
@@ -1512,7 +1443,7 @@ func InitServer(ctx context.Context, currentServers ServerType) error {
 		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 5m for refresh interval and 1h for valid interval")
 	}
 
-	if currentServers.IsEnabled(OriginType) || currentServers.IsEnabled(CacheType) {
+	if currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType) {
 		if param.Xrootd_ConfigFile.IsSet() {
 			_, err := os.Stat(param.Xrootd_ConfigFile.GetString())
 			if err != nil {

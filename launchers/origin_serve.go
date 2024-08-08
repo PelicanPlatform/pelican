@@ -33,7 +33,6 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/oa4mp"
@@ -44,7 +43,7 @@ import (
 	"github.com/pelicanplatform/pelican/xrootd"
 )
 
-func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules config.ServerType) (server_structs.XRootDServer, error) {
+func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, modules server_structs.ServerType) (server_structs.XRootDServer, error) {
 	metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusWarning, "XRootD is initializing")
 	metrics.SetComponentHealthStatus(metrics.OriginCache_CMSD, metrics.StatusWarning, "CMSD is initializting")
 
@@ -88,7 +87,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 
 	// Director also registers this metadata URL; avoid registering twice.
-	if !modules.IsEnabled(config.DirectorType) {
+	if !modules.IsEnabled(server_structs.DirectorType) {
 		server_utils.RegisterOIDCAPI(engine.Group("/"), false)
 	}
 

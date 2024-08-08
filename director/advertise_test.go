@@ -74,7 +74,7 @@ func TestConsolidateDupServerAd(t *testing.T) {
 			BrokerURL:    url.URL{Host: "example.org"},
 			URL:          url.URL{Host: "example.org"},
 			WebURL:       url.URL{Host: "example.org"},
-			Type:         server_structs.OriginType,
+			Type:         server_structs.OriginType.String(),
 			FromTopology: true,
 		}
 		newAd := server_structs.ServerAd{
@@ -83,7 +83,7 @@ func TestConsolidateDupServerAd(t *testing.T) {
 			BrokerURL:    url.URL{Host: "diff.org"},
 			URL:          url.URL{Host: "example.org"},
 			WebURL:       url.URL{Host: "diff.org"},
-			Type:         server_structs.OriginType,
+			Type:         server_structs.OriginType.String(),
 			FromTopology: false,
 		}
 		get := consolidateDupServerAd(newAd, existingAd)
@@ -125,9 +125,9 @@ func TestParseServerAdFromTopology(t *testing.T) {
 
 	t.Run("test-ad-type", func(t *testing.T) {
 		ad := parseServerAdFromTopology(server, server_structs.OriginType, server_structs.Capabilities{})
-		assert.True(t, ad.Type == server_structs.OriginType)
+		assert.True(t, ad.Type == server_structs.OriginType.String())
 		ad = parseServerAdFromTopology(server, server_structs.CacheType, server_structs.Capabilities{})
-		assert.True(t, ad.Type == server_structs.CacheType)
+		assert.True(t, ad.Type == server_structs.CacheType.String())
 	})
 	t.Run("test-from-topology", func(t *testing.T) {
 		ad := parseServerAdFromTopology(server, server_structs.OriginType, server_structs.Capabilities{})
@@ -268,7 +268,7 @@ func TestAdvertiseOSDF(t *testing.T) {
 		require.True(t, found)
 		foundAd := serverAds.Get("http://sdsc-origin.nationalresearchplatform.org:1094").Value()
 		require.NotNil(t, foundAd)
-		assert.Equal(t, server_structs.OriginType, foundAd.Type)
+		assert.Equal(t, server_structs.OriginType.String(), foundAd.Type)
 		assert.Len(t, foundAd.NamespaceAds, 3)
 		// This origin has at least one namespace enables the following capacity
 		assert.True(t, foundAd.DirectReads)
@@ -296,7 +296,7 @@ func TestAdvertiseOSDF(t *testing.T) {
 		require.True(t, found)
 		foundAd := serverAds.Get("http://dtn-pas.bois.nrp.internet2.edu:8000").Value()
 		require.NotNil(t, foundAd)
-		assert.Equal(t, server_structs.CacheType, foundAd.Type)
+		assert.Equal(t, server_structs.CacheType.String(), foundAd.Type)
 		assert.Len(t, foundAd.NamespaceAds, 2)
 	})
 }

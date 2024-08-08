@@ -40,7 +40,7 @@ func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
 	namespaces := make([]server_structs.NamespaceAdV2, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
 		ad := item.Value()
-		if ad.Type == server_structs.OriginType {
+		if ad.Type == server_structs.OriginType.String() {
 			namespaces = append(namespaces, ad.NamespaceAds...)
 		}
 	}
@@ -53,7 +53,7 @@ func listAdvertisement(serverTypes []server_structs.ServerType) []*server_struct
 	for _, item := range serverAds.Items() {
 		ad := item.Value()
 		for _, serverType := range serverTypes {
-			if ad.Type == serverType {
+			if ad.Type == serverType.String() {
 				ads = append(ads, ad)
 			}
 		}

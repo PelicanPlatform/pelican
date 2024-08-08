@@ -39,8 +39,8 @@ type (
 	}
 )
 
-func (server *OriginServer) GetServerType() config.ServerType {
-	return config.OriginType
+func (server *OriginServer) GetServerType() server_structs.ServerType {
+	return server_structs.OriginType
 }
 
 func (server *OriginServer) GetNamespaceAdsFromDirector() error {
