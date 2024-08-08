@@ -57,7 +57,7 @@ RUN yum install -y yum-utils createrepo https://repo.opensciencegrid.org/osg/23-
     yum install -y rpm-build && \
     mkdir -p /usr/local/src/rpmbuild/SRPMS && \
     cd /usr/local/src/rpmbuild/SRPMS && \
-    yumdownloader --source xrootd --disablerepo=\* --enablerepo=osg-development-source && \
+    yumdownloader --source xrootd --disablerepo=\* --enablerepo=osg-source && \
     yum-builddep -y xrootd-*.osg*.src.rpm && \
     rpmbuild --define 'osg 1' \
              --define 'dist .osg.el9' \
