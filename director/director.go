@@ -36,6 +36,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -368,8 +369,8 @@ func redirectToCache(ginCtx *gin.Context) {
 	} else {
 		// Query Origins and check if the object exists on the server
 		q := NewObjectStat()
-		st := server_structs.NewServerType()
-		st.SetList([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
+		st := config.NewServerType()
+		st.SetList([]config.ServerType{config.OriginType, config.CacheType})
 		// Set max response to all available origin and cache servers to ensure we stat against origins
 		// if no cache server has the file
 		// TODO: come back and re-evaluate if we need this many responses and potential origin/cache
@@ -408,7 +409,7 @@ func redirectToCache(ginCtx *gin.Context) {
 			// Here, we need to match against the AuthURL field of originAds
 			for _, ds := range qr.DeniedServers {
 				for _, oAd := range originAds {
-					if oAd.Type == server_structs.OriginType.String() && oAd.AuthURL.String() == ds {
+					if oAd.Type == server_structs.OriginType && oAd.AuthURL.String() == ds {
 						originAdsWObject = append(originAdsWObject, oAd)
 					}
 				}
@@ -438,11 +439,9 @@ func redirectToCache(ginCtx *gin.Context) {
 			})
 			return
 		}
-<<<<<<< HEAD
 	}
 
-<<<<<<< HEAD
-	cacheAds, err = sortServerAdsByIP(ipAddr, cacheAds, cachesAvailabilityMap)
+	cacheAds, err = sortServerAds(ipAddr, cacheAds, cachesAvailabilityMap)
 	if err != nil {
 		log.Error("Error determining server ordering for cacheAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -450,32 +449,13 @@ func redirectToCache(ginCtx *gin.Context) {
 			Msg:    "Failed to determine server ordering",
 		})
 		return
-=======
-	} else {
-		cacheAds, err = sortServerAds(ipAddr, cacheAds, nil)
-		if err != nil {
-			log.Error("Error determining server ordering for cacheAdsWObject: ", err)
-			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Failed to determine server ordering",
-			})
-			return
-		}
->>>>>>> 43c4af30 (Rename `sortServerAdsByIP` to `sortServerAds`)
 	}
 
-	// "adaptive" sorting method takes care of availability factor
-	if param.Director_CacheSortMethod.GetString() != string(server_structs.AdaptiveType) {
-		// Re-sort by availability, where caches having the object have higher priority
-		sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
-	}
-=======
 	// "smart" sorting method takes care of availability factor
 	if param.Director_CacheSortMethod.GetString() != "smart" {
 		// Re-sort by availability, where caches having the object have higher priority
 		sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
 	}
->>>>>>> 7754850b (Only sort by availability if sort method is not `smart`)
 
 	redirectURL := getRedirectURL(reqPath, cacheAds[0], !namespaceAd.Caps.PublicReads)
 
@@ -584,7 +564,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	} else {
 		// Query Origins and check if the object exists
 		q = NewObjectStat()
-		qr := q.Query(context.Background(), reqPath, server_structs.OriginType, 1, 3,
+		qr := q.Query(context.Background(), reqPath, config.OriginType, 1, 3,
 			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.PublicRead))
 		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
 
@@ -636,7 +616,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		if q == nil {
 			q = NewObjectStat()
 		}
-		qr := q.Query(context.Background(), reqPath, server_structs.CacheType, 1, 3,
+		qr := q.Query(context.Background(), reqPath, config.CacheType, 1, 3,
 			withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
 		log.Debugf("CachesPullFromCaches is enabled. Stat result for %s among caches: %s", reqPath, qr.String())
 
@@ -908,7 +888,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 }
 
 func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_structs.ServerType) {
-	ctx.Set("serverType", sType.String())
+	ctx.Set("serverType", string(sType))
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
 		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
@@ -1022,8 +1002,8 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		ok, err := verifyAdvertiseToken(engineCtx, token, registryPrefix)
 		if err != nil {
 			if err == adminApprovalErr {
-				log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), adV2.Name)
-				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), ad.Name, approvalErrMsg)})
+				log.Warningf("Failed to verify token. %s %q was not approved", string(sType), adV2.Name)
+				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", string(sType), ad.Name, approvalErrMsg)})
 				return
 			} else {
 				log.Warningln("Failed to verify token:", err)
@@ -1094,7 +1074,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		URL:                 *adUrl,
 		WebURL:              *adWebUrl,
 		BrokerURL:           *brokerUrl,
-		Type:                sType.String(),
+		Type:                sType,
 		Caps:                adV2.Caps,
 		Writes:              adV2.Caps.Writes,
 		DirectReads:         adV2.Caps.DirectReads,
