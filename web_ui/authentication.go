@@ -227,7 +227,7 @@ func RequireAuthMiddleware(ctx *gin.Context) {
 		origPath := ctx.Request.URL.RequestURI()
 		redirUrl := url.URL{
 			Path:     oauthLoginPath,
-			RawQuery: "next_url=" + url.QueryEscape(origPath),
+			RawQuery: "nextUrl=" + url.QueryEscape(origPath),
 		}
 		ctx.Redirect(http.StatusTemporaryRedirect, redirUrl.String())
 		ctx.Abort()
