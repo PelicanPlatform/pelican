@@ -9,7 +9,8 @@ import React, {
   useMemo,
   useCallback,
   SetStateAction,
-  ChangeEvent, useEffect,
+  ChangeEvent,
+  useEffect,
 } from 'react';
 
 import { createId, buildPatch } from '../util';
@@ -29,7 +30,6 @@ const StringField = ({
   focused,
   verify,
 }: StringFieldProps) => {
-
   const id = useMemo(() => createId(name), [name]);
 
   // Hold a buffer value so that you can type freely without saving an invalid state
@@ -38,7 +38,10 @@ const StringField = ({
     setBufferValue(value);
   }, [value]);
 
-  const error = useMemo(() => (verify ? verify(bufferValue) : undefined), [bufferValue]);
+  const error = useMemo(
+    () => (verify ? verify(bufferValue) : undefined),
+    [bufferValue]
+  );
 
   return (
     <TextField
@@ -54,8 +57,8 @@ const StringField = ({
         setBufferValue(e.target.value);
 
         // If there is a verification function then make sure it passes
-        if(verify && verify(e.target.value) !== undefined) {
-          return
+        if (verify && verify(e.target.value) !== undefined) {
+          return;
         }
 
         // If the verification passes then update the value as a patch

@@ -13,8 +13,6 @@ import {
   BooleanField,
   FormProps,
 } from '@/components/configuration';
-import { Simulate } from 'react-dom/test-utils';
-import submit = Simulate.submit;
 
 const verifyForm = (x: CustomRegistrationField) => {
   return (

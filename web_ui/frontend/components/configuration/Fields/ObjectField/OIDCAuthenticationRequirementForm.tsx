@@ -3,7 +3,8 @@ import { Box, Button, TextField } from '@mui/material';
 
 import {
   FormProps,
-  OIDCAuthenticationRequirement, StringField,
+  OIDCAuthenticationRequirement,
+  StringField,
 } from '@/components/configuration';
 import { String } from 'ts-toolbelt';
 
@@ -38,14 +39,14 @@ const OIDCAuthenticationRequirementForm = ({
     <>
       <Box my={2}>
         <StringField
-          name={"Claim"}
+          name={'Claim'}
           value={authReq.claim}
           onChange={(e) => setAuthReq({ ...authReq, claim: e })}
         />
       </Box>
       <Box mb={2}>
         <StringField
-          name={"Value"}
+          name={'Value'}
           value={authReq.value}
           onChange={(e) => setAuthReq({ ...authReq, value: e })}
         />

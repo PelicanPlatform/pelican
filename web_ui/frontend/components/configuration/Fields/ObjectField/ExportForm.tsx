@@ -86,7 +86,9 @@ const ExportForm = ({ onSubmit, value }: FormProps<Export>) => {
           }
         />
       </Box>
-      <Button type={'submit'} onClick={submitHandler}>Submit</Button>
+      <Button type={'submit'} onClick={submitHandler}>
+        Submit
+      </Button>
     </>
   );
 };

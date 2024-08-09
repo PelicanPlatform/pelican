@@ -9,7 +9,8 @@ import React, {
   useMemo,
   useCallback,
   SetStateAction,
-  ChangeEvent, useEffect,
+  ChangeEvent,
+  useEffect,
 } from 'react';
 
 import { createId, buildPatch } from '../util';
@@ -38,7 +39,9 @@ const IntegerField = ({
 }: IntegerFieldProps) => {
   const id = useMemo(() => createId(name), [name]);
 
-  const [bufferValue, setBufferValue] = React.useState<string>(value.toString());
+  const [bufferValue, setBufferValue] = React.useState<string>(
+    value.toString()
+  );
 
   const error = useMemo(() => {
     return verifyInteger(bufferValue) ? undefined : 'Value must be a integer';
@@ -46,7 +49,7 @@ const IntegerField = ({
 
   useEffect(() => {
     setBufferValue(value.toString());
-  }, [value])
+  }, [value]);
 
   return (
     <TextField
@@ -59,12 +62,12 @@ const IntegerField = ({
       value={bufferValue}
       onChange={(e) => {
         setBufferValue(e.target.value);
-        if(verifyInteger(e.target.value)) {
-          onChange(parseInt(e.target.value))
+        if (verifyInteger(e.target.value)) {
+          onChange(parseInt(e.target.value));
         }
       }}
       onBlur={(e) => {
-        setBufferValue(value.toString())
+        setBufferValue(value.toString());
       }}
       error={error !== undefined}
       helperText={error}

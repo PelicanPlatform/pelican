@@ -1,6 +1,6 @@
+'use client';
+
 import {
-  Config,
-  ParameterInputProps,
   ParameterMetadata,
   ParameterMetadataRecord,
 } from '@/components/configuration/index';

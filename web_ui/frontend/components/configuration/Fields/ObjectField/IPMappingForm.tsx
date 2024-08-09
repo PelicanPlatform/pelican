@@ -33,7 +33,9 @@ const createDefaultIPMapping = (): IPMappingFine => {
 
 const IPMappingForm = ({ onSubmit, value }: FormProps<IPMapping>) => {
   const valueAsIPMappingFine: IPMappingFine =
-    value !== undefined && 'all' in value ? { source: 'all', dest: value.all } : value;
+    value !== undefined && 'all' in value
+      ? { source: 'all', dest: value.all }
+      : value;
 
   const [ipMapping, setIPMapping] = React.useState<IPMappingFine>(
     valueAsIPMappingFine || createDefaultIPMapping()
@@ -71,7 +73,9 @@ const IPMappingForm = ({ onSubmit, value }: FormProps<IPMapping>) => {
           verify={verifyIpAddress}
         />
       </Box>
-      <Button type={'submit'} onClick={submitHandler}>Submit</Button>
+      <Button type={'submit'} onClick={submitHandler}>
+        Submit
+      </Button>
     </>
   );
 };

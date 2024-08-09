@@ -1,3 +1,5 @@
+'use client';
+
 import React, { memo } from 'react';
 import { Box, Button, Typography } from '@mui/material';
 import { QuestionMark } from '@mui/icons-material';
@@ -24,7 +26,9 @@ export interface ConfigDisplayProps {
   onChange: (patch: any) => void;
 }
 
-export function ConfigDisplay({
+export const ConfigDisplay = memo(NonMemoizedConfigDisplay);
+
+export function NonMemoizedConfigDisplay({
   config,
   metadata,
   patch,

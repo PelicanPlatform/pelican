@@ -56,7 +56,9 @@ const AuthorizationTemplateForm = ({
           }
         />
       </Box>
-      <Button type={'submit'} onClick={submitHandler}>Submit</Button>
+      <Button type={'submit'} onClick={submitHandler}>
+        Submit
+      </Button>
     </>
   );
 };
