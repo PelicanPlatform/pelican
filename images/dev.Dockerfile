@@ -32,52 +32,20 @@ ENV GOFLAGS="-buildvcs=false"
 RUN groupadd -o -g 10940 xrootd
 RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
-RUN yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+# Install EPEL and OSG repos -- we want OSG-patched versions of XRootD
+RUN yum install -y \
+    https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm \
+    https://repo.opensciencegrid.org/osg/23-main/osg-23-main-el9-release-latest.rpm \
+    yum-utils && \
     /usr/bin/crb enable && \
     # ^^ crb enables the Code Ready Builder repository (EL9) or PowerTools (EL8), needed for some of our dependencies \
+    yum-config-manager --setopt=install_weak_deps=False --save && \
+    # ^^ save some space by not installing weak dependencies \
     yum clean all
 
 # Get goreleaser
-# NOTE: If using podman to build, you must pass --format=docker for the SHELL command to work
-SHELL ["/bin/bash", "-c"]
-RUN echo $'[goreleaser] \n\
-name=GoReleaser \n\
-baseurl=https://repo.goreleaser.com/yum/ \n\
-enabled=1 \n\
-gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
-
-RUN echo '%_topdir /usr/local/src/rpmbuild' > $HOME/.rpmmacros
-
-# Download OSG's XRootD SRPM and rebuild it. Create a yum repository to put the results in.
-RUN yum install -y yum-utils createrepo https://repo.opensciencegrid.org/osg/23-main/osg-23-main-el9-release-latest.rpm && \
-    yum-config-manager --setopt=install_weak_deps=False --save && \
-    # ^^ save some space by not installing weak dependencies \
-    yum-config-manager --disable osg --save && \
-    # ^^ disable the OSG _binary_ repos, they may not be available for our arch \
-    yum install -y rpm-build && \
-    mkdir -p /usr/local/src/rpmbuild/SRPMS && \
-    cd /usr/local/src/rpmbuild/SRPMS && \
-    yumdownloader --source xrootd --disablerepo=\* --enablerepo=osg-testing-source && \
-    yum-builddep -y xrootd-*.osg*.src.rpm && \
-    rpmbuild --define 'osg 1' \
-             --define 'dist .osg.el9' \
-             --without compat \
-             --without doc \
-             --nocheck \
-             --rebuild \
-             -bb xrootd-*.osg*.src.rpm  && \
-    createrepo /usr/local/src/rpmbuild/RPMS && \
-    yum clean all
-
-RUN echo $'[local] \n\
-name=Local \n\
-baseurl=file:///usr/local/src/rpmbuild/RPMS/ \n\
-enabled=1 \n\
-priority=1 \n\
-gpgcheck=0' > /etc/yum.repos.d/local.repo
-
 # Install goreleaser and various other packages we need
-RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens xrootd-voms \
+RUN yum install -y --enablerepo=osg-testing goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens xrootd-voms \
     xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel libcap-devel \
     && yum clean all
 
@@ -155,7 +123,6 @@ RUN \
     dnf module install -y nodejs:20
 
 # Installing the right version of go
-SHELL ["/bin/sh", "-c"]
 RUN curl https://dl.google.com/go/go1.21.6.linux-$TARGETARCH.tar.gz -o go1.21.6.linux-$TARGETARCH.tar.gz && \
     rm -rf /usr/local/go && tar -C /usr/local -xzf go1.21.6.linux-$TARGETARCH.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
