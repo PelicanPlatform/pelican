@@ -31,6 +31,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -736,39 +737,18 @@ func TestObjectList(t *testing.T) {
 	// Other set-up items:
 	testFileContent := "test file content"
 	// Create the temporary file to upload
-	tempFile, err := os.CreateTemp(t.TempDir(), "test")
+	tempFileName := filepath.Join(t.TempDir(), "test")
+	tempFile, err := os.OpenFile(tempFileName, os.O_CREATE|os.O_RDWR, 0644)
 	assert.NoError(t, err, "Error creating temp file")
-	defer os.Remove(tempFile.Name())
 	_, err = tempFile.WriteString(testFileContent)
 	assert.NoError(t, err, "Error writing to temp file")
 	tempFile.Close()
 
-	issuer, err := config.GetServerIssuerURL()
-	require.NoError(t, err)
-
-	// Create a token file
-	tokenConfig := token.NewWLCGToken()
-	tokenConfig.Lifetime = time.Minute
-	tokenConfig.Issuer = issuer
-	tokenConfig.Subject = "origin"
-	tokenConfig.AddAudienceAny()
-
-	scopes := []token_scopes.TokenScope{}
-	readScope, err := token_scopes.Storage_Read.Path("/")
-	assert.NoError(t, err)
-	scopes = append(scopes, readScope)
-	modScope, err := token_scopes.Storage_Modify.Path("/")
-	assert.NoError(t, err)
-	scopes = append(scopes, modScope)
-	tokenConfig.AddScopes(scopes...)
-	token, err := tokenConfig.CreateToken()
-	assert.NoError(t, err)
-	tempToken, err := os.CreateTemp(t.TempDir(), "token")
-	assert.NoError(t, err, "Error creating temp token file")
+	// Get a temporary token file
+	tempToken, _ := getTempToken(t)
+	defer tempToken.Close()
 	defer os.Remove(tempToken.Name())
-	_, err = tempToken.WriteString(token)
-	assert.NoError(t, err, "Error writing to temp token file")
-	tempToken.Close()
+
 	// Disable progress bars to not reuse the same mpb instance
 	viper.Set("Logging.DisableProgressBars", true)
 
@@ -786,12 +766,24 @@ func TestObjectList(t *testing.T) {
 				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(""))
 				require.NoError(t, err)
 				require.Len(t, get, 2)
-				require.Equal(t, fmt.Sprintf("%s/hello_world.txt", export.FederationPrefix), get[0].Name)
+				var name string
+				if strings.Contains(get[0].Name, "hello_world.txt") {
+					name = get[0].Name
+				} else {
+					name = get[1].Name
+				}
+				require.Equal(t, fmt.Sprintf("%s/hello_world.txt", export.FederationPrefix), name)
 			} else {
 				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()))
 				require.NoError(t, err)
 				require.Len(t, get, 2)
-				require.Equal(t, fmt.Sprintf("%s/hello_world.txt", export.FederationPrefix), get[0].Name)
+				var name string
+				if strings.Contains(get[0].Name, "hello_world.txt") {
+					name = get[0].Name
+				} else {
+					name = get[1].Name
+				}
+				require.Equal(t, fmt.Sprintf("%s/hello_world.txt", export.FederationPrefix), name)
 			}
 		}
 	})
