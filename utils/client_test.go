@@ -24,6 +24,8 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // Test the functionality of CheckValidQuery and all its edge cases
@@ -252,6 +254,7 @@ func TestUrlWithFederation(t *testing.T) {
 	})
 
 	t.Run("testFederationNoHost", func(t *testing.T) {
+		viper.Set(param.Federation_DiscoveryUrl.GetName(), "somefederation")
 		namespaceOnly := "/namespace/test.txt"
 		str, err := UrlWithFederation(namespaceOnly)
 		assert.NoError(t, err)
