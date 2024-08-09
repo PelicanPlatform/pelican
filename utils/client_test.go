@@ -24,8 +24,6 @@ import (
 
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/pelicanplatform/pelican/param"
 )
 
 // Test the functionality of CheckValidQuery and all its edge cases
@@ -251,13 +249,6 @@ func TestUrlWithFederation(t *testing.T) {
 		str, err := UrlWithFederation(pelUrl)
 		assert.NoError(t, err)
 		assert.Equal(t, pelUrl, str)
-	})
-
-	t.Run("testFederationAndHost", func(t *testing.T) {
-		viper.Set(param.Federation_DiscoveryUrl.GetName(), "somefederation")
-		_, err := UrlWithFederation(pelUrl)
-		assert.Error(t, err)
-		assert.Equal(t, "Source URL should not have a host when the Federation_DiscoveryUrl is set", err.Error())
 	})
 
 	t.Run("testFederationNoHost", func(t *testing.T) {

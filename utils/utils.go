@@ -131,6 +131,9 @@ func ExtractVersionAndServiceFromUserAgent(userAgent string) (reqVer, service st
 	return reqVer, service
 }
 
+// Given a remote url with no host (a namespace path, essentially), then if the Federation.DiscoveryURL is
+// set (either via a yaml file or via the command line flags), create a full pelican protocol URL by combining
+// the two
 func UrlWithFederation(remoteUrl string) (string, error) {
 	if param.Federation_DiscoveryUrl.IsSet() {
 		parsedUrl, err := url.Parse(remoteUrl)
@@ -139,10 +142,8 @@ func UrlWithFederation(remoteUrl string) (string, error) {
 			return "", newErr
 		}
 		if parsedUrl.Host != "" {
-			newErr := errors.New("Source URL should not have a host when the Federation_DiscoveryUrl is set")
-			return "", newErr
+			return remoteUrl, nil
 		}
-
 		parsedUrl.Host = param.Federation_DiscoveryUrl.GetString()
 		parsedUrl.Scheme = "pelican"
 		return parsedUrl.String(), nil
