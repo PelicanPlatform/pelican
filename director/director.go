@@ -225,9 +225,12 @@ func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.Nam
 
 		hdrVals := []string{namespaceAd.Generation[0].CredentialIssuer.String(), fmt.Sprint(namespaceAd.Generation[0].MaxScopeDepth),
 			string(namespaceAd.Generation[0].Strategy), basePath}
-		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy"} {
+		for idx, hdrKey := range []string{"issuer", "max-scope-depth", "strategy", "base-path"} {
 			hdrVal := hdrVals[idx]
 			if hdrVal == "" {
+				continue
+			} else if hdrKey == "max-scope-depth" && hdrVal == "0" {
+				// don't send a 0 max-scope-depth because it's malformed and probably means there should be no token generation header
 				continue
 			}
 			if !first {
@@ -235,10 +238,6 @@ func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.Nam
 			}
 			first = false
 			tokenGen += hdrKey + "=" + hdrVal
-		}
-
-		if basePath != "" {
-			tokenGen += ", base-path=" + basePath
 		}
 
 		if tokenGen != "" {
