@@ -834,7 +834,7 @@ func TestNewPelicanURL(t *testing.T) {
 // and that any duplicates are removed
 func TestGetObjectServersToTry(t *testing.T) {
 	sortedServers := []string{
-		"https://cache-1.com",
+		"http://cache-1.com", // set an HTTP scheme to check that it's switched to https
 		"https://cache-2.com",
 		"https://cache-2.com", // make sure duplicates are removed
 		"https://cache-3.com",
@@ -842,29 +842,56 @@ func TestGetObjectServersToTry(t *testing.T) {
 		"https://cache-5.com",
 	}
 
-	directorResponse := server_structs.DirectorResponse{
-		XPelNsHdr: server_structs.XPelNs{
-			RequireToken: false,
-		},
-	}
-	job := &TransferJob{
-		dirResp: directorResponse,
-	}
-	transfers := getObjectServersToTry(sortedServers, job, 3, "")
-
-	// Check that there are no duplicates in the result
-	cacheSet := make(map[string]bool)
-	for _, transfer := range transfers {
-		if cacheSet[transfer.Url.String()] {
-			t.Errorf("Found duplicate cache: %v", transfer.Url.String())
+	t.Run("RequiredTokenTriggersHTTPS", func(t *testing.T) {
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: true,
+			},
 		}
-		cacheSet[transfer.Url.String()] = true
-	}
-	// Verify we got the correct caches in our transfer attempt details
-	require.Len(t, transfers, 3)
-	assert.Equal(t, "https://cache-1.com", transfers[0].Url.String())
-	assert.Equal(t, "https://cache-2.com", transfers[1].Url.String())
-	assert.Equal(t, "https://cache-3.com", transfers[2].Url.String())
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		transfers := getObjectServersToTry(sortedServers, job, 3, "")
+
+		// Check that there are no duplicates in the result
+		cacheSet := make(map[string]bool)
+		for _, transfer := range transfers {
+			if cacheSet[transfer.Url.String()] {
+				t.Errorf("Found duplicate cache: %v", transfer.Url.String())
+			}
+			cacheSet[transfer.Url.String()] = true
+		}
+		// Verify we got the correct caches in our transfer attempt details
+		require.Len(t, transfers, 3)
+		assert.Equal(t, "https://cache-1.com", transfers[0].Url.String())
+		assert.Equal(t, "https://cache-2.com", transfers[1].Url.String())
+		assert.Equal(t, "https://cache-3.com", transfers[2].Url.String())
+	})
+
+	t.Run("NoRequiredTokenPreservesHTTP", func(t *testing.T) {
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: false,
+			},
+		}
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		transfers := getObjectServersToTry(sortedServers, job, 3, "")
+
+		cacheSet := make(map[string]bool)
+		for _, transfer := range transfers {
+			if cacheSet[transfer.Url.String()] {
+				t.Errorf("Found duplicate cache: %v", transfer.Url.String())
+			}
+			cacheSet[transfer.Url.String()] = true
+		}
+
+		require.Len(t, transfers, 3)
+		assert.Equal(t, "http://cache-1.com", transfers[0].Url.String())
+		assert.Equal(t, "https://cache-2.com", transfers[1].Url.String())
+		assert.Equal(t, "https://cache-3.com", transfers[2].Url.String())
+	})
 }
 
 // Test that the project name is correctly extracted from the job ad file

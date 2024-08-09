@@ -1351,7 +1351,7 @@ func getObjectServersToTry(sortedObjectServers []string, job *TransferJob, oServ
 			oServers = append(oServers, oServer)
 			oServerList[oServer] = true
 			td := transferDetailsOptions{
-				NeedsToken: !job.dirResp.XPelNsHdr.RequireToken,
+				NeedsToken: job.dirResp.XPelNsHdr.RequireToken,
 				PackOption: packOption,
 			}
 			transfers = append(transfers, generateTransferDetails(oServer, td)...)
