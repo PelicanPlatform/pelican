@@ -237,10 +237,11 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 			if clientCoordOk {
 				distance, isRand = distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
 				if isRand {
-					// We'll set weight to negative, but still perform the load weight calculation
-					// This way, if the client or multiple servers result in null lat/long, we'll still
-					// prefer whichever server has the lowest load.
-					weight = 0 - rand.Float64()
+					// In distanceAndLoad/adaptive modes, pin random distance weights to the range [-0.475, -0.525)] in an attempt
+					// to make sure the weights from availability/load overpower the random distance weights while
+					// still having a stochastic element. We do this instead of ignoring the distance weight entirely, because
+					// it's possible load information and or availability information is not available for all servers.
+					weight = 0 - (0.475+rand.Float64())*(0.05)
 				} else {
 					dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
 					weight *= dWeighted
@@ -259,7 +260,7 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 			if clientCoordOk {
 				distance, isRand = distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
 				if isRand {
-					weight = 0 - rand.Float64()
+					weight = 0 - (0.475+rand.Float64())*(0.05)
 				} else {
 					dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
 					weight *= dWeighted
