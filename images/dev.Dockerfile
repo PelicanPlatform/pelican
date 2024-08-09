@@ -54,6 +54,7 @@ gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 # Install goreleaser and various other packages we need
 RUN yum install -y --enablerepo=osg-testing goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens xrootd-voms \
     xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel libcap-devel \
+    zlib-devel \
     && yum clean all
 
 # The ADD command with a api.github.com URL in the next couple of sections
