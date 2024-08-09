@@ -44,6 +44,13 @@ RUN yum install -y \
     yum clean all
 
 # Get goreleaser
+# This is a bash-ism but on almalinux:9, /bin/sh _is_ bash so we don't need to change SHELL
+RUN echo $'[goreleaser] \n\
+name=GoReleaser \n\
+baseurl=https://repo.goreleaser.com/yum/ \n\
+enabled=1 \n\
+gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
+
 # Install goreleaser and various other packages we need
 RUN yum install -y --enablerepo=osg-testing goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens xrootd-voms \
     xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel libcap-devel \
