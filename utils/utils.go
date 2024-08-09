@@ -19,6 +19,7 @@
 package utils
 
 import (
+	"fmt"
 	"net"
 	"net/url"
 	"regexp"
@@ -29,6 +30,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // snakeCaseToCamelCase converts a snake case string to camel case.
@@ -126,4 +129,23 @@ func ExtractVersionAndServiceFromUserAgent(userAgent string) (reqVer, service st
 	reqVer = userAgentSplit[1]
 	service = (strings.Split(userAgentSplit[0], "-"))[1]
 	return reqVer, service
+}
+
+func UrlWithFederation(remoteUrl string) (string, error) {
+	if param.Federation_DiscoveryUrl.IsSet() {
+		parsedUrl, err := url.Parse(remoteUrl)
+		if err != nil {
+			newErr := errors.New(fmt.Sprintf("error parsing source url: %s", err))
+			return "", newErr
+		}
+		if parsedUrl.Host != "" {
+			newErr := errors.New("Source URL should not have a host when the Federation_DiscoveryUrl is set")
+			return "", newErr
+		}
+
+		parsedUrl.Host = param.Federation_DiscoveryUrl.GetString()
+		parsedUrl.Scheme = "pelican"
+		return parsedUrl.String(), nil
+	}
+	return remoteUrl, nil
 }
