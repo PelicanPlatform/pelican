@@ -48,7 +48,7 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
 RUN yum -y update \
-    && yum -y --allowerasing install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms xrootd-multiuser curl java-17-openjdk-headless \
+    && yum -y --allowerasing --enablerepo osg-testing install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms xrootd-multiuser curl java-17-openjdk-headless \
     && yum clean all \
     && rm -rf /var/cache/yum/
 
@@ -57,7 +57,7 @@ RUN yum -y update \
 ####
 FROM dependency-build AS xrootd-plugin-builder
 # Install necessary build dependencies
-RUN  yum install -y xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
+RUN  yum install -y --enablerepo=osg-testing xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
 
 # The ADD command with a api.github.com URL in the next couple of sections
 # are for cache-hashing of the external repository that we rely on to build
