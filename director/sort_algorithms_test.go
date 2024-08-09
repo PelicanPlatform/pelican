@@ -27,9 +27,31 @@ import (
 
 func TestDistanceWeight(t *testing.T) {
 	// Some basic values to test and ensure it returns miles, not radian
-	assert.Equal(t, 0.0, distanceWeight(43.0753, -89.4114, 43.0753, -89.4114, true))
-	assert.Equal(t, 69.0, math.Round(distanceWeight(42.0753, -89.4114, 43.0753, -89.4114, true)))
-	assert.Equal(t, 50.0, math.Round(distanceWeight(43.0753, -90.4114, 43.0753, -89.4114, true)))
+	d, isRand := distanceWeight(43.0753, -89.4114, 43.0753, -89.4114, true)
+	assert.False(t, isRand)
+	assert.Equal(t, 0.0, d)
+
+	d, isRand = distanceWeight(42.0753, -89.4114, 43.0753, -89.4114, true)
+	assert.False(t, isRand)
+	assert.Equal(t, 69.0, math.Round(d))
+
+	d, isRand = distanceWeight(43.0753, -90.4114, 43.0753, -89.4114, true)
+	assert.False(t, isRand)
+	assert.Equal(t, 50.0, math.Round(d))
+
+	// Test passing null lat long
+	_, isRand = distanceWeight(0, 0, 0, 0, true)
+	assert.True(t, isRand)
+
+	_, isRand = distanceWeight(42.0753, -89.4114, 0, 0, true)
+	assert.True(t, isRand)
+
+	_, isRand = distanceWeight(0, 0, 43.0753, -89.4114, true)
+	assert.True(t, isRand)
+
+	// Make sure a 0 in both is not mistaken for null
+	_, isRand = distanceWeight(43.0753, 0, 0, -89.4114, true)
+	assert.False(t, isRand)
 }
 
 func TestGatedHalvingMultiplier(t *testing.T) {
