@@ -65,12 +65,18 @@ func distanceOnSphere(lat1 float64, long1 float64, lat2 float64, long2 float64) 
 // with priority (higher weight is higher priority is lower distance)
 //
 // Is realD set to true, then return the distance between the two coordinates in miles
-func distanceWeight(lat1 float64, long1 float64, lat2 float64, long2 float64, realD bool) float64 {
-	if realD {
-		return distanceOnSphere(lat1, long1, lat2, long2) * earthRadiusToMilesFactor
+func distanceWeight(lat1 float64, long1 float64, lat2 float64, long2 float64, realD bool) (weight float64, isRand bool) {
+	// If either coordinate is sitting at null island, return a random weight
+	isRand = false
+	if (lat1 == 0.0 && long1 == 0.0) || (lat2 == 0.0 && long2 == 0.0) {
+		isRand = true
+		weight = rand.Float64() // technically this returns [0,1)
+	} else if realD {
+		weight = distanceOnSphere(lat1, long1, lat2, long2) * earthRadiusToMilesFactor
 	} else {
-		return 1 - (distanceOnSphere(lat1, long1, lat2, long2) / math.Pi)
+		weight = 1 - (distanceOnSphere(lat1, long1, lat2, long2) / math.Pi)
 	}
+	return
 }
 
 // Given the input value, return a weight [0, 1.0] based on the gated havling of the base weight 1.0.

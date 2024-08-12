@@ -152,9 +152,24 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	lat = record.Location.Latitude
 	long = record.Location.Longitude
 
+	// If the lat/long results in null _before_ we've had a chance to potentially set it to null, log a warning.
+	// There's likely a problem with the GeoIP database or the IP address. Usually this just means the IP address
+	// comes from a private range.
 	if lat == 0 && long == 0 {
-		log.Infof("GeoIP Resolution of the address %s resulted in the nul lat/long.", ip.String())
+		log.Warningf("GeoIP Resolution of the address %s resulted in the null lat/long. This will result in random server sorting.", ip.String())
 	}
+
+	// MaxMind provides an accuracy radius in kilometers. When it actually has no clue how to resolve a valid, public
+	// IP, it sets the radius to 1000. If we get a radius of 900 or more (probably even much less than this...), we
+	// should be very suspicious of the data, and mark it as appearing at the null lat/long (and provide a warning in
+	// the Director), which also triggers random weighting in our sort algorithms.
+	if record.Location.AccuracyRadius >= 900 {
+		log.Warningf("GeoIP resolution of the address %s resulted in a suspiciously large accuracy radius of %d km. "+
+			"This will be treated as GeoIP resolution failure and result in random server sorting. Setting lat/long to null.", ip.String(), record.Location.AccuracyRadius)
+		lat = 0
+		long = 0
+	}
+
 	return
 }
 
@@ -166,6 +181,15 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate, ok bool) {
 		log.Warningf("failed to resolve lat/long for address %s: %v", addr, err)
 	}
 	return
+}
+
+// Any time we end up with a random distance, we flip the weights negative. When this happens,
+// we want a multiplier that should double a servers rank to multiply the weight by 0.5, not 2.0
+func invertWeightIfNeeded(isRand bool, weight float64) float64 {
+	if isRand {
+		return 1 / weight
+	}
+	return weight
 }
 
 // The all-in-one method to sort serverAds based on Dirtector.CacheSortMethod configuration parameter
@@ -197,56 +221,65 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 	for idx, ad := range ads {
 		switch server_structs.SortType(sortMethod) {
 		case server_structs.DistanceType:
-			// If we can't get the client coordinates, then simply use random sort
-			if !clientCoordOk {
-				weights[idx] = SwapMap{rand.Float64(), idx}
-				continue
-			}
-			if ad.Latitude == 0 && ad.Longitude == 0 {
-				// If server lat and long are 0, the server geolocation is unknown
-				// Below we sort weights in descending order, so we assign negative value here,
-				// causing them to always be at the end of the sorted list.
-				weights[idx] = SwapMap{0 - rand.Float64(), idx}
+			// If either client or ad coordinates are null, the underlying distanceWeight function will return a random weight
+			weight, isRand := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, false)
+			if isRand {
+				// Guarantee randomly-weighted servers are sorted to the bottom
+				weights[idx] = SwapMap{0 - weight, idx}
 			} else {
-				weights[idx] = SwapMap{distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, false),
-					idx}
+				weights[idx] = SwapMap{weight, idx}
 			}
 		case server_structs.DistanceAndLoadType:
 			weight := 1.0
 			// Distance weight
+			var distance float64
+			var isRand bool
 			if clientCoordOk {
-				distance := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
-				dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
-				weight *= dWeighted
+				distance, isRand = distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
+				if isRand {
+					// In distanceAndLoad/adaptive modes, pin random distance weights to the range [-0.475, -0.525)] in an attempt
+					// to make sure the weights from availability/load overpower the random distance weights while
+					// still having a stochastic element. We do this instead of ignoring the distance weight entirely, because
+					// it's possible load information and or availability information is not available for all servers.
+					weight = 0 - (0.475+rand.Float64())*(0.05)
+				} else {
+					dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
+					weight *= dWeighted
+				}
 			}
 
 			// Load weight
 			lWeighted := gatedHalvingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
-			weight *= lWeighted
-
+			weight *= invertWeightIfNeeded(isRand, lWeighted)
 			weights[idx] = SwapMap{weight, idx}
 		case server_structs.AdaptiveType:
 			weight := 1.0
 			// Distance weight
+			var distance float64
+			var isRand bool
 			if clientCoordOk {
-				distance := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
-				dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
-				weight *= dWeighted
+				distance, isRand = distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
+				if isRand {
+					weight = 0 - (0.475+rand.Float64())*(0.05)
+				} else {
+					dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
+					weight *= dWeighted
+				}
 			}
 			// Availability weight
 			if availabilityMap == nil {
 				weight *= 1.0
 			} else if hasObj, ok := availabilityMap[ad.URL.String()]; ok && hasObj {
-				weight *= 2.0
+				weight *= invertWeightIfNeeded(isRand, 2.0)
 			} else if !ok {
 				weight *= 1.0
 			} else { // ok but does not have the object
-				weight *= 0.5
+				weight *= invertWeightIfNeeded(isRand, 0.5)
 			}
 
 			// Load weight
 			lWeighted := gatedHalvingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
-			weight *= lWeighted
+			weight *= invertWeightIfNeeded(isRand, lWeighted)
 
 			weights[idx] = SwapMap{weight, idx}
 		case server_structs.RandomType:
