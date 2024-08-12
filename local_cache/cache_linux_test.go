@@ -139,8 +139,8 @@ func TestForcePurge(t *testing.T) {
 		Scheme: "unix",
 		Path:   param.LocalCache_Socket.GetString(),
 	}
-
-	_, err = utils.MakeRequest(ft.Ctx, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge", "POST", nil, map[string]string{"Authorization": "Bearer abcd"})
+	tr := config.GetTransport()
+	_, err = utils.MakeRequest(ft.Ctx, tr, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge", "POST", nil, map[string]string{"Authorization": "Bearer abcd"})
 	assert.Error(t, err)
 	require.Equal(t, fmt.Sprintf("The POST attempt to %s/api/v1.0/localcache/purge resulted in status code 403", param.Server_ExternalWebUrl.GetString()), err.Error())
 
@@ -172,7 +172,7 @@ func TestForcePurge(t *testing.T) {
 		}()
 	}
 
-	_, err = utils.MakeRequest(ft.Ctx, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge", "POST", nil, map[string]string{"Authorization": "Bearer " + token})
+	_, err = utils.MakeRequest(ft.Ctx, tr, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge", "POST", nil, map[string]string{"Authorization": "Bearer " + token})
 	require.NoError(t, err)
 
 	// Low water mark is small enough that a force purge will delete a file.

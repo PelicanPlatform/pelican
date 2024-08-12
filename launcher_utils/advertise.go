@@ -118,7 +118,8 @@ func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, er
 	if err != nil {
 		return
 	}
-	res, err := utils.MakeRequest(context.Background(), requestUrl, http.MethodGet, nil, nil)
+	tr := config.GetTransport()
+	res, err := utils.MakeRequest(context.Background(), tr, requestUrl, http.MethodGet, nil, nil)
 	if err != nil {
 		return
 	}

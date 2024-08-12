@@ -744,7 +744,8 @@ func (sc *LocalCache) updateConfig() error {
 		return errors.Wrap(err, "Unable to generate the director's listNamespaces endpoint")
 	}
 
-	respData, err := utils.MakeRequest(sc.ctx, directorNSListEndpointURL, "GET", nil, nil)
+	tr := config.GetTransport()
+	respData, err := utils.MakeRequest(sc.ctx, tr, directorNSListEndpointURL, "GET", nil, nil)
 	if err != nil {
 		return err
 	} else {

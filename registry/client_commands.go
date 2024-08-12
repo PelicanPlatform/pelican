@@ -32,6 +32,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -58,7 +59,8 @@ func NamespaceRegisterWithIdentity(privateKey jwk.Key, namespaceRegistryEndpoint
 		// it's also registered already
 
 	}
-	resp, err := utils.MakeRequest(context.Background(), namespaceRegistryEndpoint, "POST", identifiedPayload, nil)
+	tr := config.GetTransport()
+	resp, err := utils.MakeRequest(context.Background(), tr, namespaceRegistryEndpoint, "POST", identifiedPayload, nil)
 
 	var respData clientResponseData
 	// Handle case where there was an error encoded in the body
@@ -81,7 +83,7 @@ func NamespaceRegisterWithIdentity(privateKey jwk.Key, namespaceRegistryEndpoint
 			"identity_required": "true",
 			"device_code":       respData.DeviceCode,
 		}
-		resp, err = utils.MakeRequest(context.Background(), namespaceRegistryEndpoint, "POST", identifiedPayload, nil)
+		resp, err = utils.MakeRequest(context.Background(), tr, namespaceRegistryEndpoint, "POST", identifiedPayload, nil)
 		if err != nil {
 			return errors.Wrap(err, "Failed to make request")
 		}
@@ -137,7 +139,8 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 		"pubkey":       keySet,
 	}
 
-	resp, err := utils.MakeRequest(context.Background(), namespaceRegistryEndpoint, "POST", data, nil)
+	tr := config.GetTransport()
+	resp, err := utils.MakeRequest(context.Background(), tr, namespaceRegistryEndpoint, "POST", data, nil)
 
 	var respData clientResponseData
 	// Handle case where there was an error encoded in the body
@@ -182,7 +185,7 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	}
 
 	// Send the second POST request
-	resp, err = utils.MakeRequest(context.Background(), namespaceRegistryEndpoint, "POST", unidentifiedPayload, nil)
+	resp, err = utils.MakeRequest(context.Background(), tr, namespaceRegistryEndpoint, "POST", unidentifiedPayload, nil)
 
 	// Handle case where there was an error encoded in the body
 	if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil {
@@ -204,7 +207,8 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 }
 
 func NamespaceList(endpoint string) error {
-	respData, err := utils.MakeRequest(context.Background(), endpoint, "GET", nil, nil)
+	tr := config.GetTransport()
+	respData, err := utils.MakeRequest(context.Background(), tr, endpoint, "GET", nil, nil)
 	var respErr clientResponseData
 	if err != nil {
 		if jsonErr := json.Unmarshal(respData, &respErr); jsonErr == nil { // Error creating json
@@ -217,7 +221,8 @@ func NamespaceList(endpoint string) error {
 }
 
 func NamespaceGet(endpoint string) error {
-	respData, err := utils.MakeRequest(context.Background(), endpoint, "GET", nil, nil)
+	tr := config.GetTransport()
+	respData, err := utils.MakeRequest(context.Background(), tr, endpoint, "GET", nil, nil)
 	var respErr clientResponseData
 	if err != nil {
 		if jsonErr := json.Unmarshal(respData, &respErr); jsonErr == nil { // Error creating json
@@ -264,8 +269,8 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	authHeader := map[string]string{
 		"Authorization": "Bearer " + tok,
 	}
-
-	respData, err := utils.MakeRequest(context.Background(), endpoint, "DELETE", nil, authHeader)
+	tr := config.GetTransport()
+	respData, err := utils.MakeRequest(context.Background(), tr, endpoint, "DELETE", nil, authHeader)
 	var respErr clientResponseData
 	if err != nil {
 		if unmarshalErr := json.Unmarshal(respData, &respErr); unmarshalErr == nil { // Error creating json

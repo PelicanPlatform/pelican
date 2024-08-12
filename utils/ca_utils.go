@@ -33,7 +33,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -86,13 +85,13 @@ func WriteCABundle(filename string) (int, error) {
 //
 // If we're on a platform (Mac, Windows) that does not provide a CA bundle, we return
 // a count of 0 and do not launch the go routine.
-func LaunchPeriodicWriteCABundle(ctx context.Context, filename string, sleepTime time.Duration) (count int, err error) {
+func LaunchPeriodicWriteCABundle(ctx context.Context, egrpKey string, filename string, sleepTime time.Duration) (count int, err error) {
 	count, err = WriteCABundle(filename)
 	if err != nil || count == 0 {
 		return
 	}
 
-	egrp, ok := ctx.Value(config.EgrpKey).(*errgroup.Group)
+	egrp, ok := ctx.Value(egrpKey).(*errgroup.Group)
 	if !ok {
 		egrp = &errgroup.Group{}
 	}

@@ -29,8 +29,8 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	config "github.com/pelicanplatform/pelican/config"
-	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 func deviceCodeSupported(grantTypes *[]string) bool {
@@ -66,8 +66,7 @@ func trimPath(pathName string, maxDepth int) string {
 	return "/" + path.Join(pathComponents[0:maxLength]...)
 }
 
-func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *namespaces.CredentialGeneration, osdfPath string, opts config.TokenGenerationOpts) (*config.TokenEntry, error) {
-
+func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_structs.DirectorResponse, osdfPath string, opts config.TokenGenerationOpts) (*config.TokenEntry, error) {
 	if fileInfo, _ := os.Stdout.Stat(); (len(os.Getenv(config.GetPreferredPrefix().String()+"_SKIP_TERMINAL_CHECK")) == 0) && ((fileInfo.Mode() & os.ModeCharDevice) == 0) {
 		return nil, errors.New("This program must be run in a terminal to acquire a new token")
 	}
@@ -85,18 +84,17 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *na
 	osdfPath = path.Dir(osdfPath)
 
 	pathCleaned := path.Clean(osdfPath)[len(entry.Prefix):]
-	// The credential generation object provides various hints and guidance about how
+	// The credential generation/issuer objects provide various hints and guidance about how
 	// to best create the OAuth2 credential
-	if credentialGen != nil {
-		// Tweak the relative path the issuer starts with
-		if credentialGen.BasePath != nil && len(*credentialGen.BasePath) > 0 {
-			pathCleaned = path.Clean(osdfPath)[len(*credentialGen.BasePath):]
+	if len(dirResp.XPelTokGenHdr.Issuers) != 0 {
+		if len(dirResp.XPelTokGenHdr.BasePaths) > 0 {
+			pathCleaned = path.Clean(osdfPath)[len(dirResp.XPelTokGenHdr.BasePaths[0]):]
 		}
+	}
 
-		// Potentially increase the coarseness of the token
-		if opts.Operation != config.TokenSharedWrite && opts.Operation != config.TokenSharedRead && credentialGen.MaxScopeDepth != nil && *credentialGen.MaxScopeDepth >= 0 {
-			pathCleaned = trimPath(pathCleaned, *credentialGen.MaxScopeDepth)
-		}
+	// Potentially increase the coarseness of the token
+	if opts.Operation != config.TokenSharedWrite && opts.Operation != config.TokenSharedRead && dirResp.XPelTokGenHdr.MaxScopeDepth > 0 {
+		pathCleaned = trimPath(pathCleaned, (int)((dirResp.XPelTokGenHdr.MaxScopeDepth)))
 	}
 
 	var storageScope string
@@ -111,9 +109,11 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, credentialGen *na
 	oauth2Config := Config{
 		ClientID:     entry.ClientID,
 		ClientSecret: entry.ClientSecret,
-		Endpoint: Endpoint{AuthURL: issuerInfo.AuthURL,
+		Endpoint: Endpoint{
+			AuthURL:       issuerInfo.AuthURL,
 			TokenURL:      issuerInfo.TokenURL,
-			DeviceAuthURL: issuerInfo.DeviceAuthURL},
+			DeviceAuthURL: issuerInfo.DeviceAuthURL,
+		},
 		Scopes: []string{"wlcg", "offline_access", storageScope},
 	}
 

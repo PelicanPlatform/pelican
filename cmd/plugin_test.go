@@ -774,7 +774,7 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		results := make(chan *classads.ClassAd, 5)
 		err = runPluginWorker(fed.Ctx, false, workChan, results)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to read remote directory: PROPFIND /test/SomeDirectoryThatDoesNotExist:)/: 404")
+		assert.Contains(t, err.Error(), "Failed to create new transfer job: no collections URL found in director response")
 	})
 }
 

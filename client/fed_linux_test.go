@@ -455,5 +455,5 @@ func TestFailureOnOriginDisablingListings(t *testing.T) {
 
 	_, err = client.DoGet(fed.Ctx, downloadURL, t.TempDir(), true)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "origin and/or namespace does not support directory listings")
+	assert.Contains(t, err.Error(), "no collections URL found in director response")
 }

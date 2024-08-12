@@ -32,12 +32,12 @@ import (
 	log "github.com/sirupsen/logrus"
 	oauth2_upstream "golang.org/x/oauth2"
 
-	config "github.com/pelicanplatform/pelican/config"
-	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/config"
 	oauth2 "github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-func TokenIsAcceptable(jwtSerialized string, osdfPath string, namespace namespaces.Namespace, opts config.TokenGenerationOpts) bool {
+func TokenIsAcceptable(jwtSerialized string, osdfPath string, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) bool {
 	parser := jwt.Parser{SkipClaimsValidation: true}
 	token, _, err := parser.ParseUnverified(jwtSerialized, &jwt.MapClaims{})
 	if err != nil {
@@ -52,7 +52,7 @@ func TokenIsAcceptable(jwtSerialized string, osdfPath string, namespace namespac
 	}
 
 	osdfPathCleaned := path.Clean(osdfPath)
-	if !strings.HasPrefix(osdfPathCleaned, namespace.Path) {
+	if !strings.HasPrefix(osdfPathCleaned, dirResp.XPelNsHdr.Namespace) {
 		return false
 	}
 
@@ -63,9 +63,10 @@ func TokenIsAcceptable(jwtSerialized string, osdfPath string, namespace namespac
 	// In this case, we want to strip out the issuer base path, not the
 	// namespace one, in order to see if the token has the right privs.
 
-	targetResource := path.Clean("/" + osdfPathCleaned[len(namespace.Path):])
-	if namespace.CredentialGen != nil && namespace.CredentialGen.BasePath != nil && len(*namespace.CredentialGen.BasePath) > 0 {
-		targetResource = path.Clean("/" + osdfPathCleaned[len(*namespace.CredentialGen.BasePath):])
+	// TODO: Come back and figure out how to resolve this in the case that there are multiple issuers or multiple base paths.
+	targetResource := path.Clean("/" + osdfPathCleaned[len(dirResp.XPelNsHdr.Namespace):])
+	if len(dirResp.XPelTokGenHdr.Issuers) >= 0 && len(dirResp.XPelTokGenHdr.BasePaths) > 0 && dirResp.XPelTokGenHdr.BasePaths[0] != "" {
+		targetResource = path.Clean("/" + osdfPathCleaned[len(dirResp.XPelTokGenHdr.BasePaths[0]):])
 	}
 
 	scopes_iface := (*token.Claims.(*jwt.MapClaims))["scope"]
@@ -115,13 +116,18 @@ func TokenIsExpired(jwtSerialized string) bool {
 	return true
 }
 
-func RegisterClient(namespace namespaces.Namespace) (*config.PrefixEntry, error) {
-	issuer, err := config.GetIssuerMetadata(*namespace.CredentialGen.Issuer)
+func RegisterClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntry, error) {
+	issuers := dirResp.XPelTokGenHdr.Issuers
+	if len(issuers) == 0 {
+		return nil, fmt.Errorf("no issuer information for prefix '%s' is provided", dirResp.XPelNsHdr.Namespace)
+	}
+	issuerUrl := issuers[0].String()
+	issuer, err := config.GetIssuerMetadata(issuerUrl)
 	if err != nil {
 		return nil, err
 	}
 	if issuer.RegistrationURL == "" {
-		return nil, fmt.Errorf("Issuer %s does not support dynamic client registration", *namespace.CredentialGen.Issuer)
+		return nil, fmt.Errorf("Issuer %s does not support dynamic client registration", issuerUrl)
 	}
 
 	drcp := oauth2.DCRPConfig{ClientRegistrationEndpointURL: issuer.RegistrationURL, Transport: config.GetTransport(), Metadata: oauth2.Metadata{
@@ -138,35 +144,38 @@ func RegisterClient(namespace namespaces.Namespace) (*config.PrefixEntry, error)
 		return nil, err
 	}
 	newEntry := config.PrefixEntry{
-		Prefix:       namespace.Path,
+		Prefix:       dirResp.XPelNsHdr.Namespace,
 		ClientID:     resp.ClientID,
 		ClientSecret: resp.ClientSecret,
 	}
 	return &newEntry, nil
 }
 
-// Given a URL and a piece of the namespace, attempt to acquire a valid
+// Given a URL and a director Response, attempt to acquire a valid
 // token for that URL.
-func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts config.TokenGenerationOpts) (string, error) {
+func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) (string, error) {
+
 	log.Debugln("Acquiring a token from configuration and OAuth2")
 
-	if namespace.CredentialGen == nil {
-		return "", errors.Errorf("Credential generation scheme information not provided for prefix %s", namespace.Path)
-	}
-	if namespace.CredentialGen.Strategy == nil {
-		return "", errors.Errorf("Credential generation strategy not provided for prefix %s", namespace.Path)
-	}
-	switch strategy := *namespace.CredentialGen.Strategy; strategy {
-	case "OAuth2":
-	case "Vault":
-		return "", fmt.Errorf("Vault credential generation strategy is not supported")
+	nsPrefix := dirResp.XPelNsHdr.Namespace
+
+	switch tokStrategy := dirResp.XPelTokGenHdr.Strategy; tokStrategy {
+	case server_structs.OAuthStrategy:
+	case server_structs.VaultStrategy:
+		return "", fmt.Errorf("vault credential generation strategy is not supported")
 	default:
-		return "", fmt.Errorf("Unknown credential generation strategy (%s) for prefix %s",
-			strategy, namespace.Path)
+		return "", fmt.Errorf("unknown credential generation strategy (%s) for prefix %s",
+			tokStrategy, nsPrefix)
 	}
-	issuer := *namespace.CredentialGen.Issuer
+
+	issuers := dirResp.XPelTokGenHdr.Issuers
+	if len(issuers) == 0 {
+		return "", fmt.Errorf("no issuer information for prefix '%s' is provided", nsPrefix)
+	}
+
+	issuer := issuers[0].String()
 	if len(issuer) == 0 {
-		return "", fmt.Errorf("Issuer for prefix %s is unknown", namespace.Path)
+		return "", fmt.Errorf("issuer URL for prefix %s is unknown", nsPrefix)
 	}
 
 	osdfConfig, err := config.GetCredentialConfigContents()
@@ -176,7 +185,7 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts con
 
 	prefixIdx := -1
 	for idx, entry := range osdfConfig.OSDF.OauthClient {
-		if entry.Prefix == namespace.Path {
+		if entry.Prefix == nsPrefix {
 			prefixIdx = idx
 			break
 		}
@@ -184,8 +193,8 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts con
 	var prefixEntry *config.PrefixEntry
 	newEntry := false
 	if prefixIdx < 0 {
-		log.Infof("Prefix configuration for %s not in configuration file; will request new client", namespace.Path)
-		prefixEntry, err = RegisterClient(namespace)
+		log.Infof("Prefix configuration for %s not in configuration file; will request new client", nsPrefix)
+		prefixEntry, err = RegisterClient(dirResp)
 		if err != nil {
 			return "", err
 		}
@@ -195,8 +204,8 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts con
 	} else {
 		prefixEntry = &osdfConfig.OSDF.OauthClient[prefixIdx]
 		if len(prefixEntry.ClientID) == 0 || len(prefixEntry.ClientSecret) == 0 {
-			log.Infof("Prefix configuration for %s missing OAuth2 client information", namespace.Path)
-			prefixEntry, err = RegisterClient(namespace)
+			log.Infof("Prefix configuration for %s missing OAuth2 client information", nsPrefix)
+			prefixEntry, err = RegisterClient(dirResp)
 			if err != nil {
 				return "", err
 			}
@@ -216,7 +225,7 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts con
 	var acceptableToken *config.TokenEntry = nil
 	acceptableUnexpiredToken := ""
 	for idx, token := range prefixEntry.Tokens {
-		if !TokenIsAcceptable(token.AccessToken, destination.Path, namespace, opts) {
+		if !TokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
 			continue
 		}
 		if acceptableToken == nil {
@@ -271,12 +280,12 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts con
 		}
 	}
 
-	token, err := oauth2.AcquireToken(issuer, prefixEntry, namespace.CredentialGen, destination.Path, opts)
+	token, err := oauth2.AcquireToken(issuer, prefixEntry, dirResp, destination.Path, opts)
 	if errors.Is(err, oauth2.ErrUnknownClient) {
 		// We use anonymously-registered clients; OA4MP can periodically garbage collect these to prevent DoS
 		// In this case, we register a new client and try to acquire again.
-		log.Infof("Identity provider does not know the client for %s; registering a new one", namespace.Path)
-		prefixEntry, err = RegisterClient(namespace)
+		log.Infof("Identity provider does not know the client for %s; registering a new one", nsPrefix)
+		prefixEntry, err = RegisterClient(dirResp)
 		if err != nil {
 			return "", errors.Wrap(err, "re-registration error (identity provider does not recognize our client)")
 		}
@@ -285,7 +294,7 @@ func AcquireToken(destination *url.URL, namespace namespaces.Namespace, opts con
 			log.Warningln("Failed to save new token to configuration file:", err)
 		}
 
-		if token, err = oauth2.AcquireToken(issuer, prefixEntry, namespace.CredentialGen, destination.Path, opts); err != nil {
+		if token, err = oauth2.AcquireToken(issuer, prefixEntry, dirResp, destination.Path, opts); err != nil {
 			return "", err
 		}
 	} else if err != nil {

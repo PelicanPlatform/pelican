@@ -150,7 +150,8 @@ func runtimeInfo() (api_v1.RuntimeInfo, error) {
 
 func onceLaunchCABundleUpdate(ctx context.Context, caBundle string) (certCtn int, err error) {
 	onceCABundle.Do(func() {
-		certCtn, err = utils.LaunchPeriodicWriteCABundle(ctx, caBundle, 2*time.Minute)
+		egrpKey := string(pelican_config.EgrpKey)
+		certCtn, err = utils.LaunchPeriodicWriteCABundle(ctx, egrpKey, caBundle, 2*time.Minute)
 	})
 	return
 }

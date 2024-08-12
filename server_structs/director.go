@@ -20,8 +20,15 @@ package server_structs
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
+
+	"github.com/pkg/errors"
+
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -145,7 +152,130 @@ type (
 		RegistrationEndpoint string   `json:"registration_endpoint,omitempty"`
 		DeviceEndpoint       string   `json:"device_authorization_endpoint,omitempty"`
 	}
+
+	XPelHeader interface {
+		GetName() string
+		ParseRawHeader(*http.Response) error
+	}
+
+	XPelAuth struct {
+		Issuers []*url.URL
+	}
+
+	XPelNs struct {
+		Namespace      string // Federation Prefix path
+		RequireToken   bool   // Whether or not a token is required for read operations
+		CollectionsUrl *url.URL
+	}
+
+	XPelTokGen struct {
+		Issuers       []*url.URL
+		MaxScopeDepth uint
+		Strategy      StrategyType
+		BasePaths     []string
+		VaultServer   *url.URL
+	}
+
+	DirectorResponse struct {
+		ObjectServers []*url.URL // List of servers provided in Link header
+		Location      *url.URL   // URL content of the location header
+		XPelAuthHdr   XPelAuth
+		XPelNsHdr     XPelNs
+		XPelTokGenHdr XPelTokGen
+	}
 )
+
+func (x XPelNs) GetName() string {
+	return "X-Pelican-Namespace"
+}
+func (x *XPelNs) ParseRawResponse(resp *http.Response) error {
+	raw := resp.Header.Values(x.GetName())
+	if len(raw) == 0 {
+		return errors.Errorf("No %s header found.", x.GetName())
+	}
+	keyDict := utils.HeaderParser(raw[0])
+	x.Namespace = keyDict["namespace"]
+	x.RequireToken, _ = strconv.ParseBool(keyDict["require-token"])
+	if keyDict["collections-url"] != "" {
+		x.CollectionsUrl, _ = url.Parse(keyDict["collections-url"])
+	}
+	return nil
+}
+
+func (x XPelAuth) GetName() string {
+	return "X-Pelican-Authorization"
+}
+func (x *XPelAuth) ParseRawResponse(resp *http.Response) error {
+	// If the director provides an auth header, raw will have an array of length 1.
+	raw := resp.Header.Values(x.GetName())
+	if len(raw) > 0 {
+		x.Issuers = make([]*url.URL, 0)
+		// clean up the string and split it by commas to fetch each issuer. Can't use
+		// utils.HeaderParser, because we don't have unique keys here.
+		cleaned := strings.ReplaceAll(raw[0], " ", "")
+		issuers := strings.Split(cleaned, ",")
+		for _, issuer := range issuers {
+			issuerUrlStr := strings.TrimPrefix(issuer, "issuer=")
+			issuerUrl, err := url.Parse(issuerUrlStr)
+			if err != nil {
+				return errors.Errorf("Failed to parse issuer URL %s from Director's %s header: %v", issuerUrlStr, x.GetName(), err)
+			}
+			x.Issuers = append(x.Issuers, issuerUrl)
+		}
+	}
+	return nil
+}
+
+func (x XPelTokGen) GetName() string {
+	return "X-Pelican-Token-Generation"
+}
+func (x *XPelTokGen) ParseRawResponse(resp *http.Response) error {
+	raw := resp.Header.Values(x.GetName())
+	if len(raw) > 0 {
+		// Parse issuer, for now assuming a single value but eventually may be multiple
+		x.Issuers = make([]*url.URL, 0)
+		keyDict := utils.HeaderParser(raw[0])
+		issuerUrl, err := url.Parse(keyDict["issuer"])
+		if err != nil {
+			return errors.Errorf("Failed to parse issuer URL %s from Director's %s header: %v", keyDict["issuer"], x.GetName(), err)
+		}
+		x.Issuers = append(x.Issuers, issuerUrl)
+
+		// Parse scope depth
+		maxScopeDepth, err := strconv.ParseUint(keyDict["max-scope-depth"], 10, 32)
+		if err != nil {
+			return errors.Errorf("Failed to parse max-scope-depth %s from Director's %s header: %v", keyDict["max-scope-depth"], x.GetName(), err)
+		}
+		x.MaxScopeDepth = uint(maxScopeDepth)
+
+		// Parse strategy
+		strategy, exists := keyDict["strategy"]
+		if !exists {
+			return errors.Errorf("No credential generation strategy found in Director's %s header", x.GetName())
+		}
+		if !IsValidStrategy(strategy) {
+			return errors.Errorf("Invalid strategy '%s' from Director's %s header", strategy, x.GetName())
+		}
+		x.Strategy = StrategyType(strategy)
+
+		// Parse base path(s) -- Right now we assume a single value, although this may eventually change.
+		basePath, exists := keyDict["base-path"]
+		if exists {
+			x.BasePaths = append(x.BasePaths, basePath)
+		}
+
+		// Handle potential for vault server in header
+		vaultServer, exists := keyDict["vault-server"]
+		if exists {
+			vaultServerUrl, err := url.Parse(vaultServer)
+			if err != nil {
+				return errors.Errorf("Failed to parse vault server URL %s from Director's %s header: %v", vaultServer, x.GetName(), err)
+			}
+			x.VaultServer = vaultServerUrl
+		}
+	}
+	return nil
+}
 
 const (
 	OAuthStrategy StrategyType = "OAuth2"
@@ -159,6 +289,15 @@ const (
 	RandomType          SortType = "random"
 	AdaptiveType        SortType = "adaptive"
 )
+
+func IsValidStrategy(strategy string) bool {
+	switch StrategyType(strategy) {
+	case OAuthStrategy, VaultStrategy:
+		return true
+	default:
+		return false
+	}
+}
 
 func (ad *ServerAd) MarshalJSON() ([]byte, error) {
 	type Alias ServerAd
