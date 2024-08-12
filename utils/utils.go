@@ -139,12 +139,21 @@ func UrlWithFederation(remoteUrl string) (string, error) {
 		parsedUrl, err := url.Parse(remoteUrl)
 		if err != nil {
 			newErr := errors.New(fmt.Sprintf("error parsing source url: %s", err))
-			return "", newErr
+			return remoteUrl, newErr
 		}
 		if parsedUrl.Host != "" {
 			return remoteUrl, nil
 		}
-		parsedUrl.Host = param.Federation_DiscoveryUrl.GetString()
+		parsedDiscUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+		if err != nil {
+			newErr := errors.New(fmt.Sprintf("error parsing discovery url: %s", err))
+			return remoteUrl, newErr
+		}
+		if parsedDiscUrl.Path != "" {
+			newErr := errors.New(fmt.Sprintf("provided federation url %s has a path component", param.Federation_DiscoveryUrl.GetString()))
+			return remoteUrl, newErr
+		}
+		parsedUrl.Host = parsedDiscUrl.Host
 		parsedUrl.Scheme = "pelican"
 		return parsedUrl.String(), nil
 	}

@@ -160,7 +160,7 @@ func TestGetAndPutAuth(t *testing.T) {
 			require.NoError(t, err)
 		}()
 		assert.NoError(t, err)
-		viper.Set(param.Federation_DiscoveryUrl.GetName(), fmt.Sprintf("%s:%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt())))
+		viper.Set(param.Federation_DiscoveryUrl.GetName(), fmt.Sprintf("%s://%s:%s", "https", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt())))
 
 		// Set path for object to upload/download
 		for _, export := range fed.Exports {
@@ -347,7 +347,7 @@ func TestCopyAuth(t *testing.T) {
 			require.NoError(t, err)
 		}()
 
-		viper.Set(param.Federation_DiscoveryUrl.GetName(), fmt.Sprintf("%s:%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt())))
+		viper.Set(param.Federation_DiscoveryUrl.GetName(), fmt.Sprintf("%s://%s:%s", "https", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt())))
 
 		// Set path for object to upload/download
 		for _, export := range fed.Exports {

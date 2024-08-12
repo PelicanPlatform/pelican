@@ -202,8 +202,8 @@ func copyMain(cmd *cobra.Command, args []string) {
 	lastSrc := ""
 
 	for _, src := range source {
-		src, err = utils.UrlWithFederation(src)
-		if err != nil {
+		src, result = utils.UrlWithFederation(src)
+		if result != nil {
 			lastSrc = src
 			break
 		}
