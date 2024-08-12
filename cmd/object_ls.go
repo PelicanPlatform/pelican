@@ -45,12 +45,18 @@ var (
 func init() {
 	flagSet := lsCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
-	flagSet.BoolP("long", "L", false, "Include extended information")
+	flagSet.BoolP("long", "L", false, "Include extended information - The '-L' for long output will be changed to '-l' in the 7.11.0 pelican release")
 	flagSet.BoolP("collectionOnly", "C", false, "List collections only")
 	flagSet.BoolP("objectonly", "O", false, "List objects only")
 	flagSet.BoolP("json", "j", false, "Print results in JSON format")
 
 	objectCmd.AddCommand(lsCmd)
+
+	lsCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		if cmd.Flags().Changed("long") {
+			log.Warningln("The '-L' for long output will be changed to '-l' in the 7.11.0 pelican release")
+		}
+	}
 }
 
 func listMain(cmd *cobra.Command, args []string) error {

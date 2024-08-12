@@ -86,9 +86,6 @@ func (i *uint16Value) String() string { return strconv.FormatUint(uint64(*i), 10
 func Execute() error {
 	egrp, egrpCtx := errgroup.WithContext(context.Background())
 	ctx := context.WithValue(egrpCtx, config.EgrpKey, egrp)
-	if rootCmd.Flags().Changed("log") {
-		fmt.Println("WARNING - '-l' as a flag for logging will be changed to '-L' in the 7.11.0 pelican release")
-	}
 	exeErr := rootCmd.ExecuteContext(ctx)
 	if exeErr != nil {
 		log.Errorln("Fatal error occurred at the start of the program. Cleanup started:", exeErr)
@@ -150,7 +147,7 @@ func init() {
 		panic(err)
 	}
 
-	rootCmd.PersistentFlags().StringP("log", "l", "", "Specified log output file - WARNING This is being deprecated and will become 'L' in 7.11.0")
+	rootCmd.PersistentFlags().StringP("log", "l", "", "Specified log output file - The '-l' for logging will be changed to '-L' in the 7.11.0 pelican release")
 	if err := viper.BindPFlag("Logging.LogLocation", rootCmd.PersistentFlags().Lookup("log")); err != nil {
 		panic(err)
 	}
@@ -171,5 +168,11 @@ func init() {
 	}
 	if err := viper.BindPFlag("Server.WebPort", portFlag); err != nil {
 		panic(err)
+	}
+
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		if cmd.Flags().Changed("log") {
+			log.Warningln("The '-l' for logging will be changed to '-L' in the 7.11.0 pelican release")
+		}
 	}
 }
