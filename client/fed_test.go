@@ -48,6 +48,7 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -144,16 +145,48 @@ func TestGetAndPutAuth(t *testing.T) {
 			// Upload the file with PUT
 			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
-			}
+			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 
 			// Download that same file with GET
 			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
-			}
+			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+		}
+	})
+
+	t.Run("testPelicanObjectPutAndGetWithQueryAndDestDir", func(t *testing.T) {
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
+		assert.NoError(t, err)
+		viper.Set(param.Federation_DiscoveryUrl.GetName(), fmt.Sprintf("%s://%s:%s", "https", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt())))
+
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			tempPath := tempFile.Name()
+			fileName := filepath.Base(tempPath)
+			uploadURL := fmt.Sprintf("%s/%s/%s",
+				export.FederationPrefix, "osdf_osdf", fileName)
+
+			uploadURL, err := utils.UrlWithFederation(uploadURL)
+			assert.NoError(t, err)
+
+			// Upload the file with PUT
+			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
+			assert.NoError(t, err)
+			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
+
+			queryURL := uploadURL + "?directread"
+			tempDir := t.TempDir()
+			// Download that same file with GET
+			transferResultsDownload, err := client.DoGet(fed.Ctx, queryURL, tempDir, false, client.WithTokenLocation(tempToken.Name()))
+			assert.NoError(t, err)
+			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			stats, err := os.Stat(filepath.Join(tempDir, fileName))
+			assert.NoError(t, err)
+			assert.NotNil(t, stats)
 		}
 	})
 
@@ -176,16 +209,12 @@ func TestGetAndPutAuth(t *testing.T) {
 			// Upload the file with PUT
 			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithToken(tmpTkn))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
-			}
+			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 
 			// Download that same file with GET
 			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithToken(tmpTkn))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
-			}
+			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
 		}
 	})
 
@@ -208,16 +237,12 @@ func TestGetAndPutAuth(t *testing.T) {
 			// Upload the file with PUT
 			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
-			}
+			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 
 			// Download that same file with GET
 			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
-			}
+			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
 		}
 	})
 
@@ -248,16 +273,12 @@ func TestGetAndPutAuth(t *testing.T) {
 			// Upload the file with PUT
 			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
-			}
+			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 
 			// Download that same file with GET
 			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
-			}
+			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
 		}
 	})
 	t.Cleanup(func() {
@@ -307,19 +328,52 @@ func TestCopyAuth(t *testing.T) {
 			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
 				export.FederationPrefix, "osdf_osdf", fileName)
 
-			// Upload the file with PUT
+			// Upload the file with COPY
 			transferResultsUpload, err := client.DoCopy(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, int64(17), transferResultsUpload[0].TransferredBytes)
-			}
+			assert.Equal(t, int64(17), transferResultsUpload[0].TransferredBytes)
 
-			// Download that same file with GET
+			// Download that same file with COPY
 			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, int64(17), transferResultsDownload[0].TransferredBytes)
-			}
+			assert.Equal(t, int64(17), transferResultsDownload[0].TransferredBytes)
+		}
+	})
+
+	t.Run("testPelicanObjectCopyWithQueryAndDestDir", func(t *testing.T) {
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		assert.NoError(t, err)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
+
+		viper.Set(param.Federation_DiscoveryUrl.GetName(), fmt.Sprintf("%s://%s:%s", "https", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt())))
+
+		// Set path for object to upload/download
+		for _, export := range fed.Exports {
+			tempPath := tempFile.Name()
+			fileName := filepath.Base(tempPath)
+			uploadURL := fmt.Sprintf("%s/%s/%s",
+				export.FederationPrefix, "osdf_osdf", fileName)
+
+			uploadURL, err := utils.UrlWithFederation(uploadURL)
+			assert.NoError(t, err)
+
+			// Upload the file with COPY
+			transferResultsUpload, err := client.DoCopy(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
+			assert.NoError(t, err)
+			assert.Equal(t, int64(17), transferResultsUpload[0].TransferredBytes)
+
+			queryURL := uploadURL + "?directread"
+			tempDir := t.TempDir()
+			// Download that same file with COPY
+			transferResultsDownload, err := client.DoCopy(fed.Ctx, queryURL, tempDir, false, client.WithTokenLocation(tempToken.Name()))
+			assert.NoError(t, err)
+			assert.Equal(t, int64(17), transferResultsDownload[0].TransferredBytes)
+			stats, err := os.Stat(filepath.Join(tempDir, fileName))
+			assert.NoError(t, err)
+			assert.NotNil(t, stats)
 		}
 	})
 
@@ -342,16 +396,12 @@ func TestCopyAuth(t *testing.T) {
 			// Upload the file with PUT
 			transferResultsUpload, err := client.DoCopy(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
-			}
+			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 
 			// Download that same file with GET
 			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
-			}
+			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
 		}
 	})
 
@@ -382,16 +432,13 @@ func TestCopyAuth(t *testing.T) {
 			// Upload the file with PUT
 			transferResultsUpload, err := client.DoCopy(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
-			}
+			assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 
 			// Download that same file with GET
 			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
-			}
+			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+
 		}
 	})
 	t.Cleanup(func() {
@@ -431,9 +478,7 @@ func TestGetPublicRead(t *testing.T) {
 			// Download the file with GET. Shouldn't need a token to succeed
 			transferResults, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
 			assert.NoError(t, err)
-			if err == nil {
-				assert.Equal(t, transferResults[0].TransferredBytes, int64(17))
-			}
+			assert.Equal(t, transferResults[0].TransferredBytes, int64(17))
 		}
 	})
 	t.Cleanup(func() {
@@ -543,10 +588,8 @@ func TestObjectStat(t *testing.T) {
 		// Stat the file
 		statInfo, err := client.DoStat(fed.Ctx, statUrl)
 		assert.NoError(t, err)
-		if err == nil {
-			assert.Equal(t, int64(17), int64(statInfo.Size))
-			assert.Equal(t, fmt.Sprintf("%s/%s", fed.Exports[0].FederationPrefix, fileName), statInfo.Name)
-		}
+		assert.Equal(t, int64(17), int64(statInfo.Size))
+		assert.Equal(t, fmt.Sprintf("%s/%s", fed.Exports[0].FederationPrefix, fileName), statInfo.Name)
 	})
 
 	// Ensure stat fails if it does not recognize the url scheme

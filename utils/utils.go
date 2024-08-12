@@ -19,6 +19,7 @@
 package utils
 
 import (
+	"fmt"
 	"net"
 	"net/url"
 	"regexp"
@@ -29,6 +30,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // snakeCaseToCamelCase converts a snake case string to camel case.
@@ -126,4 +129,38 @@ func ExtractVersionAndServiceFromUserAgent(userAgent string) (reqVer, service st
 	reqVer = userAgentSplit[1]
 	service = (strings.Split(userAgentSplit[0], "-"))[1]
 	return reqVer, service
+}
+
+// Given a remote url with no host (a namespace path, essentially), then if the Federation.DiscoveryURL is
+// set (either via a yaml file or via the command line flags), create a full pelican protocol URL by combining
+// the two
+func UrlWithFederation(remoteUrl string) (string, error) {
+	if param.Federation_DiscoveryUrl.IsSet() {
+		parsedUrl, err := url.Parse(remoteUrl)
+		if err != nil {
+			newErr := errors.New(fmt.Sprintf("error parsing source url: %s", err))
+			return remoteUrl, newErr
+		}
+		if parsedUrl.Host != "" {
+			return remoteUrl, nil
+		}
+		parsedDiscUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+		if err != nil {
+			newErr := errors.New(fmt.Sprintf("error parsing discovery url: %s", err))
+			return remoteUrl, newErr
+		}
+		if parsedDiscUrl.Scheme == "" {
+			parsedDiscUrl.Scheme = "https"
+			updatedDiscString := parsedDiscUrl.String()
+			parsedDiscUrl, _ = url.Parse(updatedDiscString)
+		}
+		if parsedDiscUrl.Path != "" {
+			newErr := errors.New(fmt.Sprintf("provided federation url %s has a path component", param.Federation_DiscoveryUrl.GetString()))
+			return remoteUrl, newErr
+		}
+		parsedUrl.Host = parsedDiscUrl.Host
+		parsedUrl.Scheme = "pelican"
+		return parsedUrl.String(), nil
+	}
+	return remoteUrl, nil
 }
