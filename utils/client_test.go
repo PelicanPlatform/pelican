@@ -254,6 +254,14 @@ func TestUrlWithFederation(t *testing.T) {
 		assert.Equal(t, pelUrl, str)
 	})
 
+	t.Run("testFederationNoHost", func(t *testing.T) {
+		viper.Set(param.Federation_DiscoveryUrl.GetName(), "somefederation.org")
+		namespaceOnly := "/namespace/test.txt"
+		str, err := UrlWithFederation(namespaceOnly)
+		assert.NoError(t, err)
+		assert.Equal(t, pelUrl, str)
+	})
+
 	t.Run("testFederationWithFedHost", func(t *testing.T) {
 		viper.Set(param.Federation_DiscoveryUrl.GetName(), "https://somefederation.org")
 		namespaceOnly := "/namespace/test.txt"
@@ -264,6 +272,14 @@ func TestUrlWithFederation(t *testing.T) {
 
 	t.Run("testFederationWithPathComponent", func(t *testing.T) {
 		viper.Set(param.Federation_DiscoveryUrl.GetName(), "somefederation.org/path")
+		namespaceOnly := "/namespace/test.txt"
+		_, err := UrlWithFederation(namespaceOnly)
+		assert.Error(t, err)
+		assert.EqualError(t, err, fmt.Sprintf("provided federation url %s has a path component", param.Federation_DiscoveryUrl.GetString()))
+	})
+
+	t.Run("testFederationPathComponentWithHost", func(t *testing.T) {
+		viper.Set(param.Federation_DiscoveryUrl.GetName(), "https://somefederation.org/path")
 		namespaceOnly := "/namespace/test.txt"
 		_, err := UrlWithFederation(namespaceOnly)
 		assert.Error(t, err)

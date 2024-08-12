@@ -149,6 +149,11 @@ func UrlWithFederation(remoteUrl string) (string, error) {
 			newErr := errors.New(fmt.Sprintf("error parsing discovery url: %s", err))
 			return remoteUrl, newErr
 		}
+		if parsedDiscUrl.Scheme == "" {
+			parsedDiscUrl.Scheme = "https"
+			updatedDiscString := parsedDiscUrl.String()
+			parsedDiscUrl, _ = url.Parse(updatedDiscString)
+		}
 		if parsedDiscUrl.Path != "" {
 			newErr := errors.New(fmt.Sprintf("provided federation url %s has a path component", param.Federation_DiscoveryUrl.GetString()))
 			return remoteUrl, newErr
