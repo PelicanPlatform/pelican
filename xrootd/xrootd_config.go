@@ -770,7 +770,8 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 	if !isOrigin {
 		runtimeCAs = filepath.Join(param.Cache_RunLocation.GetString(), "ca-bundle.crt")
 	}
-	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, runtimeCAs, 2*time.Minute)
+	egrpKey := string(config.EgrpKey)
+	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, egrpKey, runtimeCAs, 2*time.Minute)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to setup the runtime CA bundle")
 	}

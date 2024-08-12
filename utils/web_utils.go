@@ -32,13 +32,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
-
-	"github.com/pelicanplatform/pelican/config"
 )
 
 // MakeRequest makes an http request with our custom http client. It acts similarly to the http.NewRequest but
 // it only takes json as the request data.
-func MakeRequest(ctx context.Context, url string, method string, data map[string]interface{}, headers map[string]string) ([]byte, error) {
+func MakeRequest(ctx context.Context, tr *http.Transport, url string, method string, data map[string]interface{}, headers map[string]string) ([]byte, error) {
 	payload, _ := json.Marshal(data)
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(payload))
 	if err != nil {
@@ -49,7 +47,6 @@ func MakeRequest(ctx context.Context, url string, method string, data map[string
 	for key, val := range headers {
 		req.Header.Set(key, val)
 	}
-	tr := config.GetTransport()
 	client := &http.Client{Transport: tr}
 
 	resp, err := client.Do(req)
@@ -140,11 +137,11 @@ func HasContentType(r *http.Response, mimetype string) bool {
 	return false
 }
 
-func GetJwks(ctx context.Context, location string) (jwk.Set, error) {
+func GetJwks(ctx context.Context, tr *http.Transport, location string) (jwk.Set, error) {
 	if location == "" {
 		return nil, errors.New("jwks location is empty")
 	}
-	client := http.Client{Transport: config.GetTransport()}
+	client := http.Client{Transport: tr}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, location, nil)
 	if err != nil {
 		return nil, err
