@@ -2532,10 +2532,10 @@ func listHttp(remoteObjectUrl *url.URL, dirResp server_structs.DirectorResponse,
 			if !info.IsDir() {
 				// NOTE: we implement our own FileInfo here because the one we get back from stat() does not have a .name field for some reason
 				file := FileInfo{
-					Name:    remotePath,
-					Size:    info.Size(),
-					ModTime: info.ModTime(),
-					IsCollection:   false,
+					Name:         remotePath,
+					Size:         info.Size(),
+					ModTime:      info.ModTime(),
+					IsCollection: false,
 				}
 				fileInfos = append(fileInfos, file)
 				return fileInfos, nil
@@ -2552,10 +2552,10 @@ func listHttp(remoteObjectUrl *url.URL, dirResp server_structs.DirectorResponse,
 		jPath, _ := url.JoinPath(remotePath, info.Name())
 		// Create a FileInfo for the file and append it to the slice
 		file := FileInfo{
-			Name:    jPath,
-			Size:    info.Size(),
-			ModTime: info.ModTime(),
-			IsCollection:   info.IsDir(),
+			Name:         jPath,
+			Size:         info.Size(),
+			ModTime:      info.ModTime(),
+			IsCollection: info.IsDir(),
 		}
 		fileInfos = append(fileInfos, file)
 	}
@@ -2616,10 +2616,10 @@ func statHttp(dest *url.URL, dirResp server_structs.DirectorResponse, token stri
 				fsinfo, err := client.Stat(endpoint.Path)
 				if err == nil {
 					info = FileInfo{
-						Name:    endpoint.Path,
-						Size:    fsinfo.Size(),
-						IsCollection:   fsinfo.IsDir(),
-						ModTime: fsinfo.ModTime(),
+						Name:         endpoint.Path,
+						Size:         fsinfo.Size(),
+						IsCollection: fsinfo.IsDir(),
+						ModTime:      fsinfo.ModTime(),
 					}
 					break
 				} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
@@ -2655,10 +2655,10 @@ func statHttp(dest *url.URL, dirResp server_structs.DirectorResponse, token stri
 			}
 
 			resultsChan <- statResults{FileInfo{
-				Name:    endpoint.Path,
-				Size:    info.Size,
-				IsCollection:   info.IsDir,
-				ModTime: info.ModTime,
+				Name:         endpoint.Path,
+				Size:         info.Size,
+				IsCollection: info.IsCollection,
+				ModTime:      info.ModTime,
 			}, nil}
 
 		}(&destCopy)
