@@ -41,6 +41,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -55,7 +56,7 @@ func TestWaitUntilLogin(t *testing.T) {
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
-	err := config.InitServer(ctx, config.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	go func() {
 		err := waitUntilLogin(ctx)
@@ -104,7 +105,7 @@ func TestCodeBasedLogin(t *testing.T) {
 	viper.Reset()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
-	err := config.InitServer(ctx, config.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
@@ -161,7 +162,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	viper.Set("ConfigDir", dirName)
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(ctx, config.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
@@ -303,7 +304,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(ctx, config.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	///////////////////////////SETUP///////////////////////////////////
@@ -421,7 +422,7 @@ func TestWhoamiAPI(t *testing.T) {
 	config.InitConfig()
 	viper.Set("ConfigDir", dirName)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(ctx, config.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)
@@ -599,7 +600,7 @@ func TestLogoutAPI(t *testing.T) {
 	config.InitConfig()
 	viper.Set("ConfigDir", dirName)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(ctx, config.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	err = config.GeneratePrivateKey(param.IssuerKey.GetString(), elliptic.P256(), false)
 	require.NoError(t, err)

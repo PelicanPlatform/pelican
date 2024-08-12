@@ -187,7 +187,7 @@ func TestSortServerAdsByTopo(t *testing.T) {
 	assert.EqualValues(t, expectedList, sortedList)
 }
 
-func TestSortServerAdsByIP(t *testing.T) {
+func TestSortServerAds(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(func() {
 		viper.Reset()
@@ -204,32 +204,131 @@ func TestSortServerAdsByIP(t *testing.T) {
 
 	// These are listed in order of increasing distance from the clientIP
 	madisonServer := server_structs.ServerAd{
+		Name:      "madison server",
+		URL:       url.URL{Scheme: "https", Host: "madison-cache.org"},
 		Latitude:  43.0753,
 		Longitude: -89.4114,
 	}
 	sdscServer := server_structs.ServerAd{
+		Name:      "sdsc server",
+		URL:       url.URL{Scheme: "https", Host: "sdsc-cache.org"},
 		Latitude:  32.8761,
 		Longitude: -117.2318,
 	}
 	bigBenServer := server_structs.ServerAd{
+		Name:      "bigBen server",
+		URL:       url.URL{Scheme: "https", Host: "bigBen-cache.org"},
 		Latitude:  51.5103,
 		Longitude: -0.1167,
 	}
 	kremlinServer := server_structs.ServerAd{
+		Name:      "kremlin server",
+		URL:       url.URL{Scheme: "https", Host: "kremlin-cache.org"},
 		Latitude:  55.752121,
 		Longitude: 37.617664,
 	}
 	daejeonServer := server_structs.ServerAd{
+		Name:      "daejeon server",
+		URL:       url.URL{Scheme: "https", Host: "daejeon-cache.org"},
 		Latitude:  36.3213,
 		Longitude: 127.4200,
 	}
 	mcMurdoServer := server_structs.ServerAd{
+		Name:      "mcMurdo server",
+		URL:       url.URL{Scheme: "https", Host: "mcMurdo-cache.org"},
 		Latitude:  -77.8500,
 		Longitude: 166.6666,
 	}
+	nullIslandServer := server_structs.ServerAd{
+		Name:      "Null Island Server",
+		URL:       url.URL{Scheme: "https", Host: "null-cache.org"},
+		Latitude:  0.0,
+		Longitude: 0.0,
+	}
+
+	// Mock servers with same geolocation but different loads
+	serverLoad1 := server_structs.ServerAd{
+		Name:      "load1",
+		Latitude:  43.0753,
+		Longitude: -89.4114,
+		IOLoad:    0.0,
+	}
+
+	serverLoad2 := server_structs.ServerAd{
+		Name:      "load2",
+		Latitude:  43.0753,
+		Longitude: -89.4114,
+		IOLoad:    10.2,
+	}
+
+	serverLoad3 := server_structs.ServerAd{
+		Name:      "load3",
+		Latitude:  43.0753,
+		Longitude: -89.4114,
+		IOLoad:    14,
+	}
+
+	serverLoad4 := server_structs.ServerAd{
+		Name:      "load4",
+		Latitude:  43.0753,
+		Longitude: -89.4114,
+		IOLoad:    60.3,
+	}
+
+	serverLoad5NullLoc := server_structs.ServerAd{
+		Name:      "load5NullLoc",
+		Latitude:  0.0,
+		Longitude: 0.0,
+		IOLoad:    10.0,
+	}
+
+	serverLoad6NullLoc := server_structs.ServerAd{
+		Name:      "load6NullLoc",
+		Latitude:  0.0,
+		Longitude: 0.0,
+		IOLoad:    99.0,
+	}
+
+	// These are listed in order of increasing distance from the clientIP
+	// However, madison server is overloaded and bigBenServer has very high load
+	madisonServerHighLoad := server_structs.ServerAd{
+		Name:      "madison high load",
+		URL:       url.URL{Scheme: "https", Host: "madison-cache.org"},
+		Latitude:  43.0753,
+		Longitude: -89.4114,
+		IOLoad:    100.4,
+	}
+	chicagoLowload := server_structs.ServerAd{
+		Name:      "chicago low load",
+		URL:       url.URL{Scheme: "https", Host: "chicago-cache.org"},
+		Latitude:  41.789722,
+		Longitude: -87.599724,
+		IOLoad:    10,
+	}
+	bigBenServerHighLoad := server_structs.ServerAd{
+		Name:      "big ben high load",
+		Latitude:  51.5103,
+		Longitude: -0.1167,
+		IOLoad:    65.7,
+	}
 
 	randAds := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
-		daejeonServer, mcMurdoServer}
+		daejeonServer, mcMurdoServer, nullIslandServer}
+
+	randLoadAds := []server_structs.ServerAd{serverLoad6NullLoc, serverLoad4, serverLoad1, serverLoad3, serverLoad2}
+
+	randDistanceLoadAds := []server_structs.ServerAd{
+		madisonServerHighLoad,
+		chicagoLowload,
+		sdscServer,
+		bigBenServerHighLoad,
+		kremlinServer,
+		daejeonServer,
+		mcMurdoServer,
+		serverLoad5NullLoc,
+		serverLoad6NullLoc,
+	}
+
 	// Shuffle so that we don't give the sort function an already-sorted slice!
 	rand.Shuffle(len(randAds), func(i, j int) {
 		randAds[i], randAds[j] = randAds[j], randAds[i]
@@ -238,18 +337,35 @@ func TestSortServerAdsByIP(t *testing.T) {
 	t.Run("test-distance-sort", func(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distance")
 		expected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
-			daejeonServer, mcMurdoServer}
-		sorted, err := sortServerAdsByIP(clientIP, randAds)
+			daejeonServer, mcMurdoServer, nullIslandServer}
+		sorted, err := sortServerAds(clientIP, randAds, nil)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
 	})
 
-	t.Run("test-distanceAndLoad-sort", func(t *testing.T) {
-		// For now, this test should return the same ordering as the distance test
+	t.Run("test-distanceAndLoad-sort-distance-only", func(t *testing.T) {
+		// Should return the same ordering as the distance test
 		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
 		expected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
-			daejeonServer, mcMurdoServer}
-		sorted, err := sortServerAdsByIP(clientIP, randAds)
+			daejeonServer, mcMurdoServer, nullIslandServer}
+		sorted, err := sortServerAds(clientIP, randAds, nil)
+		require.NoError(t, err)
+		assert.EqualValues(t, expected, sorted)
+	})
+
+	t.Run("test-distanceAndLoad-sort-load-only", func(t *testing.T) {
+		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
+		expected := []server_structs.ServerAd{serverLoad1, serverLoad2, serverLoad3, serverLoad4, serverLoad6NullLoc}
+		sorted, err := sortServerAds(clientIP, randLoadAds, nil)
+		require.NoError(t, err)
+		assert.EqualValues(t, expected, sorted)
+	})
+
+	t.Run("test-distanceAndLoad-sort-distance-and-load", func(t *testing.T) {
+		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
+		expected := []server_structs.ServerAd{chicagoLowload, sdscServer, madisonServerHighLoad, kremlinServer,
+			daejeonServer, mcMurdoServer, bigBenServerHighLoad, serverLoad5NullLoc, serverLoad6NullLoc}
+		sorted, err := sortServerAds(clientIP, randDistanceLoadAds, nil)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
 	})
@@ -269,7 +385,7 @@ func TestSortServerAdsByIP(t *testing.T) {
 		// of failure. If you run thrice and you still get the distance-sorted slice, you might consider buying a powerball ticket
 		// (1/292,201,338 chance of winning).
 		for i := 0; i < 3; i++ {
-			sorted, err = sortServerAdsByIP(clientIP, randAds)
+			sorted, err = sortServerAds(clientIP, randAds, nil)
 			require.NoError(t, err)
 
 			// If the values are not equal, break the loop

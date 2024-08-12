@@ -23,48 +23,46 @@ import {
   Grid,
   Typography,
   Skeleton,
-  Link,
-  Container,
-  Tooltip,
   Snackbar,
   Button,
   IconButton,
 } from '@mui/material';
-import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { OverridableStringUnion } from '@mui/types';
-import { Variant } from '@mui/material/styles/createTypography';
-import { TypographyPropsVariantOverrides } from '@mui/material/Typography';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AppRegistration,
-  ArrowDropDown,
-  ArrowDropUp,
   AssistantDirection,
-  QuestionMark,
   TripOrigin,
   Cached,
   Download,
 } from '@mui/icons-material';
-import { default as NextLink } from 'next/link';
 import useSWR from 'swr';
 import { merge, isMatch } from 'lodash';
 import * as yaml from 'js-yaml';
-import { Sidebar } from '@/components/layout/Sidebar';
+import { ButtonLink, Sidebar } from '@/components/layout/Sidebar';
 import { Main } from '@/components/layout/Main';
-import { Field } from '@/components/Config';
 import { submitConfigChange } from '@/components/Config/util';
 import {
   ParameterInputProps,
   Config,
   ConfigMetadata,
-} from '@/components/Config/index.d';
-import { getConfigMetadata } from './util';
+} from '@/components/Config/index';
+import {
+  deleteKey,
+  getConfigMetadata,
+  stripNulls,
+  stripTypes,
+  updateValue,
+} from './util';
 import StatusSnackBar, {
   StatusSnackBarProps,
 } from '@/components/StatusSnackBar';
 import { useRouter } from 'next/navigation';
+import { AppRouterInstance } from 'next/dist/shared/lib/app-router-context.shared-runtime';
 import { ServerType } from '@/index';
 import { getEnabledServers } from '@/helpers/util';
 import DownloadButton from '@/components/DownloadButton';
+import { PaddedContent } from '@/components/layout';
+import { ConfigDisplay, TableOfContents } from '@/app/config/components';
 
 function Config() {
   const router = useRouter();
@@ -73,22 +71,14 @@ function Config() {
     undefined
   );
   const [config, setConfig] = useState<Config | undefined>(undefined);
-
-  // Config state managers
   const [configKey, setConfigKey] = useState<number>(0);
-
-  const [patch, setPatch] = useState<any>({});
-
-  let onChange = (fieldPatch: any) => {
-    const newPatch = merge(patch, fieldPatch);
-    setPatch(structuredClone(newPatch));
-  };
+  const [patch, _setPatch] = useState<any>({});
 
   const { data: enabledServers } = useSWR<ServerType[]>(
     'getEnabledServers',
     getEnabledServers,
     {
-      fallbackData: ['origin', 'registry', 'director'],
+      fallbackData: ['origin', 'registry', 'director', 'cache'],
     }
   );
   const { data: configMetadata } = useSWR<ConfigMetadata | undefined>(
@@ -96,485 +86,226 @@ function Config() {
     getConfigMetadata
   );
 
-  const getConfig = async () => {
-    let response = await fetch('/api/v1.0/config');
-    if (response.ok) {
-      const data = await response.json();
-      setConfig(data);
-      setStatus(undefined);
-      setConfigKey(configKey + 1);
-    } else {
-      setConfig(undefined);
-      if (response.status === 401) {
-        setStatus({
-          severity: 'error',
-          message: 'Unauthorized',
-          action: {
-            label: 'Login',
-            onClick: () => router.push('/login/?returnURL=/view/config/'),
-          },
-        });
-      }
-      setTimeout(getConfig, 2000);
-    }
-  };
+  const setPatch = useCallback(
+    (fieldPatch: any) => {
+      _setPatch((p: any) => structuredClone(merge(p, fieldPatch)));
+    },
+    [_setPatch]
+  );
+
+  const _getConfig = useCallback(
+    () => getConfig(setConfig, setConfigKey, setStatus, router),
+    [setConfig, setConfigKey, setStatus, router]
+  );
 
   useEffect(() => {
-    getConfig();
+    _getConfig();
   }, []);
 
   const filteredConfig = useMemo(() => {
-    if (!config) {
-      return undefined;
-    }
-
-    if (!enabledServers || !configMetadata) {
-      return config;
-    }
-
-    // Filter out the inactive config values
-    const filteredConfig: Config = structuredClone(config);
-    Object.entries(configMetadata).forEach(([key, value]) => {
-      if (
-        [...enabledServers, '*'].filter((i) => value.components.includes(i))
-          .length === 0
-      ) {
-        deleteKey(filteredConfig, key.split('.'));
-      } else {
-        updateValue(filteredConfig, key.split('.'), configMetadata[key]);
-      }
-    });
-
-    // Filter out read-only values
-    deleteKey(filteredConfig, ['ConfigDir']);
-
-    return filteredConfig;
+    return filterConfig(config, configMetadata, enabledServers);
   }, [config, enabledServers, configMetadata]);
 
   return (
     <>
       <Sidebar>
         {enabledServers && enabledServers.includes('origin') && (
-          <Box pt={1}>
-            <NextLink href={'/origin/'}>
-              <Tooltip title={'Origin'} placement={'right'}>
-                <IconButton>
-                  <TripOrigin />
-                </IconButton>
-              </Tooltip>
-            </NextLink>
-          </Box>
+          <ButtonLink title={'Origin'} href={'/origin/'}>
+            <TripOrigin />
+          </ButtonLink>
         )}
         {enabledServers && enabledServers.includes('director') && (
-          <Box pt={1}>
-            <NextLink href={'/director/'}>
-              <Tooltip title={'Director'} placement={'right'}>
-                <IconButton>
-                  <AssistantDirection />
-                </IconButton>
-              </Tooltip>
-            </NextLink>
-          </Box>
+          <ButtonLink title={'Director'} href={'/director/'}>
+            <AssistantDirection />
+          </ButtonLink>
         )}
         {enabledServers && enabledServers.includes('registry') && (
-          <Box pt={1}>
-            <NextLink href={'/registry/'}>
-              <Tooltip title={'Registry'} placement={'right'}>
-                <IconButton>
-                  <AppRegistration />
-                </IconButton>
-              </Tooltip>
-            </NextLink>
-          </Box>
+          <ButtonLink title={'Registry'} href={'/registry/'}>
+            <AppRegistration />
+          </ButtonLink>
         )}
         {enabledServers && enabledServers.includes('cache') && (
-          <Box pt={1}>
-            <NextLink href={'/cache/'}>
-              <Tooltip title={'Cache'} placement={'right'}>
-                <IconButton>
-                  <Cached />
-                </IconButton>
-              </Tooltip>
-            </NextLink>
-          </Box>
+          <ButtonLink title={'Cache'} href={'/cache/'}>
+            <Cached />
+          </ButtonLink>
         )}
       </Sidebar>
       <Main>
-        <Container maxWidth={'xl'}>
-          <Box width={'100%'}>
-            <Grid container spacing={2}>
-              <Grid item xs={7} md={8} lg={6}>
-                <Box display={'flex'} flexDirection={'row'}>
-                  <Typography variant={'h4'} component={'h2'} mb={1}>
-                    Configuration
-                  </Typography>
-                  {config && (
-                    <Box ml={2}>
-                      <DownloadButton
-                        Button={IconButton}
-                        mimeType={'text/yaml'}
-                        data={yaml.dump(
-                          stripNulls(stripTypes(structuredClone(config)))
-                        )}
-                      >
-                        <Download />
-                      </DownloadButton>
-                    </Box>
+        <PaddedContent>
+          <Box display={'flex'} flexDirection={'row'}>
+            <Typography variant={'h4'} component={'h2'} mb={1}>
+              Configuration
+            </Typography>
+            {config && (
+              <Box ml={2}>
+                <DownloadButton
+                  Button={IconButton}
+                  mimeType={'text/yaml'}
+                  data={yaml.dump(
+                    stripNulls(stripTypes(structuredClone(config)))
                   )}
-                </Box>
-              </Grid>
-              <Grid item xs={5} md={4} lg={3}></Grid>
-              <Grid item xs={12} md={8} lg={6}>
-                <form>
-                  {filteredConfig === undefined ? (
+                >
+                  <Download />
+                </DownloadButton>
+              </Box>
+            )}
+          </Box>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={8} lg={6}>
+              <form>
+                {filteredConfig === undefined ||
+                configMetadata === undefined ? (
+                  <Box borderRadius={1} overflow={'hidden'}>
                     <Skeleton
                       variant='rectangular'
                       animation='wave'
-                      height={'1000px'}
+                      height={'90vh'}
                     />
-                  ) : (
-                    <ConfigDisplay
-                      key={configKey.toString()}
-                      id={[]}
-                      name={''}
-                      value={filteredConfig}
-                      level={4}
-                      onChange={onChange}
-                    />
-                  )}
-                </form>
-                <Snackbar
-                  anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-                  open={!isMatch(config === undefined ? {} : config, patch)}
-                  message='Save Changes'
-                  action={
-                    <Box>
-                      <Button
-                        onClick={async () => {
-                          try {
-                            await submitConfigChange(patch);
-                            setPatch({});
-                            setStatus({
-                              message: 'Changes Saved, Restarting Server',
-                            });
-                            setTimeout(getConfig, 3000);
-                          } catch (e) {
-                            setStatus({
-                              severity: 'error',
-                              message: (e as string).toString(),
-                            });
-                          }
-                        }}
-                      >
-                        Save
-                      </Button>
-                      <Button
-                        onClick={() => {
-                          setPatch({});
-                          getConfig();
-                        }}
-                      >
-                        Clear
-                      </Button>
-                    </Box>
-                  }
-                />
-                {status && <StatusSnackBar key={status.message} {...status} />}
-              </Grid>
-              <Grid
-                item
-                xs={12}
-                md={4}
-                lg={3}
-                display={{ xs: 'none', md: 'block' }}
-              >
-                {filteredConfig === undefined ? (
+                  </Box>
+                ) : (
+                  <ConfigDisplay
+                    key={configKey.toString()}
+                    id={[]}
+                    name={''}
+                    value={filteredConfig}
+                    level={4}
+                    onChange={setPatch}
+                  />
+                )}
+              </form>
+              <Snackbar
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+                open={!isMatch(config === undefined ? {} : config, patch)}
+                message='Save Changes'
+                action={
+                  <Box>
+                    <Button
+                      onClick={async () => {
+                        try {
+                          await submitConfigChange(patch);
+                          _setPatch({});
+                          setStatus({
+                            message: 'Changes Saved, Restarting Server',
+                          });
+                          setTimeout(_getConfig, 3000);
+                        } catch (e) {
+                          setStatus({
+                            severity: 'error',
+                            message: (e as string).toString(),
+                          });
+                        }
+                      }}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        _setPatch({});
+                        _getConfig();
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  </Box>
+                }
+              />
+              {status && <StatusSnackBar key={status.message} {...status} />}
+            </Grid>
+            <Grid
+              item
+              xs={12}
+              md={4}
+              lg={3}
+              display={{ xs: 'none', md: 'block' }}
+            >
+              {filteredConfig === undefined ? (
+                <Box borderRadius={1} overflow={'hidden'}>
                   <Skeleton
                     variant='rectangular'
                     animation='wave'
-                    height={'1000px'}
+                    height={'500px'}
                   />
-                ) : (
-                  <Box pt={2}>
-                    <TableOfContents
-                      id={[]}
-                      name={''}
-                      value={filteredConfig}
-                      level={1}
-                    />
-                  </Box>
-                )}
-              </Grid>
+                </Box>
+              ) : (
+                <Box pt={2}>
+                  <TableOfContents
+                    id={[]}
+                    name={''}
+                    value={filteredConfig}
+                    level={1}
+                  />
+                </Box>
+              )}
             </Grid>
-          </Box>
-        </Container>
+          </Grid>
+        </PaddedContent>
       </Main>
     </>
   );
 }
 
-/**
- * Recursively replace all objects of type { Type: any, Value: any } with the value of Value
- * @param config
- */
-const stripTypes = (config: any) => {
-  if (config?.Value !== undefined && config?.Type !== undefined) {
-    return config.Value;
+const filterConfig = (
+  config?: Config,
+  configMetadata?: ConfigMetadata,
+  enabledServers?: ServerType[]
+) => {
+  if (!config) {
+    return undefined;
   }
 
-  Object.keys(config).forEach((key) => {
-    config[key] = stripTypes(config[key]);
-  });
-
-  return config;
-};
-
-/** Recursively delete the keys that have null values in an object */
-const stripNulls = (config: any) => {
-  // If the config is an object then iterate keys otherwise skip
-  if (typeof config !== 'object') {
+  if (!enabledServers || !configMetadata) {
     return config;
   }
 
-  Object.keys(config).forEach((key) => {
-    if (config[key] === null) {
-      delete config[key];
+  // Filter out the inactive config values
+  const filteredConfig: Config = structuredClone(config);
+  Object.entries(configMetadata).forEach(([key, value]) => {
+    if (
+      [...enabledServers, '*'].filter((i) => value.components.includes(i))
+        .length === 0
+    ) {
+      deleteKey(filteredConfig, key.split('.'));
     } else {
-      config[key] = stripNulls(config[key]);
+      updateValue(filteredConfig, key.split('.'), configMetadata[key]);
     }
   });
 
-  return config;
+  // Filter out read-only values
+  deleteKey(filteredConfig, ['ConfigDir']);
+
+  return filteredConfig;
 };
 
-const isConfig = (value: ParameterInputProps | Config): boolean => {
-  const isConfig = (value as Config)?.Type === undefined;
-  return isConfig;
-};
-
-function sortConfig(
-  a: [string, ParameterInputProps | Config],
-  b: [string, ParameterInputProps | Config]
-) {
-  if (isConfig(a[1]) && !isConfig(b[1])) {
-    return 1;
-  }
-  if (!isConfig(a[1]) && isConfig(b[1])) {
-    return -1;
-  }
-  return a[0].localeCompare(b[0]);
-}
-
-interface StringObject {
-  [key: string]: any;
-}
-
-function deleteKey(obj: StringObject, key: string[]) {
-  if (key.length === 1) {
-    delete obj[key[0]];
-    return;
+const getConfig = async (
+  setConfig: (c?: Config) => void,
+  setConfigKey: (f: (k: number) => number) => void,
+  setStatus: (s?: StatusSnackBarProps) => void,
+  router: AppRouterInstance
+) => {
+  let response = await fetch('/api/v1.0/config');
+  if (response.ok) {
+    const data = await response.json();
+    setConfig(data);
+    setStatus(undefined);
+    setConfigKey((k) => k + 1);
   } else {
-    deleteKey(obj[key[0]], key.slice(1));
-    if (Object.keys(obj[key[0]]).length === 0) {
-      delete obj[key[0]];
-    }
-  }
-}
-
-function updateValue(obj: StringObject, key: string[], value: any) {
-  if (key.length === 1) {
-    obj[key[0]] = { ...value, ...obj[key[0]] };
-    return;
-  } else {
-    updateValue(obj[key[0]], key.slice(1), value);
-  }
-}
-
-export interface ConfigDisplayProps {
-  id: string[];
-  name: string;
-  value: Config | ParameterInputProps;
-  level: number;
-  onChange: (patch: any) => void;
-}
-
-function ConfigDisplay({
-  id,
-  name,
-  value,
-  level = 1,
-  onChange,
-}: ConfigDisplayProps) {
-  if (name != '') {
-    id = [...id, name];
-  }
-
-  // If this is a ConfigValue then display it
-  if (!isConfig(value)) {
-    return (
-      <Box pt={2} display={'flex'} id={id.join('-')}>
-        <Box flexGrow={1} minWidth={0}>
-          <Field {...(value as ParameterInputProps)} onChange={onChange} />
-        </Box>
-
-        <Button
-          size={'small'}
-          href={`https://docs.pelicanplatform.org/parameters#${id.join('-')}`}
-          target={'_blank'}
-        >
-          <QuestionMark />
-        </Button>
-      </Box>
-    );
-  }
-
-  // If this is a Config then display all of its values
-  let subValues = Object.entries(value);
-  subValues.sort(sortConfig);
-
-  let configDisplays = subValues.map(([k, v]) => {
-    return (
-      <ConfigDisplay
-        id={id}
-        key={k}
-        name={k}
-        value={v}
-        level={level + 1}
-        onChange={onChange}
-      />
-    );
-  });
-
-  let variant: OverridableStringUnion<
-    'inherit' | Variant,
-    TypographyPropsVariantOverrides
-  >;
-  switch (level) {
-    case 1:
-      variant = 'h1';
-      break;
-    case 2:
-      variant = 'h2';
-      break;
-    case 3:
-      variant = 'h3';
-      break;
-    case 4:
-      variant = 'h4';
-      break;
-    case 5:
-      variant = 'h5';
-      break;
-    case 6:
-      variant = 'h6';
-      break;
-    default:
-      variant = 'h6';
-  }
-
-  return (
-    <>
-      {name ? (
-        <Typography
-          id={id.join('-')}
-          variant={variant}
-          component={variant}
-          mt={2}
-        >
-          {name}
-        </Typography>
-      ) : undefined}
-      {configDisplays}
-    </>
-  );
-}
-
-interface TableOfContentsProps {
-  id: string[];
-  name: string;
-  value: Config | ParameterInputProps;
-  level: number;
-}
-
-function TableOfContents({ id, name, value, level = 1 }: TableOfContentsProps) {
-  const [open, setOpen] = useState(false);
-
-  if (name != '') {
-    id = [...id, name];
-  }
-
-  let subContents = undefined;
-  if (isConfig(value)) {
-    let subValues = Object.entries(value);
-    subValues.sort(sortConfig);
-    subContents = subValues.map(([key, value]) => {
-      return (
-        <TableOfContents
-          id={id}
-          key={key}
-          name={key}
-          value={value}
-          level={level + 1}
-        />
-      );
-    });
-  }
-
-  let headerPointer = (
-    <Box
-      sx={{
-        '&:hover': {
-          backgroundColor: 'primary.light',
+    setConfig(undefined);
+    if (response.status === 401) {
+      setStatus({
+        severity: 'error',
+        message: 'Unauthorized',
+        action: {
+          label: 'Login',
+          onClick: () => router.push('/login/?returnURL=/view/config/'),
         },
-        borderRadius: 1,
-        paddingX: '5px',
-        paddingLeft: 0 + 5 * level + 'px',
-      }}
-    >
-      <Link
-        href={subContents ? undefined : `#${id.join('-')}`}
-        sx={{
-          cursor: 'pointer',
-          textDecoration: 'none',
-          color: 'black',
-          display: 'flex',
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-        }}
-        onClick={() => {
-          setOpen(!open);
-        }}
-      >
-        <Typography
-          style={{
-            fontSize: 20 - 2 * level + 'px',
-            fontWeight: subContents ? '600' : 'normal',
-          }}
-        >
-          {name}
-        </Typography>
-        {subContents ? open ? <ArrowDropUp /> : <ArrowDropDown /> : undefined}
-      </Link>
-    </Box>
-  );
-
-  return (
-    <>
-      {name ? headerPointer : undefined}
-      {subContents && level != 1 ? (
-        <Box
-          sx={{
-            display: open ? 'block' : 'none',
-            cursor: 'pointer',
-          }}
-        >
-          {subContents}
-        </Box>
-      ) : (
-        subContents
-      )}
-    </>
-  );
-}
+      });
+    } else {
+      setTimeout(
+        () => getConfig(setConfig, setConfigKey, setStatus, router),
+        2000
+      );
+    }
+  }
+};
 
 export default Config;

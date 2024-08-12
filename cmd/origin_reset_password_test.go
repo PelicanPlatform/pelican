@@ -32,6 +32,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -46,7 +47,7 @@ func TestResetPassword(t *testing.T) {
 	config.InitConfig()
 	viper.Set("Server.WebPort", 8444)
 	viper.Set("Origin.Port", 8443)
-	err := config.InitServer(ctx, config.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	rootCmd.SetArgs([]string{"origin", "web-ui", "reset-password", "--stdin"})

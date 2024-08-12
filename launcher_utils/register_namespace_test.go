@@ -61,7 +61,7 @@ func TestRegistration(t *testing.T) {
 
 	config.InitConfig()
 	viper.Set("Registry.DbLocation", filepath.Join(tempConfigDir, "test.sql"))
-	err = config.InitServer(ctx, config.OriginType)
+	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	err = registry.InitializeDB()
@@ -97,7 +97,7 @@ func TestRegistration(t *testing.T) {
 	viper.Set("Origin.FederationPrefix", "/test123")
 
 	// Re-run the InitServer to reflect the new RegistryUrl set above
-	require.NoError(t, config.InitServer(ctx, config.OriginType))
+	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
 
 	// Test registration succeeds
 	prefix := param.Origin_FederationPrefix.GetString()

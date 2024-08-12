@@ -400,7 +400,7 @@ func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 	}
 	// Pelican registry relies on OAuth2 device flow for CLI-based registration
 	// and Globus does not support such flow. So users should not use Globus for the registry
-	if config.IsServerEnabled(config.RegistryType) && provider == config.Globus {
+	if config.IsServerEnabled(server_structs.RegistryType) && provider == config.Globus {
 		return errors.New("you are using Globus as the OIDC auth server. However, Pelican registry server does not support Globus. Please use CILogon as the auth server instead.")
 	}
 

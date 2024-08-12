@@ -19,7 +19,6 @@
 package main
 
 import (
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -31,7 +30,6 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/namespaces"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -64,9 +62,7 @@ func init() {
 		copyCmd.Short = "Copy a file to/from the OSDF"
 		flagSet.Lookup("cache-list-name").Hidden = false // Expose the help for this option
 		flagSet.StringP("caches-json", "j", "", "A JSON file containing the list of caches")
-		flagSet.Bool("closest", false, "Return the closest cache and exit")
 		flagSet.BoolP("debug", "d", false, "Enable debug logs") // Typically set by the root command (which doesn't exist in stashcp mode)
-		flagSet.Bool("list-names", false, "Return the names of pre-configured cache lists and exit")
 		flagSet.String("methods", "http", "Comma separated list of methods to try, in order")
 		flagSet.Bool("namespaces", false, "Print the namespace information and exit")
 		flagSet.Bool("plugininterface", false, "Output in HTCondor plugin format.  Turned on if executable is named stash_plugin")
@@ -122,40 +118,9 @@ func copyMain(cmd *cobra.Command, args []string) {
 	}
 
 	if val, err := cmd.Flags().GetBool("namespaces"); err == nil && val {
-		namespaces, err := namespaces.GetNamespaces(ctx)
-		if err != nil {
-			fmt.Println("Failed to get namespaces:", err)
-			os.Exit(1)
-		}
-		fmt.Printf("%+v\n", namespaces)
-		os.Exit(0)
-	}
-
-	// Just return all the caches that it knows about
-	// Print out all of the caches and exit
-	if val, err := cmd.Flags().GetBool("list-names"); err == nil && val {
-		listName, _ := cmd.Flags().GetString("cache-list-name")
-		cacheList, err := client.GetBestCache(listName)
-		if err != nil {
-			log.Errorln("Failed to get best caches:", err)
-			os.Exit(1)
-		}
-		// Print the caches, comma separated,
-		fmt.Println(strings.Join(cacheList[:], ","))
-		os.Exit(0)
-	}
-
-	if val, err := cmd.Flags().GetBool("closest"); err == nil && val {
-		listName, err := cmd.Flags().GetString("cache-list-name")
-		if err != nil {
-			log.Errorln("Failed to determine correct cache list")
-			os.Exit(1)
-		}
-		cacheList, err := client.GetBestCache(listName)
-		if err != nil {
-			log.Errorln("Failed to get best cache: ", err)
-		}
-		fmt.Println(cacheList[0])
+		// NOTE: The value returned by this no longer conforms to the old-style stashcp namespaces JSON.
+		// Instead, it now returns the struct provided by the registry
+		listAllNamespaces(cmd, args)
 		os.Exit(0)
 	}
 
@@ -202,6 +167,11 @@ func copyMain(cmd *cobra.Command, args []string) {
 	lastSrc := ""
 
 	for _, src := range source {
+		src, result = utils.UrlWithFederation(src)
+		if result != nil {
+			lastSrc = src
+			break
+		}
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
 		_, result = client.DoCopy(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...))
 		if result != nil {

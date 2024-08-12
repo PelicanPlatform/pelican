@@ -227,7 +227,7 @@ func RequireAuthMiddleware(ctx *gin.Context) {
 		origPath := ctx.Request.URL.RequestURI()
 		redirUrl := url.URL{
 			Path:     oauthLoginPath,
-			RawQuery: "next_url=" + url.QueryEscape(origPath),
+			RawQuery: "nextUrl=" + url.QueryEscape(origPath),
 		}
 		ctx.Redirect(http.StatusTemporaryRedirect, redirUrl.String())
 		ctx.Abort()
@@ -461,15 +461,15 @@ func whoamiHandler(ctx *gin.Context) {
 
 func listOIDCEnabledServersHandler(ctx *gin.Context) {
 	// Registry has OIDC enabled by default
-	res := OIDCEnabledServerRes{ODICEnabledServers: []string{strings.ToLower(config.RegistryType.String())}}
+	res := OIDCEnabledServerRes{ODICEnabledServers: []string{strings.ToLower(server_structs.RegistryType.String())}}
 	if param.Origin_EnableOIDC.GetBool() {
-		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(config.OriginType.String()))
+		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(server_structs.OriginType.String()))
 	}
 	if param.Cache_EnableOIDC.GetBool() {
-		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(config.CacheType.String()))
+		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(server_structs.CacheType.String()))
 	}
 	if param.Director_EnableOIDC.GetBool() {
-		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(config.DirectorType.String()))
+		res.ODICEnabledServers = append(res.ODICEnabledServers, strings.ToLower(server_structs.DirectorType.String()))
 	}
 	ctx.JSON(http.StatusOK, res)
 }

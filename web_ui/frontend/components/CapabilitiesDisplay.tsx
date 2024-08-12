@@ -1,6 +1,6 @@
 import { Capabilities } from '@/index';
 import { Box, Tooltip, Typography } from '@mui/material';
-import { green, orange } from '@mui/material/colors';
+import { grey } from '@mui/material/colors';
 import { Check, Clear } from '@mui/icons-material';
 import React from 'react';
 
@@ -38,7 +38,8 @@ export const CapabilitiesChip = ({
         py: 0.4,
         px: 1,
         mb: 0.2,
-        backgroundColor: value ? green[200] : orange[200],
+        backgroundColor: value ? grey[300] : grey[100],
+        color: value ? 'black' : grey[700],
         border: '1px 1px solid black',
       }}
     >

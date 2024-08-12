@@ -38,6 +38,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -66,7 +67,7 @@ func TestPrometheusUnprotected(t *testing.T) {
 	viper.Set("IssuerKey", kfile)
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
-	err := config.InitServer(ctx, config.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
@@ -112,7 +113,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	viper.Set("IssuerKey", kfile)
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
-	err := config.InitServer(ctx, config.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	w := httptest.NewRecorder()
@@ -182,7 +183,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	})
 	viper.Set("ConfigDir", configDir)
 	config.InitConfig()
-	err = config.InitServer(ctx, config.OriginType)
+	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
@@ -237,14 +238,14 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		// Create a new private key by re-initializing config to point at a new temp dir
 		k2file := filepath.Join(tDir, "testKey2")
 		viper.Set("IssuerKey", k2file)
-		err = config.InitServer(ctx, config.OriginType)
+		err = config.InitServer(ctx, server_structs.OriginType)
 		require.NoError(t, err)
 
 		token := createToken("monitoring.query", issuerUrl)
 
 		// Re-init the config again, this time pointing at the original key
 		viper.Set("IssuerKey", kfile)
-		err = config.InitServer(ctx, config.OriginType)
+		err = config.InitServer(ctx, server_structs.OriginType)
 		require.NoError(t, err)
 
 		r.GET("/api/v1.0/prometheus/*any", promQueryEngineAuthHandler(av1))

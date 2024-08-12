@@ -416,7 +416,7 @@ func TestOriginUnresponsive(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	viper.Reset()
-	viper.Set("Transport.ResponseHeaderTimeout", "2s")
+	viper.Set("Transport.ResponseHeaderTimeout", "3s")
 	viper.Set("Logging.Level", "debug")
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
@@ -442,7 +442,7 @@ func TestOriginUnresponsive(t *testing.T) {
 		client.WithCaches(cacheUrl))
 	assert.Error(t, err)
 	var sce *client.StatusCodeError
-	assert.True(t, errors.As(err, &sce))
+	assert.True(t, errors.As(err, &sce), "error type does not match expected. Got ", err.Error())
 	if sce != nil {
 		assert.Equal(t, int(*sce), 504)
 	}

@@ -24,15 +24,17 @@ import {
   TripOrigin,
   Storage,
   Block,
+  Dashboard,
 } from '@mui/icons-material';
 
-import { Sidebar } from '@/components/layout/Sidebar';
+import { ButtonLink, Sidebar } from '@/components/layout/Sidebar';
 import IconButton from '@mui/material/IconButton';
 import { Main } from '@/components/layout/Main';
 import SpeedDial, {
   SpeedButtonControlledProps,
 } from '@/components/layout/SidebarSpeedDial';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
+import { PaddedContent } from '@/components/layout';
 
 export const metadata = {
   title: 'Pelican Registry',
@@ -68,31 +70,24 @@ export default function RootLayout({
   return (
     <Box display={'flex'} flexDirection={'row'}>
       <Sidebar>
+        <ButtonLink title={'Dashboard'} href={'/registry/'}>
+          <Dashboard />
+        </ButtonLink>
         <Box pt={1}>
           <SpeedDial actions={actions} />
         </Box>
         <AuthenticatedContent>
-          <Box pt={1}>
-            <Tooltip title={'Denied Namespaces'} placement={'right'}>
-              <Link href={'/registry/denied/'}>
-                <IconButton>
-                  <Block />
-                </IconButton>
-              </Link>
-            </Tooltip>
-          </Box>
+          <ButtonLink title={'Denied Namespaces'} href={'/registry/denied/'}>
+            <Block />
+          </ButtonLink>
         </AuthenticatedContent>
-        <Box pt={1}>
-          <Tooltip title={'Config'} placement={'right'}>
-            <Link href={'/config/'}>
-              <IconButton>
-                <Build />
-              </IconButton>
-            </Link>
-          </Tooltip>
-        </Box>
+        <ButtonLink title={'Config'} href={'/config/'}>
+          <Build />
+        </ButtonLink>
       </Sidebar>
-      <Main>{children}</Main>
+      <Main>
+        <PaddedContent>{children}</PaddedContent>
+      </Main>
     </Box>
   );
 }

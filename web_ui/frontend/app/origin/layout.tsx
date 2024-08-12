@@ -19,6 +19,7 @@
 import { Box } from '@mui/material';
 import Main from '@/components/layout/Main';
 import { OriginSidebar } from '@/components/layout/OriginSidebar';
+import { PaddedContent } from '@/components/layout';
 
 export const metadata = {
   title: 'Pelican Origin',
@@ -33,7 +34,9 @@ export default function RootLayout({
   return (
     <Box display={'flex'} flexDirection={'row'}>
       <OriginSidebar />
-      <Main>{children}</Main>
+      <Main>
+        <PaddedContent>{children}</PaddedContent>
+      </Main>
     </Box>
   );
 }

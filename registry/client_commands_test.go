@@ -46,7 +46,7 @@ func registryMockup(ctx context.Context, t *testing.T, testName string) *httptes
 	viper.Set("IssuerKey", ikey)
 	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
 	viper.Set("Server.WebPort", 8444)
-	err := config.InitServer(ctx, config.RegistryType)
+	err := config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
 
 	setupMockRegistryDB(t)
@@ -200,7 +200,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	viper.Set("IssuerKey", t.TempDir()+"/keychaining")
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
-	err = config.InitServer(ctx, config.RegistryType)
+	err = config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
 
 	_, err = config.GetIssuerPublicJWKS()
@@ -272,7 +272,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 	viper.Set("IssuerKey", t.TempDir()+"/keychaining")
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
-	err = config.InitServer(ctx, config.RegistryType)
+	err = config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
 
 	_, err = config.GetIssuerPublicJWKS()

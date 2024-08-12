@@ -19,10 +19,14 @@
 package utils
 
 import (
+	"fmt"
 	"net/url"
 	"testing"
 
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // Test the functionality of CheckValidQuery and all its edge cases
@@ -108,6 +112,34 @@ func TestValidQuery(t *testing.T) {
 		err = CheckValidQuery(transferUrl)
 		assert.NoError(t, err)
 	})
+
+	t.Run("testValidSkipStat", func(t *testing.T) {
+		transferStr := "pelican://something/here?skipstat"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = CheckValidQuery(transferUrl)
+		assert.NoError(t, err)
+	})
+
+	t.Run("testValidPreferCached", func(t *testing.T) {
+		transferStr := "pelican://something/here?prefercached"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = CheckValidQuery(transferUrl)
+		assert.NoError(t, err)
+	})
+
+	t.Run("testInvalidDirectReadAndPreferCached", func(t *testing.T) {
+		transferStr := "pelican://something/here?prefercached&directread"
+		transferUrl, err := url.Parse(transferStr)
+		assert.NoError(t, err)
+
+		err = CheckValidQuery(transferUrl)
+		assert.Error(t, err)
+		assert.Equal(t, "cannot have both directread and prefercached query parameters", err.Error())
+	})
 }
 
 func TestApplyIPMask(t *testing.T) {
@@ -182,5 +214,75 @@ func TestExtractAndMaskIP(t *testing.T) {
 		maskedIP, ok := ExtractAndMaskIP(real)
 		assert.True(t, ok)
 		assert.Equal(t, expected, maskedIP)
+	})
+}
+
+func TestExtractVersionAndServiceFromUserAgent(t *testing.T) {
+	t.Run("testNormalUserAgent", func(t *testing.T) {
+		userAgent := "pelican-origin/7.9.0"
+		expectedVersion := "7.9.0"
+		expectedService := "origin"
+		version, service := ExtractVersionAndServiceFromUserAgent(userAgent)
+
+		assert.Equal(t, expectedVersion, version)
+		assert.Equal(t, expectedService, service)
+	})
+
+	t.Run("testInvalidUserAgent", func(t *testing.T) {
+		invalidUserAgent := "thisisnotvalid"
+		version, service := ExtractVersionAndServiceFromUserAgent(invalidUserAgent)
+		assert.Equal(t, 0, len(version))
+		assert.Equal(t, 0, len(service))
+	})
+
+	t.Run("testEmptyUserAgent", func(t *testing.T) {
+		emptyUserAgent := ""
+		version, service := ExtractVersionAndServiceFromUserAgent(emptyUserAgent)
+		assert.Equal(t, 0, len(version))
+		assert.Equal(t, 0, len(service))
+	})
+}
+
+func TestUrlWithFederation(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+	pelUrl := "pelican://somefederation.org/namespace/test.txt"
+
+	t.Run("testNoFederation", func(t *testing.T) {
+		str, err := UrlWithFederation(pelUrl)
+		assert.NoError(t, err)
+		assert.Equal(t, pelUrl, str)
+	})
+
+	t.Run("testFederationNoHost", func(t *testing.T) {
+		viper.Set(param.Federation_DiscoveryUrl.GetName(), "somefederation.org")
+		namespaceOnly := "/namespace/test.txt"
+		str, err := UrlWithFederation(namespaceOnly)
+		assert.NoError(t, err)
+		assert.Equal(t, pelUrl, str)
+	})
+
+	t.Run("testFederationWithFedHost", func(t *testing.T) {
+		viper.Set(param.Federation_DiscoveryUrl.GetName(), "https://somefederation.org")
+		namespaceOnly := "/namespace/test.txt"
+		str, err := UrlWithFederation(namespaceOnly)
+		assert.NoError(t, err)
+		assert.Equal(t, pelUrl, str)
+	})
+
+	t.Run("testFederationWithPathComponent", func(t *testing.T) {
+		viper.Set(param.Federation_DiscoveryUrl.GetName(), "somefederation.org/path")
+		namespaceOnly := "/namespace/test.txt"
+		_, err := UrlWithFederation(namespaceOnly)
+		assert.Error(t, err)
+		assert.EqualError(t, err, fmt.Sprintf("provided federation url %s has a path component", param.Federation_DiscoveryUrl.GetString()))
+	})
+
+	t.Run("testFederationPathComponentWithHost", func(t *testing.T) {
+		viper.Set(param.Federation_DiscoveryUrl.GetName(), "https://somefederation.org/path")
+		namespaceOnly := "/namespace/test.txt"
+		_, err := UrlWithFederation(namespaceOnly)
+		assert.Error(t, err)
+		assert.EqualError(t, err, fmt.Sprintf("provided federation url %s has a path component", param.Federation_DiscoveryUrl.GetString()))
 	})
 }

@@ -7,7 +7,7 @@ import {
 } from '@mui/material';
 import React, { useMemo, useCallback } from 'react';
 
-import { ParameterInputProps } from '@/components/Config/index.d';
+import { ParameterInputProps } from '@/components/Config/index';
 import { createId, buildPatch } from './util';
 
 export type BooleanFieldProps = {

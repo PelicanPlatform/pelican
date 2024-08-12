@@ -147,7 +147,7 @@ func init() {
 		panic(err)
 	}
 
-	rootCmd.PersistentFlags().StringP("log", "l", "", "Specified log output file")
+	rootCmd.PersistentFlags().StringP("log", "l", "", "Specified log output file - The '-l' for logging will be changed to '-L' in the 7.11.0 pelican release")
 	if err := viper.BindPFlag("Logging.LogLocation", rootCmd.PersistentFlags().Lookup("log")); err != nil {
 		panic(err)
 	}
@@ -168,5 +168,11 @@ func init() {
 	}
 	if err := viper.BindPFlag("Server.WebPort", portFlag); err != nil {
 		panic(err)
+	}
+
+	rootCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		if cmd.Flags().Changed("log") {
+			log.Warningln("The '-l' for logging will be changed to '-L' in the 7.11.0 pelican release")
+		}
 	}
 }

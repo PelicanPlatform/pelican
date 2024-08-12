@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"net/url"
 	"runtime/debug"
 	"strconv"
@@ -39,12 +38,12 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Number of caches to attempt to use in any invocation
-var CachesToTry int = 3
+var ObjectServersToTry int = 3
 
 // Our own FileInfo structure to hold information about a file
 // NOTE: this was created to provide more flexibility to information on a file. The fs.FileInfo interface was causing some issues like not always returning a Name attribute
@@ -73,7 +72,7 @@ func getTokenName(destination *url.URL) (scheme, tokenName string) {
 //
 // If tokenName is not empty, it will be used as the token name.
 // If tokenName is empty, the token name will be determined from the destination URL (if possible) using getTokenName
-func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool, tokenName string, tokenLocation string, acquireToken bool) (string, error) {
+func getToken(destination *url.URL, dirResp server_structs.DirectorResponse, isWrite bool, tokenName string, tokenLocation string, acquireToken bool) (string, error) {
 	if tokenName == "" {
 		_, tokenName = getTokenName(destination)
 	}
@@ -136,7 +135,7 @@ func getToken(destination *url.URL, namespace namespaces.Namespace, isWrite bool
 			if isWrite {
 				opts.Operation = config.TokenSharedWrite
 			}
-			value, err := AcquireToken(destination, namespace, opts)
+			value, err := AcquireToken(destination, dirResp, opts)
 			if err == nil {
 				return value, nil
 			}
@@ -209,7 +208,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return nil, errors.Wrap(err, "Failed to generate pelicanURL object")
 	}
 
-	ns, err := getNamespaceInfo(ctx, destUri.Path, pelicanURL.directorUrl, false, "")
+	dirResp, err := GetDirectorInfoForPath(ctx, destUri.Path, pelicanURL.directorUrl, false, "")
 	if err != nil {
 		return nil, err
 	}
@@ -228,48 +227,32 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}
 
-	if ns.UseTokenOnRead && token == "" {
-		token, err = getToken(destUri, ns, true, "", tokenLocation, acquire)
+	if dirResp.XPelNsHdr.RequireToken && token == "" {
+		token, err = getToken(destUri, dirResp, true, "", tokenLocation, acquire)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get token for transfer: %v", err)
 		}
 	}
 
-	if statInfo, err := statHttp(ctx, destUri, ns, pelicanURL.directorUrl, token); err != nil {
+	if statInfo, err := statHttp(destUri, dirResp, token); err != nil {
 		return nil, errors.Wrap(err, "failed to do the stat")
 	} else {
 		return &statInfo, nil
 	}
 }
 
-func GetCacheHostnames(ctx context.Context, testFile string) (urls []string, err error) {
+func GetObjectServerHostnames(ctx context.Context, testFile string) (urls []string, err error) {
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
 		return
 	}
-	ns, err := getNamespaceInfo(ctx, testFile, fedInfo.DirectorEndpoint, false, "")
+
+	parsedDirResp, err := GetDirectorInfoForPath(ctx, testFile, fedInfo.DirectorEndpoint, false, "")
 	if err != nil {
 		return
 	}
-
-	caches, err := getCachesFromNamespace(ns, fedInfo.DirectorEndpoint != "", make([]*url.URL, 0))
-	if err != nil {
-		return
-	}
-
-	for _, cacheGeneric := range caches {
-		if cache, ok := cacheGeneric.(namespaces.Cache); ok {
-			url_string := cache.AuthEndpoint
-			host := strings.Split(url_string, ":")[0]
-			urls = append(urls, host)
-		} else if cache, ok := cacheGeneric.(namespaces.DirectorCache); ok {
-			cacheUrl, err := url.Parse(cache.EndpointUrl)
-			if err != nil {
-				log.Debugln("Failed to parse returned cache as a URL:", cacheUrl)
-				continue
-			}
-			urls = append(urls, cacheUrl.Hostname())
-		}
+	for _, objectServer := range parsedDirResp.ObjectServers {
+		urls = append(urls, objectServer.Hostname())
 	}
 
 	return
@@ -283,113 +266,65 @@ func getUserAgent(project string) (agent string) {
 	return
 }
 
-func getCachesFromNamespace(namespace namespaces.Namespace, useDirector bool, preferredCaches []*url.URL) (caches []CacheInterface, err error) {
+// Given a response from the director with sorted object servers, incorporate any "preferred" servers (origins/caches) that
+// may be passed in from the command line. This should handle the special '+' logic -- if the user provides a list of servers
+// and no +, it means they ONLY want to use the provided servers. Otherwise, we prefer those servers, but also incorporate the
+// servers provided by the Director.
+func generateSortedObjServers(dirResp server_structs.DirectorResponse, preferredCaches []*url.URL) (objectServers []*url.URL, err error) {
 	var appendCaches bool
 	// The global cache override is set
 	if len(preferredCaches) > 0 {
-		var preferredCacheList []CacheInterface
+		var preferredObjectServers []*url.URL
 		for idx, preferredCache := range preferredCaches {
 			cacheUrl := preferredCache.String()
 			// If the preferred cache is empty, return an error
 			if cacheUrl == "" {
-				err = errors.New("Preferred cache was specified as an empty string")
+				err = errors.New("Preferred server was specified as an empty string")
 				return
 			} else if cacheUrl == "+" {
 				// If we have a '+' in our list, the user wants to prepend the preferred caches to the "normal" list of caches
 				// if the cache is a '+', verify it is at the end of our list, if not, return an error
 				if idx != len(preferredCaches)-1 {
-					err = errors.New("The special character '+' must be the last item in the list of preferred caches")
+					err = errors.New("The special character '+' must be the last item in the list of preferred servers")
 					return
 				}
 				// We want to signify that we want to append the "normal" cache list
 				appendCaches = true
 			} else {
 				// We have a normal item in the preferred cache list
-				log.Debugf("Using the cache (%s) from the config override\n", preferredCache)
-				cache := namespaces.DirectorCache{
-					EndpointUrl: cacheUrl,
-				}
-				// append to our list of preferred caches
-				preferredCacheList = append(preferredCacheList, cache)
+				log.Debugf("Using the server (%s) from the config override\n", preferredCache)
+				preferredObjectServers = append(preferredObjectServers, preferredCache)
 			}
 		}
-
-		// If we are not appending any more caches, we return with the caches we have
+		objectServers = preferredObjectServers
+		// No +, no mo problems -- err, I mean, no more object servers
 		if !appendCaches {
-			caches = preferredCacheList
 			return
 		}
-		caches = preferredCacheList
 	}
 
-	if useDirector {
-		log.Debugln("Using the returned sources from the director")
-		directorCaches := make([]CacheInterface, len(namespace.SortedDirectorCaches))
-		for idx, val := range namespace.SortedDirectorCaches {
-			directorCaches[idx] = val
-		}
+	log.Debugln("Using the returned sources from the director")
+	// We may have some servers from the preferred list
+	objectServers = append(objectServers, dirResp.ObjectServers...)
 
-		// If appendCaches is set, prepend it to the list of caches and return
-		if appendCaches {
-			caches = append(caches, directorCaches...)
+	if log.IsLevelEnabled(log.DebugLevel) || log.IsLevelEnabled(log.TraceLevel) {
+		oHosts := make([]string, len(objectServers))
+		for idx, oServer := range objectServers {
+			simpleUrl := url.URL{
+				Scheme: oServer.Scheme,
+				Host:   oServer.Host,
+			}
+			oHosts[idx] = simpleUrl.String()
+		}
+		if len(oHosts) <= 6 {
+			log.Debugln("Matched object servers:", strings.Join(oHosts, ", "))
 		} else {
-			caches = directorCaches
-		}
-		if log.IsLevelEnabled(log.DebugLevel) || log.IsLevelEnabled(log.TraceLevel) {
-			cacheHosts := make([]string, len(caches))
-			for idx, entry := range caches {
-				cacheStr := entry.(namespaces.DirectorCache).EndpointUrl
-				cacheUrl, err := url.Parse(cacheStr)
-				if err != nil {
-					cacheHosts[idx] = cacheStr
-				}
-				cacheSimpleUrl := url.URL{
-					Scheme: cacheUrl.Scheme,
-					Host:   cacheUrl.Host,
-				}
-				cacheHosts[idx] = cacheSimpleUrl.String()
-			}
-			if len(cacheHosts) <= 6 {
-				log.Debugln("Matched caches:", strings.Join(cacheHosts, ", "))
-			} else {
-				log.Debugf("Matched caches: %s ... (plus %d more)", strings.Join(cacheHosts[0:6], ", "), len(cacheHosts)-6)
-				log.Traceln("matched caches continued:", cacheHosts[6:])
-			}
-		}
-		return
-	}
-
-	var bestCaches []string
-	if len(preferredCaches) == 0 {
-		cacheListName := "xroot"
-		if namespace.ReadHTTPS || namespace.UseTokenOnRead {
-			cacheListName = "xroots"
-		}
-		bestCaches, err = GetBestCache(cacheListName)
-		if err != nil {
-			log.Errorln("Failed to get best caches:", err)
-			return
+			log.Debugf("Matched object servers: %s ... (plus %d more)", strings.Join(oHosts[0:6], ", "), len(oHosts)-6)
+			log.Traceln("matched object servers continued:", oHosts[6:])
 		}
 	}
-
-	log.Debugln("Nearest cache list:", bestCaches)
-	log.Debugln("Cache list name:", namespace.Caches)
-
-	matchedCaches := namespace.MatchCaches(bestCaches)
-	log.Debugln("Matched caches:", matchedCaches)
-	matchedCachesList := make([]CacheInterface, len(matchedCaches))
-	for idx, val := range matchedCaches {
-		matchedCachesList[idx] = val
-	}
-
-	// If usingPreferredCache is set, prepend it to the list of caches and return
-	if appendCaches {
-		caches = append(caches, matchedCachesList...)
-	} else {
-		caches = matchedCachesList
-	}
-
 	return
+
 }
 
 func correctURLWithUnderscore(sourceFile string) (string, string) {
@@ -436,58 +371,6 @@ func discoverHTCondorToken(tokenName string) string {
 		tokenLocation, _ = filepath.Abs(".condor_creds/" + tokenFilename)
 	}
 	return tokenLocation
-}
-
-// Retrieve federation namespace information for a given URL.
-// If OSDFDirectorUrl is non-empty, then the namespace information will be pulled from the director;
-// otherwise, it is pulled from topology.
-func getNamespaceInfo(ctx context.Context, resourcePath, OSDFDirectorUrl string, isPut bool, query string) (ns namespaces.Namespace, err error) {
-	// If we have a director set, go through that for namespace info, otherwise use topology
-	if OSDFDirectorUrl != "" {
-		log.Debugln("Will query director at", OSDFDirectorUrl, "for object", resourcePath)
-		verb := "GET"
-		if isPut {
-			verb = "PUT"
-		}
-		if query != "" {
-			resourcePath += "?" + query
-		}
-		var dirResp *http.Response
-		dirResp, err = queryDirector(ctx, verb, resourcePath, OSDFDirectorUrl)
-		if err != nil {
-			if isPut && dirResp != nil && dirResp.StatusCode == 405 {
-				err = errors.New("Error 405: No writeable origins were found")
-				return
-			} else {
-				log.Errorln("Error while querying the Director:", err)
-				return
-			}
-		}
-		ns, err = CreateNsFromDirectorResp(dirResp)
-		if err != nil {
-			return
-		}
-
-		// if we are doing a PUT, we need to get our endpoint from the director
-		if isPut {
-			var writeBackUrl *url.URL
-			location := dirResp.Header.Get("Location")
-			writeBackUrl, err = url.Parse(location)
-			if err != nil {
-				log.Errorf("The director responded with an invalid location (does not parse as URL: %v): %s", err, location)
-				return
-			}
-			ns.WriteBackHost = "https://" + writeBackUrl.Host
-		}
-		return
-	} else {
-		log.Debugln("Director URL not found, searching in topology")
-		ns, err = namespaces.MatchNamespace(ctx, resourcePath)
-		if err != nil {
-			return
-		}
-		return
-	}
 }
 
 func schemeUnderstood(scheme string) error {
@@ -540,7 +423,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		return nil, errors.Wrap(err, "failed to generate pelicanURL object")
 	}
 
-	ns, err := getNamespaceInfo(ctx, remoteObjectUrl.Path, pelicanURL.directorUrl, false, "")
+	dirResp, err := GetDirectorInfoForPath(ctx, remoteObjectUrl.Path, pelicanURL.directorUrl, false, "")
 	if err != nil {
 		return nil, err
 	}
@@ -560,14 +443,14 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		}
 	}
 
-	if ns.UseTokenOnRead && token == "" {
-		token, err = getToken(remoteObjectUrl, ns, true, "", tokenLocation, acquire)
+	if dirResp.XPelNsHdr.RequireToken && token == "" {
+		token, err = getToken(remoteObjectUrl, dirResp, true, "", tokenLocation, acquire)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
 	}
 
-	fileInfos, err = listHttp(ctx, remoteObjectUrl, pelicanURL.directorUrl, ns, token)
+	fileInfos, err = listHttp(remoteObjectUrl, dirResp, token)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to do the list")
 	}
@@ -793,7 +676,6 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 
 // Start the transfer, whether read or write back. Primarily used for backwards compatibility
 func DoCopy(ctx context.Context, sourceFile string, destination string, recursive bool, options ...TransferOption) (transferResults []TransferResults, err error) {
-
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {

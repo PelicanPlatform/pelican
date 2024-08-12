@@ -24,9 +24,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 func fedServeStart(cmd *cobra.Command, args []string) error {
@@ -34,7 +34,7 @@ func fedServeStart(cmd *cobra.Command, args []string) error {
 	if len(moduleSlice) == 0 {
 		return errors.New("No modules are enabled; pass the --module flag or set the Server.Modules parameter")
 	}
-	modules := config.NewServerType()
+	modules := server_structs.NewServerType()
 	for _, module := range moduleSlice {
 		if !modules.SetString(module) {
 			return errors.Errorf("Unknown module name: %s", module)

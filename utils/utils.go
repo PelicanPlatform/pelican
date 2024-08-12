@@ -19,8 +19,10 @@
 package utils
 
 import (
+	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -28,6 +30,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // snakeCaseToCamelCase converts a snake case string to camel case.
@@ -72,38 +76,6 @@ func GetPreferredCaches(preferredCaches string) (caches []*url.URL, err error) {
 	return
 }
 
-// This function checks if we have a valid query (or no query) for the transfer URL
-func CheckValidQuery(transferUrl *url.URL) (err error) {
-	query := transferUrl.Query()
-	recursive, hasRecursive := query["recursive"]
-	_, hasPack := query["pack"]
-	directRead, hasDirectRead := query["directread"]
-
-	// If we have both recursive and pack, we should return a failure
-	if hasRecursive && hasPack {
-		return errors.New("cannot have both recursive and pack query parameters")
-	}
-
-	// If there is an argument in the directread query param, inform the user this is deprecated and their argument will be ignored
-	if hasDirectRead && directRead[0] != "" {
-		log.Warnln("Arguments (true/false) for the ?directread query have been deprecated and will be disallowed in a future release. The argument provided will be ignored")
-		return nil
-	}
-
-	// If there is an argument in the recursive query param, inform the user this is deprecated and their argument will be ignored
-	if hasRecursive && recursive[0] != "" {
-		log.Warnln("Arguments (true/false) for the ?recursive query have been deprecated and will be disallowed in a future release. The argument provided will be ignored")
-		return nil
-	}
-
-	// If we have no query, or we have recursive or pack, we are good
-	if len(query) == 0 || hasRecursive || hasPack || hasDirectRead {
-		return nil
-	}
-
-	return errors.New("invalid query parameter(s) " + transferUrl.RawQuery + " provided in url " + transferUrl.String())
-}
-
 func maskIPv4With24(ip net.IP) (masked string, ok bool) {
 	mask := net.CIDRMask(24, 32)
 	maskedIP := ip.Mask(mask)
@@ -142,4 +114,53 @@ func ExtractAndMaskIP(ipStr string) (maskedIP string, ok bool) {
 	} else {
 		return ApplyIPMask(ipStr)
 	}
+}
+
+// ExtractVersionAndServiceFromUserAgent will extract the Pelican version and service from
+// the user agent.
+// It will return empty strings if the provided userAgent failes to match against the parser
+func ExtractVersionAndServiceFromUserAgent(userAgent string) (reqVer, service string) {
+	uaRegExp := regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
+	if matches := uaRegExp.MatchString(userAgent); !matches {
+		return "", ""
+	}
+
+	userAgentSplit := strings.Split(userAgent, "/")
+	reqVer = userAgentSplit[1]
+	service = (strings.Split(userAgentSplit[0], "-"))[1]
+	return reqVer, service
+}
+
+// Given a remote url with no host (a namespace path, essentially), then if the Federation.DiscoveryURL is
+// set (either via a yaml file or via the command line flags), create a full pelican protocol URL by combining
+// the two
+func UrlWithFederation(remoteUrl string) (string, error) {
+	if param.Federation_DiscoveryUrl.IsSet() {
+		parsedUrl, err := url.Parse(remoteUrl)
+		if err != nil {
+			newErr := errors.New(fmt.Sprintf("error parsing source url: %s", err))
+			return remoteUrl, newErr
+		}
+		if parsedUrl.Host != "" {
+			return remoteUrl, nil
+		}
+		parsedDiscUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+		if err != nil {
+			newErr := errors.New(fmt.Sprintf("error parsing discovery url: %s", err))
+			return remoteUrl, newErr
+		}
+		if parsedDiscUrl.Scheme == "" {
+			parsedDiscUrl.Scheme = "https"
+			updatedDiscString := parsedDiscUrl.String()
+			parsedDiscUrl, _ = url.Parse(updatedDiscString)
+		}
+		if parsedDiscUrl.Path != "" {
+			newErr := errors.New(fmt.Sprintf("provided federation url %s has a path component", param.Federation_DiscoveryUrl.GetString()))
+			return remoteUrl, newErr
+		}
+		parsedUrl.Host = parsedDiscUrl.Host
+		parsedUrl.Scheme = "pelican"
+		return parsedUrl.String(), nil
+	}
+	return remoteUrl, nil
 }

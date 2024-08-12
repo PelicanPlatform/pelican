@@ -19,9 +19,12 @@
 package server_structs
 
 import (
+	"fmt"
+	"net/http"
 	"net/url"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -148,5 +151,134 @@ func TestConversion(t *testing.T) {
 	OAdConv := ConvertOriginAdV1ToV2(oAdV1)
 
 	require.Equal(t, oAdV2, OAdConv)
+}
 
+func TestValidTokenStrategy(t *testing.T) {
+	t.Run("ValidOAuth2Strategy", func(t *testing.T) {
+		require.True(t, IsValidStrategy("OAuth2"))
+	})
+
+	t.Run("ValidVaultStrategy", func(t *testing.T) {
+		require.True(t, IsValidStrategy("Vault"))
+	})
+
+	t.Run("InvalidStrategies", func(t *testing.T) {
+		require.False(t, IsValidStrategy("oauth2"))
+		require.False(t, IsValidStrategy("vault"))
+		require.False(t, IsValidStrategy("foo"))
+	})
+}
+
+func TestXPelNsParsing(t *testing.T) {
+	t.Run("ParseValidRawResponse", func(t *testing.T) {
+		xPelNs := XPelNs{}
+		err := xPelNs.ParseRawResponse(&http.Response{
+			Header: map[string][]string{
+				"X-Pelican-Namespace": {"namespace=foo, require-token=true, collections-url=https://collections-url.org"},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, "foo", xPelNs.Namespace)
+		assert.True(t, xPelNs.RequireToken)
+		assert.Equal(t, "https://collections-url.org", xPelNs.CollectionsUrl.String())
+	})
+
+	t.Run("ParseMissingCollectionsUrl", func(t *testing.T) { // Signifies origins that don't enable listings
+		xPelNs := XPelNs{}
+		err := xPelNs.ParseRawResponse(&http.Response{
+			Header: map[string][]string{
+				"X-Pelican-Namespace": {"namespace=foo, require-token=true"},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, "foo", xPelNs.Namespace)
+		assert.True(t, xPelNs.RequireToken)
+		assert.Nil(t, xPelNs.CollectionsUrl)
+	})
+
+	t.Run("ParseMissingHeader", func(t *testing.T) {
+		xPelNs := XPelNs{}
+		err := xPelNs.ParseRawResponse(&http.Response{
+			Header: map[string][]string{
+				"X-Pelican-foo": {"bar"},
+			},
+		})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), fmt.Sprintf("No %s header found.", xPelNs.GetName()))
+	})
+}
+
+func TestXPelAuthParsing(t *testing.T) {
+	t.Run("ParseValidRawResponse", func(t *testing.T) {
+		xPelAuth := XPelAuth{}
+		err := xPelAuth.ParseRawResponse(&http.Response{
+			Header: map[string][]string{
+				"X-Pelican-Authorization": {"issuer=https://issuer1.com, issuer=https://issuer2.com"},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Len(t, xPelAuth.Issuers, 2)
+		assert.Equal(t, "https://issuer1.com", xPelAuth.Issuers[0].String())
+		assert.Equal(t, "https://issuer2.com", xPelAuth.Issuers[1].String())
+	})
+
+	t.Run("ParseMissingHeader", func(t *testing.T) {
+		xPelAuth := XPelAuth{}
+		err := xPelAuth.ParseRawResponse(&http.Response{
+			Header: map[string][]string{
+				"X-Pelican-foo": {"foo"},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(xPelAuth.Issuers))
+	})
+}
+
+func TestXPelTokGenParsing(t *testing.T) {
+	t.Run("ParseValidRawResponse", func(t *testing.T) {
+		xPelTokGen := XPelTokGen{}
+		err := xPelTokGen.ParseRawResponse(&http.Response{
+			Header: map[string][]string{
+				"X-Pelican-Token-Generation": {"strategy=OAuth2, max-scope-depth=3, issuer=https://issuer.com, base-path=/foo/bar"},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, OAuthStrategy, xPelTokGen.Strategy)
+		assert.Equal(t, uint(3), xPelTokGen.MaxScopeDepth)
+		assert.Len(t, xPelTokGen.Issuers, 1)
+		assert.Equal(t, "https://issuer.com", xPelTokGen.Issuers[0].String())
+		// no test for multiple base paths yet because the director doesn't implement it
+		assert.Len(t, xPelTokGen.BasePaths, 1)
+		assert.Equal(t, "/foo/bar", xPelTokGen.BasePaths[0])
+	})
+
+	t.Run("ParseMissingBasePath", func(t *testing.T) {
+		xPelTokGen := XPelTokGen{}
+		err := xPelTokGen.ParseRawResponse(&http.Response{
+			Header: map[string][]string{
+				"X-Pelican-Token-Generation": {"strategy=OAuth2, max-scope-depth=3, issuer=https://issuer.com"},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, OAuthStrategy, xPelTokGen.Strategy)
+		assert.Equal(t, uint(3), xPelTokGen.MaxScopeDepth)
+		assert.Len(t, xPelTokGen.Issuers, 1)
+		assert.Equal(t, "https://issuer.com", xPelTokGen.Issuers[0].String())
+		// no test for multiple base paths yet because the director doesn't implement it
+		assert.Len(t, xPelTokGen.BasePaths, 0)
+	})
+
+	t.Run("ParseMissingHeader", func(t *testing.T) {
+		xPelTokGen := XPelTokGen{}
+		err := xPelTokGen.ParseRawResponse(&http.Response{
+			Header: map[string][]string{
+				"X-Pelican-foo": {"foo"},
+			},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, StrategyType(""), xPelTokGen.Strategy)
+		assert.Equal(t, uint(0), xPelTokGen.MaxScopeDepth)
+		assert.Len(t, xPelTokGen.Issuers, 0)
+		assert.Len(t, xPelTokGen.BasePaths, 0)
+	})
 }

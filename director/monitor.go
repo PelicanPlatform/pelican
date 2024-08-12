@@ -44,7 +44,7 @@ import (
 var originReportNotFoundError = errors.New("Origin does not support new reporting API")
 
 // Report the health status of test file transfer to storage server
-func reportStatusToServer(ctx context.Context, serverWebUrl string, status string, message string, serverType server_structs.ServerType, fallback bool) error {
+func reportStatusToServer(ctx context.Context, serverWebUrl string, status string, message string, serverType string, fallback bool) error {
 	directorUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	if err != nil {
 		return errors.Wrapf(err, "failed to parse external URL %v", param.Server_ExternalWebUrl.GetString())
@@ -71,13 +71,13 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 		return errors.Errorf("bad status for reporting director test %s", status)
 	}
 
-	if serverType == server_structs.OriginType {
+	if serverType == server_structs.OriginType.String() {
 		if fallback {
 			reportUrl.Path = "/api/v1.0/origin-api/directorTest"
 		} else {
 			reportUrl.Path = "/api/v1.0/origin/directorTest"
 		}
-	} else if serverType == server_structs.CacheType {
+	} else if serverType == server_structs.CacheType.String() {
 		reportUrl.Path = "/api/v1.0/cache/directorTest"
 	}
 
@@ -119,13 +119,13 @@ func reportStatusToServer(ctx context.Context, serverWebUrl string, status strin
 	if resp.StatusCode > 404 { // For all servers, >404 is a failure
 		return errors.Errorf("error response %v from reporting director test: %v", resp.StatusCode, string(body))
 	}
-	if serverType == server_structs.OriginType && resp.StatusCode != 200 {
+	if serverType == server_structs.OriginType.String() && resp.StatusCode != 200 {
 		return errors.Errorf("error response %v from reporting director test: %v", resp.StatusCode, string(body))
 	}
-	if serverType == server_structs.CacheType && resp.StatusCode == 404 {
+	if serverType == server_structs.CacheType.String() && resp.StatusCode == 404 {
 		return errors.New("cache reports a 404 error. For cache version < v7.7.0, director-based test is not supported")
 	}
-	if serverType == server_structs.OriginType && resp.StatusCode == 404 {
+	if serverType == server_structs.OriginType.String() && resp.StatusCode == 404 {
 		return originReportNotFoundError
 	}
 
@@ -178,10 +178,10 @@ func LaunchPeriodicDirectorTest(ctx context.Context, serverAd server_structs.Ser
 			log.Debug(fmt.Sprintf("Starting a director test cycle for %s server %s at %s", serverAd.Type, serverName, serverUrl))
 			ok := true
 			var err error
-			if serverAd.Type == server_structs.OriginType {
+			if serverAd.Type == server_structs.OriginType.String() {
 				fileTests := server_utils.TestFileTransferImpl{}
 				ok, err = fileTests.RunTests(ctx, serverUrl, serverUrl, "", server_utils.DirectorTest)
-			} else if serverAd.Type == server_structs.CacheType {
+			} else if serverAd.Type == server_structs.CacheType.String() {
 				err = runCacheTest(ctx, serverAd.URL)
 			}
 

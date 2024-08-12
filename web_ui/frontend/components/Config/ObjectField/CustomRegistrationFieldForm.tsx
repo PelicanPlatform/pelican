@@ -3,7 +3,7 @@ import {
   CustomRegistrationField,
   FieldType,
   Option,
-} from '@/components/Config/index.d';
+} from '@/components/Config/index';
 import React from 'react';
 import { Box, Button } from '@mui/material';
 

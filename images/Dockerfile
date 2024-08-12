@@ -47,8 +47,6 @@ RUN groupadd -o -g 10940 xrootd
 RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
-# FIXME: We install xrootd from the osg-test repo to incorporate patch for the throttle plugin
-# We should come back and remove it once xrootd 5.7.0 is released
 RUN yum -y update \
     && yum -y --allowerasing --enablerepo osg-testing install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms xrootd-multiuser curl java-17-openjdk-headless \
     && yum clean all \
