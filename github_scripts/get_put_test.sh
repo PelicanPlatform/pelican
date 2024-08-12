@@ -123,7 +123,7 @@ do
 done
 
 # Run pelican object put
-./pelican object put ./get_put_tmp/input.txt pelican://$HOSTNAME:8444/test/input.txt -d -t get_put_tmp/test-token.jwt -L get_put_tmp/putOutput.txt
+./pelican object put ./get_put_tmp/input.txt pelican://$HOSTNAME:8444/test/input.txt -d -t get_put_tmp/test-token.jwt -l get_put_tmp/putOutput.txt
 
 # Check output of command
 if grep -q "Dumping response: HTTP/1.1 200 OK" get_put_tmp/putOutput.txt; then
@@ -134,7 +134,7 @@ else
     exit 1
 fi
 
-./pelican object get pelican://$HOSTNAME:8444/test/input.txt get_put_tmp/output.txt -d -t get_put_tmp/test-token.jwt -L get_put_tmp/getOutput.txt
+./pelican object get pelican://$HOSTNAME:8444/test/input.txt get_put_tmp/output.txt -d -t get_put_tmp/test-token.jwt -l get_put_tmp/getOutput.txt
 
 # Check output of command
 if grep -q "HTTP Transfer was successful" get_put_tmp/getOutput.txt; then
