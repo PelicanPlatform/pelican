@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strconv"
 	"text/tabwriter"
 
@@ -44,12 +45,18 @@ var (
 func init() {
 	flagSet := lsCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
-	flagSet.BoolP("long", "L", false, "Include extended information")
+	flagSet.BoolP("long", "L", false, "Include extended information - The '-L' for long output will be changed to '-l' in the 7.11.0 pelican release")
 	flagSet.BoolP("collectionOnly", "C", false, "List collections only")
 	flagSet.BoolP("objectonly", "O", false, "List objects only")
 	flagSet.BoolP("json", "j", false, "Print results in JSON format")
 
 	objectCmd.AddCommand(lsCmd)
+
+	lsCmd.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		if cmd.Flags().Changed("long") {
+			log.Warningln("The '-L' for long output will be changed to '-l' in the 7.11.0 pelican release")
+		}
+	}
 }
 
 func listMain(cmd *cobra.Command, args []string) error {
@@ -122,7 +129,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 	}
 
 	// Take our fileInfos and print them in a nice way
-	// if the -L flag was set, we print more information
+	// if the -l flag was set, we print more information
 	if long {
 		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
 		// If we want JSON format, we append the file info to a slice of fileInfo structs so that we can marshal it
@@ -140,10 +147,10 @@ func listMain(cmd *cobra.Command, args []string) error {
 		}
 		w.Flush()
 	} else if asJSON {
-		// In this case, we are not using the long option (-L) and want a JSON format
+		// In this case, we are not using the long option (-l) and want a JSON format
 		jsonInfo := []string{}
 		for _, info := range filteredInfos {
-			jsonInfo = append(jsonInfo, info.Name)
+			jsonInfo = append(jsonInfo, path.Base(info.Name))
 		}
 		// Convert the FileInfo to JSON and print it
 		jsonData, err := json.Marshal(jsonInfo)
@@ -159,7 +166,7 @@ func listMain(cmd *cobra.Command, args []string) error {
 		w := tabwriter.NewWriter(os.Stdout, 1, 2, 10, ' ', tabwriter.TabIndent|tabwriter.DiscardEmptyColumns)
 		var line string
 		for _, info := range filteredInfos {
-			line += info.Name
+			line += path.Base(info.Name)
 			//increase our counter
 			column++
 
