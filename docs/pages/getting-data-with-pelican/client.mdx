@@ -180,7 +180,7 @@ pelican object get pelican://<federation-url></namespace-prefix></path/to/file/f
 To upload, specify a directory and Pelican will compress it for you:
 
 ```bash
-pelican object put <local/path/to/directory> pelican://<federation-url></namespace-prefix></path/to/directory.tar.gz>?pack=tar.gz
+pelican object put <local/path/to/directory> pelican://<federation-url></namespace-prefix></path/to/collection.tar.gz>?pack=tar.gz
 ```
 
 Pelican accepts the following values for the `pack` query:
@@ -192,16 +192,16 @@ Pelican accepts the following values for the `pack` query:
 	- For uploading, create the object in the specified format (`tar`, `tar.gz`, `tar.xz`, `zip`, respectively).
 
 ### Recursive Downloads and Uploads with the `?recursive` Query
-The `?recursive` query can be utilized if the desired remote object is a directory. When this query is enabled, it indicates to Pelican that all sub paths at the level of the provided namespace should be copied recursively. To use this query, run:
+The `?recursive` query can be utilized if the desired remote object is a collection. When this query is enabled, it indicates to Pelican that all sub paths at the level of the provided namespace should be copied recursively. To use this query, run:
 
 ```bash
-pelican object get pelican://<federation-url></namespace-prefix></path/to/directory>?recursive <local/path/to/file>
+pelican object get pelican://<federation-url></namespace-prefix></path/to/collection>?recursive <local/path/to/file>
 ```
 
 To upload, you can run something similar but with an `object put`:
 
 ```bash
-pelican object put <local/path/to/directory> pelican://<federation-url></namespace-prefix></path/to/directory>?recursive
+pelican object put <local/path/to/directory> pelican://<federation-url></namespace-prefix></path/to/collection>?recursive
 ```
 
 >**Note:** This query functions the same as specifying the `-r` flag described below.

@@ -662,7 +662,7 @@ func CheckOriginSentinelLocations(exports []OriginExport) (ok bool, err error) {
 			fullPath := filepath.Join(export.StoragePrefix, sentinelPath)
 			_, err := os.Stat(fullPath)
 			if err != nil {
-				return false, errors.Wrapf(err, "fail to open SentinelLocation %s for StoragePrefix %s. Directory check failed", export.SentinelLocation, export.StoragePrefix)
+				return false, errors.Wrapf(err, "fail to open SentinelLocation %s for StoragePrefix %s. Collection check failed", export.SentinelLocation, export.StoragePrefix)
 			}
 		}
 	}

@@ -2397,7 +2397,7 @@ func createWebDavClient(collectionsUrl *url.URL, token string, project string) (
 	return
 }
 
-// Walk a remote directory in a WebDAV server, emitting the files discovered
+// Walk a remote collection in a WebDAV server, emitting the files discovered
 func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
 	// Create the client to walk the filesystem
 	collUrl := job.job.dirResp.XPelNsHdr.CollectionsUrl
@@ -2412,7 +2412,7 @@ func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []tr
 
 // Helper function for the `walkDirDownload`.
 //
-// Recursively walks through the remote server directory, emitting transfer files
+// Recursively walks through the remote server collection, emitting transfer files
 // for the engine to process.
 func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, remotePath string, client *gowebdav.Client) error {
 	// Check for cancelation since the client does not respect the context
@@ -2421,7 +2421,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	}
 	infos, err := client.ReadDir(remotePath)
 	if err != nil {
-		return errors.Wrap(err, "failed to read remote directory")
+		return errors.Wrap(err, "failed to read remote collection")
 	}
 	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
 	for _, info := range infos {
@@ -2507,9 +2507,9 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	return err
 }
 
-// This function performs the ls command by walking through the specified directory and printing the contents of the files
+// This function performs the ls command by walking through the specified collections and printing the contents of the files
 func listHttp(remoteObjectUrl *url.URL, dirResp server_structs.DirectorResponse, token string) (fileInfos []FileInfo, err error) {
-	// Get our directory listing host
+	// Get our collection listing host
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 	log.Debugln("Collections URL: ", collectionsUrl.String())
 
@@ -2528,14 +2528,14 @@ func listHttp(remoteObjectUrl *url.URL, dirResp server_structs.DirectorResponse,
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to stat remote path")
 			}
-			// If the path leads to a file and not a directory, just add the filename
+			// If the path leads to a file and not a collection, just add the filename
 			if !info.IsDir() {
 				// NOTE: we implement our own FileInfo here because the one we get back from stat() does not have a .name field for some reason
 				file := FileInfo{
-					Name:    remotePath,
-					Size:    info.Size(),
-					ModTime: info.ModTime(),
-					IsDir:   false,
+					Name:         remotePath,
+					Size:         info.Size(),
+					ModTime:      info.ModTime(),
+					IsCollection: false,
 				}
 				fileInfos = append(fileInfos, file)
 				return fileInfos, nil
@@ -2545,17 +2545,17 @@ func listHttp(remoteObjectUrl *url.URL, dirResp server_structs.DirectorResponse,
 			return nil, errors.Errorf("405: object listings are not supported by the discovered origin")
 		}
 		// Otherwise, a different error occurred and we should return it
-		return nil, errors.Wrap(err, "failed to read remote directory")
+		return nil, errors.Wrap(err, "failed to read remote collection")
 	}
 
 	for _, info := range infos {
 		jPath, _ := url.JoinPath(remotePath, info.Name())
 		// Create a FileInfo for the file and append it to the slice
 		file := FileInfo{
-			Name:    jPath,
-			Size:    info.Size(),
-			ModTime: info.ModTime(),
-			IsDir:   info.IsDir(),
+			Name:         jPath,
+			Size:         info.Size(),
+			ModTime:      info.ModTime(),
+			IsCollection: info.IsDir(),
 		}
 		fileInfos = append(fileInfos, file)
 	}
@@ -2616,10 +2616,10 @@ func statHttp(dest *url.URL, dirResp server_structs.DirectorResponse, token stri
 				fsinfo, err := client.Stat(endpoint.Path)
 				if err == nil {
 					info = FileInfo{
-						Name:    endpoint.Path,
-						Size:    fsinfo.Size(),
-						IsDir:   fsinfo.IsDir(),
-						ModTime: fsinfo.ModTime(),
+						Name:         endpoint.Path,
+						Size:         fsinfo.Size(),
+						IsCollection: fsinfo.IsDir(),
+						ModTime:      fsinfo.ModTime(),
 					}
 					break
 				} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
@@ -2646,7 +2646,7 @@ func statHttp(dest *url.URL, dirResp server_structs.DirectorResponse, token stri
 			}
 
 			if info.Size == 0 {
-				if info.IsDir {
+				if info.IsCollection {
 					resultsChan <- statResults{info, nil}
 				}
 				err = errors.New("Stat response did not include a size")
@@ -2655,10 +2655,10 @@ func statHttp(dest *url.URL, dirResp server_structs.DirectorResponse, token stri
 			}
 
 			resultsChan <- statResults{FileInfo{
-				Name:    endpoint.Path,
-				Size:    info.Size,
-				IsDir:   info.IsDir,
-				ModTime: info.ModTime,
+				Name:         endpoint.Path,
+				Size:         info.Size,
+				IsCollection: info.IsCollection,
+				ModTime:      info.ModTime,
 			}, nil}
 
 		}(&destCopy)

@@ -744,7 +744,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		}
 		ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "No origins on specified endpoint allow directory listings",
+			Msg:    "No origins on specified endpoint allow collection listings",
 		})
 	}
 

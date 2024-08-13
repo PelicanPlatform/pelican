@@ -803,7 +803,7 @@ name: Origin.EnableDirListing
 description: |+
   [Deprecated] Origin.EnableDirListing is being deprecated and will be removed in a future release. It is replaced by Origin.EnableListings.
 
-  Allows the origin to enable directory listings. Needs to be enabled for recursive
+  Allows the origin to enable collection listings. Needs to be enabled for recursive
   downloads to work properly and for directories to be visible.
 type: bool
 default: false

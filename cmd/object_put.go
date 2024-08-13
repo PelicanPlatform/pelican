@@ -41,7 +41,7 @@ var (
 func init() {
 	flagSet := putCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
-	flagSet.BoolP("recursive", "r", false, "Recursively upload a directory.  Forces methods to only be http to get the freshest directory contents")
+	flagSet.BoolP("recursive", "r", false, "Recursively upload a collection.  Forces methods to only be http to get the freshest collection contents")
 	objectCmd.AddCommand(putCmd)
 }
 
