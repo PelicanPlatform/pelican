@@ -803,7 +803,7 @@ func (cr *cacheReader) peekError(ctx context.Context) (err error) {
 }
 
 func (cr *cacheReader) Read(p []byte) (n int, err error) {
-	if cr.buf != nil && len(cr.buf) > 0 {
+	if len(cr.buf) > 0 {
 		bytesCopied := copy(p, cr.buf)
 		if len(cr.buf) > bytesCopied {
 			cr.buf = cr.buf[bytesCopied:]
