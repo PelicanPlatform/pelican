@@ -78,6 +78,7 @@ type Config struct {
 		StatTimeout time.Duration `mapstructure:"stattimeout"`
 		SupportContactEmail string `mapstructure:"supportcontactemail"`
 		SupportContactUrl string `mapstructure:"supportcontacturl"`
+		X509ClientAuthenticationPrefixes []string `mapstructure:"x509clientauthenticationprefixes"`
 	} `mapstructure:"director"`
 	DisableHttpProxy bool `mapstructure:"disablehttpproxy"`
 	DisableProxyFallback bool `mapstructure:"disableproxyfallback"`
@@ -373,6 +374,7 @@ type configWithType struct {
 		StatTimeout struct { Type string; Value time.Duration }
 		SupportContactEmail struct { Type string; Value string }
 		SupportContactUrl struct { Type string; Value string }
+		X509ClientAuthenticationPrefixes struct { Type string; Value []string }
 	}
 	DisableHttpProxy struct { Type string; Value bool }
 	DisableProxyFallback struct { Type string; Value bool }

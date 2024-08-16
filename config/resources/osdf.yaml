@@ -27,3 +27,8 @@ Federation:
 Registry:
   RequireCacheApproval: true
   RequireOriginApproval: true
+Director:
+  X509ClientAuthenticationPrefixes:
+  - /xenon/PROTECTED
+  - /user/ligo
+  - /igwn
