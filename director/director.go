@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -44,6 +45,7 @@ import (
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 type (
@@ -97,7 +99,13 @@ var (
 
 	statUtils      = make(map[string]serverStatUtil) // The utilities for the stat call. The key is string form of ServerAd.URL
 	statUtilsMutex = sync.RWMutex{}
+
+	startupTime = time.Now()
 )
+
+func inStartupSequence() bool {
+	return time.Since(startupTime) <= 5*time.Minute
+}
 
 func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth bool) (redirectURL url.URL) {
 	var serverURL url.URL
@@ -360,10 +368,17 @@ func redirectToCache(ginCtx *gin.Context) {
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
-		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems",
-		})
+		if inStartupSequence() {
+			ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "No cache serving requested prefix; director just restarted, try again later",
+			})
+		} else {
+			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "No namespace found for prefix. Either it doesn't exist, or the Director is experiencing problems",
+			})
+		}
 		return
 	}
 	// if err != nil, depth == 0, which is the default value for depth
@@ -567,10 +582,17 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
-		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems",
-		})
+		if inStartupSequence() {
+			ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "No origin serving requested prefix; director just restarted, try again later",
+			})
+		} else {
+			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems",
+			})
+		}
 		return
 	}
 
@@ -836,6 +858,8 @@ func checkHostnameRedirects(c *gin.Context, incomingHost string) {
 // original request had been made to /api/v1.0/director/object/foo/bar
 func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		web_ui.ServerHeaderMiddleware(c)
+
 		// If this is a request for getting public key, don't modify the path
 		// If this is a request to the Prometheus API, don't modify the path
 		if strings.HasPrefix(c.Request.URL.Path, "/.well-known/") ||
@@ -1304,7 +1328,7 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 }
 
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
-	directorAPIV1 := router.Group("/api/v1.0/director")
+	directorAPIV1 := router.Group("/api/v1.0/director", web_ui.ServerHeaderMiddleware)
 	{
 		// Establish the routes used for cache/origin redirection
 		directorAPIV1.GET("/object/*any", redirectToCache)
@@ -1330,7 +1354,7 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/discoverServers", discoverOriginCache)
 	}
 
-	directorAPIV2 := router.Group("/api/v2.0/director")
+	directorAPIV2 := router.Group("/api/v2.0/director", web_ui.ServerHeaderMiddleware)
 	{
 		directorAPIV2.GET("/listNamespaces", listNamespacesV2)
 	}

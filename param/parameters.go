@@ -321,6 +321,7 @@ var (
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
+	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
 	Debug = BoolParam{"Debug"}

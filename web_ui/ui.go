@@ -64,6 +64,10 @@ var (
 
 const notFoundFilePath = "frontend/out/404/index.html"
 
+func ServerHeaderMiddleware(ctx *gin.Context) {
+	ctx.Writer.Header().Add("Server", "pelican/"+config.GetVersion())
+}
+
 func getConfigValues(ctx *gin.Context) {
 	user := ctx.GetString("User")
 	if user == "" {
