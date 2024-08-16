@@ -417,7 +417,7 @@ func ConfigOAuthClientAPIs(engine *gin.Engine) error {
 		return err
 	}
 
-	oauthGroup := engine.Group("/api/v1.0/auth/oauth", seHandler)
+	oauthGroup := engine.Group("/api/v1.0/auth/oauth", seHandler, ServerHeaderMiddleware)
 	{
 		oauthGroup.GET("/login", handleOAuthLogin)
 		oauthGroup.GET("/callback", handleOAuthCallback)

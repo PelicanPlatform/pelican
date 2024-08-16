@@ -22,20 +22,30 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
+
+func assumePelican(resp *http.Response) bool {
+	if !param.Client_AssumeDirectorServerHeader.GetBool() {
+		return false
+	}
+	return strings.HasPrefix(resp.Header.Get("Server"), "pelican/")
+}
 
 // Make a request to the director for a given verb/resource; return the
 // HTTP response object only if a 307 is returned.
@@ -60,38 +70,53 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, verb, resourceUrl.String(), nil)
-	if err != nil {
-		log.Errorln("Failed to create an HTTP request:", err)
-		return nil, err
+	var errMsg string
+	var body []byte
+	for idx := 0; idx < 10; idx++ {
+		var req *http.Request
+		req, err = http.NewRequestWithContext(ctx, verb, resourceUrl.String(), nil)
+		if err != nil {
+			log.Errorln("Failed to create an HTTP request:", err)
+			return nil, err
+		}
+
+		// Include the Client's version as a User-Agent header. The Director will decide
+		// if it supports the version, and provide an error message in the case that it
+		// cannot.
+		req.Header.Set("User-Agent", getUserAgent(""))
+
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+
+		// Perform the HTTP request
+		resp, err = client.Do(req)
+
+		if err != nil {
+			log.Errorln("Failed to get response from the director:", err)
+			return
+		}
+
+		defer resp.Body.Close()
+		log.Tracef("Director's response: %#v\n", resp)
+		// Check HTTP response -- should be 307 (redirect), else something went wrong
+		body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			log.Errorln("Failed to read the body from the director response:", err)
+			return resp, err
+		}
+		errMsg = string(body)
+
+		// If this isn't a Pelican process and we got an error, then sleep and retry
+		if (assumePelican(resp) && (resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusInternalServerError)) ||
+			(resp.StatusCode == http.StatusTooManyRequests) {
+			log.Warnln("Director response not from a Pelican process; sleeping for", 3*idx+3, "seconds and retrying")
+			time.Sleep(time.Duration(3*idx+3)*time.Second + time.Duration(rand.Float32()*1000)*time.Millisecond)
+		} else {
+			break
+		}
 	}
 
-	// Include the Client's version as a User-Agent header. The Director will decide
-	// if it supports the version, and provide an error message in the case that it
-	// cannot.
-	req.Header.Set("User-Agent", getUserAgent(""))
-
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	// Perform the HTTP request
-	resp, err = client.Do(req)
-
-	if err != nil {
-		log.Errorln("Failed to get response from the director:", err)
-		return
-	}
-
-	defer resp.Body.Close()
-	log.Tracef("Director's response: %#v\n", resp)
-	// Check HTTP response -- should be 307 (redirect), else something went wrong
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Errorln("Failed to read the body from the director response:", err)
-		return resp, err
-	}
-	errMsg := string(body)
 	// The Content-Type will be alike "application/json; charset=utf-8"
 	if utils.HasContentType(resp, "application/json") {
 		var respErr server_structs.SimpleApiResp

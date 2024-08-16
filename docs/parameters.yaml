@@ -463,6 +463,17 @@ default: 0
 components: ["client"]
 hidden: true
 ---
+name: Client.AssumeDirectorServerHeader
+description: |+
+  Assume the director service always sets the `Server` header to `pelican`.
+
+  If enabled and a director response is missing this header, then we assume the response is suspect
+  (may be a default response from a SSL termination server, like Traefik, while pelican is restarting).
+type: bool
+default: false
+components: ["client"]
+hidden: true
+---
 ############################
 #   Origin-level Configs   #
 ############################

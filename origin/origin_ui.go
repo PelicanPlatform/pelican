@@ -162,7 +162,7 @@ func handleExports(ctx *gin.Context) {
 }
 
 func RegisterOriginWebAPI(engine *gin.Engine) error {
-	originWebAPI := engine.Group("/api/v1.0/origin_ui")
+	originWebAPI := engine.Group("/api/v1.0/origin_ui", web_ui.ServerHeaderMiddleware)
 	{
 		originWebAPI.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleExports)
 	}
