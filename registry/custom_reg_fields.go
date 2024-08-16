@@ -282,7 +282,7 @@ func InitCustomRegistrationFields() error {
 			return errors.New(fmt.Sprintf("Bad custom registration field, unsupported field type: %q with %q", conf.Name, conf.Type))
 		}
 		if conf.Type == "enum" {
-			if (conf.Options == nil || len(conf.Options) == 0) && conf.OptionsUrl == "" {
+			if len(conf.Options) == 0 && conf.OptionsUrl == "" {
 				return errors.New(fmt.Sprintf("Bad custom registration field, 'enum' type field does not have options or optionsUrl set: %q", conf.Name))
 			}
 		}
