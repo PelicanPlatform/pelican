@@ -1402,6 +1402,19 @@ type: bool
 default: false
 components: ["director"]
 ---
+name: Director.X509ClientAuthenticationPrefixes
+description: |+
+  A list of object prefixes where the origin uses X.509 client authentication.
+
+  If a cache requests an object starting with one of these prefixes, then it will be instructed by the director
+  to use X.509 client authentication if available.
+
+  This setting allows for compatibility with specific legacy OSDF origins and is not needed for new origins.
+type: stringSlice
+default: none
+components: ["director"]
+hidden: true
+---
 ############################
 #  Registry-level configs  #
 ############################

@@ -84,6 +84,8 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 			"XRD_PELICANBROKERSOCKET=" + filepath.Join(xrootdRun, "cache-reversal.sock"),
 			"XRD_PLUGINCONFDIR=" + filepath.Join(xrootdRun, "cache-client.plugins.d"),
 			"X509_CERT_FILE=" + filepath.Join(xrootdRun, "ca-bundle.crt"),
+			"XRD_PELICANCLIENTCERTFILE=" + filepath.Join(xrootdRun, "copied-tls-creds.crt"),
+			"XRD_PELICANCLIENTKEYFILE=" + filepath.Join(xrootdRun, "copied-tls-creds.crt"),
 		}
 	}
 	return

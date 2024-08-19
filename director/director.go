@@ -798,6 +798,13 @@ func redirectToOrigin(ginCtx *gin.Context) {
 			ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 		}
 
+		for _, prefix := range param.Director_X509ClientAuthenticationPrefixes.GetStringSlice() {
+			if strings.HasPrefix(reqPath, prefix) {
+				ginCtx.Writer.Header().Add("X-Osdf-X509", "true")
+				break
+			}
+		}
+
 		// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
 		// not those in the `Link`.
 		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))

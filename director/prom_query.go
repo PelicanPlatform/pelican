@@ -147,7 +147,7 @@ func parsePromRes(res promQLRes) (promParsed promQLParsed, err error) {
 		ResultType: data.ResultType,
 	}
 
-	if data.Result != nil && len(data.Result) > 0 {
+	if len(data.Result) > 0 {
 		switch data.Result[0].(type) {
 		case float64: // result: [unixtime, value]
 			if len(data.Result) == 2 && (data.ResultType == "scalar" || data.ResultType == "string") {
