@@ -29,6 +29,6 @@ Registry:
   RequireOriginApproval: true
 Director:
   X509ClientAuthenticationPrefixes:
-  - /xenon/PROTECTED
-  - /user/ligo
-  - /igwn
+  - /xenon/PROTECTED/
+  - /user/ligo/
+  - /igwn/
