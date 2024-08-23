@@ -54,6 +54,7 @@ gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 # Install goreleaser and various other packages we need
 RUN yum install -y --enablerepo=osg-testing goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens xrootd-voms \
     xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel libcap-devel \
+    xrootd-multiuser \
     zlib-devel \
     && yum clean all
 
@@ -68,16 +69,6 @@ RUN \
     git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
     cd xrdcl-pelican && \
     git reset cbd6850 --hard && \
-    mkdir build && cd build && \
-    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
-    make && make install
-
-# Install xrootd-multiuser from source (otherwise it's only available from osg repos)
-ADD https://api.github.com/repos/opensciencegrid/xrootd-multiuser/git/refs/heads/master /tmp/hash-xrootd-multiuser
-RUN \
-    git clone https://github.com/opensciencegrid/xrootd-multiuser.git && \
-    cd xrootd-multiuser && \
-    git checkout v2.2.0-1 && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make && make install
