@@ -31,6 +31,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/hashicorp/go-version"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -67,9 +68,10 @@ type (
 	}
 	// Utility struct to keep track of the `stat` call the director made to the origin/cache servers
 	serverStatUtil struct {
-		Context  context.Context
-		Cancel   context.CancelFunc
-		Errgroup *errgroup.Group
+		Context     context.Context
+		Cancel      context.CancelFunc
+		Errgroup    *utils.Group
+		ResultCache *ttlcache.Cache[string, *objectMetadata]
 	}
 )
 
@@ -362,7 +364,7 @@ func redirectToCache(ginCtx *gin.Context) {
 
 	reqParams := getRequestParameters(ginCtx.Request)
 
-	disableStat := !param.Director_EnableStat.GetBool()
+	disableStat := !param.Director_CheckCachePresence.GetBool()
 
 	// Skip the stat check for object availability
 	// If either disableStat or skipstat is set, then skip the stat query
@@ -580,7 +582,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqParams := getRequestParameters(ginCtx.Request)
 
 	// Skip the stat check for object availability if either disableStat or skipstat is set
-	skipStat := reqParams.Has(pelican_url.QuerySkipStat) || !param.Director_EnableStat.GetBool()
+	skipStat := reqParams.Has(pelican_url.QuerySkipStat) || !param.Director_CheckOriginPresence.GetBool()
 
 	// Include caches in the response if Director.CachesPullFromCaches is enabled
 	// AND prefercached query parameter is set
@@ -599,7 +601,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	}
 
 	// If the namespace requires a token yet there's no token available, skip the stat.
-	if !namespaceAd.Caps.PublicReads && reqParams.Get("authz") == "" {
+	if (!namespaceAd.Caps.PublicReads && reqParams.Get("authz") == "") || (param.Director_AssumePresenceAtSingleOrigin.GetBool() && len(originAds) == 1) {
 		skipStat = true
 	}
 

@@ -35,6 +35,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type filterType string
@@ -143,12 +144,17 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 			if concLimit == 0 {
 				concLimit = -1
 			}
-			statErrGrp := errgroup.Group{}
+			statErrGrp := utils.Group{}
 			statErrGrp.SetLimit(concLimit)
 			newUtil := serverStatUtil{
 				Errgroup: &statErrGrp,
 				Cancel:   cancel,
 				Context:  baseCtx,
+				ResultCache: ttlcache.New[string, *objectMetadata](
+					ttlcache.WithTTL[string, *objectMetadata](param.Director_CachePresenceTTL.GetDuration()),
+					ttlcache.WithDisableTouchOnHit[string, *objectMetadata](),
+					ttlcache.WithCapacity[string, *objectMetadata](uint64(param.Director_CachePresenceCapacity.GetInt())),
+				),
 			}
 			statUtils[ad.URL.String()] = newUtil
 		}

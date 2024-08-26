@@ -30,15 +30,40 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/utils"
 )
+
+func cleanupMock() {
+	statUtilsMutex.Lock()
+	defer statUtilsMutex.Unlock()
+	serverAds.DeleteAll()
+	for sa := range statUtils {
+		delete(statUtils, sa)
+	}
+}
+
+func initMockStatUtils() {
+	statUtilsMutex.Lock()
+	defer statUtilsMutex.Unlock()
+
+	for _, key := range serverAds.Keys() {
+		ctx, cancel := context.WithCancel(context.Background())
+		statUtils[key] = serverStatUtil{
+			Context:     ctx,
+			Cancel:      cancel,
+			Errgroup:    &utils.Group{},
+			ResultCache: ttlcache.New[string, *objectMetadata](),
+		}
+	}
+}
 
 func TestQueryServersForObject(t *testing.T) {
 	server_utils.ResetTestState()
@@ -188,29 +213,6 @@ func TestQueryServersForObject(t *testing.T) {
 				NamespaceAds: []server_structs.NamespaceAdV2{mockMixNsPrivateTopo, mockMixNsPublicTopo},
 			}, ttlcache.DefaultTTL,
 		)
-	}
-
-	cleanupMock := func() {
-		statUtilsMutex.Lock()
-		defer statUtilsMutex.Unlock()
-		serverAds.DeleteAll()
-		for sa := range statUtils {
-			delete(statUtils, sa)
-		}
-	}
-
-	initMockStatUtils := func() {
-		statUtilsMutex.Lock()
-		defer statUtilsMutex.Unlock()
-
-		for _, key := range serverAds.Keys() {
-			ctx, cancel := context.WithCancel(context.Background())
-			statUtils[key] = serverStatUtil{
-				Context:  ctx,
-				Cancel:   cancel,
-				Errgroup: &errgroup.Group{},
-			}
-		}
 	}
 
 	t.Cleanup(func() {
@@ -388,9 +390,10 @@ func TestQueryServersForObject(t *testing.T) {
 
 		statUtilsMutex.Lock()
 		statUtils[mockCacheServer[0].URL.String()] = serverStatUtil{
-			Context:  ctx,
-			Cancel:   cancel,
-			Errgroup: &errgroup.Group{},
+			Context:     ctx,
+			Cancel:      cancel,
+			Errgroup:    &utils.Group{},
+			ResultCache: ttlcache.New[string, *objectMetadata](),
 		}
 		statUtilsMutex.Unlock()
 
@@ -422,9 +425,10 @@ func TestQueryServersForObject(t *testing.T) {
 
 		statUtilsMutex.Lock()
 		statUtils[mockOrigin[0].URL.String()] = serverStatUtil{
-			Context:  ctx,
-			Cancel:   cancel,
-			Errgroup: &errgroup.Group{},
+			Context:     ctx,
+			Cancel:      cancel,
+			Errgroup:    &utils.Group{},
+			ResultCache: ttlcache.New[string, *objectMetadata](),
 		}
 		statUtilsMutex.Unlock()
 
@@ -695,6 +699,94 @@ func TestQueryServersForObject(t *testing.T) {
 		require.Equal(t, 1, len(result.Objects))
 		assert.Equal(t, "http://mock-mix-ns-topo-origin.com/mix/public/test.txt", result.Objects[0].URL.String(),
 			"Return value is not expected:", result.Objects[0].URL.String())
+	})
+}
+
+func TestCache(t *testing.T) {
+	viper.Reset()
+	viper.Set("Logging.Level", "Debug")
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	reqCounter := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		reqCounter += 1
+		log.Debugln("Mock server handling request for ", req.URL.String())
+		if req.Method == "HEAD" && req.URL.String() == "/foo/test.txt" {
+			rw.Header().Set("Content-Length", "1")
+			rw.WriteHeader(http.StatusOK)
+			return
+		} else if req.Method == "HEAD" {
+			rw.WriteHeader(http.StatusNotFound)
+		} else {
+			rw.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	viper.Set("Server.ExternalWebUrl", server.URL)
+	viper.Set("IssuerUrl", server.URL)
+	realServerUrl, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
+
+	mockCacheAd := server_structs.ServerAd{
+		Name: "cache",
+		Type: server_structs.CacheType.String(),
+		URL:  *realServerUrl,
+		Caps: server_structs.Capabilities{PublicReads: true},
+	}
+	mockNsAd := server_structs.NamespaceAdV2{Path: "/foo"}
+	serverAds.Set(
+		mockCacheAd.URL.String(),
+		&server_structs.Advertisement{
+			ServerAd:     mockCacheAd,
+			NamespaceAds: []server_structs.NamespaceAdV2{mockNsAd},
+		},
+		ttlcache.DefaultTTL,
+	)
+	initMockStatUtils()
+	t.Cleanup(cleanupMock)
+
+	t.Run("repeated-cache-access-found", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		stat := NewObjectStat()
+
+		startCtr := reqCounter
+		qResult := stat.queryServersForObject(ctx, "/foo/test.txt", server_structs.CacheType, 1, 1)
+		assert.Equal(t, querySuccessful, qResult.Status)
+		require.Len(t, qResult.Objects, 1)
+		assert.Equal(t, 1, qResult.Objects[0].ContentLength)
+		require.Equal(t, startCtr+1, reqCounter)
+
+		qResult = stat.queryServersForObject(ctx, "/foo/test.txt", server_structs.CacheType, 1, 1)
+		assert.Equal(t, querySuccessful, qResult.Status)
+		require.Len(t, qResult.Objects, 1)
+		assert.Equal(t, 1, qResult.Objects[0].ContentLength)
+		require.Equal(t, startCtr+1, reqCounter)
+	})
+
+	t.Run("repeated-cache-access-not-found", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		stat := NewObjectStat()
+
+		startCtr := reqCounter
+		qResult := stat.queryServersForObject(ctx, "/foo/notfound.txt", server_structs.CacheType, 1, 1)
+		assert.Equal(t, queryFailed, qResult.Status)
+		assert.Len(t, qResult.Objects, 0)
+		assert.Equal(t, queryInsufficientResErr, qResult.ErrorType)
+		require.Equal(t, startCtr+1, reqCounter)
+
+		qResult = stat.queryServersForObject(ctx, "/foo/notfound.txt", server_structs.CacheType, 1, 1)
+		assert.Equal(t, queryFailed, qResult.Status)
+		assert.Len(t, qResult.Objects, 0)
+		assert.Equal(t, queryInsufficientResErr, qResult.ErrorType)
+		require.Equal(t, startCtr+1, reqCounter)
 	})
 }
 

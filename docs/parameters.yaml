@@ -1334,7 +1334,53 @@ components: ["director"]
 ---
 name: Director.EnableStat
 description: |+
-  Disable the `stat` query to the origin servers for object requests.
+  Before redirecting a cache (or, for direct reads or writes, a client) to an origin,
+  query the origin to see if the object is present.
+
+  Enabling this option generates slightly more load on the origin; however, it provides
+  improved error messages and allows a namespace to effectively be split across multiple
+  origins.
+type: bool
+default: true
+deprecated: true
+hidden: true
+replacedby: Director.CheckOriginPresence
+components: ["director"]
+---
+name: Director.CheckOriginPresence
+description: |+
+  Before redirecting a cache (or, for direct reads or writes, a client) to an origin,
+  query the origin to see if the object is present.
+
+  Enabling this option generates slightly more load on the origin; however, it provides
+  improved error messages and allows a namespace to effectively be split across multiple
+  origins.
+type: bool
+default: true
+components: ["director"]
+---
+name: Director.AssumePresenceAtSingleOrigin
+description: |+
+  If `Director.CheckOriginPresence` is enabled, the director will check for object
+  presence at the origin before redirecting a client.
+
+  If this option is enabled and there's only one possible origin for the object,
+  then the check will be skipped.
+
+  Enabling this option will reduce load on single-origin namespaces but clients will
+  get less informative error messages.
+type: bool
+default: true
+hidden: true
+components: ["director"]
+---
+name: Director.CheckCachePresence
+description: |+
+  Before redirecting a client to a cache, query the origin to see if the object is present
+  at the cache.
+
+  Enabling this option improves the cache selection algorithm, allowing the director
+  to prefer caches nearby the client with the object over caches without the object.
 type: bool
 default: true
 components: ["director"]
@@ -1428,6 +1474,29 @@ type: stringSlice
 default: none
 components: ["director"]
 hidden: true
+---
+name: Director.CachePresenceTTL
+description: |+
+  If `Director.CheckCachePresence` is enabled, the director will check with remote cache
+  to see if the object is present before redirecting a client.
+
+  This parameter controls how long the director will cache the result of the lookup.  Longer values
+  will reduce the load generated on the caches but may reduce the accuracy of the result (as the
+  contents of the cache will change over time).
+type: duration
+default: 1m
+components: ["director"]
+---
+name: Director.CachePresenceCapacity
+description: |+
+  If `Director.CheckCachePresence` is enabled, the director will check with remote cache
+  to see if the object is present before redirecting a client.
+
+  This parameter controls how many responses, per-service, will be cached.
+type: int
+default: 10000
+hidden: true
+components: ["director"]
 ---
 ############################
 #  Registry-level configs  #
