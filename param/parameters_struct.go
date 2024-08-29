@@ -87,6 +87,7 @@ type Config struct {
 		DiscoveryUrl string `mapstructure:"discoveryurl"`
 		JwkUrl string `mapstructure:"jwkurl"`
 		RegistryUrl string `mapstructure:"registryurl"`
+		TopologyDowntimeUrl string `mapstructure:"topologydowntimeurl"`
 		TopologyNamespaceUrl string `mapstructure:"topologynamespaceurl"`
 		TopologyReloadInterval time.Duration `mapstructure:"topologyreloadinterval"`
 		TopologyUrl string `mapstructure:"topologyurl"`
@@ -381,6 +382,7 @@ type configWithType struct {
 		DiscoveryUrl struct { Type string; Value string }
 		JwkUrl struct { Type string; Value string }
 		RegistryUrl struct { Type string; Value string }
+		TopologyDowntimeUrl struct { Type string; Value string }
 		TopologyNamespaceUrl struct { Type string; Value string }
 		TopologyReloadInterval struct { Type string; Value time.Duration }
 		TopologyUrl struct { Type string; Value string }

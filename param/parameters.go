@@ -154,6 +154,7 @@ var (
 	Director_SupportContactEmail = StringParam{"Director.SupportContactEmail"}
 	Director_SupportContactUrl = StringParam{"Director.SupportContactUrl"}
 	Federation_DiscoveryUrl = StringParam{"Federation.DiscoveryUrl"}
+	Federation_TopologyDowntimeUrl = StringParam{"Federation.TopologyDowntimeUrl"}
 	Federation_TopologyNamespaceUrl = StringParam{"Federation.TopologyNamespaceUrl"}
 	Federation_TopologyUrl = StringParam{"Federation.TopologyUrl"}
 	IssuerKey = StringParam{"IssuerKey"}
