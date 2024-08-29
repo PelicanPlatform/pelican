@@ -19,12 +19,15 @@
 package director
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"text/template"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
@@ -33,7 +36,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 var (
@@ -98,7 +100,7 @@ func TestConsolidateDupServerAd(t *testing.T) {
 
 func TestParseServerAdFromTopology(t *testing.T) {
 
-	server := server_utils.Server{
+	server := server_structs.TopoServer{
 		Endpoint:     "http://my-endpoint.com",
 		AuthEndpoint: "https://my-auth-endpoint.com",
 		Resource:     "MY_SERVER",
@@ -301,149 +303,85 @@ func TestAdvertiseOSDF(t *testing.T) {
 	})
 }
 
-func TestFindDownedTopologyCache(t *testing.T) {
-	mockTopoCacheA := server_utils.Server{AuthEndpoint: "cacheA.org:8443", Endpoint: "cacheA.org:8000", Resource: "CACHE_A"}
-	mockTopoCacheB := server_utils.Server{AuthEndpoint: "cacheB.org:8443", Endpoint: "cacheB.org:8000", Resource: "CACHE_B"}
-	mockTopoCacheC := server_utils.Server{AuthEndpoint: "cacheC.org:8443", Endpoint: "cacheC.org:8000", Resource: "CACHE_C"}
-	mockTopoCacheD := server_utils.Server{AuthEndpoint: "cacheD.org:8443", Endpoint: "cacheD.org:8000", Resource: "CACHE_D"}
-	t.Run("empty-response", func(t *testing.T) {
-		get := findDownedTopologyCache(
-			[]server_utils.Server{},
-			[]server_utils.Server{},
-		)
-		assert.Empty(t, get)
-	})
+func mockTopoDowntimeXMLHandler(w http.ResponseWriter, r *http.Request) {
+	downtimeInfo := server_structs.TopoCurrentDowntimes{
+		Downtimes: []server_structs.TopoServerDowntime{
+			{
+				// Current time falls in start-end window. SHould be filtered
+				ResourceName: "BOISE_INTERNET2_OSDF_CACHE",
+				ResourceFQDN: "dtn-pas.bois.nrp.internet2.edu",
+				StartTime:    time.Now().Add(-24 * time.Hour).Format("Jan 2, 2006 03:04 PM MST"),
+				EndTime:      time.Now().Add(24 * time.Hour).Format("Jan 2, 2006 03:04 PM MST"),
+			},
+			{
+				// start time is after current time. Should NOT be filtered
+				ResourceName: "DENVER_INTERNET2_OSDF_CACHE",
+				ResourceFQDN: "dtn-pas.denv.nrp.internet2.edu",
+				StartTime:    time.Now().Add(24 * time.Hour).Format("Jan 2, 2006 03:04 PM MST"),
+				EndTime:      time.Now().Add(25 * time.Hour).Format("Jan 2, 2006 03:04 PM MST"),
+			},
+			{
+				// end time is before current time. Should NOT be filtered
+				ResourceName: "HOW_MUCH_CASH_COULD_A_STASHCACHE_STASH",
+				ResourceFQDN: "stash-cache.cache.osdf.biz",
+				StartTime:    time.Now().Add(-24 * time.Hour).Format("Jan 2, 2006 03:04 PM MST"),
+				EndTime:      time.Now().Add(-1 * time.Hour).Format("Jan 2, 2006 03:04 PM MST"),
+			},
+			{
+				// Invalid time should cause updateDowntimeFromTopology to log an error but not return one
+				ResourceName: "FOOBAR",
+				ResourceFQDN: "foo.bar",
+				StartTime:    "The second of January, 2006 03:04 PM MST",
+				EndTime:      time.Now().Add(1 * time.Hour).Format("Jan 2, 2006 03:04 PM MST"),
+			},
+		},
+	}
 
-	t.Run("no-downed-cache", func(t *testing.T) {
-		get := findDownedTopologyCache(
-			[]server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
-			[]server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
-		)
-		assert.Empty(t, get)
-	})
+	tmpl, err := template.ParseFiles("resources/mock_topology_downtime_template.xml")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	t.Run("one-downed-cache", func(t *testing.T) {
-		get := findDownedTopologyCache(
-			[]server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC},
-			[]server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
-		)
-		require.Len(t, get, 1)
-		assert.EqualValues(t, mockTopoCacheD, get[0])
-	})
-
-	t.Run("two-downed-cache", func(t *testing.T) {
-		get := findDownedTopologyCache(
-			[]server_utils.Server{mockTopoCacheB, mockTopoCacheC},
-			[]server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
-		)
-		require.Len(t, get, 2)
-		assert.EqualValues(t, mockTopoCacheA, get[0])
-		assert.EqualValues(t, mockTopoCacheD, get[1])
-	})
-
-	t.Run("all-downed-cache", func(t *testing.T) {
-		get := findDownedTopologyCache(
-			[]server_utils.Server{},
-			[]server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD},
-		)
-		assert.EqualValues(t, []server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC, mockTopoCacheD}, get)
-	})
+	w.Header().Set("Content-Type", "application/xml")
+	err = tmpl.Execute(w, downtimeInfo)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func TestUpdateDowntimeFromTopology(t *testing.T) {
-	mockTopoCacheA := server_utils.Server{AuthEndpoint: "cacheA.org:8443", Endpoint: "cacheA.org:8000", Resource: "CACHE_A"}
-	mockTopoCacheB := server_utils.Server{AuthEndpoint: "cacheB.org:8443", Endpoint: "cacheB.org:8000", Resource: "CACHE_B"}
-	mockTopoCacheC := server_utils.Server{AuthEndpoint: "cacheC.org:8443", Endpoint: "cacheC.org:8000", Resource: "CACHE_C"}
-
-	t.Run("no-change-with-same-downtime", func(t *testing.T) {
-		filteredServers = map[string]filterType{}
-		updateDowntimeFromTopology(
-			&server_utils.TopologyNamespacesJSON{},
-			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA, mockTopoCacheB}},
-		)
-		checkResult := func() {
-			filteredServersMutex.RLock()
-			defer filteredServersMutex.RUnlock()
-			assert.Len(t, filteredServers, 2)
-			require.NotEmpty(t, filteredServers[mockTopoCacheA.Resource])
-			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheA.Resource])
-			require.NotEmpty(t, filteredServers[mockTopoCacheB.Resource])
-			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheB.Resource])
-		}
-		checkResult()
-
-		// second round of updates
-		updateDowntimeFromTopology(
-			&server_utils.TopologyNamespacesJSON{},
-			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA, mockTopoCacheB}},
-		)
-		// Same result
-		checkResult()
+	// Create a buffer to capture log output
+	var logBuffer bytes.Buffer
+	originalOutput := logrus.StandardLogger().Out
+	logrus.SetOutput(&logBuffer)
+	t.Cleanup(func() {
+		logrus.SetOutput(originalOutput)
 	})
 
-	t.Run("one-server-back-online", func(t *testing.T) {
-		filteredServers = map[string]filterType{}
-		updateDowntimeFromTopology(
-			&server_utils.TopologyNamespacesJSON{},
-			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA, mockTopoCacheB}},
-		)
-		func() {
-			filteredServersMutex.RLock()
-			defer filteredServersMutex.RUnlock()
-			assert.Len(t, filteredServers, 2)
-			require.NotEmpty(t, filteredServers[mockTopoCacheA.Resource])
-			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheA.Resource])
-			require.NotEmpty(t, filteredServers[mockTopoCacheB.Resource])
-			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheB.Resource])
-		}()
+	server := httptest.NewServer(http.HandlerFunc(mockTopoDowntimeXMLHandler))
+	t.Cleanup(func() {
+		server.Close()
+	})
+	viper.Set("Federation.TopologyDowntimeUrl", server.URL)
 
-		// second round of updates
-		updateDowntimeFromTopology(
-			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA}}, // A is back online
-			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA, mockTopoCacheB}},
-		)
-
-		func() {
-			filteredServersMutex.RLock()
-			defer filteredServersMutex.RUnlock()
-			assert.Len(t, filteredServers, 1)
-			require.NotEmpty(t, filteredServers[mockTopoCacheB.Resource])
-			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheB.Resource])
-		}()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(func() {
+		cancel()
 	})
 
-	t.Run("one-more-server-in-downtime", func(t *testing.T) {
-		filteredServers = map[string]filterType{}
-		updateDowntimeFromTopology(
-			&server_utils.TopologyNamespacesJSON{},
-			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA, mockTopoCacheB}},
-		)
-		func() {
-			filteredServersMutex.RLock()
-			defer filteredServersMutex.RUnlock()
-			assert.Len(t, filteredServers, 2)
-			require.NotEmpty(t, filteredServers[mockTopoCacheA.Resource])
-			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheA.Resource])
-			require.NotEmpty(t, filteredServers[mockTopoCacheB.Resource])
-			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheB.Resource])
-		}()
+	err := updateDowntimeFromTopology(ctx)
+	if err != nil {
+		t.Fatalf("updateDowntimeFromTopology() error = %v", err)
+	}
 
-		// second round of updates
-		updateDowntimeFromTopology(
-			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{}},
-			&server_utils.TopologyNamespacesJSON{Caches: []server_utils.Server{mockTopoCacheA, mockTopoCacheB, mockTopoCacheC}},
-		)
+	// There should be a logged warning about the invalid time
+	logOutput := logBuffer.String()
+	assert.Contains(t, logOutput, "Could not put FOOBAR into downtime because its start time")
 
-		func() {
-			filteredServersMutex.RLock()
-			defer filteredServersMutex.RUnlock()
-			assert.Len(t, filteredServers, 3)
-			require.NotEmpty(t, filteredServers[mockTopoCacheA.Resource])
-			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheA.Resource])
-			require.NotEmpty(t, filteredServers[mockTopoCacheB.Resource])
-			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheB.Resource])
-			require.NotEmpty(t, filteredServers[mockTopoCacheC.Resource])
-			assert.Equal(t, topoFiltered, filteredServers[mockTopoCacheC.Resource])
-		}()
-	})
+	assert.True(t, filteredServers["BOISE_INTERNET2_OSDF_CACHE"] == topoFiltered)
+	_, keyExists := filteredServers["DENVER_INTERNET2_OSDF_CACHE"]
+	assert.False(t, keyExists, "DENVER_INTERNET2_OSDF_CACHE should not be in filteredServers")
+	_, keyExists = filteredServers["HOW_MUCH_CASH_COULD_A_STASHCACHE_STASH"]
+	assert.False(t, keyExists, "HOW_MUCH_CASH_COULD_A_STASHCACHE_STASH should not be in filteredServers")
 }

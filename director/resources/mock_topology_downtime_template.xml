@@ -1,0 +1,30 @@
+<Downtimes xsi:schemaLocation="https://topology.opensciencegrid.org/schema/rgdowntime.xsd">
+<CurrentDowntimes>
+{{- range .Downtimes }}
+<Downtime>
+    <ID>1890864242</ID>
+    <ResourceID>1405</ResourceID>
+    <ResourceGroup>
+        <GroupName>I2BoiseInfrastructure</GroupName>
+        <GroupID>1338</GroupID>
+    </ResourceGroup>
+    <ResourceName>{{ .ResourceName }}</ResourceName>
+    <ResourceFQDN>{{ .ResourceFQDN }}</ResourceFQDN>
+    <StartTime>{{ .StartTime }}</StartTime>
+    <EndTime>{{ .EndTime }}</EndTime>
+    <Class>UNSCHEDULED</Class>
+    <Severity>Outage</Severity>
+    <CreatedTime>Aug 19, 2024 16:53 PM UTC</CreatedTime>
+    <UpdateTime>Not Available</UpdateTime>
+    <Services>
+        <Service>
+            <ID>156</ID>
+            <Name>XRootD cache server</Name>
+            <Description>Internet2 Boise Cache</Description>
+        </Service>
+    </Services>
+    <Description>HW issues</Description>
+</Downtime>
+{{- end }}
+</CurrentDowntimes>
+</Downtimes>
