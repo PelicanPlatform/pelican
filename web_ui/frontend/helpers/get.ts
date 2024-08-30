@@ -1,10 +1,10 @@
-import { Config } from '@/components/configuration';
+import { Config, ParameterValueRecord } from '@/components/configuration';
+import { flattenObject } from '@/app/config/util';
 
-export const getConfig = async (): Promise<Config> => {
+
+export const getConfig = async (): Promise<ParameterValueRecord> => {
   let response = await fetch('/api/v1.0/config');
-  return await response.json();
+  let data = await response.json();
+  let flatData = flattenObject(data);
+  return flatData;
 };
-
-/**
- * Recurse into the config object
- */

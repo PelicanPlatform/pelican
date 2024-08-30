@@ -1,11 +1,12 @@
 'use client';
 
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import { Box, Button, Typography } from '@mui/material';
 import { QuestionMark } from '@mui/icons-material';
 import { OverridableStringUnion } from '@mui/types';
 import { Variant } from '@mui/material/styles/createTypography';
 import { TypographyPropsVariantOverrides } from '@mui/material/Typography';
+import { grey } from '@mui/material/colors';
 
 import {
   Field as NonMemoizedField,
@@ -15,6 +16,7 @@ import {
   ParameterValueRecord,
 } from '@/components/configuration';
 import { isEqual } from 'lodash';
+import MarkdownRender from '@/components/MarkdownRender';
 
 // Memoize Expensive Components
 const Field = memo(NonMemoizedField);
@@ -24,6 +26,9 @@ export interface ConfigDisplayProps {
   patch: ParameterValueRecord;
   metadata: ParameterMetadataRecord;
   onChange: (patch: any) => void;
+  includeLabels?: boolean;
+  omitLabels?: boolean;
+  showDescription?: boolean;
 }
 
 export const ConfigDisplay = memo(NonMemoizedConfigDisplay);
@@ -33,6 +38,8 @@ export function NonMemoizedConfigDisplay({
   metadata,
   patch,
   onChange,
+  omitLabels = false,
+  showDescription = false,
 }: ConfigDisplayProps) {
   const existingLabels = new Set<string>();
 
@@ -49,12 +56,13 @@ export function NonMemoizedConfigDisplay({
 
         return (
           <Box key={name}>
-            {label}
+            { !omitLabels && label}
             <ConfigField
               metadata={parameterMetadata}
               value={name in patch ? patch[name] : config?.[name]}
               focused={name in patch && !isEqual(patch[name], config?.[name])}
               onChange={onChange}
+              showDescription={showDescription}
             />
           </Box>
         );
@@ -68,6 +76,7 @@ interface ConfigFieldProps {
   value: ParameterValue;
   onChange: (patch: any) => void;
   focused: boolean;
+  showDescription?: boolean
 }
 
 export const ConfigField = ({
@@ -75,24 +84,46 @@ export const ConfigField = ({
   value,
   onChange,
   focused,
+  showDescription = false
 }: ConfigFieldProps) => {
+
+  const [expandDescription, setExpandDescription] = useState(false)
+
   return (
-    <Box pt={2} display={'flex'} id={metadata.name.split('.').join('-')}>
-      <Box flexGrow={1} minWidth={0}>
-        <Field
-          {...(metadata as ParameterMetadata)}
-          value={value}
-          onChange={onChange}
-          focused={focused}
-        />
+    <Box>
+      <Box pt={2} display={'flex'} id={metadata.name.split('.').join('-')}>
+        <Box flexGrow={1} minWidth={0}>
+          <Field
+            {...(metadata as ParameterMetadata)}
+            value={value}
+            onChange={onChange}
+            focused={focused}
+          />
+          { metadata.description && showDescription && expandDescription &&
+            <Box p={1} bgcolor={grey[100]} borderRadius={1} mb={1}>
+              <Typography variant={'body2'}><MarkdownRender content={metadata.description} /></Typography>
+            </Box>
+          }
+        </Box>
+        { !showDescription &&
+          <Button
+            size={'small'}
+            href={`https://docs.pelicanplatform.org/parameters#${metadata.name.split('.').join('-')}`}
+            target={'_blank'}
+          >
+            <QuestionMark />
+          </Button>
+        }
+        { showDescription &&
+          <Button
+            size={'small'}
+            onClick={() => setExpandDescription(!expandDescription)}
+          >
+            <QuestionMark />
+          </Button>
+        }
       </Box>
-      <Button
-        size={'small'}
-        href={`https://docs.pelicanplatform.org/parameters#${metadata.name.split('.').join('-')}`}
-        target={'_blank'}
-      >
-        <QuestionMark />
-      </Button>
+
     </Box>
   );
 };

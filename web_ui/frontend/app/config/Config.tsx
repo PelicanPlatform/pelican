@@ -54,7 +54,6 @@ import { getEnabledServers } from '@/helpers/util';
 import DownloadButton from '@/components/DownloadButton';
 import { PaddedContent } from '@/components/layout';
 import { ConfigDisplay, TableOfContents } from '@/app/config/components';
-import _metadata from '@/public/data/parameters.json';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 
 function Config({ metadata }: { metadata: ParameterMetadataRecord }) {

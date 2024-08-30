@@ -16,77 +16,57 @@
  *
  ***************************************************************/
 
-'use client';
+import { merge } from 'lodash';
 
-import { useState, useReducer } from 'react';
-import {
-  Box,
-  IconButton,
-  Grid,
-  Tooltip,
-  Typography,
-  FormGroup,
-  FormControlLabel,
-  Switch,
-} from '@mui/material';
-import { User } from '@/index';
-import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
-import { getErrorMessage } from '@/helpers/util';
-import { Label } from '@mui/icons-material';
-import { BooleanToggleButton } from '@/components';
-import useSWR from 'swr';
-import { getConfig } from '@/helpers/get';
-import configPatchReducer, {
-  ConfigAction,
-  ConfigPatch,
-} from '@/reducers/configPatch';
+import _metadata from '@/public/data/parameters.json';
+import { ParameterMetadataList } from '@/components/configuration';
+import { Issuer } from './Issuer';
 
-export default function Page() {
-  const { data: config, error: configError } = useSWR(
-    'issuerConfig',
-    getConfig
-  );
+const getMetadata = async () => {
+  const metadataList = _metadata as unknown as ParameterMetadataList;
 
-  const [configPatch, dispatchConfigPatch] = useReducer(configPatchReducer, {});
+  // Enumerate the fields that we want to display
+  const fields = [
+    "Origin.EnableOrigin",
+    "Issuer.IssuerClaimValue",
+    "Issuer.AuthenticationSource",
+    "OIDC.ClientIDFile",
+    "OIDC.ClientID",
+    "OIDC.ClientSecretFile",
+    "OIDC.DeviceAuthEndpoint",
+    "OIDC.TokenEndpoint",
+    "OIDC.UserInfoEndpoint",
+    "OIDC.AuthorizationEndpoint",
+    "OIDC.Issuer",
+    "OIDC.ClientRedirectHostname",
+    "Issuer.OIDCAuthenticationRequirements",
+    "Issuer.OIDCAuthenticationUserClaim",
+    "Issuer.GroupSource",
+    "Issuer.OIDCGroupClaim",
+    "Issuer.GroupFile",
+    "Issuer.GroupRequirements",
+    "Issuer.AuthorizationTemplates",
+    "Issuer.UserStripDomain",
+    "Issuer.TomcatLocation",
+    "Issuer.ScitokensServerLocation",
+    "Issuer.QDLLocation",
+  ];
 
-  const [] = useState();
+  // @ts-ignore
+  let metadata = merge(...metadataList);
 
-  return (
-    <AuthenticatedContent
-      redirect={true}
-      checkAuthentication={(u: User) => u?.role == 'admin'}
-    >
-      <Box width={'100%'}>
-        <Typography variant={'h4'}>Issuer Configuration</Typography>
-        <Box mt={2}>
-          <Typography variant={'body1'}>
-            The origins issuer is responsible for issuing access tokens for the
-            data that it holds.
-          </Typography>
-          <BooleanToggleButton
-            label={'Enable Issuer'}
-            onChange={() => 'test'}
-          />
-        </Box>
-      </Box>
-    </AuthenticatedContent>
-  );
-}
+  // Pull out the Issuer Data
+  const issuerMetadata: Record<string, any> = {}
+  fields.forEach((field) => {
+    issuerMetadata[field] = metadata[field];
+  })
 
-const booleanToggle = ({
-  label,
-  value,
-  onClick,
-}: {
-  label: string;
-  value: boolean;
-  onClick: () => void;
-}) => {
-  return (
-    <Box onClick={onClick}>
-      <FormGroup>
-        <FormControlLabel control={<Switch value={value} />} label={label} />
-      </FormGroup>
-    </Box>
-  );
+  return issuerMetadata;
 };
+
+const Page = async () => {
+  const metadata = await getMetadata();
+  return <Issuer metadata={metadata} />;
+};
+
+export default Page;
