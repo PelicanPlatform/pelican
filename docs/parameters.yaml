@@ -348,6 +348,14 @@ osdf_default: https://topology.opensciencegrid.org/osdf/namespaces
 default: none
 components: ["director", "registry"]
 ---
+name: Federation.TopologyDowntimeUrl
+description: |+
+  A URL for determining OSG topology server downtime information. The result of querying this URL is an XML file containing downtime information.
+type: url
+osdf_default: https://topology.opensciencegrid.org/rgdowntime/xml
+default: none
+components: ["director"]
+---
 name: Federation.TopologyReloadInterval
 description: |+
   The frequency, in minutes, that topology should be reloaded.
@@ -1366,8 +1374,8 @@ components: ["director"]
 ---
 name: Director.FilteredServers
 description: |+
-  A list of server host names to not to redirect client requests to. This is for admins to put a list of
-  servers in the federation into downtime.
+  A list of server resource names that the Director should consider in downtime, preventing the Director from issuing redirects to them.
+  Additional downtimes are aggregated from Topology (when the Director is served in OSDF mode), and the Web UI.
 type: stringSlice
 default: none
 components: ["director"]

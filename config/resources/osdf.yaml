@@ -20,8 +20,9 @@ Xrootd:
   DetailedMonitoringHost: xrd-mon.osgstorage.org
 Federation:
   DiscoveryUrl: osg-htc.org
-  TopologyURL: https://topology.opensciencegrid.org
-  TopologyNamespaceURL: https://topology.opensciencegrid.org/osdf/namespaces?production=1
+  TopologyUrl: https://topology.opensciencegrid.org
+  TopologyNamespaceUrl: https://topology.opensciencegrid.org/osdf/namespaces?production=1
+  TopologyDowntimeUrl: https://topology.opensciencegrid.org/rgdowntime/xml
   TopologyReloadInterval: 4.5m
 Registry:
   RequireCacheApproval: true
