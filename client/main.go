@@ -20,12 +20,10 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
 	"runtime/debug"
-	"strconv"
 	"strings"
 	"time"
 
@@ -53,118 +51,6 @@ type FileInfo struct {
 	Size         int64
 	ModTime      time.Time
 	IsCollection bool
-}
-
-// Determine the token name if it is embedded in the scheme, Condor-style
-func getTokenName(destination *url.URL) (scheme, tokenName string) {
-	schemePieces := strings.Split(destination.Scheme, "+")
-	tokenName = ""
-	// Scheme is always the last piece
-	scheme = schemePieces[len(schemePieces)-1]
-	// If there are 2 or more pieces, token name is everything but the last item, joined with a +
-	if len(schemePieces) > 1 {
-		tokenName = strings.Join(schemePieces[:len(schemePieces)-1], "+")
-	}
-	return
-}
-
-// getToken returns the token to use for the given destination
-//
-// If tokenName is not empty, it will be used as the token name.
-// If tokenName is empty, the token name will be determined from the destination URL (if possible) using getTokenName
-func getToken(destination *url.URL, dirResp server_structs.DirectorResponse, isWrite bool, tokenName string, tokenLocation string, acquireToken bool) (string, error) {
-	if tokenName == "" {
-		_, tokenName = getTokenName(destination)
-	}
-
-	type tokenJson struct {
-		AccessKey string `json:"access_token"`
-		ExpiresIn int    `json:"expires_in"`
-	}
-	/*
-		Search for the location of the authentiction token.  It can be set explicitly on the command line (TODO),
-		with the environment variable "TOKEN", or it can be searched in the standard HTCondor directory pointed
-		to by the environment variable "_CONDOR_CREDS".
-	*/
-	// WLCG Token Discovery
-	if bearerToken, isBearerTokenSet := os.LookupEnv("BEARER_TOKEN"); tokenLocation == "" && isBearerTokenSet {
-		return bearerToken, nil
-	} else if bearerTokenFile, isBearerTokenFileSet := os.LookupEnv("BEARER_TOKEN_FILE"); tokenLocation == "" && isBearerTokenFileSet {
-		if _, err := os.Stat(bearerTokenFile); err != nil {
-			log.Warningln("Environment variable BEARER_TOKEN_FILE is set, but file being point to does not exist:", err)
-		} else {
-			tokenLocation = bearerTokenFile
-		}
-	}
-	if xdgRuntimeDir, xdgRuntimeDirSet := os.LookupEnv("XDG_RUNTIME_DIR"); tokenLocation == "" && xdgRuntimeDirSet {
-		// Get the uid
-		uid := os.Getuid()
-		tmpTokenPath := filepath.Join(xdgRuntimeDir, "bt_u"+strconv.Itoa(uid))
-		if _, err := os.Stat(tmpTokenPath); err == nil {
-			tokenLocation = tmpTokenPath
-		}
-	}
-
-	// Check for /tmp/bt_u<uid>
-	if tokenLocation == "" {
-		uid := os.Getuid()
-		tmpTokenPath := "/tmp/bt_u" + strconv.Itoa(uid)
-		if _, err := os.Stat(tmpTokenPath); err == nil {
-			tokenLocation = tmpTokenPath
-		}
-	}
-
-	// Backwards compatibility for getting scitokens
-	// If TOKEN is not set in environment, and _CONDOR_CREDS is set, then...
-	if tokenFile, isTokenSet := os.LookupEnv("TOKEN"); isTokenSet && tokenLocation == "" {
-		if _, err := os.Stat(tokenFile); err != nil {
-			log.Warningln("Environment variable TOKEN is set, but file being point to does not exist:", err)
-		} else {
-			tokenLocation = tokenFile
-		}
-	}
-
-	// Finally, look in the HTCondor runtime
-	if tokenLocation == "" {
-		tokenLocation = discoverHTCondorToken(tokenName)
-	}
-
-	if tokenLocation == "" {
-		if acquireToken {
-			opts := config.TokenGenerationOpts{Operation: config.TokenSharedRead}
-			if isWrite {
-				opts.Operation = config.TokenSharedWrite
-			}
-			value, err := AcquireToken(destination, dirResp, opts)
-			if err == nil {
-				return value, nil
-			}
-			log.Errorln("Failed to generate a new authorization token for this transfer: ", err)
-			log.Errorln("This transfer requires authorization to complete and no token is available")
-			err = errors.New("failed to find or generate a token as required for " + destination.String())
-			return "", err
-		} else {
-			log.Errorln("Credential is required, but currently missing")
-			err := errors.New("Credential is required for " + destination.String() + " but is currently missing")
-			return "", err
-		}
-	}
-
-	//Read in the JSON
-	log.Debug("Opening token file: " + tokenLocation)
-	tokenContents, err := os.ReadFile(tokenLocation)
-	if err != nil {
-		log.Errorln("Error reading token file:", err)
-		return "", err
-	}
-	tokenParsed := tokenJson{}
-	if err := json.Unmarshal(tokenContents, &tokenParsed); err != nil {
-		log.Debugln("Error unmarshalling JSON token contents:", err)
-		log.Debugln("Assuming the token file is not JSON, and only contains the TOKEN")
-		tokenStr := strings.TrimSpace(string(tokenContents))
-		return tokenStr, nil
-	}
-	return tokenParsed.AccessKey, nil
 }
 
 // Check the size of a remote file in an origin
@@ -213,24 +99,22 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return nil, err
 	}
 
-	tokenLocation := ""
-	acquire := true
-	token := ""
+	token := newTokenGenerator(destUri, &dirResp, false, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
-			tokenLocation = option.Value().(string)
+			token.SetTokenLocation(option.Value().(string))
 		case identTransferOptionAcquireToken{}:
-			acquire = option.Value().(bool)
+			token.EnableAcquire = option.Value().(bool)
 		case identTransferOptionToken{}:
-			token = option.Value().(string)
+			token.SetToken(option.Value().(string))
 		}
 	}
 
-	if dirResp.XPelNsHdr.RequireToken && token == "" {
-		token, err = getToken(destUri, dirResp, true, "", tokenLocation, acquire)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get token for transfer: %v", err)
+	if dirResp.XPelNsHdr.RequireToken {
+		tokenContents, err := token.get()
+		if err != nil || tokenContents == "" {
+			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
 	}
 
@@ -341,38 +225,6 @@ func correctURLWithUnderscore(sourceFile string) (string, string) {
 	return sourceFile, originalScheme
 }
 
-func discoverHTCondorToken(tokenName string) string {
-	tokenLocation := ""
-
-	// Tokens with dots in their name may need to have dots converted to underscores.
-	if strings.Contains(tokenName, ".") {
-		underscoreTokenName := strings.ReplaceAll(tokenName, ".", "_")
-		// If we find a token after replacing dots, then we're already done.
-		tokenLocation = discoverHTCondorToken(underscoreTokenName)
-		if tokenLocation != "" {
-			return tokenLocation
-		}
-	}
-
-	tokenFilename := "scitokens.use"
-	if len(tokenName) > 0 {
-		tokenFilename = tokenName + ".use"
-	}
-	log.Debugln("Looking for token file:", tokenFilename)
-	if credsDir, isCondorCredsSet := os.LookupEnv("_CONDOR_CREDS"); tokenLocation == "" && isCondorCredsSet {
-		// Token wasn't specified on the command line or environment, try the default scitoken
-		if _, err := os.Stat(filepath.Join(credsDir, tokenFilename)); err != nil {
-			log.Warningln("Environment variable _CONDOR_CREDS is set, but file being point to does not exist:", err)
-		} else {
-			tokenLocation = filepath.Join(credsDir, tokenFilename)
-		}
-	}
-	if _, err := os.Stat(".condor_creds/" + tokenFilename); err == nil && tokenLocation == "" {
-		tokenLocation, _ = filepath.Abs(".condor_creds/" + tokenFilename)
-	}
-	return tokenLocation
-}
-
 func schemeUnderstood(scheme string) error {
 	understoodSchemes := []string{"file", "osdf", "pelican", "stash", ""}
 
@@ -429,23 +281,21 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	}
 
 	// Get our token if needed
-	tokenLocation := ""
-	acquire := true
-	token := ""
+	token := newTokenGenerator(remoteObjectUrl, &dirResp, false, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
-			tokenLocation = option.Value().(string)
+			token.SetTokenLocation(option.Value().(string))
 		case identTransferOptionAcquireToken{}:
-			acquire = option.Value().(bool)
+			token.EnableAcquire = option.Value().(bool)
 		case identTransferOptionToken{}:
-			token = option.Value().(string)
+			token.SetToken(option.Value().(string))
 		}
 	}
 
-	if dirResp.XPelNsHdr.RequireToken && token == "" {
-		token, err = getToken(remoteObjectUrl, dirResp, true, "", tokenLocation, acquire)
-		if err != nil {
+	if dirResp.XPelNsHdr.RequireToken {
+		tokenContents, err := token.get()
+		if err != nil || tokenContents == "" {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
 	}

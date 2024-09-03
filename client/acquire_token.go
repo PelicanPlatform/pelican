@@ -20,38 +20,427 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
-	jwt "github.com/golang-jwt/jwt"
+	jwt "github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	oauth2_upstream "golang.org/x/oauth2"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/pelicanplatform/pelican/config"
 	oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-func TokenIsAcceptable(jwtSerialized string, osdfPath string, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) bool {
-	parser := jwt.Parser{SkipClaimsValidation: true}
-	token, _, err := parser.ParseUnverified(jwtSerialized, &jwt.MapClaims{})
+type (
+
+	// A token contents and its expiration time
+	//
+	// Meant to be used atomically as part of the token generator.
+	tokenInfo struct {
+		Contents string
+		Expiry   time.Time
+	}
+
+	// An object that can fetch an appropriate token for a given transfer.
+	//
+	// Thread-safe and will auto-renew the token throughout the lifetime
+	// of the process.
+	tokenGenerator struct {
+		DirResp       *server_structs.DirectorResponse
+		Destination   *url.URL
+		TokenLocation string
+		TokenName     string
+		IsWrite       bool
+		EnableAcquire bool
+		Token         atomic.Pointer[tokenInfo]
+		Iterator      *tokenContentIterator
+		Sync          *singleflight.Group
+	}
+
+	// An object that iterates through the various possible tokens
+	tokenContentIterator struct {
+		Location      string
+		Name          string
+		CredLocations []string
+		Method        int
+	}
+)
+
+func newTokenGenerator(dest *url.URL, dirResp *server_structs.DirectorResponse, isWrite bool, enableAcquire bool) *tokenGenerator {
+	return &tokenGenerator{
+		DirResp:       dirResp,
+		Destination:   dest,
+		IsWrite:       isWrite,
+		EnableAcquire: enableAcquire,
+		Sync:          new(singleflight.Group),
+	}
+}
+
+func newTokenContentIterator(loc string, name string) *tokenContentIterator {
+	return &tokenContentIterator{
+		Location: loc,
+		Name:     name,
+	}
+}
+
+// Force the token generator to read the token from a fixed location.
+//
+// Overrides any environment-based discovery logic.
+func (tg *tokenGenerator) SetTokenLocation(tokenLocation string) {
+	tg.TokenLocation = tokenLocation
+}
+
+// Force the token generator to use a specific named token instead of
+// evaluating all possible tokens
+func (tg *tokenGenerator) SetTokenName(name string) {
+	tg.TokenName = name
+}
+
+// Force the use of a specific token for the lifetime of the generator
+func (tg *tokenGenerator) SetToken(contents string) {
+	info := tokenInfo{
+		Contents: contents,
+		Expiry:   time.Now().Add(100 * 365 * 24 * time.Hour), // 100 years should be enough for "forever"
+	}
+	tg.Token.Store(&info)
+}
+
+// Determine the token name if it is embedded in the scheme, Condor-style
+func getTokenName(destination *url.URL) (scheme, tokenName string) {
+	schemePieces := strings.Split(destination.Scheme, "+")
+	tokenName = ""
+	// Scheme is always the last piece
+	scheme = schemePieces[len(schemePieces)-1]
+	// If there are 2 or more pieces, token name is everything but the last item, joined with a +
+	if len(schemePieces) > 1 {
+		tokenName = strings.Join(schemePieces[:len(schemePieces)-1], "+")
+	}
+	return
+}
+
+// Read a token from a file; ensure
+func getTokenFromFile(tokenLocation string) (string, error) {
+	//Read in the JSON
+	log.Debug("Opening token file: " + tokenLocation)
+	tokenContents, err := os.ReadFile(tokenLocation)
+	if err != nil {
+		log.Errorln("Error reading from token file:", err)
+		return "", err
+	}
+
+	type tokenJson struct {
+		AccessKey string `json:"access_token"`
+		ExpiresIn int    `json:"expires_in"`
+	}
+
+	tokenStr := strings.TrimSpace(string(tokenContents))
+	if len(tokenStr) > 0 && tokenStr[0] == '{' {
+		tokenParsed := tokenJson{}
+		if err := json.Unmarshal(tokenContents, &tokenParsed); err != nil {
+			log.Debugf("Unable to unmarshal file %s as JSON (assuming it is a token instead): %v", tokenLocation, err)
+			return tokenStr, nil
+		}
+		return tokenParsed.AccessKey, nil
+	}
+	return tokenStr, nil
+}
+
+func (tci *tokenContentIterator) discoverHTCondorTokenLocations(tokenName string) (tokenLocations []string) {
+	tokenLocations = make([]string, 0)
+
+	// Tokens with dots in their name may need to have dots converted to underscores.
+	if strings.Contains(tokenName, ".") {
+		underscoreTokenName := strings.ReplaceAll(tokenName, ".", "_")
+		// If we find a token after replacing dots, then we're already done.
+		tokenLocations = tci.discoverHTCondorTokenLocations(underscoreTokenName)
+		if len(tokenLocations) > 0 {
+			return
+		}
+	}
+
+	credsDir, isCondorCredsSet := os.LookupEnv("_CONDOR_CREDS")
+	if !isCondorCredsSet {
+		credsDir = ".condor_creds"
+	}
+
+	if len(tokenName) > 0 {
+		tokenLocation := filepath.Join(credsDir, tokenName+".use")
+		// Token was explicitly requested; warn if it doesn't exist.
+		if _, err := os.Stat(filepath.Join(credsDir, tokenName)); err != nil {
+			log.Warningln("Environment variable _CONDOR_CREDS is set, but the credential file is not readable:", err)
+		} else {
+			tokenLocations = append(tokenLocations, tokenLocation)
+			return
+		}
+	} else {
+		tokenLocation := filepath.Join(credsDir, "scitokens.use")
+		// Just prefer the scitokens.use first by convention; do not warn if it is missing
+		if _, err := os.Stat(tokenLocation); err == nil {
+			tokenLocations = append(tokenLocations, tokenLocation)
+		}
+	}
+
+	// Walk through all available credentials in the directory; scitokens.use was already
+	// put first, if available, above.
+	err := filepath.Walk(credsDir, func(path string, info fs.FileInfo, err error) error {
+		if path == credsDir {
+			return nil
+		} else if info.IsDir() {
+			return filepath.SkipDir
+		}
+		baseName := filepath.Base(path)
+		if baseName == "scitokens.use" {
+			return nil
+		}
+		if len(baseName) > 0 && baseName[0] == '.' {
+			return nil
+		}
+		tokenLocations = append(tokenLocations, path)
+		return nil
+	})
+	if err != nil {
+		log.Warningln("Failure when iterating through directory to look through tokens:", err)
+	}
+	return
+}
+
+func (tci *tokenContentIterator) next() (string, bool) {
+	/*
+		Search for the location of the authentiction token.  It can be set explicitly on the command line,
+		with the environment variable "BEARER_TOKEN", or it can be searched in the standard HTCondor directory pointed
+		to by the environment variable "_CONDOR_CREDS".
+	*/
+	switch tci.Method {
+	case 0:
+		tci.Method += 1
+		if tci.Location != "" {
+			log.Debugln("Using API-specified token location", tci.Location)
+			if _, err := os.Stat(tci.Location); err != nil {
+				log.Warningln("Client was asked to read token from location", tci.Location, "but it is not readable:", err)
+			} else if jwtSerialized, err := getTokenFromFile(tci.Location); err == nil {
+				return jwtSerialized, true
+			}
+		}
+		fallthrough
+	// WLCG Token Discovery
+	case 1:
+		tci.Method += 1
+		if bearerToken, isBearerTokenSet := os.LookupEnv("BEARER_TOKEN"); isBearerTokenSet {
+			log.Debugln("Using token from BEARER_TOKEN environment variable")
+			return bearerToken, true
+		}
+		fallthrough
+	case 2:
+		tci.Method += 1
+		if bearerTokenFile, isBearerTokenFileSet := os.LookupEnv("BEARER_TOKEN_FILE"); isBearerTokenFileSet {
+			log.Debugln("Using token from BEARER_TOKEN_FILE environment variable")
+			if _, err := os.Stat(bearerTokenFile); err != nil {
+				log.Warningln("Environment variable BEARER_TOKEN_FILE is set, but file being point to does not exist:", err)
+			} else if jwtSerialized, err := getTokenFromFile(bearerTokenFile); err == nil {
+				return jwtSerialized, true
+			}
+		}
+		fallthrough
+	case 3:
+		tci.Method += 1
+		if xdgRuntimeDir, xdgRuntimeDirSet := os.LookupEnv("XDG_RUNTIME_DIR"); xdgRuntimeDirSet {
+			// Get the uid
+			uid := os.Getuid()
+			tmpTokenPath := filepath.Join(xdgRuntimeDir, "bt_u"+strconv.Itoa(uid))
+			if _, err := os.Stat(tmpTokenPath); err == nil {
+				log.Debugln("Using token from XDG_RUNTIME_DIR")
+				if jwtSerialized, err := getTokenFromFile(tmpTokenPath); err == nil {
+					return jwtSerialized, true
+				}
+			}
+		}
+		fallthrough
+	case 4:
+		tci.Method += 1
+		// Check for /tmp/bt_u<uid>
+		uid := os.Getuid()
+		tmpTokenPath := "/tmp/bt_u" + strconv.Itoa(uid)
+		if _, err := os.Stat(tmpTokenPath); err == nil {
+			log.Debugln("Using token from", tmpTokenPath)
+			if jwtSerialized, err := getTokenFromFile(tmpTokenPath); err == nil {
+				return jwtSerialized, true
+			}
+		}
+		fallthrough
+	case 5:
+		tci.Method += 1
+		// Backwards compatibility for getting token; TOKEN env var is not standardized
+		// but some of the oldest use cases may utilize them.
+		if tokenFile, isTokenSet := os.LookupEnv("TOKEN"); isTokenSet {
+			if _, err := os.Stat(tokenFile); err != nil {
+				log.Warningln("Environment variable TOKEN is set, but file being point to does not exist:", err)
+			} else if jwtSerialized, err := getTokenFromFile(tokenFile); err == nil {
+				log.Debugln("Using token from TOKEN environment variable")
+				return jwtSerialized, true
+			}
+		}
+		fallthrough
+	case 6:
+		tci.Method += 1
+		// Finally, look in the HTCondor runtime
+		tci.CredLocations = tci.discoverHTCondorTokenLocations(tci.Name)
+		fallthrough
+	default:
+		for {
+			idx := tci.Method - 7
+			tci.Method += 1
+			if idx < 0 || idx >= len(tci.CredLocations) {
+				log.Debugln("Out of token locations to search")
+				return "", false
+			}
+			if jwtSerialized, err := getTokenFromFile(tci.CredLocations[idx]); err == nil {
+				return jwtSerialized, true
+			}
+		}
+	}
+}
+
+// getToken returns the token to use for the given destination after searching through
+// the environment.
+//
+// Do not use directly -- invoke `get` instead.  Intended to be invoked from a singleflight
+// context.
+func (tg *tokenGenerator) getToken() (token interface{}, err error) {
+
+	{ // Check to see if the cached token was refreshed prior to the function call
+		info := tg.Token.Load()
+		if info != nil && time.Until(info.Expiry) > 0 && info.Contents != "" {
+			token = info.Contents
+			return
+		}
+	}
+
+	potentialTokens := make([]tokenInfo, 0)
+
+	if tg.TokenName == "" {
+		_, tg.TokenName = getTokenName(tg.Destination)
+	}
+
+	opts := config.TokenGenerationOpts{
+		Operation: config.TokenSharedRead,
+	}
+	if tg.IsWrite {
+		opts.Operation = config.TokenSharedWrite
+	}
+
+	if tg.Iterator == nil {
+		tg.Iterator = newTokenContentIterator(tg.TokenLocation, tg.TokenName)
+	}
+	for {
+		contents, cont := tg.Iterator.next()
+		if !cont {
+			tg.Iterator = nil
+			break
+		}
+		valid, expiry := tokenIsValid(contents)
+		info := tokenInfo{contents, expiry}
+		if valid && (tg.DirResp == nil || tokenIsAcceptable(contents, tg.Destination.Path, *tg.DirResp, opts)) {
+			tg.Token.Store(&info)
+			log.Debugln("Using token:", info.Contents)
+			return contents, nil
+		} else if contents != "" {
+			potentialTokens = append(potentialTokens, info)
+		}
+	}
+
+	// If _any_ potential token is found, even though it's not thought to be acceptable,
+	// return that instead of failing outright under the theory the user knows better.
+	if len(potentialTokens) > 0 {
+		log.Warningln("Using provided token even though it does not appear to be acceptable to perform transfer")
+		tg.Token.Store(&potentialTokens[0])
+		token = potentialTokens[0].Contents
+		err = nil
+		return
+	}
+
+	if tg.EnableAcquire && tg.Destination != nil && tg.DirResp != nil {
+		opts := config.TokenGenerationOpts{Operation: config.TokenSharedRead}
+		if tg.IsWrite {
+			opts.Operation = config.TokenSharedWrite
+		}
+		var contents string
+		contents, err = AcquireToken(tg.Destination, *tg.DirResp, opts)
+		if err == nil && contents != "" {
+			valid, expiry := tokenIsValid(contents)
+			info := tokenInfo{contents, expiry}
+			if !tokenIsAcceptable(contents, tg.Destination.Path, *tg.DirResp, opts) {
+				log.Warningln("Token was acquired from issuer but it does not appear valid for transfer; trying anyway")
+			} else if !valid {
+				log.Warningln("Token was acquired from issuer but it appears to be expired; trying anyway")
+			}
+			tg.Token.Store(&info)
+			token = contents
+			return
+		}
+		log.Errorln("Failed to generate a new authorization token for this transfer: ", err)
+		log.Errorln("This transfer requires authorization to complete and no token is available")
+		err = errors.Wrap(err, "failed to find or generate a token as required for "+tg.Destination.String())
+		return
+	}
+
+	log.Errorln("Credential is required, but currently missing")
+	return "", errors.New("credential is required for " + tg.Destination.String() + " but was not discovered")
+}
+
+// Return the token contents associated with the generator
+//
+// Thread-safe
+func (tg *tokenGenerator) get() (token string, err error) {
+	// First, see if the existing token is valid
+	info := tg.Token.Load()
+	if info != nil && time.Until(info.Expiry) > 0 && info.Contents != "" {
+		token = info.Contents
+		return
+	}
+
+	// If not, always invoke the synchronized "Do".  It will
+	// re-check the cache and, if still invalid, regenerate the token
+	tokenGeneric, err, _ := tg.Sync.Do("", tg.getToken)
+	if err != nil {
+		return
+	}
+	if tokenStr, ok := tokenGeneric.(string); ok {
+		token = tokenStr
+		return
+	}
+	// Should be impossible -- getToken should always return a string
+	err = errors.Errorf("token generator failed by returning object of type %T", tokenGeneric)
+	return
+}
+
+// Given jwtSerialized, a serialized JWT, return whether or not the scopes
+// would authorize the given objectName based on the information in dirResp.
+func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) bool {
+	tok, err := jwt.Parse([]byte(jwtSerialized), jwt.WithVerify(false), jwt.WithValidate(false))
 	if err != nil {
 		log.Warningln("Failed to parse token:", err)
 		return false
 	}
 
 	// For now, we'll accept any WLCG token
-	wlcg_ver := (*token.Claims.(*jwt.MapClaims))["wlcg.ver"]
-	if wlcg_ver == nil {
+	if wlcg_ver, present := tok.Get("wlcg.ver"); !present || wlcg_ver == nil {
 		return false
 	}
 
-	osdfPathCleaned := path.Clean(osdfPath)
+	osdfPathCleaned := path.Clean(objectName)
 	if !strings.HasPrefix(osdfPathCleaned, dirResp.XPelNsHdr.Namespace) {
 		return false
 	}
@@ -69,7 +458,10 @@ func TokenIsAcceptable(jwtSerialized string, osdfPath string, dirResp server_str
 		targetResource = path.Clean("/" + osdfPathCleaned[len(dirResp.XPelTokGenHdr.BasePaths[0]):])
 	}
 
-	scopes_iface := (*token.Claims.(*jwt.MapClaims))["scope"]
+	scopes_iface, ok := tok.Get("scope")
+	if !ok {
+		return false
+	}
 	if scopes, ok := scopes_iface.(string); ok {
 		acceptableScope := false
 		for _, scope := range strings.Split(scopes, " ") {
@@ -102,21 +494,25 @@ func TokenIsAcceptable(jwtSerialized string, osdfPath string, dirResp server_str
 	return false
 }
 
-func TokenIsExpired(jwtSerialized string) bool {
-	parser := jwt.Parser{SkipClaimsValidation: true}
-	token, _, err := parser.ParseUnverified(jwtSerialized, &jwt.StandardClaims{})
+// Return whether the JWT represented by jwtSerialized is valid.
+//
+// Valid means that the current time is after the `nbf` ("not before")
+// claim and before the `exp` ("expiration") claim.
+//
+// If valid, then the function also returns the expiration time.
+func tokenIsValid(jwtSerialized string) (valid bool, expiry time.Time) {
+	token, err := jwt.Parse([]byte(jwtSerialized), jwt.WithVerify(false))
 	if err != nil {
 		log.Warningln("Failed to parse token:", err)
-		return true
+		return
 	}
 
-	if claims, ok := token.Claims.(*jwt.StandardClaims); ok {
-		return claims.Valid() != nil
-	}
-	return true
+	valid = true
+	expiry = token.Expiration()
+	return
 }
 
-func RegisterClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntry, error) {
+func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntry, error) {
 	issuers := dirResp.XPelTokGenHdr.Issuers
 	if len(issuers) == 0 {
 		return nil, fmt.Errorf("no issuer information for prefix '%s' is provided", dirResp.XPelNsHdr.Namespace)
@@ -127,7 +523,7 @@ func RegisterClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 		return nil, err
 	}
 	if issuer.RegistrationURL == "" {
-		return nil, fmt.Errorf("Issuer %s does not support dynamic client registration", issuerUrl)
+		return nil, errors.Errorf("issuer %s does not support dynamic client registration", issuerUrl)
 	}
 
 	drcp := oauth2.DCRPConfig{ClientRegistrationEndpointURL: issuer.RegistrationURL, Transport: config.GetTransport(), Metadata: oauth2.Metadata{
@@ -194,7 +590,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 	newEntry := false
 	if prefixIdx < 0 {
 		log.Infof("Prefix configuration for %s not in configuration file; will request new client", nsPrefix)
-		prefixEntry, err = RegisterClient(dirResp)
+		prefixEntry, err = registerClient(dirResp)
 		if err != nil {
 			return "", err
 		}
@@ -205,7 +601,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		prefixEntry = &osdfConfig.OSDF.OauthClient[prefixIdx]
 		if len(prefixEntry.ClientID) == 0 || len(prefixEntry.ClientSecret) == 0 {
 			log.Infof("Prefix configuration for %s missing OAuth2 client information", nsPrefix)
-			prefixEntry, err = RegisterClient(dirResp)
+			prefixEntry, err = registerClient(dirResp)
 			if err != nil {
 				return "", err
 			}
@@ -225,7 +621,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 	var acceptableToken *config.TokenEntry = nil
 	acceptableUnexpiredToken := ""
 	for idx, token := range prefixEntry.Tokens {
-		if !TokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
+		if !tokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
 			continue
 		}
 		if acceptableToken == nil {
@@ -234,7 +630,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 			// Both tokens are non-empty; let's use them
 			break
 		}
-		if !TokenIsExpired(token.AccessToken) {
+		if valid, _ := tokenIsValid(token.AccessToken); valid {
 			acceptableUnexpiredToken = token.AccessToken
 		}
 	}
@@ -285,7 +681,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		// We use anonymously-registered clients; OA4MP can periodically garbage collect these to prevent DoS
 		// In this case, we register a new client and try to acquire again.
 		log.Infof("Identity provider does not know the client for %s; registering a new one", nsPrefix)
-		prefixEntry, err = RegisterClient(dirResp)
+		prefixEntry, err = registerClient(dirResp)
 		if err != nil {
 			return "", errors.Wrap(err, "re-registration error (identity provider does not recognize our client)")
 		}

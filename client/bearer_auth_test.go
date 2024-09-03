@@ -37,7 +37,9 @@ func TestBearerAuthenticator_Authorize(t *testing.T) {
 	}))
 	defer server.Close()
 
-	authenticator := &bearerAuthenticator{token: "some_token_1234_abc"}
+	token := newTokenGenerator(nil, nil, false, false)
+	token.SetToken("some_token_1234_abc")
+	authenticator := &bearerAuthenticator{token: token}
 	client := &http.Client{}
 
 	// Create a HTTP request to be authorized
@@ -53,7 +55,9 @@ func TestBearerAuthenticator_Authorize(t *testing.T) {
 }
 
 func TestBearerAuthenticator_Verify(t *testing.T) {
-	authenticator := &bearerAuthenticator{token: "some_token_1234_abc"}
+	token := newTokenGenerator(nil, nil, false, false)
+	token.SetToken("some_token_1234_abc")
+	authenticator := &bearerAuthenticator{token: token}
 	client := &http.Client{}
 
 	// Create a dummy HTTP response with a 401 status

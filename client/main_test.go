@@ -150,9 +150,10 @@ func TestGetToken(t *testing.T) {
 
 	// ENVs to test: BEARER_TOKEN, BEARER_TOKEN_FILE, XDG_RUNTIME_DIR/bt_u<uid>, TOKEN, _CONDOR_CREDS/scitoken.use, .condor_creds/scitokens.use
 	os.Setenv("BEARER_TOKEN", "bearer_token_contents")
-	token, err := getToken(url, dirResp, true, "", "", false)
+	token := newTokenGenerator(url, &dirResp, true, false)
+	tokenContents, err := token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, "bearer_token_contents", token)
+	assert.Equal(t, "bearer_token_contents", tokenContents)
 	os.Unsetenv("BEARER_TOKEN")
 
 	// BEARER_TOKEN_FILE
@@ -163,9 +164,10 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("BEARER_TOKEN_FILE", bearer_token_file)
-	token, err = getToken(url, dirResp, true, "", "", false)
+	token = newTokenGenerator(url, &dirResp, true, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("BEARER_TOKEN_FILE")
 
 	// XDG_RUNTIME_DIR/bt_u<uid>
@@ -175,9 +177,10 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("XDG_RUNTIME_DIR", tmpDir)
-	token, err = getToken(url, dirResp, true, "", "", false)
+	token = newTokenGenerator(url, &dirResp, true, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("XDG_RUNTIME_DIR")
 
 	// TOKEN
@@ -187,9 +190,10 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("TOKEN", bearer_token_file)
-	token, err = getToken(url, dirResp, true, "", "", false)
+	token = newTokenGenerator(url, &dirResp, true, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("TOKEN")
 
 	// _CONDOR_CREDS/scitokens.use
@@ -199,9 +203,10 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	token, err = getToken(url, dirResp, true, "", "", false)
+	token = newTokenGenerator(url, &dirResp, true, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("_CONDOR_CREDS")
 
 	// _CONDOR_CREDS/renamed.use
@@ -219,9 +224,10 @@ func TestGetToken(t *testing.T) {
 			Namespace: "/user/ligo/frames",
 		},
 	}
-	token, err = getToken(renamedUrl, ligoDirResp, false, "", "", false)
+	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("_CONDOR_CREDS")
 
 	// _CONDOR_CREDS/renamed_handle1.use via renamed_handle1+osdf:///user/ligo/frames
@@ -236,9 +242,10 @@ func TestGetToken(t *testing.T) {
 	renamedUrl, err = url.Parse("renamed.handle1+osdf:///user/ligo/frames")
 	renamedUrl.Scheme = "renamed_handle1+osdf"
 	assert.NoError(t, err)
-	token, err = getToken(renamedUrl, ligoDirResp, false, "", "", false)
+	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("_CONDOR_CREDS")
 
 	// _CONDOR_CREDS/renamed_handle2.use via renamed.handle2+osdf:///user/ligo/frames
@@ -251,9 +258,10 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err = url.Parse("renamed.handle2+osdf:///user/ligo/frames")
 	assert.NoError(t, err)
-	token, err = getToken(renamedUrl, ligoDirResp, false, "", "", false)
+	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("_CONDOR_CREDS")
 
 	// _CONDOR_CREDS/renamed.handle3.use via renamed.handle3+osdf:///user/ligo/frames
@@ -266,9 +274,10 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err = url.Parse("renamed.handle3+osdf:///user/ligo/frames")
 	assert.NoError(t, err)
-	token, err = getToken(renamedUrl, ligoDirResp, false, "", "", false)
+	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("_CONDOR_CREDS")
 
 	// _CONDOR_CREDS/renamed.use
@@ -281,9 +290,11 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err = url.Parse("/user/ligo/frames")
 	assert.NoError(t, err)
-	token, err = getToken(renamedUrl, ligoDirResp, false, "renamed", "", false)
+	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	token.SetTokenName("renamed")
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("_CONDOR_CREDS")
 
 	// Current directory .condor_creds/scitokens.use
@@ -298,14 +309,17 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 	err = os.Chdir(tmpDir)
 	assert.NoError(t, err)
-	token, err = getToken(url, dirResp, true, "", "", false)
+	token = newTokenGenerator(url, &dirResp, true, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	err = os.Chdir(currentDir)
 	assert.NoError(t, err)
 
-	_, err = getToken(url, dirResp, true, "", "", false)
-	assert.EqualError(t, err, "Credential is required for osdf:///user/foo but is currently missing")
+	// Check that we haven't regressed on our error messages
+	token = newTokenGenerator(url, &dirResp, true, false)
+	_, err = token.get()
+	assert.EqualError(t, err, "credential is required for osdf:///user/foo but was not discovered")
 }
 
 // TestGetTokenName tests getTokenName
