@@ -46,6 +46,7 @@ type Config struct {
 		XRootDPrefix string `mapstructure:"xrootdprefix"`
 	} `mapstructure:"cache"`
 	Client struct {
+		AssumeDirectorServerHeader bool `mapstructure:"assumedirectorserverheader"`
 		DisableHttpProxy bool `mapstructure:"disablehttpproxy"`
 		DisableProxyFallback bool `mapstructure:"disableproxyfallback"`
 		MaximumDownloadSpeed int `mapstructure:"maximumdownloadspeed"`
@@ -342,6 +343,7 @@ type configWithType struct {
 		XRootDPrefix struct { Type string; Value string }
 	}
 	Client struct {
+		AssumeDirectorServerHeader struct { Type string; Value bool }
 		DisableHttpProxy struct { Type string; Value bool }
 		DisableProxyFallback struct { Type string; Value bool }
 		MaximumDownloadSpeed struct { Type string; Value int }

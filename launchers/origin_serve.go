@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 )
 
@@ -88,7 +89,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 
 	// Director also registers this metadata URL; avoid registering twice.
 	if !modules.IsEnabled(server_structs.DirectorType) {
-		server_utils.RegisterOIDCAPI(engine.Group("/"), false)
+		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
 	}
 
 	if param.Origin_EnableIssuer.GetBool() {

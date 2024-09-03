@@ -32,6 +32,7 @@ import (
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
@@ -77,7 +78,7 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 			return errors.Wrap(err, "invalid URL for Director.SupportContactUrl")
 		}
 	}
-	rootGroup := engine.Group("/")
+	rootGroup := engine.Group("/", web_ui.ServerHeaderMiddleware)
 	director.RegisterDirectorOIDCAPI(rootGroup)
 	director.RegisterDirectorWebAPI(rootGroup)
 	engine.Use(director.ShortcutMiddleware(defaultResponse))
