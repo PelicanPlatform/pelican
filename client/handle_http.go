@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -234,6 +235,8 @@ type (
 		localPath      string
 		upload         bool
 		recursive      bool
+		skipAcquire    bool
+		syncLevel      SyncLevel  // Policy for handling synchronization when the destination exists
 		prefObjServers []*url.URL // holds any client-requested caches/origins
 		dirResp        server_structs.DirectorResponse
 		directorUrl    string
@@ -253,6 +256,9 @@ type (
 		jobId uuid.UUID
 		file  *transferFile
 	}
+
+	// Different types of synchronization for recursize transfers
+	SyncLevel int
 
 	// An object able to process transfer jobs.
 	TransferEngine struct {
@@ -286,9 +292,10 @@ type (
 		cancel         context.CancelFunc
 		callback       TransferCallbackFunc
 		engine         *TransferEngine
-		skipAcquire    bool   // Enable/disable the token acquisition logic.  Defaults to acquiring a token
-		tokenLocation  string // Location of a token file to use for transfers
-		token          string // Token that should be used for transfers
+		skipAcquire    bool      // Enable/disable the token acquisition logic.  Defaults to acquiring a token
+		syncLevel      SyncLevel // Policy for the client to synchronize data
+		tokenLocation  string    // Location of a token file to use for transfers
+		token          string    // Token that should be used for transfers
 		work           chan *TransferJob
 		closed         bool
 		prefObjServers []*url.URL // holds any client-requested caches/origins
@@ -303,6 +310,7 @@ type (
 	identTransferOptionTokenLocation struct{}
 	identTransferOptionAcquireToken  struct{}
 	identTransferOptionToken         struct{}
+	identTransferOptionSynchronize   struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -319,6 +327,10 @@ const (
 
 	projectName classAd = "ProjectName"
 	jobId       classAd = "GlobalJobId"
+
+	SyncNone  = iota // When synchronizing, always re-transfer, regardless of existence at destination.
+	SyncExist        // Skip synchronization transfer if the destination exists
+	SyncSize         // Skip synchronization transfer if the destination exists and matches the current source size
 )
 
 // The progress container object creates several
@@ -737,6 +749,14 @@ func WithAcquireToken(enable bool) TransferOption {
 	return option.New(identTransferOptionAcquireToken{}, enable)
 }
 
+// Create an option to specify the object synchronization level
+//
+// The synchronization level specifies what to do if the destination
+// object already exists.
+func WithSynchronize(level SyncLevel) TransferOption {
+	return option.New(identTransferOptionSynchronize{}, level)
+}
+
 // Create a new client to work with an engine
 func (te *TransferEngine) NewClient(options ...TransferOption) (client *TransferClient, err error) {
 	log.Debugln("Making new clients")
@@ -765,6 +785,8 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 			client.skipAcquire = !option.Value().(bool)
 		case identTransferOptionToken{}:
 			client.token = option.Value().(string)
+		case identTransferOptionSynchronize{}:
+			client.syncLevel = option.Value().(SyncLevel)
 		}
 	}
 	func() {
@@ -1103,6 +1125,9 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		localPath:      localPath,
 		remoteURL:      &copyUrl,
 		callback:       tc.callback,
+		skipAcquire:    tc.skipAcquire,
+		syncLevel:      tc.syncLevel,
+		tokenLocation:  tc.tokenLocation,
 		upload:         upload,
 		uuid:           id,
 		project:        project,
@@ -1140,6 +1165,8 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.token.EnableAcquire = option.Value().(bool)
 		case identTransferOptionToken{}:
 			tj.token.SetToken(option.Value().(string))
+		case identTransferOptionSynchronize{}:
+			tj.syncLevel = option.Value().(SyncLevel)
 		}
 	}
 
@@ -2415,6 +2442,52 @@ func createWebDavClient(collectionsUrl *url.URL, token *tokenGenerator, project 
 	return
 }
 
+// Depending on the synchronization policy, decide if a object download should be skipped
+func skipDownload(syncLevel SyncLevel, remoteInfo fs.FileInfo, localPath string) bool {
+	if syncLevel == SyncNone {
+		return false
+	}
+	localInfo, err := os.Stat(localPath)
+	if err != nil {
+		return false
+	}
+	switch syncLevel {
+	case SyncExist:
+		return true
+	case SyncSize:
+		return localInfo.Size() == remoteInfo.Size()
+	}
+	return false
+}
+
+// Depending on the synchronization policy, decide if the upload should be skipped
+func skipUpload(job *TransferJob, localPath, remotePath string) bool {
+	if job.syncLevel == SyncNone {
+		return false
+	}
+
+	localInfo, err := os.Stat(localPath)
+	if err != nil {
+		return false
+	}
+
+	remoteUrl := url.URL{
+		Path: remotePath,
+	}
+	remoteInfo, err := statHttp(&remoteUrl, job.dirResp, job.token)
+	if err != nil {
+		return false
+	}
+
+	switch job.syncLevel {
+	case SyncExist:
+		return true
+	case SyncSize:
+		return localInfo.Size() == remoteInfo.Size
+	}
+	return false
+}
+
 // Walk a remote collection in a WebDAV server, emitting the files discovered
 func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
 	// Create the client to walk the filesystem
@@ -2449,6 +2522,8 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 			if err != nil {
 				return err
 			}
+		} else if localPath := path.Join(job.job.localPath, localBase, info.Name()); skipDownload(job.job.syncLevel, info, localPath) {
+			log.Infoln("Skipping download of object", newPath, "as it already exists at", localPath)
 		} else {
 			job.job.activeXfer.Add(1)
 			select {
@@ -2464,7 +2539,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					engine:     te,
 					remoteURL:  &url.URL{Path: newPath},
 					packOption: transfers[0].PackOption,
-					localPath:  path.Join(job.job.localPath, localBase, info.Name()),
+					localPath:  localPath,
 					upload:     job.job.upload,
 					token:      job.job.token,
 					attempts:   transfers,
@@ -2477,7 +2552,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	return nil
 }
 
-// Walk a local directory structure, writing all discovered files to the files channel
+// Helper function for walkDirUpload; not to be called directly
 func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, localPath string) error {
 	if job.job.ctx.Err() != nil {
 		return job.job.ctx.Err()
@@ -2497,9 +2572,9 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 			if err != nil {
 				return err
 			}
+		} else if remotePath := path.Join(job.job.remoteURL.Path, strings.TrimPrefix(newPath, job.job.localPath)); skipUpload(job.job, newPath, remotePath) {
+			log.Infoln("Skipping upload of object", remotePath, "as it already exists at the destination")
 		} else if info.Type().IsRegular() {
-			// It is a normal file; strip off the path prefix and append the destination prefix
-			remotePath := path.Join(job.job.remoteURL.Path, strings.TrimPrefix(newPath, job.job.localPath))
 			job.job.activeXfer.Add(1)
 			select {
 			case <-job.job.ctx.Done():
