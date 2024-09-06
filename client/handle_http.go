@@ -1008,9 +1008,9 @@ func (te *TransferEngine) runMux() error {
 			// Notification that a job has been processed into files (or failed)
 			job := recv.Interface().(*clientTransferJob)
 			job.job.lookupDone.Store(true)
-			// If no transfers were created and we have an error, the job is no
+			// If no transfers were created or we have an error, the job is no
 			// longer active
-			if job.job.lookupErr != nil && job.job.totalXfer == 0 {
+			if job.job.lookupErr != nil || job.job.totalXfer == 0 {
 				// Remove this job from the list of active jobs for the client.
 				activeJobs[job.uuid] = slices.DeleteFunc(activeJobs[job.uuid], func(oldJob *TransferJob) bool {
 					return oldJob.uuid == job.job.uuid
@@ -2470,6 +2470,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					attempts:   transfers,
 				},
 			}:
+				job.job.totalXfer += 1
 			}
 		}
 	}
@@ -2519,6 +2520,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 					attempts:   transfers,
 				},
 			}:
+				job.job.totalXfer += 1
 			}
 		}
 	}
