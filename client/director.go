@@ -38,7 +38,7 @@ import (
 
 // Make a request to the director for a given verb/resource; return the
 // HTTP response object only if a 307 is returned.
-func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (resp *http.Response, err error) {
+func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string, token string) (resp *http.Response, err error) {
 	resourceUrl := directorUrl + sourcePath
 	// Here we use http.Transport to prevent the client from following the director's
 	// redirect. We use the Location url elsewhere (plus we still need to do the token
@@ -62,6 +62,10 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string) (r
 	// if it supports the version, and provide an error message in the case that it
 	// cannot.
 	req.Header.Set("User-Agent", getUserAgent(""))
+
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	// Perform the HTTP request
 	resp, err = client.Do(req)
@@ -161,7 +165,7 @@ func parseServersFromDirectorResponse(resp *http.Response) (servers []*url.URL, 
 }
 
 // Retrieve federation namespace information for a given URL.
-func GetDirectorInfoForPath(ctx context.Context, resourcePath, directorUrl string, isPut bool, query string) (parsedResponse server_structs.DirectorResponse, err error) {
+func GetDirectorInfoForPath(ctx context.Context, resourcePath, directorUrl string, isPut bool, query string, token string) (parsedResponse server_structs.DirectorResponse, err error) {
 	if directorUrl == "" {
 		return server_structs.DirectorResponse{},
 			errors.Errorf("unable to retrieve information from a Director for object %s because no director URL was provided", resourcePath)
@@ -176,7 +180,7 @@ func GetDirectorInfoForPath(ctx context.Context, resourcePath, directorUrl strin
 		resourcePath += "?" + query
 	}
 	var dirResp *http.Response
-	dirResp, err = queryDirector(ctx, verb, resourcePath, directorUrl)
+	dirResp, err = queryDirector(ctx, verb, resourcePath, directorUrl, token)
 	if err != nil {
 		if isPut && dirResp != nil && dirResp.StatusCode == 405 {
 			err = errors.New("error 405: No writeable origins were found")

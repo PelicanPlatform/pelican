@@ -373,6 +373,11 @@ func redirectToCache(ginCtx *gin.Context) {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
 
+	// If the namespace requires a token yet there's no token available, skip the stat.
+	if !namespaceAd.Caps.PublicReads && reqParams.Get("authz") == "" {
+		skipStat = true
+	}
+
 	// Stat origins and caches for object availability
 	// For origins, we only want ones with the object
 	// For caches, we still list all in the response but turn down priorities for ones that don't have the object
@@ -572,6 +577,11 @@ func redirectToOrigin(ginCtx *gin.Context) {
 			Msg:    "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems",
 		})
 		return
+	}
+
+	// If the namespace requires a token yet there's no token available, skip the stat.
+	if !namespaceAd.Caps.PublicReads && reqParams.Get("authz") == "" {
+		skipStat = true
 	}
 
 	var q *ObjectStat

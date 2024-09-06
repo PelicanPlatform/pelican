@@ -154,7 +154,7 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 				os.Exit(1)
 			}
 
-			dirResp, err := client.GetDirectorInfoForPath(cmd.Context(), dest.Path, fedInfo.DirectorEndpoint, isWrite, "")
+			dirResp, err := client.GetDirectorInfoForPath(cmd.Context(), dest.Path, fedInfo.DirectorEndpoint, isWrite, "", "")
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get director info for path:", err)
 				os.Exit(1)
