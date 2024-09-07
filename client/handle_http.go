@@ -2764,15 +2764,6 @@ func statHttp(dest *url.URL, dirResp server_structs.DirectorResponse, token *tok
 				return
 			}
 
-			if info.Size == 0 {
-				if info.IsCollection {
-					resultsChan <- statResults{info, nil}
-				}
-				err = errors.New("Stat response did not include a size")
-				resultsChan <- statResults{FileInfo{}, err}
-				return
-			}
-
 			resultsChan <- statResults{FileInfo{
 				Name:         endpoint.Path,
 				Size:         info.Size,
