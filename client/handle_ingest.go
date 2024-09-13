@@ -50,7 +50,7 @@ func generateDestination(filePath string, originPrefix string, shadowOriginPrefi
 	if strings.HasPrefix(hashString, cleanedOriginPrefix) {
 		return shadowOriginPrefix + hashString[len(cleanedOriginPrefix):], localSize, nil
 	}
-	return "", 0, errors.New("File path must have the origin prefix")
+	return "", 0, errors.New("file path must have the origin prefix")
 }
 
 func DoShadowIngest(ctx context.Context, sourceFile string, originPrefix string, shadowOriginPrefix string, options ...TransferOption) (int64, string, error) {
@@ -118,5 +118,5 @@ func DoShadowIngest(ctx context.Context, sourceFile string, originPrefix string,
 			return transferResults[0].TransferredBytes, shadowFile, err
 		}
 	}
-	return 0, "", errors.New("After 10 upload attempts, file was still being modified during ingest.")
+	return 0, "", errors.New("after 10 upload attempts, file was still being modified during ingest")
 }

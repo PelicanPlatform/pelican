@@ -28,12 +28,12 @@ import (
 
 // BasicAuth structure holds our credentials, this is the authorizer
 type bearerAuth struct {
-	token string
+	token *tokenGenerator
 }
 
 // BearerAuthenticator is an Authenticator for BearerAuth
 type bearerAuthenticator struct {
-	token string
+	token *tokenGenerator
 }
 
 // NewAuthenticator creates a new BearerAuthenticator
@@ -48,7 +48,11 @@ func (b *bearerAuth) AddAuthenticator(key string, fn gowebdav.AuthFactory) {
 
 // Authorize the current request
 func (b *bearerAuthenticator) Authorize(c *http.Client, rq *http.Request, path string) error {
-	rq.Header.Add("Authorization", "Bearer "+b.token) //set the header with the token
+	if b.token != nil {
+		if tokenContents, err := b.token.get(); err == nil && tokenContents != "" {
+			rq.Header.Add("Authorization", "Bearer "+tokenContents) //set the header with the token
+		}
+	}
 	return nil
 }
 

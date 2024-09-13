@@ -207,7 +207,7 @@ type (
 		callback   TransferCallbackFunc
 		remoteURL  *url.URL
 		localPath  string
-		token      string
+		token      *tokenGenerator
 		upload     bool
 		packOption string
 		attempts   []transferAttemptDetails
@@ -234,12 +234,10 @@ type (
 		localPath      string
 		upload         bool
 		recursive      bool
-		skipAcquire    bool
 		prefObjServers []*url.URL // holds any client-requested caches/origins
 		dirResp        server_structs.DirectorResponse
 		directorUrl    string
-		tokenLocation  string
-		token          string
+		token          *tokenGenerator
 		project        string
 	}
 
@@ -639,7 +637,7 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 
 		// If the values do not exist, exit with failure
 		if pelicanURL.directorUrl == "" {
-			return pelicanUrl{}, fmt.Errorf("Missing metadata information in config, ensure Federation DirectorUrl, RegistryUrl, and DiscoverUrl are all set")
+			return pelicanUrl{}, errors.New("missing metadata information in config, ensure Federation DirectorUrl, RegistryUrl, and DiscoverUrl are all set")
 		}
 	}
 	return
@@ -1105,12 +1103,16 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		localPath:      localPath,
 		remoteURL:      &copyUrl,
 		callback:       tc.callback,
-		skipAcquire:    tc.skipAcquire,
-		tokenLocation:  tc.tokenLocation,
 		upload:         upload,
 		uuid:           id,
-		token:          tc.token,
 		project:        project,
+		token:          newTokenGenerator(&copyUrl, nil, upload, !tc.skipAcquire),
+	}
+	if tc.token != "" {
+		tj.token.SetToken(tc.token)
+	}
+	if tc.tokenLocation != "" {
+		tj.token.SetTokenLocation(tc.tokenLocation)
 	}
 
 	mergeCancel := func(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {
@@ -1133,11 +1135,11 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		case identTransferOptionCallback{}:
 			tj.callback = option.Value().(TransferCallbackFunc)
 		case identTransferOptionTokenLocation{}:
-			tj.tokenLocation = option.Value().(string)
+			tj.token.SetTokenLocation(option.Value().(string))
 		case identTransferOptionAcquireToken{}:
-			tj.skipAcquire = !option.Value().(bool)
+			tj.token.EnableAcquire = option.Value().(bool)
 		case identTransferOptionToken{}:
-			tj.token = option.Value().(string)
+			tj.token.SetToken(option.Value().(string))
 		}
 	}
 
@@ -1149,11 +1151,12 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		return
 	}
 	tj.dirResp = dirResp
+	tj.token.DirResp = &dirResp
 
-	if (upload || dirResp.XPelNsHdr.RequireToken) && tj.token == "" {
-		tj.token, err = getToken(remoteUrl, dirResp, true, "", tc.tokenLocation, !tj.skipAcquire)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get token for transfer: %v", err)
+	if upload || dirResp.XPelNsHdr.RequireToken {
+		contents, err := tj.token.get()
+		if err != nil || contents == "" {
+			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
 	}
 
@@ -1513,7 +1516,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 //
 // Attempts a HEAD against all the endpoints simultaneously.  Put any that don't respond within
 // a second behind those that do respond.
-func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDetails, token string) (size int64, results []transferAttemptDetails) {
+func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDetails, token *tokenGenerator) (size int64, results []transferAttemptDetails) {
 	size = -1
 	if len(attempts) < 2 {
 		results = attempts
@@ -1556,8 +1559,10 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 			// header for GETs
 			headRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet, tUrl.String(), nil)
 			headRequest.Header.Set("Range", "0-0")
-			if token != "" {
-				headRequest.Header.Set("Authorization", "Bearer "+token)
+			if token != nil {
+				if tokenContents, err := token.get(); err == nil && tokenContents != "" {
+					headRequest.Header.Set("Authorization", "Bearer "+tokenContents)
+				}
 			}
 			var headResponse *http.Response
 			headResponse, err := headClient.Do(headRequest)
@@ -1698,8 +1703,12 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		transferEndpointUrl.Path = transfer.remoteURL.Path
 		transferEndpoint.Url = &transferEndpointUrl
 		transferStartTime = time.Now() // Update start time for this attempt
+		tokenContents := ""
+		if transfer.token != nil {
+			tokenContents, _ = transfer.token.get()
+		}
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, err := downloadHTTP(
-			transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, transfer.token, transfer.project,
+			transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, tokenContents, transfer.project,
 		)
 		endTime := time.Now()
 		if cacheAge >= 0 {
@@ -2250,7 +2259,11 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		return transferResult, err
 	}
 	// Set the authorization header as well as other headers
-	request.Header.Set("Authorization", "Bearer "+transfer.token)
+	if transfer.token != nil {
+		if tokenContents, err := transfer.token.get(); tokenContents != "" && err == nil {
+			request.Header.Set("Authorization", "Bearer "+tokenContents)
+		}
+	}
 	request.Header.Set("User-Agent", getUserAgent(transfer.project))
 	if searchJobAd(jobId) != "" {
 		request.Header.Set("X-Pelican-JobId", searchJobAd(jobId))
@@ -2388,7 +2401,7 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 }
 
 // This helper function creates a web dav client to walkDavDir's. Used for recursive downloads and lists
-func createWebDavClient(collectionsUrl *url.URL, token string, project string) (client *gowebdav.Client) {
+func createWebDavClient(collectionsUrl *url.URL, token *tokenGenerator, project string) (client *gowebdav.Client) {
 	auth := &bearerAuth{token: token}
 	client = gowebdav.NewAuthClient(collectionsUrl.String(), auth)
 	client.SetHeader("User-Agent", getUserAgent(project))
@@ -2508,7 +2521,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 }
 
 // This function performs the ls command by walking through the specified collections and printing the contents of the files
-func listHttp(remoteObjectUrl *url.URL, dirResp server_structs.DirectorResponse, token string) (fileInfos []FileInfo, err error) {
+func listHttp(remoteObjectUrl *url.URL, dirResp server_structs.DirectorResponse, token *tokenGenerator) (fileInfos []FileInfo, err error) {
 	// Get our collection listing host
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 	log.Debugln("Collections URL: ", collectionsUrl.String())
@@ -2569,7 +2582,7 @@ func listHttp(remoteObjectUrl *url.URL, dirResp server_structs.DirectorResponse,
 // Otherwise, the first three caches are queried simultaneously.
 // For any of the queries, if the attempt with the proxy fails, a second attempt
 // is made without.
-func statHttp(dest *url.URL, dirResp server_structs.DirectorResponse, token string) (info FileInfo, err error) {
+func statHttp(dest *url.URL, dirResp server_structs.DirectorResponse, token *tokenGenerator) (info FileInfo, err error) {
 	statHosts := make([]url.URL, 0, 3)
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 
