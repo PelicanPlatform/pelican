@@ -1201,6 +1201,13 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		// The director response may change if it's given a token; let's repeat the query.
 		if contents != "" {
 			dirResp, err = GetDirectorInfoForPath(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload, remoteUrl.RawQuery, contents)
+			if err != nil {
+				log.Errorln(err)
+				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
+				return nil, err
+			}
+			tj.dirResp = dirResp
+			tj.token.DirResp = &dirResp
 		}
 	}
 
