@@ -20,8 +20,6 @@ package client
 
 import (
 	"context"
-	"net/url"
-	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -29,81 +27,28 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 )
 
-func getDirectorFromUrl(objectUrl *url.URL) (string, error) {
-	ctx := context.Background()
-
-	fedInfo, err := config.GetFederation(ctx)
+func CreateSharingUrl(ctx context.Context, object string, isWrite bool) (string, error) {
+	pUrl, err := ParseRemoteAsPUrl(ctx, object)
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(err, "Failed to parse remote path")
 	}
-	configDirectorUrl := fedInfo.DirectorEndpoint
-	var directorUrl string
-	if objectUrl.Scheme == "pelican" {
-		if objectUrl.Host == "" {
-			if configDirectorUrl == "" {
-				return "", errors.New("Must specify (or configure) the federation hostname with the pelican://-style URLs")
-			}
-			directorUrl = configDirectorUrl
-		} else {
-			discoveryUrl := url.URL{
-				Scheme: "https",
-				Host:   objectUrl.Host,
-			}
-			fedInfo, err := config.DiscoverUrlFederation(ctx, discoveryUrl.String())
-			if err != nil {
-				return "", errors.Wrapf(err, "Failed to discover location of the director for the federation %s", objectUrl.Host)
-			}
-			if directorUrl = fedInfo.DirectorEndpoint; directorUrl == "" {
-				return "", errors.Errorf("Director for the federation %s not discovered", objectUrl.Host)
-			}
-		}
-	} else if objectUrl.Scheme == "osdf" && configDirectorUrl == "" {
-		if objectUrl.Host != "" {
-			objectUrl.Path = "/" + objectUrl.Host + objectUrl.Path
-			objectUrl.Host = ""
-		}
-		fedInfo, err := config.DiscoverUrlFederation(ctx, "https://osg-htc.org")
-		if err != nil {
-			return "", errors.Wrap(err, "Failed to discover director for the OSDF")
-		}
-		if directorUrl = fedInfo.DirectorEndpoint; directorUrl == "" {
-			return "", errors.Errorf("Director for the OSDF not discovered")
-		}
-	} else if objectUrl.Scheme == "" {
-		if configDirectorUrl == "" {
-			return "", errors.Errorf("Must provide a federation name for path %s (e.g., pelican://osg-htc.org/%s)", objectUrl.Path, objectUrl.Path)
-		} else {
-			directorUrl = configDirectorUrl
-		}
-	} else if objectUrl.Scheme != "osdf" {
-		return "", errors.Errorf("Unsupported scheme for pelican: %s://", objectUrl.Scheme)
-	}
-	return directorUrl, nil
-}
 
-func CreateSharingUrl(ctx context.Context, objectUrl *url.URL, isWrite bool) (string, error) {
-	directorUrl, err := getDirectorFromUrl(objectUrl)
-	if err != nil {
-		return "", err
-	}
-	objectUrl.Path = "/" + strings.TrimPrefix(objectUrl.Path, "/")
-
-	log.Debugln("Will query director for path", objectUrl.Path)
-	dirResp, err := queryDirector(ctx, "GET", objectUrl.Path, directorUrl, "")
+	log.Debugln("Will query director for path", pUrl.Path)
+	dirResp, err := queryDirector(ctx, "GET", pUrl, "")
 	if err != nil {
 		log.Errorln("Error while querying the Director:", err)
-		return "", errors.Wrapf(err, "Error while querying the director at %s", directorUrl)
+		return "", errors.Wrapf(err, "Error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
 	}
 	parsedDirResp, err := ParseDirectorInfo(dirResp)
 	if err != nil {
-		return "", errors.Wrapf(err, "Unable to parse response from director at %s", directorUrl)
+		return "", errors.Wrapf(err, "Unable to parse response from director at %s", pUrl.FedInfo.DirectorEndpoint)
 	}
 
 	opts := config.TokenGenerationOpts{Operation: config.TokenSharedRead}
 	if isWrite {
 		opts.Operation = config.TokenSharedWrite
 	}
-	token, err := AcquireToken(objectUrl, parsedDirResp, opts)
+	token, err := AcquireToken(pUrl.Path, parsedDirResp, opts)
 	if err != nil {
 		err = errors.Wrap(err, "Failed to acquire token")
 	}

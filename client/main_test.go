@@ -19,7 +19,11 @@
 package client
 
 import (
+	"context"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -33,7 +37,9 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/mock"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // TestGetIps calls main.get_ips with a hostname, checking
@@ -145,12 +151,12 @@ func TestGetToken(t *testing.T) {
 		},
 	}
 
-	url, err := url.Parse("osdf:///user/foo")
+	pUrl, err := pelican_url.Parse("osdf:///user/foo", nil, nil)
 	assert.NoError(t, err)
 
 	// ENVs to test: BEARER_TOKEN, BEARER_TOKEN_FILE, XDG_RUNTIME_DIR/bt_u<uid>, TOKEN, _CONDOR_CREDS/scitoken.use, .condor_creds/scitokens.use
 	os.Setenv("BEARER_TOKEN", "bearer_token_contents")
-	token := newTokenGenerator(url, &dirResp, true, false)
+	token := newTokenGenerator(pUrl, &dirResp, true, false)
 	tokenContents, err := token.get()
 	assert.NoError(t, err)
 	assert.Equal(t, "bearer_token_contents", tokenContents)
@@ -164,7 +170,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("BEARER_TOKEN_FILE", bearer_token_file)
-	token = newTokenGenerator(url, &dirResp, true, false)
+	token = newTokenGenerator(pUrl, &dirResp, true, false)
 	tokenContents, err = token.get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -177,7 +183,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("XDG_RUNTIME_DIR", tmpDir)
-	token = newTokenGenerator(url, &dirResp, true, false)
+	token = newTokenGenerator(pUrl, &dirResp, true, false)
 	tokenContents, err = token.get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -190,7 +196,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("TOKEN", bearer_token_file)
-	token = newTokenGenerator(url, &dirResp, true, false)
+	token = newTokenGenerator(pUrl, &dirResp, true, false)
 	tokenContents, err = token.get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -203,7 +209,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	token = newTokenGenerator(url, &dirResp, true, false)
+	token = newTokenGenerator(pUrl, &dirResp, true, false)
 	tokenContents, err = token.get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -217,14 +223,14 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	renamedUrl, err := url.Parse("renamed+osdf:///user/ligo/frames")
+	pUrl, err = pelican_url.Parse("renamed+osdf:///user/ligo/frames", nil, nil)
 	assert.NoError(t, err)
 	ligoDirResp := server_structs.DirectorResponse{
 		XPelNsHdr: server_structs.XPelNs{
 			Namespace: "/user/ligo/frames",
 		},
 	}
-	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	token = newTokenGenerator(pUrl, &ligoDirResp, false, false)
 	tokenContents, err = token.get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -239,10 +245,9 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	// Use a valid URL, then replace the scheme
-	renamedUrl, err = url.Parse("renamed.handle1+osdf:///user/ligo/frames")
-	renamedUrl.Scheme = "renamed_handle1+osdf"
+	pUrl, err = pelican_url.Parse("renamed.handle1+osdf:///user/ligo/frames", nil, nil)
 	assert.NoError(t, err)
-	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	token = newTokenGenerator(pUrl, &ligoDirResp, false, false)
 	tokenContents, err = token.get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -256,9 +261,9 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	renamedUrl, err = url.Parse("renamed.handle2+osdf:///user/ligo/frames")
+	pUrl.RawScheme = "renamed.handle2+osdf"
 	assert.NoError(t, err)
-	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	token = newTokenGenerator(pUrl, &ligoDirResp, false, false)
 	tokenContents, err = token.get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -272,9 +277,9 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	renamedUrl, err = url.Parse("renamed.handle3+osdf:///user/ligo/frames")
+	pUrl.RawScheme = "renamed.handle3+osdf"
 	assert.NoError(t, err)
-	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	token = newTokenGenerator(pUrl, &ligoDirResp, false, false)
 	tokenContents, err = token.get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -288,9 +293,9 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	renamedUrl, err = url.Parse("/user/ligo/frames")
+	pUrl, err = pelican_url.Parse("osdf:///user/ligo/frames", nil, nil)
 	assert.NoError(t, err)
-	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	token = newTokenGenerator(pUrl, &ligoDirResp, false, false)
 	token.SetTokenName("renamed")
 	tokenContents, err = token.get()
 	assert.NoError(t, err)
@@ -309,7 +314,7 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 	err = os.Chdir(tmpDir)
 	assert.NoError(t, err)
-	token = newTokenGenerator(url, &dirResp, true, false)
+	token = newTokenGenerator(pUrl, &dirResp, true, false)
 	tokenContents, err = token.get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -317,7 +322,7 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Check that we haven't regressed on our error messages
-	token = newTokenGenerator(url, &dirResp, true, false)
+	token = newTokenGenerator(pUrl, &dirResp, true, false)
 	_, err = token.get()
 	assert.EqualError(t, err, "credential is required for osdf:///user/foo but was not discovered")
 }
@@ -331,21 +336,19 @@ func TestGetTokenName(t *testing.T) {
 	}{
 		{"osdf://blah+asdf", "", "osdf"},
 		{"stash://blah+asdf", "", "stash"},
-		{"file://blah+asdf", "", "file"},
 		{"tokename+osdf://blah+asdf", "tokename", "osdf"},
 		{"tokename+stash://blah+asdf", "tokename", "stash"},
-		{"tokename+file://blah+asdf", "tokename", "file"},
 		{"tokename+tokename2+osdf://blah+asdf", "tokename+tokename2", "osdf"},
 		{"token+tokename2+stash://blah+asdf", "token+tokename2", "stash"},
 		{"token.use+stash://blah+asdf", "token.use", "stash"},
 		{"token.blah.asdf+stash://blah+asdf", "token.blah.asdf", "stash"},
 	}
 	for _, c := range cases {
-		url, err := url.Parse(c.url)
+		pUrl, err := pelican_url.Parse(c.url, nil, []pelican_url.DiscoveryOption{pelican_url.WithContext(context.Background())})
 		assert.NoError(t, err)
-		scheme, tokenName := getTokenName(url)
+		tokenName := pUrl.GetTokenName()
 		assert.Equal(t, c.name, tokenName)
-		assert.Equal(t, c.scheme, scheme)
+		assert.Equal(t, c.scheme, pUrl.Scheme)
 	}
 
 }
@@ -364,77 +367,183 @@ func FuzzGetTokenName(f *testing.F) {
 			return
 		}
 		assert.NoError(t, err)
-		_, tokenName := getTokenName(url)
+		pUrl, err := pelican_url.Parse(urlString, nil, nil)
+		assert.NoError(t, err)
+		tokenName := pUrl.GetTokenName()
 		assert.Equal(t, strings.ToLower(orig), tokenName, "URL: "+urlString+"URL String: "+url.String()+" Scheme: "+url.Scheme)
 	})
 }
 
-func TestCorrectURLWithUnderscore(t *testing.T) {
+// Spin up a discovery server for testing purposes
+func getTestDiscoveryServer(t *testing.T) *httptest.Server {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/pelican-configuration" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(`{
+				"director_endpoint": "https://director.com",
+				"namespace_registration_endpoint": "https://registration.com",
+				"broker_endpoint": "https://broker.com",
+				"jwks_uri": "https://tokens.com"
+			}`))
+			assert.NoError(t, err)
+		} else {
+			http.NotFound(w, r)
+		}
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(handler))
+	return server
+}
+
+func assertPelicanURLEqual(t *testing.T, expected, actual *pelican_url.PelicanURL) {
+	assert.Equal(t, expected.Scheme, actual.Scheme, "Scheme mismatch")
+	assert.Equal(t, expected.Host, actual.Host, "Discovery Host mismatch")
+	assert.Equal(t, expected.Path, actual.Path, "Path mismatch")
+	assert.Equal(t, expected.FedInfo, actual.FedInfo, "Federation Info mismatch")
+}
+
+func TestParseRemoteAsPUrl(t *testing.T) {
+	discServer := getTestDiscoveryServer(t)
+	defer discServer.Close()
+	discUrl, err := url.Parse(discServer.URL)
+	require.NoError(t, err)
+
+	oldHost, err := pelican_url.SetOsdfDiscoveryHost(discUrl.Host)
+	t.Cleanup(func() {
+		_, _ = pelican_url.SetOsdfDiscoveryHost(oldHost)
+	})
+	require.NoError(t, err)
+
 	tests := []struct {
-		name           string
-		url            string
-		expectedURL    string
-		expectedScheme string
+		name     string
+		rp       string
+		discEP   string // for setting global federation metadata
+		dirEP    string // for setting global federation metadata
+		expected *pelican_url.PelicanURL
+		errMsg   string
 	}{
 		{
-			name:           "LIGO URL with underscore",
-			url:            "ligo_data://ligo.org/data/1",
-			expectedURL:    "ligo.data://ligo.org/data/1",
-			expectedScheme: "ligo_data",
+			name:     "test valid pelican url, no global metadata",
+			rp:       fmt.Sprintf("pelican://%s/foo/bar", discUrl.Host),
+			discEP:   "",
+			dirEP:    "",
+			expected: &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			errMsg:   "",
 		},
 		{
-			name:           "URL without underscore",
-			url:            "http://example.com",
-			expectedURL:    "http://example.com",
-			expectedScheme: "http",
+			name:     "test valid osdf url, no global metadata",
+			rp:       "osdf:///foo/bar",
+			discEP:   "",
+			dirEP:    "",
+			expected: &pelican_url.PelicanURL{Scheme: "osdf", Host: "", Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			errMsg:   "",
 		},
 		{
-			name:           "URL with no scheme",
-			url:            "example.com",
-			expectedURL:    "example.com",
-			expectedScheme: "",
+			name:     "test valid stash url, no global metadata",
+			rp:       "stash:///foo/bar",
+			discEP:   "",
+			dirEP:    "",
+			expected: &pelican_url.PelicanURL{Scheme: "stash", Host: "", Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			errMsg:   "",
+		},
+		{
+			name:     "test valid path with configured global discovery url",
+			rp:       "/foo/bar",
+			discEP:   discUrl.Host,
+			dirEP:    "",
+			expected: &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			errMsg:   "",
+		},
+		{
+			name:     "test valid path that falls back to configured director for discovery",
+			rp:       "/foo/bar",
+			discEP:   "",
+			dirEP:    discUrl.Host,
+			expected: &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			errMsg:   "",
+		},
+		{
+			name:     "test failure for path with no discovery metadata",
+			rp:       "/foo/bar",
+			discEP:   "",
+			dirEP:    "",
+			expected: nil,
+			errMsg:   "schemeless Pelican URLs must be used with a federation discovery URL",
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			actualURL, actualScheme := correctURLWithUnderscore(tt.url)
-			if actualURL != tt.expectedURL || actualScheme != tt.expectedScheme {
-				t.Errorf("correctURLWithUnderscore(%v) = %v, %v; want %v, %v", tt.url, actualURL, actualScheme, tt.expectedURL, tt.expectedScheme)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Set up global metadata if we have it. We do this because the function may
+			// fall back to configured discovery/director URLs if it can't find them in the URL
+			configOpts := map[string]any{"TLSSkipVerify": true}
+			if test.discEP != "" {
+				configOpts["Federation.DiscoveryUrl"] = test.discEP
+			}
+			if test.dirEP != "" {
+				configOpts["Federation.DirectorUrl"] = test.dirEP
+			}
+
+			test_utils.InitClient(t, configOpts)
+
+			pUrl, err := ParseRemoteAsPUrl(context.Background(), test.rp)
+			if test.errMsg == "" {
+				assert.NoError(t, err)
+				assertPelicanURLEqual(t, test.expected, pUrl)
+			} else {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), test.errMsg)
 			}
 		})
 	}
 }
 
-func TestSchemeUnderstood(t *testing.T) {
-	t.Run("TestProperSchemeOsdf", func(t *testing.T) {
-		scheme := "osdf"
-		err := schemeUnderstood(scheme)
-		assert.NoError(t, err)
-	})
-	t.Run("TestProperSchemeStash", func(t *testing.T) {
-		scheme := "stash"
-		err := schemeUnderstood(scheme)
-		assert.NoError(t, err)
-	})
-	t.Run("TestProperSchemePelican", func(t *testing.T) {
-		scheme := "pelican"
-		err := schemeUnderstood(scheme)
-		assert.NoError(t, err)
-	})
-	t.Run("TestProperSchemeFile", func(t *testing.T) {
-		scheme := "file"
-		err := schemeUnderstood(scheme)
-		assert.NoError(t, err)
-	})
-	t.Run("TestProperSchemeEmpty", func(t *testing.T) {
-		scheme := ""
-		err := schemeUnderstood(scheme)
-		assert.NoError(t, err)
-	})
-	t.Run("TestImproperScheme", func(t *testing.T) {
-		scheme := "ThisSchemeDoesNotExistAndHopefullyNeverWill"
-		err := schemeUnderstood(scheme)
-		assert.Error(t, err)
-	})
-}
+// func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL, error) {
+// 	pUrl := &pelican_url.PelicanURL{}
+
+// 	rpUrl, err := url.Parse(rp)
+// 	if err != nil {
+// 		return nil, errors.Wrap(err, "failed to parse remote path")
+// 	}
+
+// 	// Set up options that get passed from Parse --> PopulateFedInfo and may be used when querying the Director
+// 	client := &http.Client{Transport: config.GetTransport()}
+// 	pOptions := []pelican_url.ParseOption{pelican_url.ShouldDiscover(true)}
+// 	dOptions := []pelican_url.DiscoveryOption{pelican_url.UseCached(true), pelican_url.WithContext(ctx), pelican_url.WithClient(client), pelican_url.WithUserAgent(getUserAgent(""))}
+
+// 	// If we have no scheme, we'll end up assuming a Pelican url. We need to figure out which discovery endpoint to use.
+// 	if rpUrl.Scheme == "" {
+// 		fedInfo, err := config.GetFederation(ctx)
+// 		if err != nil {
+// 			return nil, errors.Wrap(err, "failed to get configured federation info")
+// 		}
+
+// 		// First try to use the configured discovery endpoint
+// 		if fedInfo.DiscoveryEndpoint != "" {
+// 			discoveryUrl, err := url.Parse(fedInfo.DiscoveryEndpoint)
+// 			if err != nil {
+// 				return nil, errors.Wrap(err, "failed to parse federation discovery endpoint")
+// 			}
+// 			dOptions = append(dOptions, pelican_url.WithDiscoveryUrl(discoveryUrl))
+// 		} else if fedInfo.DirectorEndpoint != "" {
+// 			// If we don't have a discovery endpoint, try to use the director endpoint
+// 			discoveryUrl, err := url.Parse(fedInfo.DiscoveryEndpoint)
+// 			if err != nil {
+// 				return nil, errors.Wrap(err, "failed to parse federation discovery endpoint")
+// 			}
+
+// 			dOptions = append(dOptions, pelican_url.WithDiscoveryUrl(discoveryUrl))
+// 		}
+// 	}
+
+// 	pUrl, err = pelican_url.Parse(
+// 		rp,
+// 		pOptions,
+// 		dOptions,
+// 	)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	return pUrl, nil
+// }
