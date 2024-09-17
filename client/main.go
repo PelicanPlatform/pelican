@@ -524,18 +524,6 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	}
 }
 
-// find takes a slice and looks for an element in it. If found it will
-// return it's key, otherwise it will return -1 and a bool of false.
-// From https://golangcode.com/check-if-element-exists-in-slice/
-func find(slice []string, val string) (int, bool) {
-	for i, item := range slice {
-		if item == val {
-			return i, true
-		}
-	}
-	return -1, false
-}
-
 // getIPs will resolve a hostname and return all corresponding IP addresses
 // in DNS.  This can be used to randomly pick an IP when DNS round robin
 // is used
