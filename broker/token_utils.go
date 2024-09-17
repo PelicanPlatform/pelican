@@ -86,7 +86,7 @@ func getRegistryIssValue(prefix string) (iss string, err error) {
 	if err != nil {
 		return
 	}
-	namespaceUrlStr := fedInfo.NamespaceRegistrationEndpoint
+	namespaceUrlStr := fedInfo.RegistryEndpoint
 	if namespaceUrlStr == "" {
 		err = errors.New("namespace URL is not set")
 		return

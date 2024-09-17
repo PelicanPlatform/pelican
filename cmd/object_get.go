@@ -121,11 +121,6 @@ func getMain(cmd *cobra.Command, args []string) {
 	lastSrc := ""
 
 	for _, src := range source {
-		src, result = utils.UrlWithFederation(src)
-		if result != nil {
-			lastSrc = src
-			break
-		}
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
 		_, result = client.DoGet(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...))
 		if result != nil {

@@ -43,6 +43,7 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
@@ -523,10 +524,14 @@ func (sc *LocalCache) runMux() error {
 				}
 			}
 
-			sourceURL := *sc.directorURL
-			sourceURL.Path = path.Join(sourceURL.Path, path.Clean(req.request.path))
-			sourceURL.Scheme = "pelican"
-			tj, err := sc.tc.NewTransferJob(req.ctx, &sourceURL, localPath, false, false, client.WithToken(req.request.token))
+			pUrl := pelican_url.PelicanURL{
+				FedInfo: pelican_url.FederationDiscovery{
+					DirectorEndpoint: sc.directorURL.String(),
+				},
+				Path:   path.Join(sc.directorURL.Path, path.Clean(req.request.path)),
+				Scheme: "pelican",
+			}
+			tj, err := sc.tc.NewTransferJob(req.ctx, &pUrl, localPath, false, false, client.WithToken(req.request.token))
 			if err != nil {
 				ds := &downloadStatus{}
 				ds.err.Store(&err)

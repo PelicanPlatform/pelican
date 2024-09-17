@@ -50,6 +50,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -80,27 +81,13 @@ type (
 		} `yaml:"OSDF"`
 	}
 
-	FederationDiscovery struct {
-		DirectorEndpoint              string `json:"director_endpoint"`
-		NamespaceRegistrationEndpoint string `json:"namespace_registration_endpoint"`
-		JwksUri                       string `json:"jwks_uri"`
-		BrokerEndpoint                string `json:"broker_endpoint"`
-	}
-
 	TokenOperation int
 
 	TokenGenerationOpts struct {
 		Operation TokenOperation
 	}
 
-	// ServerType int // ServerType is a bit mask indicating which Pelican server(s) are running in the current process
-
 	ContextKey string
-
-	MetadataErr struct {
-		msg      string
-		innerErr error
-	}
 )
 
 const (
@@ -152,7 +139,7 @@ var (
 	// Note the 'once' object is a pointer so we can reset the client multiple
 	// times during unit tests
 	fedDiscoveryOnce *sync.Once
-	globalFedInfo    FederationDiscovery
+	globalFedInfo    pelican_url.FederationDiscovery
 	globalFedErr     error
 
 	// Global struct validator
@@ -172,8 +159,6 @@ var (
 
 	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 
-	MetadataTimeoutErr *MetadataErr = &MetadataErr{msg: "Timeout when querying metadata"}
-
 	watermarkUnits = []byte{'k', 'm', 'g', 't'}
 	validPrefixes  = map[ConfigPrefix]bool{
 		PelicanPrefix: true,
@@ -184,42 +169,6 @@ var (
 
 	clientInitialized = false
 )
-
-// This function creates a new MetadataError by wrapping the previous error
-func NewMetadataError(err error, msg string) *MetadataErr {
-	return &MetadataErr{
-		msg:      msg,
-		innerErr: err,
-	}
-}
-
-func (e *MetadataErr) Error() string {
-	// If the inner error is nil, we don't want to print out "<nil>"
-	if e.innerErr != nil {
-		return fmt.Sprintf("%s: %v", e.msg, e.innerErr)
-	} else {
-		return e.msg
-	}
-}
-
-func (e *MetadataErr) Is(target error) bool {
-	// We want to verify we have a timeout error
-	if target, ok := target.(*MetadataErr); ok {
-		return e.msg == target.msg
-	}
-	return false
-}
-
-func (e *MetadataErr) Wrap(err error) error {
-	return &MetadataErr{
-		innerErr: err,
-		msg:      e.msg,
-	}
-}
-
-func (e *MetadataErr) Unwrap() error {
-	return e.innerErr
-}
 
 func init() {
 	en := en.New()
@@ -369,114 +318,18 @@ func GetAllPrefixes() []ConfigPrefix {
 	return prefixes
 }
 
-// Helper function to start a metadata request.
-//
-// We see periodic timeouts when doing metadata lookup at sites.
-// Adding a modest retry will, hopefully, reduce the number of errors
-// that propagate out to users
-func startMetadataQuery(ctx context.Context, httpClient *http.Client, discoveryUrl *url.URL) (result *http.Response, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discoveryUrl.String(), nil)
-	if err != nil {
-		err = errors.Wrapf(err, "Failure when doing federation metadata request creation for %s", discoveryUrl)
-		return
+// We can't parse a schemeless hostname when there's a port, so check for a scheme and add one if non exists.
+func wrapWithHttpsIfNeeded(urlStr string) string {
+	if len(urlStr) > 0 && !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
+		urlStr = "https://" + urlStr
 	}
-	req.Header.Set("User-Agent", "pelican/"+version)
-
-	result, err = httpClient.Do(req)
-	if err != nil {
-		var netErr net.Error
-		if errors.As(err, &netErr) && netErr.Timeout() {
-			err = MetadataTimeoutErr.Wrap(err)
-		} else {
-			err = NewMetadataError(err, "Error occurred when querying for metadata")
-		}
-	}
-	return
+	return urlStr
 }
 
-// This function is for discovering federations as specified by a url during a pelican:// transfer.
-// this does not populate global fields and is more temporary per url
-func DiscoverUrlFederation(ctx context.Context, federationDiscoveryUrl string) (metadata FederationDiscovery, err error) {
-	log.Debugln("Performing federation service discovery for specified url against endpoint", federationDiscoveryUrl)
-	federationUrl, err := url.Parse(federationDiscoveryUrl)
-	if err != nil {
-		err = errors.Wrapf(err, "invalid federation value %s:", federationDiscoveryUrl)
-		return
-	}
-	federationUrl.Scheme = "https"
-	if len(federationUrl.Path) > 0 && len(federationUrl.Host) == 0 {
-		federationUrl.Host = federationUrl.Path
-		federationUrl.Path = ""
-	}
-
-	discoveryUrl, err := url.Parse(federationUrl.String())
-	if err != nil {
-		err = errors.Wrap(err, "unable to parse federation discovery URL")
-		return
-	}
-	discoveryUrl.Path, err = url.JoinPath(federationUrl.Path, ".well-known/pelican-configuration")
-	if err != nil {
-		err = errors.Wrap(err, "Unable to parse federation url because of invalid path")
-		return
-	}
-
-	httpClient := http.Client{
-		Transport: GetTransport(),
-		Timeout:   time.Second * 5,
-	}
-
-	var result *http.Response
-	for idx := 1; idx <= 3; idx++ {
-		result, err = startMetadataQuery(ctx, &httpClient, discoveryUrl)
-		if err == nil {
-			break
-		} else if errors.Is(err, MetadataTimeoutErr) && ctx.Err() == nil {
-			log.Warningln("Timeout occurred when querying discovery URL", discoveryUrl.String(), "for metadata;", 3-idx, "retries remaining")
-			time.Sleep(2 * time.Second)
-		} else {
-			return
-		}
-	}
-	if errors.Is(err, MetadataTimeoutErr) {
-		log.Errorln("3 timeouts occurred when querying discovery URL", discoveryUrl.String())
-		return
-	}
-
-	if result.Body != nil {
-		defer result.Body.Close()
-	}
-
-	body, err := io.ReadAll(result.Body)
-	if err != nil {
-		return FederationDiscovery{}, errors.Wrapf(err, "Failure when doing federation metadata read to %s", discoveryUrl)
-	}
-
-	if result.StatusCode != http.StatusOK {
-		truncatedMessage := string(body)
-		if len(body) > 1000 {
-			truncatedMessage = string(body[:1000])
-			truncatedMessage += " [... remainder truncated ...]"
-		}
-		return FederationDiscovery{}, errors.Errorf("Federation metadata discovery failed with HTTP status %d.  Error message: %s", result.StatusCode, truncatedMessage)
-	}
-
-	metadata = FederationDiscovery{}
-	err = json.Unmarshal(body, &metadata)
-	if err != nil {
-		return FederationDiscovery{}, errors.Wrapf(err, "Failure when parsing federation metadata at %s", discoveryUrl)
-	}
-
-	log.Debugln("Federation service discovery resulted in director URL", metadata.DirectorEndpoint)
-	log.Debugln("Federation service discovery resulted in registry URL", metadata.NamespaceRegistrationEndpoint)
-	log.Debugln("Federation service discovery resulted in JWKS URL", metadata.JwksUri)
-	log.Debugln("Federation service discovery resulted in broker URL", metadata.BrokerEndpoint)
-
-	return metadata, nil
-}
 
 // Global implementation of Discover Federation, outside any caching or
 // delayed discovery
-func discoverFederationImpl(ctx context.Context) (fedInfo FederationDiscovery, err error) {
+func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.FederationDiscovery, err error) {
 	federationStr := param.Federation_DiscoveryUrl.GetString()
 	externalUrlStr := param.Server_ExternalWebUrl.GetString()
 	defer func() {
@@ -484,8 +337,8 @@ func discoverFederationImpl(ctx context.Context) (fedInfo FederationDiscovery, e
 		if fedInfo.DirectorEndpoint == "" && enabledServers.IsEnabled(server_structs.DirectorType) {
 			fedInfo.DirectorEndpoint = externalUrlStr
 		}
-		if fedInfo.NamespaceRegistrationEndpoint == "" && enabledServers.IsEnabled(server_structs.RegistryType) {
-			fedInfo.NamespaceRegistrationEndpoint = externalUrlStr
+		if fedInfo.RegistryEndpoint == "" && enabledServers.IsEnabled(server_structs.RegistryType) {
+			fedInfo.RegistryEndpoint = externalUrlStr
 		}
 		if fedInfo.JwksUri == "" && enabledServers.IsEnabled(server_structs.DirectorType) {
 			fedInfo.JwksUri = externalUrlStr + "/.well-known/issuer.jwks"
@@ -493,17 +346,24 @@ func discoverFederationImpl(ctx context.Context) (fedInfo FederationDiscovery, e
 		if fedInfo.BrokerEndpoint == "" && enabledServers.IsEnabled(server_structs.BrokerType) {
 			fedInfo.BrokerEndpoint = externalUrlStr
 		}
+
+		// Make sure any values in global federation metadata are url-parseable
+		fedInfo.DirectorEndpoint = wrapWithHttpsIfNeeded(fedInfo.DirectorEndpoint)
+		fedInfo.RegistryEndpoint = wrapWithHttpsIfNeeded(fedInfo.RegistryEndpoint)
+		fedInfo.JwksUri = wrapWithHttpsIfNeeded(fedInfo.JwksUri)
+		fedInfo.BrokerEndpoint = wrapWithHttpsIfNeeded(fedInfo.BrokerEndpoint)
 	}()
 
-	log.Debugln("Federation URL:", federationStr)
+	log.Debugln("Configured federation URL:", federationStr)
 	fedInfo.DirectorEndpoint = viper.GetString("Federation.DirectorUrl")
-	fedInfo.NamespaceRegistrationEndpoint = viper.GetString("Federation.RegistryUrl")
+	fedInfo.RegistryEndpoint = viper.GetString("Federation.RegistryUrl")
 	fedInfo.JwksUri = viper.GetString("Federation.JwkUrl")
 	fedInfo.BrokerEndpoint = viper.GetString("Federation.BrokerUrl")
-	if fedInfo.DirectorEndpoint != "" && fedInfo.NamespaceRegistrationEndpoint != "" && fedInfo.JwksUri != "" && fedInfo.BrokerEndpoint != "" {
+	if fedInfo.DirectorEndpoint != "" && fedInfo.RegistryEndpoint != "" && fedInfo.JwksUri != "" && fedInfo.BrokerEndpoint != "" {
 		return
 	}
 
+	federationStr = wrapWithHttpsIfNeeded(federationStr)
 	federationUrl, err := url.Parse(federationStr)
 	if err != nil {
 		err = errors.Wrapf(err, "invalid federation value %s:", federationStr)
@@ -516,19 +376,27 @@ func discoverFederationImpl(ctx context.Context) (fedInfo FederationDiscovery, e
 		return
 	}
 
-	federationUrl.Scheme = "https"
 	if len(federationUrl.Path) > 0 && len(federationUrl.Host) == 0 {
 		federationUrl.Host = federationUrl.Path
 		federationUrl.Path = ""
 	}
+	fedInfo.DiscoveryEndpoint = federationUrl.String()
 
-	var metadata FederationDiscovery
+	var metadata pelican_url.FederationDiscovery
 	if federationStr == "" {
 		log.Debugln("Federation URL is unset; skipping discovery")
 	} else if federationStr == externalUrlStr {
 		log.Debugln("Current web engine hosts the federation; skipping auto-discovery of services")
 	} else {
-		metadata, err = DiscoverUrlFederation(ctx, federationStr)
+		tr := GetTransport()
+		httpClient := &http.Client{
+			Transport: tr,
+			Timeout:   time.Second * 5,
+		}
+
+		// We can't really know the service here, so set to generic Pelican
+		ua := "pelican/" + GetVersion()
+		metadata, err = pelican_url.DiscoverFederation(ctx, httpClient, ua, federationUrl)
 		if err != nil {
 			err = errors.Wrapf(err, "invalid federation value (%s)", federationStr)
 			return
@@ -540,9 +408,9 @@ func discoverFederationImpl(ctx context.Context) (fedInfo FederationDiscovery, e
 		log.Debugln("Setting global director url to", metadata.DirectorEndpoint)
 		fedInfo.DirectorEndpoint = metadata.DirectorEndpoint
 	}
-	if fedInfo.NamespaceRegistrationEndpoint == "" {
-		log.Debugln("Setting global registry url to", metadata.NamespaceRegistrationEndpoint)
-		fedInfo.NamespaceRegistrationEndpoint = metadata.NamespaceRegistrationEndpoint
+	if fedInfo.RegistryEndpoint == "" {
+		log.Debugln("Setting global registry url to", metadata.RegistryEndpoint)
+		fedInfo.RegistryEndpoint = metadata.RegistryEndpoint
 	}
 	if fedInfo.JwksUri == "" {
 		log.Debugln("Setting global jwks url to", metadata.JwksUri)
@@ -568,7 +436,7 @@ func ResetFederationForTest() {
 // long as this is invoked after `InitClient` / `InitServer`, it is thread-safe.
 // If invoked before things are configured, it must be done from a single-threaded
 // context.
-func GetFederation(ctx context.Context) (FederationDiscovery, error) {
+func GetFederation(ctx context.Context) (pelican_url.FederationDiscovery, error) {
 	if fedDiscoveryOnce == nil {
 		fedDiscoveryOnce = &sync.Once{}
 	}
@@ -579,9 +447,11 @@ func GetFederation(ctx context.Context) (FederationDiscovery, error) {
 }
 
 // Set the current global federation metadata
-func SetFederation(fd FederationDiscovery) {
+func SetFederation(fd pelican_url.FederationDiscovery) {
+	viper.Set("Federation.DiscoveryUrl", fd.DiscoveryEndpoint)
 	viper.Set("Federation.DirectorUrl", fd.DirectorEndpoint)
-	viper.Set("Federation.RegistryUrl", fd.NamespaceRegistrationEndpoint)
+	viper.Set("Federation.RegistryUrl", fd.RegistryEndpoint)
+	viper.Set("Federation.BrokerUrl", fd.BrokerEndpoint)
 	viper.Set("Federation.JwkUrl", fd.JwksUri)
 }
 

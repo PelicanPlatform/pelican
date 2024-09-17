@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
@@ -166,9 +167,9 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 		timeout = timeoutHeader[0]
 	}
 
-	directRead := req.URL.Query().Has(utils.QueryDirectRead.String())
-	skipStat := req.URL.Query().Has(utils.QuerySkipStat.String())
-	preferCached := req.URL.Query().Has(utils.QueryPreferCached.String())
+	directRead := req.URL.Query().Has(pelican_url.QueryDirectRead)
+	skipStat := req.URL.Query().Has(pelican_url.QuerySkipStat)
+	preferCached := req.URL.Query().Has(pelican_url.QueryPreferCached)
 
 	// url.Values.Encode will help us escape all them
 	if authz != "" {
@@ -178,13 +179,13 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 		requestParams.Add("pelican.timeout", timeout)
 	}
 	if skipStat {
-		requestParams.Add(utils.QuerySkipStat.String(), "")
+		requestParams.Add(pelican_url.QuerySkipStat, "")
 	}
 	if preferCached {
-		requestParams.Add(utils.QueryPreferCached.String(), "")
+		requestParams.Add(pelican_url.QueryPreferCached, "")
 	}
 	if directRead {
-		requestParams.Add(utils.QueryDirectRead.String(), "")
+		requestParams.Add(pelican_url.QueryDirectRead, "")
 	}
 	return
 }
@@ -312,8 +313,8 @@ func versionCompatCheck(reqVer *version.Version, service string) error {
 
 // Check and validate the director-specific query params from the redirect request
 func checkRedirectQuery(query url.Values) error {
-	_, hasDirectRead := query[utils.QueryDirectRead.String()]
-	_, hasPreferCached := query[utils.QueryPreferCached.String()]
+	_, hasDirectRead := query[pelican_url.QueryDirectRead]
+	_, hasPreferCached := query[pelican_url.QueryPreferCached]
 
 	if hasDirectRead && hasPreferCached {
 		return errors.New("cannot have both directread and prefercached query parameters")
@@ -561,11 +562,11 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqParams := getRequestParameters(ginCtx.Request)
 
 	// Skip the stat check for object availability if either disableStat or skipstat is set
-	skipStat := reqParams.Has(utils.QuerySkipStat.String()) || !param.Director_EnableStat.GetBool()
+	skipStat := reqParams.Has(pelican_url.QuerySkipStat) || !param.Director_EnableStat.GetBool()
 
 	// Include caches in the response if Director.CachesPullFromCaches is enabled
 	// AND prefercached query parameter is set
-	includeCaches := param.Director_CachesPullFromCaches.GetBool() && reqParams.Has(utils.QueryPreferCached.String())
+	includeCaches := param.Director_CachesPullFromCaches.GetBool() && reqParams.Has(pelican_url.QueryPreferCached)
 
 	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
@@ -641,7 +642,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		includeCaches &&
 		ginCtx.Request.Method != http.MethodPut &&
 		ginCtx.Request.Method != "PROPFIND" &&
-		!reqParams.Has(utils.QueryDirectRead.String()) {
+		!reqParams.Has(pelican_url.QueryDirectRead) {
 		if q == nil {
 			q = NewObjectStat()
 		}
@@ -763,7 +764,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// Any client that uses this api that doesn't set directreads can talk directly to an origin
 
 	// Check if we are doing a DirectRead and if it is allowed
-	if reqParams.Has(utils.QueryDirectRead.String()) {
+	if reqParams.Has(pelican_url.QueryDirectRead) {
 		for idx, originAd := range availableAds {
 			if originAd.DirectReads && namespaceAd.Caps.DirectReads {
 				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.PublicRead)
@@ -891,7 +892,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		}
 
 		// Check for the DirectRead query paramater and redirect to the origin if it's set if the origin allows DirectReads
-		if c.Request.URL.Query().Has(utils.QueryDirectRead.String()) {
+		if c.Request.URL.Query().Has(pelican_url.QueryDirectRead) {
 			log.Debugln("directread query parameter detected, redirecting to origin")
 			// We'll redirect to origin here and the origin will decide if it can serve the request (if direct reads are enabled)
 			redirectToOrigin(c)

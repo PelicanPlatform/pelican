@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -82,8 +83,8 @@ func TestFetchRegStatus(t *testing.T) {
 		defer ts.Close()
 		viper.Reset()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{
-			NamespaceRegistrationEndpoint: ts.URL,
+		config.SetFederation(pelican_url.FederationDiscovery{
+			RegistryEndpoint: ts.URL,
 		})
 
 		result, err := FetchRegStatus([]string{"/foo", "/bar"})
@@ -106,8 +107,8 @@ func TestFetchRegStatus(t *testing.T) {
 		defer ts.Close()
 		viper.Reset()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{
-			NamespaceRegistrationEndpoint: ts.URL,
+		config.SetFederation(pelican_url.FederationDiscovery{
+			RegistryEndpoint: ts.URL,
 		})
 
 		_, err := FetchRegStatus([]string{"/foo", "/bar"})
@@ -126,8 +127,8 @@ func TestFetchRegStatus(t *testing.T) {
 		defer ts.Close()
 		viper.Reset()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{
-			NamespaceRegistrationEndpoint: ts.URL,
+		config.SetFederation(pelican_url.FederationDiscovery{
+			RegistryEndpoint: ts.URL,
 		})
 
 		_, err := FetchRegStatus([]string{"/foo", "/bar"})
@@ -143,8 +144,8 @@ func TestWrapExportsByStatus(t *testing.T) {
 	})
 
 	viper.Reset()
-	config.SetFederation(config.FederationDiscovery{
-		NamespaceRegistrationEndpoint: "https://mock-registry.org",
+	config.SetFederation(pelican_url.FederationDiscovery{
+		RegistryEndpoint: "https://mock-registry.org",
 	})
 	registrationsStatus.DeleteAll()
 
@@ -194,8 +195,8 @@ func TestWrapExportsByStatus(t *testing.T) {
 		ts := mockRegistryCheck(t)
 		defer ts.Close()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{
-			NamespaceRegistrationEndpoint: ts.URL,
+		config.SetFederation(pelican_url.FederationDiscovery{
+			RegistryEndpoint: ts.URL,
 		})
 		registrationsStatus.DeleteAll()
 

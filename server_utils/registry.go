@@ -41,7 +41,7 @@ func GetNSIssuerURL(prefix string) (string, error) {
 		return "", errors.New(fmt.Sprintf("the prefix \"%s\" is invalid", prefix))
 	}
 	fedInfo, err := config.GetFederation(context.Background())
-	registryUrlStr := fedInfo.NamespaceRegistrationEndpoint
+	registryUrlStr := fedInfo.RegistryEndpoint
 	if registryUrlStr == "" {
 		if err != nil {
 			return "", err

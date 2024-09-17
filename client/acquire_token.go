@@ -25,8 +25,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"net/url"
-	"os"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -43,6 +41,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	oauth2 "github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -64,7 +63,7 @@ type (
 	// of the process.
 	tokenGenerator struct {
 		DirResp       *server_structs.DirectorResponse
-		Destination   *url.URL
+		Destination   *pelican_url.PelicanURL
 		TokenLocation string
 		TokenName     string
 		IsWrite       bool
@@ -83,7 +82,7 @@ type (
 	}
 )
 
-func newTokenGenerator(dest *url.URL, dirResp *server_structs.DirectorResponse, isWrite bool, enableAcquire bool) *tokenGenerator {
+func newTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, isWrite bool, enableAcquire bool) *tokenGenerator {
 	return &tokenGenerator{
 		DirResp:       dirResp,
 		Destination:   dest,
@@ -553,7 +552,7 @@ func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 
 // Given a URL and a director Response, attempt to acquire a valid
 // token for that URL.
-func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) (string, error) {
+func AcquireToken(dest string, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) (string, error) {
 
 	log.Debugln("Acquiring a token from configuration and OAuth2")
 
@@ -641,7 +640,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 	var acceptableToken *config.TokenEntry = nil
 	acceptableUnexpiredToken := ""
 	for idx, token := range prefixEntry.Tokens {
-		if !tokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
+		if !tokenIsAcceptable(token.AccessToken, dest, dirResp, opts) {
 			continue
 		}
 		if acceptableToken == nil {
@@ -719,7 +718,7 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 			log.Warningln("Failed to save new token to configuration file:", err)
 		}
 
-		if token, err = oauth2.AcquireToken(issuer, prefixEntry, dirResp, destination.Path, opts); err != nil {
+		if token, err = oauth2.AcquireToken(issuer, prefixEntry, dirResp, dest, opts); err != nil {
 			return "", err
 		}
 	} else if err != nil {

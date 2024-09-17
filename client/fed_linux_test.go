@@ -23,6 +23,7 @@ package client_test
 import (
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -38,6 +39,7 @@ import (
 	config "github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -49,6 +51,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	server_utils.ResetOriginExports()
 
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
 
 	te, err := client.NewTransferEngine(fed.Ctx)
 	require.NoError(t, err)
@@ -124,20 +128,20 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
-			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			uploadUrl := fmt.Sprintf("pelican://%s%s/%s/%s", discoveryUrl.Host,
 				export.FederationPrefix, "osdf_osdf", dirName)
 
 			// Upload the file with PUT
-			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
+			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadUrl, true, client.WithTokenLocation(tempToken.Name()))
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsUpload)
 
 			// Download the files we just uploaded
 			var transferDetailsDownload []client.TransferResults
 			if export.Capabilities.PublicReads {
-				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true)
+				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadUrl, t.TempDir(), true)
 			} else {
-				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
+				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadUrl, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
@@ -151,22 +155,21 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			require.NoError(t, err)
 		}()
 		assert.NoError(t, err)
+
+		oldHost, err := pelican_url.SetOsdfDiscoveryHost(discoveryUrl.String())
+		require.NoError(t, err)
+		defer func() {
+			_, _ = pelican_url.SetOsdfDiscoveryHost(oldHost)
+		}()
+
 		for _, export := range fed.Exports {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
-			uploadURL := fmt.Sprintf("osdf:///%s/%s/%s", export.FederationPrefix, "osdf_osdf", dirName)
-			hostname := fmt.Sprintf("%v:%v", param.Server_WebHost.GetString(), param.Server_WebPort.GetInt())
-
-			// Set our metadata values in config since that is what this url scheme - prefix combo does in handle_http
-			metadata, err := config.DiscoverUrlFederation(fed.Ctx, "https://"+hostname)
-			assert.NoError(t, err)
-			viper.Set("Federation.DirectorUrl", metadata.DirectorEndpoint)
-			viper.Set("Federation.RegistryUrl", metadata.NamespaceRegistrationEndpoint)
-			viper.Set("Federation.DiscoveryUrl", hostname)
+			uploadUrl := fmt.Sprintf("osdf://%s/%s/%s", export.FederationPrefix, "osdf_osdf", dirName)
 
 			// Upload the file with PUT
-			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
+			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadUrl, true, client.WithTokenLocation(tempToken.Name()))
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsUpload)
 
@@ -174,9 +177,9 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			tmpDir := t.TempDir()
 			var transferDetailsDownload []client.TransferResults
 			if export.Capabilities.PublicReads {
-				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, tmpDir, true)
+				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadUrl, tmpDir, true)
 			} else {
-				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, tmpDir, true, client.WithTokenLocation(tempToken.Name()))
+				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadUrl, tmpDir, true, client.WithTokenLocation(tempToken.Name()))
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
@@ -195,19 +198,19 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			// Set path for object to upload/download
 			tempPath := tempDir
 			dirName := filepath.Base(tempPath)
-			uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			uploadUrl := fmt.Sprintf("pelican://%s%s/%s/%s", discoveryUrl.Host,
 				export.FederationPrefix, "osdf_osdf", dirName)
 			// Upload the file with PUT
-			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()))
+			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadUrl, true, client.WithTokenLocation(tempToken.Name()))
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsUpload)
 
 			// Download the files we just uploaded
 			var transferDetailsDownload []client.TransferResults
 			if export.Capabilities.PublicReads {
-				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true)
+				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadUrl, t.TempDir(), true)
 			} else {
-				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
+				transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadUrl, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
