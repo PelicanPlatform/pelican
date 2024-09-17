@@ -244,7 +244,6 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	// Use a valid URL, then replace the scheme
 	pUrl, err = pelican_url.Parse("renamed.handle1+osdf:///user/ligo/frames", nil, nil)
 	assert.NoError(t, err)
 	token = newTokenGenerator(pUrl, &ligoDirResp, false, false)
@@ -324,7 +323,7 @@ func TestGetToken(t *testing.T) {
 	// Check that we haven't regressed on our error messages
 	token = newTokenGenerator(pUrl, &dirResp, true, false)
 	_, err = token.get()
-	assert.EqualError(t, err, "credential is required for osdf:///user/foo but was not discovered")
+	assert.EqualError(t, err, "credential is required for osdf:///user/ligo/frames but was not discovered")
 }
 
 // TestGetTokenName tests getTokenName
