@@ -1140,7 +1140,6 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		callback:       tc.callback,
 		skipAcquire:    tc.skipAcquire,
 		syncLevel:      tc.syncLevel,
-		tokenLocation:  tc.tokenLocation,
 		upload:         upload,
 		uuid:           id,
 		project:        project,
@@ -1200,8 +1199,8 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 
 		// The director response may change if it's given a token; let's repeat the query.
-		if tj.token != "" {
-			dirResp, err = GetDirectorInfoForPath(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload, remoteUrl.RawQuery, tj.token)
+		if contents != "" {
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload, remoteUrl.RawQuery, contents)
 		}
 	}
 
