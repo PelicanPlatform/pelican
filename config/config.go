@@ -326,7 +326,6 @@ func wrapWithHttpsIfNeeded(urlStr string) string {
 	return urlStr
 }
 
-
 // Global implementation of Discover Federation, outside any caching or
 // delayed discovery
 func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.FederationDiscovery, err error) {
