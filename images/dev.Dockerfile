@@ -68,7 +68,7 @@ ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/ma
 RUN \
     git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
     cd xrdcl-pelican && \
-    git reset cbd6850 --hard && \
+    git checkout v0.9.4 && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make && make install
