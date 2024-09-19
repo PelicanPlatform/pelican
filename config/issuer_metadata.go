@@ -29,6 +29,7 @@ import (
 
 type OauthIssuer struct {
 	Issuer          string   `json:"issuer"`
+	JwksUri         string   `json:"jwks_uri"`
 	AuthURL         string   `json:"authorization_endpoint"`
 	DeviceAuthURL   string   `json:"device_authorization_endpoint"`
 	TokenURL        string   `json:"token_endpoint"`
