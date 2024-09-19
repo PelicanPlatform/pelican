@@ -89,7 +89,7 @@ func CreateSharingUrl(ctx context.Context, objectUrl *url.URL, isWrite bool) (st
 	objectUrl.Path = "/" + strings.TrimPrefix(objectUrl.Path, "/")
 
 	log.Debugln("Will query director for path", objectUrl.Path)
-	dirResp, err := queryDirector(ctx, "GET", objectUrl.Path, directorUrl)
+	dirResp, err := queryDirector(ctx, "GET", objectUrl.Path, directorUrl, "")
 	if err != nil {
 		log.Errorln("Error while querying the Director:", err)
 		return "", errors.Wrapf(err, "Error while querying the director at %s", directorUrl)

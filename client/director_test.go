@@ -103,7 +103,7 @@ func TestQueryDirector(t *testing.T) {
 	defer server.Close()
 
 	// Call QueryDirector with the test server URL and a source path
-	actualResp, err := queryDirector(context.Background(), "GET", "/foo/bar", server.URL)
+	actualResp, err := queryDirector(context.Background(), "GET", "/foo/bar", server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			_, err := GetDirectorInfoForPath(ctx, tt.resourcePath, tt.directorUrl, tt.isPut, tt.query)
+			_, err := GetDirectorInfoForPath(ctx, tt.resourcePath, tt.directorUrl, tt.isPut, tt.query, "")
 			if tt.expectedError != "" {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedError)

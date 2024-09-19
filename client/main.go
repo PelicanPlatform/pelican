@@ -94,7 +94,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return nil, errors.Wrap(err, "Failed to generate pelicanURL object")
 	}
 
-	dirResp, err := GetDirectorInfoForPath(ctx, destUri.Path, pelicanURL.directorUrl, false, "")
+	dirResp, err := GetDirectorInfoForPath(ctx, destUri.Path, pelicanURL.directorUrl, false, "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func GetObjectServerHostnames(ctx context.Context, testFile string) (urls []stri
 		return
 	}
 
-	parsedDirResp, err := GetDirectorInfoForPath(ctx, testFile, fedInfo.DirectorEndpoint, false, "")
+	parsedDirResp, err := GetDirectorInfoForPath(ctx, testFile, fedInfo.DirectorEndpoint, false, "", "")
 	if err != nil {
 		return
 	}
@@ -275,7 +275,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		return nil, errors.Wrap(err, "failed to generate pelicanURL object")
 	}
 
-	dirResp, err := GetDirectorInfoForPath(ctx, remoteObjectUrl.Path, pelicanURL.directorUrl, false, "")
+	dirResp, err := GetDirectorInfoForPath(ctx, remoteObjectUrl.Path, pelicanURL.directorUrl, false, "", "")
 	if err != nil {
 		return nil, err
 	}

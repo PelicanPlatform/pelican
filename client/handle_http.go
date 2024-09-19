@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -87,10 +88,14 @@ var (
 		},
 	)
 
+	stoppedTransferDebugLine sync.Once
+
 	PelicanError error_codes.PelicanError
 )
 
 type (
+	logFields string
+
 	classAd string
 
 	cacheItem struct {
@@ -234,6 +239,8 @@ type (
 		localPath      string
 		upload         bool
 		recursive      bool
+		skipAcquire    bool
+		syncLevel      SyncLevel  // Policy for handling synchronization when the destination exists
 		prefObjServers []*url.URL // holds any client-requested caches/origins
 		dirResp        server_structs.DirectorResponse
 		directorUrl    string
@@ -253,6 +260,9 @@ type (
 		jobId uuid.UUID
 		file  *transferFile
 	}
+
+	// Different types of synchronization for recursize transfers
+	SyncLevel int
 
 	// An object able to process transfer jobs.
 	TransferEngine struct {
@@ -286,9 +296,10 @@ type (
 		cancel         context.CancelFunc
 		callback       TransferCallbackFunc
 		engine         *TransferEngine
-		skipAcquire    bool   // Enable/disable the token acquisition logic.  Defaults to acquiring a token
-		tokenLocation  string // Location of a token file to use for transfers
-		token          string // Token that should be used for transfers
+		skipAcquire    bool      // Enable/disable the token acquisition logic.  Defaults to acquiring a token
+		syncLevel      SyncLevel // Policy for the client to synchronize data
+		tokenLocation  string    // Location of a token file to use for transfers
+		token          string    // Token that should be used for transfers
 		work           chan *TransferJob
 		closed         bool
 		prefObjServers []*url.URL // holds any client-requested caches/origins
@@ -303,6 +314,7 @@ type (
 	identTransferOptionTokenLocation struct{}
 	identTransferOptionAcquireToken  struct{}
 	identTransferOptionToken         struct{}
+	identTransferOptionSynchronize   struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -319,6 +331,10 @@ const (
 
 	projectName classAd = "ProjectName"
 	jobId       classAd = "GlobalJobId"
+
+	SyncNone  = iota // When synchronizing, always re-transfer, regardless of existence at destination.
+	SyncExist        // Skip synchronization transfer if the destination exists
+	SyncSize         // Skip synchronization transfer if the destination exists and matches the current source size
 )
 
 // The progress container object creates several
@@ -628,7 +644,7 @@ func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanU
 		}
 	} else if scheme == "" {
 		// If we don't have a url scheme, then our metadata information should be in the config
-		log.Debugln("No url scheme detected, getting metadata information from configuration")
+		log.Debugln("No url scheme detected for", remoteUrl.String(), ", getting metadata information from configuration")
 		if fedInfo, err := config.GetFederation(te.ctx); err == nil {
 			pelicanURL.directorUrl = fedInfo.DirectorEndpoint
 		} else {
@@ -737,6 +753,14 @@ func WithAcquireToken(enable bool) TransferOption {
 	return option.New(identTransferOptionAcquireToken{}, enable)
 }
 
+// Create an option to specify the object synchronization level
+//
+// The synchronization level specifies what to do if the destination
+// object already exists.
+func WithSynchronize(level SyncLevel) TransferOption {
+	return option.New(identTransferOptionSynchronize{}, level)
+}
+
 // Create a new client to work with an engine
 func (te *TransferEngine) NewClient(options ...TransferOption) (client *TransferClient, err error) {
 	log.Debugln("Making new clients")
@@ -765,6 +789,8 @@ func (te *TransferEngine) NewClient(options ...TransferOption) (client *Transfer
 			client.skipAcquire = !option.Value().(bool)
 		case identTransferOptionToken{}:
 			client.token = option.Value().(string)
+		case identTransferOptionSynchronize{}:
+			client.syncLevel = option.Value().(SyncLevel)
 		}
 	}
 	func() {
@@ -805,6 +831,37 @@ func (te *TransferEngine) Close() {
 	select {
 	case <-te.ctx.Done():
 	case te.closeChan <- true:
+	}
+}
+
+// If we've detected a job is done, clean up the active job state map
+func (te *TransferEngine) finishJob(activeJobs *map[uuid.UUID][]*TransferJob, job *TransferJob, id uuid.UUID) {
+	if len((*activeJobs)[id]) == 1 {
+		log.Debugln("Job", job.ID(), "is done for client", id.String(), "which has no active jobs remaining")
+		// Delete the job from the list of active jobs
+		delete(*activeJobs, id)
+		func() {
+			te.clientLock.Lock()
+			defer te.clientLock.Unlock()
+			// If the client is closed and there are no remaining
+			// jobs for that client, we can close the results channel
+			// for the client -- a clean shutdown of the client.
+			if te.workMap[id] == nil {
+				close(te.resultsMap[id])
+				log.Debugln("Client", id.String(), "has no more work and is finished shutting down")
+			}
+		}()
+	} else {
+		// Scan through the list of active jobs, removing the recently
+		// completed one and saving the updated list.
+		newJobList := make([]*TransferJob, 0, len((*activeJobs)[id]))
+		for _, oldJob := range (*activeJobs)[id] {
+			if oldJob.uuid != job.uuid {
+				newJobList = append(newJobList, oldJob)
+			}
+		}
+		(*activeJobs)[id] = newJobList
+		log.Debugln("Job", job.ID(), "is done for client", id.String(), " which has", len(newJobList), "jobs remaining")
 	}
 }
 
@@ -938,33 +995,7 @@ func (te *TransferEngine) runMux() error {
 			// Test to see if the transfer job is done (true if job-to-file translation
 			// has completed and there are no remaining active transfers)
 			if job.lookupDone.Load() && job.activeXfer.Load() == 0 {
-				if len(activeJobs[id]) == 1 {
-					log.Debugln("Job", job.ID(), "is done for client", id.String(), " which has no active jobs remaining")
-					// Delete the job from the list of active jobs
-					delete(activeJobs, id)
-					func() {
-						te.clientLock.Lock()
-						defer te.clientLock.Unlock()
-						// If the client is closed and there are no remaining
-						// jobs for that client, we can close the results channel
-						// for the client -- a clean shutdown of the client.
-						if te.workMap[id] == nil {
-							close(te.resultsMap[id])
-							log.Debugln("Client", id.String(), "has no more work and is finished shutting down")
-						}
-					}()
-				} else {
-					// Scan through the list of active jobs, removing the recently
-					// completed one and saving the updated list.
-					newJobList := make([]*TransferJob, 0, len(activeJobs[id]))
-					for _, oldJob := range activeJobs[id] {
-						if oldJob.uuid != job.uuid {
-							newJobList = append(newJobList, oldJob)
-						}
-					}
-					activeJobs[id] = newJobList
-					log.Debugln("Job", job.ID(), "is done for client", id.String(), " which has ", len(newJobList), "jobs remaining")
-				}
+				te.finishJob(&activeJobs, job, id)
 			}
 			if len(tmpResults[id]) == 1 {
 				// The last result back to this client has been sent; delete the
@@ -1008,9 +1039,9 @@ func (te *TransferEngine) runMux() error {
 			// Notification that a job has been processed into files (or failed)
 			job := recv.Interface().(*clientTransferJob)
 			job.job.lookupDone.Store(true)
-			// If no transfers were created and we have an error, the job is no
+			// If no transfers were created or we have an error, the job is no
 			// longer active
-			if job.job.lookupErr != nil && job.job.totalXfer == 0 {
+			if job.job.lookupErr != nil || job.job.totalXfer == 0 {
 				// Remove this job from the list of active jobs for the client.
 				activeJobs[job.uuid] = slices.DeleteFunc(activeJobs[job.uuid], func(oldJob *TransferJob) bool {
 					return oldJob.uuid == job.job.uuid
@@ -1026,6 +1057,10 @@ func (te *TransferEngine) runMux() error {
 						}
 					}()
 				}
+			} else if job.job.activeXfer.Load() == 0 {
+				// Transfer jobs were created but they all completed before the recursive directory
+				// walk finished.
+				te.finishJob(&activeJobs, job.job, job.uuid)
 			}
 		} else if chosen == len(workMap)+len(resultsMap)+5 {
 			// Notification that the engine should shut down
@@ -1103,6 +1138,8 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		localPath:      localPath,
 		remoteURL:      &copyUrl,
 		callback:       tc.callback,
+		skipAcquire:    tc.skipAcquire,
+		syncLevel:      tc.syncLevel,
 		upload:         upload,
 		uuid:           id,
 		project:        project,
@@ -1140,11 +1177,13 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.token.EnableAcquire = option.Value().(bool)
 		case identTransferOptionToken{}:
 			tj.token.SetToken(option.Value().(string))
+		case identTransferOptionSynchronize{}:
+			tj.syncLevel = option.Value().(SyncLevel)
 		}
 	}
 
 	tj.directorUrl = pelicanURL.directorUrl
-	dirResp, err := GetDirectorInfoForPath(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload, remoteUrl.RawQuery)
+	dirResp, err := GetDirectorInfoForPath(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload, remoteUrl.RawQuery, "")
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1157,6 +1196,18 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		contents, err := tj.token.get()
 		if err != nil || contents == "" {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
+		}
+
+		// The director response may change if it's given a token; let's repeat the query.
+		if contents != "" {
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload, remoteUrl.RawQuery, contents)
+			if err != nil {
+				log.Errorln(err)
+				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
+				return nil, err
+			}
+			tj.dirResp = dirResp
+			tj.token.DirResp = &dirResp
 		}
 	}
 
@@ -1702,13 +1753,18 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		transferEndpointUrl := *transferEndpoint.Url
 		transferEndpointUrl.Path = transfer.remoteURL.Path
 		transferEndpoint.Url = &transferEndpointUrl
+		fields := log.Fields{
+			"url": transferEndpoint.Url.String(),
+			"job": transfer.job.ID(),
+		}
+		ctx := context.WithValue(transfer.ctx, logFields("fields"), fields)
 		transferStartTime = time.Now() // Update start time for this attempt
 		tokenContents := ""
 		if transfer.token != nil {
 			tokenContents, _ = transfer.token.get()
 		}
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, err := downloadHTTP(
-			transfer.ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, tokenContents, transfer.project,
+			ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, tokenContents, transfer.project,
 		)
 		endTime := time.Now()
 		if cacheAge >= 0 {
@@ -1722,7 +1778,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		downloaded += attemptDownloaded
 
 		if err != nil {
-			log.Debugln("Failed to download from", transferEndpoint.Url, ":", err)
+			log.WithFields(fields).Debugln("Failed to download from", transferEndpoint.Url, ":", err)
 			var ope *net.OpError
 			var cse *ConnectionSetupError
 			proxyStr, _ := os.LookupEnv("http_proxy")
@@ -1761,7 +1817,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		transferResults.Attempts = append(transferResults.Attempts, attempt)
 
 		if err == nil { // Success
-			log.Debugln("Downloaded bytes:", downloaded)
+			log.WithFields(fields).Debugln("Downloaded bytes:", downloaded)
 			success = true
 			break
 		}
@@ -1792,9 +1848,13 @@ func parseTransferStatus(status string) (int, string) {
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
 func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, totalSize int64, token string, project string) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, err error) {
+	fields, ok := ctx.Value(logFields("fields")).(log.Fields)
+	if !ok {
+		fields = log.Fields{}
+	}
 	defer func() {
 		if r := recover(); r != nil {
-			log.Errorln("Panic occurred in downloadHTTP:", r)
+			log.WithFields(fields).Errorln("Panic occurred in downloadHTTP:", r)
 			ret := fmt.Sprintf("Unrecoverable error (panic) occurred in downloadHTTP: %v", r)
 			err = errors.New(ret)
 		}
@@ -1854,8 +1914,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	log.Debugln("Attempting to download from:", transferUrl.Host)
-	log.Debugln("Transfer URL String:", transferUrl.String())
+	log.WithFields(fields).Debugln("Attempting to download from:", transferUrl.Host)
+	log.WithFields(fields).Debugln("Transfer URL String:", transferUrl.String())
 	var req *grab.Request
 	var unpacker *autoUnpacker
 	if transfer.PackOption != "" {
@@ -1905,7 +1965,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	downloadLimit := param.Client_MinimumDownloadSpeed.GetInt()
 
 	// Start the transfer
-	log.Debugln("Starting the HTTP transfer...")
+	log.WithFields(fields).Debugln("Starting the HTTP transfer...")
 	downloadStart := time.Now()
 	resp := client.Do(req)
 	// Check the error real quick
@@ -1916,7 +1976,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			if errors.Is(err, grab.ErrBadLength) {
 				err = fmt.Errorf("local copy of file is larger than remote copy %w", grab.ErrBadLength)
 			} else if errors.As(err, &sce) {
-				log.Debugln("Creating a client status code error")
+				log.WithFields(fields).Debugln("Creating a client status code error")
 				sce2 := StatusCodeError(sce)
 				err = &sce2
 			} else if errors.As(err, &cam) && cam == syscall.ENOMEM {
@@ -1925,7 +1985,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			} else {
 				err = &ConnectionSetupError{Err: err}
 			}
-			log.Errorln("Failed to download:", err)
+			log.WithFields(fields).Errorln("Failed to download:", err)
 			return
 		}
 	}
@@ -1935,13 +1995,13 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		if ageSec, err := strconv.Atoi(ageStr); err == nil {
 			cacheAge = time.Duration(ageSec) * time.Second
 		} else {
-			log.Debugf("Server at %s gave unparseable Age header (%s) in response: %s", transfer.Url.Host, ageStr, err.Error())
+			log.WithFields(fields).Debugf("Server at %s gave unparseable Age header (%s) in response: %s", transfer.Url.Host, ageStr, err.Error())
 		}
 	}
 	if cacheAge == 0 {
-		log.Debugln("Server at", transfer.Url.Host, "had a cache miss")
+		log.WithFields(fields).Debugln("Server at", transfer.Url.Host, "had a cache miss")
 	} else if cacheAge > 0 {
-		log.Debugln("Server at", transfer.Url.Host, "had a cache hit with data age", cacheAge.String())
+		log.WithFields(fields).Debugln("Server at", transfer.Url.Host, "had a cache hit with data age", cacheAge.String())
 	}
 
 	// Size of the download
@@ -1956,7 +2016,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		var headResponse *http.Response
 		headResponse, err = headClient.Do(headRequest)
 		if err != nil {
-			log.Errorln("Could not successfully get response for HEAD request")
+			log.WithFields(fields).Errorln("Could not successfully get response for HEAD request")
 			err = errors.Wrap(err, "Could not determine the size of the remote object")
 			return
 		}
@@ -1965,7 +2025,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		if contentLengthStr != "" {
 			totalSize, err = strconv.ParseInt(contentLengthStr, 10, 64)
 			if err != nil {
-				log.Errorln("problem converting content-length to an int:", err)
+				log.WithFields(fields).Errorln("problem converting content-length to an int:", err)
 				totalSize = 0
 			}
 		}
@@ -1977,8 +2037,10 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	stoppedTransferTimeout := compatToDuration(param.Client_StoppedTransferTimeout.GetDuration(), "Client.StoppedTranferTimeout")
 	slowTransferRampupTime := compatToDuration(param.Client_SlowTransferRampupTime.GetDuration(), "Client.SlowTransferRampupTime")
 	slowTransferWindow := compatToDuration(param.Client_SlowTransferWindow.GetDuration(), "Client.SlowTransferWindow")
-	log.Debugf("Stopped transfer timeout is %s; slow transfer ramp-up is %s; slow transfer look-back window is %s",
-		stoppedTransferTimeout.String(), slowTransferRampupTime.String(), slowTransferWindow.String())
+	stoppedTransferDebugLine.Do(func() {
+		log.WithFields(fields).Debugf("Stopped transfer timeout is %s; slow transfer ramp-up is %s; slow transfer look-back window is %s",
+			stoppedTransferTimeout.String(), slowTransferRampupTime.String(), slowTransferWindow.String())
+	})
 	startBelowLimit := time.Time{}
 	var noProgressStartTime time.Time
 	var lastBytesComplete int64
@@ -2015,7 +2077,7 @@ Loop:
 						StoppedTime:      time.Since(noProgressStartTime),
 						CacheHit:         cacheAge > 0,
 					}
-					log.Errorln(err.Error())
+					log.WithFields(fields).Errorln(err.Error())
 					return
 				}
 			} else {
@@ -2040,7 +2102,7 @@ Loop:
 					warning := []byte("Warning! Downloading too slow...\n")
 					status, err := getProgressContainer().Write(warning)
 					if err != nil {
-						log.Errorln("Problem displaying slow message", err, status)
+						log.WithFields(fields).Errorln("Problem displaying slow message", err, status)
 						continue
 					}
 					startBelowLimit = time.Now()
@@ -2052,7 +2114,7 @@ Loop:
 				// The download is below the threshold for more than `SlowTransferWindow` seconds, cancel the download
 				cancel()
 
-				log.Errorf("Cancelled: Download speed of %s/s is below the limit of %s/s", ByteCountSI(int64(resp.BytesPerSecond())), ByteCountSI(int64(downloadLimit)))
+				log.WithFields(fields).Errorf("Cancelled: Download speed of %s/s is below the limit of %s/s", ByteCountSI(int64(resp.BytesPerSecond())), ByteCountSI(int64(downloadLimit)))
 
 				err = &SlowTransferError{
 					BytesTransferred: resp.BytesComplete(),
@@ -2083,7 +2145,7 @@ Loop:
 			err = &ConnectionSetupError{URL: resp.Request.URL().String()}
 			return
 		}
-		log.Debugln("Got error from HTTP download", err)
+		log.WithFields(fields).Debugln("Got error from HTTP download", err)
 		return
 	} else {
 		// Check the trailers for any error information
@@ -2091,7 +2153,7 @@ Loop:
 		if errorStatus := trailer.Get("X-Transfer-Status"); errorStatus != "" {
 			statusCode, statusText := parseTransferStatus(errorStatus)
 			if statusCode != 200 {
-				log.Debugln("Got error from file transfer")
+				log.WithFields(fields).Debugln("Got error from file transfer")
 				err = errors.New("transfer error: " + statusText)
 				return
 			}
@@ -2100,7 +2162,7 @@ Loop:
 	// Valid responses include 200 and 206.  The latter occurs if the download was resumed after a
 	// prior attempt.
 	if resp.HTTPResponse.StatusCode != 200 && resp.HTTPResponse.StatusCode != 206 {
-		log.Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
+		log.WithFields(fields).Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
 		return 0, 0, -1, serverVersion, &HttpErrResp{resp.HTTPResponse.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s",
 			resp.HTTPResponse.StatusCode, resp.Err().Error())}
 	}
@@ -2112,7 +2174,7 @@ Loop:
 		}
 	}
 
-	log.Debugln("HTTP Transfer was successful")
+	log.WithFields(fields).Debugln("HTTP Transfer was successful")
 	return
 }
 
@@ -2410,6 +2472,52 @@ func createWebDavClient(collectionsUrl *url.URL, token *tokenGenerator, project 
 	return
 }
 
+// Depending on the synchronization policy, decide if a object download should be skipped
+func skipDownload(syncLevel SyncLevel, remoteInfo fs.FileInfo, localPath string) bool {
+	if syncLevel == SyncNone {
+		return false
+	}
+	localInfo, err := os.Stat(localPath)
+	if err != nil {
+		return false
+	}
+	switch syncLevel {
+	case SyncExist:
+		return true
+	case SyncSize:
+		return localInfo.Size() == remoteInfo.Size()
+	}
+	return false
+}
+
+// Depending on the synchronization policy, decide if the upload should be skipped
+func skipUpload(job *TransferJob, localPath, remotePath string) bool {
+	if job.syncLevel == SyncNone {
+		return false
+	}
+
+	localInfo, err := os.Stat(localPath)
+	if err != nil {
+		return false
+	}
+
+	remoteUrl := url.URL{
+		Path: remotePath,
+	}
+	remoteInfo, err := statHttp(&remoteUrl, job.dirResp, job.token)
+	if err != nil {
+		return false
+	}
+
+	switch job.syncLevel {
+	case SyncExist:
+		return true
+	case SyncSize:
+		return localInfo.Size() == remoteInfo.Size
+	}
+	return false
+}
+
 // Walk a remote collection in a WebDAV server, emitting the files discovered
 func (te *TransferEngine) walkDirDownload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, url *url.URL) error {
 	// Create the client to walk the filesystem
@@ -2444,6 +2552,8 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 			if err != nil {
 				return err
 			}
+		} else if localPath := path.Join(job.job.localPath, localBase, info.Name()); skipDownload(job.job.syncLevel, info, localPath) {
+			log.Infoln("Skipping download of object", newPath, "as it already exists at", localPath)
 		} else {
 			job.job.activeXfer.Add(1)
 			select {
@@ -2459,19 +2569,20 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					engine:     te,
 					remoteURL:  &url.URL{Path: newPath},
 					packOption: transfers[0].PackOption,
-					localPath:  path.Join(job.job.localPath, localBase, info.Name()),
+					localPath:  localPath,
 					upload:     job.job.upload,
 					token:      job.job.token,
 					attempts:   transfers,
 				},
 			}:
+				job.job.totalXfer += 1
 			}
 		}
 	}
 	return nil
 }
 
-// Walk a local directory structure, writing all discovered files to the files channel
+// Helper function for walkDirUpload; not to be called directly
 func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []transferAttemptDetails, files chan *clientTransferFile, localPath string) error {
 	if job.job.ctx.Err() != nil {
 		return job.job.ctx.Err()
@@ -2491,9 +2602,9 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 			if err != nil {
 				return err
 			}
+		} else if remotePath := path.Join(job.job.remoteURL.Path, strings.TrimPrefix(newPath, job.job.localPath)); skipUpload(job.job, newPath, remotePath) {
+			log.Infoln("Skipping upload of object", remotePath, "as it already exists at the destination")
 		} else if info.Type().IsRegular() {
-			// It is a normal file; strip off the path prefix and append the destination prefix
-			remotePath := path.Join(job.job.remoteURL.Path, strings.TrimPrefix(newPath, job.job.localPath))
 			job.job.activeXfer.Add(1)
 			select {
 			case <-job.job.ctx.Done():
@@ -2514,6 +2625,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 					attempts:   transfers,
 				},
 			}:
+				job.job.totalXfer += 1
 			}
 		}
 	}
@@ -2654,15 +2766,6 @@ func statHttp(dest *url.URL, dirResp server_structs.DirectorResponse, token *tok
 					}
 				}
 				log.Errorln("Failed to get HTTP response:", err)
-				resultsChan <- statResults{FileInfo{}, err}
-				return
-			}
-
-			if info.Size == 0 {
-				if info.IsCollection {
-					resultsChan <- statResults{info, nil}
-				}
-				err = errors.New("Stat response did not include a size")
 				resultsChan <- statResults{FileInfo{}, err}
 				return
 			}
