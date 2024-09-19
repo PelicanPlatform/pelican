@@ -1284,7 +1284,8 @@ description: |+
   - "random": Sorts caches randomly.
   - "adaptive": Sorts caches according to stochastically-generated weights that consider a combination of factors,
       including a cache's distance from the client, its IO load, and whether the cache already has the requested object.
-      See details at https://github.com/PelicanPlatform/pelican/discussions/1198
+      See details at https://github.com/PelicanPlatform/pelican/discussions/1198.  Note that if `Director.CheckCachePresence`
+      is set to false, then the adaptive algorithm cannot use the cache locality information.
 type: string
 default: distance
 components: ["director"]
@@ -1376,7 +1377,7 @@ components: ["director"]
 ---
 name: Director.CheckCachePresence
 description: |+
-  Before redirecting a client to a cache, query the origin to see if the object is present
+  Before redirecting a client to a cache, query the cache to see if the object is present
   at the cache.
 
   Enabling this option improves the cache selection algorithm, allowing the director
