@@ -1390,7 +1390,7 @@ name: Director.StatTimeout
 description: |+
   The timeout for a single `stat` request.
 type: duration
-default: 200ms
+default: 2000ms
 components: ["director"]
 ---
 name: Director.StatConcurrencyLimit
