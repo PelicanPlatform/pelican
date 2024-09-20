@@ -70,6 +70,7 @@ func parseServerAdFromTopology(server server_structs.TopoServer, serverType serv
 		serverAd.Writes = false
 		serverAd.Listings = false
 		serverAd.DirectReads = false
+		serverAd.PublicReads = true
 	} else {
 		// Until we consolidate ServerAd capabilities with NamespaceAdV2 capabilities, we'll keep setting the top-level
 		// ServerAd capabilities. Eventually we should replace with the actual caps struct.
