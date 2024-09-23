@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -105,7 +106,7 @@ func TestSharingUrl(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Call QueryDirector with the test server URL and a source path
-	testObj := "/test/foo/bar"
+	testObj, err := url.Parse("/test/foo/bar")
 	require.NoError(t, err)
 	os.Setenv(config.GetPreferredPrefix().String()+"_SKIP_TERMINAL_CHECK", "true")
 	token, err := client.CreateSharingUrl(context.Background(), testObj, true)

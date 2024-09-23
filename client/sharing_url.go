@@ -20,6 +20,7 @@ package client
 
 import (
 	"context"
+	"net/url"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -27,8 +28,8 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 )
 
-func CreateSharingUrl(ctx context.Context, object string, isWrite bool) (string, error) {
-	pUrl, err := ParseRemoteAsPUrl(ctx, object)
+func CreateSharingUrl(ctx context.Context, objectUrl *url.URL, isWrite bool) (string, error) {
+	pUrl, err := ParseRemoteAsPUrl(ctx, objectUrl.String())
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to parse remote path")
 	}
