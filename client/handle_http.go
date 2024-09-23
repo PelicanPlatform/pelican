@@ -988,9 +988,14 @@ func (te *TransferEngine) runJobHandler() error {
 //
 // The returned object can be further customized as desired.
 // This function does not "submit" the job for execution.
-func (tc *TransferClient) NewTransferJob(ctx context.Context, pUrl *pelican_url.PelicanURL, localPath string, upload bool, recursive bool, options ...TransferOption) (tj *TransferJob, err error) {
+func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL, localPath string, upload bool, recursive bool, options ...TransferOption) (tj *TransferJob, err error) {
 
 	id, err := uuid.NewV7()
+	if err != nil {
+		return
+	}
+
+	pUrl, err := ParseRemoteAsPUrl(ctx, remoteUrl.String())
 	if err != nil {
 		return
 	}

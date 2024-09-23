@@ -329,7 +329,11 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		}
 	}()
 
-	pUrl, err := ParseRemoteAsPUrl(ctx, remoteDestination)
+	// Parse as a Pelican URL, but without any discovery (that happens when the transfer job is created).
+	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
+	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
+	// but should still send it along.
+	pUrl, err := pelican_url.Parse(remoteDestination, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteDestination)
 	}
@@ -348,7 +352,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := client.NewTransferJob(context.Background(), pUrl, localObject, true, recursive)
+	tj, err := client.NewTransferJob(context.Background(), pUrl.GetRawUrl(), localObject, true, recursive)
 	if err != nil {
 		return
 	}
@@ -385,7 +389,11 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		}
 	}()
 
-	pUrl, err := ParseRemoteAsPUrl(ctx, remoteObject)
+	// Parse as a Pelican URL, but without any discovery (that happens when the transfer job is created).
+	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
+	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
+	// but should still send it along.
+	pUrl, err := pelican_url.Parse(remoteObject, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteObject)
 	}
@@ -420,7 +428,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(context.Background(), pUrl, localDestination, false, recursive)
+	tj, err := tc.NewTransferJob(context.Background(), pUrl.GetRawUrl(), localDestination, false, recursive)
 	if err != nil {
 		return
 	}
