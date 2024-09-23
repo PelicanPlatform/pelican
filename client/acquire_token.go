@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -368,7 +369,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 			opts.Operation = config.TokenSharedWrite
 		}
 		var contents string
-		contents, err = AcquireToken(tg.Destination.Path, *tg.DirResp, opts)
+		contents, err = AcquireToken(tg.Destination.GetRawUrl(), *tg.DirResp, opts)
 		if err == nil && contents != "" {
 			valid, expiry := tokenIsValid(contents)
 			info := tokenInfo{contents, expiry}
@@ -540,7 +541,7 @@ func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 
 // Given a URL and a director Response, attempt to acquire a valid
 // token for that URL.
-func AcquireToken(dest string, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) (string, error) {
+func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) (string, error) {
 
 	log.Debugln("Acquiring a token from configuration and OAuth2")
 
@@ -628,7 +629,7 @@ func AcquireToken(dest string, dirResp server_structs.DirectorResponse, opts con
 	var acceptableToken *config.TokenEntry = nil
 	acceptableUnexpiredToken := ""
 	for idx, token := range prefixEntry.Tokens {
-		if !tokenIsAcceptable(token.AccessToken, dest, dirResp, opts) {
+		if !tokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
 			continue
 		}
 		if acceptableToken == nil {
@@ -706,7 +707,7 @@ func AcquireToken(dest string, dirResp server_structs.DirectorResponse, opts con
 			log.Warningln("Failed to save new token to configuration file:", err)
 		}
 
-		if token, err = oauth2.AcquireToken(issuer, prefixEntry, dirResp, dest, opts); err != nil {
+		if token, err = oauth2.AcquireToken(issuer, prefixEntry, dirResp, destination.Path, opts); err != nil {
 			return "", err
 		}
 	} else if err != nil {
