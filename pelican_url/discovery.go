@@ -404,13 +404,14 @@ func (p *PelicanURL) PopulateFedInfo(opts ...DiscoveryOption) error {
 		}
 	}
 
-	// TODO: Figure out best way to get version into this
-	// var userAgent string
-	// if options.userAgent != "" {
-	// 	userAgent = options.userAgent
-	// } else {
+	var userAgent string
+	if options.userAgent != "" {
+		userAgent = options.userAgent
+	} else {
+		userAgent = "pelican"
+	}
 
-	fedInfo, err := DiscoverFederation(ctx, httpClient, options.userAgent, discoveryUrl)
+	fedInfo, err := DiscoverFederation(ctx, httpClient, userAgent, discoveryUrl)
 	if err != nil {
 		return err
 	}
