@@ -48,7 +48,7 @@ func CreateSharingUrl(ctx context.Context, object string, isWrite bool) (string,
 	if isWrite {
 		opts.Operation = config.TokenSharedWrite
 	}
-	token, err := AcquireToken(pUrl.Path, parsedDirResp, opts)
+	token, err := AcquireToken(pUrl.GetRawUrl(), parsedDirResp, opts)
 	if err != nil {
 		err = errors.Wrap(err, "Failed to acquire token")
 	}

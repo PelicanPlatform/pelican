@@ -162,7 +162,7 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 			if isWrite {
 				opts.Operation = config.TokenWrite
 			}
-			token, err := client.AcquireToken(pUrl.Path, dirResp, opts)
+			token, err := client.AcquireToken(pUrl.GetRawUrl(), dirResp, opts)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get a token:", err)
 				os.Exit(1)
