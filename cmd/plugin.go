@@ -439,7 +439,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				break
 			}
 
-			pUrl, err := client.ParseRemoteAsPUrl(ctx, transfer.url.String())
+			pUrl, err := pelican_url.Parse(transfer.url.String(), []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
 			if err != nil {
 				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return err
@@ -458,7 +458,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
 			}
 
-			urlCopy := *pUrl
+			urlCopy := *(pUrl.GetRawUrl())
 			tj, err = tc.NewTransferJob(context.Background(), &urlCopy, transfer.localFile, upload, recursive, client.WithAcquireToken(false), client.WithCaches(caches...))
 			if err != nil {
 				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)

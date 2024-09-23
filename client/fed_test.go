@@ -709,16 +709,13 @@ func TestNewTransferJob(t *testing.T) {
 	te, err := client.NewTransferEngine(fed.Ctx)
 	require.NoError(t, err)
 
-	tr := config.GetTransport()
-	httpClient := &http.Client{Transport: tr}
-
 	// Test when we have a failure during namespace lookup (here we will get a 404)
 	t.Run("testFailureToGetNamespaceInfo", func(t *testing.T) {
 		tc, err := te.NewClient()
 		assert.NoError(t, err)
 
 		// have a file/namespace that does not exist
-		mockRemoteUrl, err := pelican_url.Parse(fmt.Sprintf("pelican://%s/first/something/file.txt", discoveryUrl.Host), []pelican_url.ParseOption{pelican_url.ShouldDiscover(true)}, []pelican_url.DiscoveryOption{pelican_url.WithClient(httpClient)})
+		mockRemoteUrl, err := url.Parse(fmt.Sprintf("pelican://%s/first/something/file.txt", discoveryUrl.Host))
 		require.NoError(t, err)
 		_, err = tc.NewTransferJob(context.Background(), mockRemoteUrl, "/dest", false, false)
 		require.Error(t, err)
@@ -731,7 +728,7 @@ func TestNewTransferJob(t *testing.T) {
 		assert.NoError(t, err)
 
 		// use our auth required namespace
-		mockRemoteUrl, err := pelican_url.Parse(fmt.Sprintf("pelican://%s/second/namespace/hello_world.txt", discoveryUrl.Host), []pelican_url.ParseOption{pelican_url.ShouldDiscover(true)}, []pelican_url.DiscoveryOption{pelican_url.WithClient(httpClient)})
+		mockRemoteUrl, err := url.Parse(fmt.Sprintf("pelican://%s/second/namespace/hello_world.txt", discoveryUrl.Host))
 		require.NoError(t, err)
 		_, err = tc.NewTransferJob(context.Background(), mockRemoteUrl, "/dest", false, false, client.WithAcquireToken(false))
 		require.Error(t, err)
@@ -742,8 +739,7 @@ func TestNewTransferJob(t *testing.T) {
 	t.Run("testSuccess", func(t *testing.T) {
 		tc, err := te.NewClient()
 		assert.NoError(t, err)
-
-		remoteUrl, err := pelican_url.Parse(fmt.Sprintf("pelican://%s/first/namespace/hello_world.txt", discoveryUrl.Host), []pelican_url.ParseOption{pelican_url.ShouldDiscover(true)}, []pelican_url.DiscoveryOption{pelican_url.WithClient(httpClient)})
+		remoteUrl, err := url.Parse(fmt.Sprintf("pelican://%s/first/namespace/hello_world.txt", discoveryUrl.Host))
 		require.NoError(t, err)
 		_, err = tc.NewTransferJob(context.Background(), remoteUrl, t.TempDir(), false, false)
 		assert.NoError(t, err)
