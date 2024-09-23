@@ -63,7 +63,7 @@ var (
 	progressCtr     *mpb.Progress
 
 	stoppedTransferDebugLine sync.Once
-	
+
 	PelicanError error_codes.PelicanError
 )
 
@@ -2365,7 +2365,7 @@ func skipDownload(syncLevel SyncLevel, remoteInfo fs.FileInfo, localPath string)
 }
 
 // Depending on the synchronization policy, decide if the upload should be skipped
-func skipUpload(job *TransferJob, localPath, remotePath string) bool {
+func skipUpload(job *TransferJob, localPath string, remoteUrl *pelican_url.PelicanURL) bool {
 	if job.syncLevel == SyncNone {
 		return false
 	}
@@ -2375,8 +2375,7 @@ func skipUpload(job *TransferJob, localPath, remotePath string) bool {
 		return false
 	}
 
-	pUrl, err := pelican_url.Parse(remotePath, nil, nil)
-	remoteInfo, err := statHttp(pUrl, job.dirResp, job.token)
+	remoteInfo, err := statHttp(remoteUrl, job.dirResp, job.token)
 	if err != nil {
 		return false
 	}
@@ -2468,14 +2467,20 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 
 	for _, info := range infos {
 		newPath := localPath + "/" + info.Name()
+		remoteUrl, err := pelican_url.Parse(job.job.remoteURL.String(), nil, nil)
+		if err != nil {
+			return err
+		}
+		remoteUrl.Path = path.Join(remoteUrl.Path, strings.TrimPrefix(newPath, job.job.localPath))
+
 		if info.IsDir() {
 			// Recursively call this function to create any nested dir's as well as list their files
 			err := te.walkDirUpload(job, transfers, files, newPath)
 			if err != nil {
 				return err
 			}
-		} else if remotePath := path.Join(job.job.remoteURL.Path, strings.TrimPrefix(newPath, job.job.localPath)); skipUpload(job.job, newPath, remotePath) {
-			log.Infoln("Skipping upload of object", remotePath, "as it already exists at the destination")
+		} else if skipUpload(job.job, newPath, remoteUrl) {
+			log.Infoln("Skipping upload of object", remoteUrl.Path, "as it already exists at the destination")
 		} else if info.Type().IsRegular() {
 			job.job.activeXfer.Add(1)
 			select {
@@ -2489,7 +2494,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 					callback:   job.job.callback,
 					job:        job.job,
 					engine:     te,
-					remoteURL:  &url.URL{Path: remotePath},
+					remoteURL:  &url.URL{Path: remoteUrl.Path},
 					packOption: transfers[0].PackOption,
 					localPath:  newPath,
 					upload:     job.job.upload,
