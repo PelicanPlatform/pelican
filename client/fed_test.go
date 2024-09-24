@@ -841,36 +841,37 @@ func TestObjectList(t *testing.T) {
 // This tests object ls but for an origin that supports listings but with an object store that does not support PROPFIND.
 // We should get a 405 returned. This is a separate test since we need a completely different origin
 func TestObjectList405Error(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
 	test_utils.InitClient(t, nil)
-
-	err := config.InitClient()
-	require.NoError(t, err)
+	
+	var storageName string
 
 	// Set up our http backend so that we can return a 405 on a PROPFIND
 	body := "Hello, World!"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "HEAD" && r.URL.Path == "/test2/hello_world" {
+		if r.Method == "HEAD" && r.URL.Path == storageName {
 			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 			w.WriteHeader(http.StatusOK)
 			return
-		} else if r.Method == "GET" && r.URL.Path == "/test2/hello_world" {
+		} else if r.Method == "GET" && r.URL.Path == storageName {
 			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 			w.WriteHeader(http.StatusPartialContent)
 			_, err := w.Write([]byte(body))
 			require.NoError(t, err)
 			return
-		} else if r.Method == "PROPFIND" && r.URL.Path == "/test2/hello_world" {
+		} else if r.Method == "PROPFIND" && r.URL.Path == storageName {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 		}
 	}))
 	defer srv.Close()
-	viper.Set("Origin.HttpServiceUrl", srv.URL+"/test2")
+	viper.Set("Origin.HttpServiceUrl", srv.URL)
 
-	config.InitConfig()
 	fed := fed_test_utils.NewFedTest(t, httpsOriginConfig)
-	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
+	storageName = fed.Exports[0].StoragePrefix + "/hello_world"
+	discoveryHost := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 
-	_, err = client.DoList(fed.Ctx, "pelican://"+host+"/test/hello_world")
+	_, err := client.DoList(fed.Ctx, "pelican://"+discoveryHost+"/my-prefix/hello_world")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "405: object listings are not supported by the discovered origin")
 }
