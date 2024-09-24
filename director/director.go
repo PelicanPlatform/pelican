@@ -451,7 +451,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	if len(cacheAds) == 0 {
 		for _, originAd := range originAdsWObject {
 			// Find the first origin that enables direct reads as the fallback
-			if originAd.DirectReads {
+			if originAd.Caps.DirectReads {
 				cacheAds = append(cacheAds, originAd)
 				break
 			}
@@ -594,7 +594,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		// Query Origins and check if the object exists
 		q = NewObjectStat()
 		qr := q.Query(context.Background(), reqPath, server_structs.OriginType, 1, 3,
-			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.PublicRead))
+			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.Caps.PublicReads))
 		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
 
 		// For a successful response, we got a list of object URLs.
@@ -729,8 +729,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
 	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
 	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
-	if namespaceAd.Caps.Listings && len(availableAds) > 0 && availableAds[0].Listings {
-		if !namespaceAd.PublicRead && availableAds[0].AuthURL != (url.URL{}) {
+	if namespaceAd.Caps.Listings && len(availableAds) > 0 && availableAds[0].Caps.Listings {
+		if !namespaceAd.Caps.PublicReads && availableAds[0].AuthURL != (url.URL{}) {
 			colUrl = availableAds[0].AuthURL.String()
 		} else {
 			colUrl = availableAds[0].URL.String()
@@ -743,8 +743,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// If we are doing a PROPFIND, check if origins enable dirlistings
 	if ginCtx.Request.Method == "PROPFIND" {
 		for idx, ad := range availableAds {
-			if ad.Listings && namespaceAd.Caps.Listings {
-				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.PublicRead)
+			if ad.Caps.Listings && namespaceAd.Caps.Listings {
+				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.Caps.PublicReads)
 				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
@@ -765,8 +765,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// Check if we are doing a DirectRead and if it is allowed
 	if reqParams.Has(utils.QueryDirectRead.String()) {
 		for idx, originAd := range availableAds {
-			if originAd.DirectReads && namespaceAd.Caps.DirectReads {
-				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.PublicRead)
+			if originAd.Caps.DirectReads && namespaceAd.Caps.DirectReads {
+				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.Caps.PublicReads)
 				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
@@ -788,8 +788,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// If we are doing a PUT, check to see if any origins are writeable
 	if ginCtx.Request.Method == "PUT" {
 		for idx, ad := range availableAds {
-			if ad.Writes {
-				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.PublicRead)
+			if ad.Caps.Writes {
+				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.Caps.PublicReads)
 				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
@@ -803,7 +803,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		})
 		return
 	} else { // Otherwise, we are doing a GET
-		redirectURL := getRedirectURL(reqPath, availableAds[0], !namespaceAd.PublicRead)
+		redirectURL := getRedirectURL(reqPath, availableAds[0], !namespaceAd.Caps.PublicReads)
 		if brokerUrl := availableAds[0].BrokerURL; brokerUrl.String() != "" {
 			ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 		}
@@ -1112,9 +1112,6 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		BrokerURL:           *brokerUrl,
 		Type:                sType.String(),
 		Caps:                adV2.Caps,
-		Writes:              adV2.Caps.Writes,
-		DirectReads:         adV2.Caps.DirectReads,
-		Listings:            adV2.Caps.Listings,
 		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
 	}
 
@@ -1215,7 +1212,6 @@ func listNamespacesV1(ctx *gin.Context) {
 func listNamespacesV2(ctx *gin.Context) {
 	namespacesAdsV2 := listNamespacesFromOrigins()
 	namespacesAdsV2 = append(namespacesAdsV2, server_structs.NamespaceAdV2{
-		PublicRead: true,
 		Caps: server_structs.Capabilities{
 			PublicReads: true,
 			Reads:       true,
