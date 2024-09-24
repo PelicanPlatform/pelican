@@ -450,8 +450,8 @@ func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) 
 			}
 
 			newNS := NamespaceAdV2{
-				Caps:       caps,
-				Path:       nsAd.Path,
+				Caps: caps,
+				Path: nsAd.Path,
 			}
 
 			if nsAd.RequireToken {
