@@ -183,6 +183,10 @@ func validateFederationPrefix(prefix string) error {
 		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid '\\' characters", prefix)
 	}
 
+	if strings.Contains(prefix, "?") {
+		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid '?' characters", prefix)
+	}
+
 	if server_structs.IsCacheNS(prefix) || server_structs.IsOriginNS(prefix) {
 		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s is a reserved prefix for cache/origin server registration", prefix)
 	}
@@ -356,14 +360,47 @@ func GetOriginExports() ([]OriginExport, error) {
 			viper.Set("Origin.EnableReads", capabilities.Reads)
 		}
 	case server_structs.OriginStorageHTTPS:
-		// Storage prefix is unused by HTTPS so we put in a dummy value of /
+		var fedPrefix string
+		var storagePrefix string
+		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
+			log.Infoln("Configuring exports from export volumes passed via command line or via yaml")
+			if len(param.Origin_ExportVolumes.GetStringSlice()) > 1 {
+				return nil, errors.Errorf("https backend does not yet support multiple exports, but %d were provided: %+v", len(param.Origin_ExportVolumes.GetStringSlice()), param.Origin_ExportVolumes.GetStringSlice())
+			}
+
+			// Handle : delimiter in the volume mount
+			volumeMountInfo := strings.SplitN(param.Origin_ExportVolumes.GetStringSlice()[0], ":", 2)
+			if len(volumeMountInfo) != 2 {
+				return nil, errors.New("Invalid volume mount/ExportVolume format. Each entry must be in the form of <http server path prefix>:<federation prefix>")
+			}
+			storagePrefix = volumeMountInfo[0]
+			fedPrefix = volumeMountInfo[1]
+
+			viper.Set(param.Origin_FederationPrefix.GetName(), fedPrefix)
+			viper.Set(param.Origin_StoragePrefix.GetName(), storagePrefix)
+		} else {
+			storagePrefix = param.Origin_StoragePrefix.GetString()
+			fedPrefix = param.Origin_FederationPrefix.GetString()
+		}
+
+		// Clean up any path components that might have been added by the user to guarantee the correct
+		// URL is constructed without duplicate or missing slashes
+		if strings.HasSuffix(storagePrefix, "/") {
+			log.Warningln("Removing trailing '/' from storage prefix")
+			storagePrefix = strings.TrimSuffix(storagePrefix, "/")
+		}
+		if strings.HasSuffix(param.Origin_HttpServiceUrl.GetString(), "/") {
+			log.Warningln("Removing trailing '/' from http service URL")
+			viper.Set("Origin.HttpServiceUrl", strings.TrimSuffix(param.Origin_HttpServiceUrl.GetString(), "/"))
+		}
+
 		originExport = OriginExport{
-			FederationPrefix: param.Origin_FederationPrefix.GetString(),
-			StoragePrefix:    "/",
+			FederationPrefix: fedPrefix,
+			StoragePrefix:    storagePrefix,
 			Capabilities:     capabilities,
 		}
 
-		if err = validateExportPaths("/", originExport.FederationPrefix); err != nil {
+		if err = validateExportPaths(originExport.StoragePrefix, originExport.FederationPrefix); err != nil {
 			return nil, err
 		}
 	case server_structs.OriginStorageS3:
