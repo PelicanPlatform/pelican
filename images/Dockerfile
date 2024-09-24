@@ -71,7 +71,7 @@ RUN \
     cd xrdcl-pelican && \
     git checkout v0.9.4 && \
     mkdir build && cd build && \
-    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 -DCMAKE_BUILD_TYPE=RelWithDebInfo .. && \
     make && make install
 
 ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/main /tmp/hash-xrootd-s3-http
