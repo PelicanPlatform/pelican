@@ -617,7 +617,7 @@ func CleanupTempResources() (err error) {
 func getConfigBase() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", err
+		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
 	}
 
 	return filepath.Join(home, ".config", "pelican"), nil
@@ -885,10 +885,6 @@ func InitConfig() {
 	viper.SetOptions(viper.ExperimentalBindStruct())
 	viper.SetConfigType("yaml")
 
-	// Initialize ConfigDir parameter based on user permission
-	if err := initConfigDir(); err != nil {
-		cobra.CheckErr(err)
-	}
 	// 1) Set up defaults.yaml
 	err := viper.MergeConfig(strings.NewReader(defaultsYaml))
 	if err != nil {
@@ -913,6 +909,16 @@ func InitConfig() {
 	} else {
 		configDir := viper.GetString("ConfigDir")
 		if configDir == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
+			} else {
+				// 3) Set up pelican.yaml (has higher precedence)
+				viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
+			}
+			viper.AddConfigPath(filepath.Join("/etc", "pelican"))
+		} else {
+			viper.AddConfigPath(configDir)
 			// We've called initConfigDir but still got empty string
 			cobra.CheckErr("ConfigDir is empty after initialization")
 		}
@@ -936,19 +942,6 @@ func InitConfig() {
 	err = handleContinuedCfg()
 	if err != nil {
 		cobra.CheckErr(err)
-	}
-
-	// Handle web UI override. Client is not expected to set anything here
-	viper.SetDefault(param.Server_WebConfigFile.GetName(), filepath.Join(viper.GetString("ConfigDir"), "web-config.yaml"))
-
-	if webConfigPath := param.Server_WebConfigFile.GetString(); webConfigPath != "" {
-		if err := os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
-			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
-		}
-	}
-
-	if err := setWebConfigOverride(viper.GetViper(), param.Server_WebConfigFile.GetString()); err != nil {
-		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
 	}
 
 	// TODO: Refactor the error handling logic below to be consistently using cobra.CheckErr
@@ -1095,6 +1088,19 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	setEnabledServer(currentServers)
 
 	configDir := viper.GetString("ConfigDir")
+
+	viper.SetDefault(param.Server_WebConfigFile.GetName(), filepath.Join(viper.GetString("ConfigDir"), "web-config.yaml"))
+
+	if webConfigPath := param.Server_WebConfigFile.GetString(); webConfigPath != "" {
+		if err := os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
+			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
+		}
+	}
+
+	if err := setWebConfigOverride(viper.GetViper(), param.Server_WebConfigFile.GetString()); err != nil {
+		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
+	}
+
 	viper.SetConfigType("yaml")
 	viper.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	viper.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
