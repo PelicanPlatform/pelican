@@ -55,7 +55,7 @@ type (
 	}
 
 	NamespaceAdV2 struct {
-		Caps         Capabilities  `json:"capabilities"` // Namespace capabilities should be considered independently of the origin’s capabilities.
+		Caps         Capabilities  // Namespace capabilities should be considered independently of the origin’s capabilities.
 		Path         string        `json:"path"`
 		Generation   []TokenGen    `json:"token-generation"`
 		Issuer       []TokenIssuer `json:"token-issuer"`
