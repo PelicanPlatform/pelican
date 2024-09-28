@@ -919,8 +919,6 @@ func InitConfig() {
 			viper.AddConfigPath(filepath.Join("/etc", "pelican"))
 		} else {
 			viper.AddConfigPath(configDir)
-			// We've called initConfigDir but still got empty string
-			cobra.CheckErr("ConfigDir is empty after initialization")
 		}
 		viper.AddConfigPath(configDir)
 		viper.SetConfigName("pelican")
