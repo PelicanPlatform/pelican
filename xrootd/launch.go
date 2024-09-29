@@ -23,6 +23,7 @@ package xrootd
 import (
 	"context"
 	_ "embed"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -86,6 +87,9 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 			"X509_CERT_FILE=" + filepath.Join(xrootdRun, "ca-bundle.crt"),
 			"XRD_PELICANCLIENTCERTFILE=" + filepath.Join(xrootdRun, "copied-tls-creds.crt"),
 			"XRD_PELICANCLIENTKEYFILE=" + filepath.Join(xrootdRun, "copied-tls-creds.crt"),
+		}
+		if confDir := os.Getenv("XRD_PLUGINCONFDIR"); confDir != "" {
+			result.ExtraEnv = append(result.ExtraEnv, "XRD_PLUGINCONFDIR="+confDir)
 		}
 	}
 	return

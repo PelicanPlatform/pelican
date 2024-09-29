@@ -1,5 +1,8 @@
 # Origin export configuration to test full multi-export capabilities
 
+Cache:
+  EnablePrefetch: false
+
 Origin:
   # Things that configure the origin itself
   StorageType: "posix"

@@ -1207,6 +1207,17 @@ type: stringSlice
 default: none
 components: ["cache"]
 ---
+name: Cache.EnablePrefetch
+description: |+
+  Control whether data prefeteching is enabled in the cache.
+
+  This is provided solely for testing purposes and is not advised to be disabled
+  in production
+type: bool
+default: true
+hidden: true
+components: ["cache"]
+---
 name: Cache.SelfTest
 description: |+
   A bool indicating whether the cache should perform self health checks.

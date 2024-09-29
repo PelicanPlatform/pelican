@@ -125,6 +125,49 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 	}
 }
 
+// Check the cache information of a remote cache
+func DoCacheInfo(ctx context.Context, destination string, options ...TransferOption) (age int, size int64, err error) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugln("Panic captured while attempting to do cache info:", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			ret := fmt.Sprintf("Unrecoverable error (panic) while check file size: %v", r)
+			err = errors.New(ret)
+			return
+		}
+	}()
+
+	destUri, err := url.Parse(destination)
+	if err != nil {
+		log.Errorln("Failed to parse destination URL")
+		return
+	}
+
+	// Check if we understand the found url scheme
+	err = schemeUnderstood(destUri.Scheme)
+	if err != nil {
+		return
+	}
+
+	te, err := NewTransferEngine(ctx)
+	if err != nil {
+		return
+	}
+
+	defer func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+	}()
+
+	tc, err := te.NewClient(options...)
+	if err != nil {
+		return
+	}
+	return tc.CacheInfo(ctx, destUri)
+}
+
 func GetObjectServerHostnames(ctx context.Context, testFile string) (urls []string, err error) {
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
@@ -282,6 +325,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 
 	// Get our token if needed
 	token := newTokenGenerator(remoteObjectUrl, &dirResp, false, true)
+	collectionsOverride := ""
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -290,6 +334,8 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 			token.EnableAcquire = option.Value().(bool)
 		case identTransferOptionToken{}:
 			token.SetToken(option.Value().(string))
+		case identTransferOptionCollectionsUrl{}:
+			collectionsOverride = option.Value().(string)
 		}
 	}
 
@@ -298,6 +344,13 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		if err != nil || tokenContents == "" {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
+	}
+	if collectionsOverride != "" {
+		collectionsOverrideUrl, err := url.Parse(collectionsOverride)
+		if err != nil {
+			return nil, errors.Wrap(err, "unable to parse collections URL override")
+		}
+		dirResp.XPelNsHdr.CollectionsUrl = collectionsOverrideUrl
 	}
 
 	fileInfos, err = listHttp(remoteObjectUrl, dirResp, token)

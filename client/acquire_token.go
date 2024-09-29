@@ -118,6 +118,17 @@ func (tg *tokenGenerator) SetToken(contents string) {
 	tg.Token.Store(&info)
 }
 
+// Copy the contents
+func (tg *tokenGenerator) Copy() *tokenGenerator {
+	return &tokenGenerator{
+		DirResp:       tg.DirResp,
+		Destination:   tg.Destination,
+		IsWrite:       tg.IsWrite,
+		EnableAcquire: tg.EnableAcquire,
+		Sync:          new(singleflight.Group),
+	}
+}
+
 // Determine the token name if it is embedded in the scheme, Condor-style
 func getTokenName(destination *url.URL) (scheme, tokenName string) {
 	schemePieces := strings.Split(destination.Scheme, "+")
