@@ -72,13 +72,14 @@ func TestTPC(t *testing.T) {
 	destDir := filepath.Join(fed.Exports[0].StoragePrefix, "test")
 	require.NoError(t, os.MkdirAll(destDir, os.FileMode(0755)))
 	log.Debugln("Will create origin file at", destDir)
-	err = os.WriteFile(filepath.Join(destDir, "test.txt"), []byte("test file content"), fs.FileMode(0644))
+	fileContents := []byte("test file content")
+	err = os.WriteFile(filepath.Join(destDir, "test.txt"), fileContents, fs.FileMode(0644))
 	require.NoError(t, err)
-	downloadURL := fmt.Sprintf("pelican://%s:%s%s/test/test.txt?directread", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+	downloadURL := fmt.Sprintf("pelican://%s:%s%s/test/test.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
 		fed.Exports[0].FederationPrefix)
-	uploadURL := fmt.Sprintf("pelican://%s:%s%s/test/test_up.txt?directread", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+	uploadURL := fmt.Sprintf("pelican://%s:%s%s/test/test_up.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
 		fed.Exports[0].FederationPrefix)
-	copyDestURL := fmt.Sprintf("pelican://%s:%s%s/test/test_copy.txt?directread", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+	copyDestURL := fmt.Sprintf("pelican://%s:%s%s/test/test_copy.txt", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
 		fed.Exports[0].FederationPrefix)
 
 	// Verify simple download / upload works.
@@ -86,8 +87,13 @@ func TestTPC(t *testing.T) {
 	_, err = client.DoGet(fed.Ctx, downloadURL, localDir, false, client.WithToken(tkn))
 	require.NoError(t, err)
 	_, err = client.DoPut(fed.Ctx, filepath.Join(localDir, "test.txt"), uploadURL, false, client.WithToken(tkn))
-
-	_, err = client.DoCopy(fed.Ctx, downloadURL, copyDestURL, false, client.WithToken(tkn))
-
 	require.NoError(t, err)
+
+	_, err = client.DoCopy(fed.Ctx, uploadURL, copyDestURL, false, client.WithToken(tkn), client.WithSourceToken(tkn))
+	require.NoError(t, err)
+
+	transferResults, err := client.DoGet(fed.Ctx, copyDestURL, localDir, false, client.WithToken(tkn))
+	require.NoError(t, err)
+	require.Len(t, transferResults, 1)
+	require.Equal(t, int64(len(fileContents)), transferResults[0].TransferredBytes)
 }

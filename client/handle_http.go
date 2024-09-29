@@ -213,6 +213,8 @@ type (
 		job        *TransferJob
 		callback   TransferCallbackFunc
 		remoteURL  *url.URL
+		srcURL     *url.URL        // When a copy job, this is the source URL to use
+		srcToken   *tokenGenerator // When a copy job, the source token to use
 		localPath  string
 		token      *tokenGenerator
 		xferType   transferType
@@ -242,8 +244,11 @@ type (
 		xferType       transferType
 		recursive      bool
 		skipAcquire    bool
-		syncLevel      SyncLevel  // Policy for handling synchronization when the destination exists
-		prefObjServers []*url.URL // holds any client-requested caches/origins
+		srcURL         *url.URL                        // When a copy job, this is the source URL
+		srcDirResp     server_structs.DirectorResponse // When a copy job, this represents the source directory information
+		srcToken       *tokenGenerator                 // When a copy job, this represents the source token
+		syncLevel      SyncLevel                       // Policy for handling synchronization when the destination exists
+		prefObjServers []*url.URL                      // holds any client-requested caches/origins
 		dirResp        server_structs.DirectorResponse
 		directorUrl    string
 		token          *tokenGenerator
@@ -344,6 +349,7 @@ const (
 	transferTypeDownload transferType = iota // Transfer is downloading from the federation
 	transferTypeUpload                       // Transfer is uploading to the federation
 	transferTypePrestage                     // Transfer is staging at a federation cache
+	transferTypeCopy                         // Transfer copies objects between origins
 )
 
 // The progress container object creates several
@@ -1160,40 +1166,54 @@ func (te *TransferEngine) runJobHandler() error {
 // Create a new copy job for the client
 //
 // This function does not "submit" the job for execution.
-func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *url.URL, options ...TransferOption) (cj *CopyJob, err error) {
-	id, err := uuid.NewV7()
+func (tc *TransferClient) NewCopyJob(ctx context.Context, src *url.URL, dest *url.URL, options ...TransferOption) (cj *TransferJob, err error) {
+
+	// Create the base job: writing to the destination.
+	cj, err = tc.NewTransferJob(ctx, dest, "/dev/null", true, false, options...)
 	if err != nil {
 		return
 	}
 
-	project := searchJobAd(projectName)
-
-	cj = &CopyJob{
-		id:       id,
-		src:      src,
-		dest:     dest,
-		project:  project,
-		callback: tc.callback,
-	}
-	cj.ctx, cj.cancel = mergeCancel(ctx, tc.ctx)
-
+	cj.srcToken = newTokenGenerator(src, nil, false, true)
 	for _, option := range options {
 		switch option.Ident() {
-		case identTransferOptionCallback{}:
-			cj.callback = option.Value().(TransferCallbackFunc)
-		case identTransferOptionTokenLocation{}:
-			cj.destTokenLocation = option.Value().(string)
-		case identTransferOptionAcquireToken{}:
-			cj.skipAcquire = !option.Value().(bool)
-		case identTransferOptionToken{}:
-			cj.destToken = option.Value().(string)
 		case identTransferOptionSourceToken{}:
-			cj.srcToken = option.Value().(string)
+			cj.srcToken.SetToken(option.Value().(string))
 		case identTransferOptionSourceTokenLocation{}:
-			cj.srcTokenLocation = option.Value().(string)
+			cj.srcToken.SetTokenLocation(option.Value().(string))
 		}
 	}
+	cj.xferType = transferTypeCopy
+	cj.srcURL = src
 
+	// Get the director info for the source URL
+	dirResp, err := GetDirectorInfoForPath(cj.ctx, src.Path, cj.directorUrl, false, src.RawQuery, "")
+	if err != nil {
+		log.Errorln(err)
+		err = errors.Wrapf(err, "failed to get source namespace information for remote URL %s", src.String())
+		return
+	}
+	cj.srcDirResp = dirResp
+	cj.srcToken.DirResp = &dirResp
+
+	if dirResp.XPelNsHdr.RequireToken {
+		contents, err := cj.srcToken.get()
+		if err != nil || contents == "" {
+			return nil, errors.Wrap(err, "failed to get token for transfer")
+		}
+
+		// The director response may change if it's given a token; let's repeat the query.
+		if contents != "" {
+			dirResp, err = GetDirectorInfoForPath(cj.ctx, src.Path, cj.directorUrl, false, src.RawQuery, contents)
+			if err != nil {
+				log.Errorln(err)
+				err = errors.Wrapf(err, "failed to get namespace information for source URL %s", src.String())
+				return nil, err
+			}
+			cj.srcDirResp = dirResp
+			cj.srcToken.DirResp = &dirResp
+		}
+	}
 	return
 }
 
@@ -1685,6 +1705,10 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		log.Debugln("Will use unpack option value", packOption)
 	}
 	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme}
+	var srcUrl *url.URL
+	if job.job.xferType == transferTypeCopy {
+		srcUrl = &url.URL{Path: job.job.srcURL.Path, Scheme: job.job.srcURL.Scheme}
+	}
 
 	var transfers []transferAttemptDetails
 	if job.job.xferType == transferTypeUpload { // Uploads use the redirected endpoint directly
@@ -1696,6 +1720,37 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			Url:        job.job.dirResp.ObjectServers[0],
 			PackOption: packOption,
 		})
+	} else if job.job.xferType == transferTypeCopy {
+		if len(job.job.dirResp.ObjectServers) == 0 {
+			err = errors.New("No origins found for upload")
+			return
+		}
+
+		var sortedServers []*url.URL
+		sortedServers, err = generateSortedObjServers(job.job.srcDirResp, job.job.prefObjServers)
+		if err != nil {
+			log.Errorln("Failed to get namespaced caches (treated as non-fatal):", err)
+		}
+		var sortedServerStrings []string
+		for _, serverUrl := range sortedServers {
+			sortedServerStrings = append(sortedServerStrings, serverUrl.String())
+		}
+
+		// Make sure we only try as many object servers as we have
+		objectServersToTry := ObjectServersToTry
+		if objectServersToTry > len(sortedServers) {
+			objectServersToTry = len(sortedServers)
+		}
+		log.Debugf("Trying the first %d object servers", objectServersToTry)
+		transfers = getObjectServersToTry(sortedServerStrings, job.job, objectServersToTry, packOption)
+
+		if len(transfers) > 0 {
+			log.Traceln("First transfer in list:", transfers[0].Url)
+		} else {
+			err = errors.New("No transfers possible as no object servers were found")
+			return
+		}
+
 	} else {
 		var sortedServers []*url.URL
 		sortedServers, err = generateSortedObjServers(job.job.dirResp, job.job.prefObjServers)
@@ -1740,6 +1795,15 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		if statInfo.IsCollection {
 			return te.walkDirDownload(job, transfers, te.files, remoteUrl)
 		}
+	} else if job.job.xferType == transferTypeCopy {
+		var statInfo FileInfo
+		if statInfo, err = statHttp(srcUrl, job.job.srcDirResp, job.job.srcToken); err != nil {
+			err = errors.Wrap(err, "failed to stat source object to copy")
+			return
+		}
+		if statInfo.IsCollection {
+			return te.walkDirUpload(job, transfers, te.files, "/dev/null")
+		}
 	}
 
 	job.job.totalXfer += 1
@@ -1756,6 +1820,8 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			packOption: packOption,
 			localPath:  job.job.localPath,
 			xferType:   job.job.xferType,
+			srcToken:   job.job.srcToken,
+			srcURL:     job.job.srcURL,
 			token:      job.job.token,
 			attempts:   transfers,
 			project:    job.job.project,
@@ -1809,6 +1875,8 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			var transferResults TransferResults
 			if file.file.xferType == transferTypeUpload {
 				transferResults, err = uploadObject(file.file)
+			} else if file.file.xferType == transferTypeCopy {
+				transferResults, err = copyHTTP(file.file)
 			} else {
 				transferResults, err = downloadObject(file.file)
 			}
@@ -2869,6 +2937,8 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 					packOption: transfers[0].PackOption,
 					localPath:  newPath,
 					xferType:   job.job.xferType,
+					srcToken:   job.job.srcToken,
+					srcURL:     job.job.srcURL,
 					token:      job.job.token,
 					attempts:   transfers,
 				},

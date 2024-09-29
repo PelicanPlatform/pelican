@@ -21,35 +21,19 @@ package client
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
 type (
-	CopyJob struct {
-		ctx               context.Context
-		cancel            context.CancelFunc
-		id                uuid.UUID
-		dest              *url.URL
-		src               *url.URL
-		srcToken          string
-		destToken         string
-		project           string
-		callback          TransferCallbackFunc
-		destTokenLocation string
-		srcTokenLocation  string
-		skipAcquire       bool // Set to true if the code should not attempt to acquire a new token (when the current one doesn't suffice)
-	}
-
 	tpcStatus struct {
 		done    bool
 		xferred uint64
@@ -61,29 +45,54 @@ type (
 //
 // Uses the WebDAV COPY verb to actually move the data.  Only implements the "push" mode
 // where the destination side is the active side performing the transfer
-func copyHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, xfer CopyJob) (err error) {
+func copyHTTP(xfer *transferFile) (transferResults TransferResults, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorln("Panic occurred in HTTP copy code:", r)
-			err = errors.Errorf("Unrecoverable error (panic) occurred in downloadHTTP: %v", r)
+			err = errors.Errorf("Unrecoverable error (panic) occurred in copyHTTP: %v", r)
 		}
 	}()
+	if len(xfer.attempts) == 0 {
+		log.Errorln("No source URLs specified; cannot copy")
+		err = errors.New("No source URLs specified")
+		return
+	}
+	resolvedDestUrl := *xfer.job.dirResp.ObjectServers[0]
+	resolvedDestUrl.RawQuery = xfer.job.remoteURL.RawQuery
+
+	log.Debugln("Copying object from", resolvedDestUrl.String(), "to", xfer.attempts[0].Url.String())
+	transferResults = newTransferResults(xfer.job)
+
 	lastUpdate := time.Now()
-	if callback != nil {
-		callback(xfer.dest.String(), 0, 0, false)
+	if xfer.job.callback != nil {
+		xfer.job.callback(xfer.remoteURL.String(), 0, 0, false)
 	}
 	downloaded := int64(-1)
 	totalSize := int64(-1)
+	transferStartTime := time.Now()
+	transferResults.TransferStartTime = transferStartTime
+	attempt := TransferResult{
+		CacheAge: -1,
+		Number:   0,
+		Endpoint: xfer.remoteURL.String(),
+	}
+
 	defer func() {
-		if callback != nil {
+		endTime := time.Now()
+		attempt.TransferEndTime = endTime
+		attempt.TransferTime = endTime.Sub(transferStartTime)
+		attempt.TransferFileBytes = totalSize
+		transferResults.Attempts = []TransferResult{attempt}
+
+		if xfer.job.callback != nil {
 			finalSize := int64(0)
 			if totalSize >= 0 {
 				finalSize = totalSize
 			}
-			callback(xfer.dest.String(), downloaded, finalSize, true)
+			xfer.job.callback(xfer.remoteURL.String(), downloaded, finalSize, true)
 		}
-		if te != nil {
-			te.ewmaCtr.Add(int64(time.Since(lastUpdate)))
+		if xfer.engine != nil {
+			xfer.engine.ewmaCtr.Add(int64(time.Since(lastUpdate)))
 		}
 	}()
 
@@ -91,51 +100,55 @@ func copyHTTP(ctx context.Context, te *TransferEngine, callback TransferCallback
 		Transport: config.GetTransport(),
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(xfer.ctx)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "HEAD", xfer.src.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, xfer.attempts[0].Url.String(), nil)
 	if err != nil {
-		err = errors.Wrapf(err, "Failed to get size of the source file %s", xfer.src.String())
+		err = errors.Wrapf(err, "Failed to get size of the source object %s", xfer.attempts[0].Url.String())
 		return
 	}
-	if xfer.srcToken != "" {
-		req.Header.Set("Authorization", "Bearer "+xfer.srcToken)
+
+	srcTkn, err := xfer.srcToken.get()
+	if err == nil && srcTkn != "" {
+		req.Header.Set("Authorization", "Bearer "+srcTkn)
 	}
 	req.Header.Set("User-Agent", getUserAgent(xfer.project))
 	log.Debugln("Starting the HEAD request to the HTTP Third Party Copy source...")
 	resp, err := client.Do(req)
 	if err != nil {
-		err = errors.Wrapf(err, "failed to execute the HEAD request to third-party-copy source %s: %s", xfer.src.String(), err.Error())
+		err = errors.Wrapf(err, "failed to execute the HEAD request to third-party-copy source %s: %s", resolvedDestUrl.String(), err.Error())
 		log.Errorln(err)
 		return
 	}
 	resp.Body.Close() // HEAD requests shouldn't have anything in the body; just ignore it.
 	totalSize = resp.ContentLength
 	if resp.ContentLength < 0 {
-		log.Warningln("Third-party-copy source", xfer.src.String(), "is of unknown size; download statistics may be incorrect")
+		log.Warningln("Third-party-copy source", xfer.srcURL.String(), "is of unknown size; download statistics may be incorrect")
 	}
+	attempt.ServerVersion = resp.Header.Get("Server")
 
-	req, err = http.NewRequestWithContext(ctx, "COPY", xfer.dest.String(), nil)
+	req, err = http.NewRequestWithContext(ctx, "COPY", resolvedDestUrl.String(), nil)
 	if err != nil {
-		err = errors.Wrapf(err, "Unable to create request for third-party-copy to %s", xfer.dest.String())
+		err = errors.Wrapf(err, "Unable to create request for third-party-copy to %s", xfer.remoteURL.String())
 		return
 	}
 
-	if xfer.destToken != "" {
-		req.Header.Set("Authorization", "Bearer "+xfer.destToken)
+	if tkn, err := xfer.token.get(); err == nil && tkn != "" {
+		req.Header.Set("Authorization", "Bearer "+tkn)
 	}
-	if xfer.srcToken != "" {
-		req.Header.Set("TransferHeaderAuthorization", "Bearer "+xfer.srcToken)
+	if srcTkn != "" {
+		req.Header.Set("TransferHeaderAuthorization", "Bearer "+srcTkn)
 	}
 	req.Header.Set("User-Agent", getUserAgent(xfer.project))
+	req.Header.Set("Source", xfer.attempts[0].Url.String())
 
 	log.Debugln("Starting the HTTP Third Party Copy transfer...")
 	resp, err = client.Do(req)
 
 	if err != nil {
-		log.Errorf("Failed to execute the third-party-copy to %s: %s", xfer.dest.String(), err.Error())
-		err = errors.Wrapf(err, "Failed to execute the third-party-copy to %s", xfer.dest.String())
+		log.Errorf("Failed to execute the third-party-copy to %s: %s", xfer.remoteURL.String(), err.Error())
+		err = errors.Wrapf(err, "Failed to execute the third-party-copy to %s", xfer.remoteURL.String())
 		return
 	}
 	defer resp.Body.Close()
@@ -146,17 +159,20 @@ func copyHTTP(ctx context.Context, te *TransferEngine, callback TransferCallback
 			log.Errorf("TPC request was not successful (status code %d); when reading the error message, a further issue occurred: %s", resp.StatusCode, err.Error())
 		} else {
 			log.Errorf("TPC request was not successful (status code %d): %s", resp.StatusCode, string(respBytes))
+			err = &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d)",
+				resp.StatusCode)}
 		}
 		return
 	}
 
 	serverMessages := make(chan tpcStatus)
 
-	te.egrp.Go(func() error { return monitorTPC(serverMessages, resp.Body) })
+	xfer.engine.egrp.Go(func() error { return monitorTPC(serverMessages, resp.Body) })
 
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
+	gotFirstByte := false
 MessageHandler:
 	for {
 		select {
@@ -170,12 +186,17 @@ MessageHandler:
 				break
 			}
 			downloaded = int64(msg.xferred)
+			if !gotFirstByte && downloaded > 0 {
+				gotFirstByte = true
+				attempt.TimeToFirstByte = time.Since(transferStartTime)
+			}
 		case <-ticker.C:
 			if totalSize < downloaded {
 				totalSize = downloaded
+				attempt.TransferFileBytes = totalSize
 			}
-			log.Infof("Transfer %s->%s has downloaded %d bytes", xfer.src.String(), xfer.dest.String(), downloaded)
-			callback(xfer.dest.String(), downloaded, totalSize, false)
+			log.Infof("Transfer %s->%s has downloaded %d bytes", xfer.srcURL.String(), xfer.remoteURL.String(), downloaded)
+			xfer.job.callback(xfer.remoteURL.String(), downloaded, totalSize, false)
 		case <-ctx.Done():
 			err = ctx.Err()
 			resp.Body.Close()

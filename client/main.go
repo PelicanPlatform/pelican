@@ -582,9 +582,9 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	// First, create a handler for any panics that occur
 	defer func() {
 		if r := recover(); r != nil {
-			log.Debugln("Panic captured while attempting to perform transfer (DoStashCPSingle):", r)
+			log.Debugln("Panic captured while attempting to perform transfer:", r)
 			log.Debugln("Panic caused by the following", string(debug.Stack()))
-			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoStashCPSingle: %v", r)
+			ret := fmt.Sprintf("Unrecoverable error (panic) captured: %v", r)
 			err = errors.New(ret)
 		}
 	}()
@@ -630,10 +630,20 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	destScheme, _ := getTokenName(destURL)
 
 	isPut := destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican"
+	isGet := sourceScheme == "stash" || sourceScheme == "osdf" || sourceScheme == "pelican"
 
 	var localPath string
 	var remoteURL *url.URL
-	if isPut {
+	if isPut && isGet {
+		if err = schemeUnderstood(destScheme); err != nil {
+			return nil, err
+		}
+		if err = schemeUnderstood(sourceScheme); err != nil {
+			return nil, err
+		}
+		localPath = "/dev/null"
+		remoteURL = destURL
+	} else if isPut {
 		// Verify valid scheme
 		if err = schemeUnderstood(destScheme); err != nil {
 			return nil, err
@@ -693,7 +703,12 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(context.Background(), remoteURL, localPath, isPut, recursive)
+	var tj *TransferJob
+	if isGet && isPut {
+		tj, err = tc.NewCopyJob(context.Background(), sourceURL, remoteURL, options...)
+	} else {
+		tj, err = tc.NewTransferJob(context.Background(), remoteURL, localPath, isPut, recursive)
+	}
 	if err != nil {
 		return
 	}
