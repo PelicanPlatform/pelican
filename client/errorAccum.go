@@ -146,6 +146,12 @@ func IsRetryable(err error) bool {
 	if errors.Is(err, config.MetadataTimeoutErr) {
 		return true
 	}
+	// There's little a user can do about a TCP connection reset besides retry; if it
+	// was due to the server crashing, then on a subsequent retry they should get a different
+	// error message (connection refused).
+	if errors.Is(err, &NetworkResetError{}) {
+		return true
+	}
 	if errors.Is(err, &StoppedTransferError{}) {
 		return true
 	}
@@ -156,6 +162,9 @@ func IsRetryable(err error) bool {
 		// false because we cannot automatically retry, the user must change the url to use a different origin/namespace
 		// that enables dirlistings or the admin must enable dirlistings on the origin/namespace
 		return false
+	}
+	if errors.Is(err, &HeaderTimeoutError{}) {
+		return true
 	}
 	var cse *ConnectionSetupError
 	if errors.As(err, &cse) {

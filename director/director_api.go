@@ -40,7 +40,7 @@ func listNamespacesFromOrigins() []server_structs.NamespaceAdV2 {
 	namespaces := make([]server_structs.NamespaceAdV2, 0, len(serverAdItems))
 	for _, item := range serverAdItems {
 		ad := item.Value()
-		if ad.Type == server_structs.OriginType {
+		if ad.Type == server_structs.OriginType.String() {
 			namespaces = append(namespaces, ad.NamespaceAds...)
 		}
 	}
@@ -53,7 +53,7 @@ func listAdvertisement(serverTypes []server_structs.ServerType) []*server_struct
 	for _, item := range serverAds.Items() {
 		ad := item.Value()
 		for _, serverType := range serverTypes {
-			if ad.Type == serverType {
+			if ad.Type == serverType.String() {
 				ads = append(ads, ad)
 			}
 		}
@@ -193,6 +193,33 @@ func LaunchMapMetrics(ctx context.Context, egrp *errgroup.Group) {
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("filteredServers").Set(float64(len(filteredServers)))
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("healthTestUtils").Set(float64(len(healthTestUtils)))
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("originStatUtils").Set(float64(len(statUtils)))
+			}
+		}
+	})
+}
+
+func LaunchServerCountMetric(ctx context.Context, egrp *errgroup.Group) {
+	egrp.Go(func() error {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				for _, ad := range serverAds.Items() {
+					serverAd := ad.Value()
+					metrics.PelicanDirectorServerCount.With(prometheus.Labels{
+						"server_name":    serverAd.Name,
+						"server_type":    string(serverAd.Type),
+						"server_url":     serverAd.URL.String(),
+						"server_web_url": serverAd.WebURL.String(),
+						"server_lat":     fmt.Sprintf("%.4f", serverAd.Latitude),
+						"server_long":    fmt.Sprintf("%.4f", serverAd.Longitude),
+						"from_topology":  strconv.FormatBool(serverAd.FromTopology),
+					}).Inc()
+				}
 			}
 		}
 	})

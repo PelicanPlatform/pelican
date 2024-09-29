@@ -40,6 +40,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -106,7 +107,7 @@ func TestMain(m *testing.M) {
 	config.InitConfig()
 	viper.Set("Server.UILoginRateLimit", 100)
 
-	if err := config.InitServer(ctx, config.OriginType); err != nil {
+	if err := config.InitServer(ctx, server_structs.OriginType); err != nil {
 		fmt.Println("Failed to configure the test module")
 		os.Exit(1)
 	}

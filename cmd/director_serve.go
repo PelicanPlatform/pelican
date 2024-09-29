@@ -21,18 +21,18 @@ package main
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 func serveDirector(cmd *cobra.Command, args []string) error {
-	modules := config.DirectorType
+	modules := server_structs.DirectorType
 	if param.Origin_EnableBroker.GetBool() {
-		modules.Set(config.BrokerType)
+		modules.Set(server_structs.BrokerType)
 	}
 
-	_, cancel, err := launchers.LaunchModules(cmd.Context(), config.DirectorType)
+	_, cancel, err := launchers.LaunchModules(cmd.Context(), server_structs.DirectorType)
 	if err != nil {
 		cancel()
 	}

@@ -138,7 +138,7 @@ func TestSharingUrl(t *testing.T) {
 			w.Header().Set("Location", *myUrlRef)
 			w.Header().Set("X-Pelican-Namespace", "namespace=/test, require-token=true")
 			w.Header().Set("X-Pelican-Authorization", fmt.Sprintf("issuer=%s", issuerLoc))
-			w.Header().Set("X-Pelican-Token-Generation", fmt.Sprintf("issuer=%s, base-path=/test, strategy=OAuth2", issuerLoc))
+			w.Header().Set("X-Pelican-Token-Generation", fmt.Sprintf("issuer=%s, base-path=/test, strategy=OAuth2, max-scope-depth=3", issuerLoc))
 			w.WriteHeader(http.StatusTemporaryRedirect)
 		} else if r.URL.Path == "/issuer/.well-known/openid-configuration" {
 			w.WriteHeader(http.StatusOK)

@@ -455,5 +455,280 @@ func TestFailureOnOriginDisablingListings(t *testing.T) {
 
 	_, err = client.DoGet(fed.Ctx, downloadURL, t.TempDir(), true)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "origin and/or namespace does not support directory listings")
+	assert.Contains(t, err.Error(), "no collections URL found in director response")
+}
+
+func TestSyncUpload(t *testing.T) {
+	// Create instance of test federation
+	viper.Reset()
+	server_utils.ResetOriginExports()
+
+	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
+
+	// Create a token file
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+
+	tokenConfig := token.NewWLCGToken()
+	tokenConfig.Lifetime = time.Minute
+	tokenConfig.Issuer = issuer
+	tokenConfig.Subject = "origin"
+	tokenConfig.AddAudienceAny()
+	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
+	token, err := tokenConfig.CreateToken()
+	assert.NoError(t, err)
+	tempToken, err := os.CreateTemp(t.TempDir(), "token")
+	assert.NoError(t, err, "Error creating temp token file")
+	defer os.Remove(tempToken.Name())
+	_, err = tempToken.WriteString(token)
+	assert.NoError(t, err, "Error writing to temp token file")
+	tempToken.Close()
+
+	// Disable progress bars to not reuse the same mpb instance
+	viper.Set("Logging.DisableProgressBars", true)
+
+	// Make our test directories and files
+	tempDir := t.TempDir()
+	innerTempDir, err := os.MkdirTemp(tempDir, "InnerUploadDir")
+	assert.NoError(t, err)
+	permissions := os.FileMode(0755)
+	err = os.Chmod(tempDir, permissions)
+	require.NoError(t, err)
+	err = os.Chmod(innerTempDir, permissions)
+	require.NoError(t, err)
+
+	testFileContent1 := "test file content"
+	testFileContent2 := "more test file content!"
+	innerTestFileContent := "this content is within another dir!"
+	tempFile1, err := os.CreateTemp(tempDir, "test1")
+	require.NoError(t, err, "Error creating temp1 file")
+	tempFile2, err := os.CreateTemp(tempDir, "test1")
+	require.NoError(t, err, "Error creating temp2 file")
+	innerTempFile, err := os.CreateTemp(innerTempDir, "testInner")
+	require.NoError(t, err, "Error creating inner test file")
+
+	_, err = tempFile1.WriteString(testFileContent1)
+	require.NoError(t, err, "Error writing to temp1 file")
+	tempFile1.Close()
+	_, err = tempFile2.WriteString(testFileContent2)
+	require.NoError(t, err, "Error writing to temp2 file")
+	tempFile2.Close()
+	_, err = innerTempFile.WriteString(innerTestFileContent)
+	require.NoError(t, err, "Error writing to inner test file")
+	innerTempFile.Close()
+
+	t.Run("testSyncUploadFull", func(t *testing.T) {
+		// Set path for object to upload/download
+		tempPath := tempDir
+		dirName := filepath.Base(tempPath)
+		uploadURL := fmt.Sprintf("pelican://%s:%s/first/namespace/sync_upload/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), dirName)
+
+		// Upload the file with PUT
+		transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		require.NoError(t, err)
+		verifySuccessfulTransfer(t, transferDetailsUpload)
+
+		// Download the files we just uploaded
+		transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		verifySuccessfulTransfer(t, transferDetailsDownload)
+	})
+
+	t.Run("testSyncUploadNone", func(t *testing.T) {
+		// Set path for object to upload/download
+		dirName := filepath.Base(tempDir)
+		uploadURL := fmt.Sprintf("pelican://%s:%s/first/namespace/sync_upload_none/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), dirName)
+
+		// Upload the file with PUT
+		transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		require.NoError(t, err)
+		verifySuccessfulTransfer(t, transferDetailsUpload)
+
+		// Synchronize the uploaded files again.
+		transferDetailsUpload, err = client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		require.NoError(t, err)
+
+		// Should have already been uploaded once
+		assert.Len(t, transferDetailsUpload, 0)
+	})
+
+	t.Run("testSyncUploadPartial", func(t *testing.T) {
+		// Set path for object to upload/download
+		dirName := filepath.Base(tempDir)
+		uploadURL := fmt.Sprintf("pelican://%s:%s/first/namespace/sync_upload_partial/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), dirName)
+		uploadInnerURL := fmt.Sprintf("pelican://%s:%s/first/namespace/sync_upload_partial/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), dirName, filepath.Base(innerTempDir))
+
+		// Upload some files with PUT
+		transferDetailsUpload, err := client.DoPut(fed.Ctx, innerTempDir, uploadInnerURL, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		require.NoError(t, err)
+		require.Len(t, transferDetailsUpload, 1)
+
+		// Change the contents of the already-uploaded file; changes shouldn't be detected as the size stays the same
+		newTestFileContent := "XXXX content is within another XXXX"
+		err = os.WriteFile(innerTempFile.Name(), []byte(newTestFileContent), os.FileMode(0755))
+		require.NoError(t, err)
+
+		// Upload again; this time there should be fewer uploads as the subdir was already moved.
+		transferDetailsUpload, err = client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		require.NoError(t, err)
+		require.Len(t, transferDetailsUpload, 2)
+
+		// Download all the objects
+		downloadDir := t.TempDir()
+		transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadURL, downloadDir, true, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		verifySuccessfulTransfer(t, transferDetailsDownload)
+
+		// Verify we received the original contents, not any modified contents
+		contentBytes, err := os.ReadFile(filepath.Join(downloadDir, dirName, filepath.Base(innerTempDir), filepath.Base(innerTempFile.Name())))
+		require.NoError(t, err)
+		assert.Equal(t, innerTestFileContent, string(contentBytes))
+	})
+}
+
+func TestSyncDownload(t *testing.T) {
+	// Create instance of test federation
+	viper.Reset()
+	server_utils.ResetOriginExports()
+
+	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
+
+	// Create a token file
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+
+	tokenConfig := token.NewWLCGToken()
+	tokenConfig.Lifetime = time.Minute
+	tokenConfig.Issuer = issuer
+	tokenConfig.Subject = "origin"
+	tokenConfig.AddAudienceAny()
+	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
+	token, err := tokenConfig.CreateToken()
+	assert.NoError(t, err)
+	tempToken, err := os.CreateTemp(t.TempDir(), "token")
+	assert.NoError(t, err, "Error creating temp token file")
+	defer os.Remove(tempToken.Name())
+	_, err = tempToken.WriteString(token)
+	assert.NoError(t, err, "Error writing to temp token file")
+	tempToken.Close()
+
+	// Disable progress bars to not reuse the same mpb instance
+	viper.Set("Logging.DisableProgressBars", true)
+
+	// Make our test directories and files
+	tempDir := t.TempDir()
+	innerTempDir, err := os.MkdirTemp(tempDir, "InnerUploadDir")
+	assert.NoError(t, err)
+	permissions := os.FileMode(0755)
+	err = os.Chmod(tempDir, permissions)
+	require.NoError(t, err)
+	err = os.Chmod(innerTempDir, permissions)
+	require.NoError(t, err)
+
+	testFileContent1 := "test file content"
+	testFileContent2 := "more test file content!"
+	innerTestFileContent := "this content is within another dir!"
+	tempFile1, err := os.CreateTemp(tempDir, "test1")
+	require.NoError(t, err, "Error creating temp1 file")
+	tempFile2, err := os.CreateTemp(tempDir, "test1")
+	require.NoError(t, err, "Error creating temp2 file")
+	innerTempFile, err := os.CreateTemp(innerTempDir, "testInner")
+	require.NoError(t, err, "Error creating inner test file")
+
+	_, err = tempFile1.WriteString(testFileContent1)
+	require.NoError(t, err, "Error writing to temp1 file")
+	tempFile1.Close()
+	_, err = tempFile2.WriteString(testFileContent2)
+	require.NoError(t, err, "Error writing to temp2 file")
+	tempFile2.Close()
+	_, err = innerTempFile.WriteString(innerTestFileContent)
+	require.NoError(t, err, "Error writing to inner test file")
+	innerTempFile.Close()
+
+	// Set path for object to upload/download
+	tempPath := tempDir
+	dirName := filepath.Base(tempPath)
+	uploadURL := fmt.Sprintf("pelican://%s:%s/first/namespace/sync_download/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), dirName)
+
+	// Upload the file with PUT
+	transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+	require.NoError(t, err)
+	verifySuccessfulTransfer(t, transferDetailsUpload)
+
+	t.Run("testSyncDownloadFull", func(t *testing.T) {
+		// Download the files we just uploaded
+		transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		require.NoError(t, err)
+		verifySuccessfulTransfer(t, transferDetailsDownload)
+	})
+
+	t.Run("testSyncDownloadNone", func(t *testing.T) {
+		// Set path for object to upload/download
+		dirName := t.TempDir()
+
+		// Synchronize the uploaded files to a local directory
+		transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadURL, dirName, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		require.NoError(t, err)
+		verifySuccessfulTransfer(t, transferDetailsDownload)
+
+		// Synchronize the files again; should result in no transfers
+		transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, dirName, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		assert.NoError(t, err)
+		assert.Len(t, transferDetailsDownload, 0)
+	})
+
+	t.Run("testSyncDownloadPartial", func(t *testing.T) {
+		// Set path for object to upload/download
+		downloadDir := t.TempDir()
+		dirName := filepath.Base(tempDir)
+		uploadURL := fmt.Sprintf("pelican://%s:%s/first/namespace/sync_download_partial/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), dirName)
+		uploadInnerURL := fmt.Sprintf("pelican://%s:%s/first/namespace/sync_download_partial/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()), dirName, filepath.Base(innerTempDir))
+
+		// Upload the initial files
+		transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadURL, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		require.NoError(t, err)
+		verifySuccessfulTransfer(t, transferDetailsUpload)
+
+		// Download the inner directory
+		innerDownloadDir := filepath.Join(downloadDir, dirName, filepath.Base(innerTempDir))
+		transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadInnerURL, innerDownloadDir, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		require.NoError(t, err)
+		require.Len(t, transferDetailsDownload, 1)
+
+		// Change the contents of one already-uploaded file and re-upload it.
+		// Filesize is the same so a re-download should be skipped.
+		newTestFileContent := "XXXX content is within another XXXX"
+		err = os.WriteFile(innerTempFile.Name(), []byte(newTestFileContent), os.FileMode(0755))
+		require.NoError(t, err)
+		transferDetailsUpload, err = client.DoPut(fed.Ctx, innerTempDir, uploadInnerURL, true, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		require.Len(t, transferDetailsUpload, 1)
+
+		// Download all the objects
+		transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL, downloadDir, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		require.NoError(t, err)
+		assert.Len(t, transferDetailsDownload, 2)
+
+		// Verify we received the original contents, not any modified contents
+		contentBytes, err := os.ReadFile(filepath.Join(innerDownloadDir, filepath.Base(innerTempFile.Name())))
+		require.NoError(t, err)
+		assert.Equal(t, innerTestFileContent, string(contentBytes))
+
+		// Change the local size, then re-sync
+		innerDownloadFile := filepath.Join(innerDownloadDir, filepath.Base(innerTempFile.Name()))
+		log.Debugln("Overwriting old version of file", innerDownloadFile)
+		err = os.Remove(innerDownloadFile)
+		require.NoError(t, err)
+		err = os.WriteFile(innerDownloadFile, []byte("XXXX"), os.FileMode(0755))
+		require.NoError(t, err)
+		log.Debugln("Re-downloading file direct from origin")
+		transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadURL+"?directread", downloadDir, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		require.NoError(t, err)
+		assert.Len(t, transferDetailsDownload, 1)
+		contentBytes, err = os.ReadFile(filepath.Join(innerDownloadDir, filepath.Base(innerTempFile.Name())))
+		require.NoError(t, err)
+		assert.Equal(t, newTestFileContent, string(contentBytes))
+	})
 }

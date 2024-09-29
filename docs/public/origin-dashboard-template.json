@@ -18,15 +18,224 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 1,
+  "id": 2,
   "links": [],
-  "liveNow": false,
   "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 10,
+      "panels": [],
+      "title": "Origin Overview",
+      "type": "row"
+    },
     {
       "datasource": {
         "type": "prometheus",
         "uid": "<YOUR-DATA-SOURCE-UID>"
       },
+      "description": "1: Critical\n2: Warning\n3: OK\n4: Unknown\n\n\"web-ui\":       Web interface\n\"xrootd\"*:      XRootD process\n\"cmsd\"*:        CMSD process\n\"federation\"*:  Advertisement to central service\n\"director\"*:    File transfer test (health test) with the director\n\"topology\":     Data fetch from Topology server\n*: only available at origin and cache servers",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "1": {
+                  "color": "dark-red",
+                  "index": 0,
+                  "text": "Critical"
+                },
+                "2": {
+                  "color": "dark-orange",
+                  "index": 1,
+                  "text": "Warning"
+                },
+                "3": {
+                  "color": "dark-green",
+                  "index": 2,
+                  "text": "OK"
+                },
+                "4": {
+                  "color": "dark-purple",
+                  "index": 3,
+                  "text": "Unknown"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 0,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "<YOUR-DATA-SOURCE-UID>"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "pelican_component_health_status",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Component Status",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": ".*component=\"([^\"]+)\".*",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "<YOUR-DATA-SOURCE-UID>"
+      },
+      "description": "This panel displays the aggregated health status of all Pelican server components. The status is determined based on the most critical condition among the individual components:\n\n\t•\tOK: All components are operating normally.\n\t•\tWarning: At least one component is experiencing issues but none are critical.\n\t•\tError: At least one component is in a critical state.\n\nThis panel provides a high-level overview of the system’s health, allowing you to quickly assess if any action is needed. For detailed information about each component’s status, refer to the “Component Status” panel below.",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "options": {
+                "1": {
+                  "color": "dark-red",
+                  "index": 0,
+                  "text": "Error"
+                },
+                "2": {
+                  "color": "dark-yellow",
+                  "index": 1,
+                  "text": "Warning"
+                },
+                "3": {
+                  "color": "dark-green",
+                  "index": 2,
+                  "text": "OK"
+                }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 9,
+        "y": 1
+      },
+      "id": 14,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "<YOUR-DATA-SOURCE-UID>"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "max(\n  pelican_component_health_status == 1\n) * 1 OR max(\n  pelican_component_health_status == 2\n) * 2 OR on()\nsum(\n  pelican_component_health_status == 3\n) * 3",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Server Status",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "<YOUR-DATA-SOURCE-UID>"
+      },
+      "description": "The transfer rate for individual objects",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -78,25 +287,26 @@
               }
             ]
           },
-          "unitScale": true
+          "unit": "binBps"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 5,
+        "w": 5,
         "x": 0,
-        "y": 0
+        "y": 6
       },
-      "id": 4,
+      "id": 16,
       "options": {
         "legend": {
           "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
+          "displayMode": "table",
+          "placement": "right",
           "showLegend": true
         },
         "tooltip": {
+          "maxHeight": 600,
           "mode": "single",
           "sort": "none"
         }
@@ -107,20 +317,24 @@
             "type": "prometheus",
             "uid": "<YOUR-DATA-SOURCE-UID>"
           },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "xrootd_server_connection_count{instance=\"<YOUR-ORIGIN-SERVER-WEB-URL>\"}",
-          "format": "time_series",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
+          "editorMode": "code",
+          "expr": "rate(xrootd_transfer_bytes[5m])",
           "instant": false,
-          "legendFormat": "Connection",
+          "legendFormat": "__auto",
           "range": true,
-          "refId": "A",
-          "useBackend": false
+          "refId": "A"
         }
       ],
-      "title": "Accum. XrootD Connections",
+      "title": "Transfer Rate",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": ".*path=\"([^\"]+)\".*",
+            "renamePattern": "$1"
+          }
+        }
+      ],
       "type": "timeseries"
     },
     {
@@ -128,104 +342,162 @@
         "type": "prometheus",
         "uid": "<YOUR-DATA-SOURCE-UID>"
       },
+      "description": "This table shows the top 5 projects by Bytes Accessed",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Time"
+            },
+            "properties": [
+              {
+                "id": "custom.hidden",
+                "value": true
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 5,
+        "y": 6
+      },
+      "id": 17,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "<YOUR-DATA-SOURCE-UID>"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "topk(5, sum by (proj) (xrootd_transfer_bytes{type!=\"write\", proj!=\"\"}))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "__auto",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Top 5 Projects by Bytes Accessed",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "<YOUR-DATA-SOURCE-UID>"
+      },
+      "description": "Storage volume usage on the XRootD server",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "points",
-            "fillOpacity": 0,
-            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
             }
           },
-          "decimals": 0,
-          "mappings": [
-            {
-              "options": {
-                "1": {
-                  "color": "red",
-                  "index": 0,
-                  "text": "Critical"
-                },
-                "2": {
-                  "color": "orange",
-                  "index": 1,
-                  "text": "Warning"
-                },
-                "3": {
-                  "color": "green",
-                  "index": 2,
-                  "text": "OK"
-                },
-                "4": {
-                  "color": "blue",
-                  "index": 3,
-                  "text": "Unknown"
-                }
-              },
-              "type": "value"
-            }
-          ],
-          "max": 4,
-          "min": 1,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
+          "mappings": [],
+          "unit": "decbytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "free"
+            },
+            "properties": [
               {
-                "color": "super-light-blue",
-                "value": null
+                "id": "displayName",
+                "value": "Available"
               }
             ]
           },
-          "unit": "none",
-          "unitScale": true
-        },
-        "overrides": []
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "total"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Used"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
+        "h": 5,
+        "w": 4,
+        "x": 9,
+        "y": 6
       },
-      "id": 2,
+      "id": 9,
       "options": {
+        "displayLabels": [
+          "percent"
+        ],
         "legend": {
+          "calcs": [],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": []
+        },
+        "pieType": "donut",
+        "reduceOptions": {
           "calcs": [
             "lastNotNull"
           ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
+          "fields": "",
+          "values": false
         },
         "tooltip": {
+          "maxHeight": 600,
           "mode": "single",
           "sort": "none"
         }
@@ -238,25 +510,47 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "pelican_component_health_status{instance=\"<YOUR-ORIGIN-SERVER-WEB-URL>\"}",
+          "expr": "xrootd_storage_volume_bytes{server_type=\"origin\", ns=\"/patrickbrophy\"}",
           "fullMetaSearch": false,
-          "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "{{component}}",
+          "legendFormat": "__auto",
           "range": true,
           "refId": "A",
           "useBackend": false
         }
       ],
-      "title": "Origin Component Health Status",
-      "type": "timeseries"
+      "title": "Storage Usage",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": ".*type=\"([^\"]+)\".*",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "piechart"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
+      "id": 11,
+      "panels": [],
+      "title": "Resource Utilization",
+      "type": "row"
     },
     {
       "datasource": {
         "type": "prometheus",
         "uid": "<YOUR-DATA-SOURCE-UID>"
       },
+      "description": "Pelican memory usage",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -279,9 +573,6 @@
             },
             "insertNulls": false,
             "lineInterpolation": "smooth",
-            "lineStyle": {
-              "fill": "solid"
-            },
             "lineWidth": 1,
             "pointSize": 5,
             "scaleDistribution": {
@@ -291,7 +582,7 @@
             "spanNulls": false,
             "stacking": {
               "group": "A",
-              "mode": "normal"
+              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -310,31 +601,534 @@
                 "value": 80
               }
             ]
-          },
-          "unit": "deckbytes",
-          "unitScale": true
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 5,
+        "w": 6,
         "x": 0,
-        "y": 8
+        "y": 12
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "maxHeight": 600,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "<YOUR-DATA-SOURCE-UID>"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "go_memstats_alloc_bytes / 1024 / 1024",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Memory (MB)",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": ".*__name__=\"([^\"]+)\".*",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "<YOUR-DATA-SOURCE-UID>"
+      },
+      "description": "CPU usage of Pelican",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 12
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "tooltip": {
+          "maxHeight": 600,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "<YOUR-DATA-SOURCE-UID>"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "avg by (instance) (irate(process_cpu_seconds_total{job=\"prometheus\"}[1m]))",
+          "fullMetaSearch": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "CPU Usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "<YOUR-DATA-SOURCE-UID>"
+      },
+      "description": "The total number of bytes XRootD sent/received. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968503 (See link.in and link.out)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "decbytes"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "rx"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Recieved"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "tx"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Transmitted"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 0,
+        "y": 17
+      },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "<YOUR-DATA-SOURCE-UID>"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "xrootd_server_bytes",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Total Bytes Transferred",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": ".*direction=\"([^\"]+)\".*",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 12,
+      "panels": [],
+      "title": "Advanced",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "<YOUR-DATA-SOURCE-UID>"
+      },
+      "description": "Pelican Threads - The number of threads being used by the Pelican process\n\nXRootD Idle Threads - Number of scheduler threads waiting for work\n\nXRootD Running Threads - Number of scheduler threads running",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "go_threads"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Pelican Threads"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "{__name__=\"xrootd_sched_thread_count\", instance=\"fc3cba5b515f:8444\", job=\"prometheus\", state=\"idle\"}"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "XRootD Idle Threads"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "{__name__=\"xrootd_sched_thread_count\", instance=\"fc3cba5b515f:8444\", job=\"prometheus\", state=\"running\"}"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "XRootD Running Threads"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 23
+      },
+      "id": 15,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "<YOUR-DATA-SOURCE-UID>"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "go_threads",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "<YOUR-DATA-SOURCE-UID>"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "xrootd_sched_thread_count",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        }
+      ],
+      "title": "Threads",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "<YOUR-DATA-SOURCE-UID>"
+      },
+      "description": "The bytes of transfers for individual object. Ref: https://xrootd.slac.stanford.edu/doc/dev56/xrd_monitoring.htm#_Toc138968522 (See XrdXrootdMonStatXFR)",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "decbytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 23
+      },
+      "id": 8,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.0.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "<YOUR-DATA-SOURCE-UID>"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "xrootd_transfer_bytes",
+          "format": "time_series",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "XRootD Byte Transfers",
+      "transformations": [
+        {
+          "id": "renameByRegex",
+          "options": {
+            "regex": ".*type=\"([^\"]+)\".*",
+            "renamePattern": "$1"
+          }
+        }
+      ],
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "<YOUR-DATA-SOURCE-UID>"
+      },
+      "description": "Number of goroutines that currently exist.",
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 28
       },
       "id": 1,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
+      "pluginVersion": "11.0.0",
       "targets": [
         {
           "datasource": {
@@ -343,100 +1137,67 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "xrootd_server_bytes{instance=\"<YOUR-ORIGIN-SERVER-WEB-URL>\"}",
+          "expr": "go_goroutines",
           "fullMetaSearch": false,
+          "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "{{direction}}",
+          "legendFormat": "__auto",
           "range": true,
-          "refId": "Bytes transferred",
+          "refId": "A",
           "useBackend": false
         }
       ],
-      "title": "Origin Bytes Transferred",
-      "transformations": [],
-      "type": "timeseries"
+      "title": "Go Routines",
+      "type": "stat"
     },
     {
       "datasource": {
         "type": "prometheus",
         "uid": "<YOUR-DATA-SOURCE-UID>"
       },
+      "description": "The total number of server connections ",
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "mode": "thresholds"
           },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
+                "color": "green"
               }
             ]
-          },
-          "unit": "decbits",
-          "unitScale": true
+          }
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 8
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 28
       },
-      "id": 5,
+      "id": 7,
       "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
       },
+      "pluginVersion": "11.0.0",
       "targets": [
         {
           "datasource": {
@@ -444,136 +1205,57 @@
             "uid": "<YOUR-DATA-SOURCE-UID>"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "xrootd_storage_volume_bytes{instance=\"<YOUR-ORIGIN-SERVER-WEB-URL>\"}",
+          "editorMode": "code",
+          "expr": "xrootd_server_connection_count",
           "fullMetaSearch": false,
-          "includeNullMetadata": true,
+          "includeNullMetadata": false,
           "instant": false,
-          "legendFormat": "{{type}}",
+          "legendFormat": "__auto",
           "range": true,
           "refId": "A",
           "useBackend": false
         }
       ],
-      "title": "Origin Storage Volume",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "<YOUR-DATA-SOURCE-UID>"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "deckbytes",
-          "unitScale": true
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 16
-      },
-      "id": 3,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
+      "title": "Total Server Connections",
+      "transformations": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "<YOUR-DATA-SOURCE-UID>"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "xrootd_transfer_bytes{instance=\"<YOUR-ORIGIN-SERVER-WEB-URL>\"}",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "{{type}}: {{path}} ",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
+          "id": "renameByRegex",
+          "options": {
+            "regex": ".*__name__=\"([^\"]+)\".*",
+            "renamePattern": "$1"
+          }
         }
       ],
-      "title": "Object Transferred ",
-      "type": "timeseries"
+      "type": "stat"
     }
   ],
   "refresh": "",
   "schemaVersion": 39,
   "tags": [],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "<YOUR-DATA-SOURCE-UID>"
+        },
+        "filters": [],
+        "hide": 0,
+        "name": "Filters",
+        "skipUrlSync": false,
+        "type": "adhoc"
+      }
+    ]
   },
   "time": {
-    "from": "now-30m",
+    "from": "now-5m",
     "to": "now"
   },
+  "timeRangeUpdatedDuringEditOrView": false,
   "timepicker": {},
-  "timezone": "",
+  "timezone": "browser",
   "title": "Origin Dashboard",
-  "uid": "e85410a7-2e04-41e1-8a40-df9417c1d296",
-  "version": 2,
+  "uid": "ddnpqh7srolxcf",
+  "version": 27,
   "weekStart": ""
 }

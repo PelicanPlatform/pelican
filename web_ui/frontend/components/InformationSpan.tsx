@@ -1,4 +1,5 @@
 import { Box, Tooltip, Typography } from '@mui/material';
+import { grey } from '@mui/material/colors';
 import React from 'react';
 
 export const InformationSpan = ({
@@ -13,7 +14,7 @@ export const InformationSpan = ({
       <Box
         sx={{
           '&:nth-of-type(odd)': {
-            bgcolor: '#ececec',
+            bgcolor: grey[300],
             p: '4px 6px',
             borderRadius: '4px',
           },
@@ -24,10 +25,7 @@ export const InformationSpan = ({
           justifyContent: 'space-between',
         }}
       >
-        <Typography
-          variant={'body2'}
-          sx={{ fontWeight: 500, display: 'inline', mr: 2 }}
-        >
+        <Typography variant={'body2'} sx={{ display: 'inline', mr: 2 }}>
           {name}
         </Typography>
         <Typography variant={'body2'} sx={{ display: 'inline' }}>

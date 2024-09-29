@@ -32,7 +32,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -46,7 +45,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/mock"
-	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -82,49 +81,49 @@ func TestNewTransferDetails(t *testing.T) {
 		require.NoError(t, os.Unsetenv("http_proxy"))
 	})
 
-	// Case 1: cache with http
-	testCache := namespaces.Cache{
-		AuthEndpoint: "cache.edu:8443",
-		Endpoint:     "cache.edu:8000",
-		Resource:     "Cache",
-	}
-	transfers := newTransferDetails(testCache, transferDetailsOptions{false, ""})
-	assert.Equal(t, 2, len(transfers))
-	assert.Equal(t, "cache.edu:8000", transfers[0].Url.Host)
-	assert.Equal(t, "http", transfers[0].Url.Scheme)
-	assert.Equal(t, true, transfers[0].Proxy)
-	assert.Equal(t, "cache.edu:8000", transfers[1].Url.Host)
-	assert.Equal(t, "http", transfers[1].Url.Scheme)
-	assert.Equal(t, false, transfers[1].Proxy)
+	t.Run("ServerWithHTTPAndPort", func(t *testing.T) {
+		server := "http://cache.edu:8000"
+		transfers := generateTransferDetails(server, transferDetailsOptions{false, ""})
+		assert.Equal(t, 2, len(transfers))
+		assert.Equal(t, "cache.edu:8000", transfers[0].Url.Host)
+		assert.Equal(t, "http", transfers[0].Url.Scheme)
+		assert.Equal(t, true, transfers[0].Proxy)
+		assert.Equal(t, "cache.edu:8000", transfers[1].Url.Host)
+		assert.Equal(t, "http", transfers[1].Url.Scheme)
+		assert.Equal(t, false, transfers[1].Proxy)
+	})
 
-	// Case 2: cache with https
-	transfers = newTransferDetails(testCache, transferDetailsOptions{true, ""})
-	assert.Equal(t, 1, len(transfers))
-	assert.Equal(t, "cache.edu:8443", transfers[0].Url.Host)
-	assert.Equal(t, "https", transfers[0].Url.Scheme)
-	assert.Equal(t, false, transfers[0].Proxy)
+	t.Run("ServerWithHTTPSAndPort", func(t *testing.T) {
+		server := "https://cache.edu:8443"
+		transfers := generateTransferDetails(server, transferDetailsOptions{true, ""})
+		assert.Equal(t, 1, len(transfers))
+		assert.Equal(t, "cache.edu:8443", transfers[0].Url.Host)
+		assert.Equal(t, "https", transfers[0].Url.Scheme)
+		assert.Equal(t, false, transfers[0].Proxy)
+	})
 
-	testCache.Endpoint = "cache.edu"
-	// Case 3: cache without port with http
-	transfers = newTransferDetails(testCache, transferDetailsOptions{false, ""})
-	assert.Equal(t, 2, len(transfers))
-	assert.Equal(t, "cache.edu:8000", transfers[0].Url.Host)
-	assert.Equal(t, "http", transfers[0].Url.Scheme)
-	assert.Equal(t, true, transfers[0].Proxy)
-	assert.Equal(t, "cache.edu:8000", transfers[1].Url.Host)
-	assert.Equal(t, "http", transfers[1].Url.Scheme)
-	assert.Equal(t, false, transfers[1].Proxy)
+	t.Run("ServerWithHTTPAndNoPort", func(t *testing.T) {
+		server := "http://cache.edu"
+		// Case 3: cache without port with http
+		transfers := generateTransferDetails(server, transferDetailsOptions{false, ""})
+		assert.Equal(t, 2, len(transfers))
+		assert.Equal(t, "cache.edu", transfers[0].Url.Host)
+		assert.Equal(t, "http", transfers[0].Url.Scheme)
+		assert.Equal(t, true, transfers[0].Proxy)
+		assert.Equal(t, "cache.edu", transfers[1].Url.Host)
+		assert.Equal(t, "http", transfers[1].Url.Scheme)
+		assert.Equal(t, false, transfers[1].Proxy)
+	})
 
-	// Case 4. cache without port with https
-	testCache.AuthEndpoint = "cache.edu"
-	transfers = newTransferDetails(testCache, transferDetailsOptions{true, ""})
-	assert.Equal(t, 2, len(transfers))
-	assert.Equal(t, "cache.edu:8444", transfers[0].Url.Host)
-	assert.Equal(t, "https", transfers[0].Url.Scheme)
-	assert.Equal(t, false, transfers[0].Proxy)
-	assert.Equal(t, "cache.edu:8443", transfers[1].Url.Host)
-	assert.Equal(t, "https", transfers[1].Url.Scheme)
-	assert.Equal(t, false, transfers[1].Proxy)
+	t.Run("ServerWithHTTPSAndNoPort", func(t *testing.T) {
+		// Case 4. cache without port with https
+		server := "https://cache.edu"
+		transfers := generateTransferDetails(server, transferDetailsOptions{true, ""})
+		assert.Equal(t, 1, len(transfers))
+		assert.Equal(t, "cache.edu", transfers[0].Url.Host)
+		assert.Equal(t, "https", transfers[0].Url.Scheme)
+		assert.Equal(t, false, transfers[0].Proxy)
+	})
 }
 
 func TestNewTransferDetailsEnv(t *testing.T) {
@@ -133,22 +132,18 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 		require.NoError(t, os.Unsetenv("http_proxy"))
 	})
 
-	testCache := namespaces.Cache{
-		AuthEndpoint: "cache.edu:8443",
-		Endpoint:     "cache.edu:8000",
-		Resource:     "Cache",
-	}
+	testCache := "http://cache.edu:8000"
 
 	os.Setenv("OSG_DISABLE_PROXY_FALLBACK", "")
 	test_utils.InitClient(t, map[string]any{})
 
-	transfers := newTransferDetails(testCache, transferDetailsOptions{})
+	transfers := generateTransferDetails(testCache, transferDetailsOptions{})
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, true, transfers[0].Proxy)
 
 	os.Unsetenv("http_proxy")
 
-	transfers = newTransferDetails(testCache, transferDetailsOptions{true, ""})
+	transfers = generateTransferDetails(testCache, transferDetailsOptions{true, ""})
 	assert.Equal(t, 1, len(transfers))
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
 	assert.Equal(t, false, transfers[0].Proxy)
@@ -194,18 +189,13 @@ func TestSlowTransfers(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	testCache := namespaces.Cache{
-		AuthEndpoint: svr.URL,
-		Endpoint:     svr.URL,
-		Resource:     "Cache",
-	}
-
+	testCache := svr.URL
 	os.Setenv("http_proxy", "http://proxy.edu:3128")
 	t.Cleanup(func() {
 		require.NoError(t, os.Unsetenv("http_proxy"))
 	})
 
-	transfers := newTransferDetails(testCache, transferDetailsOptions{false, ""})
+	transfers := generateTransferDetails(testCache, transferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
@@ -286,12 +276,8 @@ func TestStoppedTransfer(t *testing.T) {
 	defer svr.CloseClientConnections()
 	defer svr.Close()
 
-	testCache := namespaces.Cache{
-		AuthEndpoint: svr.URL,
-		Endpoint:     svr.URL,
-		Resource:     "Cache",
-	}
-	transfers := newTransferDetails(testCache, transferDetailsOptions{false, ""})
+	testCache := svr.URL
+	transfers := generateTransferDetails(testCache, transferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
@@ -362,12 +348,8 @@ func TestTrailerError(t *testing.T) {
 		require.NoError(t, os.Unsetenv("http_proxy"))
 	})
 
-	testCache := namespaces.Cache{
-		AuthEndpoint: svr.URL,
-		Endpoint:     svr.URL,
-		Resource:     "Cache",
-	}
-	transfers := newTransferDetails(testCache, transferDetailsOptions{false, ""})
+	testCache := svr.URL
+	transfers := generateTransferDetails(testCache, transferDetailsOptions{false, ""})
 	assert.Equal(t, 2, len(transfers))
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
@@ -477,24 +459,26 @@ func TestSortAttempts(t *testing.T) {
 
 	defer cancel()
 
-	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3})
+	token := newTokenGenerator(nil, nil, false, false)
+	token.SetToken("aaa")
+	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, token)
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 	assert.Equal(t, svr1.URL, results[2].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3, attempt1})
+	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3, attempt1}, token)
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
 	assert.Equal(t, svr1.URL, results[2].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt1})
+	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt1}, token)
 	assert.Equal(t, int64(-1), size)
 	assert.Equal(t, svr1.URL, results[0].Url.String())
 	assert.Equal(t, svr1.URL, results[1].Url.String())
 
-	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3})
+	size, results = sortAttempts(ctx, "/path", []transferAttemptDetails{attempt2, attempt3}, token)
 	assert.Equal(t, int64(42), size)
 	assert.Equal(t, svr2.URL, results[0].Url.String())
 	assert.Equal(t, svr3.URL, results[1].Url.String())
@@ -848,54 +832,68 @@ func TestNewPelicanURL(t *testing.T) {
 	})
 }
 
-// Tests the functionality of getCachesToTry, ensuring that the function returns the correct number of caches and removes duplicates
-func TestGetCachesToTry(t *testing.T) {
-	directorCaches := make([]namespaces.DirectorCache, 3)
-	for i := 0; i < 3; i++ {
-		directorCache := namespaces.DirectorCache{
-			EndpointUrl: "https://some/cache/" + strconv.Itoa(i),
-			Priority:    0,
-			AuthedReq:   false,
-		}
-		directorCaches[i] = directorCache
+// The test should prove that the function getObjectServersToTry returns the correct number of servers,
+// and that any duplicates are removed
+func TestGetObjectServersToTry(t *testing.T) {
+	sortedServers := []string{
+		"http://cache-1.com", // set an HTTP scheme to check that it's switched to https
+		"https://cache-2.com",
+		"https://cache-2.com", // make sure duplicates are removed
+		"https://cache-3.com",
+		"https://cache-4.com",
+		"https://cache-5.com",
 	}
 
-	// Add a duplicate to the list --> check for its removal
-	directorCaches = append(directorCaches, namespaces.DirectorCache{
-		EndpointUrl: "https://some/cache/0",
-		Priority:    0,
-		AuthedReq:   false,
+	t.Run("RequiredTokenTriggersHTTPS", func(t *testing.T) {
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: true,
+			},
+		}
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		transfers := getObjectServersToTry(sortedServers, job, 3, "")
+
+		// Check that there are no duplicates in the result
+		cacheSet := make(map[string]bool)
+		for _, transfer := range transfers {
+			if cacheSet[transfer.Url.String()] {
+				t.Errorf("Found duplicate cache: %v", transfer.Url.String())
+			}
+			cacheSet[transfer.Url.String()] = true
+		}
+		// Verify we got the correct caches in our transfer attempt details
+		require.Len(t, transfers, 3)
+		assert.Equal(t, "https://cache-1.com", transfers[0].Url.String())
+		assert.Equal(t, "https://cache-2.com", transfers[1].Url.String())
+		assert.Equal(t, "https://cache-3.com", transfers[2].Url.String())
 	})
 
-	// Make our namespace:
-	namespace := namespaces.Namespace{
-		SortedDirectorCaches: directorCaches,
-		ReadHTTPS:            false,
-		UseTokenOnRead:       false,
-	}
-
-	caches, err := getCachesFromNamespace(namespace, true, nil)
-	assert.NoError(t, err)
-
-	job := &TransferJob{
-		namespace: namespace,
-	}
-
-	transfers := getCachesToTry(caches, job, 4, "")
-
-	// Check that there are no duplicates in the result
-	cacheSet := make(map[CacheInterface]bool)
-	for _, transfer := range transfers {
-		if cacheSet[transfer.Url.String()] {
-			t.Errorf("Found duplicate cache: %v", transfer.Url.String())
+	t.Run("NoRequiredTokenPreservesHTTP", func(t *testing.T) {
+		directorResponse := server_structs.DirectorResponse{
+			XPelNsHdr: server_structs.XPelNs{
+				RequireToken: false,
+			},
 		}
-		cacheSet[transfer.Url.String()] = true
-	}
-	// Verify we got the correct caches in our transfer attempt details
-	require.Len(t, transfers, 3)
-	assert.Equal(t, "https://some/cache/0", transfers[0].Url.String())
-	assert.Equal(t, "https://some/cache/1", transfers[1].Url.String())
-	assert.Equal(t, "https://some/cache/2", transfers[2].Url.String())
+		job := &TransferJob{
+			dirResp: directorResponse,
+		}
+		transfers := getObjectServersToTry(sortedServers, job, 3, "")
+
+		cacheSet := make(map[string]bool)
+		for _, transfer := range transfers {
+			if cacheSet[transfer.Url.String()] {
+				t.Errorf("Found duplicate cache: %v", transfer.Url.String())
+			}
+			cacheSet[transfer.Url.String()] = true
+		}
+
+		require.Len(t, transfers, 3)
+		assert.Equal(t, "http://cache-1.com", transfers[0].Url.String())
+		assert.Equal(t, "https://cache-2.com", transfers[1].Url.String())
+		assert.Equal(t, "https://cache-3.com", transfers[2].Url.String())
+	})
 }
 
 // Test that the project name is correctly extracted from the job ad file
@@ -1011,7 +1009,37 @@ func TestFailedConnectionSetupError(t *testing.T) {
 	} else {
 		require.Fail(t, "Slow server did not generate a HeaderTimeoutError")
 	}
-	require.Error(t, err)
+	assert.True(t, IsRetryable(err))
+	assert.Error(t, err)
+}
+
+// Test that head requests with downloads contain the download token if it exists
+func TestHeadRequestWithDownloadToken(t *testing.T) {
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
+		}
+	}))
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	token := newTokenGenerator(nil, nil, false, false)
+	token.SetToken("test-token")
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: "/dev/null",
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+		token: token,
+	}
+	_, _ = downloadObject(transfer)
 }
 
 // Test error message generated on a failed upload
@@ -1144,178 +1172,5 @@ func TestNewTransferEngine(t *testing.T) {
 		ctx := context.Background()
 		_, err = NewTransferEngine(ctx)
 		assert.NoError(t, err)
-	})
-}
-
-// Test the functionality of getting the collections URL from the director or from the namespace ad.
-// Tests different responses from the director with and without 'dirlisthost' specified in the namespace.
-func TestGetCollectionsUrl(t *testing.T) {
-	viper.Reset()
-	defer viper.Reset()
-	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
-	ctx := context.Background()
-	err := config.InitClient()
-	assert.NoError(t, err)
-
-	// Test we get dirlisthost with valid PROPFIND on test server
-	t.Run("testValidPropfind", func(t *testing.T) {
-		expectedLocation := "http://some/origin/path/to/object"
-		handler := func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Location", expectedLocation)
-			w.WriteHeader(http.StatusTemporaryRedirect)
-		}
-		server := httptest.NewServer(http.HandlerFunc(handler))
-		defer server.Close()
-		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		dirListHost, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
-		require.NoError(t, err)
-		assert.Equal(t, "http://some", dirListHost.String())
-	})
-
-	// Test we get dirlist host when PROPFIND returns 405 but dirlisthost set in namespace
-	t.Run("testInvalidPropfindValidDirListInNamespace", func(t *testing.T) {
-		expectedLocation := "http://origin"
-		handler := func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-		server := httptest.NewServer(http.HandlerFunc(handler))
-		defer server.Close()
-		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		dirListHost, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, server.URL)
-		require.NoError(t, err)
-		assert.Equal(t, expectedLocation, dirListHost.String())
-	})
-
-	// Test we get dirlist host when PROPFIND returns 404 but dirlisthost set in namespace
-	t.Run("test404PropfindValidDirListInNamespace", func(t *testing.T) {
-		expectedLocation := "http://origin"
-		handler := func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-		}
-		server := httptest.NewServer(http.HandlerFunc(handler))
-		defer server.Close()
-		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		dirListHost, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, server.URL)
-		require.NoError(t, err)
-		assert.Equal(t, expectedLocation, dirListHost.String())
-	})
-
-	// Test we get dirlisthost when we are not using a director and namespace has dirlisthost set
-	t.Run("testNoDirectorValidDirListInNamespace", func(t *testing.T) {
-		expectedLocation := "http://origin"
-		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-		dirListHost, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{DirListHost: expectedLocation}, "")
-		require.NoError(t, err)
-		assert.Equal(t, expectedLocation, dirListHost.String())
-	})
-
-	// Test if PROPFIND and ns.dirlisthost fail, we get dirListingNotSupported error
-	t.Run("testInvalidPropfindNoDirListInNamespace", func(t *testing.T) {
-		handler := func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-		}
-		server := httptest.NewServer(http.HandlerFunc(handler))
-		defer server.Close()
-		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
-		require.Error(t, err)
-		assert.IsType(t, &dirListingNotSupportedError{}, err)
-	})
-
-	// Test if PROPFIND if 404 and ns.dirlisthost fail, we get dirListingNotSupported error
-	t.Run("test404PropfindNoDirListInNamespace", func(t *testing.T) {
-		handler := func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-		}
-		server := httptest.NewServer(http.HandlerFunc(handler))
-		defer server.Close()
-		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
-		require.Error(t, err)
-		assert.IsType(t, &dirListingNotSupportedError{}, err)
-	})
-
-	// Test if no director and namespace doesn't contain dirlisthost, we get dirListingNotSupported error
-	t.Run("testNoDirectorNoDirListInNamespace", func(t *testing.T) {
-		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, "")
-		require.Error(t, err)
-		assert.IsType(t, &dirListingNotSupportedError{}, err)
-	})
-
-	// Test when director does not return 'location' header (just blank response), we fail
-	t.Run("testNoLocationHeaderReturned", func(t *testing.T) {
-		handler := func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusTemporaryRedirect)
-		}
-		server := httptest.NewServer(http.HandlerFunc(handler))
-		defer server.Close()
-		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "collections URL not found in director response")
-	})
-
-	// Test when director returns 200 with X-Pelican-Namespace header
-	t.Run("test207ResponseWPelicanNamespaceHeader", func(t *testing.T) {
-		expectedLocation := "https://example-origin.com"
-		handler := func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Pelican-Namespace", "namespace=federation, require-token=false, collections-url="+expectedLocation)
-			w.WriteHeader(http.StatusMultiStatus)
-		}
-		server := httptest.NewServer(http.HandlerFunc(handler))
-		defer server.Close()
-		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		res, err := getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
-		require.NoError(t, err)
-		assert.Equal(t, expectedLocation, res.String())
-	})
-
-	t.Run("test200ResponseWOPelicanNamespaceHeader", func(t *testing.T) {
-		handler := func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusMultiStatus)
-		}
-		server := httptest.NewServer(http.HandlerFunc(handler))
-		defer server.Close()
-		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "collections URL not found in director response: X-Pelican-Namespace header is missing in 207 response")
-	})
-
-	// Test if failure to connect to director we handle that properly
-	t.Run("testDirectorFailedToConnect", func(t *testing.T) {
-		handler := func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			err := json.NewEncoder(w).Encode(map[string]string{"status": "error", "msg": "some server error"})
-			require.NoError(t, err)
-		}
-		server := httptest.NewServer(http.HandlerFunc(handler))
-		defer server.Close()
-		testObjectUrl, err := url.Parse("pelican://federation/some/object")
-		require.NoError(t, err)
-
-		_, err = getCollectionsUrl(ctx, testObjectUrl, namespaces.Namespace{}, server.URL)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "some server error")
 	})
 }

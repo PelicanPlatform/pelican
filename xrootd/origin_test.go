@@ -43,6 +43,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
@@ -75,7 +76,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
 	config.InitConfig()
-	err = config.InitServer(ctx, config.OriginType)
+	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	err = config.GeneratePrivateKey(param.Server_TLSKey.GetString(), elliptic.P256(), false)

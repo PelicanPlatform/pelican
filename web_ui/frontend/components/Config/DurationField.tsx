@@ -16,7 +16,7 @@ import {
   ParameterInputProps,
   Duration,
   DurationString,
-} from '@/components/Config/index.d';
+} from '@/components/Config/index';
 import { createId, buildPatch } from './util';
 
 /**

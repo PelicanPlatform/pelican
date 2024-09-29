@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
@@ -63,14 +64,14 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	ft.Ctx = ctx
 	ft.Egrp = egrp
 
-	modules := config.ServerType(0)
-	modules.Set(config.CacheType)
-	modules.Set(config.OriginType)
-	modules.Set(config.DirectorType)
-	modules.Set(config.RegistryType)
+	modules := server_structs.ServerType(0)
+	modules.Set(server_structs.CacheType)
+	modules.Set(server_structs.OriginType)
+	modules.Set(server_structs.DirectorType)
+	modules.Set(server_structs.RegistryType)
 	// TODO: the cache startup routines not sequenced correctly for the downloads
 	// to immediately work through the cache.  For now, unit tests will just use the origin.
-	modules.Set(config.LocalCacheType)
+	modules.Set(server_structs.LocalCacheType)
 
 	tmpPathPattern := "Pelican-FedTest*"
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
@@ -143,6 +144,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set("LocalCache.RunLocation", filepath.Join(tmpPath, "local-cache"))
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
+	viper.Set("Director.CacheSortMethod", "distance")
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)

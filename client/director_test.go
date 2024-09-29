@@ -24,17 +24,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
-	namespaces "github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
-func TestGetCachesFromDirectorResponse(t *testing.T) {
+func TestParseServersFromDirectorResponse(t *testing.T) {
 	// Construct the Director's Response, comprising headers and a body
 	directorHeaders := make(map[string][]string)
 	directorHeaders["Link"] = []string{"<my-cache.edu:8443>; rel=\"duplicate\"; pri=1, <another-cache.edu:8443>; rel=\"duplicate\"; pri=2"}
@@ -46,27 +44,19 @@ func TestGetCachesFromDirectorResponse(t *testing.T) {
 		Body:       io.NopCloser(bytes.NewReader(directorBody)),
 	}
 
-	// Call the function in question
-	caches, err := getCachesFromDirectorResponse(directorResponse, true)
-
-	// Test for expected outputs
-	assert.NoError(t, err, "Error getting caches from the Director's response")
-
-	assert.Equal(t, "my-cache.edu:8443", caches[0].EndpointUrl)
-	assert.Equal(t, 1, caches[0].Priority)
-	assert.Equal(t, true, caches[0].AuthedReq)
-
-	assert.Equal(t, "another-cache.edu:8443", caches[1].EndpointUrl)
-	assert.Equal(t, 2, caches[1].Priority)
-	assert.Equal(t, true, caches[1].AuthedReq)
+	sortedServers, err := parseServersFromDirectorResponse(directorResponse)
+	assert.NoError(t, err, "Error getting sortedServers from the Director's response")
+	assert.Equal(t, "my-cache.edu:8443", sortedServers[0].String())
+	assert.Equal(t, "another-cache.edu:8443", sortedServers[1].String())
 }
 
-func TestCreateNsFromDirectorResp(t *testing.T) {
-	//Craft the Director's response
+func TestParseDirectorInfo(t *testing.T) {
+	// Craft the Director's response
 	directorHeaders := make(map[string][]string)
 	directorHeaders["Link"] = []string{"<my-cache.edu:8443>; rel=\"duplicate\"; pri=1, <another-cache.edu:8443>; rel=\"duplicate\"; pri=2"}
-	directorHeaders["X-Pelican-Namespace"] = []string{"namespace=/foo/bar, readhttps=True, require-token=True"}
-	directorHeaders["X-Pelican-Authorization"] = []string{"issuer=https://get-your-tokens.org", "issuer=https://get-your-tokens2.org"}
+	directorHeaders["X-Pelican-Namespace"] = []string{"namespace=/foo/bar, require-token=True, collections-url=https://my-collections.com"}
+	directorHeaders["X-Pelican-Authorization"] = []string{"issuer=https://get-your-tokens.org, issuer=https://get-your-tokens2.org"}
+	directorHeaders["X-Pelican-Token-Generation"] = []string{"issuer=https://get-your-tokens.org, base-path=/foo/bar, max-scope-depth=2, strategy=OAuth2"}
 	directorBody := []byte(`{"key": "value"}`)
 
 	directorResponse := &http.Response{
@@ -75,41 +65,21 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 		Body:       io.NopCloser(bytes.NewReader(directorBody)),
 	}
 
-	// Create a namespace instance to test against
-	cache1 := namespaces.DirectorCache{
-		EndpointUrl: "my-cache.edu:8443",
-		Priority:    1,
-		AuthedReq:   true,
-	}
-	cache2 := namespaces.DirectorCache{
-		EndpointUrl: "another-cache.edu:8443",
-		Priority:    2,
-		AuthedReq:   true,
-	}
+	parsed, err := ParseDirectorInfo(directorResponse)
+	assert.NoError(t, err, "Error parsing Director response")
 
-	caches := []namespaces.DirectorCache{}
-	caches = append(caches, cache1)
-	caches = append(caches, cache2)
+	assert.Equal(t, "/foo/bar", parsed.XPelNsHdr.Namespace)
+	assert.Equal(t, true, parsed.XPelNsHdr.RequireToken)
+	assert.NotNil(t, parsed.XPelNsHdr.CollectionsUrl)
+	assert.Equal(t, "https://my-collections.com", parsed.XPelNsHdr.CollectionsUrl.String())
 
-	constructedNamespace := &namespaces.Namespace{
-		SortedDirectorCaches: caches,
-		Path:                 "/foo/bar",
-		Issuer:               []string{"https://get-your-tokens.org", "https://get-your-tokens2.org"},
-		ReadHTTPS:            true,
-		UseTokenOnRead:       true,
-	}
+	assert.Equal(t, "https://get-your-tokens.org", parsed.XPelAuthHdr.Issuers[0].String())
+	assert.Equal(t, "https://get-your-tokens2.org", parsed.XPelAuthHdr.Issuers[1].String())
 
-	// Call the function in question
-	ns, err := CreateNsFromDirectorResp(directorResponse)
-
-	// Test for expected outputs
-	assert.NoError(t, err, "Error creating Namespace from Director response")
-
-	assert.Equal(t, constructedNamespace.SortedDirectorCaches, ns.SortedDirectorCaches)
-	assert.Equal(t, constructedNamespace.Path, ns.Path)
-	assert.Equal(t, constructedNamespace.Issuer, ns.Issuer)
-	assert.Equal(t, constructedNamespace.ReadHTTPS, ns.ReadHTTPS)
-	assert.Equal(t, constructedNamespace.UseTokenOnRead, ns.UseTokenOnRead)
+	assert.Equal(t, "https://get-your-tokens.org", parsed.XPelTokGenHdr.Issuers[0].String())
+	assert.Equal(t, "/foo/bar", parsed.XPelTokGenHdr.BasePaths[0])
+	assert.Equal(t, uint(2), parsed.XPelTokGenHdr.MaxScopeDepth)
+	assert.Equal(t, server_structs.OAuthStrategy, parsed.XPelTokGenHdr.Strategy)
 
 	// Test the old version of parsing the issuer from the director to ensure backwards compatibility with a V1 client and a V2 director
 	var xPelicanAuthorization map[string]string
@@ -119,73 +89,7 @@ func TestCreateNsFromDirectorResp(t *testing.T) {
 		issuer = xPelicanAuthorization["issuer"]
 	}
 
-	assert.Equal(t, "https://get-your-tokens.org", issuer)
-
-}
-
-func TestNewTransferDetailsUsingDirector(t *testing.T) {
-	os.Setenv("http_proxy", "http://proxy.edu:3128")
-	t.Cleanup(func() {
-		require.NoError(t, os.Unsetenv("http_proxy"))
-	})
-
-	// Construct the input caches
-	// Cache with http
-	nonAuthCache := namespaces.DirectorCache{
-		ResourceName: "mycache",
-		EndpointUrl:  "my-cache-url:8000",
-		Priority:     99,
-		AuthedReq:    false,
-	}
-
-	// Cache with https
-	authCache := namespaces.DirectorCache{
-		ResourceName: "mycache",
-		EndpointUrl:  "my-cache-url:8443",
-		Priority:     99,
-		AuthedReq:    true,
-	}
-
-	// Case 1: cache with http
-
-	transfers := newTransferDetailsUsingDirector(nonAuthCache, transferDetailsOptions{nonAuthCache.AuthedReq, ""})
-	assert.Equal(t, 2, len(transfers))
-	assert.Equal(t, "my-cache-url:8000", transfers[0].Url.Host)
-	assert.Equal(t, "http", transfers[0].Url.Scheme)
-	assert.Equal(t, true, transfers[0].Proxy)
-	assert.Equal(t, 2, len(transfers))
-	assert.Equal(t, "my-cache-url:8000", transfers[1].Url.Host)
-	assert.Equal(t, "http", transfers[1].Url.Scheme)
-	assert.Equal(t, false, transfers[1].Proxy)
-
-	// Case 2: cache with https
-	transfers = newTransferDetailsUsingDirector(authCache, transferDetailsOptions{authCache.AuthedReq, ""})
-	assert.Equal(t, 1, len(transfers))
-	assert.Equal(t, "my-cache-url:8443", transfers[0].Url.Host)
-	assert.Equal(t, "https", transfers[0].Url.Scheme)
-	assert.Equal(t, false, transfers[0].Proxy)
-
-	// Case 3: cache without port with http
-	nonAuthCache.EndpointUrl = "my-cache-url"
-	transfers = newTransferDetailsUsingDirector(nonAuthCache, transferDetailsOptions{nonAuthCache.AuthedReq, ""})
-	assert.Equal(t, 2, len(transfers))
-	assert.Equal(t, "my-cache-url:8000", transfers[0].Url.Host)
-	assert.Equal(t, "http", transfers[0].Url.Scheme)
-	assert.Equal(t, true, transfers[0].Proxy)
-	assert.Equal(t, "my-cache-url:8000", transfers[1].Url.Host)
-	assert.Equal(t, "http", transfers[1].Url.Scheme)
-	assert.Equal(t, false, transfers[1].Proxy)
-
-	// Case 4. cache without port with https
-	authCache.EndpointUrl = "my-cache-url"
-	transfers = newTransferDetailsUsingDirector(authCache, transferDetailsOptions{authCache.AuthedReq, ""})
-	assert.Equal(t, 2, len(transfers))
-	assert.Equal(t, "my-cache-url:8444", transfers[0].Url.Host)
-	assert.Equal(t, "https", transfers[0].Url.Scheme)
-	assert.Equal(t, false, transfers[0].Proxy)
-	assert.Equal(t, "my-cache-url:8443", transfers[1].Url.Host)
-	assert.Equal(t, "https", transfers[1].Url.Scheme)
-	assert.Equal(t, false, transfers[1].Proxy)
+	assert.Equal(t, "https://get-your-tokens2.org", issuer)
 }
 
 func TestQueryDirector(t *testing.T) {
@@ -199,7 +103,7 @@ func TestQueryDirector(t *testing.T) {
 	defer server.Close()
 
 	// Call QueryDirector with the test server URL and a source path
-	actualResp, err := queryDirector(context.Background(), "GET", "/foo/bar", server.URL)
+	actualResp, err := queryDirector(context.Background(), "GET", "/foo/bar", server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,5 +117,90 @@ func TestQueryDirector(t *testing.T) {
 	// Check the HTTP status code
 	if actualResp.StatusCode != http.StatusTemporaryRedirect {
 		t.Errorf("Expected HTTP status code %d, but got %d", http.StatusFound, actualResp.StatusCode)
+	}
+}
+
+func TestGetDirectorInfoForPath(t *testing.T) {
+	// Craft the Director's response
+	directorHeaders := make(map[string]string)
+	directorHeaders["Link"] = "<my-cache.edu:8443>; rel=\"duplicate\"; pri=1, <another-cache.edu:8443>; rel=\"duplicate\"; pri=2"
+	directorHeaders["X-Pelican-Namespace"] = "namespace=/foo/bar, require-token=True, collections-url=https://my-collections.com"
+	directorHeaders["X-Pelican-Authorization"] = "issuer=https://get-your-tokens.org, issuer=https://get-your-tokens2.org"
+	directorHeaders["X-Pelican-Token-Generation"] = "issuer=https://get-your-tokens.org, base-path=/foo/bar, max-scope-depth=2, strategy=OAuth2"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			queryParams := r.URL.Query()
+			if _, ok := queryParams["directread"]; ok {
+				// Prove the query made it through the various function calls. This is NOT
+				// how the director would actually respond (but it's easier to mock in a test)
+				// and it effectively shows preservation of the query.
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"status": "direct read"}`))
+				return
+			}
+			for key, value := range directorHeaders {
+				w.Header().Add(key, value)
+			}
+			w.WriteHeader(http.StatusTemporaryRedirect)
+		} else if r.Method == "PUT" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer ts.Close()
+
+	tests := []struct {
+		name          string
+		resourcePath  string
+		directorUrl   string
+		isPut         bool
+		query         string
+		expectedError string
+	}{
+		{
+			name:          "No director URL",
+			resourcePath:  "/test",
+			directorUrl:   "",
+			isPut:         false,
+			query:         "",
+			expectedError: "unable to retrieve information from a Director for object /test because no director URL was provided",
+		},
+		{
+			name:          "Successful GET request",
+			resourcePath:  "/test",
+			directorUrl:   ts.URL,
+			isPut:         false,
+			query:         "",
+			expectedError: "",
+		},
+		{
+			name:          "PUT request changes verb", // also generates 405, although this is a feauture of the director
+			resourcePath:  "/test",
+			directorUrl:   ts.URL,
+			isPut:         true,
+			query:         "",
+			expectedError: "error 405: No writeable origins were found",
+		},
+		{
+			name:          "Queries are propagated", // also generates 405, although this is a feauture of the director
+			resourcePath:  "/test",
+			directorUrl:   ts.URL,
+			isPut:         false,
+			query:         "directread",
+			expectedError: "200: {\"status\": \"direct read\"}",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			_, err := GetDirectorInfoForPath(ctx, tt.resourcePath, tt.directorUrl, tt.isPut, tt.query, "")
+			if tt.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedError)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
 	}
 }

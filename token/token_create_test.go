@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -211,7 +212,7 @@ func TestCreateToken(t *testing.T) {
 	viper.Set("IssuerKey", kfile)
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
-	err := config.InitServer(ctx, config.DirectorType)
+	err := config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
 	// Generate a private key to use for the test

@@ -3,14 +3,15 @@
   "version": "7.2.0",
   "private": true,
   "scripts": {
-    "dev": "export NODE_ENV=development && next dev",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "export": "next export",
     "lint": "next lint",
     "format": "prettier --check --ignore-path .gitignore .",
     "format:fix": "prettier --write --ignore-path .gitignore .",
-    "clean": "rm -rf .next & rm -rf out"
+    "clean": "rm -rf .next & rm -rf out",
+    "analyze": "ANALYZE=true next build"
   },
   "dependencies": {
     "@emotion/react": "^11.11.1",
@@ -27,18 +28,21 @@
     "chartjs-plugin-zoom": "^2.0.1",
     "eslint": "8.45.0",
     "eslint-config-next": "13.4.12",
-    "js-yaml": "^4.1.0",
     "fuse.js": "^7.0.0",
+    "js-yaml": "^4.1.0",
     "lodash": "^4.17.21",
     "luxon": "^3.4.3",
+    "maplibre-gl": "^4.5.0",
     "next": "14.1.1",
     "react": "18.2.0",
     "react-chartjs-2": "^5.2.0",
     "react-dom": "18.2.0",
+    "react-map-gl": "^7.1.7",
     "swagger-ui-react": "^5.10.3",
     "swr": "^2.2.5",
     "typescript": "5.1.6",
-    "yaml": "^2.3.4"
+    "yaml": "^2.3.4",
+    "@next/bundle-analyzer": "^14.2.3"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

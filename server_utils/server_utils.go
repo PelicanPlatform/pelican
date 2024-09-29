@@ -41,50 +41,11 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
-)
-
-type (
-	Server struct {
-		AuthEndpoint string `json:"auth_endpoint"`
-		Endpoint     string `json:"endpoint"`
-		Resource     string `json:"resource"`
-	}
-
-	Scitokens struct {
-		BasePath   []string `json:"base_path"`
-		Issuer     string   `json:"issuer"`
-		Restricted []string `json:"restricted_path"`
-	}
-
-	CredentialGeneration struct {
-		BasePath      string `json:"base_path"`
-		Issuer        string `json:"issuer"`
-		MaxScopeDepth int    `json:"max_scope_depth"`
-		Strategy      string `json:"strategy"`
-		VaultIssuer   string `json:"vault_issuer"`
-		VaultServer   string `json:"vault_server"`
-	}
-
-	Namespace struct {
-		Caches               []Server             `json:"caches"`
-		Origins              []Server             `json:"origins"`
-		CredentialGeneration CredentialGeneration `json:"credential_generation"`
-		DirlistHost          string               `json:"dirlisthost"`
-		Path                 string               `json:"path"`
-		ReadHTTPS            bool                 `json:"readhttps"`
-		Scitokens            []Scitokens          `json:"scitokens"`
-		UseTokenOnRead       bool                 `json:"usetokenonread"`
-		WritebackHost        string               `json:"writebackhost"`
-	}
-
-	TopologyNamespacesJSON struct {
-		Caches     []Server    `json:"caches"`
-		Namespaces []Namespace `json:"namespaces"`
-	}
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // GetTopologyJSON returns the namespaces and caches from OSDF topology
-func GetTopologyJSON(ctx context.Context, includeDowned bool) (*TopologyNamespacesJSON, error) {
+func GetTopologyJSON(ctx context.Context) (*server_structs.TopologyNamespacesJSON, error) {
 	topoNamespaceUrl := param.Federation_TopologyNamespaceUrl.GetString()
 	if topoNamespaceUrl == "" {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, "Topology namespaces.json configuration option (`Federation.TopologyNamespaceURL`) not set")
@@ -100,9 +61,6 @@ func GetTopologyJSON(ctx context.Context, includeDowned bool) (*TopologyNamespac
 	req.Header.Set("Accept", "application/json")
 
 	q := req.URL.Query()
-	if includeDowned {
-		q.Add("include_downed", "1")
-	}
 	req.URL.RawQuery = q.Encode()
 
 	// Use the transport to include timeouts
@@ -125,7 +83,7 @@ func GetTopologyJSON(ctx context.Context, includeDowned bool) (*TopologyNamespac
 		return nil, errors.Wrap(err, "Failure when reading OSDF namespace response")
 	}
 
-	var namespaces TopologyNamespacesJSON
+	var namespaces server_structs.TopologyNamespacesJSON
 	if err = json.Unmarshal(respBytes, &namespaces); err != nil {
 		metrics.SetComponentHealthStatus(metrics.DirectorRegistry_Topology, metrics.StatusCritical, fmt.Sprintf("Failure when parsing JSON response from topology URL %v", topoNamespaceUrl))
 		return nil, errors.Wrapf(err, "Failure when parsing JSON response from topology URL %v", topoNamespaceUrl)

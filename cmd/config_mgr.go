@@ -22,15 +22,12 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path"
 
 	"github.com/spf13/cobra"
-
 	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/namespaces"
 )
 
 var (
@@ -130,7 +127,7 @@ func printOauthConfig() {
 func addTokenSubcommands(tokenCmd *cobra.Command) {
 
 	tokenCmd.AddCommand(&cobra.Command{
-		Use:   "get <read|write> <prefix>",
+		Use:   "get <read|write> <pelican URL>",
 		Short: "Get a new token for a given prefix",
 		Long:  "Get a new token for a given prefix",
 		Args:  cobra.ExactArgs(2),
@@ -145,11 +142,21 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 				fmt.Fprintln(os.Stderr, "Unknown value for operation type (must be 'read' or 'write')", args[0])
 				os.Exit(1)
 			}
-			dest := url.URL{Path: path.Clean("/" + args[1])}
 
-			namespace, err := namespaces.MatchNamespace(cmd.Context(), args[1])
+			dest, err := url.Parse(args[1])
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "Failed to get namespace for path:", err)
+				fmt.Fprintln(os.Stderr, "Failed to parse URL:", err)
+				os.Exit(1)
+			}
+			fedInfo, err := config.DiscoverUrlFederation(cmd.Context(), dest.Host)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Failed to discover federation metadata:", err)
+				os.Exit(1)
+			}
+
+			dirResp, err := client.GetDirectorInfoForPath(cmd.Context(), dest.Path, fedInfo.DirectorEndpoint, isWrite, "", "")
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Failed to get director info for path:", err)
 				os.Exit(1)
 			}
 
@@ -157,7 +164,7 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 			if isWrite {
 				opts.Operation = config.TokenWrite
 			}
-			token, err := client.AcquireToken(&dest, namespace, opts)
+			token, err := client.AcquireToken(dest, dirResp, opts)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get a token:", err)
 				os.Exit(1)

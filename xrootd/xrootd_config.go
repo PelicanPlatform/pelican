@@ -194,11 +194,11 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 		return err
 	}
 
-	backendType, err := server_utils.ParseOriginStorageType(param.Origin_StorageType.GetString())
+	backendType, err := server_structs.ParseOriginStorageType(param.Origin_StorageType.GetString())
 	if err != nil {
 		return err
 	}
-	if backendType == server_utils.OriginStoragePosix {
+	if backendType == server_structs.OriginStoragePosix {
 		// For each export, we symlink the exported directory, currently at /var/run/pelican/export/<export.FederationPrefix>,
 		// to the actual data source, which is what we get from the Export object's StoragePrefix
 		for _, export := range originExports {
@@ -385,7 +385,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 
 	// Ensure the runtime directory exists
 	runtimeDir := param.Origin_RunLocation.GetString()
-	if server.GetServerType().IsEnabled(config.CacheType) {
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		runtimeDir = param.Cache_RunLocation.GetString()
 	}
 
@@ -415,7 +415,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 		return errors.Wrap(err, "Unable to set $XDG_CACHE_HOME for scitokens library")
 	}
 
-	if server.GetServerType().IsEnabled(config.CacheType) {
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		clientPluginsDir := filepath.Join(runtimeDir, "cache-client.plugins.d")
 		if err = os.MkdirAll(clientPluginsDir, os.FileMode(0755)); err != nil {
 			return errors.Wrap(err, "Unable to create cache client plugins directory")
@@ -441,7 +441,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 		return err
 	}
 
-	if server.GetServerType().IsEnabled(config.OriginType) {
+	if server.GetServerType().IsEnabled(server_structs.OriginType) {
 		err = CheckOriginXrootdEnv(exportPath, server, uid, gid, groupname)
 	} else {
 		exportPath, err = CheckCacheXrootdEnv(exportPath, server, uid, gid)
@@ -451,7 +451,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	}
 
 	xServerUrl := param.Origin_Url.GetString()
-	if server.GetServerType().IsEnabled(config.CacheType) {
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		xServerUrl = param.Cache_Url.GetString()
 	}
 	if err = EmitIssuerMetadata(exportPath, xServerUrl); err != nil {
@@ -521,7 +521,7 @@ func CopyXrootdCertificates(server server_structs.XRootDServer) error {
 	}
 
 	destination := filepath.Join(param.Origin_RunLocation.GetString(), "copied-tls-creds.crt")
-	if server.GetServerType().IsEnabled(config.CacheType) {
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		destination = filepath.Join(param.Cache_RunLocation.GetString(), "copied-tls-creds.crt")
 	}
 	tmpName := destination + ".tmp"
@@ -770,7 +770,8 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 	if !isOrigin {
 		runtimeCAs = filepath.Join(param.Cache_RunLocation.GetString(), "ca-bundle.crt")
 	}
-	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, runtimeCAs, 2*time.Minute)
+	egrpKey := string(config.EgrpKey)
+	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, egrpKey, runtimeCAs, 2*time.Minute)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to setup the runtime CA bundle")
 	}

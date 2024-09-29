@@ -25,6 +25,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,7 +51,8 @@ func TestQueryServersForObject(t *testing.T) {
 	stat := NewObjectStat()
 	stat.ReqHandler = func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error) {
 		// For a protected origin with an authURL, if it's from topology, then the serverAd.URL is likely timeout
-		if dataUrl.String() == "https://mock-origin-5.com" {
+		if dataUrl.String() == "https://mock-private-topo-origin.com" ||
+			(dataUrl.String() == "http://mock-mix-ns-topo-origin.com" && strings.HasPrefix(objectName, "/mix/private")) {
 			return nil, &headReqTimeoutErr{"Request timeout"}
 		} else {
 			return &objectMetadata{URL: *dataUrl.JoinPath(objectName)}, nil
@@ -68,51 +70,59 @@ func TestQueryServersForObject(t *testing.T) {
 			URL:     url.URL{Host: "mock-origin-1.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "mock-origin-1-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
-			Type:    server_structs.OriginType}
+			Type:    server_structs.OriginType.String()}
 		mockServerAd2 := server_structs.ServerAd{
 			Name:    "origin2",
 			URL:     url.URL{Host: "mock-origin-2.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "mock-origin-2-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
-			Type:    server_structs.OriginType}
+			Type:    server_structs.OriginType.String()}
 		mockServerAd3 := server_structs.ServerAd{
 			Name:    "origin3",
 			URL:     url.URL{Host: "mock-origin-3.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "mock-origin-3-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
-			Type:    server_structs.OriginType}
+			Type:    server_structs.OriginType.String()}
 		mockServerAd4 := server_structs.ServerAd{
 			Name:    "origin4",
 			URL:     url.URL{Host: "mock-origin-4.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "mock-origin-4-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
-			Type:    server_structs.OriginType}
+			Type:    server_structs.OriginType.String()}
 		mockServerAdPrivateTopology := server_structs.ServerAd{
 			Name:         "originPrivateTopology",
-			URL:          url.URL{Host: "mock-origin-5.com", Scheme: "https"},
-			AuthURL:      url.URL{Host: "mock-origin-5-auth.com:8444", Scheme: "https"},
+			URL:          url.URL{Host: "mock-private-topo-origin.com", Scheme: "http"},
+			AuthURL:      url.URL{Host: "mock-private-topo-origin-auth.com:8444", Scheme: "https"},
 			Caps:         server_structs.Capabilities{PublicReads: false},
-			Type:         server_structs.OriginType,
+			Type:         server_structs.OriginType.String(),
 			FromTopology: true}
 		mockServerAdPublicTopology := server_structs.ServerAd{
-			Name:         "originPrivatePublicTopology",
-			URL:          url.URL{Host: "mock-origin-6.com", Scheme: "https"},
-			AuthURL:      url.URL{Host: "mock-origin-6-auth.com:8444", Scheme: "https"},
-			Caps:         server_structs.Capabilities{PublicReads: false},
-			Type:         server_structs.OriginType,
-			FromTopology: false}
-		mockServerAdPrivateTopologyWOAuthUrl := server_structs.ServerAd{
-			Name:         "originPrivateTopology",
-			URL:          url.URL{Host: "mock-origin-7.com", Scheme: "https"},
-			Caps:         server_structs.Capabilities{PublicReads: false},
-			Type:         server_structs.OriginType,
+			Name:         "originPublicTopology",
+			URL:          url.URL{Host: "mock-public-topo-origin.com", Scheme: "http"},
+			AuthURL:      url.URL{Host: "mock-public-topo-origin-auth.com:8444", Scheme: "https"},
+			Caps:         server_structs.Capabilities{PublicReads: true},
+			Type:         server_structs.OriginType.String(),
 			FromTopology: true}
+		mockServerAdPrivateTopologyWOAuthUrl := server_structs.ServerAd{
+			Name:         "originPrivateTopologyNoAuthUrl",
+			URL:          url.URL{Host: "mock-private-topo-origin-no-authurl.com", Scheme: "http"},
+			Caps:         server_structs.Capabilities{PublicReads: false},
+			Type:         server_structs.OriginType.String(),
+			FromTopology: true}
+		mockTopoPubServerMixNs := server_structs.ServerAd{
+			Name:         "originMixNsTopology",
+			URL:          url.URL{Host: "mock-mix-ns-topo-origin.com", Scheme: "http"},
+			AuthURL:      url.URL{Host: "mock-mix-ns-topo-origin-auth.com:8444", Scheme: "https"},
+			Caps:         server_structs.Capabilities{PublicReads: true},
+			Type:         server_structs.OriginType.String(),
+			FromTopology: true,
+		}
 		mockServerAd5 := server_structs.ServerAd{
 			Name:    "cache1",
 			URL:     url.URL{Host: "cache1.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "cache1-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
-			Type:    server_structs.CacheType}
+			Type:    server_structs.CacheType.String()}
 		mockNsAd0 := server_structs.NamespaceAdV2{Path: "/foo"}
 		mockNsAd1 := server_structs.NamespaceAdV2{Path: "/foo/bar"}
 		mockNsAd2 := server_structs.NamespaceAdV2{Path: "/foo/x"}
@@ -120,8 +130,10 @@ func TestQueryServersForObject(t *testing.T) {
 		mockNsAd4 := server_structs.NamespaceAdV2{Path: "/unrelated"}
 		mockNsAd5 := server_structs.NamespaceAdV2{Path: "/caches/hostname"}
 		mockNsPrivateTopo := server_structs.NamespaceAdV2{Path: "/protected/topology"}
-		mockNsPublicTopo := server_structs.NamespaceAdV2{Path: "/public/topology"}
-		mockNsPrivateTopoNoAuth := server_structs.NamespaceAdV2{Path: "/noauth/protected/topology"}
+		mockNsPrivateTopoNoAuth := server_structs.NamespaceAdV2{Path: "/protected/topology/noauth"}
+		mockNsPublicTopo := server_structs.NamespaceAdV2{Path: "/public/topology", Caps: server_structs.Capabilities{PublicReads: true}}
+		mockMixNsPrivateTopo := server_structs.NamespaceAdV2{Path: "/mix/protected"}
+		mockMixNsPublicTopo := server_structs.NamespaceAdV2{Path: "/mix/public", Caps: server_structs.Capabilities{PublicReads: true}}
 		mockNsCacheOnly := server_structs.NamespaceAdV2{Path: "/foo/cache/only"}
 		serverAds.Set(mockServerAd1.URL.String(),
 			&server_structs.Advertisement{
@@ -169,6 +181,12 @@ func TestQueryServersForObject(t *testing.T) {
 				NamespaceAds: []server_structs.NamespaceAdV2{mockNsPrivateTopoNoAuth},
 			}, ttlcache.DefaultTTL,
 		)
+		serverAds.Set(mockTopoPubServerMixNs.URL.String(),
+			&server_structs.Advertisement{
+				ServerAd:     mockTopoPubServerMixNs,
+				NamespaceAds: []server_structs.NamespaceAdV2{mockMixNsPrivateTopo, mockMixNsPublicTopo},
+			}, ttlcache.DefaultTTL,
+		)
 	}
 
 	cleanupMock := func() {
@@ -206,7 +224,7 @@ func TestQueryServersForObject(t *testing.T) {
 		defer cancel()
 		cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -218,7 +236,7 @@ func TestQueryServersForObject(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 3, 1)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 3, 1)
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -233,7 +251,7 @@ func TestQueryServersForObject(t *testing.T) {
 		mockTTLCache()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/dne/random.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/dne/random.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -248,7 +266,7 @@ func TestQueryServersForObject(t *testing.T) {
 		mockTTLCache()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		assert.Equal(t, queryInsufficientResErr, result.ErrorType)
@@ -264,7 +282,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -285,7 +303,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -301,7 +319,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/barz/test.txt", config.CacheType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/barz/test.txt", server_structs.CacheType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -317,7 +335,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", config.CacheType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", server_structs.CacheType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -338,8 +356,8 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		sType := config.CacheType
-		sType.Set(config.OriginType)
+		sType := server_structs.CacheType
+		sType.Set(server_structs.OriginType)
 
 		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", sType, 0, 0)
 
@@ -375,7 +393,7 @@ func TestQueryServersForObject(t *testing.T) {
 		}
 		statUtilsMutex.Unlock()
 
-		result := stat.queryServersForObject(ctx, "/overwrites/test.txt", config.CacheType, 0, 0, withCacheAds(mockCacheServer))
+		result := stat.queryServersForObject(ctx, "/overwrites/test.txt", server_structs.CacheType, 0, 0, withCacheAds(mockCacheServer))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -409,7 +427,7 @@ func TestQueryServersForObject(t *testing.T) {
 		}
 		statUtilsMutex.Unlock()
 
-		result := stat.queryServersForObject(ctx, "/overwrites/test.txt", config.OriginType, 0, 0, withOriginAds(mockOrigin))
+		result := stat.queryServersForObject(ctx, "/overwrites/test.txt", server_structs.OriginType, 0, 0, withOriginAds(mockOrigin))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -436,7 +454,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -457,7 +475,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -481,7 +499,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -501,7 +519,7 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 1, 1)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 1, 1)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -530,7 +548,7 @@ func TestQueryServersForObject(t *testing.T) {
 		msgChan := make(chan string)
 
 		go func() {
-			result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+			result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 			msgChan <- result.Msg
 		}()
 
@@ -576,14 +594,14 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, queryFailed, result.Status)
 		assert.Equal(t, "Number of success response: 0 is less than MinStatResponse (1) required.", result.Msg)
 		assert.Nil(t, result.Objects)
 	})
 
-	t.Run("private-topology-uses-authurl", func(t *testing.T) {
+	t.Run("private-topo-origin-uses-authurl", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -591,18 +609,18 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/protected/topology/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/protected/topology/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
 
 		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
 		require.Equal(t, 1, len(result.Objects))
-		assert.Equal(t, "https://mock-origin-5-auth.com:8444/protected/topology/test.txt", result.Objects[0].URL.String(),
+		assert.Equal(t, "https://mock-private-topo-origin-auth.com:8444/protected/topology/test.txt", result.Objects[0].URL.String(),
 			"Return value is not expected:", result.Objects[0].URL.String())
 	})
 
-	t.Run("public-topology-uses-url", func(t *testing.T) {
+	t.Run("public-topo-origin-uses-url", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -610,18 +628,18 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/public/topology/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/public/topology/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
 
 		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
 		require.Equal(t, 1, len(result.Objects))
-		assert.Equal(t, "https://mock-origin-6.com/public/topology/test.txt", result.Objects[0].URL.String(),
+		assert.Equal(t, "http://mock-public-topo-origin.com/public/topology/test.txt", result.Objects[0].URL.String(),
 			"Return value is not expected:", result.Objects[0].URL.String())
 	})
 
-	t.Run("private-origin-wo-authurl-uses-url", func(t *testing.T) {
+	t.Run("private-topo-origin-wo-authurl-uses-url", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
@@ -629,14 +647,52 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/noauth/protected/topology/test.txt", config.OriginType, 0, 0)
+		result := stat.queryServersForObject(ctx, "/protected/topology/noauth/test.txt", server_structs.OriginType, 0, 0)
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
 
 		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
 		require.Equal(t, 1, len(result.Objects))
-		assert.Equal(t, "https://mock-origin-7.com/noauth/protected/topology/test.txt", result.Objects[0].URL.String(),
+		assert.Equal(t, "http://mock-private-topo-origin-no-authurl.com/protected/topology/noauth/test.txt", result.Objects[0].URL.String(),
+			"Return value is not expected:", result.Objects[0].URL.String())
+	})
+
+	t.Run("mix-topo-origin-priv-ns-uses-authurl", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockTTLCache()
+		initMockStatUtils()
+		defer cleanupMock()
+
+		result := stat.queryServersForObject(ctx, "/mix/protected/test.txt", server_structs.OriginType, 0, 0, withAuth(true))
+
+		assert.Equal(t, querySuccessful, result.Status)
+		assert.Empty(t, result.ErrorType)
+
+		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.Equal(t, 1, len(result.Objects))
+		assert.Equal(t, "https://mock-mix-ns-topo-origin-auth.com:8444/mix/protected/test.txt", result.Objects[0].URL.String(),
+			"Return value is not expected:", result.Objects[0].URL.String())
+	})
+
+	t.Run("mix-topo-origin-pub-ns-uses-url", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		mockTTLCache()
+		initMockStatUtils()
+		defer cleanupMock()
+
+		result := stat.queryServersForObject(ctx, "/mix/public/test.txt", server_structs.OriginType, 0, 0)
+
+		assert.Equal(t, querySuccessful, result.Status)
+		assert.Empty(t, result.ErrorType)
+
+		assert.Contains(t, result.Msg, "Maximum responses reached for stat. Return result and cancel ongoing requests.")
+		require.Equal(t, 1, len(result.Objects))
+		assert.Equal(t, "http://mock-mix-ns-topo-origin.com/mix/public/test.txt", result.Objects[0].URL.String(),
 			"Return value is not expected:", result.Objects[0].URL.String())
 	})
 }
@@ -674,7 +730,7 @@ func TestSendHeadReq(t *testing.T) {
 	realServerUrl, err := url.Parse(server.URL)
 	require.NoError(t, err)
 
-	mockOriginAd := server_structs.ServerAd{Type: server_structs.OriginType}
+	mockOriginAd := server_structs.ServerAd{Type: server_structs.OriginType.String()}
 	mockOriginAd.URL = *realServerUrl
 
 	tDir := t.TempDir()

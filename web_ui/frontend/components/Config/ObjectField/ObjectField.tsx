@@ -17,7 +17,7 @@ import {
   KeyboardDoubleArrowDown,
   Delete,
 } from '@mui/icons-material';
-import { ParameterInputProps } from '@/components/Config/index.d';
+import { ParameterInputProps } from '@/components/Config/index';
 import { isEmpty, isEqual, merge } from 'lodash';
 import { buildPatch } from '@/components/Config/util';
 import ObjectModal from './ObjectModal';
@@ -267,7 +267,6 @@ function ObjectField<T>({
   }, [localValue]);
 
   const updated = useMemo(() => {
-    console.log(value, localValue);
     return !isEqual(value, localValue);
   }, [sortedValue]);
 

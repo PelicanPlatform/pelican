@@ -34,6 +34,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -48,11 +49,11 @@ func TestFedServeCache(t *testing.T) {
 	defer viper.Reset()
 	defer server_utils.ResetOriginExports()
 
-	modules := config.ServerType(0)
-	modules.Set(config.CacheType)
-	modules.Set(config.OriginType)
-	modules.Set(config.DirectorType)
-	modules.Set(config.RegistryType)
+	modules := server_structs.ServerType(0)
+	modules.Set(server_structs.CacheType)
+	modules.Set(server_structs.OriginType)
+	modules.Set(server_structs.DirectorType)
+	modules.Set(server_structs.RegistryType)
 
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
 	tmpPathPattern := "XRootD-Test_Whole_Fed*"

@@ -62,6 +62,7 @@ type Config struct {
 		AdvertisementTTL time.Duration `mapstructure:"advertisementttl"`
 		CacheResponseHostnames []string `mapstructure:"cacheresponsehostnames"`
 		CacheSortMethod string `mapstructure:"cachesortmethod"`
+		CachesPullFromCaches bool `mapstructure:"cachespullfromcaches"`
 		DefaultResponse string `mapstructure:"defaultresponse"`
 		EnableBroker bool `mapstructure:"enablebroker"`
 		EnableOIDC bool `mapstructure:"enableoidc"`
@@ -77,6 +78,7 @@ type Config struct {
 		StatTimeout time.Duration `mapstructure:"stattimeout"`
 		SupportContactEmail string `mapstructure:"supportcontactemail"`
 		SupportContactUrl string `mapstructure:"supportcontacturl"`
+		X509ClientAuthenticationPrefixes []string `mapstructure:"x509clientauthenticationprefixes"`
 	} `mapstructure:"director"`
 	DisableHttpProxy bool `mapstructure:"disablehttpproxy"`
 	DisableProxyFallback bool `mapstructure:"disableproxyfallback"`
@@ -86,6 +88,7 @@ type Config struct {
 		DiscoveryUrl string `mapstructure:"discoveryurl"`
 		JwkUrl string `mapstructure:"jwkurl"`
 		RegistryUrl string `mapstructure:"registryurl"`
+		TopologyDowntimeUrl string `mapstructure:"topologydowntimeurl"`
 		TopologyNamespaceUrl string `mapstructure:"topologynamespaceurl"`
 		TopologyReloadInterval time.Duration `mapstructure:"topologyreloadinterval"`
 		TopologyUrl string `mapstructure:"topologyurl"`
@@ -168,6 +171,7 @@ type Config struct {
 	} `mapstructure:"oidc"`
 	Origin struct {
 		DbLocation string `mapstructure:"dblocation"`
+		DirectorTest bool `mapstructure:"directortest"`
 		EnableBroker bool `mapstructure:"enablebroker"`
 		EnableCmsd bool `mapstructure:"enablecmsd"`
 		EnableDirListing bool `mapstructure:"enabledirlisting"`
@@ -354,6 +358,7 @@ type configWithType struct {
 		AdvertisementTTL struct { Type string; Value time.Duration }
 		CacheResponseHostnames struct { Type string; Value []string }
 		CacheSortMethod struct { Type string; Value string }
+		CachesPullFromCaches struct { Type string; Value bool }
 		DefaultResponse struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
@@ -369,6 +374,7 @@ type configWithType struct {
 		StatTimeout struct { Type string; Value time.Duration }
 		SupportContactEmail struct { Type string; Value string }
 		SupportContactUrl struct { Type string; Value string }
+		X509ClientAuthenticationPrefixes struct { Type string; Value []string }
 	}
 	DisableHttpProxy struct { Type string; Value bool }
 	DisableProxyFallback struct { Type string; Value bool }
@@ -378,6 +384,7 @@ type configWithType struct {
 		DiscoveryUrl struct { Type string; Value string }
 		JwkUrl struct { Type string; Value string }
 		RegistryUrl struct { Type string; Value string }
+		TopologyDowntimeUrl struct { Type string; Value string }
 		TopologyNamespaceUrl struct { Type string; Value string }
 		TopologyReloadInterval struct { Type string; Value time.Duration }
 		TopologyUrl struct { Type string; Value string }
@@ -460,6 +467,7 @@ type configWithType struct {
 	}
 	Origin struct {
 		DbLocation struct { Type string; Value string }
+		DirectorTest struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }

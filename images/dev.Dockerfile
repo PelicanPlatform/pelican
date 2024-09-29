@@ -32,53 +32,30 @@ ENV GOFLAGS="-buildvcs=false"
 RUN groupadd -o -g 10940 xrootd
 RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
-RUN yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+# Install EPEL and OSG repos -- we want OSG-patched versions of XRootD
+RUN yum install -y \
+    https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm \
+    https://repo.opensciencegrid.org/osg/23-main/osg-23-main-el9-release-latest.rpm \
+    yum-utils && \
     /usr/bin/crb enable && \
     # ^^ crb enables the Code Ready Builder repository (EL9) or PowerTools (EL8), needed for some of our dependencies \
+    yum-config-manager --setopt=install_weak_deps=False --save && \
+    # ^^ save some space by not installing weak dependencies \
     yum clean all
 
 # Get goreleaser
-# NOTE: If using podman to build, you must pass --format=docker for the SHELL command to work
-SHELL ["/bin/bash", "-c"]
+# This is a bash-ism but on almalinux:9, /bin/sh _is_ bash so we don't need to change SHELL
 RUN echo $'[goreleaser] \n\
 name=GoReleaser \n\
 baseurl=https://repo.goreleaser.com/yum/ \n\
 enabled=1 \n\
 gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 
-RUN echo '%_topdir /usr/local/src/rpmbuild' > $HOME/.rpmmacros
-
-# Download OSG's XRootD SRPM and rebuild it. Create a yum repository to put the results in.
-RUN yum install -y yum-utils createrepo https://repo.opensciencegrid.org/osg/23-main/osg-23-main-el9-release-latest.rpm && \
-    yum-config-manager --setopt=install_weak_deps=False --save && \
-    # ^^ save some space by not installing weak dependencies \
-    yum-config-manager --disable osg --save && \
-    # ^^ disable the OSG _binary_ repos, they may not be available for our arch \
-    yum install -y rpm-build && \
-    mkdir -p /usr/local/src/rpmbuild/SRPMS && \
-    cd /usr/local/src/rpmbuild/SRPMS && \
-    yumdownloader --source xrootd --disablerepo=\* --enablerepo=osg-development-source && \
-    yum-builddep -y xrootd-*.osg*.src.rpm && \
-    rpmbuild --define 'osg 1' \
-             --define 'dist .osg.el9' \
-             --without compat \
-             --without doc \
-             --nocheck \
-             --rebuild \
-             -bb xrootd-*.osg*.src.rpm  && \
-    createrepo /usr/local/src/rpmbuild/RPMS && \
-    yum clean all
-
-RUN echo $'[local] \n\
-name=Local \n\
-baseurl=file:///usr/local/src/rpmbuild/RPMS/ \n\
-enabled=1 \n\
-priority=1 \n\
-gpgcheck=0' > /etc/yum.repos.d/local.repo
-
 # Install goreleaser and various other packages we need
-RUN yum install -y goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens xrootd-voms \
+RUN yum install -y --enablerepo=osg-testing goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens xrootd-voms \
     xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel libcap-devel \
+    xrootd-multiuser \
+    zlib-devel \
     && yum clean all
 
 # The ADD command with a api.github.com URL in the next couple of sections
@@ -91,19 +68,9 @@ ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/ma
 RUN \
     git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
     cd xrdcl-pelican && \
-    git reset cbd6850 --hard && \
+    git checkout v0.9.4 && \
     mkdir build && cd build && \
-    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
-    make && make install
-
-# Install xrootd-multiuser from source (otherwise it's only available from osg repos)
-ADD https://api.github.com/repos/opensciencegrid/xrootd-multiuser/git/refs/heads/master /tmp/hash-xrootd-multiuser
-RUN \
-    git clone https://github.com/opensciencegrid/xrootd-multiuser.git && \
-    cd xrootd-multiuser && \
-    git checkout v2.2.0-1 && \
-    mkdir build && cd build && \
-    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 -DCMAKE_BUILD_TYPE=RelWithDebInfo .. && \
     make && make install
 
 ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/main /tmp/hash-xrootd-s3-http
@@ -114,7 +81,7 @@ ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/m
 RUN \
     git clone --recurse-submodules https://github.com/PelicanPlatform/xrootd-s3-http.git && \
     cd xrootd-s3-http && \
-    git checkout v0.1.3 && \
+    git checkout v0.1.6 && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
@@ -155,7 +122,6 @@ RUN \
     dnf module install -y nodejs:20
 
 # Installing the right version of go
-SHELL ["/bin/sh", "-c"]
 RUN curl https://dl.google.com/go/go1.21.6.linux-$TARGETARCH.tar.gz -o go1.21.6.linux-$TARGETARCH.tar.gz && \
     rm -rf /usr/local/go && tar -C /usr/local -xzf go1.21.6.linux-$TARGETARCH.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"

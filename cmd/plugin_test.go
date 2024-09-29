@@ -53,6 +53,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -139,10 +140,10 @@ func (f *FedTest) Spinup() {
 	//////////////////////////////Setup our test federation//////////////////////////////////////////
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), f.T)
 
-	modules := config.ServerType(0)
-	modules.Set(config.OriginType)
-	modules.Set(config.DirectorType)
-	modules.Set(config.RegistryType)
+	modules := server_structs.ServerType(0)
+	modules.Set(server_structs.OriginType)
+	modules.Set(server_structs.DirectorType)
+	modules.Set(server_structs.RegistryType)
 
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
 	tmpPathPattern := "XRootD-Test_Origin*"
@@ -754,7 +755,7 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		results := make(chan *classads.ClassAd, 5)
 		err = runPluginWorker(fed.Ctx, false, workChan, results)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to read remote directory: PROPFIND /test/test/test.txt/: 500")
+		assert.Contains(t, err.Error(), "failed to read remote collection: PROPFIND /test/test/test.txt/: 500")
 	})
 
 	t.Run("TestRecursiveFailureDirNotFound", func(t *testing.T) {
@@ -773,7 +774,7 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		results := make(chan *classads.ClassAd, 5)
 		err = runPluginWorker(fed.Ctx, false, workChan, results)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to read remote directory: PROPFIND /test/SomeDirectoryThatDoesNotExist:)/: 404")
+		assert.Contains(t, err.Error(), "Failed to create new transfer job: no collections URL found in director response")
 	})
 }
 
@@ -1013,14 +1014,20 @@ func TestParseDestination(t *testing.T) {
 			},
 			want: tempFile.Name(),
 		},
+		{
+			name: "destination is unpacked file",
+			transfer: PluginTransfer{
+				localFile: filepath.Join(tempDir, "test.tar"),
+				url:       &url.URL{Path: "/path/to/source", RawQuery: "pack=auto", Scheme: "pelican"},
+			},
+			want: tempDir,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got := parseDestination(test.transfer)
-			if got != test.want {
-				t.Errorf("parseDestination() = %v, want %v", got, test.want)
-			}
+			assert.Equal(t, test.want, got)
 		})
 	}
 }

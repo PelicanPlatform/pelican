@@ -348,6 +348,14 @@ osdf_default: https://topology.opensciencegrid.org/osdf/namespaces
 default: none
 components: ["director", "registry"]
 ---
+name: Federation.TopologyDowntimeUrl
+description: |+
+  A URL for determining OSG topology server downtime information. The result of querying this URL is an XML file containing downtime information.
+type: url
+osdf_default: https://topology.opensciencegrid.org/rgdowntime/xml
+default: none
+components: ["director"]
+---
 name: Federation.TopologyReloadInterval
 description: |+
   The frequency, in minutes, that topology should be reloaded.
@@ -687,9 +695,20 @@ type: bool
 default: false
 components: ["origin"]
 ---
+name: Origin.DirectorTest
+description: |+
+  A bool indicating whether the director should send file transfer tests to the origin.
+
+  If `Origin.StorageType` is set to values other than `POSIX`, this parameter is set to false.
+type: bool
+default: true
+components: ["origin"]
+---
 name: Origin.SelfTest
 description: |+
   A bool indicating whether the origin should perform self health checks.
+
+  If `Origin.StorageType` is set to values other than `POSIX`, this parameter is set to false.
 type: bool
 default: true
 components: ["origin"]
@@ -792,7 +811,7 @@ name: Origin.EnableDirListing
 description: |+
   [Deprecated] Origin.EnableDirListing is being deprecated and will be removed in a future release. It is replaced by Origin.EnableListings.
 
-  Allows the origin to enable directory listings. Needs to be enabled for recursive
+  Allows the origin to enable collection listings. Needs to be enabled for recursive
   downloads to work properly and for directories to be visible.
 type: bool
 default: false
@@ -1228,6 +1247,14 @@ type: string
 default: cache
 components: ["director"]
 ---
+name: Director.CachesPullFromCaches
+description: |+
+  In the "origin" response, the director returns a list of origins that can serve the object. If `Director.CachesPullFromCaches`
+  is set to true (default is false), the director then appends a list of caches that can serve the object to the original response.
+type: bool
+default: false
+components: ["director"]
+---
 name: Director.CacheResponseHostnames
 description: |+
   A list of virtual hostnames for the director. If a request is sent by the client to one of these hostnames,
@@ -1249,6 +1276,9 @@ description: |+
   - "distanceAndLoad": Sorts caches according to both their distance and a calculated load. This is currently a placeholder,
     and returns the same ordering as "distance".
   - "random": Sorts caches randomly.
+  - "adaptive": Sorts caches according to stochastically-generated weights that consider a combination of factors,
+      including a cache's distance from the client, its IO load, and whether the cache already has the requested object.
+      See details at https://github.com/PelicanPlatform/pelican/discussions/1198
 type: string
 default: distance
 components: ["director"]
@@ -1344,8 +1374,8 @@ components: ["director"]
 ---
 name: Director.FilteredServers
 description: |+
-  A list of server host names to not to redirect client requests to. This is for admins to put a list of
-  servers in the federation into downtime.
+  A list of server resource names that the Director should consider in downtime, preventing the Director from issuing redirects to them.
+  Additional downtimes are aggregated from Topology (when the Director is served in OSDF mode), and the Web UI.
 type: stringSlice
 default: none
 components: ["director"]
@@ -1379,6 +1409,19 @@ description: |+
 type: bool
 default: false
 components: ["director"]
+---
+name: Director.X509ClientAuthenticationPrefixes
+description: |+
+  A list of object prefixes where the origin uses X.509 client authentication.
+
+  If a cache requests an object starting with one of these prefixes, then it will be instructed by the director
+  to use X.509 client authentication if available.
+
+  This setting allows for compatibility with specific legacy OSDF origins and is not needed for new origins.
+type: stringSlice
+default: none
+components: ["director"]
+hidden: true
 ---
 ############################
 #  Registry-level configs  #

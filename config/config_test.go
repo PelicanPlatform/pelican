@@ -33,6 +33,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
@@ -40,6 +41,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var server *httptest.Server
@@ -351,7 +353,7 @@ func TestDeprecateLogMessage(t *testing.T) {
 }
 
 func TestEnabledServers(t *testing.T) {
-	allServerTypes := []ServerType{OriginType, CacheType, DirectorType, RegistryType}
+	allServerTypes := []server_structs.ServerType{server_structs.OriginType, server_structs.CacheType, server_structs.DirectorType, server_structs.RegistryType}
 	allServerStrs := make([]string, 0)
 	allServerStrsLower := make([]string, 0)
 	for _, st := range allServerTypes {
@@ -372,7 +374,7 @@ func TestEnabledServers(t *testing.T) {
 		for _, server := range allServerTypes {
 			enabledServers = 0
 			// We didn't call setEnabledServer as it will only set once per process
-			enabledServers.SetList([]ServerType{server})
+			enabledServers.SetList([]server_structs.ServerType{server})
 			assert.True(t, IsServerEnabled(server))
 			assert.Equal(t, []string{server.String()}, GetEnabledServerString(false))
 			assert.Equal(t, []string{strings.ToLower(server.String())}, GetEnabledServerString(true))
@@ -381,13 +383,13 @@ func TestEnabledServers(t *testing.T) {
 
 	t.Run("enable-multiple-servers", func(t *testing.T) {
 		enabledServers = 0
-		enabledServers.SetList([]ServerType{OriginType, CacheType})
-		serverStr := []string{OriginType.String(), CacheType.String()}
-		serverStrLower := []string{strings.ToLower(OriginType.String()), strings.ToLower(CacheType.String())}
+		enabledServers.SetList([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
+		serverStr := []string{server_structs.OriginType.String(), server_structs.CacheType.String()}
+		serverStrLower := []string{strings.ToLower(server_structs.OriginType.String()), strings.ToLower(server_structs.CacheType.String())}
 		sort.Strings(serverStr)
 		sort.Strings(serverStrLower)
-		assert.True(t, IsServerEnabled(OriginType))
-		assert.True(t, IsServerEnabled(CacheType))
+		assert.True(t, IsServerEnabled(server_structs.OriginType))
+		assert.True(t, IsServerEnabled(server_structs.CacheType))
 		assert.Equal(t, serverStr, GetEnabledServerString(false))
 		assert.Equal(t, serverStrLower, GetEnabledServerString(true))
 	})
@@ -395,30 +397,30 @@ func TestEnabledServers(t *testing.T) {
 	t.Run("enable-all-servers", func(t *testing.T) {
 		enabledServers = 0
 		enabledServers.SetList(allServerTypes)
-		assert.True(t, IsServerEnabled(OriginType))
-		assert.True(t, IsServerEnabled(CacheType))
-		assert.True(t, IsServerEnabled(RegistryType))
-		assert.True(t, IsServerEnabled(DirectorType))
+		assert.True(t, IsServerEnabled(server_structs.OriginType))
+		assert.True(t, IsServerEnabled(server_structs.CacheType))
+		assert.True(t, IsServerEnabled(server_structs.RegistryType))
+		assert.True(t, IsServerEnabled(server_structs.DirectorType))
 		assert.Equal(t, allServerStrs, GetEnabledServerString(false))
 		assert.Equal(t, allServerStrsLower, GetEnabledServerString(true))
 	})
 
 	t.Run("setEnabledServer-only-set-once", func(t *testing.T) {
 		enabledServers = 0
-		sType := OriginType
-		sType.Set(CacheType)
+		sType := server_structs.OriginType
+		sType.Set(server_structs.CacheType)
 		setEnabledServer(sType)
-		assert.True(t, IsServerEnabled(OriginType))
-		assert.True(t, IsServerEnabled(CacheType))
+		assert.True(t, IsServerEnabled(server_structs.OriginType))
+		assert.True(t, IsServerEnabled(server_structs.CacheType))
 
 		sType.Clear()
-		sType.Set(DirectorType)
-		sType.Set(RegistryType)
+		sType.Set(server_structs.DirectorType)
+		sType.Set(server_structs.RegistryType)
 		setEnabledServer(sType)
-		assert.True(t, IsServerEnabled(OriginType))
-		assert.True(t, IsServerEnabled(CacheType))
-		assert.False(t, IsServerEnabled(DirectorType))
-		assert.False(t, IsServerEnabled(RegistryType))
+		assert.True(t, IsServerEnabled(server_structs.OriginType))
+		assert.True(t, IsServerEnabled(server_structs.CacheType))
+		assert.False(t, IsServerEnabled(server_structs.DirectorType))
+		assert.False(t, IsServerEnabled(server_structs.RegistryType))
 	})
 }
 
@@ -716,7 +718,7 @@ func TestInitServerUrl(t *testing.T) {
 		// In this case, the port is 443, so Federation_DirectorUrl = https://example.com
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mock443Port)
-		err := InitServer(ctx, DirectorType)
+		err := InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
 		require.NoError(t, err)
@@ -726,7 +728,7 @@ func TestInitServerUrl(t *testing.T) {
 		// But 443 port is stripped if provided
 		initDirectoryConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
-		err = InitServer(ctx, DirectorType)
+		err = InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
@@ -735,7 +737,7 @@ func TestInitServerUrl(t *testing.T) {
 		initDirectoryConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
 		viper.Set("Federation.DirectorUrl", "https://example-director.com")
-		err = InitServer(ctx, DirectorType)
+		err = InitServer(ctx, server_structs.DirectorType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
@@ -749,7 +751,7 @@ func TestInitServerUrl(t *testing.T) {
 		// In this case, the port is 443, so Federation_RegistryUrl = https://example.com
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mock443Port)
-		err := InitServer(ctx, RegistryType)
+		err := InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
 		require.NoError(t, err)
@@ -759,7 +761,7 @@ func TestInitServerUrl(t *testing.T) {
 		// But 443 port is stripped if provided
 		initConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
-		err = InitServer(ctx, RegistryType)
+		err = InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
@@ -768,7 +770,7 @@ func TestInitServerUrl(t *testing.T) {
 		initConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
 		viper.Set("Federation.RegistryUrl", "https://example-registry.com")
-		err = InitServer(ctx, RegistryType)
+		err = InitServer(ctx, server_structs.RegistryType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
@@ -782,7 +784,7 @@ func TestInitServerUrl(t *testing.T) {
 		// In this case, the port is 443, so Federation_BrokerUrl = https://example.com
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mock443Port)
-		err := InitServer(ctx, BrokerType)
+		err := InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
 		require.NoError(t, err)
@@ -792,7 +794,7 @@ func TestInitServerUrl(t *testing.T) {
 		// But 443 port is stripped if provided
 		initConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
-		err = InitServer(ctx, BrokerType)
+		err = InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
@@ -801,7 +803,7 @@ func TestInitServerUrl(t *testing.T) {
 		initConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
 		viper.Set("Federation.BrokerUrl", "https://example-registry.com")
-		err = InitServer(ctx, BrokerType)
+		err = InitServer(ctx, server_structs.BrokerType)
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
@@ -832,6 +834,49 @@ func TestDiscoverUrlFederation(t *testing.T) {
 		// Assert that the error is the expected metadata timeout error
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, MetadataTimeoutErr))
+		viper.Reset()
+	})
+
+	t.Run("TestMetadataDiscoveryTimeoutRetry", func(t *testing.T) {
+		viper.Set("tlsskipverify", true)
+		viper.Set("Logging.Level", "Debug")
+		viper.Set("Transport.ResponseHeaderTimeout", "300ms")
+		InitConfig()
+		err := InitClient()
+		require.NoError(t, err)
+
+		hook := test.NewGlobal()
+		logrus.SetLevel(logrus.WarnLevel)
+
+		// Create a server that sleeps for a longer duration than the timeout
+		ctr := 0
+		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ctr < 1 {
+				time.Sleep(2 * time.Second)
+			}
+
+			ctr += 1
+			w.WriteHeader(200)
+			_, err := w.Write([]byte("{\"director_endpoint\": \"https://osdf-director.osg-htc.org\", \"namespace_registration_endpoint\": \"https://osdf-registry.osg-htc.org\", \"jwks_uri\": \"https://osg-htc.org/osdf/public_signing_key.jwks\"}"))
+			assert.NoError(t, err)
+		}))
+		defer server.Close()
+
+		// Set a short timeout for the test
+		timeout := 5 * time.Second
+
+		// Create a context with the timeout
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		// Call the function with the server URL and the context
+		_, err = DiscoverUrlFederation(ctx, server.URL)
+
+		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
+		assert.Equal(t, "Timeout occurred when querying discovery URL "+server.URL+"/.well-known/pelican-configuration for metadata; 2 retries remaining", hook.LastEntry().Message)
+
+		// Assert that the error is the expected metadata timeout error
+		assert.NoError(t, err)
 		viper.Reset()
 	})
 

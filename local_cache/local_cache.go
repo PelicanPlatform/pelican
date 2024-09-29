@@ -744,7 +744,8 @@ func (sc *LocalCache) updateConfig() error {
 		return errors.Wrap(err, "Unable to generate the director's listNamespaces endpoint")
 	}
 
-	respData, err := utils.MakeRequest(sc.ctx, directorNSListEndpointURL, "GET", nil, nil)
+	tr := config.GetTransport()
+	respData, err := utils.MakeRequest(sc.ctx, tr, directorNSListEndpointURL, "GET", nil, nil)
 	if err != nil {
 		return err
 	} else {
@@ -802,7 +803,7 @@ func (cr *cacheReader) peekError(ctx context.Context) (err error) {
 }
 
 func (cr *cacheReader) Read(p []byte) (n int, err error) {
-	if cr.buf != nil && len(cr.buf) > 0 {
+	if len(cr.buf) > 0 {
 		bytesCopied := copy(p, cr.buf)
 		if len(cr.buf) > bytesCopied {
 			cr.buf = cr.buf[bytesCopied:]

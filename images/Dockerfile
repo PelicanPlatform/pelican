@@ -47,8 +47,6 @@ RUN groupadd -o -g 10940 xrootd
 RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
-# FIXME: We install xrootd from the osg-test repo to incorporate patch for the throttle plugin
-# We should come back and remove it once xrootd 5.7.0 is released
 RUN yum -y update \
     && yum -y --allowerasing --enablerepo osg-testing install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms xrootd-multiuser curl java-17-openjdk-headless \
     && yum clean all \
@@ -71,9 +69,9 @@ ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/ma
 RUN \
     git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
     cd xrdcl-pelican && \
-    git reset 9562795 --hard && \
+    git checkout v0.9.4 && \
     mkdir build && cd build && \
-    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 -DCMAKE_BUILD_TYPE=RelWithDebInfo .. && \
     make && make install
 
 ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/main /tmp/hash-xrootd-s3-http
@@ -84,7 +82,7 @@ ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/m
 RUN \
     git clone --recurse-submodules https://github.com/PelicanPlatform/xrootd-s3-http.git && \
     cd xrootd-s3-http && \
-    git checkout v0.1.3 && \
+    git checkout v0.1.6 && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install

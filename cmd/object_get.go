@@ -45,7 +45,7 @@ func init() {
 	flagSet := getCmd.Flags()
 	flagSet.StringP("cache", "c", "", "Cache to use")
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
-	flagSet.BoolP("recursive", "r", false, "Recursively download a directory.  Forces methods to only be http to get the freshest directory contents")
+	flagSet.BoolP("recursive", "r", false, "Recursively download a collection.  Forces methods to only be http to get the freshest collection contents")
 	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
 	flagSet.Lookup("cache-list-name").Hidden = true
 	flagSet.String("caches", "", "A JSON file containing the list of caches")
@@ -121,6 +121,11 @@ func getMain(cmd *cobra.Command, args []string) {
 	lastSrc := ""
 
 	for _, src := range source {
+		src, result = utils.UrlWithFederation(src)
+		if result != nil {
+			lastSrc = src
+			break
+		}
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
 		_, result = client.DoGet(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...))
 		if result != nil {

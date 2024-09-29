@@ -144,7 +144,8 @@ func verifyAdvertiseToken(ctx context.Context, token, namespace string) (bool, e
 	}
 
 	if keyset == nil {
-		keyset, err = utils.GetJwks(ctx, keyLoc)
+		tr := config.GetTransport()
+		keyset, err = utils.GetJwks(ctx, tr, keyLoc)
 		if err != nil {
 			return false, errors.Wrapf(err, "failed to get jwks at %s", keyLoc)
 		}

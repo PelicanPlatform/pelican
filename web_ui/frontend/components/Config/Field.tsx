@@ -10,7 +10,7 @@ import {
   OIDCAuthenticationRequirement,
   Parameter,
   ParameterInputProps,
-} from '@/components/Config/index.d';
+} from '@/components/Config/index';
 import {
   BooleanField,
   DurationField,

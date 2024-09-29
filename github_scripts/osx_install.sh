@@ -48,7 +48,7 @@ ninja
 ninja install
 popd
 
-git clone --depth=1 https://github.com/PelicanPlatform/xrdcl-pelican.git
+git clone --branch v0.9.4 https://github.com/PelicanPlatform/xrdcl-pelican.git
 pushd xrdcl-pelican
 mkdir build
 cd build
@@ -58,9 +58,9 @@ sudo mkdir -p /etc/xrootd/client.plugins.d/
 sudo cp release_dir/etc/xrootd/client.plugins.d/pelican-plugin.conf /etc/xrootd/client.plugins.d/
 popd
 
-git clone --recurse-submodules --branch v0.1.3 https://github.com/PelicanPlatform/xrootd-s3-http.git
+git clone --recurse-submodules --branch v0.1.6 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
-git checkout v0.1.3
+git checkout v0.1.6
 mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir

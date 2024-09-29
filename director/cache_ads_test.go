@@ -107,7 +107,7 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "cache1.wisc.edu",
 		},
-		Type: server_structs.CacheType,
+		Type: server_structs.CacheType.String(),
 	}
 
 	cacheAd2 := server_structs.ServerAd{
@@ -116,7 +116,7 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "cache2.wisc.edu",
 		},
-		Type: server_structs.CacheType,
+		Type: server_structs.CacheType.String(),
 	}
 
 	originAd1 := server_structs.ServerAd{
@@ -125,7 +125,7 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "origin1.wisc.edu",
 		},
-		Type: server_structs.OriginType,
+		Type: server_structs.OriginType.String(),
 	}
 
 	originAd2 := server_structs.ServerAd{
@@ -134,7 +134,7 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "origin2.wisc.edu",
 		},
-		Type: server_structs.OriginType,
+		Type: server_structs.OriginType.String(),
 	}
 
 	originAdTopo1 := server_structs.ServerAd{
@@ -143,7 +143,7 @@ func TestGetAdsForPath(t *testing.T) {
 			Scheme: "https",
 			Host:   "topology.wisc.edu",
 		},
-		Type:         server_structs.OriginType,
+		Type:         server_structs.OriginType.String(),
 		FromTopology: true,
 	}
 
@@ -243,7 +243,7 @@ func TestLaunchTTLCache(t *testing.T) {
 			Scheme: "https",
 			Host:   "fake-origin.org:8444",
 		},
-		Type:      server_structs.OriginType,
+		Type:      server_structs.OriginType.String(),
 		Latitude:  123.05,
 		Longitude: 456.78,
 	}
@@ -319,7 +319,7 @@ func TestLaunchTTLCache(t *testing.T) {
 }
 
 func TestServerAdsCacheEviction(t *testing.T) {
-	mockServerAd := server_structs.ServerAd{Name: "foo", Type: server_structs.OriginType, URL: url.URL{Host: "mock.server.org"}}
+	mockServerAd := server_structs.ServerAd{Name: "foo", Type: server_structs.OriginType.String(), URL: url.URL{Host: "mock.server.org"}}
 
 	t.Run("evict-after-expire-time", func(t *testing.T) {
 		// Start cache eviction

@@ -20,13 +20,11 @@ package server_structs
 
 import (
 	"strings"
-
-	"github.com/pelicanplatform/pelican/config"
 )
 
 type (
 	XRootDServer interface {
-		GetServerType() config.ServerType
+		GetServerType() ServerType
 		SetNamespaceAds([]NamespaceAdV2)
 		GetNamespaceAds() []NamespaceAdV2
 		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (*OriginAdvertiseV2, error)

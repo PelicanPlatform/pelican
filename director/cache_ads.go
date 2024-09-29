@@ -159,6 +159,11 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 		return sAd
 	}
 
+	if ad.DisableDirectorTest {
+		log.Debugf("%s server %s at %s has DisableDirectorTest set. Skip health test for this server.", ad.Type, ad.Name, ad.URL.String())
+		return
+	}
+
 	// Prepare and launch the director file transfer tests to the origins/caches if it's not from the topology AND it's not already been registered
 	func() {
 		healthTestUtilsMutex.Lock()
@@ -244,6 +249,8 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 	if !ok {
 		return errors.New("Failed to create address object from IP")
 	}
+	// NOTE: If GeoIP resolution of this address fails, lat/long are set to 0.0 (the null lat/long)
+	// This causes the server to be sorted to the end of the list whenever the Director requires distance-aware sorting.
 	lat, long, err := getLatLong(addr)
 	if err != nil {
 		return err
@@ -319,10 +326,10 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 				// If anything was previously set by a namespace that constituted a shorter
 				// prefix, we overwrite that here because we found a better ns. We also clear
 				// the other slice of server ads, because we know those aren't good anymore
-				if ad.Type == server_structs.OriginType {
+				if ad.Type == server_structs.OriginType.String() {
 					originAds = []server_structs.ServerAd{ad.ServerAd}
 					cacheAds = []server_structs.ServerAd{}
-				} else if ad.Type == server_structs.CacheType {
+				} else if ad.Type == server_structs.CacheType.String() {
 					originAds = []server_structs.ServerAd{}
 					cacheAds = []server_structs.ServerAd{ad.ServerAd}
 				}
@@ -333,7 +340,7 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 					best = ns
 				}
 				// We treat serverAds differently from namespace
-				if ad.Type == server_structs.OriginType {
+				if ad.Type == server_structs.OriginType.String() {
 					// For origin, if there's no origin in the list yet, and there's a matched one from topology, then add it
 					// However, if the first one is from Topology but the second matched one is from Pelican, replace it (repeat this process)
 					if len(originAds) == 0 {
@@ -352,7 +359,7 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 							continue
 						}
 					}
-				} else if ad.Type == server_structs.CacheType {
+				} else if ad.Type == server_structs.CacheType.String() {
 					// For caches, we allow both server from Topology and Pelican to serve the same namespace
 					cacheAds = append(cacheAds, ad.ServerAd)
 				}

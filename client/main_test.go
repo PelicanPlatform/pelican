@@ -19,7 +19,6 @@
 package client
 
 import (
-	"context"
 	"net"
 	"net/url"
 	"os"
@@ -34,7 +33,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/mock"
-	"github.com/pelicanplatform/pelican/namespaces"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 // TestGetIps calls main.get_ips with a hostname, checking
@@ -59,105 +58,73 @@ func TestGetIps(t *testing.T) {
 
 }
 
-func TestGetCachesFromNamespace(t *testing.T) {
-	// Get our list of caches for our namespace:
-	directorCaches := make([]namespaces.DirectorCache, 3)
-	for i := 0; i < 3; i++ {
-		directorCache := namespaces.DirectorCache{
-			EndpointUrl: "https://some/cache/" + strconv.Itoa(i),
-			Priority:    0,
-			AuthedReq:   false,
-		}
-		directorCaches[i] = directorCache
+func TestGenerateSortedObjectServers(t *testing.T) {
+	dirResp := server_structs.DirectorResponse{
+		ObjectServers: []*url.URL{
+			{Scheme: "https", Host: "server1.com", Path: "/foo"},
+			{Scheme: "https", Host: "server2.com", Path: "/foo"},
+			{Scheme: "https", Host: "server3.com", Path: "/foo"},
+		},
 	}
 
-	// Make our namespace:
-	namespace := namespaces.Namespace{
-		SortedDirectorCaches: directorCaches,
-		ReadHTTPS:            false,
-		UseTokenOnRead:       false,
-	}
-
-	// Check getCachesFromNamespace works with a director
-	t.Run("testNoPreferredCache", func(t *testing.T) {
-		caches, err := getCachesFromNamespace(namespace, true, nil)
+	t.Run("testNoPreferredServers", func(t *testing.T) {
+		oServers, err := generateSortedObjServers(dirResp, []*url.URL{})
 		assert.NoError(t, err)
-		require.Len(t, caches, 3)
-		assert.Equal(t, "https://some/cache/0", caches[0].(namespaces.DirectorCache).EndpointUrl)
-		assert.Equal(t, "https://some/cache/1", caches[1].(namespaces.DirectorCache).EndpointUrl)
-		assert.Equal(t, "https://some/cache/2", caches[2].(namespaces.DirectorCache).EndpointUrl)
+		require.Len(t, oServers, 3)
+		assert.Equal(t, "https://server1.com/foo", oServers[0].String())
+		assert.Equal(t, "https://server2.com/foo", oServers[1].String())
+		assert.Equal(t, "https://server3.com/foo", oServers[2].String())
 	})
 
-	// Test that the function fails if the preferred cache is ""
+	// Test that the function fails if the preferred server is ""
 	t.Run("testPreferredCacheEmpty", func(t *testing.T) {
-		preferredCacheURL, _ := url.Parse("")
-		someEmptyUrlList := []*url.URL{preferredCacheURL}
-		_, err := getCachesFromNamespace(namespace, true, someEmptyUrlList)
+		preferredUrl, _ := url.Parse("")
+		someEmptyUrlList := []*url.URL{preferredUrl}
+		_, err := generateSortedObjServers(dirResp, someEmptyUrlList)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Preferred cache was specified as an empty string")
+		assert.Contains(t, err.Error(), "Preferred server was specified as an empty string")
 	})
 
 	// Test we work with multiple preferred caches
 	t.Run("testMultiplePreferredCaches", func(t *testing.T) {
-		preferredCache1, _ := url.Parse("https://I/like/this/cache")
-		preferredCache2, _ := url.Parse("https://I/like/this/cache/too")
-		preferredCacheList := []*url.URL{preferredCache1, preferredCache2}
-		caches, err := getCachesFromNamespace(namespace, true, preferredCacheList)
+		preferredOServers := []*url.URL{
+			{Scheme: "https", Host: "preferred1.com", Path: "/foo"},
+			{Scheme: "https", Host: "preferred2.com", Path: "/foo"},
+		}
+		oServers, err := generateSortedObjServers(dirResp, preferredOServers)
 		assert.NoError(t, err)
-		require.Len(t, caches, 2)
-		assert.Equal(t, "https://I/like/this/cache", caches[0].(namespaces.DirectorCache).EndpointUrl)
-		assert.Equal(t, "https://I/like/this/cache/too", caches[1].(namespaces.DirectorCache).EndpointUrl)
+		require.Len(t, oServers, 2)
+		assert.Equal(t, "https://preferred1.com/foo", oServers[0].String())
+		assert.Equal(t, "https://preferred2.com/foo", oServers[1].String())
 	})
 
 	// Test our prepend works with multiple preferred caches
 	t.Run("testMutliPreferredCachesPrepend", func(t *testing.T) {
-		preferredCache1, _ := url.Parse("https://I/like/this/cache")
-		preferredCache2, _ := url.Parse("https://I/like/this/cache/too")
-		preferredCache3, _ := url.Parse("+")
-		preferredCacheList := []*url.URL{preferredCache1, preferredCache2, preferredCache3}
-		caches, err := getCachesFromNamespace(namespace, true, preferredCacheList)
+		preferredOServers := []*url.URL{
+			{Scheme: "https", Host: "preferred1.com", Path: "/foo"},
+			{Scheme: "https", Host: "preferred2.com", Path: "/foo"},
+			{Scheme: "", Host: "", Path: "+"},
+		}
+		oServers, err := generateSortedObjServers(dirResp, preferredOServers)
 		assert.NoError(t, err)
-		require.Len(t, caches, 5)
-		assert.Equal(t, "https://I/like/this/cache", caches[0].(namespaces.DirectorCache).EndpointUrl)
-		assert.Equal(t, "https://I/like/this/cache/too", caches[1].(namespaces.DirectorCache).EndpointUrl)
-		assert.Equal(t, "https://some/cache/0", caches[2].(namespaces.DirectorCache).EndpointUrl)
-		assert.Equal(t, "https://some/cache/1", caches[3].(namespaces.DirectorCache).EndpointUrl)
-		assert.Equal(t, "https://some/cache/2", caches[4].(namespaces.DirectorCache).EndpointUrl)
+		require.Len(t, oServers, 5)
+		assert.Equal(t, "https://preferred1.com/foo", oServers[0].String())
+		assert.Equal(t, "https://preferred2.com/foo", oServers[1].String())
+		assert.Equal(t, "https://server1.com/foo", oServers[2].String())
+		assert.Equal(t, "https://server2.com/foo", oServers[3].String())
+		assert.Equal(t, "https://server3.com/foo", oServers[4].String())
 	})
 
 	// Test the function fails if the + character is not at the end of the list
 	t.Run("testPlusNotAtEnd", func(t *testing.T) {
-		preferredCache1, _ := url.Parse("https://I/like/this/cache")
-		preferredCache2, _ := url.Parse("+")
-		preferredCache3, _ := url.Parse("https://I/like/this/cache/too")
-		preferredCacheList := []*url.URL{preferredCache1, preferredCache2, preferredCache3}
-		_, err := getCachesFromNamespace(namespace, true, preferredCacheList)
+		preferredOServers := []*url.URL{
+			{Scheme: "https", Host: "preferred1.com", Path: "/foo"},
+			{Scheme: "", Host: "", Path: "+"},
+			{Scheme: "https", Host: "preferred2.com", Path: "/foo"},
+		}
+		_, err := generateSortedObjServers(dirResp, preferredOServers)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "The special character '+' must be the last item in the list of preferred caches")
-	})
-
-	// Test that the list of caches we get back has more than just the preferred cache when a + is at the end of the list
-	t.Run("testPreferredCachePrepend", func(t *testing.T) {
-		preferredCacheURL, _ := url.Parse("https://I/Like/This/Cache/The/Most")
-		preferredPlusURL, _ := url.Parse("+")
-		preferredCacheList := []*url.URL{preferredCacheURL, preferredPlusURL}
-		caches, err := getCachesFromNamespace(namespace, true, preferredCacheList)
-		assert.NoError(t, err)
-		require.Len(t, caches, 4)
-		assert.Equal(t, "https://I/Like/This/Cache/The/Most", caches[0].(namespaces.DirectorCache).EndpointUrl)
-		assert.Equal(t, "https://some/cache/0", caches[1].(namespaces.DirectorCache).EndpointUrl)
-		assert.Equal(t, "https://some/cache/1", caches[2].(namespaces.DirectorCache).EndpointUrl)
-		assert.Equal(t, "https://some/cache/2", caches[3].(namespaces.DirectorCache).EndpointUrl)
-	})
-
-	// Test that we only get the preferred cache back when it is specified without a "+" at the end
-	t.Run("testPreferredCacheNoPrepend", func(t *testing.T) {
-		preferredCacheURL, _ := url.Parse("https://I/Like/This/Cache/The/Most")
-		preferredCacheList := []*url.URL{preferredCacheURL}
-		caches, err := getCachesFromNamespace(namespace, true, preferredCacheList)
-		assert.NoError(t, err)
-		require.Len(t, caches, 1)
-		assert.Equal(t, "https://I/Like/This/Cache/The/Most", caches[0].(namespaces.DirectorCache).EndpointUrl)
+		assert.Contains(t, err.Error(), "The special character '+' must be the last item in the list of preferred servers")
 	})
 }
 
@@ -172,17 +139,21 @@ func TestGetToken(t *testing.T) {
 
 	mock.MockTopology(t, config.GetTransport())
 
-	namespace, err := namespaces.MatchNamespace(context.Background(), "/user/foo")
-	assert.NoError(t, err)
+	dirResp := server_structs.DirectorResponse{
+		XPelNsHdr: server_structs.XPelNs{
+			Namespace: "/user/foo",
+		},
+	}
 
 	url, err := url.Parse("osdf:///user/foo")
 	assert.NoError(t, err)
 
 	// ENVs to test: BEARER_TOKEN, BEARER_TOKEN_FILE, XDG_RUNTIME_DIR/bt_u<uid>, TOKEN, _CONDOR_CREDS/scitoken.use, .condor_creds/scitokens.use
 	os.Setenv("BEARER_TOKEN", "bearer_token_contents")
-	token, err := getToken(url, namespace, true, "", "", false)
+	token := newTokenGenerator(url, &dirResp, true, false)
+	tokenContents, err := token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, "bearer_token_contents", token)
+	assert.Equal(t, "bearer_token_contents", tokenContents)
 	os.Unsetenv("BEARER_TOKEN")
 
 	// BEARER_TOKEN_FILE
@@ -193,9 +164,10 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("BEARER_TOKEN_FILE", bearer_token_file)
-	token, err = getToken(url, namespace, true, "", "", false)
+	token = newTokenGenerator(url, &dirResp, true, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("BEARER_TOKEN_FILE")
 
 	// XDG_RUNTIME_DIR/bt_u<uid>
@@ -205,9 +177,10 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("XDG_RUNTIME_DIR", tmpDir)
-	token, err = getToken(url, namespace, true, "", "", false)
+	token = newTokenGenerator(url, &dirResp, true, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("XDG_RUNTIME_DIR")
 
 	// TOKEN
@@ -217,9 +190,10 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("TOKEN", bearer_token_file)
-	token, err = getToken(url, namespace, true, "", "", false)
+	token = newTokenGenerator(url, &dirResp, true, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("TOKEN")
 
 	// _CONDOR_CREDS/scitokens.use
@@ -229,9 +203,10 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	token, err = getToken(url, namespace, true, "", "", false)
+	token = newTokenGenerator(url, &dirResp, true, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("_CONDOR_CREDS")
 
 	// _CONDOR_CREDS/renamed.use
@@ -244,11 +219,15 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err := url.Parse("renamed+osdf:///user/ligo/frames")
 	assert.NoError(t, err)
-	renamedNamespace, err := namespaces.MatchNamespace(context.Background(), "/user/ligo/frames")
+	ligoDirResp := server_structs.DirectorResponse{
+		XPelNsHdr: server_structs.XPelNs{
+			Namespace: "/user/ligo/frames",
+		},
+	}
+	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	token, err = getToken(renamedUrl, renamedNamespace, false, "", "", false)
-	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("_CONDOR_CREDS")
 
 	// _CONDOR_CREDS/renamed_handle1.use via renamed_handle1+osdf:///user/ligo/frames
@@ -263,11 +242,10 @@ func TestGetToken(t *testing.T) {
 	renamedUrl, err = url.Parse("renamed.handle1+osdf:///user/ligo/frames")
 	renamedUrl.Scheme = "renamed_handle1+osdf"
 	assert.NoError(t, err)
-	renamedNamespace, err = namespaces.MatchNamespace(context.Background(), "/user/ligo/frames")
+	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	token, err = getToken(renamedUrl, renamedNamespace, false, "", "", false)
-	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("_CONDOR_CREDS")
 
 	// _CONDOR_CREDS/renamed_handle2.use via renamed.handle2+osdf:///user/ligo/frames
@@ -280,11 +258,10 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err = url.Parse("renamed.handle2+osdf:///user/ligo/frames")
 	assert.NoError(t, err)
-	renamedNamespace, err = namespaces.MatchNamespace(context.Background(), "/user/ligo/frames")
+	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	token, err = getToken(renamedUrl, renamedNamespace, false, "", "", false)
-	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("_CONDOR_CREDS")
 
 	// _CONDOR_CREDS/renamed.handle3.use via renamed.handle3+osdf:///user/ligo/frames
@@ -297,11 +274,10 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err = url.Parse("renamed.handle3+osdf:///user/ligo/frames")
 	assert.NoError(t, err)
-	renamedNamespace, err = namespaces.MatchNamespace(context.Background(), "/user/ligo/frames")
+	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	token, err = getToken(renamedUrl, renamedNamespace, false, "", "", false)
-	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("_CONDOR_CREDS")
 
 	// _CONDOR_CREDS/renamed.use
@@ -314,11 +290,11 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	renamedUrl, err = url.Parse("/user/ligo/frames")
 	assert.NoError(t, err)
-	renamedNamespace, err = namespaces.MatchNamespace(context.Background(), "/user/ligo/frames")
+	token = newTokenGenerator(renamedUrl, &ligoDirResp, false, false)
+	token.SetTokenName("renamed")
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	token, err = getToken(renamedUrl, renamedNamespace, false, "renamed", "", false)
-	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	os.Unsetenv("_CONDOR_CREDS")
 
 	// Current directory .condor_creds/scitokens.use
@@ -333,14 +309,17 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 	err = os.Chdir(tmpDir)
 	assert.NoError(t, err)
-	token, err = getToken(url, namespace, true, "", "", false)
+	token = newTokenGenerator(url, &dirResp, true, false)
+	tokenContents, err = token.get()
 	assert.NoError(t, err)
-	assert.Equal(t, token_contents, token)
+	assert.Equal(t, token_contents, tokenContents)
 	err = os.Chdir(currentDir)
 	assert.NoError(t, err)
 
-	_, err = getToken(url, namespace, true, "", "", false)
-	assert.EqualError(t, err, "Credential is required for osdf:///user/foo but is currently missing")
+	// Check that we haven't regressed on our error messages
+	token = newTokenGenerator(url, &dirResp, true, false)
+	_, err = token.get()
+	assert.EqualError(t, err, "credential is required for osdf:///user/foo but was not discovered")
 }
 
 // TestGetTokenName tests getTokenName

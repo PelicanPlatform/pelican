@@ -293,7 +293,7 @@ func TestOSDFAuthCreation(t *testing.T) {
 			require.NoError(t, err, "Failure generating authfile")
 
 			finalAuthPath := filepath.Join(xrootdRun, "authfile-origin-generated")
-			if testInput.server.GetServerType().IsEnabled(config.CacheType) {
+			if testInput.server.GetServerType().IsEnabled(server_structs.CacheType) {
 				finalAuthPath = filepath.Join(xrootdRun, "authfile-cache-generated")
 			}
 
@@ -374,7 +374,7 @@ func TestEmitCfg(t *testing.T) {
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
-			err = writeScitokensConfiguration(config.OriginType, cfg)
+			err = writeScitokensConfiguration(server_structs.OriginType, cfg)
 			assert.NoError(t, err)
 
 			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -461,7 +461,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 			cfg, err := LoadScitokensConfig(cfgFname)
 			require.NoError(t, err)
 
-			err = writeScitokensConfiguration(config.OriginType, &cfg)
+			err = writeScitokensConfiguration(server_structs.OriginType, &cfg)
 			assert.NoError(t, err)
 
 			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -503,7 +503,7 @@ func TestMergeConfig(t *testing.T) {
 			err := os.WriteFile(scitokensConfigFile, []byte(configInput), fs.FileMode(0600))
 			require.NoError(t, err)
 
-			err = config.InitServer(ctx, config.OriginType)
+			err = config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
 			err = EmitScitokensConfig(&origin.OriginServer{})
@@ -533,20 +533,21 @@ func TestGenerateConfig(t *testing.T) {
 	viper.Set("Origin.SelfTest", false)
 	issuer, err := GenerateMonitoringIssuer()
 	require.NoError(t, err)
-	assert.Equal(t, issuer.Name, "")
+	assert.Empty(t, issuer.Name)
 
 	viper.Set("Origin.SelfTest", true)
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Server.WebPort", 8443)
-	err = config.InitServer(ctx, config.OriginType)
+	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
+	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateMonitoringIssuer()
 	require.NoError(t, err)
-	assert.Equal(t, issuer.Name, "Built-in Monitoring")
-	assert.Equal(t, issuer.Issuer, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Origin_Port.GetInt()))
-	require.Equal(t, len(issuer.BasePaths), 1)
-	assert.Equal(t, issuer.BasePaths[0], "/pelican/monitoring")
-	assert.Equal(t, issuer.DefaultUser, "xrootd")
+	assert.Equal(t, "Built-in Monitoring", issuer.Name)
+	assert.Equal(t, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Origin_Port.GetInt()), issuer.Issuer)
+	require.Len(t, issuer.BasePaths, 1)
+	assert.Equal(t, "/pelican/monitoring", issuer.BasePaths[0])
+	assert.Equal(t, "xrootd", issuer.DefaultUser)
 
 	viper.Reset()
 	viper.Set("Origin.SelfTest", false)
@@ -554,17 +555,17 @@ func TestGenerateConfig(t *testing.T) {
 	viper.Set("Origin.ScitokensMapSubject", true)
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Server.WebPort", 8443)
-	err = config.InitServer(ctx, config.OriginType)
+	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateOriginIssuer([]string{"/foo/bar/baz", "/another/exported/path"})
 	require.NoError(t, err)
-	assert.Equal(t, issuer.Name, "Origin")
-	assert.Equal(t, issuer.Issuer, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Origin_Port.GetInt()))
-	require.Equal(t, len(issuer.BasePaths), 2)
-	assert.Equal(t, issuer.BasePaths[0], "/foo/bar/baz")
-	assert.Equal(t, issuer.BasePaths[1], "/another/exported/path")
-	assert.Equal(t, issuer.DefaultUser, "user1")
-	assert.Equal(t, issuer.MapSubject, true)
+	assert.Equal(t, "Origin", issuer.Name)
+	assert.Equal(t, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Origin_Port.GetInt()), issuer.Issuer)
+	require.Len(t, issuer.BasePaths, 2)
+	assert.Equal(t, "/foo/bar/baz", issuer.BasePaths[0])
+	assert.Equal(t, "/another/exported/path", issuer.BasePaths[1])
+	assert.Equal(t, "user1", issuer.DefaultUser)
+	assert.True(t, issuer.MapSubject)
 }
 
 func TestWriteOriginAuthFiles(t *testing.T) {
@@ -621,7 +622,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 			dirname := t.TempDir()
 			viper.Reset()
 			viper.Set("Cache.RunLocation", dirname)
-			if server.GetServerType().IsEnabled(config.OriginType) {
+			if server.GetServerType().IsEnabled(server_structs.OriginType) {
 				viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-origin-generated.cfg"))
 				viper.Set("Xrootd.Authfile", filepath.Join(dirname, "authfile-origin-generated"))
 			} else {
@@ -661,10 +662,6 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	issuer3URL := url.URL{}
 	issuer3URL.Scheme = "https"
 	issuer3URL.Host = "issuer3.com"
-
-	issuer4URL := url.URL{}
-	issuer4URL.Scheme = "https"
-	issuer4URL.Host = "issuer4.com"
 
 	PublicCaps := server_structs.Capabilities{
 		PublicReads: true,
@@ -743,7 +740,9 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Server.WebPort", 8444)
 	viper.Set("Server.Hostname", "origin.example.com")
-	err := config.InitServer(ctx, config.OriginType)
+	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
+
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.Nil(t, err)
 
 	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
