@@ -904,24 +904,16 @@ func InitConfig() {
 	}
 
 	// 3) Read config (from flag) or pelican.yaml
+
+	if err := InitConfigDir(); err != nil {
+		log.Errorf("Failed to initialize the config directory, Error: %v", err)
+		os.Exit(1)
+	}
+
 	if configFile := viper.GetString("config"); configFile != "" {
 		viper.SetConfigFile(configFile)
 	} else {
-		configDir := viper.GetString("ConfigDir")
-		if configDir == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
-			} else {
-				// 3) Set up pelican.yaml (has higher precedence)
-				viper.AddConfigPath(filepath.Join(home, ".config", "pelican"))
-			}
-			viper.AddConfigPath(filepath.Join("/etc", "pelican"))
-		} else {
-			viper.AddConfigPath(configDir)
-		}
-		viper.AddConfigPath(configDir)
-		viper.SetConfigName("pelican")
+		viper.AddConfigPath(viper.GetString("ConfigDir"))
 	}
 
 	bindNonPelicanEnv() // Deprecate OSDF env prefix but be compatible for now
@@ -991,7 +983,7 @@ func InitConfig() {
 	}
 }
 
-func initConfigDir() error {
+func InitConfigDir() error {
 	configDir := viper.GetString("ConfigDir")
 	if configDir == "" {
 		if IsRootExecution() {
@@ -1005,6 +997,7 @@ func initConfigDir() error {
 		}
 		viper.SetDefault("ConfigDir", configDir)
 	}
+	viper.SetConfigName("pelican")
 	return nil
 }
 
@@ -1079,10 +1072,6 @@ func PrintConfig() error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
-	if err := initConfigDir(); err != nil {
-		return errors.Wrap(err, "Failed to initialize the server configuration")
-	}
-
 	setEnabledServer(currentServers)
 
 	configDir := viper.GetString("ConfigDir")
@@ -1522,11 +1511,6 @@ func ResetClientInitialized() {
 }
 
 func InitClient() error {
-	if err := initConfigDir(); err != nil {
-		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
-		viper.Set("ConfigDir", "/etc/pelican")
-	}
-
 	configDir := viper.GetString("ConfigDir")
 	viper.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
 
