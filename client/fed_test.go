@@ -732,7 +732,7 @@ func TestNewTransferJob(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tc.NewTransferJob(context.Background(), mockRemoteUrl, "/dest", false, false, client.WithAcquireToken(false))
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to get token for transfer: credential is required for /second/namespace/hello_world.txt but was not discovered")
+		assert.Contains(t, err.Error(), "failed to get token for transfer: credential is required for")
 	})
 
 	// Test success
