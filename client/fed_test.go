@@ -752,9 +752,9 @@ func TestNewTransferJob(t *testing.T) {
 		// use our auth required namespace
 		mockRemoteUrl, err := url.Parse("/second/namespace/hello_world.txt")
 		require.NoError(t, err)
-		_, err = tc.NewTransferJob(context.Background(), mockRemoteUrl, "/dest", false, false)
+		_, err = tc.NewTransferJob(context.Background(), mockRemoteUrl, "/dest", false, false, client.WithAcquireToken(false))
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to get token for transfer: failed to find or generate a token as required for /second/namespace/hello_world.txt")
+		assert.Contains(t, err.Error(), "failed to get token for transfer: credential is required for /second/namespace/hello_world.txt but was not discovered")
 	})
 
 	// Test success
@@ -835,17 +835,17 @@ func TestObjectList(t *testing.T) {
 		for _, export := range fed.Exports {
 			listURL := fmt.Sprintf("pelican://%s:%d%s", param.Server_Hostname.GetString(), param.Server_WebPort.GetInt(), export.FederationPrefix)
 			if !export.Capabilities.PublicReads {
-				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(""))
+				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(""), client.WithAcquireToken(false))
 				require.Error(t, err)
 				assert.Len(t, get, 0)
-				assert.Contains(t, err.Error(), "failed to get token for transfer: failed to find or generate a token as required")
+				assert.Contains(t, err.Error(), "failed to get token for transfer: credential is required")
 
 				// No error if it's with token
-				get, err = client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()))
+				get, err = client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()), client.WithAcquireToken(false))
 				require.NoError(t, err)
 				require.Len(t, get, 2)
 			} else {
-				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()))
+				get, err := client.DoList(fed.Ctx, listURL, client.WithTokenLocation(tempToken.Name()), client.WithAcquireToken(false))
 				require.NoError(t, err)
 				require.Len(t, get, 2)
 			}
@@ -961,4 +961,42 @@ func TestClientUnpack(t *testing.T) {
 	fi, err = os.Stat(fooLocation)
 	require.NoError(t, err)
 	assert.Equal(t, int64(11), fi.Size())
+}
+
+// A test that generates a token locally from the private key
+func TestTokenGenerate(t *testing.T) {
+	viper.Reset()
+	server_utils.ResetOriginExports()
+	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
+
+	// Other set-up items:
+	testFileContent := "test file content"
+	// Create the temporary file to upload
+	tempFile, err := os.CreateTemp(t.TempDir(), "test")
+	require.NoError(t, err, "Error creating temp file")
+	defer os.Remove(tempFile.Name())
+	_, err = tempFile.WriteString(testFileContent)
+	require.NoError(t, err, "Error writing to temp file")
+	tempFile.Close()
+
+	// Disable progress bars to not reuse the same mpb instance
+	viper.Set("Logging.DisableProgressBars", true)
+
+	// Set path for object to upload/download
+	for _, export := range fed.Exports {
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		uploadURL := fmt.Sprintf("pelican://%s:%s%s/%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix, "token_gen", fileName)
+
+		// Upload the file with PUT
+		transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false)
+		require.NoError(t, err)
+		assert.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
+
+		// Download that same file with GET
+		transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
+		require.NoError(t, err)
+		assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+	}
 }
