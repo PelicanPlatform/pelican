@@ -475,8 +475,8 @@ func redirectToCache(ginCtx *gin.Context) {
 		return
 	}
 
-	// "smart" sorting method takes care of availability factor
-	if param.Director_CacheSortMethod.GetString() != "smart" {
+	// "adaptive" sorting method takes care of availability factor
+	if param.Director_CacheSortMethod.GetString() == string(server_structs.AdaptiveType) {
 		// Re-sort by availability, where caches having the object have higher priority
 		sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
 	}
