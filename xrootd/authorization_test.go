@@ -503,8 +503,6 @@ func TestMergeConfig(t *testing.T) {
 			err := os.WriteFile(scitokensConfigFile, []byte(configInput), fs.FileMode(0600))
 			require.NoError(t, err)
 
-			err = config.InitConfigDir()
-			require.NoError(t, err)
 			err = config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
@@ -541,8 +539,6 @@ func TestGenerateConfig(t *testing.T) {
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Server.WebPort", 8443)
 	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
-	err = config.InitConfigDir()
-	require.NoError(t, err)
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateMonitoringIssuer()
@@ -559,8 +555,6 @@ func TestGenerateConfig(t *testing.T) {
 	viper.Set("Origin.ScitokensMapSubject", true)
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Server.WebPort", 8443)
-	err = config.InitConfigDir()
-	require.NoError(t, err)
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	issuer, err = GenerateOriginIssuer([]string{"/foo/bar/baz", "/another/exported/path"})
@@ -749,7 +743,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
 
 	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+	require.Nil(t, err)
 
 	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, -1)
