@@ -21,6 +21,7 @@ package director
 import (
 	"bytes"
 	_ "embed"
+	"math"
 	"math/rand"
 	"net"
 	"net/netip"
@@ -419,4 +420,53 @@ func TestSortServerAdsByAvailability(t *testing.T) {
 
 	sortServerAdsByAvailability(randomOrder, avaiMap)
 	assert.EqualValues(t, expected, randomOrder)
+}
+
+func TestAssignRandBoundedCoord(t *testing.T) {
+	// Because of the test's randomness, do it a few times to increase the likelihood of catching errors
+	for i := 0; i < 10; i++ {
+		// Generate a random bounding box between -200, 200
+		lat1 := rand.Float64()*400 - 200
+		long1 := rand.Float64()*400 - 200
+		lat2 := rand.Float64()*400 - 200
+		long2 := rand.Float64()*400 - 200
+
+		// Assign mins and maxes
+		minLat, maxLat := math.Min(lat1, lat2), math.Max(lat1, lat2)
+		minLong, maxLong := math.Min(long1, long2), math.Max(long1, long2)
+
+		// Assign a random coordinate within the bounding box
+		lat, long := assignRandBoundedCoord(minLat, maxLat, minLong, maxLong)
+		assert.True(t, lat >= minLat && lat <= maxLat)
+		assert.True(t, long >= minLong && long <= maxLong)
+	}
+}
+
+func TestGetClientLatLong(t *testing.T) {
+	t.Run("invalid-ip", func(t *testing.T) {
+		// Capture the log and check that the correct error is logged
+		logOutput := &(bytes.Buffer{})
+		log.SetOutput(logOutput)
+		log.SetLevel(log.DebugLevel)
+
+		clientIp := netip.Addr{}
+		coord := getClientLatLong(clientIp)
+
+		assert.True(t, coord.Lat <= usLatMax && coord.Lat >= usLatMin)
+		assert.True(t, coord.Long <= usLongMax && coord.Long >= usLongMin)
+		assert.Contains(t, logOutput.String(), "Unable to sort servers based on client-server distance. Invalid client IP address")
+	})
+
+	t.Run("valid-ip-no-geoip-match", func(t *testing.T) {
+		logOutput := &(bytes.Buffer{})
+		log.SetOutput(logOutput)
+		log.SetLevel(log.DebugLevel)
+
+		clientIp := netip.MustParseAddr("192.168.0.1")
+		coord := getClientLatLong(clientIp)
+
+		assert.True(t, coord.Lat <= usLatMax && coord.Lat >= usLatMin)
+		assert.True(t, coord.Long <= usLongMax && coord.Long >= usLongMin)
+		assert.Contains(t, logOutput.String(), "Client IP 192.168.0.1 has been re-assigned a random location in the contiguous US to lat/long")
+	})
 }
