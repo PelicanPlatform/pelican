@@ -30,6 +30,7 @@ type Config struct {
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataLocations []string `mapstructure:"datalocations" yaml:"DataLocations"`
 		DefaultCacheTimeout time.Duration `mapstructure:"defaultcachetimeout" yaml:"DefaultCacheTimeout"`
+		EnableLotman bool `mapstructure:"enablelotman"`
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
@@ -350,6 +351,7 @@ type configWithType struct {
 		DefaultCacheTimeout struct { Type string; Value time.Duration }
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
+		EnablePrefetch struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
 		HighWaterMark struct { Type string; Value string }
