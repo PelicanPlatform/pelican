@@ -96,4 +96,9 @@ var (
 		Name: "pelican_director_redirections_total",
 		Help: "The total number of redirections the director issued.",
 	}, []string{"destination", "status_code", "version", "network"})
+
+	PelicanDirectorGeoIPErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_geoip_errors",
+		Help: "The total number of errors encountered while downloading the GeoIP database",
+	}, []string{"network", "source", "project"})
 )
