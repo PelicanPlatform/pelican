@@ -45,6 +45,10 @@ var yamlMockup string
 
 func TestCheckOverrides(t *testing.T) {
 	viper.Reset()
+	t.Cleanup(func() {
+		viper.Reset()
+		geoIPOverrides = nil
+	})
 
 	// We'll also check that our logging feature responsibly reports
 	// what Pelican is telling the user.
@@ -138,8 +142,6 @@ func TestCheckOverrides(t *testing.T) {
 		require.Equal(t, expectedCoordinate.Lat, coordinate.Lat)
 		require.Equal(t, expectedCoordinate.Long, coordinate.Long)
 	})
-
-	viper.Reset()
 }
 
 func TestSortServerAdsByTopo(t *testing.T) {
@@ -192,6 +194,7 @@ func TestSortServerAds(t *testing.T) {
 	viper.Reset()
 	t.Cleanup(func() {
 		viper.Reset()
+		geoIPOverrides = nil
 	})
 
 	// A random IP that should geo-resolve to roughly the same location as the Madison server
@@ -443,6 +446,8 @@ func TestAssignRandBoundedCoord(t *testing.T) {
 }
 
 func TestGetClientLatLong(t *testing.T) {
+	// The cache may be populated from previous tests. Wipe it out and start fresh.
+	clientIpCache.DeleteAll()
 	t.Run("invalid-ip", func(t *testing.T) {
 		// Capture the log and check that the correct error is logged
 		logOutput := &(bytes.Buffer{})
