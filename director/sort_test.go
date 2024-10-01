@@ -450,11 +450,20 @@ func TestGetClientLatLong(t *testing.T) {
 		log.SetLevel(log.DebugLevel)
 
 		clientIp := netip.Addr{}
+		assert.False(t, clientIpCache.Has(clientIp))
 		coord := getClientLatLong(clientIp)
 
 		assert.True(t, coord.Lat <= usLatMax && coord.Lat >= usLatMin)
 		assert.True(t, coord.Long <= usLongMax && coord.Long >= usLongMin)
 		assert.Contains(t, logOutput.String(), "Unable to sort servers based on client-server distance. Invalid client IP address")
+		assert.NotContains(t, logOutput.String(), "Retrieving pre-assigned lat/long")
+
+		// Get it again to make sure it's coming from the cache
+		coord = getClientLatLong(clientIp)
+		assert.True(t, coord.Lat <= usLatMax && coord.Lat >= usLatMin)
+		assert.True(t, coord.Long <= usLongMax && coord.Long >= usLongMin)
+		assert.Contains(t, logOutput.String(), "Retrieving pre-assigned lat/long for unresolved client IP")
+		assert.True(t, clientIpCache.Has(clientIp))
 	})
 
 	t.Run("valid-ip-no-geoip-match", func(t *testing.T) {
@@ -463,10 +472,19 @@ func TestGetClientLatLong(t *testing.T) {
 		log.SetLevel(log.DebugLevel)
 
 		clientIp := netip.MustParseAddr("192.168.0.1")
+		assert.False(t, clientIpCache.Has(clientIp))
 		coord := getClientLatLong(clientIp)
 
 		assert.True(t, coord.Lat <= usLatMax && coord.Lat >= usLatMin)
 		assert.True(t, coord.Long <= usLongMax && coord.Long >= usLongMin)
 		assert.Contains(t, logOutput.String(), "Client IP 192.168.0.1 has been re-assigned a random location in the contiguous US to lat/long")
+		assert.NotContains(t, logOutput.String(), "Retrieving pre-assigned lat/long")
+
+		// Get it again to make sure it's coming from the cache
+		coord = getClientLatLong(clientIp)
+		assert.True(t, coord.Lat <= usLatMax && coord.Lat >= usLatMin)
+		assert.True(t, coord.Long <= usLongMax && coord.Long >= usLongMin)
+		assert.Contains(t, logOutput.String(), "Retrieving pre-assigned lat/long for client IP")
+		assert.True(t, clientIpCache.Has(clientIp))
 	})
 }
