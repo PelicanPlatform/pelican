@@ -26,11 +26,6 @@ interface SpeedButtonProps {
   title: string;
 }
 
-export const getVersionNumber = () => {
-  const { version } = require('../../package.json');
-  return version;
-};
-
 const SpeedDialButton = ({
   open,
   order,

@@ -29,22 +29,15 @@ import 'chartjs-adapter-luxon';
 
 import {
   BoxProps,
-  Button,
-  FormControl,
-  Grid,
-  IconButton,
-  InputLabel,
-  MenuItem,
-  Paper,
-  Select,
+  Grid
 } from '@mui/material';
-
-import { Box } from '@mui/material';
 
 import {
   query_rate,
   TimeDuration,
   DurationType,
+  PrometheusQuery,
+  prometheusResultToDataPoints,
 } from '@/components/graphs/prometheus';
 
 import { GraphDrawer, ResolutionInput, RateInput } from './Drawer';
@@ -189,14 +182,18 @@ export default function RateGraph({
             updatedTime = DateTime.now();
           }
 
+          const queryResponse = await query_rate({
+            metric,
+            rate: _rate,
+            duration: _duration,
+            resolution: _resolution,
+            time: updatedTime,
+          })
+
+          const dataPoints = prometheusResultToDataPoints(queryResponse);
+
           return {
-            data: await query_rate({
-              metric,
-              rate: _rate,
-              duration: _duration,
-              resolution: _resolution,
-              time: updatedTime,
-            }),
+            data: dataPoints,
             ...datasetOption,
           };
         })
@@ -226,4 +223,47 @@ export default function RateGraph({
       boxProps={boxProps}
     />
   );
+}
+
+const executePreciseQuery = async (query: PrometheusPreciseQuery, rate: TimeDuration, duration: TimeDuration, resolution: TimeDuration, time: DateTime)=> {
+
+  let updatedTime = time;
+  if (updatedTime.hasSame(DateTime.now(), 'day')) {
+    updatedTime = DateTime.now();
+  }
+
+  const dataResponse = await query_rate({
+    metric: query.value,
+    rate: rate,
+    duration: duration,
+    resolution: resolution,
+    time: updatedTime,
+  })
+
+  const dataPoints = prometheusResultToDataPoints(dataResponse);
+
+  const dataset = {
+    data: dataPoints,
+    ...query?.datasetOptions
+  };
+
+  return dataset
+}
+
+const executeGeneralQuery = async(query: PrometheusGeneralQuery, rate: TimeDuration, duration: TimeDuration, resolution: TimeDuration, time: DateTime) => {
+
+  let updatedTime = time;
+  if (updatedTime.hasSame(DateTime.now(), 'day')) {
+    updatedTime = DateTime.now();
+  }
+
+  const dataResponse = await query_rate({
+    metric: query.value,
+    rate: rate,
+    duration: duration,
+    resolution: resolution,
+    time: updatedTime,
+  })
+
+
 }

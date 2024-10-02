@@ -19,7 +19,7 @@
 
 import { Box, Tooltip } from '@mui/material';
 import Link from 'next/link';
-import { Build, Dashboard, Public } from '@mui/icons-material';
+import { Build, Dashboard, Public, Equalizer } from '@mui/icons-material';
 import IconButton from '@mui/material/IconButton';
 import useSWR from 'swr';
 
@@ -37,6 +37,9 @@ export const OriginSidebar = () => {
     <Sidebar>
       <ButtonLink title={'Dashboard'} href={'/origin/'}>
         <Dashboard />
+      </ButtonLink>
+      <ButtonLink title={"Metrics"} href={'/origin/metrics/'}>
+        <Equalizer />
       </ButtonLink>
       {data?.type === 'globus' && (
         <ButtonLink title={'Globus Configurations'} href={'/origin/globus/'}>

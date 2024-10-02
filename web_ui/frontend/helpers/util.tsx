@@ -55,8 +55,19 @@ export const getErrorMessage = async (response: Response): Promise<string> => {
   return message;
 };
 
-type TypeOrTypeFunction<T> = T | (() => T);
+export type TypeFunction<T, F = any> = (() => T) | ((x: F) => T);
 
-export function evaluateOrReturn<T>(o: TypeOrTypeFunction<T>): T {
-  return typeof o === 'function' ? (o as () => T)() : o;
+export type TypeOrTypeFunction<T, F = any> = T | TypeFunction<T, F>;
+
+export function evaluateOrReturn<T, F>(o: TypeOrTypeFunction<T>, functionProps: F): T {
+
+  if(typeof o === 'function') {
+    return (o as TypeFunction<T, F>)(functionProps);
+  }
+
+  return o as T;
+}
+
+export const average = (arr: number[]) => {
+  return arr.reduce((a, b) => a + b, 0) / arr.length;
 }

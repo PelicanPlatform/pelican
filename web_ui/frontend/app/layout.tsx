@@ -16,8 +16,10 @@
  *
  ***************************************************************/
 
-import './globals.css';
+import { LocalizationProvider} from '@/clientComponents';
 import { ThemeProviderClient } from '@/public/theme';
+import './globals.css';
+
 
 export const metadata = {
   title: 'Pelican Platform',
@@ -32,7 +34,9 @@ export default function RootLayout({
   return (
     <html lang='en'>
       <ThemeProviderClient>
-        <body>{children}</body>
+        <LocalizationProvider>
+          <body>{children}</body>
+        </LocalizationProvider>
       </ThemeProviderClient>
     </html>
   );
