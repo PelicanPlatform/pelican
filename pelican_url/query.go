@@ -62,6 +62,16 @@ func (pvs PelicanURLValues) Add(key string, val string) {
 	pvs[key] = append(pvs[key], val)
 }
 
+// Helper function to check if a query parameter is known
+func isKnownQueryParam(key string) bool {
+	switch key {
+	case QueryRecursive, QueryPack, QueryDirectRead, QuerySkipStat, QueryPreferCached:
+		return true
+	default:
+		return false
+	}
+}
+
 // ValidateQueryParams checks that the query parameters are valid for a Pelican URL. This
 // includes checking that query parameters are known (with the option to allow for unknown)
 // and that conflicting query parameters are not present.
@@ -77,9 +87,13 @@ func (p *PelicanURL) ValidateQueryParams(opts ...ParseOption) error {
 	}
 
 	for key, valSlice := range query {
-		if len(valSlice) > 1 {
-			return errors.New(fmt.Sprintf("Multiple values for query parameter '%s' are not allowed", key))
+		// Skip length check for unknown parameters
+		if !po.allowUnknownQueryParams || isKnownQueryParam(key) {
+			if len(valSlice) > 1 {
+				return errors.New(fmt.Sprintf("Multiple values for query parameter '%s' are not allowed", key))
+			}
 		}
+
 		val := valSlice[0]
 		switch key {
 		case QueryRecursive:
@@ -93,17 +107,9 @@ func (p *PelicanURL) ValidateQueryParams(opts ...ParseOption) error {
 				}
 				return errors.New(fmt.Sprintf("Invalid value for query parameter '%s': %s", key, val))
 			}
-		case QueryDirectRead:
+		case QueryDirectRead, QuerySkipStat, QueryPreferCached:
 			if val != "" {
-				log.Warningln("Values for 'directread' query parameter have no effect and will be ignored")
-			}
-		case QuerySkipStat:
-			if val != "" {
-				log.Warningln("Values for 'skipstat' query parameter have no effect and will be ignored")
-			}
-		case QueryPreferCached:
-			if val != "" {
-				log.Warningln("Values for 'prefercached' query parameter have no effect and will be ignored")
+				log.Warningln(fmt.Sprintf("Values for '%s' query parameter have no effect and will be ignored", key))
 			}
 		default:
 			if po.allowUnknownQueryParams {
@@ -111,7 +117,6 @@ func (p *PelicanURL) ValidateQueryParams(opts ...ParseOption) error {
 			} else {
 				return errors.New(fmt.Sprintf("Unknown query parameter '%s'", key))
 			}
-
 		}
 	}
 
