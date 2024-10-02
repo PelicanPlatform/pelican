@@ -278,8 +278,18 @@ func startMetadataQuery(ctx context.Context, httpClient *http.Client, ua string,
 // This function is for discovering federations as specified by a url during a pelican:// transfer.
 // this does not populate global fields and is more temporary per url
 func DiscoverFederation(ctx context.Context, httpClient *http.Client, ua string, discoveryUrl *url.URL) (metadata FederationDiscovery, err error) {
-	log.Debugln("Performing federation service discovery for against", discoveryUrl.String())
+	if discoveryUrl.Path != "" {
+		return FederationDiscovery{}, errors.Errorf("Discovery URL must not have a path, but you provided '%s'", discoveryUrl.String())
+	}
+	if discoveryUrl.Host == "" {
+		return FederationDiscovery{}, errors.Errorf("Discovery URL must have a host, but you provided '%s'", discoveryUrl.String())
+	}
+	if discoveryUrl.Scheme != "https" && discoveryUrl.Scheme != "http" {
+		return FederationDiscovery{}, errors.Errorf("Discovery URL must use http/s, but you provided '%s'", discoveryUrl.String())
+	}
+
 	discoveryUrl.Path = PelicanDiscoveryPath
+	log.Debugln("Performing federation service discovery for against", discoveryUrl.String())
 
 	var result *http.Response
 	for idx := 1; idx <= 3; idx++ {
@@ -343,7 +353,9 @@ func (p *PelicanURL) PopulateFedInfo(opts ...DiscoveryOption) error {
 		opt(options)
 	}
 
-	discoveryUrl := &url.URL{Scheme: "https", Path: PelicanDiscoveryPath}
+	// We don't set the discovery path here, because that's handled by DiscoverFederation. All we really care to pass to that
+	// is the scheme/host.
+	discoveryUrl := &url.URL{Scheme: "https"}
 	normedScheme := normalizeScheme(p.Scheme)
 	if normedScheme == OsdfScheme || normedScheme == StashScheme {
 		// Prefer OSDF discovery host, but allow someone to overwrite if they really want to
