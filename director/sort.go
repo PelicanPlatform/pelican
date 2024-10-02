@@ -28,10 +28,13 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -140,13 +143,28 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 		return override.Lat, override.Long, nil
 	}
 
+	network, ok := utils.ApplyIPMask(addr.String())
+	if !ok {
+		log.Warningf("Failed to apply IP mask to address %s", ip.String())
+	}
+
 	reader := maxMindReader.Load()
 	if reader == nil {
 		err = errors.New("No GeoIP database is available")
+		metrics.PelicanDirectorGeoIPErrors.With(prometheus.Labels{
+			"network": network,
+			"source":  "server",
+			"project": "",
+		}).Inc()
 		return
 	}
 	record, err := reader.City(ip)
 	if err != nil {
+		metrics.PelicanDirectorGeoIPErrors.With(prometheus.Labels{
+			"network": network,
+			"source":  "server",
+			"project": "",
+		}).Inc()
 		return
 	}
 	lat = record.Location.Latitude
@@ -157,6 +175,11 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	// comes from a private range.
 	if lat == 0 && long == 0 {
 		log.Warningf("GeoIP Resolution of the address %s resulted in the null lat/long. This will result in random server sorting.", ip.String())
+		metrics.PelicanDirectorGeoIPErrors.With(prometheus.Labels{
+			"network": network,
+			"source":  "client",
+			"project": "",
+		}).Inc()
 	}
 
 	// MaxMind provides an accuracy radius in kilometers. When it actually has no clue how to resolve a valid, public
@@ -168,6 +191,11 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 			"This will be treated as GeoIP resolution failure and result in random server sorting. Setting lat/long to null.", ip.String(), record.Location.AccuracyRadius)
 		lat = 0
 		long = 0
+		metrics.PelicanDirectorGeoIPErrors.With(prometheus.Labels{
+			"network": network,
+			"source":  "client",
+			"project": "",
+		}).Inc()
 	}
 
 	return
