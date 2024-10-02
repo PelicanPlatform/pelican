@@ -116,6 +116,8 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		if err != nil || tokenContents == "" {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
+	} else {
+		token = nil
 	}
 
 	if statInfo, err := statHttp(destUri, dirResp, token); err != nil {
@@ -298,6 +300,8 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		if err != nil || tokenContents == "" {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
+	} else {
+		token = nil
 	}
 
 	fileInfos, err = listHttp(remoteObjectUrl, dirResp, token)
