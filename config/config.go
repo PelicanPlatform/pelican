@@ -319,7 +319,7 @@ func GetAllPrefixes() []ConfigPrefix {
 	return prefixes
 }
 
-// We can't parse a schemeless hostname when there's a port, so check for a scheme and add one if non exists.
+// We can't parse a schemeless hostname when there's a port, so check for a scheme and add one if none exists.
 func wrapWithHttpsIfNeeded(urlStr string) string {
 	if len(urlStr) > 0 && !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
 		urlStr = "https://" + urlStr
