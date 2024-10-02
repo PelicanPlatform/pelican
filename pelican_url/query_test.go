@@ -122,6 +122,13 @@ func TestValidateQueryParams(t *testing.T) {
 			errMsg:       "",
 		},
 		{
+			name:         "test unrecognized, do allow unknown with multi-valued query",
+			pUrl:         "pelican://something/here?somethingrandom=foo&somethingrandom=bar",
+			allowUnknown: true,
+			expected:     "somethingrandom=foo&somethingrandom=bar",
+			errMsg:       "",
+		},
+		{
 			name:         "test chained query",
 			pUrl:         "pelican://something/here?directread&recursive",
 			allowUnknown: false,
