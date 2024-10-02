@@ -1220,6 +1220,8 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 			tj.dirResp = dirResp
 			tj.token.DirResp = &dirResp
 		}
+	} else {
+		tj.token = nil
 	}
 
 	log.Debugf("Created new prestage job, ID %s client %s, for URL %s", tj.uuid.String(), tc.id.String(), remoteUrl.String())
@@ -1312,6 +1314,8 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 			}
 			token.DirResp = &dirResp
 		}
+	} else {
+		token = nil
 	}
 
 	var sortedServers []*url.URL
