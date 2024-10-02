@@ -99,6 +99,34 @@ func TestDiscoverFederation(t *testing.T) {
 		assert.Equal(t, "https://broker.com", fedInfo.BrokerEndpoint, "Unexpected BrokerEndpoint")
 	})
 
+	t.Run("TestMalformedDiscUrls", func(t *testing.T) {
+		tr := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+		client := &http.Client{Transport: tr}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		malformedUrl, _ := url.Parse("badurl")
+		_, err = DiscoverFederation(ctx, client, "test-ua", malformedUrl)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Discovery URL must not have a path, but you provided 'badurl'")
+
+		// Url with invalid scheme
+		malformedUrl, _ = url.Parse("foobar://badurl")
+		_, err = DiscoverFederation(ctx, client, "test-ua", malformedUrl)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Discovery URL must use http/s, but you provided 'foobar://badurl'")
+
+		// Url with no host
+		malformedUrl, _ = url.Parse("https://")
+		_, err = DiscoverFederation(ctx, client, "test-ua", malformedUrl)
+		require.Error(t, err)
+		// Not totally sure why URL parsing results in `https:` instead of `https://` but that's what we get
+		require.Contains(t, err.Error(), "Discovery URL must have a host, but you provided 'https:'")
+	})
+
 	t.Run("TestMetadataDiscoveryTimeout", func(t *testing.T) {
 		tr := &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
