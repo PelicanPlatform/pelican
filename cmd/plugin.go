@@ -41,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -438,14 +439,13 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				break
 			}
 
-			// Check we have valid query parameters
-			err := utils.CheckValidQuery(transfer.url)
+			pUrl, err := pelican_url.Parse(transfer.url.String(), []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
 			if err != nil {
 				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return err
 			}
 
-			if transfer.url.Query().Has("recursive") {
+			if transfer.url.Query().Has(pelican_url.QueryRecursive) {
 				recursive = true
 			} else {
 				recursive = false
@@ -458,7 +458,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				log.Debugln("Downloading:", transfer.url, "to", transfer.localFile)
 			}
 
-			urlCopy := *transfer.url
+			urlCopy := *(pUrl.GetRawUrl())
 			tj, err = tc.NewTransferJob(context.Background(), &urlCopy, transfer.localFile, upload, recursive, client.WithAcquireToken(false), client.WithCaches(caches...))
 			if err != nil {
 				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)

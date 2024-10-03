@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"runtime/debug"
 	"strings"
@@ -36,8 +37,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Number of caches to attempt to use in any invocation
@@ -53,6 +54,58 @@ type FileInfo struct {
 	IsCollection bool
 }
 
+// Given a remote path, use the client's wisdom to parse it as a Pelican URL, including metadata discovery.
+//
+// This will handle setting up the URL cache, passing along contexts to discovery, and passing the client context/user agent.
+// Calling this should return a fully populated PelicanURL object, including any metadata that was discovered.
+func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL, error) {
+	rpUrl, err := url.Parse(rp)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse remote path")
+	}
+
+	// Set up options that get passed from Parse --> PopulateFedInfo and may be used when querying the Director
+	client := &http.Client{Transport: config.GetTransport()}
+	pOptions := []pelican_url.ParseOption{pelican_url.ShouldDiscover(true), pelican_url.ValidateQueryParams(true)}
+	dOptions := []pelican_url.DiscoveryOption{pelican_url.UseCached(true), pelican_url.WithContext(ctx), pelican_url.WithClient(client), pelican_url.WithUserAgent(getUserAgent(""))}
+
+	// If we have no scheme, we'll end up assuming a Pelican url. We need to figure out which discovery endpoint to use.
+	if rpUrl.Scheme == "" {
+		fedInfo, err := config.GetFederation(ctx)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get configured federation info")
+		}
+
+		// First try to use the configured discovery endpoint
+		if fedInfo.DiscoveryEndpoint != "" {
+			discoveryUrl, err := url.Parse(fedInfo.DiscoveryEndpoint)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to parse federation discovery endpoint")
+			}
+
+			dOptions = append(dOptions, pelican_url.WithDiscoveryUrl(discoveryUrl))
+		} else if fedInfo.DirectorEndpoint != "" {
+			discoveryUrl, err := url.Parse(fedInfo.DirectorEndpoint)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to parse federation discovery endpoint")
+			}
+
+			dOptions = append(dOptions, pelican_url.WithDiscoveryUrl(discoveryUrl))
+		}
+	}
+
+	pUrl, err := pelican_url.Parse(
+		rp,
+		pOptions,
+		dOptions,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return pUrl, nil
+}
+
 // Check the size of a remote file in an origin
 func DoStat(ctx context.Context, destination string, options ...TransferOption) (fileInfo *FileInfo, err error) {
 
@@ -66,16 +119,9 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}()
 
-	destUri, err := url.Parse(destination)
+	pUrl, err := ParseRemoteAsPUrl(ctx, destination)
 	if err != nil {
-		log.Errorln("Failed to parse destination URL")
-		return nil, err
-	}
-
-	// Check if we understand the found url scheme
-	err = schemeUnderstood(destUri.Scheme)
-	if err != nil {
-		return nil, err
+		return
 	}
 
 	te, err := NewTransferEngine(ctx)
@@ -89,17 +135,12 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}()
 
-	pelicanURL, err := te.newPelicanURL(destUri)
-	if err != nil {
-		return nil, errors.Wrap(err, "Failed to generate pelicanURL object")
-	}
-
-	dirResp, err := GetDirectorInfoForPath(ctx, destUri.Path, pelicanURL.directorUrl, false, "", "")
+	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, false, "")
 	if err != nil {
 		return nil, err
 	}
 
-	token := newTokenGenerator(destUri, &dirResp, false, true)
+	token := newTokenGenerator(pUrl, &dirResp, false, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -118,7 +159,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}
 
-	if statInfo, err := statHttp(destUri, dirResp, token); err != nil {
+	if statInfo, err := statHttp(pUrl, dirResp, token); err != nil {
 		return nil, errors.Wrap(err, "failed to do the stat")
 	} else {
 		return &statInfo, nil
@@ -126,12 +167,11 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 }
 
 func GetObjectServerHostnames(ctx context.Context, testFile string) (urls []string, err error) {
-	fedInfo, err := config.GetFederation(ctx)
+	pUrl, err := ParseRemoteAsPUrl(ctx, testFile)
 	if err != nil {
 		return
 	}
-
-	parsedDirResp, err := GetDirectorInfoForPath(ctx, testFile, fedInfo.DirectorEndpoint, false, "", "")
+	parsedDirResp, err := GetDirectorInfoForPath(ctx, pUrl, false, "")
 	if err != nil {
 		return
 	}
@@ -211,31 +251,6 @@ func generateSortedObjServers(dirResp server_structs.DirectorResponse, preferred
 
 }
 
-func correctURLWithUnderscore(sourceFile string) (string, string) {
-	schemeIndex := strings.Index(sourceFile, "://")
-	if schemeIndex == -1 {
-		return sourceFile, ""
-	}
-
-	originalScheme := sourceFile[:schemeIndex]
-	if strings.Contains(originalScheme, "_") {
-		scheme := strings.ReplaceAll(originalScheme, "_", ".")
-		sourceFile = scheme + sourceFile[schemeIndex:]
-	}
-	return sourceFile, originalScheme
-}
-
-func schemeUnderstood(scheme string) error {
-	understoodSchemes := []string{"file", "osdf", "pelican", "stash", ""}
-
-	_, foundDest := find(understoodSchemes, scheme)
-	if !foundDest {
-		return errors.Errorf("Do not understand the destination scheme: %s. Permitted values are %s",
-			scheme, strings.Join(understoodSchemes, ", "))
-	}
-	return nil
-}
-
 // Function for the object ls command, we get target information for our remote object and eventually print out the contents of the specified object
 func DoList(ctx context.Context, remoteObject string, options ...TransferOption) (fileInfos []FileInfo, err error) {
 	// First, create a handler for any panics that occur
@@ -248,18 +263,11 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		}
 	}()
 
-	remoteObjectUrl, err := url.Parse(remoteObject)
+	pUrl, err := ParseRemoteAsPUrl(ctx, remoteObject)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to parse remote object URL")
+		return nil, errors.Wrapf(err, "failed to parse remote path: %s", remoteObject)
 	}
 
-	remoteObjectScheme := remoteObjectUrl.Scheme
-
-	// Check if we understand the found url scheme
-	err = schemeUnderstood(remoteObjectScheme)
-	if err != nil {
-		return nil, err
-	}
 	te, err := NewTransferEngine(ctx)
 	if err != nil {
 		return nil, err
@@ -270,18 +278,13 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		}
 	}()
 
-	pelicanURL, err := te.newPelicanURL(remoteObjectUrl)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to generate pelicanURL object")
-	}
-
-	dirResp, err := GetDirectorInfoForPath(ctx, remoteObjectUrl.Path, pelicanURL.directorUrl, false, "", "")
+	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, false, "")
 	if err != nil {
 		return nil, err
 	}
 
 	// Get our token if needed
-	token := newTokenGenerator(remoteObjectUrl, &dirResp, false, true)
+	token := newTokenGenerator(pUrl, &dirResp, false, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -300,7 +303,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		}
 	}
 
-	fileInfos, err = listHttp(remoteObjectUrl, dirResp, token)
+	fileInfos, err = listHttp(pUrl, dirResp, token)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to do the list")
 	}
@@ -326,30 +329,13 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 		}
 	}()
 
-	remoteDestination, remoteDestScheme := correctURLWithUnderscore(remoteDestination)
-	remoteDestUrl, err := url.Parse(remoteDestination)
+	// Parse as a Pelican URL, but without any discovery (that happens when the transfer job is created).
+	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
+	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
+	// but should still send it along.
+	pUrl, err := pelican_url.Parse(remoteDestination, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
 	if err != nil {
-		log.Errorln("Failed to parse remote destination URL:", err)
-		return nil, err
-	}
-
-	// Check if we have a query and that it is understood
-	err = utils.CheckValidQuery(remoteDestUrl)
-	if err != nil {
-		return
-	}
-	if remoteDestUrl.Query().Has("recursive") {
-		recursive = true
-	}
-
-	remoteDestUrl.Scheme = remoteDestScheme
-
-	remoteDestScheme, _ = getTokenName(remoteDestUrl)
-
-	// Check if we understand the found url scheme
-	err = schemeUnderstood(remoteDestScheme)
-	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteDestination)
 	}
 
 	te, err := NewTransferEngine(ctx)
@@ -366,7 +352,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := client.NewTransferJob(context.Background(), remoteDestUrl, localObject, true, recursive)
+	tj, err := client.NewTransferJob(context.Background(), pUrl.GetRawUrl(), localObject, true, recursive)
 	if err != nil {
 		return
 	}
@@ -403,40 +389,13 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 		}
 	}()
 
-	// Parse the source with URL parse
-	remoteObject, remoteObjectScheme := correctURLWithUnderscore(remoteObject)
-	remoteObjectUrl, err := url.Parse(remoteObject)
+	// Parse as a Pelican URL, but without any discovery (that happens when the transfer job is created).
+	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
+	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
+	// but should still send it along.
+	pUrl, err := pelican_url.Parse(remoteObject, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
 	if err != nil {
-		log.Errorln("Failed to parse source URL:", err)
-		return nil, err
-	}
-
-	// Check if we have a query and that it is understood
-	err = utils.CheckValidQuery(remoteObjectUrl)
-	if err != nil {
-		return
-	}
-	if remoteObjectUrl.Query().Has("recursive") {
-		recursive = true
-	}
-
-	remoteObjectUrl.Scheme = remoteObjectScheme
-
-	// This is for condor cases:
-	remoteObjectScheme, _ = getTokenName(remoteObjectUrl)
-
-	// Check if we understand the found url scheme
-	err = schemeUnderstood(remoteObjectScheme)
-	if err != nil {
-		return nil, err
-	}
-
-	if remoteObjectScheme == "osdf" || remoteObjectScheme == "pelican" {
-		remoteObject = remoteObjectUrl.Path
-	}
-
-	if string(remoteObject[0]) != "/" {
-		remoteObject = "/" + remoteObject
+		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteObject)
 	}
 
 	// get absolute path
@@ -445,10 +404,11 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	//Check if path exists or if its in a folder
 	if destStat, err := os.Stat(localDestPath); os.IsNotExist(err) {
 		localDestination = localDestPath
-	} else if destStat.IsDir() && remoteObjectUrl.Query().Get("pack") == "" {
+	} else if destStat.IsDir() && pUrl.Query().Get(pelican_url.QueryPack) == "" {
 		// If we have an auto-pack request, it's OK for the destination to be a directory
 		// Otherwise, get the base name of the source and append it to the destination dir.
-		remoteObjectFilename := path.Base(remoteObject)
+		// Note that we use the pUrl.Path, as this will have stripped any query params for us
+		remoteObjectFilename := path.Base(pUrl.Path)
 		localDestination = path.Join(localDestPath, remoteObjectFilename)
 	}
 
@@ -468,7 +428,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewTransferJob(context.Background(), remoteObjectUrl, localDestination, false, recursive)
+	tj, err := tc.NewTransferJob(context.Background(), pUrl.GetRawUrl(), localDestination, false, recursive)
 	if err != nil {
 		return
 	}
@@ -536,151 +496,40 @@ func DoCopy(ctx context.Context, sourceFile string, destination string, recursiv
 		}
 	}()
 
-	// Parse the source and destination with URL parse
-	sourceFile, source_scheme := correctURLWithUnderscore(sourceFile)
-	sourceURL, err := url.Parse(sourceFile)
-	if err != nil {
-		log.Errorln("Failed to parse source URL:", err)
-		return nil, err
-	}
-	// Check if we have a query and that it is understood
-	err = utils.CheckValidQuery(sourceURL)
-	if err != nil {
-		return
-	}
-	if sourceURL.Query().Has("recursive") {
-		recursive = true
-	}
-
-	sourceURL.Scheme = source_scheme
-
-	destination, dest_scheme := correctURLWithUnderscore(destination)
-	destURL, err := url.Parse(destination)
+	var isPut bool
+	// determine which direction we're headed
+	parsedDest, err := url.Parse(destination)
 	if err != nil {
 		log.Errorln("Failed to parse destination URL:", err)
 		return nil, err
 	}
-
-	// Check if we have a query and that it is understood
-	err = utils.CheckValidQuery(destURL)
+	parsedSrc, err := url.Parse(sourceFile)
 	if err != nil {
-		return
-	}
-	if destURL.Query().Has("recursive") {
-		recursive = true
-	}
-
-	destURL.Scheme = dest_scheme
-
-	// Check for scheme here for when using condor
-	sourceScheme, _ := getTokenName(sourceURL)
-	destScheme, _ := getTokenName(destURL)
-
-	isPut := destScheme == "stash" || destScheme == "osdf" || destScheme == "pelican"
-
-	var localPath string
-	var remoteURL *url.URL
-	if isPut {
-		// Verify valid scheme
-		if err = schemeUnderstood(destScheme); err != nil {
-			return nil, err
-		}
-
-		log.Debugln("Detected object write to remote federation object", destURL.Path)
-		localPath = sourceFile
-		remoteURL = destURL
-	} else {
-		// Verify valid scheme
-		if err = schemeUnderstood(sourceScheme); err != nil {
-			return nil, err
-		}
-
-		if destURL.Scheme == "file" {
-			destination = destURL.Path
-		}
-
-		if sourceScheme == "stash" || sourceScheme == "osdf" || sourceScheme == "pelican" {
-			sourceFile = sourceURL.Path
-		}
-
-		if string(sourceFile[0]) != "/" {
-			sourceFile = "/" + sourceFile
-		}
-
-		// get absolute path
-		destPath, _ := filepath.Abs(destination)
-
-		//Check if path exists or if its in a folder
-		if destStat, err := os.Stat(destPath); os.IsNotExist(err) {
-			destination = destPath
-		} else if destStat.IsDir() && sourceURL.Query().Get("pack") == "" {
-			// If we have an auto-pack request, it's OK for the destination to be a directory
-			// Otherwise, get the base name of the source and append it to the destination dir.
-			sourceFilename := path.Base(sourceFile)
-			destination = path.Join(destPath, sourceFilename)
-		}
-		localPath = destination
-		remoteURL = sourceURL
-	}
-
-	success := false
-	var downloaded int64 = 0
-
-	te, err := NewTransferEngine(ctx)
-	if err != nil {
+		log.Errorln("Failed to parse source URL:", err)
 		return nil, err
 	}
 
-	defer func() {
-		if err := te.Shutdown(); err != nil {
-			log.Errorln("Failure when shutting down transfer engine:", err)
-		}
-	}()
-	tc, err := te.NewClient(options...)
-	if err != nil {
-		return
-	}
-	tj, err := tc.NewTransferJob(context.Background(), remoteURL, localPath, isPut, recursive)
-	if err != nil {
-		return
-	}
-	if err = tc.Submit(tj); err != nil {
-		return
-	}
-	transferResults, err = tc.Shutdown()
-	if err == nil {
-		if tj.lookupErr == nil {
-			success = true
-		} else {
-			err = tj.lookupErr
-		}
-	}
-
-	for _, result := range transferResults {
-		downloaded += result.TransferredBytes
-		if err == nil && result.Error != nil {
-			success = false
-			err = result.Error
-		}
-	}
-
-	if success {
-		return transferResults, nil
+	var localPath string
+	var remotePath string
+	if parsedDest.Scheme != "" && (parsedSrc.Scheme == "" || parsedSrc.Scheme == "file") {
+		isPut = true
+		log.Debugf("Detected a PUT from %s to %s", parsedSrc.Path, parsedDest.String())
+		localPath = parsedSrc.Path
+		remotePath = parsedDest.String()
+	} else if (parsedDest.Scheme == "" || parsedDest.Scheme == "file") && parsedSrc.Scheme != "" {
+		isPut = false
+		log.Debugf("Detected a GET from %s to %s", parsedSrc.String(), parsedDest.Path)
+		localPath = parsedDest.Path
+		remotePath = parsedSrc.String()
 	} else {
-		return transferResults, err
+		return nil, errors.New("unable to determine direction of transfer.  Both source and destination are either local or remote")
 	}
-}
 
-// find takes a slice and looks for an element in it. If found it will
-// return it's key, otherwise it will return -1 and a bool of false.
-// From https://golangcode.com/check-if-element-exists-in-slice/
-func find(slice []string, val string) (int, bool) {
-	for i, item := range slice {
-		if item == val {
-			return i, true
-		}
+	if isPut {
+		return DoPut(ctx, localPath, remotePath, recursive, options...)
+	} else {
+		return DoGet(ctx, remotePath, localPath, recursive, options...)
 	}
-	return -1, false
 }
 
 // getIPs will resolve a hostname and return all corresponding IP addresses
