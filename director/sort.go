@@ -26,7 +26,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
@@ -58,6 +60,9 @@ type (
 var (
 	invalidOverrideLogOnce = map[string]bool{}
 	geoIPOverrides         []GeoIPOverride
+
+	// Stores a mapping of client IPs that have been randomly assigned a coordinate
+	clientIpCache = ttlcache.New(ttlcache.WithTTL[netip.Addr, Coordinate](20 * time.Minute))
 )
 
 // Constants for the director sorting algorithm
@@ -68,6 +73,13 @@ const (
 	objAvailabilityFactor    = 2    // Multiplier for knowing whether an object is present
 	loadHalvingThreshold     = 10.0 // Threshold where the load havling factor kicks in
 	loadHalvingFactor        = 4.0  // Halving interval for load
+
+	// A rough lat/long bounding box for the contiguous US. We might eventually make this box
+	// a configurable value, but for now it's hardcoded
+	usLatMin  = 30.0
+	usLatMax  = 50.0
+	usLongMin = -125.0
+	usLongMax = -65.0
 )
 
 func (me SwapMaps) Len() int {
@@ -173,12 +185,43 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	return
 }
 
-func getClientLatLong(addr netip.Addr) (coord Coordinate, ok bool) {
+// Given a bounding box, assign a random coordinate within that box.
+func assignRandBoundedCoord(minLat, maxLat, minLong, maxLong float64) (lat, long float64) {
+	lat = rand.Float64()*(maxLat-minLat) + minLat
+	long = rand.Float64()*(maxLong-minLong) + minLong
+	return
+}
+
+// Given a client address, attempt to get the lat/long of the client. If the address is invalid or
+// the lat/long is not resolvable, assign a random location in the contiguous US.
+func getClientLatLong(addr netip.Addr) (coord Coordinate) {
 	var err error
+	if !addr.IsValid() {
+		log.Warningf("Unable to sort servers based on client-server distance. Invalid client IP address: %s", addr.String())
+		coord.Lat, coord.Long = assignRandBoundedCoord(usLatMin, usLatMax, usLongMin, usLongMax)
+		cached, exists := clientIpCache.GetOrSet(addr, coord)
+		if exists {
+			log.Warningf("Retrieving pre-assigned lat/long for unresolved client IP %s: %f, %f.This assignment will be cached for 20 minutes unless the client IP is used again in that period.", addr.String(), coord.Lat, coord.Long)
+		} else {
+			log.Warningf("Assigning random location in the contiguous US to lat/long %f, %f. This assignment will be cached for 20 minutes unless the client IP is used again in that period.", coord.Lat, coord.Long)
+		}
+		coord = cached.Value()
+		return
+	}
+
 	coord.Lat, coord.Long, err = getLatLong(addr)
-	ok = (err == nil && !(coord.Lat == 0 && coord.Long == 0))
-	if err != nil {
-		log.Warningf("failed to resolve lat/long for address %s: %v", addr, err)
+	if err != nil || (coord.Lat == 0 && coord.Long == 0) {
+		if err != nil {
+			log.Warningf("Error while getting the client IP address: %v", err)
+		}
+		coord.Lat, coord.Long = assignRandBoundedCoord(usLatMin, usLatMax, usLongMin, usLongMax)
+		cached, exists := clientIpCache.GetOrSet(addr, coord)
+		if exists {
+			log.Warningf("Retrieving pre-assigned lat/long for client IP %s: %f, %f. This assignment will be cached for 20 minutes unless the client IP is used again in that period.", addr.String(), coord.Lat, coord.Long)
+		} else {
+			log.Warningf("Client IP %s has been re-assigned a random location in the contiguous US to lat/long %f, %f. This assignment will be cached for 20 minutes unless the client IP is used again in that period.", addr.String(), coord.Lat, coord.Long)
+		}
+		coord = cached.Value()
 	}
 	return
 }
@@ -192,7 +235,7 @@ func invertWeightIfNeeded(isRand bool, weight float64) float64 {
 	return weight
 }
 
-// The all-in-one method to sort serverAds based on Dirtector.CacheSortMethod configuration parameter
+// The all-in-one method to sort serverAds based on the Director.CacheSortMethod configuration parameter
 //   - distance: sort serverAds by the distance between the geolocation of the servers and the client
 //   - distanceAndLoad: sort serverAds by the distance with gated halving factor (see details in the adaptive method)
 //     and the server IO load
@@ -207,15 +250,8 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 	// A larger weight is a higher priority.
 	weights := make(SwapMaps, len(ads))
 	sortMethod := param.Director_CacheSortMethod.GetString()
-
-	clientCoord := Coordinate{}
-	clientCoordOk := false
-
-	if clientAddr.IsValid() {
-		clientCoord, clientCoordOk = getClientLatLong(clientAddr)
-	} else {
-		log.Warningf("Unable to sort servers based on client-server distance. Invalid client IP address: %s", clientAddr.String())
-	}
+	// This will handle the case where the client address is invalid or the lat/long is not resolvable.
+	clientCoord := getClientLatLong(clientAddr)
 
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {
@@ -232,20 +268,16 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 		case server_structs.DistanceAndLoadType:
 			weight := 1.0
 			// Distance weight
-			var distance float64
-			var isRand bool
-			if clientCoordOk {
-				distance, isRand = distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
-				if isRand {
-					// In distanceAndLoad/adaptive modes, pin random distance weights to the range [-0.475, -0.525)] in an attempt
-					// to make sure the weights from availability/load overpower the random distance weights while
-					// still having a stochastic element. We do this instead of ignoring the distance weight entirely, because
-					// it's possible load information and or availability information is not available for all servers.
-					weight = 0 - (0.475+rand.Float64())*(0.05)
-				} else {
-					dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
-					weight *= dWeighted
-				}
+			distance, isRand := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
+			if isRand {
+				// In distanceAndLoad/adaptive modes, pin random distance weights to the range [-0.475, -0.525)] in an attempt
+				// to make sure the weights from availability/load overpower the random distance weights while
+				// still having a stochastic element. We do this instead of ignoring the distance weight entirely, because
+				// it's possible load information and or availability information is not available for all servers.
+				weight = 0 - (0.475+rand.Float64())*(0.05)
+			} else {
+				dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
+				weight *= dWeighted
 			}
 
 			// Load weight
@@ -255,17 +287,14 @@ func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availab
 		case server_structs.AdaptiveType:
 			weight := 1.0
 			// Distance weight
-			var distance float64
-			var isRand bool
-			if clientCoordOk {
-				distance, isRand = distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
-				if isRand {
-					weight = 0 - (0.475+rand.Float64())*(0.05)
-				} else {
-					dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
-					weight *= dWeighted
-				}
+			distance, isRand := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
+			if isRand {
+				weight = 0 - (0.475+rand.Float64())*(0.05)
+			} else {
+				dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
+				weight *= dWeighted
 			}
+
 			// Availability weight
 			if availabilityMap == nil {
 				weight *= 1.0
