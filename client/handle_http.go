@@ -1083,6 +1083,8 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 			tj.dirResp = dirResp
 			tj.token.DirResp = &dirResp
 		}
+	} else {
+		tj.token = nil
 	}
 
 	// If we are a recursive download and using the director, we want to attempt to get directory listings from
