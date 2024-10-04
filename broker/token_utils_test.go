@@ -28,10 +28,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func TestGetCacheHostnameFromToken(t *testing.T) {
-	config.Reset()
+	server_utils.Reset()
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	require.NoError(t, config.InitClient())

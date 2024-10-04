@@ -33,6 +33,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -42,7 +43,7 @@ func TestResetPassword(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	config.Reset()
+	server_utils.Reset()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
 	viper.Set("Server.WebPort", 8444)

@@ -30,7 +30,7 @@ import (
 )
 
 func TestGetNSIssuerURL(t *testing.T) {
-	config.Reset()
+	Reset()
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	require.NoError(t, config.InitClient())
@@ -39,11 +39,11 @@ func TestGetNSIssuerURL(t *testing.T) {
 	url, err := GetNSIssuerURL("/test-prefix")
 	assert.Equal(t, nil, err)
 	assert.Equal(t, "https://registry.com:8446/api/v1.0/registry/test-prefix", url)
-	config.Reset()
+	Reset()
 }
 
 func TestGetJWKSURLFromIssuerURL(t *testing.T) {
-	config.Reset()
+	Reset()
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	require.NoError(t, config.InitClient())

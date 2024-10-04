@@ -47,8 +47,7 @@ import (
 
 func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	// Create instance of test federation
-	config.Reset()
-	server_utils.ResetOriginExports()
+	server_utils.Reset()
 
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -222,8 +221,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
 		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
-		config.Reset()
-		server_utils.ResetOriginExports()
+		server_utils.Reset()
+
 	})
 }
 
@@ -243,8 +242,7 @@ func verifySuccessfulTransfer(t *testing.T, transferResults []client.TransferRes
 // Test that recursive uploads and downloads work with the ?recursive query
 func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 	// Create instance of test federation
-	config.Reset()
-	server_utils.ResetOriginExports()
+	server_utils.Reset()
 
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -258,8 +256,8 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
 		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
-		config.Reset()
-		server_utils.ResetOriginExports()
+		server_utils.Reset()
+
 	})
 
 	// Create a token file
@@ -436,8 +434,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 // This tests that is origins disable listings, we should fail the download
 // Note: origins disabling listings override the existence of dirlisthost, causing a failure
 func TestFailureOnOriginDisablingListings(t *testing.T) {
-	config.Reset()
-	server_utils.ResetOriginExports()
+	server_utils.Reset()
 
 	viper.Set("Logging.Level", "debug")
 	viper.Set("Origin.StorageType", "posix")
@@ -461,8 +458,7 @@ func TestFailureOnOriginDisablingListings(t *testing.T) {
 
 func TestSyncUpload(t *testing.T) {
 	// Create instance of test federation
-	config.Reset()
-	server_utils.ResetOriginExports()
+	server_utils.Reset()
 
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -592,8 +588,7 @@ func TestSyncUpload(t *testing.T) {
 
 func TestSyncDownload(t *testing.T) {
 	// Create instance of test federation
-	config.Reset()
-	server_utils.ResetOriginExports()
+	server_utils.Reset()
 
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())

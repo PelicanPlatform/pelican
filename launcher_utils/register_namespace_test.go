@@ -41,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -56,7 +57,7 @@ func TestRegistration(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	config.Reset()
+	server_utils.Reset()
 	viper.Set("ConfigDir", tempConfigDir)
 
 	config.InitConfig()

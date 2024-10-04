@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // Create tmpdir, change cwd, and setup clean up functions
@@ -43,7 +44,7 @@ func setupTestRun(t *testing.T) string {
 	t.Cleanup(func() {
 		err := os.Chdir(wd)
 		require.NoError(t, err)
-		config.Reset()
+		server_utils.Reset()
 		config.ResetIssuerJWKPtr()
 	})
 	return tmpDir
@@ -66,7 +67,7 @@ func TestKeygenMain(t *testing.T) {
 	config.ResetIssuerJWKPtr()
 
 	t.Cleanup(func() {
-		config.Reset()
+		server_utils.Reset()
 		config.ResetIssuerJWKPtr()
 	})
 

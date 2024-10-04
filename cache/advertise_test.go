@@ -29,6 +29,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func TestFilterNsAdsForCache(t *testing.T) {
@@ -82,8 +83,8 @@ func TestFilterNsAdsForCache(t *testing.T) {
 			expectedNumNS: 2,
 		},
 	}
-	config.Reset()
-	defer config.Reset()
+	server_utils.Reset()
+	defer server_utils.Reset()
 
 	nsAds := []server_structs.NamespaceAdV2{
 		{
@@ -130,7 +131,7 @@ func TestFilterNsAdsForCache(t *testing.T) {
 			if testInput.permittedNS != nil {
 				viper.Set("Cache.PermittedNamespaces", testInput.permittedNS)
 			}
-			defer config.Reset()
+			defer server_utils.Reset()
 
 			cacheServer.SetFilters()
 			err = cacheServer.GetNamespaceAdsFromDirector()

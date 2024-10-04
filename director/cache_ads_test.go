@@ -30,8 +30,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func hasServerAdWithName(serverAds []server_structs.ServerAd, name string) bool {
@@ -432,7 +432,7 @@ func TestRecordAd(t *testing.T) {
 
 	t.Run("recorded-sad-should-match-health-test-utils-one", func(t *testing.T) {
 		t.Cleanup(func() {
-			config.Reset()
+			server_utils.Reset()
 			healthTestUtilsMutex.Lock()
 			statUtilsMutex.Lock()
 			defer statUtilsMutex.Unlock()
@@ -443,7 +443,7 @@ func TestRecordAd(t *testing.T) {
 			serverAds.DeleteAll()
 			geoIPOverrides = nil
 		})
-		config.Reset()
+		server_utils.Reset()
 		func() {
 			geoIPOverrides = nil
 

@@ -226,7 +226,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		err := os.RemoveAll(tmpPath)
 		require.NoError(t, err)
 		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	return

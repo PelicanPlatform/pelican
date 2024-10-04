@@ -1504,7 +1504,7 @@ func InitClient() error {
 	return nil
 }
 
-func Reset() {
+func ResetConfig() {
 	viper.Reset()
 
 	// Clear cached preferred prefix
@@ -1519,20 +1519,5 @@ func Reset() {
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
 
-	// // Reset other global variables
-	// setServerOnce = sync.Once{}
-	// enabledServers = 0
-
-	// tempRunDir = ""
-	// cleanupOnce = sync.Once{}
-	// clientInitialized = false
-
-	// // Reset validator and translator-related variables
-	// onceValidate = sync.Once{}
-	// validate = nil
-	// uni = nil // Clear the universal translator
-	// translator = nil
-
-	// // delete Origin exports
-	// // server_utils.ResetOriginExports()
+	// deleting Origin exports is done by Reset() in server_utils pkg
 }

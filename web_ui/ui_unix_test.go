@@ -25,18 +25,17 @@ import (
 	"path"
 	"testing"
 
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tg123/go-htpasswd"
-	
-	"github.com/pelicanplatform/pelican/config"
 )
 
 func TestDoReload(t *testing.T) {
-	config.Reset()
+	server_utils.Reset()
 	savedAuthDB := authDB.Load()
 	authDB.Store(nil)
 	defer authDB.Store(savedAuthDB)

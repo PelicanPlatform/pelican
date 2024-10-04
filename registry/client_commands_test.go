@@ -35,6 +35,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -71,7 +72,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	config.Reset()
+	server_utils.Reset()
 
 	svr := registryMockup(ctx, t, "serveregistry")
 	defer func() {
@@ -140,7 +141,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		stdoutCapture = string(capturedOutput[:n])
 		assert.Equal(t, "[]\n", stdoutCapture)
 	})
-	config.Reset()
+	server_utils.Reset()
 }
 
 func TestRegistryKeyChainingOSDF(t *testing.T) {
@@ -148,7 +149,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	config.Reset()
+	server_utils.Reset()
 	_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 	assert.NoError(t, err)
 	viper.Set("Federation.DirectorUrl", "https://osdf-director.osg-htc.org")
@@ -238,7 +239,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 
 	_, err = config.SetPreferredPrefix(config.PelicanPrefix)
 	assert.NoError(t, err)
-	config.Reset()
+	server_utils.Reset()
 }
 
 func TestRegistryKeyChaining(t *testing.T) {
@@ -246,7 +247,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	config.Reset()
+	server_utils.Reset()
 	// On by default, but just to make things explicit
 	viper.Set("Registry.RequireKeyChaining", true)
 
@@ -297,5 +298,5 @@ func TestRegistryKeyChaining(t *testing.T) {
 	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo", "")
 	require.NoError(t, err)
 
-	config.Reset()
+	server_utils.Reset()
 }

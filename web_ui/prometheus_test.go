@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -49,7 +50,7 @@ func TestPrometheusUnprotected(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	config.Reset()
+	server_utils.Reset()
 
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
 	av1.Get("/query", func(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +103,7 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	config.Reset()
+	server_utils.Reset()
 
 	av1 := route.New().WithPrefix("/api/v1.0/prometheus")
 
@@ -161,7 +162,7 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	config.Reset()
+	server_utils.Reset()
 	viper.Set("Server.ExternalWebUrl", "https://test-origin.org:8444")
 	viper.Set("Monitoring.PromQLAuthorization", true)
 

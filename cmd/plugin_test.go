@@ -232,13 +232,12 @@ func (f *FedTest) Teardown() {
 	f.Cancel()
 	f.FedCancel()
 	assert.NoError(f.T, f.ErrGroup.Wait())
-	config.Reset()
+	server_utils.Reset()
 }
 
 // Test the main function for the pelican plugin
 func TestStashPluginMain(t *testing.T) {
-	config.Reset()
-	server_utils.ResetOriginExports()
+	server_utils.Reset()
 
 	oldPrefix, err := config.SetPreferredPrefix(config.StashPrefix)
 	defer func() {
@@ -314,8 +313,7 @@ func TestStashPluginMain(t *testing.T) {
 
 // Test multiple downloads from the plugin
 func TestPluginMulti(t *testing.T) {
-	config.Reset()
-	server_utils.ResetOriginExports()
+	server_utils.Reset()
 
 	dirName := t.TempDir()
 
@@ -379,10 +377,8 @@ func TestPluginMulti(t *testing.T) {
 
 // Test multiple downloads from the plugin
 func TestPluginDirectRead(t *testing.T) {
-	config.Reset()
-	defer config.Reset()
-	defer server_utils.ResetOriginExports()
-	server_utils.ResetOriginExports()
+	server_utils.Reset()
+	defer server_utils.Reset()
 
 	dirName := t.TempDir()
 
@@ -457,8 +453,7 @@ func TestPluginDirectRead(t *testing.T) {
 func TestPluginCorrectStartAndEndTime(t *testing.T) {
 	test_utils.InitClient(t, nil)
 	server_utils.ResetOriginExports()
-	defer config.Reset()
-	defer server_utils.ResetOriginExports()
+	defer server_utils.Reset()
 
 	// Set up our http backend so that we can sleep during transfer
 	body := "Hello, World!"
@@ -670,10 +665,8 @@ func TestFailTransfer(t *testing.T) {
 
 // Test recursive downloads from the plugin
 func TestPluginRecursiveDownload(t *testing.T) {
-	config.Reset()
-	defer config.Reset()
-	defer server_utils.ResetOriginExports()
-	server_utils.ResetOriginExports()
+	server_utils.Reset()
+	defer server_utils.Reset()
 
 	dirName := t.TempDir()
 

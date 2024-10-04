@@ -30,10 +30,10 @@ import (
 
 func TestGetOIDCProvider(t *testing.T) {
 	t.Cleanup(func() {
-		Reset()
+		ResetConfig()
 	})
 	t.Run("empty-endpoints-gives-error", func(t *testing.T) {
-		Reset()
+		ResetConfig()
 		get, err := GetOIDCProdiver()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "nothing set for config parameter OIDC.IssuerUrl or OIDC.AuthorizationEndpoint")
@@ -41,7 +41,7 @@ func TestGetOIDCProvider(t *testing.T) {
 	})
 
 	t.Run("auth-endpoint-gives-correct-result", func(t *testing.T) {
-		Reset()
+		ResetConfig()
 		viper.Set(param.OIDC_AuthorizationEndpoint.GetName(), "https://example.com/authorization")
 		get, err := GetOIDCProdiver()
 		require.NoError(t, err)
@@ -61,7 +61,7 @@ func TestGetOIDCProvider(t *testing.T) {
 	})
 
 	t.Run("issuer-endpoint-gives-correct-result", func(t *testing.T) {
-		Reset()
+		ResetConfig()
 		viper.Set(param.OIDC_Issuer.GetName(), "https://example.com")
 		get, err := GetOIDCProdiver()
 		require.NoError(t, err)

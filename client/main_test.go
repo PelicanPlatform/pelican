@@ -38,6 +38,7 @@ import (
 	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -138,7 +139,7 @@ func TestGetToken(t *testing.T) {
 	// Need a namespace for token acquisition
 	defer os.Unsetenv("PELICAN_FEDERATION_TOPOLOGYNAMESPACEURL")
 	os.Setenv("PELICAN_TOPOLOGY_NAMESPACE_URL", "https://topology.opensciencegrid.org/osdf/namespaces")
-	config.Reset()
+	server_utils.Reset()
 	err := config.InitClient()
 	assert.Nil(t, err)
 

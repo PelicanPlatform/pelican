@@ -76,7 +76,7 @@ func getHelloWorldHandler(t *testing.T) func(resp http.ResponseWriter, req *http
 func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	dirpath := t.TempDir()
 
-	config.Reset()
+	server_utils.Reset()
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("ConfigDir", filepath.Join(dirpath, "config"))
 	config.InitConfig()

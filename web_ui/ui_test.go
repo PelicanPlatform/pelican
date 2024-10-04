@@ -41,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -208,12 +209,12 @@ func TestHandleWebUIAuth(t *testing.T) {
 	})
 
 	t.Run("403-for-logged-in-non-admin-user", func(t *testing.T) {
-		config.Reset()
+		server_utils.Reset()
 		// We let the frontend to handle unauthorized user (if the password is initialzied)
 		setupTestAuthDB(t)
 		t.Cleanup(func() {
 			cleanupAuthDB()
-			config.Reset()
+			server_utils.Reset()
 		})
 
 		tmpDir := t.TempDir()

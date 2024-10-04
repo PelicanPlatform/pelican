@@ -271,3 +271,8 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 		}
 	})
 }
+
+func Reset() {
+	config.ResetConfig()
+	ResetOriginExports()
+}

@@ -36,6 +36,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -81,7 +82,7 @@ func TestHandleWildcard(t *testing.T) {
 	})
 
 	t.Run("match-wildcard-metadataHandler", func(t *testing.T) {
-		config.Reset()
+		server_utils.Reset()
 		mockPrefix := "/testnamespace/foo"
 
 		setupMockRegistryDB(t)
@@ -151,7 +152,7 @@ func TestHandleWildcard(t *testing.T) {
 
 	for _, tc := range mockApprovalTcs {
 		t.Run(tc.Name, func(t *testing.T) {
-			config.Reset()
+			server_utils.Reset()
 			viper.Set("Registry.RequireCacheApproval", tc.CacheApprovedOnly)
 			viper.Set("Registry.RequireOriginApproval", tc.OriginApprovedOnly)
 
@@ -197,7 +198,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 	router.POST("/namespaces/check/status", checkStatusHandler)
 
 	t.Cleanup(func() {
-		config.Reset()
+		server_utils.Reset()
 		config.ResetFederationForTest()
 	})
 
@@ -253,7 +254,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 
 	t.Run("incomplete-registration", func(t *testing.T) {
 		resetNamespaceDB(t)
-		config.Reset()
+		server_utils.Reset()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{
 			RegistryEndpoint: "https://registry.org",
@@ -291,7 +292,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 
 	t.Run("complete-registration", func(t *testing.T) {
 		resetNamespaceDB(t)
-		config.Reset()
+		server_utils.Reset()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{
 			RegistryEndpoint: "https://registry.org",
@@ -337,7 +338,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 
 	t.Run("multiple-complete-registrations", func(t *testing.T) {
 		resetNamespaceDB(t)
-		config.Reset()
+		server_utils.Reset()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{
 			RegistryEndpoint: "https://registry.org",

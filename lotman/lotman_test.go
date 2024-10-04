@@ -30,11 +30,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pelicanplatform/pelican/server_utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
-
-	"github.com/pelicanplatform/pelican/config"
 )
 
 //go:embed resources/lots-config.yaml
@@ -60,13 +59,13 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string) (bool, func
 	success := InitLotman()
 	//reset func
 	return success, func() {
-		config.Reset()
+		server_utils.Reset()
 	}
 }
 
 // Test the library initializer. NOTE: this also tests CreateLot, which is a part of initialization.
 func TestLotmanInit(t *testing.T) {
-	config.Reset()
+	server_utils.Reset()
 
 	t.Run("TestBadInit", func(t *testing.T) {
 		// We haven't set various bits needed to create the lots, like discovery URL
@@ -120,7 +119,7 @@ func TestLotmanInit(t *testing.T) {
 }
 
 func TestLotmanInitFromConfig(t *testing.T) {
-	config.Reset()
+	server_utils.Reset()
 
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf")
 	defer cleanup()
@@ -220,7 +219,7 @@ func TestGetLotmanLib(t *testing.T) {
 }
 
 func TestGetAuthzCallers(t *testing.T) {
-	config.Reset()
+	server_utils.Reset()
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetAuthzCalleres")
 	defer cleanup()
 	require.True(t, success)
@@ -239,7 +238,7 @@ func TestGetAuthzCallers(t *testing.T) {
 }
 
 func TestGetLot(t *testing.T) {
-	config.Reset()
+	server_utils.Reset()
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetLot")
 	defer cleanup()
 	require.True(t, success)
@@ -262,7 +261,7 @@ func TestGetLot(t *testing.T) {
 }
 
 func TestUpdateLot(t *testing.T) {
-	config.Reset()
+	server_utils.Reset()
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf")
 	defer cleanup()
 	require.True(t, success)
@@ -300,7 +299,7 @@ func TestUpdateLot(t *testing.T) {
 }
 
 func TestDeleteLotsRec(t *testing.T) {
-	config.Reset()
+	server_utils.Reset()
 	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf")
 	defer cleanup()
 	require.True(t, success)

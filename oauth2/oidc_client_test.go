@@ -26,16 +26,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func TestGetRedirectURL(t *testing.T) {
-	config.Reset()
+	server_utils.Reset()
 	t.Cleanup(func() {
-		config.Reset()
+		server_utils.Reset()
 	})
 	t.Run("no-redirect-host-no-cb-path-set", func(t *testing.T) {
-		config.Reset()
+		server_utils.Reset()
 		viper.Set(param.Server_ExternalWebUrl.GetName(), "https://localhost:8888")
 		get, err := GetRedirectURL("")
 		require.NoError(t, err)
@@ -43,7 +43,7 @@ func TestGetRedirectURL(t *testing.T) {
 	})
 
 	t.Run("no-redirect-host-cp-path-set", func(t *testing.T) {
-		config.Reset()
+		server_utils.Reset()
 		viper.Set(param.Server_ExternalWebUrl.GetName(), "https://localhost:8888")
 		get, err := GetRedirectURL("/new/url")
 		require.NoError(t, err)
@@ -51,7 +51,7 @@ func TestGetRedirectURL(t *testing.T) {
 	})
 
 	t.Run("redirect-host-cp-path-set", func(t *testing.T) {
-		config.Reset()
+		server_utils.Reset()
 		viper.Set(param.Server_ExternalWebUrl.GetName(), "https://ea123fsac:8888")
 		viper.Set("Server.WebPort", 8888)
 		viper.Set(param.OIDC_ClientRedirectHostname.GetName(), "localhost")

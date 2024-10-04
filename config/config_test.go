@@ -136,9 +136,9 @@ func TestDialerTimeout(t *testing.T) {
 }
 
 func TestInitConfig(t *testing.T) {
-	Reset()
+	ResetConfig()
 	t.Cleanup(func() {
-		Reset()
+		ResetConfig()
 	})
 	// Set prefix to OSDF to ensure that config is being set
 	testingPreferredPrefix = "OSDF"
@@ -161,13 +161,13 @@ func TestInitConfig(t *testing.T) {
 	if err := viper.WriteConfigAs(tempCfgFile.Name()); err != nil {
 		t.Fatalf("Failed to write to config file: %v", err)
 	}
-	Reset()
+	ResetConfig()
 	viper.Set("config", tempCfgFile.Name()) // Set the temp file as the new 'pelican.yaml'
 	InitConfig()
 
 	// Check if server address overrides the default
 	assert.Equal(t, "1.1.1.1", param.Server_WebHost.GetString())
-	Reset()
+	ResetConfig()
 
 	//Test if prefix is not set, should not be able to find osdfYaml configuration
 	testingPreferredPrefix = ""
@@ -207,9 +207,9 @@ func setupConfigLocations(t *testing.T, continueDirs []string) {
 
 // Test that the `ConfigLocations` key works as expected
 func TestExtraCfg(t *testing.T) {
-	Reset()
+	ResetConfig()
 	t.Cleanup(func() {
-		Reset()
+		ResetConfig()
 	})
 
 	t.Run("test-no-continue", func(t *testing.T) {
@@ -218,7 +218,7 @@ func TestExtraCfg(t *testing.T) {
 	})
 
 	t.Run("test-one-dir-no-files", func(t *testing.T) {
-		Reset()
+		ResetConfig()
 		dir1 := t.TempDir()
 		setupConfigLocations(t, []string{dir1})
 
@@ -231,7 +231,7 @@ func TestExtraCfg(t *testing.T) {
 	})
 
 	t.Run("test-one-dir-one-file", func(t *testing.T) {
-		Reset()
+		ResetConfig()
 		dir1 := t.TempDir()
 		setupConfigLocations(t, []string{dir1})
 
@@ -248,7 +248,7 @@ func TestExtraCfg(t *testing.T) {
 	})
 
 	t.Run("test-two-dirs-one-file-each", func(t *testing.T) {
-		Reset()
+		ResetConfig()
 		dir1 := t.TempDir()
 		dir2 := t.TempDir()
 		setupConfigLocations(t, []string{dir1, dir2})
@@ -272,7 +272,7 @@ func TestExtraCfg(t *testing.T) {
 	})
 
 	t.Run("test-two-dirs-two-files-each", func(t *testing.T) {
-		Reset()
+		ResetConfig()
 		dir1 := t.TempDir()
 		dir2 := t.TempDir()
 		setupConfigLocations(t, []string{dir1, dir2})
@@ -297,7 +297,7 @@ func TestExtraCfg(t *testing.T) {
 	})
 
 	t.Run("test-bad-directory", func(t *testing.T) {
-		Reset()
+		ResetConfig()
 		continueDir := t.TempDir()
 		setupConfigLocations(t, []string{continueDir + "-dne"})
 
@@ -322,11 +322,11 @@ func TestDeprecateLogMessage(t *testing.T) {
 	require.NoError(t, err)
 
 	viper.Set("ConfigDir", tmpPath)
-	Reset()
+	ResetConfig()
 	t.Run("expect-deprecated-message-if-namespace-is-set", func(t *testing.T) {
 		hook := test.NewGlobal()
-		Reset()
-		defer Reset()
+		ResetConfig()
+		defer ResetConfig()
 		// The default value is set to Error, but this is a warning message
 		viper.Set("Logging.Level", "Warning")
 		viper.Set("Origin.NamespacePrefix", "/a/prefix")
@@ -584,11 +584,11 @@ func TestInitServerUrl(t *testing.T) {
 	mockWebUrlWNon443Port := "https://example.com:8444"
 
 	t.Cleanup(func() {
-		Reset()
+		ResetConfig()
 	})
 
 	initConfig := func() {
-		Reset()
+		ResetConfig()
 		tempDir := t.TempDir()
 		viper.Set("ConfigDir", tempDir)
 	}
@@ -600,7 +600,7 @@ func TestInitServerUrl(t *testing.T) {
 	}
 
 	t.Run("web-url-defaults-to-hostname-port", func(t *testing.T) {
-		Reset()
+		ResetConfig()
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mockNon443Port)
 		err := InitConfigDir()
@@ -611,7 +611,7 @@ func TestInitServerUrl(t *testing.T) {
 	})
 
 	t.Run("default-web-url-removes-443-port", func(t *testing.T) {
-		Reset()
+		ResetConfig()
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mock443Port)
 		err := InitConfigDir()
@@ -623,7 +623,7 @@ func TestInitServerUrl(t *testing.T) {
 
 	t.Run("remove-443-port-for-set-web-url", func(t *testing.T) {
 		// We respect the URL value set directly by others. Won't remove 443 port
-		Reset()
+		ResetConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
 		err := InitConfigDir()
 		require.NoError(t, err)

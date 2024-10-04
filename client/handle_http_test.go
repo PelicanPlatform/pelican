@@ -43,11 +43,12 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestMain(m *testing.M) {
-	config.Reset()
+	server_utils.Reset()
 	if err := config.InitClient(); err != nil {
 		os.Exit(1)
 	}
@@ -145,7 +146,7 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
 	assert.Equal(t, false, transfers[0].Proxy)
 	os.Unsetenv("OSG_DISABLE_PROXY_FALLBACK")
-	config.Reset()
+	server_utils.Reset()
 	err := config.InitClient()
 	assert.Nil(t, err)
 }
@@ -508,7 +509,7 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	assert.NoError(t, err)
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 	assert.NoError(t, err)
-	config.Reset()
+	server_utils.Reset()
 }
 
 func TestJobIdHeaderSetForDownload(t *testing.T) {
@@ -547,7 +548,7 @@ func TestJobIdHeaderSetForDownload(t *testing.T) {
 	assert.NoError(t, err)
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 	assert.NoError(t, err)
-	config.Reset()
+	server_utils.Reset()
 	os.Unsetenv("_CONDOR_JOB_AD")
 }
 
@@ -910,8 +911,8 @@ func TestFailedLargeUploadError(t *testing.T) {
 }
 
 func TestNewTransferEngine(t *testing.T) {
-	config.Reset()
-	defer config.Reset()
+	server_utils.Reset()
+	defer server_utils.Reset()
 	// Test we fail if we do not call initclient() before
 	t.Run("TestInitClientNotCalled", func(t *testing.T) {
 		config.ResetClientInitialized()

@@ -73,14 +73,14 @@ func mockRegistryCheck(t *testing.T) *httptest.Server {
 
 func TestFetchRegStatus(t *testing.T) {
 	t.Cleanup(func() {
-		config.Reset()
+		server_utils.Reset()
 		config.ResetFederationForTest()
 	})
 
 	t.Run("successful-fetch", func(t *testing.T) {
 		ts := mockRegistryCheck(t)
 		defer ts.Close()
-		config.Reset()
+		server_utils.Reset()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{
 			RegistryEndpoint: ts.URL,
@@ -104,7 +104,7 @@ func TestFetchRegStatus(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}))
 		defer ts.Close()
-		config.Reset()
+		server_utils.Reset()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{
 			RegistryEndpoint: ts.URL,
@@ -124,7 +124,7 @@ func TestFetchRegStatus(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
 		defer ts.Close()
-		config.Reset()
+		server_utils.Reset()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{
 			RegistryEndpoint: ts.URL,
@@ -138,11 +138,11 @@ func TestFetchRegStatus(t *testing.T) {
 
 func TestWrapExportsByStatus(t *testing.T) {
 	t.Cleanup(func() {
-		config.Reset()
+		server_utils.Reset()
 		config.ResetFederationForTest()
 	})
 
-	config.Reset()
+	server_utils.Reset()
 	config.SetFederation(pelican_url.FederationDiscovery{
 		RegistryEndpoint: "https://mock-registry.org",
 	})
@@ -190,7 +190,7 @@ func TestWrapExportsByStatus(t *testing.T) {
 	})
 
 	t.Run("partial-cached", func(t *testing.T) {
-		config.Reset()
+		server_utils.Reset()
 		ts := mockRegistryCheck(t)
 		defer ts.Close()
 		config.ResetFederationForTest()
@@ -236,6 +236,6 @@ func TestWrapExportsByStatus(t *testing.T) {
 		assert.EqualValues(t, expected, got)
 
 		registrationsStatus.DeleteAll()
-		config.Reset()
+		server_utils.Reset()
 	})
 }

@@ -42,13 +42,14 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // Setup a gin engine that will serve up a /ping endpoint on a Unix domain socket.
 func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (chan bool, context.CancelFunc, string) {
 	dirname := t.TempDir()
-	config.Reset()
+	server_utils.Reset()
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("ConfigDir", dirname)
 	viper.Set("Server.WebPort", 8444)

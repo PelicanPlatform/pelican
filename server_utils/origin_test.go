@@ -32,7 +32,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -83,12 +82,12 @@ func setup(t *testing.T, config string) []OriginExport {
 // tests an origin configuration that mimics what you could do with env vars due to the
 // fact that we don't use a yaml list
 func TestGetExports(t *testing.T) {
-	config.Reset()
+	Reset()
 	ResetOriginExports()
 
 	// Posix tests
 	t.Run("testSingleExportValid", func(t *testing.T) {
-		defer config.Reset()
+		defer Reset()
 		defer ResetOriginExports()
 		exports := setup(t, envVarMimicConfig)
 
@@ -102,7 +101,7 @@ func TestGetExports(t *testing.T) {
 	})
 
 	t.Run("testMultiExportValid", func(t *testing.T) {
-		defer config.Reset()
+		defer Reset()
 		defer ResetOriginExports()
 		exports := setup(t, multiExportValidConfig)
 		assert.Len(t, exports, 2, "expected 2 exports")
@@ -135,7 +134,7 @@ func TestGetExports(t *testing.T) {
 	})
 
 	t.Run("testExportVolumesValid", func(t *testing.T) {
-		defer config.Reset()
+		defer Reset()
 		defer ResetOriginExports()
 		exports := setup(t, exportVolumesValidConfig)
 		assert.Len(t, exports, 2, "expected 2 exports")
@@ -170,7 +169,7 @@ func TestGetExports(t *testing.T) {
 	// When we have a single export volume, we also set a few viper variables that can be
 	// used by sections of code that assume a single export. Test that those are set properly
 	t.Run("testExportVolumesSingle", func(t *testing.T) {
-		defer config.Reset()
+		defer Reset()
 		defer ResetOriginExports()
 		exports := setup(t, exportSingleVolumeConfig)
 		assert.Len(t, exports, 1, "expected 1 export")
@@ -199,7 +198,7 @@ func TestGetExports(t *testing.T) {
 	})
 
 	t.Run("testSingleExportBlock", func(t *testing.T) {
-		defer config.Reset()
+		defer Reset()
 		defer ResetOriginExports()
 		exports := setup(t, singleExportBlockConfig)
 		assert.Len(t, exports, 1, "expected 1 export")
@@ -228,7 +227,7 @@ func TestGetExports(t *testing.T) {
 	})
 
 	t.Run("testInvalidExport", func(t *testing.T) {
-		defer config.Reset()
+		defer Reset()
 		defer ResetOriginExports()
 
 		viper.Set("Origin.StorageType", "posix")
@@ -237,14 +236,14 @@ func TestGetExports(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 
-		config.Reset()
+		Reset()
 		viper.Set("Origin.StorageType", "posix")
 		viper.Set("Origin.ExportVolumes", "foo")
 		_, err = GetOriginExports()
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrInvalidOriginConfig)
 
-		config.Reset()
+		Reset()
 		viper.Set("Origin.StorageType", "blah")
 		_, err = GetOriginExports()
 		assert.Error(t, err)
@@ -253,7 +252,7 @@ func TestGetExports(t *testing.T) {
 
 	// S3 tests
 	t.Run("testSingleExportValidS3", func(t *testing.T) {
-		defer config.Reset()
+		defer Reset()
 		defer ResetOriginExports()
 
 		exports := setup(t, s3envVarMimicConfig)
@@ -271,7 +270,7 @@ func TestGetExports(t *testing.T) {
 	})
 
 	t.Run("testMultiExportValidS3", func(t *testing.T) {
-		defer config.Reset()
+		defer Reset()
 		defer ResetOriginExports()
 		exports := setup(t, s3multiExportValidConfig)
 		assert.Len(t, exports, 2, "expected 2 exports")
@@ -306,7 +305,7 @@ func TestGetExports(t *testing.T) {
 	})
 
 	t.Run("testExportVolumesValidS3", func(t *testing.T) {
-		defer config.Reset()
+		defer Reset()
 		defer ResetOriginExports()
 		exports := setup(t, s3exportVolumesValidConfig)
 		assert.Len(t, exports, 2, "expected 2 exports")
@@ -341,7 +340,7 @@ func TestGetExports(t *testing.T) {
 	})
 
 	t.Run("testExportVolumesSingleS3", func(t *testing.T) {
-		defer config.Reset()
+		defer Reset()
 		defer ResetOriginExports()
 		exports := setup(t, s3exportSingleVolumeConfig)
 		assert.Len(t, exports, 1, "expected 1 export")
@@ -375,7 +374,7 @@ func TestGetExports(t *testing.T) {
 	})
 
 	t.Run("testSingleExportBlockS3", func(t *testing.T) {
-		defer config.Reset()
+		defer Reset()
 		defer ResetOriginExports()
 		exports := setup(t, s3singleExportBlockConfig)
 		assert.Len(t, exports, 1, "expected 1 export")

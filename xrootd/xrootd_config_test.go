@@ -52,8 +52,8 @@ type xrootdTest struct {
 }
 
 func (x *xrootdTest) setup() {
-	config.Reset()
-	server_utils.ResetOriginExports()
+	server_utils.Reset()
+
 	dirname, err := os.MkdirTemp("", "tmpDir")
 	require.NoError(x.T, err)
 	x.T.Cleanup(func() {
@@ -83,10 +83,10 @@ func TestXrootDOriginConfig(t *testing.T) {
 	t.Cleanup(func() {
 		os.RemoveAll(dirname)
 	})
-	config.Reset()
-	server_utils.ResetOriginExports()
-	defer config.Reset()
-	defer server_utils.ResetOriginExports()
+	server_utils.Reset()
+
+	defer server_utils.Reset()
+
 	viper.Set("Configdir", dirname)
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Xrootd.RunLocation", dirname)
@@ -117,7 +117,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.Contains(t, string(content), "cms.trace debug")
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestOriginCmsIncorrectConfig", func(t *testing.T) {
@@ -131,7 +131,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		configPath, err := ConfigXrootd(ctx, true)
 		require.Error(t, err)
 		assert.NotNil(t, configPath)
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestOriginScitokensCorrectConfig", func(t *testing.T) {
@@ -154,7 +154,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.Contains(t, string(content), "scitokens.trace debug")
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestOriginScitokensIncorrectConfig", func(t *testing.T) {
@@ -168,7 +168,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		configPath, err := ConfigXrootd(ctx, true)
 		require.Error(t, err)
 		assert.NotNil(t, configPath)
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestOriginXrdCorrectConfig", func(t *testing.T) {
@@ -191,7 +191,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.Contains(t, string(content), "xrd.trace debug")
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestOriginXrdIncorrectConfig", func(t *testing.T) {
@@ -205,7 +205,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		configPath, err := ConfigXrootd(ctx, true)
 		require.Error(t, err)
 		assert.NotNil(t, configPath)
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestOriginXrootdCorrectConfig", func(t *testing.T) {
@@ -228,7 +228,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.Contains(t, string(content), "xrootd.trace debug")
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestOriginXrootdIncorrectConfig", func(t *testing.T) {
@@ -242,7 +242,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		configPath, err := ConfigXrootd(ctx, true)
 		require.Error(t, err)
 		assert.NotNil(t, configPath)
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestOsdfWithXRDHOSTAndPort", func(t *testing.T) {
@@ -259,7 +259,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		assert.NotNil(t, configPath)
 		assert.Equal(t, "my-xrootd.com", os.Getenv("XRDHOST"))
 
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestOsdfWithXRDHOSTAndNoPort", func(t *testing.T) {
@@ -276,7 +276,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		assert.NotNil(t, configPath)
 		assert.Equal(t, "my-xrootd.com", os.Getenv("XRDHOST"))
 
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestPelicanWithXRDHOST", func(t *testing.T) {
@@ -294,7 +294,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		_, xrdhostIsSet := os.LookupEnv("XRDHOST")
 		assert.False(t, xrdhostIsSet, "XRDHOST should only be set in OSDF mode")
 
-		config.Reset()
+		server_utils.Reset()
 	})
 }
 
@@ -308,8 +308,8 @@ func TestXrootDCacheConfig(t *testing.T) {
 	t.Cleanup(func() {
 		os.RemoveAll(dirname)
 	})
-	config.Reset()
-	server_utils.ResetOriginExports()
+	server_utils.Reset()
+
 	viper.Set("Cache.RunLocation", dirname)
 	viper.Set("ConfigDir", dirname)
 	config.InitConfig()
@@ -318,8 +318,8 @@ func TestXrootDCacheConfig(t *testing.T) {
 	assert.NotNil(t, configPath)
 
 	t.Run("TestCacheThrottlePluginEnabled", func(t *testing.T) {
-		defer config.Reset()
-		defer server_utils.ResetOriginExports()
+		defer server_utils.Reset()
+
 		xrootd := xrootdTest{T: t}
 		xrootd.setup()
 
@@ -343,8 +343,8 @@ func TestXrootDCacheConfig(t *testing.T) {
 	})
 
 	t.Run("TestCacheThrottlePluginDisabled", func(t *testing.T) {
-		defer config.Reset()
-		defer server_utils.ResetOriginExports()
+		defer server_utils.Reset()
+
 		xrootd := xrootdTest{T: t}
 		xrootd.setup()
 
@@ -384,7 +384,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.Contains(t, string(content), "ofs.trace debug")
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestCacheOfsIncorrectConfig", func(t *testing.T) {
@@ -420,7 +420,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.Contains(t, string(content), "pfc.trace debug")
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestCachePfcIncorrectConfig", func(t *testing.T) {
@@ -434,7 +434,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		configPath, err := ConfigXrootd(ctx, true)
 		require.Error(t, err)
 		assert.NotNil(t, configPath)
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestCachePssCorrectConfig", func(t *testing.T) {
@@ -457,7 +457,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.Contains(t, string(content), "pss.setopt DebugLevel 4")
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestCachePssIncorrectConfig", func(t *testing.T) {
@@ -493,7 +493,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.Contains(t, string(content), "scitokens.trace debug")
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestCacheScitokensIncorrectConfig", func(t *testing.T) {
@@ -529,7 +529,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.Contains(t, string(content), "xrd.trace debug")
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestCacheXrdIncorrectConfig", func(t *testing.T) {
@@ -565,7 +565,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.Contains(t, string(content), "xrootd.trace debug")
-		config.Reset()
+		server_utils.Reset()
 	})
 
 	t.Run("TestCacheXrootdIncorrectConfig", func(t *testing.T) {
@@ -589,10 +589,10 @@ func TestUpdateAuth(t *testing.T) {
 
 	runDirname := t.TempDir()
 	configDirname := t.TempDir()
-	config.Reset()
-	server_utils.ResetOriginExports()
-	defer config.Reset()
-	defer server_utils.ResetOriginExports()
+	server_utils.Reset()
+
+	defer server_utils.Reset()
+
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("Origin.RunLocation", runDirname)
 	viper.Set("ConfigDir", configDirname)
@@ -686,7 +686,7 @@ func TestCopyCertificates(t *testing.T) {
 
 	runDirname := t.TempDir()
 	configDirname := t.TempDir()
-	config.Reset()
+	server_utils.Reset()
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("Origin.RunLocation", runDirname)
 	viper.Set("ConfigDir", configDirname)
@@ -770,9 +770,9 @@ func TestCopyCertificates(t *testing.T) {
 }
 
 func TestAuthIntervalUnmarshal(t *testing.T) {
-	defer config.Reset()
+	defer server_utils.Reset()
 	t.Run("test-minutes-to-seconds", func(t *testing.T) {
-		config.Reset()
+		server_utils.Reset()
 		var xrdConfig XrootdConfig
 		viper.Set("Xrootd.AuthRefreshInterval", "5m")
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
@@ -781,7 +781,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	})
 
 	t.Run("test-hours-to-seconds", func(t *testing.T) {
-		config.Reset()
+		server_utils.Reset()
 		var xrdConfig XrootdConfig
 		viper.Set("Xrootd.AuthRefreshInterval", "24h")
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
@@ -790,7 +790,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	})
 
 	t.Run("test-seconds-to-seconds", func(t *testing.T) {
-		config.Reset()
+		server_utils.Reset()
 		var xrdConfig XrootdConfig
 		viper.Set("Xrootd.AuthRefreshInterval", "100s")
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
@@ -799,7 +799,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	})
 
 	t.Run("test-less-than-60s", func(t *testing.T) {
-		config.Reset()
+		server_utils.Reset()
 		var xrdConfig XrootdConfig
 		viper.Set("Xrootd.AuthRefreshInterval", "10")
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
@@ -809,7 +809,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	})
 
 	t.Run("test-no-suffix-to-seconds", func(t *testing.T) {
-		config.Reset()
+		server_utils.Reset()
 		var xrdConfig XrootdConfig
 		viper.Set("Xrootd.AuthRefreshInterval", "99")
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
@@ -818,7 +818,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	})
 
 	t.Run("test-less-than-second", func(t *testing.T) {
-		config.Reset()
+		server_utils.Reset()
 		var xrdConfig XrootdConfig
 		viper.Set("Xrootd.AuthRefreshInterval", "0.5s")
 		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
