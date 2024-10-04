@@ -51,7 +51,7 @@ import (
 func TestPurge(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	viper.Reset()
+	config.Reset()
 	viper.Set("LocalCache.Size", "5MB")
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
@@ -103,8 +103,8 @@ func TestPurge(t *testing.T) {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		config.Reset()
 	})
 }
 
@@ -113,7 +113,7 @@ func TestPurge(t *testing.T) {
 func TestForcePurge(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	viper.Reset()
+	config.Reset()
 	viper.Set("LocalCache.Size", "5MB")
 	// Decrease the low water mark so invoking purge will result in 3 files in the cache.
 	viper.Set("LocalCache.LowWaterMarkPercentage", "80")
@@ -195,7 +195,7 @@ func TestForcePurge(t *testing.T) {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		config.Reset()
 	})
 }

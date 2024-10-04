@@ -232,12 +232,12 @@ func (f *FedTest) Teardown() {
 	f.Cancel()
 	f.FedCancel()
 	assert.NoError(f.T, f.ErrGroup.Wait())
-	viper.Reset()
+	config.Reset()
 }
 
 // Test the main function for the pelican plugin
 func TestStashPluginMain(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 
 	oldPrefix, err := config.SetPreferredPrefix(config.StashPrefix)
@@ -314,7 +314,7 @@ func TestStashPluginMain(t *testing.T) {
 
 // Test multiple downloads from the plugin
 func TestPluginMulti(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 
 	dirName := t.TempDir()
@@ -379,8 +379,8 @@ func TestPluginMulti(t *testing.T) {
 
 // Test multiple downloads from the plugin
 func TestPluginDirectRead(t *testing.T) {
-	viper.Reset()
-	defer viper.Reset()
+	config.Reset()
+	defer config.Reset()
 	defer server_utils.ResetOriginExports()
 	server_utils.ResetOriginExports()
 
@@ -457,7 +457,7 @@ func TestPluginDirectRead(t *testing.T) {
 func TestPluginCorrectStartAndEndTime(t *testing.T) {
 	test_utils.InitClient(t, nil)
 	server_utils.ResetOriginExports()
-	defer viper.Reset()
+	defer config.Reset()
 	defer server_utils.ResetOriginExports()
 
 	// Set up our http backend so that we can sleep during transfer
@@ -670,8 +670,8 @@ func TestFailTransfer(t *testing.T) {
 
 // Test recursive downloads from the plugin
 func TestPluginRecursiveDownload(t *testing.T) {
-	viper.Reset()
-	defer viper.Reset()
+	config.Reset()
+	defer config.Reset()
 	defer server_utils.ResetOriginExports()
 	server_utils.ResetOriginExports()
 

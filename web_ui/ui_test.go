@@ -208,12 +208,12 @@ func TestHandleWebUIAuth(t *testing.T) {
 	})
 
 	t.Run("403-for-logged-in-non-admin-user", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		// We let the frontend to handle unauthorized user (if the password is initialzied)
 		setupTestAuthDB(t)
 		t.Cleanup(func() {
 			cleanupAuthDB()
-			viper.Reset()
+			config.Reset()
 		})
 
 		tmpDir := t.TempDir()

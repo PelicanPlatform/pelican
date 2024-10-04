@@ -56,7 +56,7 @@ func TestRegistration(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	viper.Reset()
+	config.Reset()
 	viper.Set("ConfigDir", tempConfigDir)
 
 	config.InitConfig()

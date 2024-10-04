@@ -27,18 +27,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
 
 func TestCheckCacheSentinelLocation(t *testing.T) {
 	t.Run("sentinel-not-set", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		err := CheckCacheSentinelLocation()
 		assert.NoError(t, err)
 	})
 
 	t.Run("sentinel-contains-dir", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		viper.Set(param.Cache_SentinelLocation.GetName(), "/test.txt")
 		err := CheckCacheSentinelLocation()
 		require.Error(t, err)
@@ -47,7 +48,7 @@ func TestCheckCacheSentinelLocation(t *testing.T) {
 
 	t.Run("sentinel-dne", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		viper.Reset()
+		config.Reset()
 		viper.Set(param.Cache_SentinelLocation.GetName(), "test.txt")
 		viper.Set(param.Cache_LocalRoot.GetName(), tmpDir)
 		err := CheckCacheSentinelLocation()
@@ -57,7 +58,7 @@ func TestCheckCacheSentinelLocation(t *testing.T) {
 
 	t.Run("sentinel-exists", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		viper.Reset()
+		config.Reset()
 
 		viper.Set(param.Cache_SentinelLocation.GetName(), "test.txt")
 		viper.Set(param.Cache_LocalRoot.GetName(), tmpDir)

@@ -31,7 +31,7 @@ import (
 )
 
 func TestGetCacheHostnameFromToken(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	require.NoError(t, config.InitClient())

@@ -37,7 +37,6 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -48,7 +47,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	viper.Reset()
+	config.Reset()
 	if err := config.InitClient(); err != nil {
 		os.Exit(1)
 	}
@@ -146,7 +145,7 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 	assert.Equal(t, "https", transfers[0].Url.Scheme)
 	assert.Equal(t, false, transfers[0].Proxy)
 	os.Unsetenv("OSG_DISABLE_PROXY_FALLBACK")
-	viper.Reset()
+	config.Reset()
 	err := config.InitClient()
 	assert.Nil(t, err)
 }
@@ -509,7 +508,7 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 	assert.NoError(t, err)
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 	assert.NoError(t, err)
-	viper.Reset()
+	config.Reset()
 }
 
 func TestJobIdHeaderSetForDownload(t *testing.T) {
@@ -548,7 +547,7 @@ func TestJobIdHeaderSetForDownload(t *testing.T) {
 	assert.NoError(t, err)
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
 	assert.NoError(t, err)
-	viper.Reset()
+	config.Reset()
 	os.Unsetenv("_CONDOR_JOB_AD")
 }
 
@@ -911,8 +910,8 @@ func TestFailedLargeUploadError(t *testing.T) {
 }
 
 func TestNewTransferEngine(t *testing.T) {
-	viper.Reset()
-	defer viper.Reset()
+	config.Reset()
+	defer config.Reset()
 	// Test we fail if we do not call initclient() before
 	t.Run("TestInitClientNotCalled", func(t *testing.T) {
 		config.ResetClientInitialized()

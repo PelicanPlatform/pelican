@@ -31,7 +31,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -139,7 +138,7 @@ func TestGetToken(t *testing.T) {
 	// Need a namespace for token acquisition
 	defer os.Unsetenv("PELICAN_FEDERATION_TOPOLOGYNAMESPACEURL")
 	os.Setenv("PELICAN_TOPOLOGY_NAMESPACE_URL", "https://topology.opensciencegrid.org/osdf/namespaces")
-	viper.Reset()
+	config.Reset()
 	err := config.InitClient()
 	assert.Nil(t, err)
 

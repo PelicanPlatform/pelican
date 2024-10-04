@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -44,9 +45,9 @@ import (
 var yamlMockup string
 
 func TestCheckOverrides(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	t.Cleanup(func() {
-		viper.Reset()
+		config.Reset()
 		geoIPOverrides = nil
 	})
 
@@ -191,9 +192,9 @@ func TestSortServerAdsByTopo(t *testing.T) {
 }
 
 func TestSortServerAds(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	t.Cleanup(func() {
-		viper.Reset()
+		config.Reset()
 		geoIPOverrides = nil
 	})
 

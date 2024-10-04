@@ -152,9 +152,9 @@ func TestOrigin(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
-	defer viper.Reset()
+	defer config.Reset()
 	defer server_utils.ResetOriginExports()
 
 	viper.Set("Origin.StoragePrefix", t.TempDir())
@@ -191,8 +191,8 @@ func TestMultiExportOrigin(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	viper.Reset()
-	defer viper.Reset()
+	config.Reset()
+	defer config.Reset()
 	server_utils.ResetOriginExports()
 	defer server_utils.ResetOriginExports()
 
@@ -239,9 +239,9 @@ func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
-	defer viper.Reset()
+	defer config.Reset()
 	defer server_utils.ResetOriginExports()
 	federationPrefix := "/test"
 	regionName := "us-east-1"

@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -44,7 +43,7 @@ func setupTestRun(t *testing.T) string {
 	t.Cleanup(func() {
 		err := os.Chdir(wd)
 		require.NoError(t, err)
-		viper.Reset()
+		config.Reset()
 		config.ResetIssuerJWKPtr()
 	})
 	return tmpDir
@@ -67,7 +66,7 @@ func TestKeygenMain(t *testing.T) {
 	config.ResetIssuerJWKPtr()
 
 	t.Cleanup(func() {
-		viper.Reset()
+		config.Reset()
 		config.ResetIssuerJWKPtr()
 	})
 

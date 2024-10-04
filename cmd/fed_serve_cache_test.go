@@ -44,9 +44,9 @@ func TestFedServeCache(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
-	defer viper.Reset()
+	defer config.Reset()
 	defer server_utils.ResetOriginExports()
 
 	modules := server_structs.ServerType(0)

@@ -1503,3 +1503,36 @@ func InitClient() error {
 
 	return nil
 }
+
+func Reset() {
+	viper.Reset()
+
+	// Clear cached preferred prefix
+	testingPreferredPrefix = ""
+
+	// Clear cached transport object
+	onceTransport = sync.Once{}
+	transport = nil
+
+	// Reset federation metadata
+	fedDiscoveryOnce = &sync.Once{}
+	globalFedInfo = FederationDiscovery{}
+	globalFedErr = nil
+
+	// // Reset other global variables
+	// setServerOnce = sync.Once{}
+	// enabledServers = 0
+
+	// tempRunDir = ""
+	// cleanupOnce = sync.Once{}
+	// clientInitialized = false
+
+	// // Reset validator and translator-related variables
+	// onceValidate = sync.Once{}
+	// validate = nil
+	// uni = nil // Clear the universal translator
+	// translator = nil
+
+	// // delete Origin exports
+	// // server_utils.ResetOriginExports()
+}

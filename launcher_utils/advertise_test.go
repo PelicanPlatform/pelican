@@ -26,7 +26,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -37,7 +36,7 @@ import (
 
 func TestGetSitenameFromReg(t *testing.T) {
 	t.Cleanup(func() {
-		viper.Reset()
+		config.Reset()
 	})
 
 	t.Run("no-registry-url", func(t *testing.T) {
@@ -50,7 +49,7 @@ func TestGetSitenameFromReg(t *testing.T) {
 	})
 
 	t.Run("registry-returns-404", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		}))
@@ -64,7 +63,7 @@ func TestGetSitenameFromReg(t *testing.T) {
 	})
 
 	t.Run("registry-returns-correct-object", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if strings.HasPrefix(req.URL.Path, "/api/v1.0/registry") {
 				prefix := strings.TrimPrefix(req.URL.Path, "/api/v1.0/registry")

@@ -47,7 +47,7 @@ import (
 
 func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	// Create instance of test federation
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
@@ -221,8 +221,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		config.Reset()
 		server_utils.ResetOriginExports()
 	})
 }
@@ -243,7 +243,7 @@ func verifySuccessfulTransfer(t *testing.T, transferResults []client.TransferRes
 // Test that recursive uploads and downloads work with the ?recursive query
 func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 	// Create instance of test federation
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
@@ -257,8 +257,8 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		config.Reset()
 		server_utils.ResetOriginExports()
 	})
 
@@ -436,7 +436,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 // This tests that is origins disable listings, we should fail the download
 // Note: origins disabling listings override the existence of dirlisthost, causing a failure
 func TestFailureOnOriginDisablingListings(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 
 	viper.Set("Logging.Level", "debug")
@@ -461,7 +461,7 @@ func TestFailureOnOriginDisablingListings(t *testing.T) {
 
 func TestSyncUpload(t *testing.T) {
 	// Create instance of test federation
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
@@ -592,7 +592,7 @@ func TestSyncUpload(t *testing.T) {
 
 func TestSyncDownload(t *testing.T) {
 	// Create instance of test federation
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)

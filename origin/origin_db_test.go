@@ -131,10 +131,10 @@ func TestCollectionExistsByUUID(t *testing.T) {
 }
 
 func TestGetCollectionByUUID(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	setupMockOriginDB(t)
 	t.Cleanup(func() {
-		viper.Reset()
+		config.Reset()
 		teardownMockOriginDB(t)
 	})
 	err := insertMockDBData(mockGC)
@@ -164,10 +164,10 @@ func TestGetCollectionByUUID(t *testing.T) {
 }
 
 func TestCreateCollection(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	setupMockOriginDB(t)
 	t.Cleanup(func() {
-		viper.Reset()
+		config.Reset()
 		teardownMockOriginDB(t)
 	})
 
@@ -204,10 +204,10 @@ func TestCreateCollection(t *testing.T) {
 }
 
 func TestUpdateCollection(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	setupMockOriginDB(t)
 	t.Cleanup(func() {
-		viper.Reset()
+		config.Reset()
 		teardownMockOriginDB(t)
 	})
 
@@ -234,10 +234,10 @@ func TestUpdateCollection(t *testing.T) {
 }
 
 func TestDeleteCollectionByUUID(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	setupMockOriginDB(t)
 	t.Cleanup(func() {
-		viper.Reset()
+		config.Reset()
 		teardownMockOriginDB(t)
 	})
 

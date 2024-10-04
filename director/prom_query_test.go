@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/config"
 )
 
 var (
@@ -202,8 +203,8 @@ func TestParsePromRes(t *testing.T) {
 }
 
 func TestQueryPrometheus(t *testing.T) {
-	viper.Reset()
-	t.Cleanup(viper.Reset)
+	config.Reset()
+	t.Cleanup(config.Reset)
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("query")

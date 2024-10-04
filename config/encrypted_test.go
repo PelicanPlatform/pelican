@@ -30,10 +30,10 @@ import (
 )
 
 func TestGetSecret(t *testing.T) {
-	viper.Reset()
+	Reset()
 
 	t.Cleanup(func() {
-		viper.Reset()
+		Reset()
 	})
 	t.Run("generate-32B-hash", func(t *testing.T) {
 		tmp := t.TempDir()
@@ -47,10 +47,10 @@ func TestGetSecret(t *testing.T) {
 }
 
 func TestEncryptString(t *testing.T) {
-	viper.Reset()
+	Reset()
 
 	t.Cleanup(func() {
-		viper.Reset()
+		Reset()
 	})
 
 	t.Run("encrypt-without-err", func(t *testing.T) {
@@ -65,10 +65,10 @@ func TestEncryptString(t *testing.T) {
 }
 
 func TestDecryptString(t *testing.T) {
-	viper.Reset()
+	Reset()
 
 	t.Cleanup(func() {
-		viper.Reset()
+		Reset()
 	})
 	t.Run("decrypt-without-err", func(t *testing.T) {
 		tmp := t.TempDir()

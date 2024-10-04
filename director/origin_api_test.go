@@ -47,7 +47,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	viper.Reset()
+	config.Reset()
 
 	tDir := t.TempDir()
 	kfile := filepath.Join(tDir, "t-key")

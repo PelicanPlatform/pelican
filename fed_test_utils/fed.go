@@ -225,8 +225,8 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		}
 		err := os.RemoveAll(tmpPath)
 		require.NoError(t, err)
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		config.Reset()
 	})
 
 	return

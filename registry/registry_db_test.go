@@ -805,7 +805,7 @@ func topologyMockup(t *testing.T, namespaces []string) *httptest.Server {
 }
 
 func TestRegistryTopology(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 
 	topoNamespaces := []string{"/topo/foo", "/topo/bar"}
 	svr := topologyMockup(t, topoNamespaces)
@@ -894,7 +894,7 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, exists)
 
-	viper.Reset()
+	config.Reset()
 }
 
 func TestGetTopoPrefixString(t *testing.T) {

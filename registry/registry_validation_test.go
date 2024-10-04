@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -200,12 +201,12 @@ func TestValidateCustomFields(t *testing.T) {
 }
 
 func TestValidateKeyChaining(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	setupMockRegistryDB(t)
 	defer func() {
 		resetNamespaceDB(t)
 		teardownMockNamespaceDB(t)
-		viper.Reset()
+		config.Reset()
 	}()
 
 	_, jwksFoo, jwksStrFoo, err := test_utils.GenerateJWK()

@@ -53,7 +53,7 @@ func TestWaitUntilLogin(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	viper.Reset()
+	config.Reset()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -102,7 +102,7 @@ func TestCodeBasedLogin(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	viper.Reset()
+	config.Reset()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -158,7 +158,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	viper.Reset()
+	config.Reset()
 	viper.Set("ConfigDir", dirName)
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
@@ -300,7 +300,7 @@ func TestPasswordBasedLoginAPI(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	viper.Reset()
+	config.Reset()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
@@ -418,7 +418,7 @@ func TestWhoamiAPI(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	viper.Reset()
+	config.Reset()
 	config.InitConfig()
 	viper.Set("ConfigDir", dirName)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
@@ -585,7 +585,7 @@ func TestAdminAuthHandler(t *testing.T) {
 			if tc.expectedError != "" {
 				assert.Contains(t, w.Body.String(), tc.expectedError)
 			}
-			viper.Reset()
+			config.Reset()
 		})
 	}
 }
@@ -596,7 +596,7 @@ func TestLogoutAPI(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	viper.Reset()
+	config.Reset()
 	config.InitConfig()
 	viper.Set("ConfigDir", dirName)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
@@ -677,10 +677,10 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 	router := gin.New()
 	router.GET("/oauth", listOIDCEnabledServersHandler)
 	t.Cleanup(func() {
-		viper.Reset()
+		config.Reset()
 	})
 	t.Run("registry-included-by-default", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
 		assert.NoError(t, err)
@@ -701,7 +701,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 	})
 
 	t.Run("origin-included-if-flag-is-on", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		viper.Set("Origin.EnableOIDC", true)
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "origin"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
@@ -723,7 +723,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 	})
 
 	t.Run("cache-included-if-flag-is-on", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		viper.Set("Cache.EnableOIDC", true)
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "cache"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
@@ -745,7 +745,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 	})
 
 	t.Run("director-included-if-flag-is-on", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		viper.Set("Director.EnableOIDC", true)
 		expected := OIDCEnabledServerRes{ODICEnabledServers: []string{"registry", "director"}}
 		req, err := http.NewRequest("GET", "/oauth", nil)
@@ -767,7 +767,7 @@ func TestListOIDCEnabledServersHandler(t *testing.T) {
 	})
 
 	t.Run("origin-cache-both-included-if-flags-are-on", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		viper.Set("Origin.EnableOIDC", true)
 		viper.Set("Cache.EnableOIDC", true)
 		viper.Set("Director.EnableOIDC", true)

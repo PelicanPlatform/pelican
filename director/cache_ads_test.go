@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -431,7 +432,7 @@ func TestRecordAd(t *testing.T) {
 
 	t.Run("recorded-sad-should-match-health-test-utils-one", func(t *testing.T) {
 		t.Cleanup(func() {
-			viper.Reset()
+			config.Reset()
 			healthTestUtilsMutex.Lock()
 			statUtilsMutex.Lock()
 			defer statUtilsMutex.Unlock()
@@ -442,7 +443,7 @@ func TestRecordAd(t *testing.T) {
 			serverAds.DeleteAll()
 			geoIPOverrides = nil
 		})
-		viper.Reset()
+		config.Reset()
 		func() {
 			geoIPOverrides = nil
 

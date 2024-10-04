@@ -50,10 +50,10 @@ var (
 )
 
 func TestHttpOriginConfig(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	viper.Set("ConfigDir", t.TempDir())
 	server_utils.ResetOriginExports()
-	defer viper.Reset()
+	defer config.Reset()
 	defer server_utils.ResetOriginExports()
 
 	body := "Hello, World!"

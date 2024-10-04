@@ -31,10 +31,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tg123/go-htpasswd"
+	
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func TestDoReload(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	savedAuthDB := authDB.Load()
 	authDB.Store(nil)
 	defer authDB.Store(savedAuthDB)

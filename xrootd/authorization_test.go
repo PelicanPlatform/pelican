@@ -164,7 +164,7 @@ func TestOSDFAuthRetrieval(t *testing.T) {
 		transport.TLSClientConfig = oldConfig
 	})
 
-	viper.Reset()
+	config.Reset()
 	viper.Set("Federation.TopologyUrl", "https://topology.opensciencegrid.org/")
 	viper.Set("Server.Hostname", "sc-origin.chtc.wisc.edu")
 
@@ -172,7 +172,7 @@ func TestOSDFAuthRetrieval(t *testing.T) {
 	_, err := getOSDFAuthFiles(originServer)
 
 	require.NoError(t, err, "error")
-	viper.Reset()
+	config.Reset()
 }
 
 func TestOSDFAuthCreation(t *testing.T) {
@@ -261,9 +261,9 @@ func TestOSDFAuthCreation(t *testing.T) {
 	for _, testInput := range tests {
 		t.Run(testInput.desc, func(t *testing.T) {
 			dirName := t.TempDir()
-			viper.Reset()
+			config.Reset()
 			server_utils.ResetOriginExports()
-			defer viper.Reset()
+			defer config.Reset()
 			defer server_utils.ResetOriginExports()
 
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
@@ -301,7 +301,7 @@ func TestOSDFAuthCreation(t *testing.T) {
 			require.NoError(t, err, "Error reading generated authfile")
 
 			require.Equal(t, testInput.authOut, string(genAuth))
-			viper.Reset()
+			config.Reset()
 		})
 	}
 }
@@ -338,9 +338,9 @@ func TestEmitAuthfile(t *testing.T) {
 	for _, testInput := range tests {
 		t.Run(testInput.desc, func(t *testing.T) {
 			dirName := t.TempDir()
-			viper.Reset()
+			config.Reset()
 			server_utils.ResetOriginExports()
-			defer viper.Reset()
+			defer config.Reset()
 			defer server_utils.ResetOriginExports()
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
 			viper.Set("Origin.RunLocation", dirName)
@@ -364,9 +364,9 @@ func TestEmitAuthfile(t *testing.T) {
 
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
-	defer viper.Reset()
+	defer config.Reset()
 	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	err := config.InitClient()
@@ -444,9 +444,9 @@ func TestDeduplicateBasePaths(t *testing.T) {
 
 func TestLoadScitokensConfig(t *testing.T) {
 	dirname := t.TempDir()
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
-	defer viper.Reset()
+	defer config.Reset()
 	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	err := config.InitClient()
@@ -479,9 +479,9 @@ func TestLoadScitokensConfig(t *testing.T) {
 // Test that merging the configuration works without throwing any errors
 func TestMergeConfig(t *testing.T) {
 	dirname := t.TempDir()
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
-	defer viper.Reset()
+	defer config.Reset()
 	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.Port", 8443)
@@ -528,9 +528,9 @@ func TestGenerateConfig(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
-	defer viper.Reset()
+	defer config.Reset()
 	defer server_utils.ResetOriginExports()
 	viper.Set("Origin.SelfTest", false)
 	issuer, err := GenerateMonitoringIssuer()
@@ -553,7 +553,7 @@ func TestGenerateConfig(t *testing.T) {
 	assert.Equal(t, "/pelican/monitoring", issuer.BasePaths[0])
 	assert.Equal(t, "xrootd", issuer.DefaultUser)
 
-	viper.Reset()
+	config.Reset()
 	viper.Set("Origin.SelfTest", false)
 	viper.Set("Origin.ScitokensDefaultUser", "user1")
 	viper.Set("Origin.ScitokensMapSubject", true)
@@ -575,11 +575,11 @@ func TestGenerateConfig(t *testing.T) {
 }
 
 func TestWriteOriginAuthFiles(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 	originAuthTester := func(server server_structs.XRootDServer, authStart string, authResult string) func(t *testing.T) {
 		return func(t *testing.T) {
-			defer viper.Reset()
+			defer config.Reset()
 			defer server_utils.ResetOriginExports()
 			viper.Set("Origin.StorageType", "posix")
 			dirname := t.TempDir()
@@ -626,7 +626,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 		return func(t *testing.T) {
 
 			dirname := t.TempDir()
-			viper.Reset()
+			config.Reset()
 			viper.Set("Cache.RunLocation", dirname)
 			if server.GetServerType().IsEnabled(server_structs.OriginType) {
 				viper.Set("Xrootd.ScitokensConfig", filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -735,7 +735,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	viper.Reset()
+	config.Reset()
 	dirname := t.TempDir()
 	os.Setenv("PELICAN_ORIGIN_RUNLOCATION", dirname)
 	defer os.Unsetenv("PELICAN_ORIGIN_RUNLOCATION")

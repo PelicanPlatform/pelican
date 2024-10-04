@@ -105,7 +105,7 @@ func getTempToken(t *testing.T) (tempToken *os.File, tkn string) {
 
 // A test that spins up a federation, and tests object get and put
 func TestGetAndPutAuth(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -282,14 +282,14 @@ func TestGetAndPutAuth(t *testing.T) {
 		}
 	})
 	t.Cleanup(func() {
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		config.Reset()
 	})
 }
 
 // A test that spins up a federation, and tests object get and put
 func TestCopyAuth(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -443,14 +443,14 @@ func TestCopyAuth(t *testing.T) {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		config.Reset()
 	})
 }
 
 // A test that spins up the federation, where the origin is in EnablePublicReads mode. Then GET a file from the origin without a token
 func TestGetPublicRead(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 
@@ -480,17 +480,17 @@ func TestGetPublicRead(t *testing.T) {
 		}
 	})
 	t.Cleanup(func() {
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		config.Reset()
 	})
 }
 
 // A test that spins up a federation, and tests object stat
 func TestObjectStat(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 	defer server_utils.ResetOriginExports()
-	defer viper.Reset()
+	defer config.Reset()
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err)
@@ -593,9 +593,9 @@ func TestObjectStat(t *testing.T) {
 
 // Test the functionality of the direct reads feature (?directread)
 func TestDirectReads(t *testing.T) {
-	defer viper.Reset()
+	defer config.Reset()
 	t.Run("testDirectReadsSuccess", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		server_utils.ResetOriginExports()
 		viper.Set("Origin.EnableDirectReads", true)
 		fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
@@ -637,7 +637,7 @@ func TestDirectReads(t *testing.T) {
 
 	// Test that direct reads fail if DirectReads=false is set for origin config but true for namespace/export
 	t.Run("testDirectReadsDirectReadFalseByOrigin", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		server_utils.ResetOriginExports()
 		fed := fed_test_utils.NewFedTest(t, pubOriginNoDirectRead)
 		discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -667,7 +667,7 @@ func TestDirectReads(t *testing.T) {
 
 	// Test that direct reads fail if DirectReads=false is set for namespace/export config but true for origin
 	t.Run("testDirectReadsDirectReadFalseByNamespace", func(t *testing.T) {
-		viper.Reset()
+		config.Reset()
 		server_utils.ResetOriginExports()
 		fed := fed_test_utils.NewFedTest(t, pubExportNoDirectRead)
 		discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -699,8 +699,8 @@ func TestDirectReads(t *testing.T) {
 
 // Test the functionality of NewTransferJob, checking we return at the correct locations for certain errors
 func TestNewTransferJob(t *testing.T) {
-	viper.Reset()
-	defer viper.Reset()
+	config.Reset()
+	defer config.Reset()
 	server_utils.ResetOriginExports()
 	defer server_utils.ResetOriginExports()
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
@@ -748,10 +748,10 @@ func TestNewTransferJob(t *testing.T) {
 
 // A test that spins up a federation, and tests object list
 func TestObjectList(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 	defer server_utils.ResetOriginExports()
-	defer viper.Reset()
+	defer config.Reset()
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 
 	// Other set-up items:
@@ -882,7 +882,7 @@ func TestObjectList405Error(t *testing.T) {
 // Startup a mini-federation and ensure the "pack=auto" functionality works
 // end-to-end
 func TestClientUnpack(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 	defer server_utils.ResetOriginExports()
 	err := config.InitClient()
@@ -942,7 +942,7 @@ func TestClientUnpack(t *testing.T) {
 
 // A test that generates a token locally from the private key
 func TestTokenGenerate(t *testing.T) {
-	viper.Reset()
+	config.Reset()
 	server_utils.ResetOriginExports()
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 
