@@ -1516,7 +1516,7 @@ func Reset() {
 
 	// Reset federation metadata
 	fedDiscoveryOnce = &sync.Once{}
-	globalFedInfo = FederationDiscovery{}
+	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
 
 	// // Reset other global variables
