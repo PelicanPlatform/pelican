@@ -1062,6 +1062,13 @@ func PrintPelicanVersion(out *os.File) {
 	fmt.Fprintln(out, "Built By:", GetBuiltBy())
 }
 
+func LogPelicanVersion() {
+	log.Debugf("Version: %s", GetVersion())
+	log.Debugf("Build Date: %s", GetBuiltDate())
+	log.Debugf("Build Commit: %s", GetBuiltCommit())
+	log.Debugf("Built By: %s", GetBuiltBy())
+}
+
 // Print Pelican configuration to stderr
 func PrintConfig() error {
 	rawConfig, err := param.UnmarshalConfig()
