@@ -48,6 +48,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
+	"github.com/pressly/goose/v3"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
@@ -749,6 +750,15 @@ func setWebConfigOverride(v *viper.Viper, configPath string) error {
 	return nil
 }
 
+// Custom goose logger
+type CustomGooseLogger struct{}
+func (l CustomGooseLogger) Printf(format string, v ...interface{}) {
+	log.Infof(format, v...)
+}
+func (l CustomGooseLogger) Fatalf(format string, v ...interface{}) {
+	log.Fatalf(format, v...)
+}
+
 func InitConfig() {
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
@@ -833,6 +843,8 @@ func InitConfig() {
 		cobra.CheckErr(err)
 		SetLogging(level)
 	}
+
+	goose.SetLogger(CustomGooseLogger{})
 
 	// Warn users about deprecated config keys they're using and try to map them to any new equivalent we've defined.
 	handleDeprecatedConfig()
