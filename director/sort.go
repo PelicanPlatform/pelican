@@ -228,7 +228,7 @@ func assignRandBoundedCoord(minLat, maxLat, minLong, maxLong float64) (lat, long
 
 // Given a client address, attempt to get the lat/long of the client. If the address is invalid or
 // the lat/long is not resolvable, assign a random location in the contiguous US.
-func getClientLatLong(addr netip.Addr) (coord Coordinate) {
+func getClientLatLong(ctx context.Context, addr netip.Addr) (coord Coordinate) {
 	var err error
 	if !addr.IsValid() {
 		log.Warningf("Unable to sort servers based on client-server distance. Invalid client IP address: %s", addr.String())
@@ -243,7 +243,7 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate) {
 		return
 	}
 
-	coord.Lat, coord.Long, err = getLatLong(addr)
+	coord.Lat, coord.Long, err = getLatLong(ctx, addr)
 	if err != nil || (coord.Lat == 0 && coord.Long == 0) {
 		if err != nil {
 			log.Warningf("Error while getting the client IP address: %v", err)
@@ -286,7 +286,7 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 	sortMethod := param.Director_CacheSortMethod.GetString()
 
 	// This will handle the case where the client address is invalid or the lat/long is not resolvable.
-	clientCoord := getClientLatLong(clientAddr)
+	clientCoord := getClientLatLong(ctx, clientAddr)
 
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {
