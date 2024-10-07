@@ -324,6 +324,7 @@ func checkRedirectQuery(query url.Values) error {
 
 func redirectToCache(ginCtx *gin.Context) {
 	reqVer, service, _ := extractVersionAndService(ginCtx)
+	defer collectDirectorRedirectionMetric(ginCtx, "cache")
 	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
@@ -527,6 +528,7 @@ func redirectToCache(ginCtx *gin.Context) {
 
 func redirectToOrigin(ginCtx *gin.Context) {
 	reqVer, service, _ := extractVersionAndService(ginCtx)
+	defer collectDirectorRedirectionMetric(ginCtx, "origin")
 	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
@@ -1319,6 +1321,25 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 	shortendVersion := strings.Join(strSegments, ".")
 
 	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": shortendVersion, "service": service}).Inc()
+}
+
+func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
+	labels := prometheus.Labels{
+		"destination": destination,
+		"status_code": strconv.Itoa(ctx.Writer.Status()),
+		"version":     "",
+	}
+	version, _, err := extractVersionAndService(ctx)
+	if err != nil {
+		log.Warningf("Failed to extract version and service from request: %v", err)
+		return
+	}
+	if version == nil {
+		labels["version"] = "unknown"
+		return
+	}
+	labels["version"] = version.String()
+	metrics.PelicanDirectorRedirectionsTotal.With(labels).Inc()
 }
 
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
