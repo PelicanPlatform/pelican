@@ -152,9 +152,9 @@ func TestOrigin(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	server_utils.Reset()
+	server_utils.ResetTestState()
 
-	defer server_utils.Reset()
+	defer server_utils.ResetTestState()
 
 	viper.Set("Origin.StoragePrefix", t.TempDir())
 	viper.Set("Origin.FederationPrefix", "/test")
@@ -190,8 +190,8 @@ func TestMultiExportOrigin(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	server_utils.Reset()
-	defer server_utils.Reset()
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
 
 	viper.SetConfigType("yaml")
 	// Use viper to read in the embedded config
@@ -236,9 +236,9 @@ func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	server_utils.Reset()
+	server_utils.ResetTestState()
 
-	defer server_utils.Reset()
+	defer server_utils.ResetTestState()
 
 	federationPrefix := "/test"
 	regionName := "us-east-1"

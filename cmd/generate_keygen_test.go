@@ -44,7 +44,7 @@ func setupTestRun(t *testing.T) string {
 	t.Cleanup(func() {
 		err := os.Chdir(wd)
 		require.NoError(t, err)
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		config.ResetIssuerJWKPtr()
 	})
 	return tmpDir
@@ -67,7 +67,7 @@ func TestKeygenMain(t *testing.T) {
 	config.ResetIssuerJWKPtr()
 
 	t.Cleanup(func() {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		config.ResetIssuerJWKPtr()
 	})
 

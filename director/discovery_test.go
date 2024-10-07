@@ -139,7 +139,7 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			server_utils.Reset()
+			server_utils.ResetTestState()
 			viper.Set("ConfigDir", t.TempDir())
 			viper.Set("Federation.DirectorUrl", tc.dirUrl)
 			viper.Set("Federation.RegistryUrl", tc.regUrl)
@@ -212,7 +212,7 @@ func TestOidcDiscoveryHandler(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			server_utils.Reset()
+			server_utils.ResetTestState()
 			viper.Set("ConfigDir", t.TempDir())
 			viper.Set("Federation.DirectorUrl", tc.dirUrl)
 			config.InitConfig()

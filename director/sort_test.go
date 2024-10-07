@@ -45,9 +45,9 @@ import (
 var yamlMockup string
 
 func TestCheckOverrides(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 	t.Cleanup(func() {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		geoIPOverrides = nil
 	})
 
@@ -192,9 +192,9 @@ func TestSortServerAdsByTopo(t *testing.T) {
 }
 
 func TestSortServerAds(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 	t.Cleanup(func() {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		geoIPOverrides = nil
 	})
 

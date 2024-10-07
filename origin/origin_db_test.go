@@ -132,10 +132,10 @@ func TestCollectionExistsByUUID(t *testing.T) {
 }
 
 func TestGetCollectionByUUID(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 	setupMockOriginDB(t)
 	t.Cleanup(func() {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		teardownMockOriginDB(t)
 	})
 	err := insertMockDBData(mockGC)
@@ -165,10 +165,10 @@ func TestGetCollectionByUUID(t *testing.T) {
 }
 
 func TestCreateCollection(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 	setupMockOriginDB(t)
 	t.Cleanup(func() {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		teardownMockOriginDB(t)
 	})
 
@@ -205,10 +205,10 @@ func TestCreateCollection(t *testing.T) {
 }
 
 func TestUpdateCollection(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 	setupMockOriginDB(t)
 	t.Cleanup(func() {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		teardownMockOriginDB(t)
 	})
 
@@ -235,10 +235,10 @@ func TestUpdateCollection(t *testing.T) {
 }
 
 func TestDeleteCollectionByUUID(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 	setupMockOriginDB(t)
 	t.Cleanup(func() {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		teardownMockOriginDB(t)
 	})
 

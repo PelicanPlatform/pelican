@@ -203,8 +203,8 @@ func TestParsePromRes(t *testing.T) {
 }
 
 func TestQueryPrometheus(t *testing.T) {
-	server_utils.Reset()
-	t.Cleanup(server_utils.Reset)
+	server_utils.ResetTestState()
+	t.Cleanup(server_utils.ResetTestState)
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("query")

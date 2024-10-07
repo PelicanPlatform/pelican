@@ -83,8 +83,8 @@ func TestFilterNsAdsForCache(t *testing.T) {
 			expectedNumNS: 2,
 		},
 	}
-	server_utils.Reset()
-	defer server_utils.Reset()
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
 
 	nsAds := []server_structs.NamespaceAdV2{
 		{
@@ -131,7 +131,7 @@ func TestFilterNsAdsForCache(t *testing.T) {
 			if testInput.permittedNS != nil {
 				viper.Set("Cache.PermittedNamespaces", testInput.permittedNS)
 			}
-			defer server_utils.Reset()
+			defer server_utils.ResetTestState()
 
 			cacheServer.SetFilters()
 			err = cacheServer.GetNamespaceAdsFromDirector()

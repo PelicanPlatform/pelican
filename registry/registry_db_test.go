@@ -806,7 +806,7 @@ func topologyMockup(t *testing.T, namespaces []string) *httptest.Server {
 }
 
 func TestRegistryTopology(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 
 	topoNamespaces := []string{"/topo/foo", "/topo/bar"}
 	svr := topologyMockup(t, topoNamespaces)
@@ -895,7 +895,7 @@ func TestRegistryTopology(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, exists)
 
-	server_utils.Reset()
+	server_utils.ResetTestState()
 }
 
 func TestGetTopoPrefixString(t *testing.T) {

@@ -44,9 +44,9 @@ func TestFedServeCache(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	server_utils.Reset()
+	server_utils.ResetTestState()
 
-	defer server_utils.Reset()
+	defer server_utils.ResetTestState()
 
 	modules := server_structs.ServerType(0)
 	modules.Set(server_structs.CacheType)

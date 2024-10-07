@@ -37,7 +37,7 @@ import (
 
 func TestGetSitenameFromReg(t *testing.T) {
 	t.Cleanup(func() {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 	})
 
 	t.Run("no-registry-url", func(t *testing.T) {
@@ -50,7 +50,7 @@ func TestGetSitenameFromReg(t *testing.T) {
 	})
 
 	t.Run("registry-returns-404", func(t *testing.T) {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		}))
@@ -64,7 +64,7 @@ func TestGetSitenameFromReg(t *testing.T) {
 	})
 
 	t.Run("registry-returns-correct-object", func(t *testing.T) {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if strings.HasPrefix(req.URL.Path, "/api/v1.0/registry") {
 				prefix := strings.TrimPrefix(req.URL.Path, "/api/v1.0/registry")

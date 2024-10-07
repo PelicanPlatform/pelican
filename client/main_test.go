@@ -139,7 +139,7 @@ func TestGetToken(t *testing.T) {
 	// Need a namespace for token acquisition
 	defer os.Unsetenv("PELICAN_FEDERATION_TOPOLOGYNAMESPACEURL")
 	os.Setenv("PELICAN_TOPOLOGY_NAMESPACE_URL", "https://topology.opensciencegrid.org/osdf/namespaces")
-	server_utils.Reset()
+	server_utils.ResetTestState()
 	err := config.InitClient()
 	assert.Nil(t, err)
 

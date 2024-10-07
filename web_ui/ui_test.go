@@ -209,12 +209,12 @@ func TestHandleWebUIAuth(t *testing.T) {
 	})
 
 	t.Run("403-for-logged-in-non-admin-user", func(t *testing.T) {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		// We let the frontend to handle unauthorized user (if the password is initialzied)
 		setupTestAuthDB(t)
 		t.Cleanup(func() {
 			cleanupAuthDB()
-			server_utils.Reset()
+			server_utils.ResetTestState()
 		})
 
 		tmpDir := t.TempDir()

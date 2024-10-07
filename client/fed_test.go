@@ -105,7 +105,7 @@ func getTempToken(t *testing.T) (tempToken *os.File, tkn string) {
 
 // A test that spins up a federation, and tests object get and put
 func TestGetAndPutAuth(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -283,13 +283,13 @@ func TestGetAndPutAuth(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
-		server_utils.Reset()
+		server_utils.ResetTestState()
 	})
 }
 
 // A test that spins up a federation, and tests object get and put
 func TestCopyAuth(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -444,13 +444,13 @@ func TestCopyAuth(t *testing.T) {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
 		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
-		server_utils.Reset()
+		server_utils.ResetTestState()
 	})
 }
 
 // A test that spins up the federation, where the origin is in EnablePublicReads mode. Then GET a file from the origin without a token
 func TestGetPublicRead(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 
@@ -481,15 +481,15 @@ func TestGetPublicRead(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
-		server_utils.Reset()
+		server_utils.ResetTestState()
 	})
 }
 
 // A test that spins up a federation, and tests object stat
 func TestObjectStat(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 
-	defer server_utils.Reset()
+	defer server_utils.ResetTestState()
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	require.NoError(t, err)
@@ -592,9 +592,9 @@ func TestObjectStat(t *testing.T) {
 
 // Test the functionality of the direct reads feature (?directread)
 func TestDirectReads(t *testing.T) {
-	defer server_utils.Reset()
+	defer server_utils.ResetTestState()
 	t.Run("testDirectReadsSuccess", func(t *testing.T) {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 
 		viper.Set("Origin.EnableDirectReads", true)
 		fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
@@ -636,7 +636,7 @@ func TestDirectReads(t *testing.T) {
 
 	// Test that direct reads fail if DirectReads=false is set for origin config but true for namespace/export
 	t.Run("testDirectReadsDirectReadFalseByOrigin", func(t *testing.T) {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 
 		fed := fed_test_utils.NewFedTest(t, pubOriginNoDirectRead)
 		discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -666,7 +666,7 @@ func TestDirectReads(t *testing.T) {
 
 	// Test that direct reads fail if DirectReads=false is set for namespace/export config but true for origin
 	t.Run("testDirectReadsDirectReadFalseByNamespace", func(t *testing.T) {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 
 		fed := fed_test_utils.NewFedTest(t, pubExportNoDirectRead)
 		discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -698,8 +698,8 @@ func TestDirectReads(t *testing.T) {
 
 // Test the functionality of NewTransferJob, checking we return at the correct locations for certain errors
 func TestNewTransferJob(t *testing.T) {
-	server_utils.Reset()
-	defer server_utils.Reset()
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
 
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
@@ -746,9 +746,9 @@ func TestNewTransferJob(t *testing.T) {
 
 // A test that spins up a federation, and tests object list
 func TestObjectList(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 
-	defer server_utils.Reset()
+	defer server_utils.ResetTestState()
 	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
 
 	// Other set-up items:
@@ -878,7 +878,7 @@ func TestObjectList405Error(t *testing.T) {
 // Startup a mini-federation and ensure the "pack=auto" functionality works
 // end-to-end
 func TestClientUnpack(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 
 	err := config.InitClient()
 	require.NoError(t, err)
@@ -937,7 +937,7 @@ func TestClientUnpack(t *testing.T) {
 
 // A test that generates a token locally from the private key
 func TestTokenGenerate(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 
 	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
 

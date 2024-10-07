@@ -201,12 +201,12 @@ func TestValidateCustomFields(t *testing.T) {
 }
 
 func TestValidateKeyChaining(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 	setupMockRegistryDB(t)
 	defer func() {
 		resetNamespaceDB(t)
 		teardownMockNamespaceDB(t)
-		server_utils.Reset()
+		server_utils.ResetTestState()
 	}()
 
 	_, jwksFoo, jwksStrFoo, err := test_utils.GenerateJWK()

@@ -35,7 +35,7 @@ import (
 )
 
 func TestDoReload(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 	savedAuthDB := authDB.Load()
 	authDB.Store(nil)
 	defer authDB.Store(savedAuthDB)

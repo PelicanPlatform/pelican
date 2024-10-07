@@ -43,7 +43,7 @@ func TestResetPassword(t *testing.T) {
 	defer cancel()
 
 	dirName := t.TempDir()
-	server_utils.Reset()
+	server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
 	viper.Set("Server.WebPort", 8444)

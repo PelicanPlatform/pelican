@@ -41,7 +41,7 @@ import (
 )
 
 func TestQueryServersForObject(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 	viper.Set("Director.MinStatResponse", 1)
 	viper.Set("Director.MaxStatResponse", 1)
 	viper.Set("Director.StatTimeout", time.Microsecond*200)
@@ -217,7 +217,7 @@ func TestQueryServersForObject(t *testing.T) {
 		cleanupMock()
 		// Restore the old serverAds at the end of this test func
 		serverAds = oldAds
-		server_utils.Reset()
+		server_utils.ResetTestState()
 	})
 
 	t.Run("empty-server-ads-returns", func(t *testing.T) {
@@ -699,7 +699,7 @@ func TestQueryServersForObject(t *testing.T) {
 }
 
 func TestSendHeadReq(t *testing.T) {
-	server_utils.Reset()
+	server_utils.ResetTestState()
 
 	// Start a local HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {

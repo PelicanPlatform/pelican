@@ -49,7 +49,7 @@ import (
 // Setup a gin engine that will serve up a /ping endpoint on a Unix domain socket.
 func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (chan bool, context.CancelFunc, string) {
 	dirname := t.TempDir()
-	server_utils.Reset()
+	server_utils.ResetTestState()
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("ConfigDir", dirname)
 	viper.Set("Server.WebPort", 8444)

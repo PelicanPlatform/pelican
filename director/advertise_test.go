@@ -200,10 +200,10 @@ func multiExportsTopoJSONHandler(w http.ResponseWriter, r *http.Request) {
 
 func TestAdvertiseOSDF(t *testing.T) {
 	t.Run("mock-topology-parse-correctly", func(t *testing.T) {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		serverAds.DeleteAll()
 		defer func() {
-			server_utils.Reset()
+			server_utils.ResetTestState()
 			serverAds.DeleteAll()
 		}()
 
@@ -252,10 +252,10 @@ func TestAdvertiseOSDF(t *testing.T) {
 	})
 
 	t.Run("multiple-ns-single-origin", func(t *testing.T) {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		serverAds.DeleteAll()
 		defer func() {
-			server_utils.Reset()
+			server_utils.ResetTestState()
 			serverAds.DeleteAll()
 		}()
 
@@ -280,10 +280,10 @@ func TestAdvertiseOSDF(t *testing.T) {
 	})
 
 	t.Run("caches-serving-multiple-nss", func(t *testing.T) {
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		serverAds.DeleteAll()
 		defer func() {
-			server_utils.Reset()
+			server_utils.ResetTestState()
 			serverAds.DeleteAll()
 		}()
 

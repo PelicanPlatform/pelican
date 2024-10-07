@@ -432,7 +432,7 @@ func TestRecordAd(t *testing.T) {
 
 	t.Run("recorded-sad-should-match-health-test-utils-one", func(t *testing.T) {
 		t.Cleanup(func() {
-			server_utils.Reset()
+			server_utils.ResetTestState()
 			healthTestUtilsMutex.Lock()
 			statUtilsMutex.Lock()
 			defer statUtilsMutex.Unlock()
@@ -443,7 +443,7 @@ func TestRecordAd(t *testing.T) {
 			serverAds.DeleteAll()
 			geoIPOverrides = nil
 		})
-		server_utils.Reset()
+		server_utils.ResetTestState()
 		func() {
 			geoIPOverrides = nil
 
