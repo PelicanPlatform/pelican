@@ -140,8 +140,8 @@ const BigNumber = ({title, value, data, color = '#f3f3f3'}: BigNumberProps) => {
   }
 
   return (
-    <Box>
-      <Box position={"absolute"} width="100%" bottom={0}>
+    <Box position="relative" width="100%" height="100%">
+      <Box position="absolute" bottom={0} left={0} width="100%" zIndex={1}>
         <Box p={3}>
           <Grid
             container
@@ -161,7 +161,7 @@ const BigNumber = ({title, value, data, color = '#f3f3f3'}: BigNumberProps) => {
           </Grid>
         </Box>
       </Box>
-      <Box>
+      <Box height={"100%"}>
         <Line
           data={chartData}
           options={{
@@ -212,7 +212,7 @@ export interface getBigDataFunctionProps extends getRateDataProps {
 }
 
 export const getBigDataFunction = async ({metric, rate, time, range, resolution}: getBigDataFunctionProps) : Promise<DataPoint[]> => {
-  const query = `increase(${metric}[${resolution}])[${range}:${resolution}]`
+  const query = `sum(increase(${metric}[${resolution}]))[${range}:${resolution}]`
   const dataResponse = await query_raw<MatrixResponseData>(query, time.toSeconds())
 
   // Check if the data is empty

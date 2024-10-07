@@ -18,6 +18,7 @@ import {GraphContext, GraphDispatchContext} from './GraphContext';
 import { MatrixResponseData, query_raw, TimeDuration } from '@/components/graphs/prometheus';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import 'chartjs-adapter-luxon';
+import useSWR from 'swr';
 
 ChartJS.register(
   TimeScale,
@@ -36,14 +37,13 @@ const MemoryGraph = () => {
 
   const graphContext = useContext(GraphContext);
 
-  const [datasets, setDatasets] = useState<ChartDataset<any, any>>([])
-
-  useEffect(() => {
-    (async () => {
-      const data = await getData(graphContext.rate, graphContext.range, graphContext.resolution, graphContext.time)
-      setDatasets(data)
-    })()
-  }, [graphContext])
+  const {data: datasets} = useSWR<ChartDataset<any, any>>(
+    ['memoryGraph', graphContext.rate, graphContext.range, graphContext.resolution, graphContext.time],
+    () => getData(graphContext.rate, graphContext.range, graphContext.resolution, graphContext.time),
+    {
+      fallbackData: []
+    }
+  )
 
   const data = {
     'datasets': datasets

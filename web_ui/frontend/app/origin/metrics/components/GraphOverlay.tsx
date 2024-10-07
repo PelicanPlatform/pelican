@@ -45,6 +45,7 @@ export const GraphOverlay = ({children}: {children: ReactNode}) => {
   // Capture arrow keys to adjust timeframe
   useEffect(() => {
     document.addEventListener('keydown', handleKeydown)
+    getURLParams(dispatch)
 
     return () => {
       document.removeEventListener('keydown', handleKeydown)
@@ -65,6 +66,23 @@ export const GraphOverlay = ({children}: {children: ReactNode}) => {
       {children}
     </>
   )
+}
+
+/**
+ * Gets the time and range from the url and sets it on load
+ */
+const getURLParams = (dispatch: any) => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const time = urlParams.get('time');
+  const range = urlParams.get('range');
+
+  if(time){
+    dispatch({type: 'setTime', payload: DateTime.fromISO(time)})
+  }
+
+  if(range){
+    dispatch({type: 'setRange', payload: TimeDuration.fromString(range)})
+  }
 }
 
 /**

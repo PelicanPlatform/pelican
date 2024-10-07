@@ -17,10 +17,10 @@ import zoomPlugin from 'chartjs-plugin-zoom';
 import { useContext, useEffect, useMemo, useState } from 'react';
 
 import {GraphContext, GraphDispatchContext} from './GraphContext';
-import { query_raw, TimeDuration } from '@/components/graphs/prometheus';
+import { MatrixResponseData, query_raw, TimeDuration } from '@/components/graphs/prometheus';
 import 'chartjs-adapter-luxon';
 import useSWR from 'swr';
-import { convertToBiggestBytes, toBytes } from '@/helpers/bytes';
+import { ByteType, convertToBiggestBytes, toBytes } from '@/helpers/bytes';
 import { average } from '@/helpers/util';
 
 ChartJS.register(
@@ -41,7 +41,7 @@ const TransferRateGraph = () => {
   const graphContext = useContext(GraphContext);
   const dispatch = useContext(GraphDispatchContext);
 
-  const {data: datasets} = useSWR<ChartDataset<any, any>>(
+  const {data: datasets} = useSWR<ChartDataset<'line', { x: number; y: number }[]>[]>(
     ['transferRateGraph', graphContext.rate, graphContext.range, graphContext.resolution, graphContext.time],
     () => getData(graphContext.rate, graphContext.range, graphContext.resolution, graphContext.time),
     {
@@ -50,28 +50,16 @@ const TransferRateGraph = () => {
   )
 
   const byteLabel = useMemo(() => {
-    return convertToBiggestBytes(average(datasets.flatMap(ds => ds.data).map(d => d.y))).label
+    if(datasets){
+      return convertToBiggestBytes(average(datasets.flatMap(ds => ds.data).map(d => d.y))).label
+    }
   }, [datasets])
 
-  const byteDatasets = useMemo(() => {
-
-    let byteDatasets = structuredClone(datasets)
-
-    let x = byteDatasets.map((ds) => {
-      return {
-        ...ds,
-        data: ds.data.map((d) => {
-          return {
-            ...d,
-            y: toBytes(d.y, byteLabel).value
-          }
-        })
-      }
-    })
-
-    return x
-
-
+  const byteDatasets = useMemo((): ChartDataset<'line', { x: number; y: number }[]>[] => {
+    if(datasets !== undefined && byteLabel !== undefined) {
+      return toBytesDataset(datasets, byteLabel)
+    }
+    return []
   }, [datasets, byteLabel])
 
   const data = {
@@ -127,10 +115,26 @@ const TransferRateGraph = () => {
   )
 }
 
-const getData = async (rate: TimeDuration, range: TimeDuration, resolution: TimeDuration, time: DateTime): Promise<ChartDataset<any, any>> => {
+const toBytesDataset = (datasets: ChartDataset<'line', { x: number; y: number }[]>[], byteLabel: ByteType): ChartDataset<'line', { x: number; y: number }[]>[]  => {
+  let byteDatasets = structuredClone(datasets)
+
+  return byteDatasets.map((ds) => {
+    return {
+      ...ds,
+      data: ds.data.map((d) => {
+        return {
+          ...d,
+          y: toBytes(d.y, byteLabel).value
+        }
+      })
+    }
+  })
+}
+
+const getData = async (rate: TimeDuration, range: TimeDuration, resolution: TimeDuration, time: DateTime): Promise<ChartDataset<'line', { x: number; y: number }[]>[]> => {
 
   const query = `sum by (path, type) (rate(xrootd_transfer_bytes[${rate}]))[${range}:${resolution}]`
-  const dataResponse = await query_raw(query, time.toSeconds())
+  const dataResponse = await query_raw<MatrixResponseData>(query, time.toSeconds())
   const datasets = dataResponse.data.result.map((result) => {
     return {
       id: result.metric?.path,

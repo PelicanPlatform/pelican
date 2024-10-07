@@ -41,6 +41,12 @@ export const toBytes = (value: number, unit: ByteType | undefined = undefined): 
   }
 }
 
+export const toBytesString = (value: number, unit: ByteType | undefined = undefined): string => {
+  const { value: convertedValue, label } = toBytes(value, unit);
+
+  return `${Math.round(convertedValue*1000) / 1000} ${label}`;
+}
+
 export const getSmallestByteCategory = (bytesList: number[]): ByteType => {
   // Get the smallest value
   const smallestUnit = bytesList.reduce((acc, bytes) => {
@@ -66,5 +72,3 @@ export const convertListBytes = (bytesList: number[] | any[]): ByteValue[] => {
     return toBytes(bytes, label);
   });
 }
-
-toBytes(361052659)

@@ -115,32 +115,46 @@ const calculateBestFitRange = (milliseconds: number): TimeDuration => {
 
 function graphReducer(state: GraphContextType, action: GraphReducerAction) {
 
+  let newState;
   switch (action.type) {
     case 'setTime':
-      return {...state, time: action.payload};
+      newState = {...state, time: action.payload};
+      break;
     case 'setRange':
-      return updateRange(state, action.payload.toString());
+      newState = updateRange(state, action.payload.toString());
+      break;
     case 'setTimeRange':
       // Calculate the range that best fits the time range
       const range = calculateBestFitRange(action.payload.end.diff(action.payload.start).milliseconds);
       const updatedTimeState = {...state, time: action.payload.end};
-      return updateRange(updatedTimeState, range.toString());
+      newState = updateRange(updatedTimeState, range.toString());
+      break;
     case 'incrementTimeByRange':
-      return adjustRange(state, 'incrementTimeByRange');
+      newState = adjustRange(state, 'incrementTimeByRange');
+      break;
     case 'decrementTimeByRange':
-      return adjustRange(state, 'decrementTimeByRange');
+      newState = adjustRange(state, 'decrementTimeByRange');
+      break;
     case 'incrementRange':
       // Get the next range value
       let nextRange = rangeValues[state.range.toString()].nextRange;
-      return updateRange(state, nextRange);
+      newState = updateRange(state, nextRange);
+      break;
     case 'decrementRange':
       // Get the previous range value
       let prevRange = rangeValues[state.range.toString()].prevRange;
-      return updateRange(state, prevRange);
+      newState = updateRange(state, prevRange);
+      break;
 
     default:
-      return state;
+      newState = state;
+      break;
   }
+
+  // Update the current windows url to reflect the new state
+  window.history.pushState({}, '', `?time=${newState.time.toISO()}&range=${newState.range.toString()}`);
+
+  return newState;
 }
 
 type GraphReducerAction = setTimeAction | setRangeAction | setTimeRangeAction | incrementTimeByRange | decrementTimeByRange | incrementRange | decrementRange;
