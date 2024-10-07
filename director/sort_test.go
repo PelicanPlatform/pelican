@@ -20,6 +20,7 @@ package director
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"math/rand"
 	"net"
@@ -338,7 +339,9 @@ func TestSortServerAds(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distance")
 		expected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
 			daejeonServer, mcMurdoServer, nullIslandServer}
-		sorted, err := sortServerAds(clientIP, randAds, nil)
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
+		sorted, err := sortServerAds(ctx, clientIP, randAds, nil)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
 	})
@@ -348,7 +351,10 @@ func TestSortServerAds(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
 		expected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
 			daejeonServer, mcMurdoServer, nullIslandServer}
-		sorted, err := sortServerAds(clientIP, randAds, nil)
+
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
+		sorted, err := sortServerAds(ctx, clientIP, randAds, nil)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
 	})
@@ -356,7 +362,9 @@ func TestSortServerAds(t *testing.T) {
 	t.Run("test-distanceAndLoad-sort-load-only", func(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
 		expected := []server_structs.ServerAd{serverLoad1, serverLoad2, serverLoad3, serverLoad4, serverLoad6NullLoc}
-		sorted, err := sortServerAds(clientIP, randLoadAds, nil)
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
+		sorted, err := sortServerAds(ctx, clientIP, randLoadAds, nil)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
 	})
@@ -365,7 +373,10 @@ func TestSortServerAds(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
 		expected := []server_structs.ServerAd{chicagoLowload, sdscServer, madisonServerHighLoad, kremlinServer,
 			daejeonServer, mcMurdoServer, bigBenServerHighLoad, serverLoad5NullLoc, serverLoad6NullLoc}
-		sorted, err := sortServerAds(clientIP, randDistanceLoadAds, nil)
+
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
+		sorted, err := sortServerAds(ctx, clientIP, randDistanceLoadAds, nil)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
 	})
@@ -380,12 +391,14 @@ func TestSortServerAds(t *testing.T) {
 		notExpected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer, daejeonServer,
 			mcMurdoServer}
 
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
 		// The probability this test fails the first time due to randomly sorting into ascending distances is (1/6!) = 1/720
 		// To mitigate risk of this failing because of that, we'll run the sort 3 times to get a 1/720^3 = 1/373,248,000 chance
 		// of failure. If you run thrice and you still get the distance-sorted slice, you might consider buying a powerball ticket
 		// (1/292,201,338 chance of winning).
 		for i := 0; i < 3; i++ {
-			sorted, err = sortServerAds(clientIP, randAds, nil)
+			sorted, err = sortServerAds(ctx, clientIP, randAds, nil)
 			require.NoError(t, err)
 
 			// If the values are not equal, break the loop
