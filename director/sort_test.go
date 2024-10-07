@@ -20,6 +20,7 @@ package director
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"math"
 	"math/rand"
@@ -343,7 +344,9 @@ func TestSortServerAds(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distance")
 		expected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
 			daejeonServer, mcMurdoServer, nullIslandServer}
-		sorted, err := sortServerAds(clientIP, randAds, nil)
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
+		sorted, err := sortServerAds(ctx, clientIP, randAds, nil)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
 	})
@@ -353,7 +356,10 @@ func TestSortServerAds(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
 		expected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
 			daejeonServer, mcMurdoServer, nullIslandServer}
-		sorted, err := sortServerAds(clientIP, randAds, nil)
+
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
+		sorted, err := sortServerAds(ctx, clientIP, randAds, nil)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
 	})
@@ -361,7 +367,9 @@ func TestSortServerAds(t *testing.T) {
 	t.Run("test-distanceAndLoad-sort-load-only", func(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
 		expected := []server_structs.ServerAd{serverLoad1, serverLoad2, serverLoad3, serverLoad4, serverLoad6NullLoc}
-		sorted, err := sortServerAds(clientIP, randLoadAds, nil)
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
+		sorted, err := sortServerAds(ctx, clientIP, randLoadAds, nil)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
 	})
@@ -370,7 +378,10 @@ func TestSortServerAds(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
 		expected := []server_structs.ServerAd{chicagoLowload, sdscServer, madisonServerHighLoad, kremlinServer,
 			daejeonServer, mcMurdoServer, bigBenServerHighLoad, serverLoad5NullLoc, serverLoad6NullLoc}
-		sorted, err := sortServerAds(clientIP, randDistanceLoadAds, nil)
+
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
+		sorted, err := sortServerAds(ctx, clientIP, randDistanceLoadAds, nil)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
 	})
@@ -385,12 +396,14 @@ func TestSortServerAds(t *testing.T) {
 		notExpected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer, daejeonServer,
 			mcMurdoServer}
 
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
 		// The probability this test fails the first time due to randomly sorting into ascending distances is (1/6!) = 1/720
 		// To mitigate risk of this failing because of that, we'll run the sort 3 times to get a 1/720^3 = 1/373,248,000 chance
 		// of failure. If you run thrice and you still get the distance-sorted slice, you might consider buying a powerball ticket
 		// (1/292,201,338 chance of winning).
 		for i := 0; i < 3; i++ {
-			sorted, err = sortServerAds(clientIP, randAds, nil)
+			sorted, err = sortServerAds(ctx, clientIP, randAds, nil)
 			require.NoError(t, err)
 
 			// If the values are not equal, break the loop
@@ -457,7 +470,9 @@ func TestGetClientLatLong(t *testing.T) {
 
 		clientIp := netip.Addr{}
 		assert.False(t, clientIpCache.Has(clientIp))
-		coord1 := getClientLatLong(clientIp)
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "test")
+		coord1 := getClientLatLong(ctx, clientIp)
 
 		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
 		assert.True(t, coord1.Long <= usLongMax && coord1.Long >= usLongMin)
@@ -465,7 +480,7 @@ func TestGetClientLatLong(t *testing.T) {
 		assert.NotContains(t, logOutput.String(), "Retrieving pre-assigned lat/long")
 
 		// Get it again to make sure it's coming from the cache
-		coord2 := getClientLatLong(clientIp)
+		coord2 := getClientLatLong(ctx, clientIp)
 		assert.Equal(t, coord1.Lat, coord2.Lat)
 		assert.Equal(t, coord1.Long, coord2.Long)
 		assert.Contains(t, logOutput.String(), "Retrieving pre-assigned lat/long for unresolved client IP")
@@ -479,7 +494,9 @@ func TestGetClientLatLong(t *testing.T) {
 
 		clientIp := netip.MustParseAddr("192.168.0.1")
 		assert.False(t, clientIpCache.Has(clientIp))
-		coord1 := getClientLatLong(clientIp)
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "test")
+		coord1 := getClientLatLong(ctx, clientIp)
 
 		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
 		assert.True(t, coord1.Long <= usLongMax && coord1.Long >= usLongMin)
@@ -487,7 +504,7 @@ func TestGetClientLatLong(t *testing.T) {
 		assert.NotContains(t, logOutput.String(), "Retrieving pre-assigned lat/long")
 
 		// Get it again to make sure it's coming from the cache
-		coord2 := getClientLatLong(clientIp)
+		coord2 := getClientLatLong(ctx, clientIp)
 		assert.Equal(t, coord1.Lat, coord2.Lat)
 		assert.Equal(t, coord1.Long, coord2.Long)
 		assert.Contains(t, logOutput.String(), "Retrieving pre-assigned lat/long for client IP")
