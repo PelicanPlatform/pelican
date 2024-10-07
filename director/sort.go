@@ -244,6 +244,7 @@ func getClientLatLong(ctx context.Context, addr netip.Addr) (coord Coordinate) {
 	}
 
 	coord.Lat, coord.Long, err = getLatLong(ctx, addr)
+	coord.Lat, coord.Long, err = getLatLong(ctx, addr)
 	if err != nil || (coord.Lat == 0 && coord.Long == 0) {
 		if err != nil {
 			log.Warningf("Error while getting the client IP address: %v", err)
@@ -286,12 +287,6 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 	sortMethod := param.Director_CacheSortMethod.GetString()
 	// This will handle the case where the client address is invalid or the lat/long is not resolvable.
 	clientCoord := getClientLatLong(ctx, clientAddr)
-
-	if clientAddr.IsValid() {
-		clientCoord = getClientLatLong(ctx, clientAddr)
-	} else {
-		log.Warningf("Unable to sort servers based on client-server distance. Invalid client IP address: %s", clientAddr.String())
-	}
 
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {

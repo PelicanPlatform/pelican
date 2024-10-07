@@ -471,7 +471,7 @@ func TestGetClientLatLong(t *testing.T) {
 		clientIp := netip.Addr{}
 		assert.False(t, clientIpCache.Has(clientIp))
 		ctx := context.Background()
-		ctx = context.WithValue(ctx, ProjectContextKey{}, "test")
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
 		coord1 := getClientLatLong(ctx, clientIp)
 
 		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
@@ -480,6 +480,8 @@ func TestGetClientLatLong(t *testing.T) {
 		assert.NotContains(t, logOutput.String(), "Retrieving pre-assigned lat/long")
 
 		// Get it again to make sure it's coming from the cache
+		ctx = context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
 		coord2 := getClientLatLong(ctx, clientIp)
 		assert.Equal(t, coord1.Lat, coord2.Lat)
 		assert.Equal(t, coord1.Long, coord2.Long)
@@ -495,7 +497,7 @@ func TestGetClientLatLong(t *testing.T) {
 		clientIp := netip.MustParseAddr("192.168.0.1")
 		assert.False(t, clientIpCache.Has(clientIp))
 		ctx := context.Background()
-		ctx = context.WithValue(ctx, ProjectContextKey{}, "test")
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
 		coord1 := getClientLatLong(ctx, clientIp)
 
 		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
@@ -504,6 +506,8 @@ func TestGetClientLatLong(t *testing.T) {
 		assert.NotContains(t, logOutput.String(), "Retrieving pre-assigned lat/long")
 
 		// Get it again to make sure it's coming from the cache
+		ctx = context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
 		coord2 := getClientLatLong(ctx, clientIp)
 		assert.Equal(t, coord1.Lat, coord2.Lat)
 		assert.Equal(t, coord1.Long, coord2.Long)
