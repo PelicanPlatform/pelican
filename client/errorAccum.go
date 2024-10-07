@@ -28,7 +28,7 @@ import (
 
 	grab "github.com/opensaucerer/grab/v3"
 
-	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
 type (
@@ -143,7 +143,7 @@ func IsRetryable(err error) bool {
 	if errors.Is(err, grab.ErrBadLength) {
 		return false
 	}
-	if errors.Is(err, config.MetadataTimeoutErr) {
+	if errors.Is(err, pelican_url.MetadataTimeoutErr) {
 		return true
 	}
 	// There's little a user can do about a TCP connection reset besides retry; if it

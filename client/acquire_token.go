@@ -43,6 +43,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	oauth2 "github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -64,7 +65,7 @@ type (
 	// of the process.
 	tokenGenerator struct {
 		DirResp       *server_structs.DirectorResponse
-		Destination   *url.URL
+		Destination   *pelican_url.PelicanURL
 		TokenLocation string
 		TokenName     string
 		IsWrite       bool
@@ -83,7 +84,7 @@ type (
 	}
 )
 
-func newTokenGenerator(dest *url.URL, dirResp *server_structs.DirectorResponse, isWrite bool, enableAcquire bool) *tokenGenerator {
+func newTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, isWrite bool, enableAcquire bool) *tokenGenerator {
 	return &tokenGenerator{
 		DirResp:       dirResp,
 		Destination:   dest,
@@ -120,19 +121,6 @@ func (tg *tokenGenerator) SetToken(contents string) {
 		Expiry:   time.Now().Add(100 * 365 * 24 * time.Hour), // 100 years should be enough for "forever"
 	}
 	tg.Token.Store(&info)
-}
-
-// Determine the token name if it is embedded in the scheme, Condor-style
-func getTokenName(destination *url.URL) (scheme, tokenName string) {
-	schemePieces := strings.Split(destination.Scheme, "+")
-	tokenName = ""
-	// Scheme is always the last piece
-	scheme = schemePieces[len(schemePieces)-1]
-	// If there are 2 or more pieces, token name is everything but the last item, joined with a +
-	if len(schemePieces) > 1 {
-		tokenName = strings.Join(schemePieces[:len(schemePieces)-1], "+")
-	}
-	return
 }
 
 // Read a token from a file; ensure
@@ -335,7 +323,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 	potentialTokens := make([]tokenInfo, 0)
 
 	if tg.TokenName == "" {
-		_, tg.TokenName = getTokenName(tg.Destination)
+		tg.TokenName = tg.Destination.GetTokenName()
 	}
 
 	opts := config.TokenGenerationOpts{
@@ -381,7 +369,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 			opts.Operation = config.TokenSharedWrite
 		}
 		var contents string
-		contents, err = AcquireToken(tg.Destination, *tg.DirResp, opts)
+		contents, err = AcquireToken(tg.Destination.GetRawUrl(), *tg.DirResp, opts)
 		if err == nil && contents != "" {
 			valid, expiry := tokenIsValid(contents)
 			info := tokenInfo{contents, expiry}

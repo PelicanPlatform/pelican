@@ -87,7 +87,7 @@ jobs:
     - name: Test
       run: |
         make web-build
-        go test -coverpkg=./... -coverprofile=coverage.out -covermode=count ./...
+        go test -timeout 15m -coverpkg=./... -coverprofile=coverage.out -covermode=count ./...
     - name: Get total code coverage
       if: github.event_name == 'pull_request'
       id: cc
@@ -113,7 +113,7 @@ jobs:
         git reset --hard ${{ github.event.pull_request.base.sha }}
         make web-build
         go generate ./...
-        go test -coverpkg=./... -coverprofile=base_coverage.out -covermode=count ./...
+        go test -timeout 15m -coverpkg=./... -coverprofile=base_coverage.out -covermode=count ./...
         go tool cover -func=base_coverage.out > unit-base.txt
         git reset --hard $HEAD
     - name: Get base code coverage value

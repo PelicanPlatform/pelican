@@ -199,7 +199,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 	}
 }
 
-func registerNamespacePrep(ctx context.Context, prefix string) (key jwk.Key, registrationEndpointURL string, isRegistered bool, err error) {
+func registerNamespacePrep(ctx context.Context, prefix string) (key jwk.Key, registrationUrl string, isRegistered bool, err error) {
 	// TODO: We eventually want to be able to export multiple prefixes; at that point, we'll
 	// refactor to loop around all the namespaces
 	if prefix == "" {
@@ -215,13 +215,13 @@ func registerNamespacePrep(ctx context.Context, prefix string) (key jwk.Key, reg
 	if err != nil {
 		return
 	}
-	namespaceEndpoint := fedInfo.NamespaceRegistrationEndpoint
-	if namespaceEndpoint == "" {
+	registryEndpoint := fedInfo.RegistryEndpoint
+	if registryEndpoint == "" {
 		err = errors.New("No namespace registry specified; try passing the `-f` flag specifying the federation name")
 		return
 	}
 
-	registrationEndpointURL, err = url.JoinPath(namespaceEndpoint, "api", "v1.0", "registry")
+	registrationUrl, err = url.JoinPath(registryEndpoint, "api", "v1.0", "registry")
 	if err != nil {
 		err = errors.Wrap(err, "Failed to construct registration endpoint URL: %v")
 		return
@@ -237,7 +237,7 @@ func registerNamespacePrep(ctx context.Context, prefix string) (key jwk.Key, reg
 			return
 		}
 	}
-	keyStatus, err := keyIsRegistered(key, registrationEndpointURL, prefix)
+	keyStatus, err := keyIsRegistered(key, registrationUrl, prefix)
 	if err != nil {
 		err = errors.Wrap(err, "Failed to determine whether namespace is already registered")
 		return

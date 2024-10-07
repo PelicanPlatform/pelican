@@ -32,14 +32,22 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Make a request to the director for a given verb/resource; return the
 // HTTP response object only if a 307 is returned.
-func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string, token string) (resp *http.Response, err error) {
-	resourceUrl := directorUrl + sourcePath
+func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanURL, token string) (resp *http.Response, err error) {
+	resourceUrl, err := url.Parse(pUrl.FedInfo.DirectorEndpoint)
+	if err != nil {
+		log.Errorln("Failed to parse the director URL:", err)
+		return nil, err
+	}
+	resourceUrl.Path = pUrl.Path
+	resourceUrl.RawQuery = pUrl.RawQuery
+
 	// Here we use http.Transport to prevent the client from following the director's
 	// redirect. We use the Location url elsewhere (plus we still need to do the token
 	// dance!)
@@ -52,7 +60,7 @@ func queryDirector(ctx context.Context, verb, sourcePath, directorUrl string, to
 		},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, verb, resourceUrl, nil)
+	req, err := http.NewRequestWithContext(ctx, verb, resourceUrl.String(), nil)
 	if err != nil {
 		log.Errorln("Failed to create an HTTP request:", err)
 		return nil, err
@@ -165,28 +173,26 @@ func parseServersFromDirectorResponse(resp *http.Response) (servers []*url.URL, 
 }
 
 // Retrieve federation namespace information for a given URL.
-func GetDirectorInfoForPath(ctx context.Context, resourcePath, directorUrl string, isPut bool, query string, token string) (parsedResponse server_structs.DirectorResponse, err error) {
-	if directorUrl == "" {
+func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, isPut bool, token string) (parsedResponse server_structs.DirectorResponse, err error) {
+	if pUrl.FedInfo.DirectorEndpoint == "" {
 		return server_structs.DirectorResponse{},
-			errors.Errorf("unable to retrieve information from a Director for object %s because no director URL was provided", resourcePath)
+			errors.Errorf("unable to retrieve information from a Director for object %s because none was found in pelican URL metadata.", pUrl.Path)
 	}
 
-	log.Debugln("Will query director at", directorUrl, "for object", resourcePath)
+	log.Debugln("Will query director at", pUrl.FedInfo.DirectorEndpoint, "for object", pUrl.Path)
 	verb := "GET"
 	if isPut {
 		verb = "PUT"
 	}
-	if query != "" {
-		resourcePath += "?" + query
-	}
+
 	var dirResp *http.Response
-	dirResp, err = queryDirector(ctx, verb, resourcePath, directorUrl, token)
+	dirResp, err = queryDirector(ctx, verb, pUrl, token)
 	if err != nil {
 		if isPut && dirResp != nil && dirResp.StatusCode == 405 {
 			err = errors.New("error 405: No writeable origins were found")
 			return
 		} else {
-			err = errors.Wrapf(err, "error while querying the director at %s", directorUrl)
+			err = errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
 			return
 		}
 	}

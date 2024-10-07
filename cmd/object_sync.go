@@ -174,7 +174,7 @@ func syncMain(cmd *cobra.Command, args []string) {
 		for _, src := range sources {
 			if _, err = client.DoGet(ctx, src, dest, true,
 				client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation),
-				client.WithCaches(caches...), client.WithSynchronize(client.SyncExist)); err != nil {
+				client.WithCaches(caches...), client.WithSynchronize(client.SyncSize)); err != nil {
 				lastSrc = src
 				break
 			}
@@ -183,7 +183,7 @@ func syncMain(cmd *cobra.Command, args []string) {
 		for _, src := range sources {
 			if _, err = client.DoPut(ctx, src, dest, true,
 				client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation),
-				client.WithCaches(caches...), client.WithSynchronize(client.SyncExist)); err != nil {
+				client.WithCaches(caches...), client.WithSynchronize(client.SyncSize)); err != nil {
 				lastSrc = src
 				break
 			}

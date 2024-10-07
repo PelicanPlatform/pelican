@@ -20,7 +20,6 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -28,6 +27,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
 var (
@@ -143,18 +143,16 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 				os.Exit(1)
 			}
 
-			dest, err := url.Parse(args[1])
+			pUrl, err := pelican_url.Parse(
+				args[1],
+				[]pelican_url.ParseOption{pelican_url.ShouldDiscover(true)},
+				nil,
+			)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to parse URL:", err)
 				os.Exit(1)
 			}
-			fedInfo, err := config.DiscoverUrlFederation(cmd.Context(), dest.Host)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Failed to discover federation metadata:", err)
-				os.Exit(1)
-			}
-
-			dirResp, err := client.GetDirectorInfoForPath(cmd.Context(), dest.Path, fedInfo.DirectorEndpoint, isWrite, "", "")
+			dirResp, err := client.GetDirectorInfoForPath(cmd.Context(), pUrl, isWrite, "")
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get director info for path:", err)
 				os.Exit(1)
@@ -164,7 +162,7 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 			if isWrite {
 				opts.Operation = config.TokenWrite
 			}
-			token, err := client.AcquireToken(dest, dirResp, opts)
+			token, err := client.AcquireToken(pUrl.GetRawUrl(), dirResp, opts)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get a token:", err)
 				os.Exit(1)

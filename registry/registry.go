@@ -242,7 +242,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 	if err != nil {
 		return false, nil, err
 	}
-	registryUrl := fedInfo.NamespaceRegistrationEndpoint
+	registryUrl := fedInfo.RegistryEndpoint
 
 	var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
 	if err := key.Raw(&rawkey); err != nil {
@@ -1129,11 +1129,11 @@ func checkStatusHandler(ctx *gin.Context) {
 			})
 		}
 		if server_structs.IsCacheNS(prefix) {
-			complete.EditUrl = fmt.Sprintf("%s/view/registry/cache/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/cache/edit/?id=%d", fed.RegistryEndpoint, ns.ID)
 		} else if server_structs.IsOriginNS(prefix) {
-			complete.EditUrl = fmt.Sprintf("%s/view/registry/origin/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/origin/edit/?id=%d", fed.RegistryEndpoint, ns.ID)
 		} else {
-			complete.EditUrl = fmt.Sprintf("%s/view/registry/namespace/edit/?id=%d", fed.NamespaceRegistrationEndpoint, ns.ID)
+			complete.EditUrl = fmt.Sprintf("%s/view/registry/namespace/edit/?id=%d", fed.RegistryEndpoint, ns.ID)
 		}
 		err = config.GetValidate().Struct(ns)
 		if err != nil {

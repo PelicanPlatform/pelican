@@ -28,6 +28,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -74,7 +75,7 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 	if directorUrl.Port() == "443" {
 		directorUrl.Host = strings.TrimSuffix(directorUrl.Host, ":443")
 	}
-	registryUrlStr := fedInfo.NamespaceRegistrationEndpoint
+	registryUrlStr := fedInfo.RegistryEndpoint
 	if registryUrlStr == "" {
 		log.Error("Bad server configuration: Federation.RegistryUrl is not set")
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -111,11 +112,11 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 		return
 	}
 
-	rs := config.FederationDiscovery{
-		DirectorEndpoint:              directorUrl.String(),
-		NamespaceRegistrationEndpoint: registryUrl.String(),
-		JwksUri:                       jwksUri,
-		BrokerEndpoint:                brokerUrl,
+	rs := pelican_url.FederationDiscovery{
+		DirectorEndpoint: directorUrl.String(),
+		RegistryEndpoint: registryUrl.String(),
+		JwksUri:          jwksUri,
+		BrokerEndpoint:   brokerUrl,
 	}
 
 	jsonData, err := json.MarshalIndent(rs, "", "  ")

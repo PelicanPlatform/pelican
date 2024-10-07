@@ -281,7 +281,7 @@ func GetNSIssuerURL(prefix string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	registryUrlStr := fedInfo.NamespaceRegistrationEndpoint
+	registryUrlStr := fedInfo.RegistryEndpoint
 	if registryUrlStr == "" {
 		return "", errors.New("federation registry URL is not set and was not discovered")
 	}

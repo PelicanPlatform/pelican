@@ -21,6 +21,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -102,8 +104,14 @@ func TestQueryDirector(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(handler))
 	defer server.Close()
 
+	pUrl := pelican_url.PelicanURL{
+		FedInfo: pelican_url.FederationDiscovery{
+			DirectorEndpoint: server.URL,
+		},
+		Path: "/foo/bar",
+	}
 	// Call QueryDirector with the test server URL and a source path
-	actualResp, err := queryDirector(context.Background(), "GET", "/foo/bar", server.URL, "")
+	actualResp, err := queryDirector(context.Background(), "GET", &pUrl, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +171,7 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 			directorUrl:   "",
 			isPut:         false,
 			query:         "",
-			expectedError: "unable to retrieve information from a Director for object /test because no director URL was provided",
+			expectedError: "unable to retrieve information from a Director for object /test because none was found in pelican URL metadata.",
 		},
 		{
 			name:          "Successful GET request",
@@ -194,7 +202,17 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			_, err := GetDirectorInfoForPath(ctx, tt.resourcePath, tt.directorUrl, tt.isPut, tt.query, "")
+			urlStr := fmt.Sprintf("pelican://foo%s", tt.resourcePath)
+			if tt.query != "" {
+				urlStr += "?" + tt.query
+			}
+
+			pUrl, err := pelican_url.Parse(urlStr, nil, nil)
+			assert.NoError(t, err)
+
+			pUrl.FedInfo.DirectorEndpoint = tt.directorUrl
+
+			_, err = GetDirectorInfoForPath(ctx, pUrl, tt.isPut, "")
 			if tt.expectedError != "" {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedError)
