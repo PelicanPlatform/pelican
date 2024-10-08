@@ -38,7 +38,6 @@ export PELICAN_REGISTRY_DBLOCATION=$PWD/get_put_tmp/config/test.sql
 export PELICAN_OIDC_CLIENTID="sometexthere"
 export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
 export PELICAN_ORIGIN_STORAGEPREFIX="$PWD/get_put_tmp/origin"
-export PELICAN_DIRECTOR_X509CLIENTAUTHENTICATIONPREFIXES="/test/blocked"
 
 # Function to cleanup after test ends
 cleanup() {
@@ -135,15 +134,25 @@ else
     exit 1
 fi
 
-# Run pelican object put w/ x509
-./pelican object put ./get_put_tmp/input.txt pelican://$HOSTNAME:8444/test/blocked/input.txt -d -t get_put_tmp/test-token.jwt -L get_put_tmp/putOutput.txt
+./pelican object get pelican://$HOSTNAME:8444/test/input.txt get_put_tmp/output.txt -d -t get_put_tmp/test-token.jwt -L get_put_tmp/getOutput.txt
 
 # Check output of command
-if grep -q "Dumping response: HTTP/1.1 200 OK" get_put_tmp/putOutput.txt; then
-    echo "Uploaded bytes successfully!"
+if grep -q "HTTP Transfer was successful" get_put_tmp/getOutput.txt; then
+    echo "Downloaded bytes successfully!"
 else
-    echo "Did not upload correctly"
-    cat get_put_tmp/putOutput.txt
+    echo "Did not download correctly"
+    cat get_put_tmp/getOutput.txt
+    exit 1
+fi
+
+if grep -q "This is some random content in the random file" get_put_tmp/output.txt; then
+    echo "Content matches the uploaded file!"
+else
+    echo "Did not download correctly, content in downloaded file is different from the uploaded file"
+    echo "Contents of the downloaded file:"
+    cat get_put_tmp/output.txt
+    echo "Contents of uploaded file:"
+    cat get_put_tmp/input.txt
     exit 1
 fi
 
