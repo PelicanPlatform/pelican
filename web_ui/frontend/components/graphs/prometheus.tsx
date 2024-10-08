@@ -27,13 +27,13 @@ export interface DataPoint {
 }
 
 interface ErrorResponse {
-  status: "error";
-  errorType: "bad_data" | "timeout" | "partial_result" | "execution_error";
+  status: 'error';
+  errorType: 'bad_data' | 'timeout' | 'partial_result' | 'execution_error';
   error: string;
 }
 
 export interface SuccessResponse<T extends ResponseData> {
-  status: "success";
+  status: 'success';
   data: T;
 }
 
@@ -52,12 +52,12 @@ export type Result = MatrixResult | VectorResult;
 export type DataTuple = [number, string];
 
 export interface MatrixResponseData {
-  resultType: "matrix";
+  resultType: 'matrix';
   result: MatrixResult[];
 }
 
 export interface VectorResponseData {
-  resultType: "vector";
+  resultType: 'vector';
   result: VectorResult[];
 }
 
@@ -69,13 +69,17 @@ export interface getDataProps {
   time: DateTime;
 }
 
-export type getDataFunction = (props: getDataProps) => Promise<ChartDataset<any, any>>;
+export type getDataFunction = (
+  props: getDataProps
+) => Promise<ChartDataset<any, any>>;
 
 export interface getRateDataProps extends getDataProps {
   rate: TimeDuration;
 }
 
-export type getRateDataFunction = (props: getRateDataProps) => Promise<ChartDataset<any, any>>;
+export type getRateDataFunction = (
+  props: getRateDataProps
+) => Promise<ChartDataset<any, any>>;
 
 export type getDataWrapperFunction = () => Promise<ChartDataset<any, any>>;
 
@@ -109,7 +113,6 @@ export type DurationType = 'ms' | 's' | 'm' | 'h' | 'd' | 'w' | 'y';
 export type TimeDurationString = `${number}${DurationType}`;
 
 export class TimeDuration {
-
   value: number;
   type: DurationType;
 
@@ -119,7 +122,6 @@ export class TimeDuration {
   }
 
   toDuration(): Duration {
-
     switch (this.type) {
       case 'ms':
         return Duration.fromMillis(this.value);
@@ -166,40 +168,52 @@ export async function query_raw<T extends ResponseData>(
     url.searchParams.append('time', time.toString());
   }
 
-  let response = await fetch(url.href)
+  let response = await fetch(url.href);
   if (response.status !== 200) {
     throw new Error(`Prometheus query returned status ${response.status}`);
   }
 
-  let json = await response.json() as Response;
+  let json = (await response.json()) as Response;
 
   if (json.status !== 'success') {
-    throw new Error(json.error)
+    throw new Error(json.error);
   }
 
   return json as SuccessResponse<T>;
 }
 
-interface QueryBasicOptions {
-  metric: string;
-  duration: TimeDuration;
+interface QueryParameters {
   resolution: TimeDuration;
-  time?: DateTime;
+  rate: TimeDuration;
+  time: DateTime;
+  range: TimeDuration;
 }
+
+interface QueryOptions extends QueryParameters {
+  metric: string;
+}
+
+type QueryBasicOptions = Omit<QueryOptions, 'rate'> & {
+  time?: DateTime;
+};
 
 export async function query_basic({
   metric,
-  duration,
+  range,
   resolution,
   time,
 }: QueryBasicOptions): Promise<DataPoint[]> {
-  const query = `${metric}[${duration.toString()}:${resolution.toString()}]`;
-  const queryResponse = await query_raw<MatrixResponseData>(query, time?.toSeconds());
+  const query = `${metric}[${range.toString()}:${resolution.toString()}]`;
+  const queryResponse = await query_raw<MatrixResponseData>(
+    query,
+    time?.toSeconds()
+  );
   return prometheusResultToDataPoints(queryResponse);
 }
 
-export const prometheusResultToDataPoints = (response: SuccessResponse<MatrixResponseData>): DataPoint[] => {
-
+export const prometheusResultToDataPoints = (
+  response: SuccessResponse<MatrixResponseData>
+): DataPoint[] => {
   const result = response.data.result;
 
   if (result.values.length === 0) {
@@ -215,36 +229,49 @@ export const prometheusResultToDataPoints = (response: SuccessResponse<MatrixRes
   });
 
   return data;
-}
+};
 
-interface QueryRateOptions {
-  metric: string;
-  rate: TimeDuration;
-  duration: TimeDuration;
-  resolution: TimeDuration;
+type QueryRateOptions = QueryOptions & {
   time?: DateTime;
-}
+};
 
 export async function query_rate({
   metric,
   rate,
-  duration,
+  range,
   resolution,
-  time
+  time,
 }: QueryRateOptions): Promise<SuccessResponse<MatrixResponseData>> {
-
   // Add a default time
-  if(time == undefined) {
+  if (time == undefined) {
     time = DateTime.now();
   }
 
-  const query = `rate(${metric}[${rate.toString()}])[${duration.toString()}:${resolution.toString()}]`;
+  const query = `rate(${metric}[${rate.toString()}])[${range.toString()}:${resolution.toString()}]`;
   return await query_raw(query, time?.toSeconds());
 }
 
-export type Response = SuccessResponse<MatrixResponseData | VectorResponseData> | ErrorResponse;
+export type Response =
+  | SuccessResponse<MatrixResponseData | VectorResponseData>
+  | ErrorResponse;
 
 export interface PrometheusQuery {
   value: string;
   datasetOptions?: TypeOrTypeFunction<Partial<ChartDataset<'line'>>>;
 }
+
+export const replaceQueryParameters = (
+  q: string,
+  qp: Partial<Omit<QueryOptions, 'time'>>
+): string => {
+  Object.keys(qp).forEach((key) => {
+    const keyValue = qp[key as keyof typeof qp];
+    if (keyValue instanceof TimeDuration) {
+      q = q.replace(
+        new RegExp('\\$\\{' + key + '\\}', 'g'),
+        keyValue.toString()
+      );
+    }
+  });
+  return q;
+};

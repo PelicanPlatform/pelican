@@ -38,7 +38,7 @@ export default function RootLayout({
         <ButtonLink title={'Dashboard'} href={'/director/'}>
           <Dashboard />
         </ButtonLink>
-        <ButtonLink title={"Metrics"} href={'/director/metrics/'}>
+        <ButtonLink title={'Metrics'} href={'/director/metrics/'}>
           <Equalizer />
         </ButtonLink>
         <ButtonLink title={'Map'} href={'/director/map/'}>

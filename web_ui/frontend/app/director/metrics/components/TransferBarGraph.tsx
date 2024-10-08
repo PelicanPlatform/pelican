@@ -5,7 +5,9 @@ import { DateTime } from 'luxon';
 import {
   CategoryScale,
   Chart as ChartJS,
-  ChartDataset, Colors, Legend,
+  ChartDataset,
+  Colors,
+  Legend,
   LinearScale,
   LineElement,
   PointElement,
@@ -13,18 +15,24 @@ import {
   Title,
   Tooltip,
   BarController,
-  BarElement, ChartData,
+  BarElement,
+  ChartData,
 } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
 
-import { useContext, useEffect, useMemo, useState } from 'react';
-
-import {GraphContext, GraphDispatchContext} from '@/app/origin/metrics/components/GraphContext';
-import { query_raw, TimeDuration, VectorResponseData } from '@/components/graphs/prometheus';
+import { useContext } from 'react';
+import {
+  GraphContext,
+  GraphDispatchContext,
+} from '@/components/graphs/GraphContext';
+import {
+  query_raw,
+  TimeDuration,
+  VectorResponseData,
+} from '@/components/graphs/prometheus';
 import 'chartjs-adapter-luxon';
 import useSWR from 'swr';
-import { convertToBiggestBytes, toBytes } from '@/helpers/bytes';
-import { average } from '@/helpers/util';
+import { toBytes } from '@/helpers/bytes';
 
 ChartJS.register(
   TimeScale,
@@ -42,17 +50,28 @@ ChartJS.register(
 );
 
 const TransferBarGraph = () => {
-
   const graphContext = useContext(GraphContext);
   const dispatch = useContext(GraphDispatchContext);
 
-  const {data} = useSWR<ChartDataset<any, any>>(
-    ['transferRateGraph', graphContext.rate, graphContext.range, graphContext.resolution, graphContext.time],
-    () => getData(graphContext.rate, graphContext.range, graphContext.resolution, graphContext.time),
+  const { data } = useSWR<ChartDataset<any, any>>(
+    [
+      'transferRateGraph',
+      graphContext.rate,
+      graphContext.range,
+      graphContext.resolution,
+      graphContext.time,
+    ],
+    () =>
+      getData(
+        graphContext.rate,
+        graphContext.range,
+        graphContext.resolution,
+        graphContext.time
+      ),
     {
-      fallbackData: {datasets: []}
+      fallbackData: { datasets: [] },
     }
-  )
+  );
 
   return (
     <Bar
@@ -61,48 +80,56 @@ const TransferBarGraph = () => {
         maintainAspectRatio: false,
         scales: {
           y: {
-            type: "logarithmic",
+            type: 'logarithmic',
             title: {
               display: true,
-              text: `Transferred Bytes by Path (GB)`
-            }
-          }
-        }
+              text: `Transferred Bytes by Path (GB)`,
+            },
+          },
+        },
       }}
     />
-  )
-}
+  );
+};
 
-const getData = async (rate: TimeDuration, range: TimeDuration, resolution: TimeDuration, time: DateTime): Promise<ChartData<any, any, any>> => {
+const getData = async (
+  rate: TimeDuration,
+  range: TimeDuration,
+  resolution: TimeDuration,
+  time: DateTime
+): Promise<ChartData<any, any, any>> => {
+  const query = `sum by (path,type)(increase(xrootd_transfer_bytes[${range}]))`;
+  const dataResponse = await query_raw<VectorResponseData>(
+    query,
+    time.toSeconds()
+  );
+  const result = dataResponse.data.result;
 
-  const query = `sum by (path,type)(increase(xrootd_transfer_bytes[${range}]))`
-  const dataResponse = await query_raw<VectorResponseData>(query, time.toSeconds())
-  const result = dataResponse.data.result
+  const datasets = result.reduce(
+    (acc, r) => {
+      const path = r.metric.path;
+      const type = r.metric.type;
 
-  const datasets = result.reduce((acc, r) => {
+      acc[path] = {
+        ...acc?.[path],
+        path: path,
+        [type]: Number(r.value[1]),
+      };
 
-    const path = r.metric.path
-    const type = r.metric.type
-
-    acc[path] = {
-      ...acc?.[path],
-      'path': path,
-      [type]: Number(r.value[1])
-    }
-
-    return acc
-
-  }, {} as Record<any, any>)
+      return acc;
+    },
+    {} as Record<any, any>
+  );
 
   return {
     labels: Object.keys(datasets),
     datasets: ['read', 'readv', 'write'].map((type) => {
       return {
         label: type,
-        data: Object.values(datasets).map((d) => toBytes(d[type], "GB").value)
-      }
-    })
-  }
-}
+        data: Object.values(datasets).map((d) => toBytes(d[type], 'GB').value),
+      };
+    }),
+  };
+};
 
 export { TransferBarGraph };

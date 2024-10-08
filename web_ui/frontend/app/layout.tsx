@@ -16,10 +16,9 @@
  *
  ***************************************************************/
 
-import { LocalizationProvider} from '@/clientComponents';
+import { LocalizationProvider } from '@/clientComponents';
 import { ThemeProviderClient } from '@/public/theme';
 import './globals.css';
-
 
 export const metadata = {
   title: 'Pelican Platform',

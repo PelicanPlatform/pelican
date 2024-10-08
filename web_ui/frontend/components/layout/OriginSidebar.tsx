@@ -38,7 +38,7 @@ export const OriginSidebar = () => {
       <ButtonLink title={'Dashboard'} href={'/origin/'}>
         <Dashboard />
       </ButtonLink>
-      <ButtonLink title={"Metrics"} href={'/origin/metrics/'}>
+      <ButtonLink title={'Metrics'} href={'/origin/metrics/'}>
         <Equalizer />
       </ButtonLink>
       {data?.type === 'globus' && (

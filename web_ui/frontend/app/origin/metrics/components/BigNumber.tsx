@@ -12,18 +12,33 @@ import { Line } from 'react-chartjs-2';
 import {
   CategoryScale,
   Chart as ChartJS,
-  ChartDataset, Colors, Filler, Legend,
+  ChartDataset,
+  Colors,
+  Filler,
+  Legend,
   LinearScale,
   LineElement,
   PointElement,
-  TimeScale, Title, Tooltip,
+  TimeScale,
+  Title,
+  Tooltip,
 } from 'chart.js';
 import { default as chroma } from 'chroma-js';
-import { GraphContext } from './GraphContext';
-import { getRateDataFunction, getRateDataProps, MatrixResponseData, query_raw, VectorResponseData } from '@/components';
+import { GraphContext } from '@/components/graphs/GraphContext';
+import {
+  getRateDataFunction,
+  getRateDataProps,
+  MatrixResponseData,
+  query_raw,
+  VectorResponseData,
+} from '@/components';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import useSWR from 'swr';
-import { convertToBiggestBytes, getSmallestByteCategory, toBytes } from '@/helpers/bytes';
+import {
+  convertToBiggestBytes,
+  getSmallestByteCategory,
+  toBytes,
+} from '@/helpers/bytes';
 
 ChartJS.register(
   TimeScale,
@@ -53,115 +68,156 @@ interface DataPoint {
 
 interface BigMetricProps {
   metric: string;
-  finalType?: "sum" | "last";
+  finalType?: 'sum' | 'last';
   title: string;
   color: string;
 }
 
-export const BigMetric = ({metric, finalType = "sum", title, color = '#f3f3f3'}: BigMetricProps) => {
-
-  const {rate, time, range, resolution} = useContext(GraphContext);
+export const BigMetric = ({
+  metric,
+  finalType = 'sum',
+  title,
+  color = '#f3f3f3',
+}: BigMetricProps) => {
+  const { rate, time, range, resolution } = useContext(GraphContext);
 
   const { data } = useSWR(
-    ["getBigNumberData", metric, rate, time, range, resolution],
-    () => getBigDataFunction({metric, rate, time, range, resolution}),
+    ['getBigNumberData', metric, rate, time, range, resolution],
+    () => getBigDataFunction({ metric, rate, time, range, resolution }),
     {
-      fallbackData: []
+      fallbackData: [],
     }
-  )
+  );
 
   const value = useMemo(() => {
-    if(finalType === "sum") {
-      return Math.ceil(data.reduce((acc: number, value: {x: number, y: number}) => acc + value.y, 0))
+    if (finalType === 'sum') {
+      return Math.ceil(
+        data.reduce(
+          (acc: number, value: { x: number; y: number }) => acc + value.y,
+          0
+        )
+      );
     } else {
-      return data.length > 0 ? data[data.length - 1].y : 0
+      return data.length > 0 ? data[data.length - 1].y : 0;
     }
+  }, [data, finalType]);
 
-  }, [data, finalType])
+  return (
+    <BigNumber
+      title={title}
+      value={value.toLocaleString()}
+      data={data}
+      color={color}
+    />
+  );
+};
 
-  return <BigNumber title={title} value={value.toLocaleString()} data={data} color={color}/>
-}
-
-export const BigBytesMetric = ({metric, title, finalType, color = '#f3f3f3'}: BigMetricProps) => {
-
-  const {rate, time, range, resolution} = useContext(GraphContext);
+export const BigBytesMetric = ({
+  metric,
+  title,
+  finalType,
+  color = '#f3f3f3',
+}: BigMetricProps) => {
+  const { rate, time, range, resolution } = useContext(GraphContext);
 
   const { data } = useSWR(
-    ["getBigNumberData", metric, rate, time, range, resolution],
-    () => getBigDataFunction({metric, rate, time, range, resolution}),
+    ['getBigNumberData', metric, rate, time, range, resolution],
+    () => getBigDataFunction({ metric, rate, time, range, resolution }),
     {
-      fallbackData: []
+      fallbackData: [],
     }
-  )
+  );
 
   const dataSum = useMemo(() => {
-    return Math.ceil(data.reduce((acc: number, value: {x: number, y: number}) => acc + value.y, 0))
-  }, [data])
+    return Math.ceil(
+      data.reduce(
+        (acc: number, value: { x: number; y: number }) => acc + value.y,
+        0
+      )
+    );
+  }, [data]);
 
   const largestCompatibleByteValue = useMemo(() => {
-    return convertToBiggestBytes(dataSum)
-  }, [dataSum])
+    return convertToBiggestBytes(dataSum);
+  }, [dataSum]);
 
-  const compatibleData =  useMemo(() => {
-
-    let tempData = structuredClone(data)
+  const compatibleData = useMemo(() => {
+    let tempData = structuredClone(data);
 
     // Convert the array to the largest compatible byte category
     tempData.forEach((d) => {
+      d.y = toBytes(d.y, largestCompatibleByteValue.label).value;
+    });
 
-      d.y = toBytes(d.y, largestCompatibleByteValue.label).value
-    })
+    return tempData;
+  }, [data, largestCompatibleByteValue]);
 
-    return tempData
+  return (
+    <BigNumber
+      data={compatibleData}
+      title={`${title}`}
+      value={`${largestCompatibleByteValue.value.toLocaleString()} ${largestCompatibleByteValue.label}`}
+      color={color}
+    />
+  );
+};
 
-  }, [data, largestCompatibleByteValue])
-
-  return <BigNumber data={compatibleData} title={`${title}`} value={`${largestCompatibleByteValue.value.toLocaleString()} ${largestCompatibleByteValue.label}`} color={color}/>
-}
-
-
-const BigNumber = ({title, value, data, color = '#f3f3f3'}: BigNumberProps) => {
-
+const BigNumber = ({
+  title,
+  value,
+  data,
+  color = '#f3f3f3',
+}: BigNumberProps) => {
   // Have the x-axis start at 0
   const zeroedData = useMemo(() => {
     return data.map((d) => {
-      return {x: d.x - data[0].x, y: d.y}
-    })
-  }, [data])
+      return { x: d.x - data[0].x, y: d.y };
+    });
+  }, [data]);
 
   const chartData = {
-    'datasets': [{
-      label: "filled",
-      data: zeroedData,
-      backgroundColor: chroma(color).alpha(.8).hex(),
-      borderColor: color,
-      fill: true
-    }]
-  }
+    datasets: [
+      {
+        label: 'filled',
+        data: zeroedData,
+        backgroundColor: chroma(color).alpha(0.8).hex(),
+        borderColor: color,
+        fill: true,
+      },
+    ],
+  };
 
   return (
-    <Box position="relative" width="100%" height="100%">
-      <Box position="absolute" bottom={0} left={0} width="100%" zIndex={1}>
+    <Box position='relative' width='100%' height='100%'>
+      <Box position='absolute' bottom={0} left={0} width='100%' zIndex={1}>
         <Box p={3}>
           <Grid
             container
             spacing={2}
-            direction="row"
+            direction='row'
             sx={{
-              justifyContent: "space-between",
-              alignItems: "center"
+              justifyContent: 'space-between',
+              alignItems: 'center',
             }}
           >
             <Grid item>
-              <Typography flexGrow={1} variant={"subtitle1"} fontWeight={"bold"}>{title}</Typography>
+              <Typography
+                flexGrow={1}
+                variant={'subtitle1'}
+                fontWeight={'bold'}
+              >
+                {title}
+              </Typography>
             </Grid>
             <Grid item>
-              <Typography flexGrow={1} variant={"h4"} fontWeight={"bold"}>{value}</Typography>
+              <Typography flexGrow={1} variant={'h4'} fontWeight={'bold'}>
+                {value}
+              </Typography>
             </Grid>
           </Grid>
         </Box>
       </Box>
-      <Box height={"100%"}>
+      <Box height={'100%'}>
         <Line
           data={chartData}
           options={{
@@ -173,7 +229,7 @@ const BigNumber = ({title, value, data, color = '#f3f3f3'}: BigNumberProps) => {
                   round: 'second',
                 },
                 ticks: {
-                  display: false
+                  display: false,
                 },
                 grid: {
                   color: 'rgba(0, 0, 0, 0.1)', // Lighter color for x-axis grid lines
@@ -183,51 +239,58 @@ const BigNumber = ({title, value, data, color = '#f3f3f3'}: BigNumberProps) => {
               y: {
                 min: 0,
                 ticks: {
-                  display: false
+                  display: false,
                 },
                 grid: {
                   color: 'rgba(0, 0, 0, 0.1)', // Lighter color for y-axis grid lines
                   lineWidth: 0.5, // Thinner grid lines
                 },
-              }
+              },
             },
             plugins: {
               legend: {
-                display: false
+                display: false,
               },
               tooltip: {
-                enabled: false // Disable tooltips
-              }
+                enabled: false, // Disable tooltips
+              },
             },
-            animation: false
+            animation: false,
           }}
         />
       </Box>
     </Box>
-  )
-}
+  );
+};
 
 export interface getBigDataFunctionProps extends getRateDataProps {
   metric: string;
 }
 
-export const getBigDataFunction = async ({metric, rate, time, range, resolution}: getBigDataFunctionProps) : Promise<DataPoint[]> => {
-  const query = `sum(increase(${metric}[${resolution}]))[${range}:${resolution}]`
-  const dataResponse = await query_raw<MatrixResponseData>(query, time.toSeconds())
+export const getBigDataFunction = async ({
+  metric,
+  rate,
+  time,
+  range,
+  resolution,
+}: getBigDataFunctionProps): Promise<DataPoint[]> => {
+  const query = `sum(increase(${metric}[${resolution}]))[${range}:${resolution}]`;
+  const dataResponse = await query_raw<MatrixResponseData>(
+    query,
+    time.toSeconds()
+  );
 
   // Check if the data is empty
   if (dataResponse.data.result.length == 0) {
-    return []
+    return [];
   }
 
   // Otherwise parse the data
-  const data = dataResponse.data.result[0].values.map(
-    (value) => {
-      return {x: value[0] * 1000, y: parseFloat(value[1])}
-    }
-  )
+  const data = dataResponse.data.result[0].values.map((value) => {
+    return { x: value[0] * 1000, y: parseFloat(value[1]) };
+  });
 
-  return data
-}
+  return data;
+};
 
 export { BigNumber };

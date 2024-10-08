@@ -5,10 +5,13 @@ import { DateTime } from 'luxon';
 import {
   CategoryScale,
   Chart as ChartJS,
-  ChartDataset, Colors, Legend,
+  ChartDataset,
+  Colors,
+  Legend,
   LinearScale,
   LineElement,
-  PointElement, TimeScale,
+  PointElement,
+  TimeScale,
   Title,
   Tooltip,
 } from 'chart.js';
@@ -16,8 +19,15 @@ import zoomPlugin from 'chartjs-plugin-zoom';
 
 import { useContext, useEffect, useMemo, useState } from 'react';
 
-import {GraphContext, GraphDispatchContext} from './GraphContext';
-import { MatrixResponseData, query_raw, TimeDuration } from '@/components/graphs/prometheus';
+import {
+  GraphContext,
+  GraphDispatchContext,
+} from '@/components/graphs/GraphContext';
+import {
+  MatrixResponseData,
+  query_raw,
+  TimeDuration,
+} from '@/components/graphs/prometheus';
 import 'chartjs-adapter-luxon';
 import useSWR from 'swr';
 import { ByteType, convertToBiggestBytes, toBytes } from '@/helpers/bytes';
@@ -37,34 +47,52 @@ ChartJS.register(
 );
 
 const TransferRateGraph = () => {
-
   const graphContext = useContext(GraphContext);
   const dispatch = useContext(GraphDispatchContext);
 
-  const {data: datasets} = useSWR<ChartDataset<'line', { x: number; y: number }[]>[]>(
-    ['transferRateGraph', graphContext.rate, graphContext.range, graphContext.resolution, graphContext.time],
-    () => getData(graphContext.rate, graphContext.range, graphContext.resolution, graphContext.time),
+  const { data: datasets } = useSWR<
+    ChartDataset<'line', { x: number; y: number }[]>[]
+  >(
+    [
+      'transferRateGraph',
+      graphContext.rate,
+      graphContext.range,
+      graphContext.resolution,
+      graphContext.time,
+    ],
+    () =>
+      getData(
+        graphContext.rate,
+        graphContext.range,
+        graphContext.resolution,
+        graphContext.time
+      ),
     {
-      fallbackData: []
+      fallbackData: [],
     }
-  )
+  );
 
   const byteLabel = useMemo(() => {
-    if(datasets){
-      return convertToBiggestBytes(average(datasets.flatMap(ds => ds.data).map(d => d.y))).label
+    if (datasets) {
+      return convertToBiggestBytes(
+        average(datasets.flatMap((ds) => ds.data).map((d) => d.y))
+      ).label;
     }
-  }, [datasets])
+  }, [datasets]);
 
-  const byteDatasets = useMemo((): ChartDataset<'line', { x: number; y: number }[]>[] => {
-    if(datasets !== undefined && byteLabel !== undefined) {
-      return toBytesDataset(datasets, byteLabel)
+  const byteDatasets = useMemo((): ChartDataset<
+    'line',
+    { x: number; y: number }[]
+  >[] => {
+    if (datasets !== undefined && byteLabel !== undefined) {
+      return toBytesDataset(datasets, byteLabel);
     }
-    return []
-  }, [datasets, byteLabel])
+    return [];
+  }, [datasets, byteLabel]);
 
   const data = {
-    'datasets': byteDatasets
-  }
+    datasets: byteDatasets,
+  };
 
   return (
     <Line
@@ -81,13 +109,13 @@ const TransferRateGraph = () => {
           y: {
             title: {
               display: true,
-              text: `Transfer Rate (${byteLabel}/s)`
-            }
-          }
+              text: `Transfer Rate (${byteLabel}/s)`,
+            },
+          },
         },
         plugins: {
           legend: {
-            display: false
+            display: false,
           },
           zoom: {
             zoom: {
@@ -95,28 +123,31 @@ const TransferRateGraph = () => {
                 enabled: true,
               },
               pinch: {
-                enabled: true
+                enabled: true,
               },
               mode: 'x',
               onZoom: (event) => {
                 dispatch({
-                  type: "setTimeRange",
+                  type: 'setTimeRange',
                   payload: {
                     start: DateTime.fromMillis(event.chart.scales.x.min),
-                    end: DateTime.fromMillis(event.chart.scales.x.max)
-                  }
-                })
-              }
-            }
-          }
-        }
+                    end: DateTime.fromMillis(event.chart.scales.x.max),
+                  },
+                });
+              },
+            },
+          },
+        },
       }}
     />
-  )
-}
+  );
+};
 
-const toBytesDataset = (datasets: ChartDataset<'line', { x: number; y: number }[]>[], byteLabel: ByteType): ChartDataset<'line', { x: number; y: number }[]>[]  => {
-  let byteDatasets = structuredClone(datasets)
+const toBytesDataset = (
+  datasets: ChartDataset<'line', { x: number; y: number }[]>[],
+  byteLabel: ByteType
+): ChartDataset<'line', { x: number; y: number }[]>[] => {
+  let byteDatasets = structuredClone(datasets);
 
   return byteDatasets.map((ds) => {
     return {
@@ -124,36 +155,44 @@ const toBytesDataset = (datasets: ChartDataset<'line', { x: number; y: number }[
       data: ds.data.map((d) => {
         return {
           ...d,
-          y: toBytes(d.y, byteLabel).value
-        }
-      })
-    }
-  })
-}
+          y: toBytes(d.y, byteLabel).value,
+        };
+      }),
+    };
+  });
+};
 
-const getData = async (rate: TimeDuration, range: TimeDuration, resolution: TimeDuration, time: DateTime): Promise<ChartDataset<'line', { x: number; y: number }[]>[]> => {
-
-  const query = `sum by (path, type) (rate(xrootd_transfer_bytes[${rate}]))[${range}:${resolution}]`
-  const dataResponse = await query_raw<MatrixResponseData>(query, time.toSeconds())
+const getData = async (
+  rate: TimeDuration,
+  range: TimeDuration,
+  resolution: TimeDuration,
+  time: DateTime
+): Promise<ChartDataset<'line', { x: number; y: number }[]>[]> => {
+  const query = `sum by (path, type) (rate(xrootd_transfer_bytes[${rate}]))[${range}:${resolution}]`;
+  const dataResponse = await query_raw<MatrixResponseData>(
+    query,
+    time.toSeconds()
+  );
   const datasets = dataResponse.data.result.map((result) => {
     return {
       id: result.metric?.path,
       label: `${result.metric?.type} -> ${result.metric?.path}`,
       data: result.values.map((value) => {
-        return {x: value[0] * 1000, y: parseFloat(value[1])}
-      })
-    }
-  })
+        return { x: value[0] * 1000, y: parseFloat(value[1]) };
+      }),
+    };
+  });
 
   // Filter out the datasets that have no data
-  const filteredDatasets = datasets.filter((dataset) => isDataPresent(dataset.data))
+  const filteredDatasets = datasets.filter((dataset) =>
+    isDataPresent(dataset.data)
+  );
 
-  return filteredDatasets
-}
+  return filteredDatasets;
+};
 
-const isDataPresent = (data: {x: any, y: number}[]) => {
-
-  return data.map((data) => data.y != 0).includes(true)
-}
+const isDataPresent = (data: { x: any; y: number }[]) => {
+  return data.map((data) => data.y != 0).includes(true);
+};
 
 export { TransferRateGraph };

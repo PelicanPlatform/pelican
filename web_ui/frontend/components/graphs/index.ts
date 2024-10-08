@@ -1,1 +1,1 @@
-export * from './prometheus'
+export * from './prometheus';

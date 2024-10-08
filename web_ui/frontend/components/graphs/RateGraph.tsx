@@ -27,10 +27,7 @@ import { DateTime } from 'luxon';
 
 import 'chartjs-adapter-luxon';
 
-import {
-  BoxProps,
-  Grid
-} from '@mui/material';
+import { BoxProps, Grid } from '@mui/material';
 
 import {
   query_rate,
@@ -185,10 +182,10 @@ export default function RateGraph({
           const queryResponse = await query_rate({
             metric,
             rate: _rate,
-            duration: _duration,
+            range: _duration,
             resolution: _resolution,
             time: updatedTime,
-          })
+          });
 
           const dataPoints = prometheusResultToDataPoints(queryResponse);
 
@@ -223,47 +220,4 @@ export default function RateGraph({
       boxProps={boxProps}
     />
   );
-}
-
-const executePreciseQuery = async (query: PrometheusPreciseQuery, rate: TimeDuration, duration: TimeDuration, resolution: TimeDuration, time: DateTime)=> {
-
-  let updatedTime = time;
-  if (updatedTime.hasSame(DateTime.now(), 'day')) {
-    updatedTime = DateTime.now();
-  }
-
-  const dataResponse = await query_rate({
-    metric: query.value,
-    rate: rate,
-    duration: duration,
-    resolution: resolution,
-    time: updatedTime,
-  })
-
-  const dataPoints = prometheusResultToDataPoints(dataResponse);
-
-  const dataset = {
-    data: dataPoints,
-    ...query?.datasetOptions
-  };
-
-  return dataset
-}
-
-const executeGeneralQuery = async(query: PrometheusGeneralQuery, rate: TimeDuration, duration: TimeDuration, resolution: TimeDuration, time: DateTime) => {
-
-  let updatedTime = time;
-  if (updatedTime.hasSame(DateTime.now(), 'day')) {
-    updatedTime = DateTime.now();
-  }
-
-  const dataResponse = await query_rate({
-    metric: query.value,
-    rate: rate,
-    duration: duration,
-    resolution: resolution,
-    time: updatedTime,
-  })
-
-
 }

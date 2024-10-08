@@ -57,7 +57,7 @@ const defaultOptions: Partial<ChartOptions<'line'>> = {
 };
 
 interface GraphProps {
-  getData: getDataWrapperFunction
+  getData: getDataWrapperFunction;
   drawer?: any;
   options?: ChartOptions<'line'>;
   boxProps?: BoxProps;
@@ -69,14 +69,16 @@ export default function Graph({
   boxProps,
   drawer,
 }: GraphProps) {
-
   const randomString = useRef<string>(Math.random().toString(36).substring(7));
-  const {data, isLoading, error, mutate} = useSWR('projectData' + randomString.current, getData)
+  const { data, isLoading, error, mutate } = useSWR(
+    'projectData' + randomString.current,
+    getData
+  );
 
   // Anytime the getter changes lets update the data accordingly
   useEffect(() => {
-    mutate()
-  }, [getData])
+    mutate();
+  }, [getData]);
 
   useEffect(() => {
     ChartJS.register(
@@ -93,7 +95,7 @@ export default function Graph({
     );
   }, []);
 
-  console.log(data)
+  console.log(data);
 
   return (
     <Box>
