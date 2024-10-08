@@ -82,6 +82,17 @@ const CPUGraph = () => {
             type: 'time',
             time: {
               round: 'second',
+              displayFormats: {
+                'millisecond': 'LLL d, HH:mm, HH:mm',
+                'second': 'LLL d, HH:mm',
+                'minute': 'LLL d, HH:mm',
+                'hour': 'LLL d, HH:mm',
+                'day': 'LLL d, HH:mm',
+                'week': 'LLL d, HH:mm',
+                'month': 'LLL d, HH:mm',
+                'quarter': 'LLL d, HH:mm',
+                'year': 'LLL d, HH:mm',
+              }
             },
           },
           y: {
