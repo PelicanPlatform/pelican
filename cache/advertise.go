@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -125,6 +126,7 @@ func (server *CacheServer) filterAdsBasedOnNamespace(nsAds []server_structs.Name
 func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 	// Get the endpoint of the director
 	var respNS []server_structs.NamespaceAdV2
+	var x509ClientAuths []string
 
 	fedInfo, err := config.GetFederation(context.Background())
 	if err != nil {
@@ -180,6 +182,28 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 	}
 
 	server.SetNamespaceAds(respNS)
+
+	// Grab the list of x509 client authentication prefixes from the director
+	directorX509ListEndpointURL, err := url.JoinPath(directorEndpointURL.String(), "api", "v1.0", "director", "listX509ClientPrefixes")
+	if err != nil {
+		return err
+	}
+	x509Response, err := utils.MakeRequest(context.Background(), tr, directorX509ListEndpointURL, "GET", nil, nil)
+	if err != nil {
+		// Need to account for an old version of the director
+		if strings.Contains(err.Error(), "404") {
+			viper.Set("Cache.X509ClientAuthenticationPrefixes", []string{})
+		} else {
+			return errors.Wrap(err, "Failed to make request")
+		}
+	} else {
+		err = json.Unmarshal(x509Response, &x509ClientAuths)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to marshal response in to string slice: %v", err)
+		}
+	}
+
+	viper.Set("Cache.X509ClientAuthenticationPrefixes", x509ClientAuths)
 
 	return nil
 }
