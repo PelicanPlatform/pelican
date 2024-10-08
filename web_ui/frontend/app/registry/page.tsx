@@ -223,7 +223,10 @@ export default function Home() {
               <NamespaceCardList<CardProps>
                 data={approvedNamespaceData}
                 Card={Card}
-                cardProps={{ authenticated: user }}
+                cardProps={{
+                  authenticated: user,
+                  onUpdate: _setData,
+                }}
               />
             )}
           {approvedNamespaceData !== undefined &&

@@ -17,7 +17,7 @@ export interface DeniedCardProps {
   authenticated?: User;
 }
 
-const deleteNamespace = async (id: number) => {
+export const deleteNamespace = async (id: number) => {
   const response = await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}`, {
     method: 'DELETE',
   });

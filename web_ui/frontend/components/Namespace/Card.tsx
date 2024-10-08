@@ -1,4 +1,4 @@
-import { Namespace } from '@/index';
+import { Alert, Alert as AlertType, Namespace } from '@/index';
 import React, { useRef, useState } from 'react';
 import {
   Avatar,
@@ -8,22 +8,26 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { Download, Edit, Person } from '@mui/icons-material';
+import { Delete, Download, Edit, Person } from '@mui/icons-material';
 import Link from 'next/link';
 
 import InformationDropdown from './InformationDropdown';
 import { NamespaceIcon } from '@/components/Namespace/index';
 import { User } from '@/index';
+import { deleteNamespace } from './DeniedCard';
+import { useSWRConfig } from 'swr';
 
 export interface CardProps {
   namespace: Namespace;
+  onUpdate?: () => void;
   authenticated?: User;
 }
 
-export const Card = ({ namespace, authenticated }: CardProps) => {
+export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
   const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
-
+  const [alert, setAlert] = useState<AlertType | undefined>(undefined);
+  const { mutate } = useSWRConfig();
   return (
     <Paper elevation={transition ? 2 : 0}>
       <Box
@@ -73,17 +77,45 @@ export const Card = ({ namespace, authenticated }: CardProps) => {
               </a>
             </Tooltip>
             {authenticated?.role == 'admin' && (
-              <Tooltip title={'Edit Registration'}>
-                <Link
-                  href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}
-                >
-                  <IconButton
-                    onClick={(e: React.MouseEvent) => e.stopPropagation()}
+              <>
+                <Tooltip title={'Edit Registration'}>
+                  <Link
+                    href={`/registry/${namespace.type}/edit/?id=${namespace.id}`}
                   >
-                    <Edit />
+                    <IconButton
+                      onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    >
+                      <Edit />
+                    </IconButton>
+                  </Link>
+                </Tooltip>
+                <Tooltip title={'Delete Registration'}>
+                  <IconButton
+                    sx={{ bgcolor: '#ff00001a', mx: 1 }}
+                    color={'error'}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      try {
+                        await deleteNamespace(namespace.id);
+                        setAlert({
+                          severity: 'success',
+                          message: 'Registration deleted',
+                        });
+                        setTimeout(() => mutate('getNamespaces'), 600);
+                        if(onUpdate){
+                          onUpdate();
+                        }
+                      } catch (e) {
+                        if (e instanceof Error) {
+                          setAlert({ severity: 'error', message: e.message });
+                        }
+                      }
+                    }}
+                  >
+                    <Delete />
                   </IconButton>
-                </Link>
-              </Tooltip>
+                </Tooltip>
+              </>
             )}
           </Box>
         </Box>
