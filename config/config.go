@@ -44,11 +44,11 @@ import (
 	"github.com/go-playground/validator/v10"
 	en_translations "github.com/go-playground/validator/v10/translations/en"
 	"github.com/pkg/errors"
+	"github.com/pressly/goose/v3"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
-	"github.com/pressly/goose/v3"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
@@ -752,6 +752,7 @@ func setWebConfigOverride(v *viper.Viper, configPath string) error {
 
 // Custom goose logger
 type CustomGooseLogger struct{}
+
 func (l CustomGooseLogger) Printf(format string, v ...interface{}) {
 	log.Infof(format, v...)
 }
@@ -932,10 +933,10 @@ func PrintPelicanVersion(out *os.File) {
 }
 
 func LogPelicanVersion() {
-	log.Debugf("Version: %s", GetVersion())
-	log.Debugf("Build Date: %s", GetBuiltDate())
-	log.Debugf("Build Commit: %s", GetBuiltCommit())
-	log.Debugf("Built By: %s", GetBuiltBy())
+	log.Infoln("Version:", GetVersion())
+	log.Infoln("Build Date:", GetBuiltDate())
+	log.Infoln("Build Commit:", GetBuiltCommit())
+	log.Infoln("Built By:", GetBuiltBy())
 }
 
 // Print Pelican configuration to stderr
