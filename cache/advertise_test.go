@@ -111,13 +111,17 @@ func TestFilterNsAdsForCache(t *testing.T) {
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		jsonbytes, err := json.Marshal(nsAds)
-		require.NoError(t, err)
+		if req.URL.String() == "/api/v2.0/director/listNamespaces" {
+			jsonbytes, err := json.Marshal(nsAds)
+			require.NoError(t, err)
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, err = w.Write(jsonbytes)
-		require.NoError(t, err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(jsonbytes)
+			require.NoError(t, err)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer ts.Close()
 
@@ -142,4 +146,82 @@ func TestFilterNsAdsForCache(t *testing.T) {
 
 		})
 	}
+}
+
+func TestGetX509PrefixesFromDirector(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+
+	nsAds := []server_structs.NamespaceAdV2{}
+	directorPrefixes := []string{"pref1", "pref2", "pref3"}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.String() == "/api/v2.0/director/listNamespaces" {
+			jsonbytes, err := json.Marshal(nsAds)
+			require.NoError(t, err)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(jsonbytes)
+			require.NoError(t, err)
+		} else {
+			jsonbytes, err := json.Marshal(directorPrefixes)
+			require.NoError(t, err)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(jsonbytes)
+			require.NoError(t, err)
+		}
+	}))
+	defer ts.Close()
+
+	cacheServer := &CacheServer{}
+
+	err := config.InitClient()
+	require.NoError(t, err)
+	viper.Set("Federation.DirectorURL", ts.URL)
+	err = cacheServer.GetNamespaceAdsFromDirector()
+	require.NoError(t, err)
+	cachePrefixes := viper.Get("Cache.X509ClientAuthenticationPrefixes")
+	require.Equal(t, directorPrefixes, cachePrefixes)
+}
+
+func TestGetX509PrefixesFromDirectorEmpty(t *testing.T) {
+	viper.Reset()
+	defer viper.Reset()
+
+	nsAds := []server_structs.NamespaceAdV2{}
+	directorPrefixes := []string{}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.String() == "/api/v2.0/director/listNamespaces" {
+			jsonbytes, err := json.Marshal(nsAds)
+			require.NoError(t, err)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(jsonbytes)
+			require.NoError(t, err)
+		} else {
+			jsonbytes, err := json.Marshal(directorPrefixes)
+			require.NoError(t, err)
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(jsonbytes)
+			require.NoError(t, err)
+		}
+	}))
+	defer ts.Close()
+
+	cacheServer := &CacheServer{}
+
+	err := config.InitClient()
+	require.NoError(t, err)
+	viper.Set("Federation.DirectorURL", ts.URL)
+	err = cacheServer.GetNamespaceAdsFromDirector()
+	require.NoError(t, err)
+	cachePrefixes := viper.Get("Cache.X509ClientAuthenticationPrefixes")
+	require.Equal(t, directorPrefixes, cachePrefixes)
 }
