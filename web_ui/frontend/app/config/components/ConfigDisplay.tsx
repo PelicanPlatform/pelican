@@ -56,7 +56,7 @@ export function NonMemoizedConfigDisplay({
 
         return (
           <Box key={name}>
-            { !omitLabels && label}
+            {!omitLabels && label}
             <ConfigField
               metadata={parameterMetadata}
               value={name in patch ? patch[name] : config?.[name]}
@@ -76,7 +76,7 @@ interface ConfigFieldProps {
   value: ParameterValue;
   onChange: (patch: any) => void;
   focused: boolean;
-  showDescription?: boolean
+  showDescription?: boolean;
 }
 
 export const ConfigField = ({
@@ -84,10 +84,9 @@ export const ConfigField = ({
   value,
   onChange,
   focused,
-  showDescription = false
+  showDescription = false,
 }: ConfigFieldProps) => {
-
-  const [expandDescription, setExpandDescription] = useState(false)
+  const [expandDescription, setExpandDescription] = useState(false);
 
   return (
     <Box>
@@ -99,13 +98,15 @@ export const ConfigField = ({
             onChange={onChange}
             focused={focused}
           />
-          { metadata.description && showDescription && expandDescription &&
+          {metadata.description && showDescription && expandDescription && (
             <Box p={1} bgcolor={grey[100]} borderRadius={1} mb={1}>
-              <Typography variant={'body2'}><MarkdownRender content={metadata.description} /></Typography>
+              <Typography variant={'body2'}>
+                <MarkdownRender content={metadata.description} />
+              </Typography>
             </Box>
-          }
+          )}
         </Box>
-        { !showDescription &&
+        {!showDescription && (
           <Button
             size={'small'}
             href={`https://docs.pelicanplatform.org/parameters#${metadata.name.split('.').join('-')}`}
@@ -113,17 +114,16 @@ export const ConfigField = ({
           >
             <QuestionMark />
           </Button>
-        }
-        { showDescription &&
+        )}
+        {showDescription && (
           <Button
             size={'small'}
             onClick={() => setExpandDescription(!expandDescription)}
           >
             <QuestionMark />
           </Button>
-        }
+        )}
       </Box>
-
     </Box>
   );
 };
