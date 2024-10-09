@@ -24,7 +24,7 @@ import {
   Typography,
   Snackbar,
   Button,
-  IconButton,
+  IconButton, Alert,
 } from '@mui/material';
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -65,7 +65,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
   const {
     data,
     mutate,
-    error,
+    error
   } = useSWR<ParameterValueRecord>('getConfig', getConfig);
   const { data: enabledServers } = useSWR<ServerType[]>(
     'getEnabledServers',
@@ -94,6 +94,8 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
     );
   }, [serverConfig, patch]);
 
+  console.error(error, data)
+
   return (
     <>
       <Sidebar>
@@ -120,7 +122,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
       </Sidebar>
       <Main>
         <PaddedContent>
-          <AuthenticatedContent redirect={true}>
+          <AuthenticatedContent redirect={true} trustThenValidate={true}>
             <Box display={'flex'} flexDirection={'row'}>
               <Typography variant={'h4'} component={'h2'} mb={1}>
                 Configuration
@@ -141,6 +143,11 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
             </Box>
             <Grid container spacing={2}>
               <Grid item xs={12} md={8} lg={6}>
+                <Box>
+                  {error && (
+                    <Alert severity={'warning'}>{(error as Error).message}</Alert>
+                  )}
+                </Box>
                 <ConfigDisplay
                   config={serverConfig}
                   patch={patch}
@@ -210,8 +217,15 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
 
 const getConfig = async (): Promise<ParameterValueRecord> => {
   let response = await fetch('/api/v1.0/config');
-  let data = await response.json();
-  return data;
+
+  if(!response.ok) {
+    if(response.status == 401) {
+      throw new Error('You must be logged in to view and access the config');
+    }
+    throw new Error('Failed to fetch config');
+  }
+
+  return await response.json();
 }
 
 export default Config;
