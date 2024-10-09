@@ -12,7 +12,6 @@ const MarkdownRender: React.FC<{ content: string }> = ({ content }) => {
     // Define components directly within the components prop to ensure type alignment
     return (
         <Markdown
-            children={content}
             components={{
                 // Inline code
                 code: ({className, children, ...props}) => {
@@ -35,15 +34,18 @@ const MarkdownRender: React.FC<{ content: string }> = ({ content }) => {
                         return <code style={inlineStyle} {...props}>{children}</code>;
                     }
                     // For code blocks
-                    return <SyntaxHighlighter
-                                PreTag="div"
-                                children={String(children).replace(/\n$/, '')}
-                                language={match[1]}
-                                style={stackoverflowLight}
-                                customStyle={{background: ""}}
-                                codeTagProps={{style: {display: "inline"}}}
-                                wrapLines
-                         />;
+                    return (
+                        <SyntaxHighlighter
+                            PreTag="div"
+                            language={match[1]}
+                            style={stackoverflowLight}
+                            customStyle={{background: ""}}
+                            codeTagProps={{style: {display: "inline"}}}
+                            wrapLines
+                        >
+                          {String(children).replace(/\n$/, '')}
+                        </SyntaxHighlighter>
+                    )
                 },
                 // Block-level code
                 pre: ({children, ...props}) => {
@@ -79,8 +81,10 @@ const MarkdownRender: React.FC<{ content: string }> = ({ content }) => {
                 text: ({ children }) => <Typography variant="body1" display="inline">{children}</Typography>,
                 div: ({children}) => <Box>{children}</Box>,
             }}
-        />
-    );
+        >
+          {content}
+        </Markdown>
+    )
 };
 
 export interface CodeBlockProps {
