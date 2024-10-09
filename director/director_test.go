@@ -141,7 +141,7 @@ func TestDirectorRegistration(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	viper.Reset()
+	server_utils.ResetTestState()
 
 	// Mock registry server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -1077,7 +1077,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	viper.Reset()
+	server_utils.ResetTestState()
 	// Direcor SD will only be used for director's Prometheus scraper to get available origins,
 	// so the token issuer is issentially the director server itself
 	// There's no need to rely on Federation.DirectorUrl as token issuer in this case
@@ -1369,7 +1369,7 @@ func TestRedirects(t *testing.T) {
 		expectedPath = "/api/v1.0/director/object/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
-		viper.Reset()
+		server_utils.ResetTestState()
 	})
 
 	t.Run("redirect-middleware", func(t *testing.T) {
@@ -1459,7 +1459,7 @@ func TestRedirects(t *testing.T) {
 		expectedPath = "/api/v1.0/director/origin/foo/bar"
 		assert.Equal(t, expectedPath, c.Request.URL.Path)
 
-		viper.Reset()
+		server_utils.ResetTestState()
 	})
 
 	t.Run("cache-test-file-redirect", func(t *testing.T) {
@@ -1476,9 +1476,9 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("redirect-link-header-length", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		t.Cleanup(func() {
-			viper.Reset()
+			server_utils.ResetTestState()
 		})
 
 		viper.Set("Director.CacheSortMethod", "random")
@@ -1511,9 +1511,9 @@ func TestRedirects(t *testing.T) {
 
 	// Make sure collections-url is correctly populated when the ns/origin comes from topology
 	t.Run("collections-url-from-topology", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		t.Cleanup(func() {
-			viper.Reset()
+			server_utils.ResetTestState()
 		})
 
 		viper.Set("Director.CacheSortMethod", "random")
@@ -1538,9 +1538,9 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("object-endpoint-returns-all-headers", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		t.Cleanup(func() {
-			viper.Reset()
+			server_utils.ResetTestState()
 		})
 
 		viper.Set("Director.CacheSortMethod", "random")
@@ -1561,9 +1561,9 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("origin-endpoint-returns-all-headers", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		t.Cleanup(func() {
-			viper.Reset()
+			server_utils.ResetTestState()
 		})
 
 		viper.Set("Director.CacheSortMethod", "random")

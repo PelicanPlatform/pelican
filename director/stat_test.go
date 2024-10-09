@@ -37,10 +37,11 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func TestQueryServersForObject(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	viper.Set("Director.MinStatResponse", 1)
 	viper.Set("Director.MaxStatResponse", 1)
 	viper.Set("Director.StatTimeout", time.Microsecond*200)
@@ -216,7 +217,7 @@ func TestQueryServersForObject(t *testing.T) {
 		cleanupMock()
 		// Restore the old serverAds at the end of this test func
 		serverAds = oldAds
-		viper.Reset()
+		server_utils.ResetTestState()
 	})
 
 	t.Run("empty-server-ads-returns", func(t *testing.T) {
@@ -698,7 +699,7 @@ func TestQueryServersForObject(t *testing.T) {
 }
 
 func TestSendHeadReq(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 
 	// Start a local HTTP server
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {

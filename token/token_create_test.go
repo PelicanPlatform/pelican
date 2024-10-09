@@ -205,7 +205,7 @@ func TestCreateToken(t *testing.T) {
 	defer cancel()
 
 	// Some viper pre-requisites
-	viper.Reset()
+	config.ResetConfig()
 	viper.Set("IssuerUrl", "https://my-issuer.com")
 	tDir := t.TempDir()
 	kfile := filepath.Join(tDir, "testKey")

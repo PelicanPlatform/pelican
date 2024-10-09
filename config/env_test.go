@@ -35,7 +35,7 @@ func TestOsdfEnvToPelican(t *testing.T) {
 	hook := test.NewGlobal()
 
 	t.Run("non-osdf-prefix-does-nothing", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		testingPreferredPrefix = PelicanPrefix
 
 		os.Setenv("OSDF_MOCK", "randomStr")
@@ -49,7 +49,7 @@ func TestOsdfEnvToPelican(t *testing.T) {
 	})
 
 	t.Run("one-osdf-env", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		hook.Reset()
 		testingPreferredPrefix = OsdfPrefix
 
@@ -67,7 +67,7 @@ func TestOsdfEnvToPelican(t *testing.T) {
 	})
 
 	t.Run("one-stash-env", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		hook.Reset()
 		testingPreferredPrefix = StashPrefix
 
@@ -85,7 +85,7 @@ func TestOsdfEnvToPelican(t *testing.T) {
 	})
 
 	t.Run("complex-osdf-env", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		hook.Reset()
 		testingPreferredPrefix = OsdfPrefix
 
@@ -102,7 +102,7 @@ func TestOsdfEnvToPelican(t *testing.T) {
 	})
 
 	t.Run("pelican-env-still-works", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		hook.Reset()
 		testingPreferredPrefix = OsdfPrefix
 
@@ -129,7 +129,7 @@ func TestOsdfEnvToPelican(t *testing.T) {
 	})
 
 	t.Run("pelican-env-overwrites-osdf", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		hook.Reset()
 		testingPreferredPrefix = OsdfPrefix
 

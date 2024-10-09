@@ -271,3 +271,10 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 		}
 	})
 }
+
+// Reset the testing state, including:
+// 1. viper settings, 2. preferred prefix, 3. transport object, 4. Federation metadata, 5. origin exports
+func ResetTestState() {
+	config.ResetConfig()
+	ResetOriginExports()
+}
