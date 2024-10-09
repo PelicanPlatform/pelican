@@ -81,7 +81,7 @@ echo "Token created"
 cat get_put_tmp/test-token.jwt
 
 # Run federation in the background
-federationServe="./pelican serve --module director --module registry --module origin -d"
+federationServe="./pelican serve --module director --module registry --module origin --module cache -d"
 $federationServe &
 pid_federationServe=$!
 
@@ -148,7 +148,10 @@ else
     exit 1
 fi
 
-./pelican object get pelican://$HOSTNAME:8444/test/input.txt get_put_tmp/output.txt -d -t get_put_tmp/test-token.jwt -L get_put_tmp/getOutput.txt
+# Run curl get with tls
+curl -v -k -L https://localhost:8444/test/blocked/input.txt --tlsv1.3 --cert /etc/pelican/certificates/tls.crt --key /etc/pelican/certificates/tls.key &> get_put_tmp/getOutput.txt
+
+./pelican object get pelican://$HOSTNAME:8444/test/input.txt get_put_tmp/output.txt?directreads -d -t get_put_tmp/test-token.jwt -L get_put_tmp/getOutput.txt
 
 # Check output of command
 if grep -q "HTTP Transfer was successful" get_put_tmp/getOutput.txt; then
