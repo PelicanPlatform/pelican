@@ -21,13 +21,11 @@ package client
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"runtime/debug"
 
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
-
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Single-shot call to prestage a single prefix
@@ -43,28 +41,9 @@ func DoPrestage(ctx context.Context, prefixUrl string, options ...TransferOption
 	}()
 
 	// Parse the source with URL parse
-	remotePrefix, remotePrefixScheme := correctURLWithUnderscore(prefixUrl)
-	remotePrefixUrl, err := url.Parse(remotePrefix)
+	pUrl, err := pelican_url.Parse(prefixUrl, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
 	if err != nil {
-		log.Errorln("Failed to parse source URL:", err)
-		return nil, err
-	}
-
-	// Check if we have a query and that it is understood
-	err = utils.CheckValidQuery(remotePrefixUrl)
-	if err != nil {
-		return
-	}
-
-	remotePrefixUrl.Scheme = remotePrefixScheme
-
-	// This is for condor cases:
-	remotePrefixScheme, _ = getTokenName(remotePrefixUrl)
-
-	// Check if we understand the found url scheme
-	err = schemeUnderstood(remotePrefixScheme)
-	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "failed to parse source URL: %s", prefixUrl)
 	}
 
 	success := false
@@ -83,7 +62,7 @@ func DoPrestage(ctx context.Context, prefixUrl string, options ...TransferOption
 	if err != nil {
 		return
 	}
-	tj, err := tc.NewPrestageJob(context.Background(), remotePrefixUrl)
+	tj, err := tc.NewPrestageJob(context.Background(), pUrl.GetRawUrl())
 	if err != nil {
 		return
 	}

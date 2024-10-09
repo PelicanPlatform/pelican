@@ -20,6 +20,7 @@ package client
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -33,6 +34,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	jwt "github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -41,7 +43,10 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	oauth2 "github.com/pelicanplatform/pelican/oauth2"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 type (
@@ -60,7 +65,7 @@ type (
 	// of the process.
 	tokenGenerator struct {
 		DirResp       *server_structs.DirectorResponse
-		Destination   *url.URL
+		Destination   *pelican_url.PelicanURL
 		TokenLocation string
 		TokenName     string
 		IsWrite       bool
@@ -79,7 +84,7 @@ type (
 	}
 )
 
-func newTokenGenerator(dest *url.URL, dirResp *server_structs.DirectorResponse, isWrite bool, enableAcquire bool) *tokenGenerator {
+func newTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, isWrite bool, enableAcquire bool) *tokenGenerator {
 	return &tokenGenerator{
 		DirResp:       dirResp,
 		Destination:   dest,
@@ -342,7 +347,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 	potentialTokens := make([]tokenInfo, 0)
 
 	if tg.TokenName == "" {
-		_, tg.TokenName = getTokenName(tg.Destination)
+		tg.TokenName = tg.Destination.GetTokenName()
 	}
 
 	opts := config.TokenGenerationOpts{
@@ -388,7 +393,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 			opts.Operation = config.TokenSharedWrite
 		}
 		var contents string
-		contents, err = AcquireToken(tg.Destination, *tg.DirResp, opts)
+		contents, err = AcquireToken(tg.Destination.GetRawUrl(), *tg.DirResp, opts)
 		if err == nil && contents != "" {
 			valid, expiry := tokenIsValid(contents)
 			info := tokenInfo{contents, expiry}
@@ -599,7 +604,15 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 	}
 	var prefixEntry *config.PrefixEntry
 	newEntry := false
+	tryTokenGen := false
 	if prefixIdx < 0 {
+		// We prefer to generate a token over registering a new client.
+		if token, err := generateToken(destination, dirResp, opts); err == nil && token != "" {
+			log.Debugln("Successfully generated a new token from a local key")
+			return token, nil
+		}
+		tryTokenGen = true
+
 		log.Infof("Prefix configuration for %s not in configuration file; will request new client", nsPrefix)
 		prefixEntry, err = registerClient(dirResp)
 		if err != nil {
@@ -611,6 +624,14 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 	} else {
 		prefixEntry = &osdfConfig.OSDF.OauthClient[prefixIdx]
 		if len(prefixEntry.ClientID) == 0 || len(prefixEntry.ClientSecret) == 0 {
+
+			// Similarly, here, generate a token before registering a new client.
+			if token, err := generateToken(destination, dirResp, opts); err == nil && token != "" {
+				log.Debugln("Successfully generated a new token from a local key")
+				return token, nil
+			}
+			tryTokenGen = true
+
 			log.Infof("Prefix configuration for %s missing OAuth2 client information", nsPrefix)
 			prefixEntry, err = registerClient(dirResp)
 			if err != nil {
@@ -687,6 +708,15 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		}
 	}
 
+	// If here, we've got a valid OAuth2 client credential but didn't have any luck refreshing -
+	// try generating the token before requiring a potentially user-interactive flow.
+	if !tryTokenGen {
+		if token, err := generateToken(destination, dirResp, opts); err == nil && token != "" {
+			log.Debugln("Successfully generated a new token from a local key")
+			return token, nil
+		}
+	}
+
 	token, err := oauth2.AcquireToken(issuer, prefixEntry, dirResp, destination.Path, opts)
 	if errors.Is(err, oauth2.ErrUnknownClient) {
 		// We use anonymously-registered clients; OA4MP can periodically garbage collect these to prevent DoS
@@ -716,4 +746,109 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 	}
 
 	return token.AccessToken, nil
+}
+
+// Given a URL and a known public key, determine whether the public key
+// is valid for the issuer URL.
+//
+// If valid, returns the corresponding keyId and sets found to true.
+func findKeyId(url string, ecPubKey *ecdsa.PublicKey) (keyid string, found bool) {
+	// Next, download the public keys for the issuer
+	ctx := context.Background()
+	issuerInfo, err := config.GetIssuerMetadata(url)
+	if err != nil {
+		log.Debugln("Failed to get metadata for", url, ":", err)
+		return
+	}
+	client := &http.Client{Transport: config.GetTransport()}
+	fetchOption := jwk.WithHTTPClient(client)
+	jwks, err := jwk.Fetch(ctx, issuerInfo.JwksUri, fetchOption)
+	if err != nil {
+		log.Debugln("Failed to fetch the JWKS:", err)
+		return
+	}
+	keyIter := jwks.Keys(ctx)
+	for keyIter.Next(ctx) {
+		pair := keyIter.Pair()
+		key, ok := pair.Value.(jwk.Key)
+		if !ok {
+			log.Debugln("Decode of JWK in return JWKS failed")
+			continue
+		}
+		var ecPubKey2 ecdsa.PublicKey
+		if err = key.Raw(&ecPubKey2); err != nil {
+			log.Debugln("Failed to convert public key:", err)
+			continue
+		}
+		if ecPubKey2.Equal(ecPubKey) {
+			return key.KeyID(), true
+		}
+	}
+	return
+}
+
+// Check to see if there's a copy of the issuer's pubkey locally; if so, generate an appropriate token directly.
+func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse, opts config.TokenGenerationOpts) (tkn string, err error) {
+	// Check to see if a private key is installed locally
+	key, err := config.GetIssuerPrivateJWK()
+	if err != nil {
+		log.Debugln("Cannot generate a token locally as private key is not present:", err)
+		return
+	}
+	log.Debugln("Trying to generate a token locally from issuer private key")
+	pubKey, err := key.PublicKey()
+	if err != nil {
+		log.Debugln("Cannot generate a token locally as the public key cannot be generated:", err)
+		return
+	}
+	var ecPubKey ecdsa.PublicKey
+	if err = pubKey.Raw(&ecPubKey); err != nil {
+		log.Debugln("Failed to convert JWT pub key to ECDSA:", err)
+		return
+	}
+
+	log.Debugln("Searching issuer public keys for matching key")
+	// Next, download the public keys for the issuer
+	var found bool
+	var keyId, issuer string
+	for _, issuerUrl := range dirResp.XPelAuthHdr.Issuers {
+		if issuerUrl == nil {
+			continue
+		}
+		issuer = issuerUrl.String()
+		keyId, found = findKeyId(issuer, &ecPubKey)
+		if found {
+			break
+		}
+	}
+	if !found {
+		log.Debugln("Failed to find public key at issuer corresponding to local public key")
+		return
+	}
+
+	tc, err := token.NewTokenConfig(token.TokenProfileWLCG)
+	if err != nil {
+		return
+	}
+	tc.AddAudienceAny()
+	tc.Issuer = issuer
+	tc.Lifetime = time.Hour
+	tc.Subject = "client_token"
+	ts := token_scopes.Storage_Read
+	if opts.Operation == config.TokenSharedWrite {
+		ts = token_scopes.Storage_Create
+	}
+	if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
+		tc.AddResourceScopes(token_scopes.NewResourceScope(ts, after))
+	} else {
+		err = errors.New("Destination resource not inside director-provided namespace")
+		return
+	}
+
+	err = key.Set("kid", keyId)
+	if err != nil {
+		return
+	}
+	tkn, err = tc.CreateTokenWithKey(key)
+	return
 }

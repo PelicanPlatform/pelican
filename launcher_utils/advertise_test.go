@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -41,7 +42,7 @@ func TestGetSitenameFromReg(t *testing.T) {
 
 	t.Run("no-registry-url", func(t *testing.T) {
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{})
+		config.SetFederation(pelican_url.FederationDiscovery{})
 		sitename, err := getSitenameFromReg(context.Background(), "/foo")
 		require.Error(t, err)
 		assert.Equal(t, "unable to fetch site name from the registry. Federation.RegistryUrl or Federation.DiscoveryUrl is unset", err.Error())
@@ -55,7 +56,7 @@ func TestGetSitenameFromReg(t *testing.T) {
 		}))
 		defer ts.Close()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{NamespaceRegistrationEndpoint: ts.URL})
+		config.SetFederation(pelican_url.FederationDiscovery{RegistryEndpoint: ts.URL})
 		sitename, err := getSitenameFromReg(context.Background(), "/foo")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "replied with status code 404")
@@ -78,7 +79,7 @@ func TestGetSitenameFromReg(t *testing.T) {
 		}))
 		defer ts.Close()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{NamespaceRegistrationEndpoint: ts.URL})
+		config.SetFederation(pelican_url.FederationDiscovery{RegistryEndpoint: ts.URL})
 		sitename, err := getSitenameFromReg(context.Background(), "/foo")
 		require.NoError(t, err)
 		assert.Equal(t, "bar", sitename)

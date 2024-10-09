@@ -110,11 +110,11 @@ func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, er
 	if err != nil {
 		return
 	}
-	if fed.NamespaceRegistrationEndpoint == "" {
+	if fed.RegistryEndpoint == "" {
 		err = fmt.Errorf("unable to fetch site name from the registry. Federation.RegistryUrl or Federation.DiscoveryUrl is unset")
 		return
 	}
-	requestUrl, err := url.JoinPath(fed.NamespaceRegistrationEndpoint, "api/v1.0/registry", prefix)
+	requestUrl, err := url.JoinPath(fed.RegistryEndpoint, "api/v1.0/registry", prefix)
 	if err != nil {
 		return
 	}

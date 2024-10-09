@@ -49,23 +49,23 @@ var withIdentity bool
 var prefix string
 var pubkeyPath string
 
-func getNamespaceEndpoint(ctx context.Context) (string, error) {
+func getRegistryEndpoint(ctx context.Context) (string, error) {
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
 		return "", err
 	}
-	namespaceEndpoint := fedInfo.NamespaceRegistrationEndpoint
-	if namespaceEndpoint == "" {
+	registryEndpoint := fedInfo.RegistryEndpoint
+	if registryEndpoint == "" {
 		return "", errors.New("No namespace registry specified; either give the federation name (-f) or specify the namespace API endpoint directly (e.g., --namespace-url=https://namespace.osg-htc.org/namespaces)")
 	}
 
-	namespaceEndpointURL, err := url.Parse(namespaceEndpoint)
+	registryEndpointURL, err := url.Parse(registryEndpoint)
 	if err != nil {
 		return "", errors.Wrap(err, "Unable to parse namespace registry url")
 	}
 
 	// Return the string, as opposed to a pointer to the URL object
-	return namespaceEndpointURL.String(), nil
+	return registryEndpointURL.String(), nil
 }
 
 func registerANamespace(cmd *cobra.Command, args []string) {
@@ -75,7 +75,7 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	namespaceEndpoint, err := getNamespaceEndpoint(cmd.Context())
+	namespaceEndpoint, err := getRegistryEndpoint(cmd.Context())
 	if err != nil {
 		log.Errorln("Failed to get RegistryUrl from config: ", err)
 		os.Exit(1)
@@ -143,7 +143,7 @@ func deleteANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	namespaceEndpoint, err := getNamespaceEndpoint(cmd.Context())
+	namespaceEndpoint, err := getRegistryEndpoint(cmd.Context())
 	if err != nil {
 		log.Errorln("Failed to get RegistryUrl from config: ", err)
 		os.Exit(1)
@@ -168,7 +168,7 @@ func listAllNamespaces(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	namespaceEndpoint, err := getNamespaceEndpoint(cmd.Context())
+	namespaceEndpoint, err := getRegistryEndpoint(cmd.Context())
 	if err != nil {
 		log.Errorln("Failed to get RegistryUrl from config: ", err)
 		os.Exit(1)

@@ -42,7 +42,6 @@ import (
 
 	"github.com/VividCortex/ewma"
 	"github.com/google/uuid"
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/option"
 	"github.com/opensaucerer/grab/v3"
 	"github.com/pkg/errors"
@@ -50,43 +49,18 @@ import (
 	"github.com/studio-b12/gowebdav"
 	"github.com/vbauerster/mpb/v8"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var (
 	progressCtrOnce sync.Once
 	progressCtr     *mpb.Progress
-
-	successTTL = ttlcache.DefaultTTL
-	failureTTL = 5 * time.Minute
-
-	loader = ttlcache.LoaderFunc[string, cacheItem](
-		func(c *ttlcache.Cache[string, cacheItem], key string) *ttlcache.Item[string, cacheItem] {
-			ctx := context.Background()
-			// Note: setting this timeout mostly for unit tests
-			ctx, cancel := context.WithTimeout(ctx, param.Transport_ResponseHeaderTimeout.GetDuration())
-			defer cancel()
-			urlFederation, err := config.DiscoverUrlFederation(ctx, key)
-			if err != nil {
-				// Set a shorter TTL for failures
-				item := c.Set(key, cacheItem{err: err}, failureTTL)
-				return item
-			}
-			// Set a longer TTL for successes
-			item := c.Set(key, cacheItem{
-				url: pelicanUrl{
-					directorUrl: urlFederation.DirectorEndpoint,
-				},
-			}, successTTL)
-			return item
-		},
-	)
 
 	stoppedTransferDebugLine sync.Once
 
@@ -99,7 +73,7 @@ type (
 	classAd string
 
 	cacheItem struct {
-		url pelicanUrl
+		url pelican_url.PelicanURL
 		err error
 	}
 
@@ -233,7 +207,7 @@ type (
 		cancel         context.CancelFunc
 		callback       TransferCallbackFunc
 		uuid           uuid.UUID
-		remoteURL      *url.URL
+		remoteURL      *pelican_url.PelicanURL
 		lookupDone     atomic.Bool
 		lookupErr      error
 		activeXfer     atomic.Int64
@@ -286,7 +260,7 @@ type (
 		ewmaVal         atomic.Int64
 		ewmaCtr         atomic.Int64
 		clientLock      sync.RWMutex
-		pelicanURLCache *ttlcache.Cache[string, cacheItem]
+		pelicanUrlCache *pelican_url.Cache
 	}
 
 	TransferCallbackFunc = func(path string, downloaded int64, totalSize int64, completed bool)
@@ -322,10 +296,6 @@ type (
 	transferDetailsOptions struct {
 		NeedsToken bool
 		PackOption string
-	}
-
-	pelicanUrl struct {
-		directorUrl string
 	}
 )
 
@@ -592,92 +562,6 @@ func (tr TransferResults) ID() string {
 	return tr.jobId.String()
 }
 
-func (te *TransferEngine) newPelicanURL(remoteUrl *url.URL) (pelicanURL pelicanUrl, err error) {
-	scheme := remoteUrl.Scheme
-	if remoteUrl.Host != "" {
-		if scheme == "osdf" || scheme == "stash" {
-			// in the osdf/stash case, fix url's that have a hostname
-			joinedPath, err := url.JoinPath(remoteUrl.Host, remoteUrl.Path)
-			// Prefix with a / just in case
-			remoteUrl.Path = path.Join("/", joinedPath)
-			if err != nil {
-				log.Errorln("Failed to join remote destination url path:", err)
-				return pelicanUrl{}, err
-			}
-		} else if scheme == "pelican" {
-			// If we have a host and url is pelican, we need to extract federation data from the host
-			log.Debugln("Detected pelican:// url, getting federation metadata from specified host", remoteUrl.Host)
-			federationUrl := &url.URL{}
-			federationUrl.Scheme = "https"
-			federationUrl.Path = ""
-			federationUrl.Host = remoteUrl.Host
-
-			// Check if cache has key of federationURL, if not, loader will add it:
-			pelicanUrlItem := te.pelicanURLCache.Get(federationUrl.String())
-			if pelicanUrlItem.Value().err != nil {
-				return pelicanUrl{}, pelicanUrlItem.Value().err
-			} else {
-				pelicanURL = pelicanUrlItem.Value().url
-			}
-		}
-	}
-
-	// With an osdf:// url scheme, we assume the user will be using the OSDF so load in our osdf metadata for our url
-	if scheme == "osdf" || scheme == "stash" {
-		// If we are using an osdf/stash binary, we discovered the federation already --> load into local url metadata
-		if config.GetPreferredPrefix() == config.OsdfPrefix {
-			log.Debugln("In OSDF mode with osdf:// url; populating metadata with OSDF defaults")
-			fedInfo, err := config.GetFederation(te.ctx)
-			if fedInfo.DirectorEndpoint == "" {
-				if err != nil {
-					return pelicanUrl{}, errors.Wrap(err, "no OSDF metadata available")
-				}
-				return pelicanUrl{}, fmt.Errorf("OSDF default metadata is not populated in config")
-			} else {
-				pelicanURL.directorUrl = fedInfo.DirectorEndpoint
-			}
-		} else if config.GetPreferredPrefix() == config.PelicanPrefix {
-			// We hit this case when we are using a pelican binary but an osdf:// url, therefore we need to discover the osdf federation
-			log.Debugln("In Pelican mode with an osdf:// url, populating metadata with OSDF defaults")
-			// Check if cache has key of federationURL, if not, loader will add it:
-			pelicanUrlItem := te.pelicanURLCache.Get("osg-htc.org")
-			if pelicanUrlItem.Value().err != nil {
-				err = pelicanUrlItem.Value().err
-				return
-			} else {
-				pelicanURL = pelicanUrlItem.Value().url
-			}
-		}
-	} else if scheme == "pelican" && remoteUrl.Host == "" {
-		// We hit this case when we do not have a hostname with a pelican:// url
-		if param.Federation_DiscoveryUrl.GetString() == "" {
-			return pelicanUrl{}, errors.Errorf("pelican url scheme without discovery-url detected, please provide a federation discovery-url " +
-				"(e.g. pelican://<federation-url-in-hostname.org></namespace></path/to/file>) within the hostname or with the -f flag")
-		}
-		// Check if cache has key of federationURL, if not, loader will add it:
-		pelicanUrlItem := te.pelicanURLCache.Get(param.Federation_DiscoveryUrl.GetString())
-		if pelicanUrlItem != nil {
-			pelicanURL = pelicanUrlItem.Value().url
-		} else {
-			return pelicanUrl{}, errors.Errorf("issue getting metadata information from cache")
-		}
-	} else if scheme == "" {
-		// If we don't have a url scheme, then our metadata information should be in the config
-		log.Debugln("No url scheme detected for", remoteUrl.String(), ", getting metadata information from configuration")
-		if fedInfo, err := config.GetFederation(te.ctx); err == nil {
-			pelicanURL.directorUrl = fedInfo.DirectorEndpoint
-		} else {
-			return pelicanUrl{}, errors.Wrap(err, "failed to lookup pelican metadata from configuration")
-		}
-
-		// If the values do not exist, exit with failure
-		if pelicanURL.directorUrl == "" {
-			return pelicanUrl{}, errors.New("missing metadata information in config, ensure Federation DirectorUrl, RegistryUrl, and DiscoverUrl are all set")
-		}
-	}
-	return
-}
-
 // Returns a new transfer engine object whose lifetime is tied
 // to the provided context.  Will launcher worker goroutines to
 // handle the underlying transfers
@@ -692,15 +576,9 @@ func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
 	work := make(chan *clientTransferJob, 5)
 	files := make(chan *clientTransferFile)
 	results := make(chan *clientTransferResults, 5)
-	suppressedLoader := ttlcache.NewSuppressedLoader(loader, new(singleflight.Group))
-	pelicanURLCache := ttlcache.New(
-		ttlcache.WithTTL[string, cacheItem](30*time.Minute),
-		ttlcache.WithLoader(suppressedLoader),
-	)
 
-	// Start our cache for url metadata
-	// This is stopped in the `Shutdown` method
-	go pelicanURLCache.Start()
+	// Start the URL cache to avoid repeated metadata queries
+	pelicanUrlCache := pelican_url.StartCache()
 
 	te = &TransferEngine{
 		ctx:             ctx,
@@ -717,7 +595,7 @@ func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
 		closeDoneChan:   make(chan bool),
 		ewmaTick:        time.NewTicker(ewmaInterval),
 		ewma:            ewma.NewMovingAverage(),
-		pelicanURLCache: pelicanURLCache,
+		pelicanUrlCache: pelicanUrlCache,
 	}
 	workerCount := param.Client_WorkerCount.GetInt()
 	if workerCount <= 0 {
@@ -839,7 +717,7 @@ func (te *TransferEngine) Shutdown() error {
 	te.Close()
 	<-te.closeDoneChan
 	te.ewmaTick.Stop()
-	te.pelicanURLCache.Stop()
+	te.pelicanUrlCache.Stop()
 	te.cancel()
 
 	err := te.egrp.Wait()
@@ -1146,16 +1024,17 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		return
 	}
 
-	// See if we have a projectName defined
-	project := searchJobAd(projectName)
-
-	pelicanURL, err := tc.engine.newPelicanURL(remoteUrl)
+	pUrl, err := ParseRemoteAsPUrl(ctx, remoteUrl.String())
 	if err != nil {
-		err = errors.Wrap(err, "error generating metadata for specified url")
 		return
 	}
 
-	copyUrl := *remoteUrl // Make a copy of the input URL to avoid concurrent issues.
+	// See if we have a projectName defined
+	project := searchJobAd(projectName)
+	copyUrl := *pUrl // Make a copy of the input URL to avoid concurrent issues.
+	if _, exists := copyUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
+	}
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
 		recursive:      recursive,
@@ -1198,11 +1077,11 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
-	tj.directorUrl = pelicanURL.directorUrl
-	dirResp, err := GetDirectorInfoForPath(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload, remoteUrl.RawQuery, "")
+	tj.directorUrl = copyUrl.FedInfo.DirectorEndpoint
+	dirResp, err := GetDirectorInfoForPath(tj.ctx, &copyUrl, upload, "")
 	if err != nil {
 		log.Errorln(err)
-		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
+		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", pUrl.String())
 		return
 	}
 	tj.dirResp = dirResp
@@ -1216,15 +1095,17 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 
 		// The director response may change if it's given a token; let's repeat the query.
 		if contents != "" {
-			dirResp, err = GetDirectorInfoForPath(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, upload, remoteUrl.RawQuery, contents)
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyUrl, upload, contents)
 			if err != nil {
 				log.Errorln(err)
-				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
+				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", copyUrl.String())
 				return nil, err
 			}
 			tj.dirResp = dirResp
 			tj.token.DirResp = &dirResp
 		}
+	} else {
+		tj.token = nil
 	}
 
 	// If we are a recursive download and using the director, we want to attempt to get directory listings from
@@ -1236,7 +1117,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
-	log.Debugf("Created new transfer job, ID %s client %s, for URL %s", tj.uuid.String(), tc.id.String(), remoteUrl.String())
+	log.Debugf("Created new transfer job, ID %s client %s, for URL %s", tj.uuid.String(), tc.id.String(), copyUrl.String())
 	return
 }
 
@@ -1254,13 +1135,13 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 	// See if we have a projectName defined
 	project := searchJobAd(projectName)
 
-	pelicanURL, err := tc.engine.newPelicanURL(remoteUrl)
+	pelicanURL, err := ParseRemoteAsPUrl(ctx, remoteUrl.String())
 	if err != nil {
 		err = errors.Wrap(err, "error generating metadata for specified url")
 		return
 	}
 
-	copyUrl := *remoteUrl // Make a copy of the input URL to avoid concurrent issues.
+	copyUrl := *pelicanURL // Make a copy of the input URL to avoid concurrent issues.
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
 		remoteURL:      &copyUrl,
@@ -1298,8 +1179,8 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
-	tj.directorUrl = pelicanURL.directorUrl
-	dirResp, err := GetDirectorInfoForPath(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, false, remoteUrl.RawQuery, "")
+	tj.directorUrl = pelicanURL.FedInfo.DirectorEndpoint
+	dirResp, err := GetDirectorInfoForPath(tj.ctx, pelicanURL, false, "")
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1317,7 +1198,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 
 		// The director response may change if it's given a token; let's repeat the query.
 		if contents != "" {
-			dirResp, err = GetDirectorInfoForPath(tj.ctx, remoteUrl.Path, pelicanURL.directorUrl, false, remoteUrl.RawQuery, contents)
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, pelicanURL, false, contents)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1361,14 +1242,14 @@ func (tc *TransferClient) Submit(tj *TransferJob) error {
 func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, options ...TransferOption) (age int, size int64, err error) {
 	age = -1
 
-	pelicanURL, err := tc.engine.newPelicanURL(remoteUrl)
+	pelicanURL, err := ParseRemoteAsPUrl(ctx, remoteUrl.String())
 	if err != nil {
 		err = errors.Wrap(err, "error generating metadata for specified URL")
 		return
 	}
 
 	var prefObjServers []*url.URL
-	token := newTokenGenerator(remoteUrl, nil, false, true)
+	token := newTokenGenerator(pelicanURL, nil, false, true)
 	if tc.token != "" {
 		token.SetToken(tc.token)
 	}
@@ -1394,7 +1275,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	ctx, cancel := mergeCancel(tc.ctx, ctx)
 	defer cancel()
 
-	dirResp, err := GetDirectorInfoForPath(ctx, remoteUrl.Path, pelicanURL.directorUrl, false, remoteUrl.RawQuery, "")
+	dirResp, err := GetDirectorInfoForPath(ctx, pelicanURL, false, "")
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1412,7 +1293,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 
 		// The director response may change if it's given a token; let's repeat the query.
 		if contents != "" {
-			dirResp, err = GetDirectorInfoForPath(ctx, remoteUrl.Path, pelicanURL.directorUrl, false, remoteUrl.RawQuery, contents)
+			dirResp, err = GetDirectorInfoForPath(ctx, pelicanURL, false, contents)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
@@ -1675,7 +1556,12 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 		// For prestage, from day one we handle internally whether it's recursive
 		// (as opposed to making the user specify explicitly)
 		var statInfo FileInfo
-		if statInfo, err = statHttp(remoteUrl, job.job.dirResp, job.job.token); err != nil {
+		var pelicanUrl *pelican_url.PelicanURL
+		pelicanUrl, err = pelican_url.Parse(remoteUrl.String(), nil, nil)
+		if err != nil {
+			return
+		}
+		if statInfo, err = statHttp(pelicanUrl, job.job.dirResp, job.job.token); err != nil {
 			err = errors.Wrap(err, "failed to stat object to prestage")
 			return
 		}
@@ -2680,7 +2566,7 @@ func skipDownload(syncLevel SyncLevel, remoteInfo fs.FileInfo, localPath string)
 }
 
 // Depending on the synchronization policy, decide if the upload should be skipped
-func skipUpload(job *TransferJob, localPath, remotePath string) bool {
+func skipUpload(job *TransferJob, localPath string, remoteUrl *pelican_url.PelicanURL) bool {
 	if job.syncLevel == SyncNone {
 		return false
 	}
@@ -2690,10 +2576,7 @@ func skipUpload(job *TransferJob, localPath, remotePath string) bool {
 		return false
 	}
 
-	remoteUrl := url.URL{
-		Path: remotePath,
-	}
-	remoteInfo, err := statHttp(&remoteUrl, job.dirResp, job.token)
+	remoteInfo, err := statHttp(remoteUrl, job.dirResp, job.token)
 	if err != nil {
 		return false
 	}
@@ -2787,14 +2670,20 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 
 	for _, info := range infos {
 		newPath := localPath + "/" + info.Name()
+		remoteUrl, err := pelican_url.Parse(job.job.remoteURL.String(), nil, nil)
+		if err != nil {
+			return err
+		}
+		remoteUrl.Path = path.Join(remoteUrl.Path, strings.TrimPrefix(newPath, job.job.localPath))
+
 		if info.IsDir() {
 			// Recursively call this function to create any nested dir's as well as list their files
 			err := te.walkDirUpload(job, transfers, files, newPath)
 			if err != nil {
 				return err
 			}
-		} else if remotePath := path.Join(job.job.remoteURL.Path, strings.TrimPrefix(newPath, job.job.localPath)); skipUpload(job.job, newPath, remotePath) {
-			log.Infoln("Skipping upload of object", remotePath, "as it already exists at the destination")
+		} else if skipUpload(job.job, newPath, remoteUrl) {
+			log.Infoln("Skipping upload of object", remoteUrl.Path, "as it already exists at the destination")
 		} else if info.Type().IsRegular() {
 			job.job.activeXfer.Add(1)
 			select {
@@ -2808,7 +2697,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 					callback:   job.job.callback,
 					job:        job.job,
 					engine:     te,
-					remoteURL:  &url.URL{Path: remotePath},
+					remoteURL:  &url.URL{Path: remoteUrl.Path},
 					packOption: transfers[0].PackOption,
 					localPath:  newPath,
 					xferType:   job.job.xferType,
@@ -2824,7 +2713,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 }
 
 // This function performs the ls command by walking through the specified collections and printing the contents of the files
-func listHttp(remoteObjectUrl *url.URL, dirResp server_structs.DirectorResponse, token *tokenGenerator) (fileInfos []FileInfo, err error) {
+func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator) (fileInfos []FileInfo, err error) {
 	// Get our collection listing host
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 	if collectionsUrl == nil {
@@ -2835,7 +2724,7 @@ func listHttp(remoteObjectUrl *url.URL, dirResp server_structs.DirectorResponse,
 
 	project := searchJobAd(projectName)
 	client := createWebDavClient(collectionsUrl, token, project)
-	remotePath := remoteObjectUrl.Path
+	remotePath := remoteUrl.Path
 
 	infos, err := client.ReadDir(remotePath)
 	if err != nil {
@@ -2889,7 +2778,7 @@ func listHttp(remoteObjectUrl *url.URL, dirResp server_structs.DirectorResponse,
 // Otherwise, the first three caches are queried simultaneously.
 // For any of the queries, if the attempt with the proxy fails, a second attempt
 // is made without.
-func statHttp(dest *url.URL, dirResp server_structs.DirectorResponse, token *tokenGenerator) (info FileInfo, err error) {
+func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator) (info FileInfo, err error) {
 	statHosts := make([]url.URL, 0, 3)
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 
@@ -2915,7 +2804,7 @@ func statHttp(dest *url.URL, dirResp server_structs.DirectorResponse, token *tok
 
 	for _, statUrl := range statHosts {
 		client := gowebdav.NewAuthClient(statUrl.String(), auth)
-		destCopy := *dest
+		destCopy := *(dest.GetRawUrl())
 		destCopy.Host = statUrl.Host
 		destCopy.Scheme = statUrl.Scheme
 
