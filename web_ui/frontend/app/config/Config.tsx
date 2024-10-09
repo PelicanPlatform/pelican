@@ -63,7 +63,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
   const [patch, _setPatch] = useState<ParameterValueRecord>({});
 
   const {
-    data: serverConfig,
+    data,
     mutate,
     error,
   } = useSWR<ParameterValueRecord>('getConfig', getConfig);
@@ -74,6 +74,10 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
       fallbackData: ['origin', 'registry', 'director', 'cache'],
     }
   );
+
+  const serverConfig = useMemo(() => {
+    return flattenObject(data || {});
+  }, [data])
 
   const setPatch = useCallback(
     (fieldPatch: any) => {
@@ -126,7 +130,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
                       Button={IconButton}
                       mimeType={'text/yaml'}
                       data={yaml.dump(
-                        stripNulls(structuredClone(serverConfig))
+                        stripNulls(structuredClone(data))
                       )}
                     >
                       <Download />
@@ -207,8 +211,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
 const getConfig = async (): Promise<ParameterValueRecord> => {
   let response = await fetch('/api/v1.0/config');
   let data = await response.json();
-  let flatData = flattenObject(data);
-  return flatData;
-};
+  return data;
+}
 
 export default Config;
