@@ -1328,7 +1328,9 @@ func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
 		"destination": destination,
 		"status_code": strconv.Itoa(ctx.Writer.Status()),
 		"version":     "",
+		"network":     ctx.ClientIP(),
 	}
+
 	version, _, err := extractVersionAndService(ctx)
 	if err != nil {
 		log.Warningf("Failed to extract version and service from request: %v", err)

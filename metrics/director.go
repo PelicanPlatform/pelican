@@ -95,5 +95,5 @@ var (
 	PelicanDirectorRedirectionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_redirections_total",
 		Help: "The total number of redirections the director issued.",
-	}, []string{"destination", "status_code", "version"})
+	}, []string{"destination", "status_code", "version", "network"})
 )
