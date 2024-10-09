@@ -1,4 +1,4 @@
-import { CustomRegistrationField } from '@/components/Config';
+import { CustomRegistrationField } from '@/components/configuration';
 import { Alert as AlertType, Namespace } from '@/index';
 
 export interface NamespaceFormPage {

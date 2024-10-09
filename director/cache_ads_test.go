@@ -31,6 +31,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func hasServerAdWithName(serverAds []server_structs.ServerAd, name string) bool {
@@ -431,7 +432,7 @@ func TestRecordAd(t *testing.T) {
 
 	t.Run("recorded-sad-should-match-health-test-utils-one", func(t *testing.T) {
 		t.Cleanup(func() {
-			viper.Reset()
+			server_utils.ResetTestState()
 			healthTestUtilsMutex.Lock()
 			statUtilsMutex.Lock()
 			defer statUtilsMutex.Unlock()
@@ -442,7 +443,7 @@ func TestRecordAd(t *testing.T) {
 			serverAds.DeleteAll()
 			geoIPOverrides = nil
 		})
-		viper.Reset()
+		server_utils.ResetTestState()
 		func() {
 			geoIPOverrides = nil
 

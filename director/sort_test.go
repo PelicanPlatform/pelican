@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // Geo Override Yaml mockup
@@ -44,9 +45,9 @@ import (
 var yamlMockup string
 
 func TestCheckOverrides(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
 		geoIPOverrides = nil
 	})
 
@@ -191,9 +192,9 @@ func TestSortServerAdsByTopo(t *testing.T) {
 }
 
 func TestSortServerAds(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
 		geoIPOverrides = nil
 	})
 

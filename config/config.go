@@ -1503,3 +1503,25 @@ func InitClient() error {
 
 	return nil
 }
+
+// This function resets most states for test cases, including 1. viper settings, 2. preferred prefix, 3. transport object, 4. Federation metadata back to their default
+func ResetConfig() {
+	viper.Reset()
+
+	// Clear cached preferred prefix
+	testingPreferredPrefix = ""
+
+	// Clear cached transport object
+	onceTransport = sync.Once{}
+	transport = nil
+
+	// Reset federation metadata
+	fedDiscoveryOnce = &sync.Once{}
+	globalFedInfo = pelican_url.FederationDiscovery{}
+	globalFedErr = nil
+
+	ResetIssuerJWKPtr()
+	ResetClientInitialized()
+
+	// other than what's above, resetting Origin exports will be done by ResetTestState() in server_utils pkg
+}

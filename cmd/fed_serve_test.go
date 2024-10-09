@@ -47,10 +47,9 @@ func TestFedServePosixOrigin(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	viper.Reset()
-	server_utils.ResetOriginExports()
-	defer viper.Reset()
-	defer server_utils.ResetOriginExports()
+	server_utils.ResetTestState()
+
+	defer server_utils.ResetTestState()
 
 	modules := server_structs.ServerType(0)
 	modules.Set(server_structs.OriginType)

@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -56,7 +57,7 @@ func mockAdminToken() (string, error) {
 }
 
 func TestListNamespaces(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -310,7 +311,7 @@ func TestListNamespaces(t *testing.T) {
 }
 
 func TestListNamespacesForUser(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -720,10 +721,10 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 }
 
 func TestCreateNamespace(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
 		customRegFieldsConfigs = []customRegFieldsConfig{}
 	})
 
@@ -805,7 +806,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("missing-institution-returns-400", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		viper.Set("Registry.Institutions", []map[string]string{{"name": "Mock School", "id": "123"}})
 		resetNamespaceDB(t)
 		jwks, err := test_utils.GenerateJWKS()
@@ -825,7 +826,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
 		assert.Contains(t, string(body), "Validation for Institution failed:")
-		viper.Reset()
+		server_utils.ResetTestState()
 	})
 
 	t.Run("invalid-prefix-returns-400", func(t *testing.T) {
@@ -914,7 +915,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("key-chaining-failure-returns-400", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		viper.Set("Registry.RequireKeyChaining", true)
 		resetNamespaceDB(t)
 
@@ -941,7 +942,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
 		assert.Contains(t, string(body), "Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
-		viper.Reset()
+		server_utils.ResetTestState()
 	})
 
 	t.Run("inst-failure-returns-400", func(t *testing.T) {
@@ -1094,7 +1095,7 @@ func TestCreateNamespace(t *testing.T) {
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
 		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
-		viper.Reset()
+		server_utils.ResetTestState()
 	})
 
 	t.Run("osdf-topology-same-prefix-request-gives-200", func(t *testing.T) {
@@ -1136,14 +1137,14 @@ func TestCreateNamespace(t *testing.T) {
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
 		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
-		viper.Reset()
+		server_utils.ResetTestState()
 	})
 }
 
 func TestUpdateNamespaceHandler(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
 	})
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -1388,7 +1389,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 }
 
 func TestListInsitutions(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	router := gin.Default()
 	router.GET("/institutions", listInstitutions)
 
@@ -1408,7 +1409,7 @@ func TestListInsitutions(t *testing.T) {
 	})
 
 	t.Run("cache-hit-returns", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
 		mockInsts := []registrationFieldOption{{Name: "Foo", ID: "001"}}
@@ -1432,7 +1433,7 @@ func TestListInsitutions(t *testing.T) {
 	})
 
 	t.Run("nil-cache-with-nonnil-config-returns", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		optionsCache.DeleteAll()
 
 		mockInstsConfig := []registrationFieldOption{{Name: "foo", ID: "bar"}}
@@ -1456,7 +1457,7 @@ func TestListInsitutions(t *testing.T) {
 	})
 
 	t.Run("non-nil-cache-with-nonnil-config-return-config", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		mockUrl := url.URL{Scheme: "https", Host: "example.com"}
 		viper.Set("Registry.InstitutionsUrl", mockUrl.String())
 		mockInsts := []registrationFieldOption{{Name: "Foo", ID: "001"}}

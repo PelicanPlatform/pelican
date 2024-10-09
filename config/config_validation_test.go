@@ -31,10 +31,10 @@ import (
 
 // Test that Pelican notifies users about unrecognized configuration keys.
 func TestBadConfigKeys(t *testing.T) {
-	t.Cleanup(func() { viper.Reset() })
+	t.Cleanup(func() { ResetConfig() })
 
 	setupFunc := func() *test.Hook {
-		viper.Reset()
+		ResetConfig()
 		viper.Set("ConfigDir", t.TempDir())
 		viper.Set("Debug", true)
 		hook := test.NewLocal(logrus.StandardLogger())

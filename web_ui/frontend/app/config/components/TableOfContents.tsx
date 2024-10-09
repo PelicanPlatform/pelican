@@ -1,45 +1,58 @@
-import { Config, ParameterInputProps } from '@/components/Config/index';
-import React, { useState } from 'react';
+'use client';
+
+import {
+  ParameterMetadata,
+  ParameterMetadataRecord,
+} from '@/components/configuration/index';
+import React, { useMemo, useState } from 'react';
 import { Box, Link, Typography } from '@mui/material';
 import { ArrowDropDown, ArrowDropUp } from '@mui/icons-material';
-import { isConfig, sortConfig } from '@/app/config/util';
+import {
+  ExpandedObject,
+  expandObject,
+  isParameterMetadata,
+  sortMetadata,
+} from '@/app/config/util';
 
-interface TableOfContentsProps {
-  id: string[];
-  name: string;
-  value: Config | ParameterInputProps;
-  level: number;
+export interface TableOfContentsProps {
+  metadata: ParameterMetadataRecord;
 }
 
-export function TableOfContents({
-  id,
+export const TableOfContents = ({ metadata }: TableOfContentsProps) => {
+  const expandedMetadata = expandObject(metadata);
+  return <TableOfContentsHelper name={[]} metadata={expandedMetadata} />;
+};
+
+interface TableOfContentsHelperProps {
+  name: string[];
+  metadata: ExpandedObject<ParameterMetadata> | ParameterMetadata;
+}
+
+export function TableOfContentsHelper({
   name,
-  value,
-  level = 1,
-}: TableOfContentsProps) {
+  metadata,
+}: TableOfContentsHelperProps) {
   const [open, setOpen] = useState(false);
 
-  if (name != '') {
-    id = [...id, name];
-  }
-
   let subContents = undefined;
-  if (isConfig(value)) {
-    let subValues = Object.entries(value);
-    subValues.sort(sortConfig);
-    subContents = subValues.map(([key, value]) => {
+  // If we arrived at a leaf containing the metadata for a parameter, display the field
+  if (!isParameterMetadata(metadata)) {
+    let subValues = Object.entries(metadata as ParameterMetadataRecord);
+    subValues.sort(sortMetadata);
+    subContents = subValues.map(([key, metadata]) => {
+      const childName = [...name, key];
       return (
-        <TableOfContents
-          id={id}
-          key={key}
-          name={key}
-          value={value}
-          level={level + 1}
-        />
+        <TableOfContentsHelper key={key} name={childName} metadata={metadata} />
       );
     });
   }
 
+  // Check if this is the root element, if so we want to return the children directly
+  if (name.length == 0) {
+    return subContents;
+  }
+
+  const level = name.length;
   let headerPointer = (
     <Box
       sx={{
@@ -52,7 +65,7 @@ export function TableOfContents({
       }}
     >
       <Link
-        href={subContents ? undefined : `#${id.join('-')}`}
+        href={subContents ? undefined : `#${name.join('-')}`}
         sx={{
           cursor: 'pointer',
           textDecoration: 'none',
@@ -71,7 +84,7 @@ export function TableOfContents({
             fontWeight: subContents ? '600' : 'normal',
           }}
         >
-          {name}
+          {name[name.length - 1]}
         </Typography>
         {subContents ? open ? <ArrowDropUp /> : <ArrowDropDown /> : undefined}
       </Link>
@@ -81,7 +94,7 @@ export function TableOfContents({
   return (
     <>
       {name ? headerPointer : undefined}
-      {subContents && level != 1 ? (
+      {subContents ? (
         <Box
           sx={{
             display: open ? 'block' : 'none',
