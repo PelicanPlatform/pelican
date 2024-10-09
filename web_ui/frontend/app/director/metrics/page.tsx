@@ -70,7 +70,7 @@ const Page = () => {
             </Grid>
           </Grid>
           <Grid item xs={12} display={'flex'} height={'32vh'}>
-            <Paper sx={{ width: "100%" }}>
+            <Paper sx={{ width: '100%' }}>
               <TransferBarGraph />
             </Paper>
           </Grid>
@@ -91,7 +91,7 @@ const Page = () => {
                 />,
               ].map((component, index) => (
                 <Grid key={index} item xs={6} display={'flex'}>
-                  <Paper sx={{ width: "100%" }}>{component}</Paper>
+                  <Paper sx={{ width: '100%' }}>{component}</Paper>
                 </Grid>
               ))}
             </Grid>

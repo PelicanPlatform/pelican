@@ -115,7 +115,7 @@ export const BytesMetricBoxPlot = ({
         maintainAspectRatio: false,
         scales: {
           y: {
-            type: 'logarithmic'
+            type: 'logarithmic',
           },
         },
         plugins: {
@@ -184,7 +184,7 @@ export const MetricBoxPlot = ({
         maintainAspectRatio: false,
         scales: {
           y: {
-            type: 'logarithmic'
+            type: 'logarithmic',
           },
         },
         plugins: {
