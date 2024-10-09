@@ -216,7 +216,10 @@ export default function Home() {
               <NamespaceCardList<CardProps>
                 data={approvedOriginData}
                 Card={Card}
-                cardProps={{ authenticated: user }}
+                cardProps={{
+                  authenticated: user,
+                  onUpdate: () => mutateNamespaces(),
+                }}
               />
             )}
           {approvedOriginData !== undefined &&
@@ -241,7 +244,10 @@ export default function Home() {
             <NamespaceCardList<CardProps>
               data={approvedCacheData}
               Card={Card}
-              cardProps={{ authenticated: user }}
+              cardProps={{
+                authenticated: user,
+                onUpdate: () => mutateNamespaces(),
+              }}
             />
           )}
           {approvedCacheData !== undefined &&
