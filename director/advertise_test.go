@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 var (
@@ -47,20 +48,20 @@ var (
 
 func TestConsolidateDupServerAd(t *testing.T) {
 	t.Run("union-capabilities", func(t *testing.T) {
-		existingAd := server_structs.ServerAd{Writes: false}
-		newAd := server_structs.ServerAd{Writes: true}
+		existingAd := server_structs.ServerAd{Caps: server_structs.Capabilities{Writes: false}}
+		newAd := server_structs.ServerAd{Caps: server_structs.Capabilities{Writes: true}}
 		get := consolidateDupServerAd(newAd, existingAd)
-		assert.True(t, get.Writes)
+		assert.True(t, get.Caps.Writes)
 
-		existingAd = server_structs.ServerAd{DirectReads: false}
-		newAd = server_structs.ServerAd{DirectReads: true}
+		existingAd = server_structs.ServerAd{Caps: server_structs.Capabilities{DirectReads: false}}
+		newAd = server_structs.ServerAd{Caps: server_structs.Capabilities{DirectReads: true}}
 		get = consolidateDupServerAd(newAd, existingAd)
-		assert.True(t, get.DirectReads)
+		assert.True(t, get.Caps.DirectReads)
 
-		existingAd = server_structs.ServerAd{Listings: false}
-		newAd = server_structs.ServerAd{Listings: true}
+		existingAd = server_structs.ServerAd{Caps: server_structs.Capabilities{Listings: false}}
+		newAd = server_structs.ServerAd{Caps: server_structs.Capabilities{Listings: true}}
 		get = consolidateDupServerAd(newAd, existingAd)
-		assert.True(t, get.Listings)
+		assert.True(t, get.Caps.Listings)
 
 		// All false
 		existingAd = server_structs.ServerAd{Caps: server_structs.Capabilities{}}
@@ -144,22 +145,19 @@ func TestParseServerAdFromTopology(t *testing.T) {
 			Writes:      true,
 			Listings:    true,
 			DirectReads: true,
+			PublicReads: true,
 		}
 		ad := parseServerAdFromTopology(server, server_structs.OriginType, caps)
-		assert.True(t, ad.Writes)
 		assert.True(t, ad.Caps.Writes)
-		assert.True(t, ad.Listings)
 		assert.True(t, ad.Caps.Listings)
-		assert.True(t, ad.DirectReads)
 		assert.True(t, ad.Caps.DirectReads)
+		assert.True(t, ad.Caps.PublicReads)
 
 		ad = parseServerAdFromTopology(server, server_structs.CacheType, caps)
-		assert.False(t, ad.Writes)
 		assert.False(t, ad.Caps.Writes)
-		assert.False(t, ad.Listings)
 		assert.False(t, ad.Caps.Listings)
-		assert.False(t, ad.DirectReads)
 		assert.False(t, ad.Caps.DirectReads)
+		assert.True(t, ad.Caps.PublicReads)
 	})
 
 	t.Run("test-invalid-url", func(t *testing.T) {
@@ -199,10 +197,10 @@ func multiExportsTopoJSONHandler(w http.ResponseWriter, r *http.Request) {
 
 func TestAdvertiseOSDF(t *testing.T) {
 	t.Run("mock-topology-parse-correctly", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		serverAds.DeleteAll()
 		defer func() {
-			viper.Reset()
+			server_utils.ResetTestState()
 			serverAds.DeleteAll()
 		}()
 
@@ -233,9 +231,7 @@ func TestAdvertiseOSDF(t *testing.T) {
 		assert.Equal(t, "https://cache2.com", cAds[0].URL.String())
 		// Check that various capabilities have survived until this point. Because these are from topology,
 		// origin and namespace caps should be the same
-		assert.True(t, oAds[0].Writes)
 		assert.True(t, oAds[0].Caps.Writes)
-		assert.True(t, oAds[0].Listings)
 		assert.True(t, oAds[0].Caps.Listings)
 		assert.False(t, oAds[0].Caps.PublicReads)
 		assert.True(t, nsAd.Caps.Writes)
@@ -251,10 +247,10 @@ func TestAdvertiseOSDF(t *testing.T) {
 	})
 
 	t.Run("multiple-ns-single-origin", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		serverAds.DeleteAll()
 		defer func() {
-			viper.Reset()
+			server_utils.ResetTestState()
 			serverAds.DeleteAll()
 		}()
 
@@ -273,16 +269,16 @@ func TestAdvertiseOSDF(t *testing.T) {
 		assert.Equal(t, server_structs.OriginType.String(), foundAd.Type)
 		assert.Len(t, foundAd.NamespaceAds, 3)
 		// This origin has at least one namespace enables the following capacity
-		assert.True(t, foundAd.DirectReads)
-		assert.True(t, foundAd.Writes)
+		assert.True(t, foundAd.Caps.DirectReads)
+		assert.True(t, foundAd.Caps.Writes)
 		assert.True(t, foundAd.Caps.PublicReads)
 	})
 
 	t.Run("caches-serving-multiple-nss", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		serverAds.DeleteAll()
 		defer func() {
-			viper.Reset()
+			server_utils.ResetTestState()
 			serverAds.DeleteAll()
 		}()
 

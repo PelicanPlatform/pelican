@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
@@ -166,9 +167,9 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 		timeout = timeoutHeader[0]
 	}
 
-	directRead := req.URL.Query().Has(utils.QueryDirectRead.String())
-	skipStat := req.URL.Query().Has(utils.QuerySkipStat.String())
-	preferCached := req.URL.Query().Has(utils.QueryPreferCached.String())
+	directRead := req.URL.Query().Has(pelican_url.QueryDirectRead)
+	skipStat := req.URL.Query().Has(pelican_url.QuerySkipStat)
+	preferCached := req.URL.Query().Has(pelican_url.QueryPreferCached)
 
 	// url.Values.Encode will help us escape all them
 	if authz != "" {
@@ -178,13 +179,13 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 		requestParams.Add("pelican.timeout", timeout)
 	}
 	if skipStat {
-		requestParams.Add(utils.QuerySkipStat.String(), "")
+		requestParams.Add(pelican_url.QuerySkipStat, "")
 	}
 	if preferCached {
-		requestParams.Add(utils.QueryPreferCached.String(), "")
+		requestParams.Add(pelican_url.QueryPreferCached, "")
 	}
 	if directRead {
-		requestParams.Add(utils.QueryDirectRead.String(), "")
+		requestParams.Add(pelican_url.QueryDirectRead, "")
 	}
 	return
 }
@@ -312,8 +313,8 @@ func versionCompatCheck(reqVer *version.Version, service string) error {
 
 // Check and validate the director-specific query params from the redirect request
 func checkRedirectQuery(query url.Values) error {
-	_, hasDirectRead := query[utils.QueryDirectRead.String()]
-	_, hasPreferCached := query[utils.QueryPreferCached.String()]
+	_, hasDirectRead := query[pelican_url.QueryDirectRead]
+	_, hasPreferCached := query[pelican_url.QueryPreferCached]
 
 	if hasDirectRead && hasPreferCached {
 		return errors.New("cannot have both directread and prefercached query parameters")
@@ -451,7 +452,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	if len(cacheAds) == 0 {
 		for _, originAd := range originAdsWObject {
 			// Find the first origin that enables direct reads as the fallback
-			if originAd.DirectReads {
+			if originAd.Caps.DirectReads {
 				cacheAds = append(cacheAds, originAd)
 				break
 			}
@@ -475,8 +476,8 @@ func redirectToCache(ginCtx *gin.Context) {
 		return
 	}
 
-	// "smart" sorting method takes care of availability factor
-	if param.Director_CacheSortMethod.GetString() != "smart" {
+	// "adaptive" sorting method takes care of availability factor
+	if param.Director_CacheSortMethod.GetString() == string(server_structs.AdaptiveType) {
 		// Re-sort by availability, where caches having the object have higher priority
 		sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
 	}
@@ -561,11 +562,11 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqParams := getRequestParameters(ginCtx.Request)
 
 	// Skip the stat check for object availability if either disableStat or skipstat is set
-	skipStat := reqParams.Has(utils.QuerySkipStat.String()) || !param.Director_EnableStat.GetBool()
+	skipStat := reqParams.Has(pelican_url.QuerySkipStat) || !param.Director_EnableStat.GetBool()
 
 	// Include caches in the response if Director.CachesPullFromCaches is enabled
 	// AND prefercached query parameter is set
-	includeCaches := param.Director_CachesPullFromCaches.GetBool() && reqParams.Has(utils.QueryPreferCached.String())
+	includeCaches := param.Director_CachesPullFromCaches.GetBool() && reqParams.Has(pelican_url.QueryPreferCached)
 
 	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
@@ -594,7 +595,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		// Query Origins and check if the object exists
 		q = NewObjectStat()
 		qr := q.Query(context.Background(), reqPath, server_structs.OriginType, 1, 3,
-			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.PublicRead))
+			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.Caps.PublicReads))
 		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
 
 		// For a successful response, we got a list of object URLs.
@@ -641,7 +642,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		includeCaches &&
 		ginCtx.Request.Method != http.MethodPut &&
 		ginCtx.Request.Method != "PROPFIND" &&
-		!reqParams.Has(utils.QueryDirectRead.String()) {
+		!reqParams.Has(pelican_url.QueryDirectRead) {
 		if q == nil {
 			q = NewObjectStat()
 		}
@@ -729,8 +730,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
 	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
 	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
-	if namespaceAd.Caps.Listings && len(availableAds) > 0 && availableAds[0].Listings {
-		if !namespaceAd.PublicRead && availableAds[0].AuthURL != (url.URL{}) {
+	if namespaceAd.Caps.Listings && len(availableAds) > 0 && availableAds[0].Caps.Listings {
+		if !namespaceAd.Caps.PublicReads && availableAds[0].AuthURL != (url.URL{}) {
 			colUrl = availableAds[0].AuthURL.String()
 		} else {
 			colUrl = availableAds[0].URL.String()
@@ -743,8 +744,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// If we are doing a PROPFIND, check if origins enable dirlistings
 	if ginCtx.Request.Method == "PROPFIND" {
 		for idx, ad := range availableAds {
-			if ad.Listings && namespaceAd.Caps.Listings {
-				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.PublicRead)
+			if ad.Caps.Listings && namespaceAd.Caps.Listings {
+				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.Caps.PublicReads)
 				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
@@ -763,10 +764,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// Any client that uses this api that doesn't set directreads can talk directly to an origin
 
 	// Check if we are doing a DirectRead and if it is allowed
-	if reqParams.Has(utils.QueryDirectRead.String()) {
+	if reqParams.Has(pelican_url.QueryDirectRead) {
 		for idx, originAd := range availableAds {
-			if originAd.DirectReads && namespaceAd.Caps.DirectReads {
-				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.PublicRead)
+			if originAd.Caps.DirectReads && namespaceAd.Caps.DirectReads {
+				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.Caps.PublicReads)
 				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
@@ -788,8 +789,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// If we are doing a PUT, check to see if any origins are writeable
 	if ginCtx.Request.Method == "PUT" {
 		for idx, ad := range availableAds {
-			if ad.Writes {
-				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.PublicRead)
+			if ad.Caps.Writes {
+				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.Caps.PublicReads)
 				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 				}
@@ -803,7 +804,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		})
 		return
 	} else { // Otherwise, we are doing a GET
-		redirectURL := getRedirectURL(reqPath, availableAds[0], !namespaceAd.PublicRead)
+		redirectURL := getRedirectURL(reqPath, availableAds[0], !namespaceAd.Caps.PublicReads)
 		if brokerUrl := availableAds[0].BrokerURL; brokerUrl.String() != "" {
 			ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
 		}
@@ -891,7 +892,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		}
 
 		// Check for the DirectRead query paramater and redirect to the origin if it's set if the origin allows DirectReads
-		if c.Request.URL.Query().Has(utils.QueryDirectRead.String()) {
+		if c.Request.URL.Query().Has(pelican_url.QueryDirectRead) {
 			log.Debugln("directread query parameter detected, redirecting to origin")
 			// We'll redirect to origin here and the origin will decide if it can serve the request (if direct reads are enabled)
 			redirectToOrigin(c)
@@ -1112,9 +1113,6 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		BrokerURL:           *brokerUrl,
 		Type:                sType.String(),
 		Caps:                adV2.Caps,
-		Writes:              adV2.Caps.Writes,
-		DirectReads:         adV2.Caps.DirectReads,
-		Listings:            adV2.Caps.Listings,
 		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
 	}
 
@@ -1215,7 +1213,6 @@ func listNamespacesV1(ctx *gin.Context) {
 func listNamespacesV2(ctx *gin.Context) {
 	namespacesAdsV2 := listNamespacesFromOrigins()
 	namespacesAdsV2 = append(namespacesAdsV2, server_structs.NamespaceAdV2{
-		PublicRead: true,
 		Caps: server_structs.Capabilities{
 			PublicReads: true,
 			Reads:       true,

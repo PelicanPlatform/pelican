@@ -7,7 +7,7 @@ import {
 } from '@mui/material';
 import React, { ChangeEvent, ReactNode, SyntheticEvent, useMemo } from 'react';
 
-import { createId } from '@/components/Config/util';
+import { createId } from '@/components/configuration/util';
 import FormHelperText from '@mui/material/FormHelperText';
 import type { CustomRegistrationFieldProps } from './index.d';
 

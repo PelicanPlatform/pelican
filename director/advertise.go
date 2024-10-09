@@ -49,10 +49,6 @@ func consolidateDupServerAd(newAd, existingAd server_structs.ServerAd) server_st
 	consolidatedAd.Caps.Writes = existingAd.Caps.Writes || newAd.Caps.Writes
 	consolidatedAd.Caps.Listings = existingAd.Caps.Listings || newAd.Caps.Listings
 
-	consolidatedAd.DirectReads = existingAd.DirectReads || newAd.DirectReads
-	consolidatedAd.Writes = existingAd.Writes || newAd.Writes
-	consolidatedAd.Listings = existingAd.Listings || newAd.Listings
-
 	return consolidatedAd
 }
 
@@ -67,15 +63,11 @@ func parseServerAdFromTopology(server server_structs.TopoServer, serverType serv
 	// Explicitly set these to false for caches, because these caps don't really translate in that case
 	if serverAd.Type == server_structs.CacheType.String() {
 		serverAd.Caps = server_structs.Capabilities{}
-		serverAd.Writes = false
-		serverAd.Listings = false
-		serverAd.DirectReads = false
+		serverAd.Caps.Writes = false
+		serverAd.Caps.Listings = false
+		serverAd.Caps.DirectReads = false
+		serverAd.Caps.PublicReads = true
 	} else {
-		// Until we consolidate ServerAd capabilities with NamespaceAdV2 capabilities, we'll keep setting the top-level
-		// ServerAd capabilities. Eventually we should replace with the actual caps struct.
-		serverAd.Writes = caps.Writes
-		serverAd.Listings = caps.Listings
-		serverAd.DirectReads = caps.DirectReads
 		serverAd.Caps = caps
 	}
 
@@ -250,7 +242,6 @@ func AdvertiseOSDF(ctx context.Context) error {
 		}
 		nsAd := server_structs.NamespaceAdV2{
 			Path:         ns.Path,
-			PublicRead:   caps.PublicReads,
 			Caps:         caps,
 			Generation:   []server_structs.TokenGen{tGen},
 			Issuer:       tokenIssuers,

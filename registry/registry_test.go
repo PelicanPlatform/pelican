@@ -34,7 +34,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -80,7 +82,7 @@ func TestHandleWildcard(t *testing.T) {
 	})
 
 	t.Run("match-wildcard-metadataHandler", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		mockPrefix := "/testnamespace/foo"
 
 		setupMockRegistryDB(t)
@@ -150,7 +152,7 @@ func TestHandleWildcard(t *testing.T) {
 
 	for _, tc := range mockApprovalTcs {
 		t.Run(tc.Name, func(t *testing.T) {
-			viper.Reset()
+			server_utils.ResetTestState()
 			viper.Set("Registry.RequireCacheApproval", tc.CacheApprovedOnly)
 			viper.Set("Registry.RequireOriginApproval", tc.OriginApprovedOnly)
 
@@ -196,7 +198,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 	router.POST("/namespaces/check/status", checkStatusHandler)
 
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
 		config.ResetFederationForTest()
 	})
 
@@ -252,10 +254,10 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 
 	t.Run("incomplete-registration", func(t *testing.T) {
 		resetNamespaceDB(t)
-		viper.Reset()
+		server_utils.ResetTestState()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{
-			NamespaceRegistrationEndpoint: "https://registry.org",
+		config.SetFederation(pelican_url.FederationDiscovery{
+			RegistryEndpoint: "https://registry.org",
 		})
 
 		mockJWKS, err := test_utils.GenerateJWKS()
@@ -290,10 +292,10 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 
 	t.Run("complete-registration", func(t *testing.T) {
 		resetNamespaceDB(t)
-		viper.Reset()
+		server_utils.ResetTestState()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{
-			NamespaceRegistrationEndpoint: "https://registry.org",
+		config.SetFederation(pelican_url.FederationDiscovery{
+			RegistryEndpoint: "https://registry.org",
 		})
 
 		mockJWKS, err := test_utils.GenerateJWKS()
@@ -336,10 +338,10 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 
 	t.Run("multiple-complete-registrations", func(t *testing.T) {
 		resetNamespaceDB(t)
-		viper.Reset()
+		server_utils.ResetTestState()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{
-			NamespaceRegistrationEndpoint: "https://registry.org",
+		config.SetFederation(pelican_url.FederationDiscovery{
+			RegistryEndpoint: "https://registry.org",
 		})
 
 		mockJWKS, err := test_utils.GenerateJWKS()

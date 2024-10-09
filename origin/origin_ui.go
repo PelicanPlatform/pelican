@@ -121,7 +121,7 @@ func handleExports(ctx *gin.Context) {
 	tc.Lifetime = 15 * time.Minute
 	tc.Subject = issuerUrl
 	tc.AddScopes(token_scopes.Registry_EditRegistration)
-	tc.AddAudiences(fed.NamespaceRegistrationEndpoint)
+	tc.AddAudiences(fed.RegistryEndpoint)
 	token, err := tc.CreateToken()
 	if err != nil {
 		log.Errorf("Failed to create access token for editing registration %v", err)

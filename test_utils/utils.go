@@ -191,8 +191,8 @@ func RegistryMockup(t *testing.T, prefix string) *httptest.Server {
 // avoid pulling in global configuration) and set some arbitrary
 // viper configurations
 func InitClient(t *testing.T, initCfg map[string]any) {
-	viper.Reset()
-	t.Cleanup(viper.Reset)
+	config.ResetConfig()
+	t.Cleanup(config.ResetConfig)
 	viper.Set("ConfigDir", t.TempDir())
 	for key, val := range initCfg {
 		viper.Set(key, val)

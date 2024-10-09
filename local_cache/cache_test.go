@@ -46,6 +46,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	local_cache "github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -64,7 +65,7 @@ var (
 // The download is done twice -- once to verify functionality and once
 // as a cache hit.
 func TestFedPublicGet(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	lc, err := local_cache.NewLocalCache(ft.Ctx, ft.Egrp)
@@ -89,7 +90,7 @@ func TestFedPublicGet(t *testing.T) {
 
 // Test the local cache library on an authenticated GET.
 func TestFedAuthGet(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
 	lc, err := local_cache.NewLocalCache(ft.Ctx, ft.Egrp)
@@ -121,7 +122,7 @@ func TestFedAuthGet(t *testing.T) {
 
 // Test a raw HTTP request (no Pelican client) works with the local cache
 func TestHttpReq(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
 	transport := config.GetTransport().Clone()
@@ -144,7 +145,7 @@ func TestHttpReq(t *testing.T) {
 
 // Test a raw HTTP request (no Pelican client) returns a 404 for an unknown object
 func TestHttpFailures(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	fed_test_utils.NewFedTest(t, authOriginCfg)
 
 	transport := config.GetTransport().Clone()
@@ -188,7 +189,7 @@ func TestHttpFailures(t *testing.T) {
 
 // Test that the client library (with authentication) works with the local cache
 func TestClient(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, authOriginCfg)
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
@@ -337,14 +338,14 @@ func TestClient(t *testing.T) {
 		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
 			require.NoError(t, err)
 		}
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		server_utils.ResetTestState()
 	})
 }
 
 // Test that HEAD requests to the local cache return the correct result
 func TestStat(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
 	lc, err := local_cache.NewLocalCache(ft.Ctx, ft.Egrp)
@@ -371,7 +372,7 @@ func TestStat(t *testing.T) {
 func TestLargeFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	viper.Reset()
+	server_utils.ResetTestState()
 	viper.Set("Client.MaximumDownloadSpeed", 40*1024*1024)
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
@@ -404,8 +405,8 @@ func TestLargeFile(t *testing.T) {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		server_utils.ResetTestState()
 	})
 
 }
@@ -415,7 +416,7 @@ func TestLargeFile(t *testing.T) {
 func TestOriginUnresponsive(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	viper.Reset()
+	server_utils.ResetTestState()
 	viper.Set("Transport.ResponseHeaderTimeout", "3s")
 	viper.Set("Logging.Level", "debug")
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)

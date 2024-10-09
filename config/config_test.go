@@ -20,7 +20,6 @@ package config
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -31,15 +30,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	log "github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/mock"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -140,9 +136,9 @@ func TestDialerTimeout(t *testing.T) {
 }
 
 func TestInitConfig(t *testing.T) {
-	viper.Reset()
+	ResetConfig()
 	t.Cleanup(func() {
-		viper.Reset()
+		ResetConfig()
 	})
 	// Set prefix to OSDF to ensure that config is being set
 	testingPreferredPrefix = "OSDF"
@@ -165,13 +161,13 @@ func TestInitConfig(t *testing.T) {
 	if err := viper.WriteConfigAs(tempCfgFile.Name()); err != nil {
 		t.Fatalf("Failed to write to config file: %v", err)
 	}
-	viper.Reset()
+	ResetConfig()
 	viper.Set("config", tempCfgFile.Name()) // Set the temp file as the new 'pelican.yaml'
 	InitConfig()
 
 	// Check if server address overrides the default
 	assert.Equal(t, "1.1.1.1", param.Server_WebHost.GetString())
-	viper.Reset()
+	ResetConfig()
 
 	//Test if prefix is not set, should not be able to find osdfYaml configuration
 	testingPreferredPrefix = ""
@@ -211,9 +207,9 @@ func setupConfigLocations(t *testing.T, continueDirs []string) {
 
 // Test that the `ConfigLocations` key works as expected
 func TestExtraCfg(t *testing.T) {
-	viper.Reset()
+	ResetConfig()
 	t.Cleanup(func() {
-		viper.Reset()
+		ResetConfig()
 	})
 
 	t.Run("test-no-continue", func(t *testing.T) {
@@ -222,7 +218,7 @@ func TestExtraCfg(t *testing.T) {
 	})
 
 	t.Run("test-one-dir-no-files", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		dir1 := t.TempDir()
 		setupConfigLocations(t, []string{dir1})
 
@@ -235,7 +231,7 @@ func TestExtraCfg(t *testing.T) {
 	})
 
 	t.Run("test-one-dir-one-file", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		dir1 := t.TempDir()
 		setupConfigLocations(t, []string{dir1})
 
@@ -252,7 +248,7 @@ func TestExtraCfg(t *testing.T) {
 	})
 
 	t.Run("test-two-dirs-one-file-each", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		dir1 := t.TempDir()
 		dir2 := t.TempDir()
 		setupConfigLocations(t, []string{dir1, dir2})
@@ -276,7 +272,7 @@ func TestExtraCfg(t *testing.T) {
 	})
 
 	t.Run("test-two-dirs-two-files-each", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		dir1 := t.TempDir()
 		dir2 := t.TempDir()
 		setupConfigLocations(t, []string{dir1, dir2})
@@ -301,7 +297,7 @@ func TestExtraCfg(t *testing.T) {
 	})
 
 	t.Run("test-bad-directory", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		continueDir := t.TempDir()
 		setupConfigLocations(t, []string{continueDir + "-dne"})
 
@@ -326,11 +322,11 @@ func TestDeprecateLogMessage(t *testing.T) {
 	require.NoError(t, err)
 
 	viper.Set("ConfigDir", tmpPath)
-	viper.Reset()
+	ResetConfig()
 	t.Run("expect-deprecated-message-if-namespace-is-set", func(t *testing.T) {
 		hook := test.NewGlobal()
-		viper.Reset()
-		defer viper.Reset()
+		ResetConfig()
+		defer ResetConfig()
 		// The default value is set to Error, but this is a warning message
 		viper.Set("Logging.Level", "Warning")
 		viper.Set("Origin.NamespacePrefix", "/a/prefix")
@@ -465,87 +461,6 @@ func TestSetPreferredPrefix(t *testing.T) {
 	})
 }
 
-func TestDiscoverFederation(t *testing.T) {
-	ctx := testConfigContext(t)
-
-	viper.Reset()
-	// Server to be a "mock" federation
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// make our response:
-		response := FederationDiscovery{
-			DirectorEndpoint:              "director",
-			NamespaceRegistrationEndpoint: "registry",
-			JwksUri:                       "jwks",
-			BrokerEndpoint:                "broker",
-		}
-
-		responseJSON, err := json.Marshal(response)
-		if err != nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		_, err = w.Write(responseJSON)
-		assert.NoError(t, err)
-	}))
-	defer server.Close()
-	transport := GetTransport()
-	origClientConfig := transport.TLSClientConfig
-	transport.TLSClientConfig = server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
-	t.Cleanup(func() {
-		transport.TLSClientConfig = origClientConfig
-	})
-
-	t.Run("testInvalidDiscoveryUrlWithPath", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("ConfigDir", t.TempDir())
-		viper.Set("Federation.DiscoveryURL", server.URL+"/this/is/some/path")
-		InitConfig()
-		require.NoError(t, InitClient())
-		_, err := GetFederation(ctx)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Invalid federation discovery url is set. No path allowed for federation discovery url. Provided url: ",
-			"Error returned does not contain the correct error")
-		viper.Reset()
-	})
-
-	t.Run("testValidDiscoveryUrl", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("ConfigDir", t.TempDir())
-		InitConfig()
-		require.NoError(t, InitClient())
-		transport := GetTransport()
-		transport.TLSClientConfig = server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
-		viper.Set("Federation.DiscoveryUrl", server.URL)
-		fedInfo, err := GetFederation(ctx)
-		assert.NoError(t, err)
-		// Assert that the metadata matches expectations
-		assert.Equal(t, "director", fedInfo.DirectorEndpoint, "Unexpected DirectorEndpoint")
-		assert.Equal(t, "registry", fedInfo.NamespaceRegistrationEndpoint, "Unexpected NamespaceRegistrationEndpoint")
-		assert.Equal(t, "jwks", fedInfo.JwksUri, "Unexpected JwksUri")
-		assert.Equal(t, "broker", fedInfo.BrokerEndpoint, "Unexpected BrokerEndpoint")
-		viper.Reset()
-	})
-
-	t.Run("testOsgHtcUrl", func(t *testing.T) {
-		viper.Reset()
-		viper.Set("ConfigDir", t.TempDir())
-		InitConfig()
-		require.NoError(t, InitClient())
-		mock.MockOSDFDiscovery(t, GetTransport())
-		viper.Set("Federation.DiscoveryUrl", "osg-htc.org")
-		fedInfo, err := GetFederation(ctx)
-		assert.NoError(t, err)
-		// Assert that the metadata matches expectations
-		assert.Equal(t, "https://osdf-director.osg-htc.org", fedInfo.DirectorEndpoint, "Unexpected DirectorEndpoint")
-		assert.Equal(t, "https://osdf-registry.osg-htc.org", fedInfo.NamespaceRegistrationEndpoint, "Unexpected NamespaceRegistrationEndpoint")
-		assert.Equal(t, "https://osg-htc.org/osdf/public_signing_key.jwks", fedInfo.JwksUri, "Unexpected JwksUri")
-		assert.Equal(t, "", fedInfo.BrokerEndpoint, "Unexpected BrokerEndpoint")
-		viper.Reset()
-	})
-}
-
 func TestCheckWatermark(t *testing.T) {
 	t.Parallel()
 
@@ -669,11 +584,11 @@ func TestInitServerUrl(t *testing.T) {
 	mockWebUrlWNon443Port := "https://example.com:8444"
 
 	t.Cleanup(func() {
-		viper.Reset()
+		ResetConfig()
 	})
 
 	initConfig := func() {
-		viper.Reset()
+		ResetConfig()
 		tempDir := t.TempDir()
 		viper.Set("ConfigDir", tempDir)
 	}
@@ -685,7 +600,7 @@ func TestInitServerUrl(t *testing.T) {
 	}
 
 	t.Run("web-url-defaults-to-hostname-port", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mockNon443Port)
 		err := InitConfigDir()
@@ -696,7 +611,7 @@ func TestInitServerUrl(t *testing.T) {
 	})
 
 	t.Run("default-web-url-removes-443-port", func(t *testing.T) {
-		viper.Reset()
+		ResetConfig()
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mock443Port)
 		err := InitConfigDir()
@@ -708,7 +623,7 @@ func TestInitServerUrl(t *testing.T) {
 
 	t.Run("remove-443-port-for-set-web-url", func(t *testing.T) {
 		// We respect the URL value set directly by others. Won't remove 443 port
-		viper.Reset()
+		ResetConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
 		err := InitConfigDir()
 		require.NoError(t, err)
@@ -761,7 +676,7 @@ func TestInitServerUrl(t *testing.T) {
 		require.NoError(t, err)
 		fedInfo, err := GetFederation(ctx)
 		require.NoError(t, err)
-		assert.Equal(t, mockWebUrlWoPort, fedInfo.NamespaceRegistrationEndpoint)
+		assert.Equal(t, mockWebUrlWoPort, fedInfo.RegistryEndpoint)
 
 		// If Server_ExternalWebUrl is explicitly set, Federation_RegistryUrl defaults to whatever it is
 		// But 443 port is stripped if provided
@@ -771,7 +686,7 @@ func TestInitServerUrl(t *testing.T) {
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
-		assert.Equal(t, mockWebUrlWoPort, fedInfo.NamespaceRegistrationEndpoint)
+		assert.Equal(t, mockWebUrlWoPort, fedInfo.RegistryEndpoint)
 
 		initConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlWoPort)
@@ -780,7 +695,7 @@ func TestInitServerUrl(t *testing.T) {
 		require.NoError(t, err)
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
-		assert.Equal(t, "https://example-registry.com", fedInfo.NamespaceRegistrationEndpoint)
+		assert.Equal(t, "https://example-registry.com", fedInfo.RegistryEndpoint)
 	})
 
 	t.Run("broker-url-default-to-web-url", func(t *testing.T) {
@@ -814,133 +729,5 @@ func TestInitServerUrl(t *testing.T) {
 		fedInfo, err = GetFederation(ctx)
 		require.NoError(t, err)
 		assert.Equal(t, "https://example-registry.com", fedInfo.BrokerEndpoint)
-	})
-}
-func TestDiscoverUrlFederation(t *testing.T) {
-	t.Run("TestMetadataDiscoveryTimeout", func(t *testing.T) {
-		viper.Set("tlsskipverify", true)
-		err := InitClient()
-		assert.NoError(t, err)
-		// Create a server that sleeps for a longer duration than the timeout
-		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(2 * time.Second)
-		}))
-		defer server.Close()
-
-		// Set a short timeout for the test
-		timeout := 1 * time.Second
-
-		// Create a context with the timeout
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-
-		// Call the function with the server URL and the context
-		_, err = DiscoverUrlFederation(ctx, server.URL)
-
-		// Assert that the error is the expected metadata timeout error
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, MetadataTimeoutErr))
-		viper.Reset()
-	})
-
-	t.Run("TestMetadataDiscoveryTimeoutRetry", func(t *testing.T) {
-		viper.Set("tlsskipverify", true)
-		viper.Set("Logging.Level", "Debug")
-		viper.Set("Transport.ResponseHeaderTimeout", "300ms")
-		InitConfig()
-		err := InitClient()
-		require.NoError(t, err)
-
-		hook := test.NewGlobal()
-		logrus.SetLevel(logrus.WarnLevel)
-
-		// Create a server that sleeps for a longer duration than the timeout
-		ctr := 0
-		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ctr < 1 {
-				time.Sleep(2 * time.Second)
-			}
-
-			ctr += 1
-			w.WriteHeader(200)
-			_, err := w.Write([]byte("{\"director_endpoint\": \"https://osdf-director.osg-htc.org\", \"namespace_registration_endpoint\": \"https://osdf-registry.osg-htc.org\", \"jwks_uri\": \"https://osg-htc.org/osdf/public_signing_key.jwks\"}"))
-			assert.NoError(t, err)
-		}))
-		defer server.Close()
-
-		// Set a short timeout for the test
-		timeout := 5 * time.Second
-
-		// Create a context with the timeout
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-
-		// Call the function with the server URL and the context
-		_, err = DiscoverUrlFederation(ctx, server.URL)
-
-		assert.Equal(t, log.WarnLevel, hook.LastEntry().Level)
-		assert.Equal(t, "Timeout occurred when querying discovery URL "+server.URL+"/.well-known/pelican-configuration for metadata; 2 retries remaining", hook.LastEntry().Message)
-
-		// Assert that the error is the expected metadata timeout error
-		assert.NoError(t, err)
-		viper.Reset()
-	})
-
-	t.Run("TestCanceledContext", func(t *testing.T) {
-		// Create a server that waits for the context to be canceled
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			<-r.Context().Done()
-		}))
-		defer server.Close()
-
-		// Create a context and cancel it immediately
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-
-		// Call the function with the server URL and the canceled context
-		_, err := DiscoverUrlFederation(ctx, server.URL)
-
-		// Assert that the error is the expected context cancel error
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, context.Canceled))
-	})
-
-	t.Run("TestValidDiscovery", func(t *testing.T) {
-		viper.Set("tlsskipverify", true)
-		err := InitClient()
-		assert.NoError(t, err)
-		// Server to be a "mock" federation
-		server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// make our response:
-			response := FederationDiscovery{
-				DirectorEndpoint:              "director",
-				NamespaceRegistrationEndpoint: "registry",
-				JwksUri:                       "jwks",
-				BrokerEndpoint:                "broker",
-			}
-
-			responseJSON, err := json.Marshal(response)
-			if err != nil {
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-				return
-			}
-
-			w.WriteHeader(http.StatusOK)
-			_, err = w.Write(responseJSON)
-			assert.NoError(t, err)
-		}))
-		defer server.Close()
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		metadata, err := DiscoverUrlFederation(ctx, server.URL)
-		assert.NoError(t, err)
-
-		// Assert that the metadata matches expectations
-		assert.Equal(t, "director", metadata.DirectorEndpoint, "Unexpected DirectorEndpoint")
-		assert.Equal(t, "registry", metadata.NamespaceRegistrationEndpoint, "Unexpected NamespaceRegistrationEndpoint")
-		assert.Equal(t, "jwks", metadata.JwksUri, "Unexpected JwksUri")
-		assert.Equal(t, "broker", metadata.BrokerEndpoint, "Unexpected BrokerEndpoint")
-		viper.Reset()
 	})
 }

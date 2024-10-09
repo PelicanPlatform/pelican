@@ -33,6 +33,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 const (
@@ -131,10 +132,10 @@ func TestCollectionExistsByUUID(t *testing.T) {
 }
 
 func TestGetCollectionByUUID(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	setupMockOriginDB(t)
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
 		teardownMockOriginDB(t)
 	})
 	err := insertMockDBData(mockGC)
@@ -164,10 +165,10 @@ func TestGetCollectionByUUID(t *testing.T) {
 }
 
 func TestCreateCollection(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	setupMockOriginDB(t)
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
 		teardownMockOriginDB(t)
 	})
 
@@ -204,10 +205,10 @@ func TestCreateCollection(t *testing.T) {
 }
 
 func TestUpdateCollection(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	setupMockOriginDB(t)
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
 		teardownMockOriginDB(t)
 	})
 
@@ -234,10 +235,10 @@ func TestUpdateCollection(t *testing.T) {
 }
 
 func TestDeleteCollectionByUUID(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	setupMockOriginDB(t)
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
 		teardownMockOriginDB(t)
 	})
 

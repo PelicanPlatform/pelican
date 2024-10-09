@@ -42,6 +42,7 @@ function useFuse<T>(
   const options = useMemo(() => {
     return {
       ...fuseOptions,
+      threshold: 0.2,
       keys: keys,
     };
   }, [fuseOptions, keys]);

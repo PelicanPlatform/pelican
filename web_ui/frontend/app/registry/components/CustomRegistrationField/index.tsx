@@ -1,4 +1,4 @@
-import type { CustomRegistrationField } from '@/components/Config/index';
+import type { CustomRegistrationField } from '@/components/configuration/index';
 import { BooleanField } from './BooleanField';
 import { ErrorField } from './ErrorField';
 import { StringField } from './StringField';

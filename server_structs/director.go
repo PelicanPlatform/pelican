@@ -47,17 +47,14 @@ type (
 
 	// Note that the json are kept in uppercase for backward compatibility
 	Capabilities struct {
-		PublicReads bool `json:"PublicRead"`
-		Reads       bool `json:"Read"`
-		Writes      bool `json:"Write"`
-		Listings    bool `json:"Listing"`
-		DirectReads bool `json:"FallBackRead"`
+		PublicReads bool `json:"PublicReads"`
+		Reads       bool `json:"Reads"`
+		Writes      bool `json:"Writes"`
+		Listings    bool `json:"Listings"`
+		DirectReads bool `json:"DirectReads"`
 	}
 
 	NamespaceAdV2 struct {
-		// TODO: Deprecate this top-level PublicRead field in favor of the Caps.PublicReads field.
-		// Should be done ~v7.10 series
-		PublicRead   bool
 		Caps         Capabilities  // Namespace capabilities should be considered independently of the origin’s capabilities.
 		Path         string        `json:"path"`
 		Generation   []TokenGen    `json:"token-generation"`
@@ -87,10 +84,7 @@ type (
 		Type                string            `json:"type"`
 		Latitude            float64           `json:"latitude"`
 		Longitude           float64           `json:"longitude"`
-		Caps                Capabilities      `json:"capabilities"` // TODO: Get rid of Writes, Listings, DirectReads in favor of Caps.Writes, Caps.Listings, Caps.DirectReads
-		Writes              bool              `json:"enable_write"`
-		Listings            bool              `json:"enable_listing"`       // True if the origin allows directory listings
-		DirectReads         bool              `json:"enable_fallback_read"` // True if reads from the origin are permitted when no cache is available
+		Caps                Capabilities      `json:"capabilities"`
 		FromTopology        bool              `json:"from_topology"`
 		IOLoad              float64           `json:"io_load"`
 	}
@@ -456,9 +450,8 @@ func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) 
 			}
 
 			newNS := NamespaceAdV2{
-				PublicRead: caps.PublicReads,
-				Caps:       caps,
-				Path:       nsAd.Path,
+				Caps: caps,
+				Path: nsAd.Path,
 			}
 
 			if nsAd.RequireToken {

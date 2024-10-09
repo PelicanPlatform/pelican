@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,6 +85,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set("ConfigDir", tmpPath)
 	viper.Set("Logging.Level", "debug")
 	viper.Set("Logging.Cache.Pss", "debug")
+	viper.Set("TLSSkipVerify", true)
 
 	config.InitConfig()
 
@@ -157,6 +159,27 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		ft.Pids = append(ft.Pids, server.GetPids()...)
 	}
 
+	// Set up discovery for federation metadata hosting. This needs to be done AFTER launching
+	// servers, because they populate the param values we use to set the metadata.
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/pelican-configuration" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(fmt.Sprintf(`{
+				"director_endpoint": "%s",
+				"namespace_registration_endpoint": "%s",
+				"broker_endpoint": "%s",
+				"jwks_uri": "%s"
+			}`, param.Server_ExternalWebUrl.GetString(), param.Server_ExternalWebUrl.GetString(), param.Server_ExternalWebUrl.GetString(), param.Server_ExternalWebUrl.GetString())))
+			assert.NoError(t, err)
+		} else {
+			http.NotFound(w, r)
+		}
+	}
+	discoveryServer := httptest.NewTLSServer(http.HandlerFunc(handler))
+	t.Cleanup(discoveryServer.Close)
+	viper.Set("Federation.DiscoveryUrl", discoveryServer.URL)
+
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)
 	require.NoError(t, err)
@@ -202,8 +225,8 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		}
 		err := os.RemoveAll(tmpPath)
 		require.NoError(t, err)
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		server_utils.ResetTestState()
 	})
 
 	return

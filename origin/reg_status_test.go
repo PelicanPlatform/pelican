@@ -26,11 +26,11 @@ import (
 	"testing"
 
 	"github.com/jellydator/ttlcache/v3"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -73,17 +73,17 @@ func mockRegistryCheck(t *testing.T) *httptest.Server {
 
 func TestFetchRegStatus(t *testing.T) {
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
 		config.ResetFederationForTest()
 	})
 
 	t.Run("successful-fetch", func(t *testing.T) {
 		ts := mockRegistryCheck(t)
 		defer ts.Close()
-		viper.Reset()
+		server_utils.ResetTestState()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{
-			NamespaceRegistrationEndpoint: ts.URL,
+		config.SetFederation(pelican_url.FederationDiscovery{
+			RegistryEndpoint: ts.URL,
 		})
 
 		result, err := FetchRegStatus([]string{"/foo", "/bar"})
@@ -104,10 +104,10 @@ func TestFetchRegStatus(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}))
 		defer ts.Close()
-		viper.Reset()
+		server_utils.ResetTestState()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{
-			NamespaceRegistrationEndpoint: ts.URL,
+		config.SetFederation(pelican_url.FederationDiscovery{
+			RegistryEndpoint: ts.URL,
 		})
 
 		_, err := FetchRegStatus([]string{"/foo", "/bar"})
@@ -124,10 +124,10 @@ func TestFetchRegStatus(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
 		defer ts.Close()
-		viper.Reset()
+		server_utils.ResetTestState()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{
-			NamespaceRegistrationEndpoint: ts.URL,
+		config.SetFederation(pelican_url.FederationDiscovery{
+			RegistryEndpoint: ts.URL,
 		})
 
 		_, err := FetchRegStatus([]string{"/foo", "/bar"})
@@ -138,13 +138,13 @@ func TestFetchRegStatus(t *testing.T) {
 
 func TestWrapExportsByStatus(t *testing.T) {
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
 		config.ResetFederationForTest()
 	})
 
-	viper.Reset()
-	config.SetFederation(config.FederationDiscovery{
-		NamespaceRegistrationEndpoint: "https://mock-registry.org",
+	server_utils.ResetTestState()
+	config.SetFederation(pelican_url.FederationDiscovery{
+		RegistryEndpoint: "https://mock-registry.org",
 	})
 	registrationsStatus.DeleteAll()
 
@@ -190,12 +190,12 @@ func TestWrapExportsByStatus(t *testing.T) {
 	})
 
 	t.Run("partial-cached", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		ts := mockRegistryCheck(t)
 		defer ts.Close()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{
-			NamespaceRegistrationEndpoint: ts.URL,
+		config.SetFederation(pelican_url.FederationDiscovery{
+			RegistryEndpoint: ts.URL,
 		})
 		registrationsStatus.DeleteAll()
 
@@ -236,6 +236,6 @@ func TestWrapExportsByStatus(t *testing.T) {
 		assert.EqualValues(t, expected, got)
 
 		registrationsStatus.DeleteAll()
-		viper.Reset()
+		server_utils.ResetTestState()
 	})
 }

@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -51,7 +52,7 @@ import (
 func TestPurge(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	viper.Reset()
+	server_utils.ResetTestState()
 	viper.Set("LocalCache.Size", "5MB")
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
@@ -103,8 +104,8 @@ func TestPurge(t *testing.T) {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		server_utils.ResetTestState()
 	})
 }
 
@@ -113,7 +114,7 @@ func TestPurge(t *testing.T) {
 func TestForcePurge(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	viper.Reset()
+	server_utils.ResetTestState()
 	viper.Set("LocalCache.Size", "5MB")
 	// Decrease the low water mark so invoking purge will result in 3 files in the cache.
 	viper.Set("LocalCache.LowWaterMarkPercentage", "80")
@@ -195,7 +196,7 @@ func TestForcePurge(t *testing.T) {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
-		// Throw in a viper.Reset for good measure. Keeps our env squeaky clean!
-		viper.Reset()
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		server_utils.ResetTestState()
 	})
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -138,7 +139,7 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			viper.Reset()
+			server_utils.ResetTestState()
 			viper.Set("ConfigDir", t.TempDir())
 			viper.Set("Federation.DirectorUrl", tc.dirUrl)
 			viper.Set("Federation.RegistryUrl", tc.regUrl)
@@ -152,11 +153,11 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 			require.Equal(t, tc.statusCode, w.Result().StatusCode)
 			body, err := io.ReadAll(w.Result().Body)
 			require.NoError(t, err)
-			dis := config.FederationDiscovery{}
+			dis := pelican_url.FederationDiscovery{}
 			err = json.Unmarshal(body, &dis)
 			require.NoError(t, err)
 			assert.Equal(t, tc.expectedDir, dis.DirectorEndpoint)
-			assert.Equal(t, tc.expectedReg, dis.NamespaceRegistrationEndpoint)
+			assert.Equal(t, tc.expectedReg, dis.RegistryEndpoint)
 		})
 	}
 }
@@ -211,7 +212,7 @@ func TestOidcDiscoveryHandler(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			viper.Reset()
+			server_utils.ResetTestState()
 			viper.Set("ConfigDir", t.TempDir())
 			viper.Set("Federation.DirectorUrl", tc.dirUrl)
 			config.InitConfig()

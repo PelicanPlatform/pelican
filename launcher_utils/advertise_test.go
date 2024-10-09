@@ -26,22 +26,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func TestGetSitenameFromReg(t *testing.T) {
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
 	})
 
 	t.Run("no-registry-url", func(t *testing.T) {
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{})
+		config.SetFederation(pelican_url.FederationDiscovery{})
 		sitename, err := getSitenameFromReg(context.Background(), "/foo")
 		require.Error(t, err)
 		assert.Equal(t, "unable to fetch site name from the registry. Federation.RegistryUrl or Federation.DiscoveryUrl is unset", err.Error())
@@ -49,13 +50,13 @@ func TestGetSitenameFromReg(t *testing.T) {
 	})
 
 	t.Run("registry-returns-404", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		}))
 		defer ts.Close()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{NamespaceRegistrationEndpoint: ts.URL})
+		config.SetFederation(pelican_url.FederationDiscovery{RegistryEndpoint: ts.URL})
 		sitename, err := getSitenameFromReg(context.Background(), "/foo")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "replied with status code 404")
@@ -63,7 +64,7 @@ func TestGetSitenameFromReg(t *testing.T) {
 	})
 
 	t.Run("registry-returns-correct-object", func(t *testing.T) {
-		viper.Reset()
+		server_utils.ResetTestState()
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if strings.HasPrefix(req.URL.Path, "/api/v1.0/registry") {
 				prefix := strings.TrimPrefix(req.URL.Path, "/api/v1.0/registry")
@@ -78,7 +79,7 @@ func TestGetSitenameFromReg(t *testing.T) {
 		}))
 		defer ts.Close()
 		config.ResetFederationForTest()
-		config.SetFederation(config.FederationDiscovery{NamespaceRegistrationEndpoint: ts.URL})
+		config.SetFederation(pelican_url.FederationDiscovery{RegistryEndpoint: ts.URL})
 		sitename, err := getSitenameFromReg(context.Background(), "/foo")
 		require.NoError(t, err)
 		assert.Equal(t, "bar", sitename)

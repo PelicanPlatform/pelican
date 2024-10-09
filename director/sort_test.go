@@ -21,6 +21,7 @@ package director
 import (
 	"bytes"
 	_ "embed"
+	"math"
 	"math/rand"
 	"net"
 	"net/netip"
@@ -35,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // Geo Override Yaml mockup
@@ -43,7 +45,11 @@ import (
 var yamlMockup string
 
 func TestCheckOverrides(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+		geoIPOverrides = nil
+	})
 
 	// We'll also check that our logging feature responsibly reports
 	// what Pelican is telling the user.
@@ -137,8 +143,6 @@ func TestCheckOverrides(t *testing.T) {
 		require.Equal(t, expectedCoordinate.Lat, coordinate.Lat)
 		require.Equal(t, expectedCoordinate.Long, coordinate.Long)
 	})
-
-	viper.Reset()
 }
 
 func TestSortServerAdsByTopo(t *testing.T) {
@@ -188,9 +192,10 @@ func TestSortServerAdsByTopo(t *testing.T) {
 }
 
 func TestSortServerAds(t *testing.T) {
-	viper.Reset()
+	server_utils.ResetTestState()
 	t.Cleanup(func() {
-		viper.Reset()
+		server_utils.ResetTestState()
+		geoIPOverrides = nil
 	})
 
 	// A random IP that should geo-resolve to roughly the same location as the Madison server
@@ -419,4 +424,73 @@ func TestSortServerAdsByAvailability(t *testing.T) {
 
 	sortServerAdsByAvailability(randomOrder, avaiMap)
 	assert.EqualValues(t, expected, randomOrder)
+}
+
+func TestAssignRandBoundedCoord(t *testing.T) {
+	// Because of the test's randomness, do it a few times to increase the likelihood of catching errors
+	for i := 0; i < 10; i++ {
+		// Generate a random bounding box between -200, 200
+		lat1 := rand.Float64()*400 - 200
+		long1 := rand.Float64()*400 - 200
+		lat2 := rand.Float64()*400 - 200
+		long2 := rand.Float64()*400 - 200
+
+		// Assign mins and maxes
+		minLat, maxLat := math.Min(lat1, lat2), math.Max(lat1, lat2)
+		minLong, maxLong := math.Min(long1, long2), math.Max(long1, long2)
+
+		// Assign a random coordinate within the bounding box
+		lat, long := assignRandBoundedCoord(minLat, maxLat, minLong, maxLong)
+		assert.True(t, lat >= minLat && lat <= maxLat)
+		assert.True(t, long >= minLong && long <= maxLong)
+	}
+}
+
+func TestGetClientLatLong(t *testing.T) {
+	// The cache may be populated from previous tests. Wipe it out and start fresh.
+	clientIpCache.DeleteAll()
+	t.Run("invalid-ip", func(t *testing.T) {
+		// Capture the log and check that the correct error is logged
+		logOutput := &(bytes.Buffer{})
+		log.SetOutput(logOutput)
+		log.SetLevel(log.DebugLevel)
+
+		clientIp := netip.Addr{}
+		assert.False(t, clientIpCache.Has(clientIp))
+		coord1 := getClientLatLong(clientIp)
+
+		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
+		assert.True(t, coord1.Long <= usLongMax && coord1.Long >= usLongMin)
+		assert.Contains(t, logOutput.String(), "Unable to sort servers based on client-server distance. Invalid client IP address")
+		assert.NotContains(t, logOutput.String(), "Retrieving pre-assigned lat/long")
+
+		// Get it again to make sure it's coming from the cache
+		coord2 := getClientLatLong(clientIp)
+		assert.Equal(t, coord1.Lat, coord2.Lat)
+		assert.Equal(t, coord1.Long, coord2.Long)
+		assert.Contains(t, logOutput.String(), "Retrieving pre-assigned lat/long for unresolved client IP")
+		assert.True(t, clientIpCache.Has(clientIp))
+	})
+
+	t.Run("valid-ip-no-geoip-match", func(t *testing.T) {
+		logOutput := &(bytes.Buffer{})
+		log.SetOutput(logOutput)
+		log.SetLevel(log.DebugLevel)
+
+		clientIp := netip.MustParseAddr("192.168.0.1")
+		assert.False(t, clientIpCache.Has(clientIp))
+		coord1 := getClientLatLong(clientIp)
+
+		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
+		assert.True(t, coord1.Long <= usLongMax && coord1.Long >= usLongMin)
+		assert.Contains(t, logOutput.String(), "Client IP 192.168.0.1 has been re-assigned a random location in the contiguous US to lat/long")
+		assert.NotContains(t, logOutput.String(), "Retrieving pre-assigned lat/long")
+
+		// Get it again to make sure it's coming from the cache
+		coord2 := getClientLatLong(clientIp)
+		assert.Equal(t, coord1.Lat, coord2.Lat)
+		assert.Equal(t, coord1.Long, coord2.Long)
+		assert.Contains(t, logOutput.String(), "Retrieving pre-assigned lat/long for client IP")
+		assert.True(t, clientIpCache.Has(clientIp))
+	})
 }
