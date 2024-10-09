@@ -40,6 +40,7 @@ const Circle = ({ children }: { children: React.ReactNode }) => {
 interface AuthenticatedContentProps {
   promptLogin?: boolean;
   redirect?: boolean;
+  trustThenValidate?: boolean
   children: React.ReactNode;
   boxProps?: BoxProps;
   checkAuthentication?: (user: User) => boolean;
@@ -48,6 +49,7 @@ interface AuthenticatedContentProps {
 const AuthenticatedContent = ({
   promptLogin = false,
   redirect = false,
+  trustThenValidate = false,
   children,
   boxProps,
   checkAuthentication,
@@ -67,7 +69,7 @@ const AuthenticatedContent = ({
     if (data && checkAuthentication) {
       return checkAuthentication(data);
     } else {
-      return data?.authenticated;
+      return data?.authenticated !== undefined;
     }
   }, [data, checkAuthentication]);
 
@@ -86,10 +88,17 @@ const AuthenticatedContent = ({
     }
   }, [data, isValidating]);
 
+  // If there was a error then print it to the screen
   if (error) {
     return <Circle>{error}</Circle>;
   }
 
+  // If we are authenticated or if we trust at first then show the content
+  if(authenticated || (trustThenValidate && (isLoading || isValidating))) {
+    return <Box {...boxProps}>{authenticated && children}</Box>;
+  }
+
+  // If we are loading then show a loader
   if (data === undefined) {
     return (
       <Box
@@ -109,7 +118,8 @@ const AuthenticatedContent = ({
     );
   }
 
-  if (authenticated === false && promptLogin) {
+  // If we are not authenticated and we are prompted to login then show the login
+  if (!authenticated && promptLogin) {
     return (
       <Circle>
         <Typography variant={'h4'} align={'center'}>
@@ -127,7 +137,7 @@ const AuthenticatedContent = ({
     );
   }
 
-  return <Box {...boxProps}>{authenticated && children}</Box>;
+  return null
 };
 
 export default AuthenticatedContent;
