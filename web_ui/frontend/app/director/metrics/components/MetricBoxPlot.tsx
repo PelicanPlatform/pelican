@@ -113,6 +113,11 @@ export const BytesMetricBoxPlot = ({
       options={{
         responsive: true,
         maintainAspectRatio: false,
+        scales: {
+          y: {
+            type: 'logarithmic'
+          },
+        },
         plugins: {
           tooltip: {
             callbacks: {
@@ -177,6 +182,11 @@ export const MetricBoxPlot = ({
       options={{
         responsive: true,
         maintainAspectRatio: false,
+        scales: {
+          y: {
+            type: 'logarithmic'
+          },
+        },
         plugins: {
           tooltip: {
             callbacks: {

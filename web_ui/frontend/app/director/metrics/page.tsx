@@ -29,7 +29,7 @@ const Page = () => {
         <Grid container spacing={1} flexGrow={1}>
           <Grid item xs={12} display={'flex'} height={'35vh'}>
             <Grid container spacing={1}>
-              <Grid item xs={4}>
+              <Grid item xs={3}>
                 <Paper sx={{ flexGrow: 1, height: '100%' }}>
                   <BytesMetricBoxPlot
                     metric={'go_memstats_alloc_bytes'}
@@ -37,7 +37,7 @@ const Page = () => {
                   />
                 </Paper>
               </Grid>
-              <Grid item xs={4}>
+              <Grid item xs={3}>
                 <Paper sx={{ flexGrow: 1, height: '100%' }}>
                   <MetricBoxPlot
                     metric={
@@ -47,7 +47,7 @@ const Page = () => {
                   />
                 </Paper>
               </Grid>
-              <Grid item xs={4}>
+              <Grid item xs={3}>
                 <Paper sx={{ flexGrow: 1, height: '100%' }}>
                   <MetricBoxPlot
                     metric={
@@ -57,10 +57,20 @@ const Page = () => {
                   />
                 </Paper>
               </Grid>
+              <Grid item xs={3}>
+                <Paper sx={{ flexGrow: 1, height: '100%' }}>
+                  <MetricBoxPlot
+                    metric={
+                      'sum by (server_name) (sum_over_time(xrootd_sched_thread_count[${range}])) / sum by (server_name) (count_over_time(xrootd_sched_thread_count[${range}]))'
+                    }
+                    title={'XRootD Scheduler Threads'}
+                  />
+                </Paper>
+              </Grid>
             </Grid>
           </Grid>
           <Grid item xs={12} display={'flex'} height={'32vh'}>
-            <Paper sx={{ flexGrow: 1 }}>
+            <Paper sx={{ width: "100%" }}>
               <TransferBarGraph />
             </Paper>
           </Grid>
@@ -81,7 +91,7 @@ const Page = () => {
                 />,
               ].map((component, index) => (
                 <Grid key={index} item xs={6} display={'flex'}>
-                  <Paper sx={{ flexGrow: 1 }}>{component}</Paper>
+                  <Paper sx={{ width: "100%" }}>{component}</Paper>
                 </Grid>
               ))}
             </Grid>
