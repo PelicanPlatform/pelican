@@ -1328,7 +1328,7 @@ func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
 		"destination": destination,
 		"status_code": strconv.Itoa(ctx.Writer.Status()),
 		"version":     "",
-		"network":     ctx.ClientIP(),
+		"network":     "",
 	}
 
 	version, _, err := extractVersionAndService(ctx)
@@ -1341,6 +1341,11 @@ func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
 		return
 	}
 	labels["version"] = version.String()
+
+	maskedIp, ok := utils.ApplyIPMask(ctx.ClientIP())
+	if ok {
+		labels["network"] = maskedIp
+	}
 	metrics.PelicanDirectorRedirectionsTotal.With(labels).Inc()
 }
 
