@@ -812,7 +812,7 @@ func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse
 	tc.Subject = "client_token"
 	ts := token_scopes.Storage_Read
 	if opts.Operation == config.TokenSharedWrite {
-		ts = token_scopes.Storage_Create
+		ts = token_scopes.Storage_Modify
 	}
 	if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
 		tc.AddResourceScopes(token_scopes.NewResourceScope(ts, after))
