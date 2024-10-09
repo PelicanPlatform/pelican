@@ -29,7 +29,7 @@ chmod 777 get_put_tmp/origin
 # Setup env variables needed
 export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:8444"
 export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:8444"
-export PELICAN_TLSSKIPVERIFY=true
+export PELICAN_TLSSKIPVERIFY=false
 export PELICAN_ORIGIN_ENABLEDIRECTREADS=true
 export PELICAN_SERVER_ENABLEUI=false
 export PELICAN_ORIGIN_RUNLOCATION=$PWD/xrootdRunLocation
@@ -38,6 +38,7 @@ export PELICAN_REGISTRY_DBLOCATION=$PWD/get_put_tmp/config/test.sql
 export PELICAN_OIDC_CLIENTID="sometexthere"
 export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
 export PELICAN_ORIGIN_STORAGEPREFIX="$PWD/get_put_tmp/origin"
+export PELICAN_DIRECTOR_X509CLIENTAUTHENTICATIONPREFIXES="/test/blocked"
 
 # Function to cleanup after test ends
 cleanup() {
@@ -62,6 +63,7 @@ cleanup() {
     unset PELICAN_SERVER_ENABLEUI
     unset PELICAN_OIDC_CLIENTID
     unset PELICAN_ORIGIN_ENABLEDIRECTREADS
+    unset PELICAN_DIRECTOR_X509CLIENTAUTHENTICATIONPREFIXES
 }
 
 # Make a file to use for testing
@@ -131,6 +133,18 @@ if grep -q "Dumping response: HTTP/1.1 200 OK" get_put_tmp/putOutput.txt; then
 else
     echo "Did not upload correctly"
     cat get_put_tmp/putOutput.txt
+    exit 1
+fi
+
+# Run pelican object put
+./pelican object put ./get_put_tmp/input.txt pelican://$HOSTNAME:8444/test/blocked/input.txt -d -t get_put_tmp/test-token.jwt -L get_put_tmp/putX509Output.txt
+
+# Check output of command
+if grep -q "Dumping response: HTTP/1.1 200 OK" get_put_tmp/putX509Output.txt; then
+    echo "Uploaded bytes successfully!"
+else
+    echo "Did not upload correctly"
+    cat get_put_tmp/putX509Output.txt
     exit 1
 fi
 
