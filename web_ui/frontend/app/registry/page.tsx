@@ -46,51 +46,15 @@ import { CardProps } from '@/components/Namespace/Card';
 import { PendingCardProps } from '@/components/Namespace/PendingCard';
 
 export default function Home() {
-  const [data, setData] = useState<{ namespace: Namespace }[] | undefined>(
-    undefined
-  );
   const [alert, setAlert] = useState<AlertType | undefined>(undefined);
 
-  const getData = async () => {
-    let data: { namespace: Namespace }[] = [];
-
-    const url = new URL(
-      '/api/v1.0/registry_ui/namespaces',
-      window.location.origin
-    );
-
-    const response = await fetch(url);
-    if (response.ok) {
-      const responseData: Namespace[] = await response.json();
-      responseData.sort((a, b) => (a.id > b.id ? 1 : -1));
-      responseData.forEach((namespace) => {
-        if (namespace.prefix.startsWith('/caches/')) {
-          namespace.type = 'cache';
-          namespace.prefix = namespace.prefix.replace('/caches/', '');
-        } else if (namespace.prefix.startsWith('/origins/')) {
-          namespace.type = 'origin';
-          namespace.prefix = namespace.prefix.replace('/origins/', '');
-        } else {
-          namespace.type = 'namespace';
-        }
-      });
-
-      // Convert data to Partial CardProps
-      data = responseData.map((d) => {
-        return { namespace: d };
-      });
+  const { data, mutate: mutateNamespaces } = useSWR<{ namespace: Namespace }[]>(
+    'getNamespaces',
+    getData,
+    {
+      fallbackData: [],
     }
-
-    return data;
-  };
-
-  const _setData = async () => {
-    setData(await getData());
-  };
-
-  useEffect(() => {
-    _setData();
-  }, []);
+  );
 
   const { data: user, error } = useSWR('getUser', getUser);
 
@@ -188,7 +152,7 @@ export default function Home() {
                   cardProps={{
                     authenticated: user,
                     onAlert: (a: AlertType) => setAlert(a),
-                    onUpdate: _setData,
+                    onUpdate: () => mutateNamespaces(),
                   }}
                 />
               </Paper>
@@ -225,7 +189,7 @@ export default function Home() {
                 Card={Card}
                 cardProps={{
                   authenticated: user,
-                  onUpdate: _setData,
+                  onUpdate: () => mutateNamespaces(),
                 }}
               />
             )}
@@ -293,3 +257,36 @@ export default function Home() {
     </Box>
   );
 }
+
+const getData = async () => {
+  let data: { namespace: Namespace }[] = [];
+
+  const url = new URL(
+    '/api/v1.0/registry_ui/namespaces',
+    window.location.origin
+  );
+
+  const response = await fetch(url);
+  if (response.ok) {
+    const responseData: Namespace[] = await response.json();
+    responseData.sort((a, b) => (a.id > b.id ? 1 : -1));
+    responseData.forEach((namespace) => {
+      if (namespace.prefix.startsWith('/caches/')) {
+        namespace.type = 'cache';
+        namespace.prefix = namespace.prefix.replace('/caches/', '');
+      } else if (namespace.prefix.startsWith('/origins/')) {
+        namespace.type = 'origin';
+        namespace.prefix = namespace.prefix.replace('/origins/', '');
+      } else {
+        namespace.type = 'namespace';
+      }
+    });
+
+    // Convert data to Partial CardProps
+    data = responseData.map((d) => {
+      return { namespace: d };
+    });
+  }
+
+  return data;
+};
