@@ -66,7 +66,6 @@ func TestConversion(t *testing.T) {
 			}},
 	},
 		{
-			PublicRead: true,
 			Caps: Capabilities{
 				PublicReads: true,
 				Reads:       true,

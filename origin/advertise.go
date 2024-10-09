@@ -100,7 +100,6 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		// PublicReads implies reads
 		reads := export.Capabilities.PublicReads || export.Capabilities.Reads
 		nsAds = append(nsAds, server_structs.NamespaceAdV2{
-			PublicRead: export.Capabilities.PublicReads,
 			Caps: server_structs.Capabilities{
 				PublicReads: export.Capabilities.PublicReads,
 				Reads:       reads,
