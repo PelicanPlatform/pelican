@@ -47,11 +47,11 @@ type (
 
 	// Note that the json are kept in uppercase for backward compatibility
 	Capabilities struct {
-		PublicReads bool `json:"PublicRead"`
-		Reads       bool `json:"Read"`
-		Writes      bool `json:"Write"`
-		Listings    bool `json:"Listing"`
-		DirectReads bool `json:"FallBackRead"`
+		PublicReads bool `json:"PublicReads"`
+		Reads       bool `json:"Reads"`
+		Writes      bool `json:"Writes"`
+		Listings    bool `json:"Listings"`
+		DirectReads bool `json:"DirectReads"`
 	}
 
 	NamespaceAdV2 struct {
