@@ -89,6 +89,9 @@ type (
 	}
 
 	ContextKey string
+
+	// Custom goose logger
+	CustomGooseLogger struct{}
 )
 
 const (
@@ -179,6 +182,14 @@ func init() {
 	translator = &trans
 
 	validate = validator.New(validator.WithRequiredStructEnabled())
+}
+
+// Implement logging for info and fatal levels using logrus.
+func (l CustomGooseLogger) Printf(format string, v ...interface{}) {
+	log.Infof(format, v...)
+}
+func (l CustomGooseLogger) Fatalf(format string, v ...interface{}) {
+	log.Fatalf(format, v...)
 }
 
 // setEnabledServer sets the global variable config.EnabledServers to include newServers.
@@ -750,16 +761,6 @@ func setWebConfigOverride(v *viper.Viper, configPath string) error {
 	return nil
 }
 
-// Custom goose logger
-type CustomGooseLogger struct{}
-
-func (l CustomGooseLogger) Printf(format string, v ...interface{}) {
-	log.Infof(format, v...)
-}
-func (l CustomGooseLogger) Fatalf(format string, v ...interface{}) {
-	log.Fatalf(format, v...)
-}
-
 func InitConfig() {
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
@@ -936,7 +937,6 @@ func LogPelicanVersion() {
 	log.Infoln("Version:", GetVersion())
 	log.Infoln("Build Date:", GetBuiltDate())
 	log.Infoln("Build Commit:", GetBuiltCommit())
-	log.Infoln("Built By:", GetBuiltBy())
 }
 
 // Print Pelican configuration to stderr

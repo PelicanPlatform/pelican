@@ -21,7 +21,6 @@
 # OA4MP is only for origin. Don't configure it if the deamon is not origin
 # the script is expect the argument in "[osdf|pelican] [deamon name] [...args]"
 if [ "$2" == "origin" ]; then
-    #echo "Initializing run environment for Pelican..."
     ####
     # Setup the OA4MP configuration.  Items are taken from https://github.com/scitokens/scitokens-oauth2-server/blob/master/start.sh
     # which appears to have an Apache 2.0 license.
@@ -35,6 +34,7 @@ if [ "$2" == "origin" ]; then
     export PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
 
     # Run the boot to inject the template
+    #Suppress the output of the script, as it is unhelpful for the user.
     ${QDL_HOME}/var/scripts/boot.qdl > /dev/null
 
     # check for one or more files in a directory
@@ -52,7 +52,6 @@ if [ "$2" == "origin" ]; then
 
         shopt -s nullglob
         for fullfile in /opt/scitokens-server/etc/trusted-cas/*.pem; do
-            #echo "Importing CA certificate $fullfile into the Java trusted CA store."
             aliasname=$(basename "$file")
             aliasname="${filename%.*}"
             keytool -cacerts -importcert -noprompt -storepass changeit -file "$fullfile" -alias "$aliasname"
@@ -86,14 +85,11 @@ if [ "$2" == "origin" ]; then
     # Tomcat requires us to provide the intermediate chain (which, in Kubernetes, is often in the same
     # file as the host certificate itself.  If there wasn't one provided, try splitting it out.
     if [ ! -e /opt/tomcat/conf/chain.pem ]; then
-        #echo "No chain present for host cert; trying to derive one"
         pushd /tmp > /dev/null
         if csplit -f tls- -b "%02d.crt.pem" -s -z "/opt/tomcat/conf/hostcert.pem" '/-----BEGIN CERTIFICATE-----/' '{1}' 2>/dev/null ; then
-            #echo "Chain present in hostcert.pem; using it."
             cp /tmp/tls-01.crt.pem /opt/tomcat/conf/chain.pem
             rm /tmp/tls-*.crt.pem
         else
-            #echo "No chain present; will use empty file"
             # No intermediate CAs found.  Create an empty file.
             touch /opt/tomcat/conf/chain.pem
         fi
