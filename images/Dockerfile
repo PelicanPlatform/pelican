@@ -57,7 +57,7 @@ RUN yum -y update \
 ####
 FROM dependency-build AS xrootd-plugin-builder
 # Install necessary build dependencies
-RUN  yum install -y --enablerepo=osg-testing xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
+RUN  yum install -y --enablerepo=osg-testing xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel sssd-client
 
 # The ADD command with a api.github.com URL in the next couple of sections
 # are for cache-hashing of the external repository that we rely on to build
