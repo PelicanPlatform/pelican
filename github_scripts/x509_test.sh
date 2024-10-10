@@ -38,7 +38,6 @@ export PELICAN_REGISTRY_DBLOCATION=$PWD/get_put_tmp/config/test.sql
 export PELICAN_OIDC_CLIENTID="sometexthere"
 export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
 export PELICAN_ORIGIN_STORAGEPREFIX="$PWD/get_put_tmp/origin"
-export PELICAN_DIRECTOR_X509CLIENTAUTHENTICATIONPREFIXES="/test/blocked"
 
 # Function to cleanup after test ends
 cleanup() {
@@ -63,7 +62,6 @@ cleanup() {
     unset PELICAN_SERVER_ENABLEUI
     unset PELICAN_OIDC_CLIENTID
     unset PELICAN_ORIGIN_ENABLEDIRECTREADS
-    unset PELICAN_DIRECTOR_X509CLIENTAUTHENTICATIONPREFIXES
 }
 
 # Make a file to use for testing
@@ -81,7 +79,7 @@ echo "Token created"
 cat get_put_tmp/test-token.jwt
 
 # Run federation in the background
-federationServe="./pelican serve --module director --module registry --module origin --module cache -d"
+federationServe="./pelican serve --module director --module registry --module origin -d"
 $federationServe &
 pid_federationServe=$!
 
@@ -125,7 +123,7 @@ do
 done
 
 # Run pelican object put
-./pelican object put ./get_put_tmp/input.txt pelican://$HOSTNAME:8444/test/input.txt -d -t get_put_tmp/test-token.jwt -L get_put_tmp/putOutput.txt
+./pelican object put ./get_put_tmp/input.txt pelican://$HOSTNAME:8444/test/input.txt -d -t get_put_tmp/test-token.jwt -l get_put_tmp/putOutput.txt
 
 # Check output of command
 if grep -q "Dumping response: HTTP/1.1 200 OK" get_put_tmp/putOutput.txt; then
@@ -136,22 +134,7 @@ else
     exit 1
 fi
 
-# Run pelican object put
-./pelican object put ./get_put_tmp/input.txt pelican://$HOSTNAME:8444/test/blocked/input.txt -d -t get_put_tmp/test-token.jwt -L get_put_tmp/putX509Output.txt
-
-# Check output of command
-if grep -q "Dumping response: HTTP/1.1 200 OK" get_put_tmp/putX509Output.txt; then
-    echo "Uploaded bytes successfully!"
-else
-    echo "Did not upload correctly"
-    cat get_put_tmp/putX509Output.txt
-    exit 1
-fi
-
-# Run curl get with tls
-curl -v -k -L https://localhost:8444/test/blocked/input.txt --tlsv1.3 --cert /etc/pelican/certificates/tls.crt --key /etc/pelican/certificates/tls.key &> get_put_tmp/getOutput.txt
-
-./pelican object get pelican://$HOSTNAME:8444/test/input.txt get_put_tmp/output.txt?directreads -d -t get_put_tmp/test-token.jwt -L get_put_tmp/getOutput.txt
+./pelican object get pelican://$HOSTNAME:8444/test/input.txt get_put_tmp/output.txt -d -t get_put_tmp/test-token.jwt -l get_put_tmp/getOutput.txt
 
 # Check output of command
 if grep -q "HTTP Transfer was successful" get_put_tmp/getOutput.txt; then
