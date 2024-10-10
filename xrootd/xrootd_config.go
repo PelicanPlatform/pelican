@@ -106,18 +106,19 @@ type (
 	}
 
 	CacheConfig struct {
-		UseCmsd        bool
-		EnableVoms     bool
-		CalculatedPort string
-		HighWaterMark  string
-		LowWatermark   string
-		ExportLocation string
-		RunLocation    string
-		DataLocations  []string
-		MetaLocations  []string
-		LocalRoot      string
-		PSSOrigin      string
-		Concurrency    int
+		UseCmsd                          bool
+		EnableVoms                       bool
+		CalculatedPort                   string
+		HighWaterMark                    string
+		LowWatermark                     string
+		ExportLocation                   string
+		RunLocation                      string
+		DataLocations                    []string
+		MetaLocations                    []string
+		LocalRoot                        string
+		PSSOrigin                        string
+		Concurrency                      int
+		X509ClientAuthenticationPrefixes []string
 	}
 
 	XrootdOptions struct {
