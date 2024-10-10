@@ -30,6 +30,7 @@ type Config struct {
 		DataLocations []string `mapstructure:"datalocations"`
 		EnableLotman bool `mapstructure:"enablelotman"`
 		EnableOIDC bool `mapstructure:"enableoidc"`
+		EnablePrefetch bool `mapstructure:"enableprefetch"`
 		EnableVoms bool `mapstructure:"enablevoms"`
 		ExportLocation string `mapstructure:"exportlocation"`
 		HighWaterMark string `mapstructure:"highwatermark"`
@@ -326,6 +327,7 @@ type configWithType struct {
 		DataLocations struct { Type string; Value []string }
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
+		EnablePrefetch struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
 		HighWaterMark struct { Type string; Value string }
