@@ -124,7 +124,7 @@ async function getData(
         let dataset = {
           data: await query_basic({
             metric,
-            duration: duration,
+            range: duration,
             resolution: resolution,
             time: updatedTime,
           }),

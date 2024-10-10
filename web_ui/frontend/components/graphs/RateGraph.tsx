@@ -27,24 +27,14 @@ import { DateTime } from 'luxon';
 
 import 'chartjs-adapter-luxon';
 
-import {
-  BoxProps,
-  Button,
-  FormControl,
-  Grid,
-  IconButton,
-  InputLabel,
-  MenuItem,
-  Paper,
-  Select,
-} from '@mui/material';
-
-import { Box } from '@mui/material';
+import { BoxProps, Grid } from '@mui/material';
 
 import {
   query_rate,
   TimeDuration,
   DurationType,
+  PrometheusQuery,
+  prometheusResultToDataPoints,
 } from '@/components/graphs/prometheus';
 
 import { GraphDrawer, ResolutionInput, RateInput } from './Drawer';
@@ -189,14 +179,18 @@ export default function RateGraph({
             updatedTime = DateTime.now();
           }
 
+          const queryResponse = await query_rate({
+            metric,
+            rate: _rate,
+            range: _duration,
+            resolution: _resolution,
+            time: updatedTime,
+          });
+
+          const dataPoints = prometheusResultToDataPoints(queryResponse);
+
           return {
-            data: await query_rate({
-              metric,
-              rate: _rate,
-              duration: _duration,
-              resolution: _resolution,
-              time: updatedTime,
-            }),
+            data: dataPoints,
             ...datasetOption,
           };
         })

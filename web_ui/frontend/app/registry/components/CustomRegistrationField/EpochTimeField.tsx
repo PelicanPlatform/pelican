@@ -17,25 +17,23 @@ const EpochTimeField = ({
   value,
 }: CustomRegistrationFieldProps<number>) => {
   return (
-    <LocalizationProvider dateAdapter={AdapterLuxon}>
-      <FormControl fullWidth>
-        <DateTimePicker
-          label={displayed_name}
-          slotProps={{
-            textField: {
-              name: name,
-              required: required,
-              size: 'small',
-            },
-          }}
-          value={value ? DateTime.fromSeconds(value) : null}
-          onChange={(newValue: DateTime | null) => {
-            onChange(newValue ? newValue.toUTC().toSeconds() : null);
-          }}
-        />
-        {description && <FormHelperText>{description}</FormHelperText>}
-      </FormControl>
-    </LocalizationProvider>
+    <FormControl fullWidth>
+      <DateTimePicker
+        label={displayed_name}
+        slotProps={{
+          textField: {
+            name: name,
+            required: required,
+            size: 'small',
+          },
+        }}
+        value={value ? DateTime.fromSeconds(value) : null}
+        onChange={(newValue: DateTime | null) => {
+          onChange(newValue ? newValue.toUTC().toSeconds() : null);
+        }}
+      />
+      {description && <FormHelperText>{description}</FormHelperText>}
+    </FormControl>
   );
 };
 

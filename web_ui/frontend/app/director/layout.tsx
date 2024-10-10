@@ -16,16 +16,11 @@
  *
  ***************************************************************/
 
-import { Box, Tooltip } from '@mui/material';
-
+import { Box } from '@mui/material';
 import { ButtonLink, Sidebar } from '@/components/layout/Sidebar';
-import Link from 'next/link';
-import Image from 'next/image';
-import PelicanLogo from '@/public/static/images/PelicanPlatformLogo_Icon.png';
-import IconButton from '@mui/material/IconButton';
 import BuildIcon from '@mui/icons-material/Build';
 import Main from '@/components/layout/Main';
-import { Dashboard, MapOutlined } from '@mui/icons-material';
+import { Dashboard, Equalizer, MapOutlined } from '@mui/icons-material';
 
 export const metadata = {
   title: 'Pelican Director',
@@ -42,6 +37,9 @@ export default function RootLayout({
       <Sidebar>
         <ButtonLink title={'Dashboard'} href={'/director/'}>
           <Dashboard />
+        </ButtonLink>
+        <ButtonLink title={'Metrics'} href={'/director/metrics/'}>
+          <Equalizer />
         </ButtonLink>
         <ButtonLink title={'Map'} href={'/director/map/'}>
           <MapOutlined />

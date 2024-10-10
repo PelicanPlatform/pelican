@@ -4,4 +4,5 @@ export * from './Dropdown';
 export * from './InformationSpan';
 export * from './Namespace';
 export * from './CapabilitiesDisplay';
+export * from './graphs';
 export * from './MarkdownRender';
