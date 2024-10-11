@@ -2009,3 +2009,16 @@ func TestGetFinalRedirectURL(t *testing.T) {
 		assert.Equal(t, "https://example.org:8444?key1=val1&key2=val2&raw="+encodedVal, get)
 	})
 }
+
+func TestExtractProjectFromUserAgent(t *testing.T) {
+	t.Run("Single User-Agent with project prefix", func(t *testing.T) {
+		userAgents := []string{"pelican-client/1.0.0 project/test"}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "test", result)
+	})
+	t.Run("Singlue User-Agent with swapped order", func(t *testing.T) {
+		userAgents := []string{"project/test pelican-client/1.0.0"}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "test", result)
+	})
+}
