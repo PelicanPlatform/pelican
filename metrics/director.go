@@ -99,6 +99,6 @@ var (
 
 	PelicanDirectorGeoIPErrors = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_geoip_errors",
-		Help: "The total number of errors encountered while downloading the GeoIP database",
+		Help: "The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database",
 	}, []string{"network", "source", "project"})
 )
