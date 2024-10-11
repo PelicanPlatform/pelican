@@ -9,6 +9,7 @@ require (
 	github.com/JGLTechnologies/gin-rate-limit v1.5.4
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137
 	github.com/ebitengine/purego v0.6.0
+	github.com/fatih/color v1.15.0
 	github.com/gin-gonic/gin v1.9.1
 	github.com/glebarez/sqlite v1.10.0
 	github.com/go-ini/ini v1.67.0
@@ -65,6 +66,7 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/joncrlsn/dque v0.0.0-20211108142734-c2ef48c5192a // indirect
 	github.com/lestrrat-go/httprc v1.0.5 // indirect
+	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/redis/go-redis/v9 v9.0.2 // indirect
 	github.com/sagikazarmark/locafero v0.6.0 // indirect
