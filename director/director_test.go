@@ -2021,4 +2021,34 @@ func TestExtractProjectFromUserAgent(t *testing.T) {
 		result := extractProjectFromUserAgent(userAgents)
 		assert.Equal(t, "test", result)
 	})
+
+	t.Run("Single User-Agent with additional segments", func(t *testing.T) {
+		userAgents := []string{"pelican-client/blah project/myproject foo/bar"}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "myproject", result)
+	})
+
+	t.Run("Multiple User-Agents with project prefix", func(t *testing.T) {
+		userAgents := []string{"pelican-client/1.0.0 project/test", "pelican-client/1.0.0 project/test2"}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "test", result)
+	})
+
+	t.Run("Multiple User-Agents with swapped order", func(t *testing.T) {
+		userAgents := []string{"project/test pelican-client/1.0.0", "project/test2 pelican-client/1.0.0"}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "test", result)
+	})
+
+	t.Run("No Project Prefix", func(t *testing.T) {
+		userAgents := []string{"pelican-client/1.0.0"}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("No User-Agent", func(t *testing.T) {
+		userAgents := []string{}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "", result)
+	})
 }
