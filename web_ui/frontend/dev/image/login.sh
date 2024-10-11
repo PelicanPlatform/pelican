@@ -20,7 +20,7 @@ echo "proxy_set_header Authorization \"Bearer $jwt\";" > /etc/nginx/conf.d/login
 
 # Reload Nginx to apply the new configuration if process exists
 if [ -e /var/run/nginx.pid ]; then
-  nginx -s reload
+  /usr/sbin/nginx -s reload
 fi
 
 echo "\n Successfully Updated the Authorization Header"
