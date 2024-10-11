@@ -290,12 +290,18 @@ func extractVersionAndService(ginCtx *gin.Context) (reqVer *version.Version, ser
 
 // Helper function to extract project from User-Agent
 // Will return an empty string if no project is found
-func extractProjectFromUserAgent(userAgent string) string {
+func extractProjectFromUserAgent(userAgents []string) string {
 	prefix := "project/"
 
-	if idx := strings.Index(userAgent, prefix); idx != -1 {
-		return userAgent[idx+len(prefix):]
+	for _, userAgent := range userAgents {
+		parts := strings.Split(userAgent, " ")
+		for _, part := range parts {
+			if strings.HasPrefix(part, prefix) {
+				return strings.TrimPrefix(part, prefix)
+			}
+		}
 	}
+
 	return ""
 }
 
@@ -498,7 +504,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	}
 
 	ctx := context.Background()
-	project := extractProjectFromUserAgent(ginCtx.Request.Header.Get("User-Agent"))
+	project := extractProjectFromUserAgent(ginCtx.Request.Header.Values("User-Agent"))
 	ctx = context.WithValue(ctx, ProjectContextKey{}, project)
 	cacheAds, err = sortServerAds(ctx, ipAddr, cacheAds, cachesAvailabilityMap)
 	if err != nil {
@@ -735,7 +741,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	}
 
 	ctx := context.Background()
-	project := extractProjectFromUserAgent(ginCtx.Request.Header.Get("User-Agent"))
+	project := extractProjectFromUserAgent(ginCtx.Request.Header.Values("User-Agent"))
 	ctx = context.WithValue(ctx, ProjectContextKey{}, project)
 
 	availableAds, err = sortServerAds(ctx, ipAddr, availableAds, nil)
