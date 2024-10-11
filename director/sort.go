@@ -162,7 +162,7 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	}
 
 	project, ok := ctx.Value(ProjectContextKey{}).(string)
-	if !ok {
+	if !ok || project == "" {
 		log.Warningf("Failed to get project from context")
 		project = "unknown"
 	}
