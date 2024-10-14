@@ -18,7 +18,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -41,8 +41,9 @@ import { BoxProps } from '@mui/material';
 import { Line } from 'react-chartjs-2';
 import { Box, Skeleton, Typography } from '@mui/material';
 
-import { getDataFunction } from '@/components/graphs/prometheus';
+import { getDataWrapperFunction } from '@/components/graphs/prometheus';
 import { ChartData } from 'chart.js';
+import useSWR from 'swr';
 
 const defaultOptions: Partial<ChartOptions<'line'>> = {
   scales: {
@@ -56,7 +57,7 @@ const defaultOptions: Partial<ChartOptions<'line'>> = {
 };
 
 interface GraphProps {
-  getData: getDataFunction;
+  getData: getDataWrapperFunction;
   drawer?: any;
   options?: ChartOptions<'line'>;
   boxProps?: BoxProps;
@@ -68,28 +69,16 @@ export default function Graph({
   boxProps,
   drawer,
 }: GraphProps) {
-  let [data, _setData] = useState<ChartData<'line', any, any>>();
-  let [loading, setLoading] = useState<boolean>(true);
-  let [error, setError] = useState<string>('');
+  const randomString = useRef<string>(Math.random().toString(36).substring(7));
+  const { data, isLoading, error, mutate } = useSWR(
+    'projectData' + randomString.current,
+    getData
+  );
 
-  async function setData() {
-    try {
-      let response = await getData();
-      _setData(response);
-      setLoading(false);
-      if (response.datasets[0].data.length == 0) {
-        let date = new Date(Date.now()).toLocaleTimeString();
-        setError(
-          `No data returned by database as of ${date}; Plot will auto-refresh. Adjust Graph Settings to set a lower Rate Time Range and Resolution.`
-        );
-      } else {
-        setError('');
-      }
-    } catch (e: any) {
-      let date = new Date(Date.now()).toLocaleString();
-      setError(date + ' : ' + e.message + '; Plot will auto-refresh');
-    }
-  }
+  // Anytime the getter changes lets update the data accordingly
+  useEffect(() => {
+    mutate();
+  }, [getData]);
 
   useEffect(() => {
     ChartJS.register(
@@ -104,18 +93,13 @@ export default function Graph({
       zoomPlugin,
       Colors
     );
+  }, []);
 
-    // Do the initial data fetch
-    setData();
-
-    // Refetch the data every minute
-    const interval = setInterval(() => setData(), 60000);
-    return () => clearInterval(interval);
-  }, [getData]);
+  console.log(data);
 
   return (
     <Box>
-      {loading || !data ? (
+      {isLoading || !data ? (
         <Box borderRadius={2} overflow={'hidden'}>
           <Skeleton variant={'rectangular'} width={'100%'} height={'300px'} />
         </Box>
@@ -141,7 +125,7 @@ export default function Graph({
             variant={'body2'}
             textAlign={'center'}
           >
-            {error}
+            {JSON.stringify(error)}
           </Typography>
         </Box>
       )}

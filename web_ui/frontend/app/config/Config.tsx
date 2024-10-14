@@ -24,7 +24,8 @@ import {
   Typography,
   Snackbar,
   Button,
-  IconButton, Alert,
+  IconButton,
+  Alert,
 } from '@mui/material';
 import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -62,11 +63,10 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
   );
   const [patch, _setPatch] = useState<ParameterValueRecord>({});
 
-  const {
-    data,
-    mutate,
-    error
-  } = useSWR<ParameterValueRecord>('getConfig', getConfig);
+  const { data, mutate, error } = useSWR<ParameterValueRecord>(
+    'getConfig',
+    getConfig
+  );
   const { data: enabledServers } = useSWR<ServerType[]>(
     'getEnabledServers',
     getEnabledServers,
@@ -77,7 +77,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
 
   const serverConfig = useMemo(() => {
     return flattenObject(data || {});
-  }, [data])
+  }, [data]);
 
   const setPatch = useCallback(
     (fieldPatch: any) => {
@@ -94,7 +94,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
     );
   }, [serverConfig, patch]);
 
-  console.error(error, data)
+  console.error(error, data);
 
   return (
     <>
@@ -131,9 +131,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
                     <DownloadButton
                       Button={IconButton}
                       mimeType={'text/yaml'}
-                      data={yaml.dump(
-                        stripNulls(structuredClone(data))
-                      )}
+                      data={yaml.dump(stripNulls(structuredClone(data)))}
                     >
                       <Download />
                     </DownloadButton>
@@ -145,7 +143,9 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
               <Grid item xs={12} md={8} lg={6}>
                 <Box>
                   {error && (
-                    <Alert severity={'warning'}>{(error as Error).message}</Alert>
+                    <Alert severity={'warning'}>
+                      {(error as Error).message}
+                    </Alert>
                   )}
                 </Box>
                 <ConfigDisplay
@@ -218,14 +218,14 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
 const getConfig = async (): Promise<ParameterValueRecord> => {
   let response = await fetch('/api/v1.0/config');
 
-  if(!response.ok) {
-    if(response.status == 401) {
+  if (!response.ok) {
+    if (response.status == 401) {
       throw new Error('You must be logged in to view and access the config');
     }
     throw new Error('Failed to fetch config');
   }
 
   return await response.json();
-}
+};
 
 export default Config;

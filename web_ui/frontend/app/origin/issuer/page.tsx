@@ -27,39 +27,39 @@ const getMetadata = async () => {
 
   // Enumerate the fields that we want to display
   const fields = [
-    "Origin.EnableOrigin",
-    "Issuer.IssuerClaimValue",
-    "Issuer.AuthenticationSource",
-    "OIDC.ClientIDFile",
-    "OIDC.ClientID",
-    "OIDC.ClientSecretFile",
-    "OIDC.DeviceAuthEndpoint",
-    "OIDC.TokenEndpoint",
-    "OIDC.UserInfoEndpoint",
-    "OIDC.AuthorizationEndpoint",
-    "OIDC.Issuer",
-    "OIDC.ClientRedirectHostname",
-    "Issuer.OIDCAuthenticationRequirements",
-    "Issuer.OIDCAuthenticationUserClaim",
-    "Issuer.GroupSource",
-    "Issuer.OIDCGroupClaim",
-    "Issuer.GroupFile",
-    "Issuer.GroupRequirements",
-    "Issuer.AuthorizationTemplates",
-    "Issuer.UserStripDomain",
-    "Issuer.TomcatLocation",
-    "Issuer.ScitokensServerLocation",
-    "Issuer.QDLLocation",
+    'Origin.EnableOrigin',
+    'Issuer.IssuerClaimValue',
+    'Issuer.AuthenticationSource',
+    'OIDC.ClientIDFile',
+    'OIDC.ClientID',
+    'OIDC.ClientSecretFile',
+    'OIDC.DeviceAuthEndpoint',
+    'OIDC.TokenEndpoint',
+    'OIDC.UserInfoEndpoint',
+    'OIDC.AuthorizationEndpoint',
+    'OIDC.Issuer',
+    'OIDC.ClientRedirectHostname',
+    'Issuer.OIDCAuthenticationRequirements',
+    'Issuer.OIDCAuthenticationUserClaim',
+    'Issuer.GroupSource',
+    'Issuer.OIDCGroupClaim',
+    'Issuer.GroupFile',
+    'Issuer.GroupRequirements',
+    'Issuer.AuthorizationTemplates',
+    'Issuer.UserStripDomain',
+    'Issuer.TomcatLocation',
+    'Issuer.ScitokensServerLocation',
+    'Issuer.QDLLocation',
   ];
 
   // @ts-ignore
   let metadata = merge(...metadataList);
 
   // Pull out the Issuer Data
-  const issuerMetadata: Record<string, any> = {}
+  const issuerMetadata: Record<string, any> = {};
   fields.forEach((field) => {
     issuerMetadata[field] = metadata[field];
-  })
+  });
 
   return issuerMetadata;
 };

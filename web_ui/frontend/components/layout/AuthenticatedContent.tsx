@@ -40,7 +40,7 @@ const Circle = ({ children }: { children: React.ReactNode }) => {
 interface AuthenticatedContentProps {
   promptLogin?: boolean;
   redirect?: boolean;
-  trustThenValidate?: boolean
+  trustThenValidate?: boolean;
   children: React.ReactNode;
   boxProps?: BoxProps;
   checkAuthentication?: (user: User) => boolean;
@@ -94,7 +94,7 @@ const AuthenticatedContent = ({
   }
 
   // If we are authenticated or if we trust at first then show the content
-  if(authenticated || (trustThenValidate && (isLoading || isValidating))) {
+  if (authenticated || (trustThenValidate && (isLoading || isValidating))) {
     return <Box {...boxProps}>{authenticated && children}</Box>;
   }
 
@@ -137,7 +137,7 @@ const AuthenticatedContent = ({
     );
   }
 
-  return null
+  return null;
 };
 
 export default AuthenticatedContent;

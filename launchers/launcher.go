@@ -58,7 +58,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	ctx, shutdownCancel = context.WithCancel(ctx)
 
-	config.PrintPelicanVersion(os.Stderr) // Print Pelican version to stderr at server start
+	config.LogPelicanVersion()
 
 	// Print Pelican config at server start if it's in debug or info level
 	if log.GetLevel() >= log.InfoLevel {
