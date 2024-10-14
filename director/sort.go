@@ -159,7 +159,7 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	labels := prometheus.Labels{
 		"network": "",
 		"source":  "",
-		"project": "",
+		"proj":    "",
 	}
 
 	network, ok := utils.ApplyIPMask(addr.String())
@@ -172,11 +172,11 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	project, ok := ctx.Value(ProjectContextKey{}).(string)
 	if !ok || project == "" {
 		log.Warningf("Failed to get project from context")
-		labels["project"] = "unknown"
+		labels["proj"] = "unknown"
 		labels["network"] = "unknown"
 		labels["source"] = "server"
 	} else {
-		labels["project"] = project
+		labels["proj"] = project
 	}
 
 	reader := maxMindReader.Load()
