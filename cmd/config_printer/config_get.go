@@ -35,47 +35,58 @@ func configGet(cmd *cobra.Command, args []string) {
 		highlightedValue := valueStr
 		matchesFound := false
 
-		tagsPresent := true
-		for _, tag := range tags {
-			docParam, exists := docs.ParsedParameters[strings.ToLower(key)]
-			if exists {
-				_, tagExists := docParam.Tags[strings.ToLower(tag)]
-				if !tagExists {
-					tagsPresent = false
+		docParam, exists := docs.ParsedParameters[strings.ToLower(key)]
+
+		if exists {
+			if docParam.Hidden && !includeHidden {
+				continue
+			}
+
+			if docParam.Deprecated && !includeDeprecated {
+				continue
+			}
+
+			if len(components) > 0 {
+				componentsCheckFailed := true
+				for _, c := range components {
+					_, tagExists := docParam.Tags[strings.ToLower(c)]
+					if tagExists {
+						componentsCheckFailed = false
+						break
+					}
 				}
-			} else {
-				tagsPresent = false
+				if componentsCheckFailed {
+					continue
+				}
 			}
 		}
 
-		if tagsPresent {
+		if len(args) == 0 {
+			matchesFound = true
+		} else {
+			for _, arg := range args {
+				argLower := strings.ToLower(arg)
 
-			if len(args) == 0 {
-				matchesFound = true
-			} else {
-				for _, arg := range args {
-					argLower := strings.ToLower(arg)
+				if strings.Contains(strings.ToLower(key), argLower) {
+					highlightedKey = highlightSubstring(key, arg, color.FgYellow)
+					matchesFound = true
+				}
 
-					if strings.Contains(strings.ToLower(key), argLower) {
-						highlightedKey = highlightSubstring(key, arg, color.FgYellow)
-						matchesFound = true
-					}
-
-					if strings.Contains(strings.ToLower(valueStr), argLower) {
-						highlightedValue = highlightSubstring(valueStr, arg, color.FgYellow)
-						matchesFound = true
-					}
+				if strings.Contains(strings.ToLower(valueStr), argLower) {
+					highlightedValue = highlightSubstring(valueStr, arg, color.FgYellow)
+					matchesFound = true
 				}
 			}
-
-			if matchesFound {
-				matches = append(matches, Match{
-					OriginalKey:      key,
-					HighlightedKey:   highlightedKey,
-					HighlightedValue: highlightedValue,
-				})
-			}
 		}
+
+		if matchesFound {
+			matches = append(matches, Match{
+				OriginalKey:      key,
+				HighlightedKey:   highlightedKey,
+				HighlightedValue: highlightedValue,
+			})
+		}
+
 	}
 
 	if len(matches) == 0 && len(args) > 0 {
@@ -105,10 +116,7 @@ func extractConfigValues(config interface{}, parentKey string, result map[string
 		field := t.Field(i)
 		fieldValue := v.Field(i)
 
-		key := field.Tag.Get("mapstructure")
-		if key == "" {
-			key = strings.ToLower(field.Name)
-		}
+		key := strings.ToLower(field.Name)
 
 		if parentKey != "" {
 			key = parentKey + "." + key
@@ -130,6 +138,8 @@ func extractConfigValues(config interface{}, parentKey string, result map[string
 				sliceValues[j] = fmt.Sprintf("%v", element)
 			}
 			result[key] = "[" + strings.Join(sliceValues, ", ") + "]"
+		case reflect.String:
+			result[key] = fmt.Sprintf("\"%s\"", fieldValue.Interface())
 		default:
 			result[key] = fmt.Sprintf("%v", fieldValue.Interface())
 		}

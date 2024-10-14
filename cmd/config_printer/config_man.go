@@ -8,6 +8,8 @@ import (
 	"github.com/fatih/color"
 	"github.com/pelicanplatform/pelican/docs"
 	"github.com/spf13/cobra"
+
+	"github.com/charmbracelet/glamour"
 )
 
 func configMan(cmd *cobra.Command, args []string) {
@@ -33,7 +35,8 @@ func configMan(cmd *cobra.Command, args []string) {
 	fmt.Printf("%s %s\n", labelColor.Sprint("Default:"), formatValue(matchedParam.Default))
 	fmt.Printf("%s %s\n", labelColor.Sprint("Tags:"), formatValue(matchedParam.Tags))
 	fmt.Printf("%s\n\n", labelColor.Sprint("Description:"))
-	fmt.Println(indentText(matchedParam.Description, "  "))
+	renderedDescription, _ := glamour.Render(matchedParam.Description, "dark")
+	fmt.Println(renderedDescription)
 }
 
 func formatValue(value interface{}) string {
@@ -63,17 +66,9 @@ func formatValue(value interface{}) string {
 		// Generic map handling (if needed)
 		return fmt.Sprintf("%v", value)
 	case reflect.String:
-		return fmt.Sprintf("%s", value)
+		// Surround string with double quotes
+		return fmt.Sprintf("\"%s\"", value)
 	default:
 		return fmt.Sprintf("%v", value)
 	}
-}
-
-// indentText indents each line of the text with the given prefix
-func indentText(text, prefix string) string {
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		lines[i] = prefix + line
-	}
-	return strings.Join(lines, "\n")
 }
