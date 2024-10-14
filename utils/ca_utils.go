@@ -97,6 +97,7 @@ func LaunchPeriodicWriteCABundle(ctx context.Context, egrpKey string, filename s
 	}
 	egrp.Go(func() error {
 		ticker := time.NewTicker(sleepTime)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:

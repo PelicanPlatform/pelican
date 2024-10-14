@@ -673,6 +673,7 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 					return errors.New("Refresh interval is non-positive value. Stop reloading.")
 				}
 				ticker := time.NewTicker(refreshInterval)
+				defer ticker.Stop()
 				for {
 					select {
 					case <-cancel:
