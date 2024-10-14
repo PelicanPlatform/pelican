@@ -1348,15 +1348,17 @@ func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
 		log.Warningf("Failed to extract version and service from request: %v", err)
 		return
 	}
-	if version == nil {
+	if version != nil {
+		labels["version"] = version.String()
+	} else {
 		labels["version"] = "unknown"
-		return
 	}
-	labels["version"] = version.String()
 
 	maskedIp, ok := utils.ApplyIPMask(ctx.ClientIP())
 	if ok {
 		labels["network"] = maskedIp
+	} else {
+		labels["network"] = "unknown"
 	}
 	metrics.PelicanDirectorRedirectionsTotal.With(labels).Inc()
 }
