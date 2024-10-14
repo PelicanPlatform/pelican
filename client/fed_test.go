@@ -844,7 +844,7 @@ func TestObjectList405Error(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	test_utils.InitClient(t, nil)
-	
+
 	var storageName string
 
 	// Set up our http backend so that we can return a 405 on a PROPFIND
