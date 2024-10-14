@@ -156,33 +156,40 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 		return override.Lat, override.Long, nil
 	}
 
+	labels := prometheus.Labels{
+		"network": "",
+		"source":  "",
+		"project": "",
+	}
+
 	network, ok := utils.ApplyIPMask(addr.String())
 	if !ok {
 		log.Warningf("Failed to apply IP mask to address %s", ip.String())
+	} else {
+		labels["network"] = network
 	}
 
 	project, ok := ctx.Value(ProjectContextKey{}).(string)
 	if !ok || project == "" {
 		log.Warningf("Failed to get project from context")
-		project = "unknown"
+		labels["project"] = "unknown"
+		labels["network"] = "unknown"
+		labels["source"] = "server"
+	} else {
+		labels["project"] = project
 	}
+
 	reader := maxMindReader.Load()
 	if reader == nil {
 		err = errors.New("No GeoIP database is available")
-		metrics.PelicanDirectorGeoIPErrors.With(prometheus.Labels{
-			"network": network,
-			"source":  "server",
-			"project": project,
-		}).Inc()
+		labels["source"] = "server"
+		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 		return
 	}
 	record, err := reader.City(ip)
 	if err != nil {
-		metrics.PelicanDirectorGeoIPErrors.With(prometheus.Labels{
-			"network": network,
-			"source":  "server",
-			"project": project,
-		}).Inc()
+		labels["source"] = "server"
+		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 		return
 	}
 	lat = record.Location.Latitude
@@ -193,11 +200,8 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	// comes from a private range.
 	if lat == 0 && long == 0 {
 		log.Warningf("GeoIP Resolution of the address %s resulted in the null lat/long. This will result in random server sorting.", ip.String())
-		metrics.PelicanDirectorGeoIPErrors.With(prometheus.Labels{
-			"network": network,
-			"source":  "client",
-			"project": project,
-		}).Inc()
+		labels["source"] = "client"
+		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 	}
 
 	// MaxMind provides an accuracy radius in kilometers. When it actually has no clue how to resolve a valid, public
@@ -209,11 +213,8 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 			"This will be treated as GeoIP resolution failure and result in random server sorting. Setting lat/long to null.", ip.String(), record.Location.AccuracyRadius)
 		lat = 0
 		long = 0
-		metrics.PelicanDirectorGeoIPErrors.With(prometheus.Labels{
-			"network": network,
-			"source":  "client",
-			"project": project,
-		}).Inc()
+		labels["source"] = "client"
+		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 	}
 
 	return
