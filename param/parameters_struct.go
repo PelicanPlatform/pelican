@@ -38,6 +38,7 @@ type Config struct {
 		MetaLocations []string `mapstructure:"metalocations"`
 		PermittedNamespaces []string `mapstructure:"permittednamespaces"`
 		Port int `mapstructure:"port"`
+		Prefetch int `mapstructure:"prefetch"`
 		RunLocation string `mapstructure:"runlocation"`
 		SelfTest bool `mapstructure:"selftest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval"`
@@ -340,6 +341,7 @@ type configWithType struct {
 		MetaLocations struct { Type string; Value []string }
 		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
+		Prefetch struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
