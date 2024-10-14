@@ -324,6 +324,17 @@ func checkRedirectQuery(query url.Values) error {
 
 func redirectToCache(ginCtx *gin.Context) {
 	reqVer, service, _ := extractVersionAndService(ginCtx)
+	// Flag to indicate if the request was redirected to a cache
+	// For metric collection purposes
+	// see collectDirectorRedirectionMetric
+	redirectedToCache := true
+	defer func() {
+		if !redirectedToCache {
+			collectDirectorRedirectionMetric(ginCtx, "origin")
+		} else {
+			collectDirectorRedirectionMetric(ginCtx, "cache")
+		}
+	}()
 	defer collectDirectorRedirectionMetric(ginCtx, "cache")
 	err := versionCompatCheck(reqVer, service)
 	if err != nil {
@@ -465,6 +476,11 @@ func redirectToCache(ginCtx *gin.Context) {
 			})
 			return
 		}
+		// At this point, the cacheAds is full of originAds
+		// We need to indicate that we are redirecting to an origin and not a cache
+		// This is for the purpose of metrics
+		// See collectDirectorRedirectionMetric
+		redirectedToCache = false
 	}
 
 	cacheAds, err = sortServerAds(ipAddr, cacheAds, cachesAvailabilityMap)
