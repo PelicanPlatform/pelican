@@ -306,6 +306,27 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		return
 	}
 
+	// Ensure the OA4MP storage directory exists and has correct permissions and ownership
+	OA4MPStoragePath := "/opt/scitokens-server/var/storage"
+
+	if err := os.Chmod(OA4MPStoragePath, 0700); err != nil {
+		if os.IsNotExist(err) {
+			log.Debugln("OA4MP storage directory does not exist. Creating", OA4MPStoragePath)
+			if err = os.MkdirAll(OA4MPStoragePath, 0755); err != nil {
+				log.Fatal("Failed to create directory", OA4MPStoragePath, ":", err)
+			}
+			if err = os.Chmod(OA4MPStoragePath, 0700); err != nil {
+				log.Errorln("Failed to change permissions of", OA4MPStoragePath, "after creating it:", err)
+			}
+		} else {
+			log.Errorln("Failed to change permissions of", OA4MPStoragePath, ":", err)
+		}
+	}
+
+	if err := os.Chown(OA4MPStoragePath, user.Uid, user.Gid); err != nil {
+		log.Errorln("Failed to change ownership of", OA4MPStoragePath, "to tomcat:", err)
+	}
+
 	qdlBoot := filepath.Join(param.Issuer_QDLLocation.GetString(), "var", "scripts", "boot.qdl")
 	cmd := exec.Command(qdlBoot)
 	cmd.Env = []string{
