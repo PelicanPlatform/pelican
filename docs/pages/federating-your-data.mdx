@@ -1,7 +1,7 @@
 import ExportedImage from "next-image-export-optimizer";
 import { Key } from '@mui/icons-material';
 
-# Federation Your Data via Pelican Origin
+# Federating Your Data via a Pelican Origin
 
 Pelican users who want to share data within a Pelican federation do so via an [*Origin*](./core-concepts.mdx#origins). Origins are a crucial component of Pelican's architecture for two reasons: they act as an adapter between various storage backends and Pelican federations, and they provide fine-grained access controls for that data. That is, they figure out how to take data from wherever it lives (such as a POSIX filesystem, S3 buckets, HTTPS servers, etc.) and transform it into a format that the federation can utilize while respecting your data access requirements.
 
