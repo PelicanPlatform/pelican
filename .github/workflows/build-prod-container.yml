@@ -163,7 +163,7 @@ jobs:
         # if the workflow was for the release
       - name: Log in to OSG Harbor
         uses: docker/login-action@v3
-        if: github.repository == 'PelicanPlatform/pelican' && inputs.release_workflow
+        if: github.repository == 'PelicanPlatform/pelican'
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
@@ -174,7 +174,7 @@ jobs:
         with:
           context: .
           file: ./images/Dockerfile
-          push: ${{ github.repository == 'PelicanPlatform/pelican' && (inputs.release_workflow || false) }}
+          push: ${{ github.repository == 'PelicanPlatform/pelican' }}
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           target: ${{ matrix.image }}
           build-args: |
