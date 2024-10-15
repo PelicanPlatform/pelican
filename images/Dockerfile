@@ -57,7 +57,7 @@ RUN yum -y update \
 ####
 FROM dependency-build AS xrootd-plugin-builder
 # Install necessary build dependencies
-RUN  yum install -y --enablerepo=osg-testing xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel sssd-client
+RUN  yum install -y --enablerepo=osg-testing xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
 
 # The ADD command with a api.github.com URL in the next couple of sections
 # are for cache-hashing of the external repository that we rely on to build
@@ -113,6 +113,11 @@ RUN \
     make -j`nproc` install
 
 FROM dependency-build AS final-stage
+
+# Any other yum-installable dependencies that need to be present in the final container
+# should go here. Installation in a previous section will result in the packages being
+# installed only in the intermediate builder containers!
+RUN yum install -y --enablerepo=osg-testing sssd-client
 
 WORKDIR /pelican
 
