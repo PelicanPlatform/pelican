@@ -321,6 +321,7 @@ var (
 var (
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
+	Cache_EnablePrefetch = BoolParam{"Cache.EnablePrefetch"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}

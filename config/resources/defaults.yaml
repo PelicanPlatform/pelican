@@ -56,6 +56,7 @@ Director:
   EnableBroker: true
   EnableStat: true
 Cache:
+  EnablePrefetch: true
   Port: 8442
   SelfTest: true
   SelfTestInterval: 15s
