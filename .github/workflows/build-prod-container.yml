@@ -5,20 +5,15 @@ on:
   push:
     branches:
       - main
+    tags:
+      # only run release on v7.0.0 and up
+      - v[7-9]\.[0-9]+\.[0-9]+
+      - v[1-9][0-9]+\.[0-9]+\.[0-9]+
   repository_dispatch:
     types:
       - dispatch-build
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      release_workflow:
-        required: false
-        type: boolean
-        default: false
-      tag:
-          description: 'Tag to use for the Docker image'
-          required: false
-          type: string
+
 
 permissions:
   contents: write
@@ -27,25 +22,9 @@ jobs:
   build-base-image:
     runs-on: ubuntu-latest
     steps:
-      # For release, the worflow call (from pre-release.yaml) is triggered by a tag push
-      # like 7.5.1 Here, we want to set the *branch* name to 7.5.x,
-      # which is the branch for a feature version
-      - name: Set Branch for Release
-        id: set_branch
-        if: ${{ inputs.release_workflow }}
-        run: |
-          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
-
-      - name: Checkout for release with a tag
-        uses: actions/checkout@v4
-        if: ${{ inputs.release_workflow }}
-        with:
-          fetch-depth: 0
-          ref: ${{ steps.set_branch.outputs.branch }}
 
       - name: Checkout for push to main
         uses: actions/checkout@v4
-        if: ${{ !inputs.release_workflow }}
 
       - name: Cache base image
         uses: actions/cache@v4
@@ -105,25 +84,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # For release, the worflow call (from pre-release.yaml) is triggered by a tag push
-      # like 7.5.1 Here, we want to set the *branch* name to 7.5.x,
-      # which is the branch for a feature version
-      - name: Set Branch for Release
-        id: set_branch
-        if: ${{ inputs.release_workflow }}
-        run: |
-          echo "branch=${GITHUB_REF_NAME%.*}.x" >> $GITHUB_OUTPUT
-
-      - name: Checkout for release with a tag
-        uses: actions/checkout@v4
-        if: ${{ inputs.release_workflow }}
-        with:
-          fetch-depth: 0
-          ref: ${{ steps.set_branch.outputs.branch }}
 
       - name: Checkout for push to main
         uses: actions/checkout@v4
-        if: ${{ !inputs.release_workflow }}
 
       - name: Determine Latest Version Tag
         id: latest_version
