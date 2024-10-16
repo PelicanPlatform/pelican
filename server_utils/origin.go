@@ -389,6 +389,10 @@ func GetOriginExports() ([]OriginExport, error) {
 				return nil, err
 			}
 
+			// clean up trailing / in the storage prefix
+			if strings.HasSuffix(storagePrefix, "/") {
+				log.Warningln("Removing trailing '/' from storage prefix", storagePrefix)
+			}
 			originExport := OriginExport{
 				FederationPrefix: federationPrefix,
 				StoragePrefix:    storagePrefix,
@@ -418,6 +422,18 @@ func GetOriginExports() ([]OriginExport, error) {
 
 			// Assume there's only one export
 			export := tmpExports[0]
+
+			// Clean up any path components that might have been added by the user to guarantee the correct
+			// URL is constructed without duplicate or missing slashes
+			if strings.HasSuffix(export.StoragePrefix, "/") {
+				log.Warningln("Removing trailing '/' from storage prefix", export.StoragePrefix)
+				export.StoragePrefix = strings.TrimSuffix(export.StoragePrefix, "/")
+			}
+
+			if err = validateExportPaths(export.StoragePrefix, export.FederationPrefix); err != nil {
+				return nil, err
+			}
+
 			capabilities := export.Capabilities
 			reads := capabilities.Reads || capabilities.PublicReads
 			viper.Set("Origin.FederationPrefix", export.FederationPrefix)
@@ -428,23 +444,18 @@ func GetOriginExports() ([]OriginExport, error) {
 			viper.Set("Origin.EnableListings", capabilities.Listings)
 			viper.Set("Origin.EnableDirectReads", capabilities.DirectReads)
 
-			// Clean up any path components that might have been added by the user to guarantee the correct
-			// URL is constructed without duplicate or missing slashes
-			if strings.HasSuffix(export.StoragePrefix, "/") {
-				log.Warningln("Removing trailing '/' from storage prefix", export.StoragePrefix)
-				export.StoragePrefix = strings.TrimSuffix(export.StoragePrefix, "/")
-			}
-			if err = validateExportPaths(export.StoragePrefix, export.FederationPrefix); err != nil {
-				return nil, err
-			}
-
 			originExports = []OriginExport{export}
 			return originExports, nil
 		} else { // we're using the simple Origin.FederationPrefix
 			log.Infoln("Configuring single-export origin")
+			federationPrefix := param.Origin_FederationPrefix.GetString()
+			storagePrefix := param.Origin_StoragePrefix.GetString()
+			if strings.HasSuffix(storagePrefix, "/") {
+				log.Warningln("Removing trailing '/' from storage prefix", storagePrefix)
+			}
 			originExport = OriginExport{
-				FederationPrefix: param.Origin_FederationPrefix.GetString(),
-				StoragePrefix:    param.Origin_StoragePrefix.GetString(),
+				FederationPrefix: federationPrefix,
+				StoragePrefix:    storagePrefix,
 				Capabilities:     capabilities,
 			}
 
