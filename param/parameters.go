@@ -52,6 +52,9 @@ type ObjectParam struct {
 func GetDeprecated() map[string][]string {
     return map[string][]string{
         "Cache.DataLocation": {"Cache.LocalRoot"},
+        "DisableHttpProxy": {"Client.DisableHttpProxy"},
+        "DisableProxyFallback": {"Client.DisableProxyFallback"},
+        "MinimumDownloadSpeed": {"Client.MinimumDownloadSpeed"},
         "Origin.EnableDirListing": {"Origin.EnableListings"},
         "Origin.EnableFallbackRead": {"Origin.EnableDirectReads"},
         "Origin.EnableWrite": {"Origin.EnableWrites"},
