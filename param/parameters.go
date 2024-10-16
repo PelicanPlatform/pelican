@@ -190,6 +190,7 @@ var (
 	Lotman_DbLocation = StringParam{"Lotman.DbLocation"}
 	Lotman_LibLocation = StringParam{"Lotman.LibLocation"}
 	Monitoring_DataLocation = StringParam{"Monitoring.DataLocation"}
+	Monitoring_Retention = StringParam{"Monitoring.Retention"}
 	OIDC_AuthorizationEndpoint = StringParam{"OIDC.AuthorizationEndpoint"}
 	OIDC_ClientID = StringParam{"OIDC.ClientID"}
 	OIDC_ClientIDFile = StringParam{"OIDC.ClientIDFile"}

@@ -2255,6 +2255,12 @@ type: bool
 default: true
 components: ["origin", "cache", "director", "registry"]
 ---
+name: Monitoring.Retention
+description: |+
+  The duration of which Prometheus should retain the monitoring data.
+type: string
+default: "15d"
+---
 ############################
 #   Shoveler-level configs   #
 ############################
