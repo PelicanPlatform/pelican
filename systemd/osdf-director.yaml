@@ -17,7 +17,3 @@ Logging:
   LogLocation: /var/log/pelican/osdf-director.log
   ## Valid Levels are Trace, Debug, Info, Warning, Error, Fatal and Panic.
   # Level: "Error"
-Server:
-  TLSCertificate: /etc/pki/tls/certs/pelican.crt
-  TLSKey: /etc/pki/tls/private/pelican.key
-  TLSCACertificateFile: /etc/pki/tls/certs/ca-bundle.crt
