@@ -68,6 +68,7 @@ type Config struct {
 		CachesPullFromCaches bool `mapstructure:"cachespullfromcaches"`
 		CheckCachePresence bool `mapstructure:"checkcachepresence"`
 		CheckOriginPresence bool `mapstructure:"checkoriginpresence"`
+		DbLocation string `mapstructure:"dblocation"`
 		DefaultResponse string `mapstructure:"defaultresponse"`
 		EnableBroker bool `mapstructure:"enablebroker"`
 		EnableOIDC bool `mapstructure:"enableoidc"`
@@ -370,6 +371,7 @@ type configWithType struct {
 		CachesPullFromCaches struct { Type string; Value bool }
 		CheckCachePresence struct { Type string; Value bool }
 		CheckOriginPresence struct { Type string; Value bool }
+		DbLocation struct { Type string; Value string }
 		DefaultResponse struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
