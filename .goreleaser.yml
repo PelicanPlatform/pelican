@@ -269,19 +269,31 @@ nfpms:
         dst: "/usr/lib/systemd/system/pelican-registry.service"
       - src: "systemd/pelican-cache.yaml"
         dst: "/etc/pelican/pelican-cache.yaml"
-        type: config|noreplace
+        type: config
       - src: "systemd/pelican-origin.yaml"
         dst: "/etc/pelican/pelican-origin.yaml"
-        type: config|noreplace
+        type: config
       - src: "systemd/pelican-director.yaml"
         dst: "/etc/pelican/pelican-director.yaml"
-        type: config|noreplace
+        type: config
       - src: "systemd/pelican-registry.yaml"
         dst: "/etc/pelican/pelican-registry.yaml"
-        type: config|noreplace
+        type: config
       - src: "systemd/pelican.logrotate"
         dst: "/etc/logrotate.d/pelican"
         type: config|noreplace
+      - dst: "/etc/pelican/config.d"
+        type: "dir"
+        file_info:
+          owner: root
+          group: root
+          mode: 0755
+      - dst: "/usr/share/pelican/config.d"
+        type: "dir"
+        file_info:
+          owner: root
+          group: root
+          mode: 0755
       - dst: "/var/log/pelican"
         type: "dir"
         file_info:
