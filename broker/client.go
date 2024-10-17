@@ -286,6 +286,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	// Wait for the origin to callback to the cache's return endpoint; that HTTP handler
 	// will write to the channel we originally posted.
 	tck := time.NewTicker(20 * time.Second)
+	defer tck.Stop()
 	log.Debugf("Cache waiting for up to 20 seconds for the origin %s to callback", originName)
 	select {
 	case <-ctx.Done():

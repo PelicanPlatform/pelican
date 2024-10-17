@@ -295,6 +295,7 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 
 	egrp.Go(func() error {
 		ticker := time.NewTicker(retryInterval)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:

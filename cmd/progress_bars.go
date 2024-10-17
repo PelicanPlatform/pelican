@@ -90,6 +90,7 @@ func (pb *progressBars) launchDisplay(ctx context.Context) {
 
 		tickDuration := 200 * time.Millisecond
 		ticker := time.NewTicker(tickDuration)
+		defer ticker.Stop()
 		pbMap := make(map[string]*progressBar)
 		for {
 			select {
