@@ -11,9 +11,5 @@ ConfigLocations:
   - "/usr/share/pelican/config.d"
   - "/etc/pelican/config.d"
 
-## Enable Debug to send detailed logs to the log file
-# Debug: false
 Logging:
   LogLocation: /var/log/pelican/osdf-registry.log
-  ## Valid Levels are Trace, Debug, Info, Warning, Error, Fatal and Panic.
-  # Level: "Error"
