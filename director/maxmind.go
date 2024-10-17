@@ -144,7 +144,7 @@ func periodicMaxMindReload(ctx context.Context) {
 	}
 }
 
-func InitializeDB(ctx context.Context) {
+func InitializeGeoIPDB(ctx context.Context) {
 	go periodicMaxMindReload(ctx)
 	localFile := param.Director_GeoIPLocation.GetString()
 	localReader, err := geoip2.Open(localFile)

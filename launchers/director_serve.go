@@ -37,7 +37,7 @@ import (
 func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
 
 	log.Info("Initializing Director GeoIP database...")
-	director.InitializeDB(ctx)
+	director.InitializeGeoIPDB(ctx)
 
 	director.ConfigFilterdServers()
 
@@ -76,6 +76,9 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 		if err != nil {
 			return errors.Wrap(err, "invalid URL for Director.SupportContactUrl")
 		}
+	}
+	if err := director.InitializeDB(); err != nil {
+		return errors.Wrap(err, "failed to initialize director sqlite database")
 	}
 	rootGroup := engine.Group("/")
 	director.RegisterDirectorOIDCAPI(rootGroup)
