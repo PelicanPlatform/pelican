@@ -18,11 +18,6 @@ Logging:
   ## Valid Levels are Trace, Debug, Info, Warning, Error, Fatal and Panic.
   # Level: "Error"
 Server:
-  TLSCertificate: /etc/pki/tls/certs/pelican.crt
-  TLSKey: /etc/pki/tls/private/pelican.key
-  ## Use TLSCACertificateDirectory instead of TLSCACertificateFile to support auth from grid clients
-  TLSCACertificateFile: /etc/pki/tls/certs/ca-bundle.crt
-  # TLSCACertificateDirectory: /etc/grid-security/certificates
   EnableUI: false
   ## Set Hostname to the external DNS name this can be accessed over, if
   ## different than the current hostname.
