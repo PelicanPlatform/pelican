@@ -17,5 +17,3 @@ Logging:
 Federation:
   ## The main URL for your federation. You must specify this.
   DiscoveryUrl:
-Cache:
-  DataLocation: "/mnt/pelican"

@@ -20,8 +20,7 @@ Federation:
   ## Set Hostname to the external DNS name this can be accessed over, if
   ## different than the current hostname.
   # Hostname:
-XRootD:
-  Mount: "/mnt/pelican"
+
 Origin:
   NamespacePrefix: "/MY_NAMESPACE"
   ## Enable multiuser to support Unix-based file ownership in the objects being served.
