@@ -605,7 +605,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 		assert.Contains(t, string(content), "http.tlsrequiredprefix pref3")
 	})
 
-	t.Run("TestCacheHTTPTLSRequiredPrefixCorrectConfig", func(t *testing.T) {
+	t.Run("TestCacheAuthenticationPrefixes", func(t *testing.T) {
 		xrootd := xrootdTest{T: t}
 		xrootd.setup()
 

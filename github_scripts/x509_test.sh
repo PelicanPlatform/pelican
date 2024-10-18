@@ -1,6 +1,6 @@
 #!/bin/bash -xe
 #
-# Copyright (C) 2024, University of Nebraska-Lincoln
+# Copyright (C) 2024, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
 # may not use this file except in compliance with the License.  You may
@@ -15,16 +15,19 @@
 # limitations under the License.
 #
 
-# This tests the functionality of `pelican object get` and `pelican object put` with the
-# "federation in a box"
-
-set -e
+# This test the functionaliy of the x509 defer check
+# Some prefixes allow for x509 authentication rather than using tokens, this tests
+# that a file that requires authorization is retreivable when using either x509 authentication or a token
+# and also tests that files that aren't allowed to use x509 authentication are not retreivable
 
 mkdir -p x509/config
 chmod 777 x509/config
 
 mkdir -p x509/origin
 chmod 777 x509/origin
+
+mkdir -p x509/defer
+chmod 777 x509/defer
 
 # Setup env variables needed
 export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:8444"
@@ -37,9 +40,8 @@ export PELICAN_CACHE_RUNLOCATION=$PWD/xrootdCacheRunLocation
 export PELICAN_CONFIGDIR=$PWD/x509/config
 export PELICAN_REGISTRY_DBLOCATION=$PWD/x509/config/test.sql
 export PELICAN_OIDC_CLIENTID="sometexthere"
-export PELICAN_ORIGIN_FEDERATIONPREFIX="/test"
-export PELICAN_ORIGIN_STORAGEPREFIX="$PWD/x509/origin"
-export PELICAN_DIRECTOR_X509CLIENTAUTHENTICATIONPREFIXES="/test/defer"
+export PELICAN_ORIGIN_EXPORTVOLUMES="$PWD/x509/origin:/test $PWD/x509/defer:/defer/"
+export PELICAN_DIRECTOR_X509CLIENTAUTHENTICATIONPREFIXES="/defer"
 
 # Function to cleanup after test ends
 cleanup() {
@@ -60,8 +62,7 @@ cleanup() {
     unset PELICAN_FEDERATION_DIRECTORURL
     unset PELICAN_FEDERATION_REGISTRYURL
     unset PELICAN_TLSSKIPVERIFY
-    unset PELICAN_ORIGIN_FEDERATIONPREFIX
-    unset PELICAN_ORIGIN_STORAGEPREFIX
+    unset PELICAN_ORIGIN_EXPORTVOLUMES
     unset PELICAN_SERVER_ENABLEUI
     unset PELICAN_OIDC_CLIENTID
     unset PELICAN_ORIGIN_ENABLEDIRECTREADS
@@ -76,7 +77,7 @@ rm -rf /etc/pelican/pelican.yaml
 rm -rf /run/pelican
 
 if [ ! -f ./pelican ]; then
-  echo "Pelican executable does not exist in PWD. Exiting.."
+  echo "Pelican executable does not exist in $PWD. Exiting.."
   exit 1
 fi
 
@@ -88,7 +89,14 @@ cat x509/test-token.jwt
 
 
 mkdir -p x509/config/xrootd
-echo "u $(openssl x509 -in x509/config/certificates/tls.crt -noout -hash).0 /test/defer lr" > x509/config/xrootd/authfile
+echo "u $(openssl x509 -in x509/config/certificates/tls.crt -noout -hash).0 /defer lr" > x509/config/xrootd/authfile
+
+# Copy the test file into the origin at both locations
+cp x509/input.txt x509/origin/input.txt
+cp x509/input.txt x509/defer/input.txt
+
+chmod 777 x509/origin/input.txt
+chmod 777 x509/defer/input.txt
 
 # Run federation in the background
 federationServe="./pelican serve --module director --module registry --module origin --module cache -d"
@@ -123,7 +131,7 @@ TOTAL_SLEEP_TIME=0
 # Loop until director, origin, and registry are running
 while check_response; [ $? -ne 0 ]
 do
-    sleep .5
+    sleep 1
     TOTAL_SLEEP_TIME=$((TOTAL_SLEEP_TIME + 1))
 
     # Break loop if we sleep for more than 10 seconds
@@ -134,32 +142,8 @@ do
     fi
 done
 
-# Run pelican object put to populate the origin
-./pelican object put ./x509/input.txt pelican://$HOSTNAME:8444/test/input.txt -d -t x509/test-token.jwt -L x509/putOutput.txt
-
-# Check output of command
-if grep -q "Dumping response: HTTP/1.1 200 OK" x509/putOutput.txt; then
-    echo "Uploaded bytes successfully!"
-else
-    echo "Did not upload correctly"
-    cat x509/putOutput.txt
-    exit 1
-fi
-
-# Run pelican object put to populate the defer namespace
-./pelican object put ./x509/input.txt pelican://$HOSTNAME:8444/test/defer/input.txt -d -t x509/test-token.jwt -L x509/putDeferOutput.txt
-
-# Check output of command
-if grep -q "Dumping response: HTTP/1.1 200 OK" x509/putDeferOutput.txt; then
-    echo "Uploaded bytes successfully!"
-else
-    echo "Did not upload correctly"
-    cat x509/putDeferOutput.txt
-    exit 1
-fi
-
 # Run a curl with a token and no x509 (should still work)
-curl -v -k -L https://localhost:8444/test/defer/input.txt -H "Authorization: Bearer $(cat x509/test-token.jwt)" &> x509/curlTokenOutput.txt
+curl -v -k -L https://localhost:8444/defer/input.txt -H "Authorization: Bearer $(cat x509/test-token.jwt)" &> x509/curlTokenOutput.txt
 
 # Check output of command
 if grep -q "HTTP/1.1 200 OK" x509/curlTokenOutput.txt; then
@@ -171,7 +155,7 @@ else
 fi
 
 # Run a curl with a good x509 value to defer
-curl -v -k -L https://localhost:8444/test/defer/input.txt --tlsv1.3 --cert x509/config/certificates/tls.crt --key x509/config/certificates/tls.key &> x509/curlX509Output.txt
+curl -v -k -L https://localhost:8444/defer/input.txt --tlsv1.3 --cert x509/config/certificates/tls.crt --key x509/config/certificates/tls.key &> x509/curlX509Output.txt
 
 # Check output of command
 if grep -q "HTTP/1.1 200 OK" x509/curlX509Output.txt; then
