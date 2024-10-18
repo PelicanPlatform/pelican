@@ -1,0 +1,11 @@
+---
+#####################################################
+# OSDF configuration
+#
+# Required configuration to integrate your service with the OSDF
+#####################################################
+
+XRootD:
+  ## Sitename is the resource name this cache is registered as under Topology.
+  ## You must set this.
+  Sitename: TOPOLOGY_RESOURCE_NAME
