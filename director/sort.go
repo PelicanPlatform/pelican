@@ -165,6 +165,7 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	network, ok := utils.ApplyIPMask(addr.String())
 	if !ok {
 		log.Warningf("Failed to apply IP mask to address %s", ip.String())
+		labels["network"] = "unknown"
 	} else {
 		labels["network"] = network
 	}
@@ -173,7 +174,6 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	if !ok || project == "" {
 		log.Warningf("Failed to get project from context")
 		labels["proj"] = "unknown"
-		labels["network"] = "unknown"
 		labels["source"] = "server"
 	} else {
 		labels["proj"] = project
