@@ -2009,3 +2009,46 @@ func TestGetFinalRedirectURL(t *testing.T) {
 		assert.Equal(t, "https://example.org:8444?key1=val1&key2=val2&raw="+encodedVal, get)
 	})
 }
+
+func TestExtractProjectFromUserAgent(t *testing.T) {
+	t.Run("Single User-Agent with project prefix", func(t *testing.T) {
+		userAgents := []string{"pelican-client/1.0.0 project/test"}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "test", result)
+	})
+	t.Run("Singlue User-Agent with swapped order", func(t *testing.T) {
+		userAgents := []string{"project/test pelican-client/1.0.0"}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "test", result)
+	})
+
+	t.Run("Single User-Agent with additional segments", func(t *testing.T) {
+		userAgents := []string{"pelican-client/blah project/myproject foo/bar"}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "myproject", result)
+	})
+
+	t.Run("Multiple User-Agents with project prefix", func(t *testing.T) {
+		userAgents := []string{"pelican-client/1.0.0 project/test", "pelican-client/1.0.0 project/test2"}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "test", result)
+	})
+
+	t.Run("Multiple User-Agents with swapped order", func(t *testing.T) {
+		userAgents := []string{"project/test pelican-client/1.0.0", "project/test2 pelican-client/1.0.0"}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "test", result)
+	})
+
+	t.Run("No Project Prefix", func(t *testing.T) {
+		userAgents := []string{"pelican-client/1.0.0"}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "", result)
+	})
+
+	t.Run("No User-Agent", func(t *testing.T) {
+		userAgents := []string{}
+		result := extractProjectFromUserAgent(userAgents)
+		assert.Equal(t, "", result)
+	})
+}

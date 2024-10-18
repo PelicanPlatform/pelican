@@ -71,6 +71,9 @@ type (
 		Cancel   context.CancelFunc
 		Errgroup *errgroup.Group
 	}
+
+	// Context key for the project name
+	ProjectContextKey struct{}
 )
 
 const (
@@ -285,6 +288,23 @@ func extractVersionAndService(ginCtx *gin.Context) (reqVer *version.Version, ser
 	return reqVer, service, nil
 }
 
+// Helper function to extract project from User-Agent
+// Will return an empty string if no project is found
+func extractProjectFromUserAgent(userAgents []string) string {
+	prefix := "project/"
+
+	for _, userAgent := range userAgents {
+		parts := strings.Split(userAgent, " ")
+		for _, part := range parts {
+			if strings.HasPrefix(part, prefix) {
+				return strings.TrimPrefix(part, prefix)
+			}
+		}
+	}
+
+	return ""
+}
+
 func versionCompatCheck(reqVer *version.Version, service string) error {
 	var minCompatVer *version.Version
 	switch service {
@@ -483,7 +503,10 @@ func redirectToCache(ginCtx *gin.Context) {
 		redirectedToCache = false
 	}
 
-	cacheAds, err = sortServerAds(ipAddr, cacheAds, cachesAvailabilityMap)
+	ctx := context.Background()
+	project := extractProjectFromUserAgent(ginCtx.Request.Header.Values("User-Agent"))
+	ctx = context.WithValue(ctx, ProjectContextKey{}, project)
+	cacheAds, err = sortServerAds(ctx, ipAddr, cacheAds, cachesAvailabilityMap)
 	if err != nil {
 		log.Error("Error determining server ordering for cacheAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -717,7 +740,11 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
 
-	availableAds, err = sortServerAds(ipAddr, availableAds, nil)
+	ctx := context.Background()
+	project := extractProjectFromUserAgent(ginCtx.Request.Header.Values("User-Agent"))
+	ctx = context.WithValue(ctx, ProjectContextKey{}, project)
+
+	availableAds, err = sortServerAds(ctx, ipAddr, availableAds, nil)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{

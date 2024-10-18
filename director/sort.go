@@ -20,6 +20,7 @@ package director
 
 import (
 	"cmp"
+	"context"
 	"math/rand"
 	"net"
 	"net/netip"
@@ -30,10 +31,13 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -144,7 +148,7 @@ func checkOverrides(addr net.IP) (coordinate *Coordinate) {
 	return nil
 }
 
-func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
+func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64, err error) {
 	ip := net.IP(addr.AsSlice())
 	override := checkOverrides(ip)
 	if override != nil {
@@ -152,13 +156,40 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 		return override.Lat, override.Long, nil
 	}
 
+	labels := prometheus.Labels{
+		"network": "",
+		"source":  "",
+		"proj":    "",
+	}
+
+	network, ok := utils.ApplyIPMask(addr.String())
+	if !ok {
+		log.Warningf("Failed to apply IP mask to address %s", ip.String())
+		labels["network"] = "unknown"
+	} else {
+		labels["network"] = network
+	}
+
+	project, ok := ctx.Value(ProjectContextKey{}).(string)
+	if !ok || project == "" {
+		log.Warningf("Failed to get project from context")
+		labels["proj"] = "unknown"
+		labels["source"] = "server"
+	} else {
+		labels["proj"] = project
+	}
+
 	reader := maxMindReader.Load()
 	if reader == nil {
 		err = errors.New("No GeoIP database is available")
+		labels["source"] = "server"
+		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 		return
 	}
 	record, err := reader.City(ip)
 	if err != nil {
+		labels["source"] = "server"
+		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 		return
 	}
 	lat = record.Location.Latitude
@@ -169,6 +200,8 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	// comes from a private range.
 	if lat == 0 && long == 0 {
 		log.Warningf("GeoIP Resolution of the address %s resulted in the null lat/long. This will result in random server sorting.", ip.String())
+		labels["source"] = "client"
+		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 	}
 
 	// MaxMind provides an accuracy radius in kilometers. When it actually has no clue how to resolve a valid, public
@@ -180,6 +213,8 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 			"This will be treated as GeoIP resolution failure and result in random server sorting. Setting lat/long to null.", ip.String(), record.Location.AccuracyRadius)
 		lat = 0
 		long = 0
+		labels["source"] = "client"
+		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 	}
 
 	return
@@ -194,7 +229,7 @@ func assignRandBoundedCoord(minLat, maxLat, minLong, maxLong float64) (lat, long
 
 // Given a client address, attempt to get the lat/long of the client. If the address is invalid or
 // the lat/long is not resolvable, assign a random location in the contiguous US.
-func getClientLatLong(addr netip.Addr) (coord Coordinate) {
+func getClientLatLong(ctx context.Context, addr netip.Addr) (coord Coordinate) {
 	var err error
 	if !addr.IsValid() {
 		log.Warningf("Unable to sort servers based on client-server distance. Invalid client IP address: %s", addr.String())
@@ -209,7 +244,7 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate) {
 		return
 	}
 
-	coord.Lat, coord.Long, err = getLatLong(addr)
+	coord.Lat, coord.Long, err = getLatLong(ctx, addr)
 	if err != nil || (coord.Lat == 0 && coord.Long == 0) {
 		if err != nil {
 			log.Warningf("Error while getting the client IP address: %v", err)
@@ -245,13 +280,13 @@ func invertWeightIfNeeded(isRand bool, weight float64) float64 {
 // Note that if the client has invalid IP address or MaxMind is unable to get the coordinates out of
 // the client IP, any distance-related steps are skipped. If the sort method is "distance", then
 // the serverAds are randomly sorted.
-func sortServerAds(clientAddr netip.Addr, ads []server_structs.ServerAd, availabilityMap map[string]bool) ([]server_structs.ServerAd, error) {
+func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_structs.ServerAd, availabilityMap map[string]bool) ([]server_structs.ServerAd, error) {
 	// Each entry in weights will map a priority to an index in the original ads slice.
 	// A larger weight is a higher priority.
 	weights := make(SwapMaps, len(ads))
 	sortMethod := param.Director_CacheSortMethod.GetString()
 	// This will handle the case where the client address is invalid or the lat/long is not resolvable.
-	clientCoord := getClientLatLong(clientAddr)
+	clientCoord := getClientLatLong(ctx, clientAddr)
 
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {
