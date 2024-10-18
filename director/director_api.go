@@ -225,7 +225,7 @@ func LaunchServerCountMetric(ctx context.Context, egrp *errgroup.Group) {
 	})
 }
 
-// Populate internal filteredServers map by Director.FilteredServers
+// Populate internal filteredServers map by Director.FilteredServers and director db
 func ConfigFilterdServers() {
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
@@ -236,6 +236,15 @@ func ConfigFilterdServers() {
 
 	for _, sn := range param.Director_FilteredServers.GetStringSlice() {
 		filteredServers[sn] = permFiltered
+	}
+
+	persistedServerStatuses, err := GetAllServerStatuses()
+	if err != nil {
+		log.Error("Failed to read persisted ServerStatuses from director db", err)
+		return
+	}
+	for _, serverStatus := range persistedServerStatuses {
+		filteredServers[serverStatus.Name] = serverStatus.FilterType
 	}
 }
 

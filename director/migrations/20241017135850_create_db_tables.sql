@@ -2,8 +2,8 @@
 -- +goose StatementBegin
 CREATE TABLE server_status (
     uuid TEXT PRIMARY KEY,
-    url TEXT NOT NULL DEFAULT '',
-    downtime BOOLEAN NOT NULL DEFAULT 0,
+    name TEXT NOT NULL UNIQUE,
+    filter_type TEXT NOT NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
 );
