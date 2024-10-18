@@ -1,0 +1,11 @@
+---
+#####################################################
+# Pelican admin web interface configuration
+#
+# Optional configuration. See:
+# https://docs.pelicanplatform.org/federating-your-data#login-to-admin-website
+#####################################################
+
+## Set to 'true' to enable the admin web interface
+Server:
+  EnableUI: false
