@@ -1,0 +1,15 @@
+---
+#####################################################
+# Federation configuration
+#
+# Required configuration to integrate with your federation
+#####################################################
+
+Federation:
+  ## The main URL for your federation. You must specify this.
+  DiscoveryUrl:
+
+## If the external DNS name of your host is different from the output
+## of `hostname -f`, set Hostname to the external DNS name
+# Server:
+#   Hostname:
