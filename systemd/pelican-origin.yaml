@@ -14,12 +14,5 @@ ConfigLocations:
 Logging:
   LogLocation: /var/log/pelican/pelican-origin.log
 
-Federation:
-  ## The main URL for your federation. You must specify this.
-  DiscoveryUrl:
-  ## Set Hostname to the external DNS name this can be accessed over, if
-  ## different than the current hostname.
-  # Hostname:
-
 Origin:
   NamespacePrefix: "/MY_NAMESPACE"
