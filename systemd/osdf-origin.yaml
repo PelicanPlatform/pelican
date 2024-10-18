@@ -14,10 +14,5 @@ ConfigLocations:
 Logging:
   LogLocation: /var/log/pelican/osdf-origin.log
 
-XRootD:
-  ## Sitename is the resource name this origin is registered as under Topology.
-  ## You must set this.
-  Sitename: TOPOLOGY_RESOURCE_NAME
-
 Origin:
   RunLocation: /run/pelican/xrootd/osdf-origin

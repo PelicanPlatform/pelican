@@ -14,10 +14,5 @@ ConfigLocations:
 Logging:
   LogLocation: /var/log/pelican/osdf-cache.log
 
-XRootD:
-  ## Sitename is the resource name this cache is registered as under Topology.
-  ## You must set this.
-  Sitename: TOPOLOGY_RESOURCE_NAME
-
 Cache:
   RunLocation: /run/pelican/xrootd/osdf-cache
