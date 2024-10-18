@@ -23,5 +23,3 @@ Federation:
 
 Origin:
   NamespacePrefix: "/MY_NAMESPACE"
-  ## Enable multiuser to support Unix-based file ownership in the objects being served.
-  # Multiuser: false
