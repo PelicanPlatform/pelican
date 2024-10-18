@@ -26,5 +26,4 @@ XRootD:
 
 Origin:
   NamespacePrefix: "/MY_NAMESPACE"
-  Multiuser: false
   RunLocation: /run/pelican/xrootd/osdf-origin
