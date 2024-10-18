@@ -20,4 +20,4 @@ XRootD:
   Sitename: TOPOLOGY_RESOURCE_NAME
 Cache:
   DataLocation: "/mnt/osdf"
-  RunLocation: /run/pelican/osdf-cache/xrootd
+  RunLocation: /run/pelican/xrootd/osdf-cache
