@@ -1240,6 +1240,13 @@ type: bool
 default: false
 components: ["cache"]
 ---
+name: Cache.Prefetch
+description: |+
+  The number of blocks the cache will prefetch per file
+type: int
+default: 0
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################
