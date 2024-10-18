@@ -285,6 +285,9 @@ nfpms:
       - src: "systemd/examples/10-federation.yaml"
         dst: "/etc/pelican/config.d/10-federation.yaml"
         type: config|noreplace
+      - src: "systemd/examples/20-origin-exports.yaml"
+        dst: "/etc/pelican/config.d/20-origin-exports.yaml"
+        type: config|noreplace
       - src: "systemd/examples/60-origin-multiuser.yaml"
         dst: "/etc/pelican/config.d/60-origin-multiuser.yaml"
         type: config|noreplace

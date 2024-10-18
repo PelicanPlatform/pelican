@@ -25,5 +25,4 @@ XRootD:
   Sitename: TOPOLOGY_RESOURCE_NAME
 
 Origin:
-  NamespacePrefix: "/MY_NAMESPACE"
   RunLocation: /run/pelican/xrootd/osdf-origin
