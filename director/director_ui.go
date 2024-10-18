@@ -251,8 +251,10 @@ func handleFilterServer(ctx *gin.Context) {
 	// If we previously temporarily allowed a server, we switch to permFiltered (reset)
 	if filterType == tempAllowed {
 		filteredServers[sn] = permFiltered
+		SetServerStatus(sn, permFiltered)
 	} else {
 		filteredServers[sn] = tempFiltered
+		SetServerStatus(sn, tempFiltered)
 	}
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "success"})
 }
@@ -284,9 +286,11 @@ func handleAllowServer(ctx *gin.Context) {
 	if ft == tempFiltered {
 		// For temporarily filtered server, allowing them by removing the server from the map
 		delete(filteredServers, sn)
+		DeleteServerStatus(sn)
 	} else if ft == permFiltered {
 		// For servers to filter from the config, temporarily allow the server
 		filteredServers[sn] = tempAllowed
+		SetServerStatus(sn, tempAllowed)
 	} else if ft == topoFiltered {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
