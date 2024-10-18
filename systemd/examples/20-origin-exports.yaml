@@ -1,0 +1,47 @@
+---
+#####################################################
+# Origin export configuration
+#
+# Required configuration for sharing data through your origin service
+#
+# See Origin config here:
+# https://docs.pelicanplatform.org/federating-your-data
+#
+# If serving an S3 origin, see:
+# https://docs.pelicanplatform.org/federating-your-data/s3-backend
+#####################################################
+
+Origin:
+  # s3 or posix
+  StorageType:
+
+  # If 'StorageType: s3', uncomment and fill out the following:
+  # S3ServiceUrl:
+  # S3Region:
+  # S3UrlStyle:
+
+  # List of namespaces and backing filesystem or object store to serve
+  Exports:
+    # FederationPrefix is the namespace that your users will interact
+    # with to access data through your origin
+    - FederationPrefix:
+      # Possible capabilities: ["Reads", "PublicReads", "Writes", "DirectReads", "Listings"]
+      # https://docs.pelicanplatform.org/federating-your-data#origin-and-namespace-capabilities
+      Capabilities:
+
+      # If 'StorageType: posix', uncomment and fill out the following
+      # with the path to the POSIX filesystem to serve
+      # StoragePrefix:
+
+      # If 'StorageType: s3', uncomment and fill out the following:
+      # S3Bucket:
+
+      # If 'StorageType: s3', uncomment and fill out the following if
+      # they are required by the underlying object store:
+      # S3AccessKeyfile:
+      # S3SecretKeyfile:
+
+    # See multi-export configuration details here:
+    # https://docs.pelicanplatform.org/federating-your-data#multi-export-origins
+    # - FederationPrefix:
+    #   Capabilities:
