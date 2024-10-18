@@ -282,6 +282,9 @@ nfpms:
       - src: "systemd/pelican.logrotate"
         dst: "/etc/logrotate.d/pelican"
         type: config|noreplace
+      - src: "systemd/examples/60-origin-multiuser.yaml"
+        dst: "/etc/pelican/config.d/60-origin-multiuser.yaml"
+        type: config|noreplace
       - src: "systemd/examples/90-debugging.yaml"
         dst: "/etc/pelican/config.d/90-debugging.yaml"
         type: config|noreplace
