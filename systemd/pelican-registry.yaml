@@ -13,7 +13,3 @@ ConfigLocations:
 
 Logging:
   LogLocation: /var/log/pelican/pelican-registry.log
-
-Federation:
-  ## The main URL for your federation. You must specify this.
-  DiscoveryUrl:
