@@ -13,6 +13,3 @@ ConfigLocations:
 
 Logging:
   LogLocation: /var/log/pelican/pelican-origin.log
-
-Origin:
-  NamespacePrefix: "/MY_NAMESPACE"
