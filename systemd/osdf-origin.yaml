@@ -23,7 +23,7 @@ XRootD:
   ## Sitename is the resource name this origin is registered as under Topology.
   ## You must set this.
   Sitename: TOPOLOGY_RESOURCE_NAME
-  Port: 1095
+
 Origin:
   NamespacePrefix: "/MY_NAMESPACE"
   Multiuser: false
