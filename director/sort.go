@@ -245,7 +245,6 @@ func getClientLatLong(ctx context.Context, addr netip.Addr) (coord Coordinate) {
 	}
 
 	coord.Lat, coord.Long, err = getLatLong(ctx, addr)
-	coord.Lat, coord.Long, err = getLatLong(ctx, addr)
 	if err != nil || (coord.Lat == 0 && coord.Long == 0) {
 		if err != nil {
 			log.Warningf("Error while getting the client IP address: %v", err)
