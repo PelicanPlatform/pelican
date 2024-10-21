@@ -80,7 +80,7 @@ func (f filterType) String() string {
 //  4. Set up utilities for collecting origin/health server file transfer test status
 //  5. Return the updated ServerAd. The ServerAd passed in will not be modified
 func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) (updatedAd server_structs.ServerAd) {
-	if err := updateLatLong(&sAd); err != nil {
+	if err := updateLatLong(ctx, &sAd); err != nil {
 		log.Debugln("Failed to lookup GeoIP coordinates for host", sAd.URL.Host)
 	}
 
@@ -233,7 +233,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	return sAd
 }
 
-func updateLatLong(ad *server_structs.ServerAd) error {
+func updateLatLong(ctx context.Context, ad *server_structs.ServerAd) error {
 	if ad == nil {
 		return errors.New("Cannot provide a nil ad to UpdateLatLong")
 	}
@@ -243,7 +243,7 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 		return err
 	}
 	if len(ip) == 0 {
-		return fmt.Errorf("Unable to find an IP address for hostname %s", hostname)
+		return fmt.Errorf("unable to find an IP address for hostname %s", hostname)
 	}
 	addr, ok := netip.AddrFromSlice(ip[0])
 	if !ok {
@@ -251,7 +251,7 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 	}
 	// NOTE: If GeoIP resolution of this address fails, lat/long are set to 0.0 (the null lat/long)
 	// This causes the server to be sorted to the end of the list whenever the Director requires distance-aware sorting.
-	lat, long, err := getLatLong(addr)
+	lat, long, err := getLatLong(ctx, addr)
 	if err != nil {
 		return err
 	}
