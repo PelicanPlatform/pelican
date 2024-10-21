@@ -26,16 +26,16 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
-type ServerStatus struct {
+type ServerDowntime struct {
 	UUID       string     `gorm:"primaryKey"`
 	Name       string     `gorm:"not null;unique"`
 	FilterType filterType `gorm:"type:text;not null"`
 	// We don't use gorm default gorm.Model to change ID type to string
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	DeletedAt gorm.DeletedAt
 }
 
 var db *gorm.DB
@@ -65,12 +65,12 @@ func ShutdownDirectorDB() error {
 	return server_utils.ShutdownDB(db)
 }
 
-func CreateServerStatus(name string, filterType filterType) error {
+func CreateServerDowntime(name string, filterType filterType) error {
 	id, err := uuid.NewV7()
 	if err != nil {
 		return errors.Wrap(err, "Unable to create new UUID for new entry in server status table")
 	}
-	serverStatus := ServerStatus{
+	serverDowntime := ServerDowntime{
 		UUID:       id.String(),
 		Name:       name,
 		FilterType: filterType,
@@ -78,23 +78,23 @@ func CreateServerStatus(name string, filterType filterType) error {
 		UpdatedAt:  time.Now(),
 	}
 
-	if err := db.Create(serverStatus).Error; err != nil {
+	if err := db.Create(serverDowntime).Error; err != nil {
 		return err
 	}
 	return nil
 }
 
-func GetServerStatus(name string) (filterType, error) {
-	var serverStatus ServerStatus
-	err := db.First(&serverStatus, "name = ?", name).Error
+func GetServerDowntime(name string) (filterType, error) {
+	var serverDowntime ServerDowntime
+	err := db.First(&serverDowntime, "name = ?", name).Error
 	if err != nil {
 		return "", err
 	}
-	return filterType(serverStatus.FilterType), nil
+	return filterType(serverDowntime.FilterType), nil
 }
 
-func GetAllServerStatuses() ([]ServerStatus, error) {
-	var statuses []ServerStatus
+func GetAllServerDowntimes() ([]ServerDowntime, error) {
+	var statuses []ServerDowntime
 	result := db.Find(&statuses)
 
 	if result.Error != nil {
@@ -104,27 +104,28 @@ func GetAllServerStatuses() ([]ServerStatus, error) {
 }
 
 // Set filterType of a given server. If the server doesn't exist in director db, create a new entry for it
-func SetServerStatus(name string, filterType filterType) error {
-	var serverStatus ServerStatus
-	err := db.First(&serverStatus, "name = ?", name).Error
+func SetServerDowntime(name string, filterType filterType) error {
+	var serverDowntime ServerDowntime
+	// slience the logger for this query because there's definitely an ErrRecordNotFound when a new downtime info inserted
+	err := db.Session(&gorm.Session{Logger: db.Logger.LogMode(logger.Silent)}).First(&serverDowntime, "name = ?", name).Error
 
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return CreateServerStatus(name, filterType)
+		return CreateServerDowntime(name, filterType)
 	} else if err != nil {
 		return errors.Wrap(err, "Error retrieving Server Status")
 	}
 
-	serverStatus.FilterType = filterType
-	serverStatus.UpdatedAt = time.Now()
+	serverDowntime.FilterType = filterType
+	serverDowntime.UpdatedAt = time.Now()
 
-	if err := db.Save(&serverStatus).Error; err != nil {
+	if err := db.Save(&serverDowntime).Error; err != nil {
 		return err
 	}
 	return nil
 }
 
-func DeleteServerStatus(name string) error {
-	if err := db.Where("name = ?", name).Delete(&ServerStatus{}).Error; err != nil {
+func DeleteServerDowntime(name string) error {
+	if err := db.Where("name = ?", name).Delete(&ServerDowntime{}).Error; err != nil {
 		return errors.Wrap(err, "Failed to delete an entry in Server Status table")
 	}
 	return nil
