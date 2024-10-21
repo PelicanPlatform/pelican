@@ -2260,6 +2260,7 @@ description: |+
   The duration of which Prometheus should retain the monitoring data.
 type: string
 default: "15d"
+components: ["origin", "cache", "director", "registry"]
 ---
 ############################
 #   Shoveler-level configs   #
