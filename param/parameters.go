@@ -190,7 +190,6 @@ var (
 	Lotman_DbLocation = StringParam{"Lotman.DbLocation"}
 	Lotman_LibLocation = StringParam{"Lotman.LibLocation"}
 	Monitoring_DataLocation = StringParam{"Monitoring.DataLocation"}
-	Monitoring_Retention = StringParam{"Monitoring.Retention"}
 	OIDC_AuthorizationEndpoint = StringParam{"OIDC.AuthorizationEndpoint"}
 	OIDC_ClientID = StringParam{"OIDC.ClientID"}
 	OIDC_ClientIDFile = StringParam{"OIDC.ClientIDFile"}
@@ -377,6 +376,7 @@ var (
 	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
+	Monitoring_Retention = DurationParam{"Monitoring.Retention"}
 	Monitoring_TokenExpiresIn = DurationParam{"Monitoring.TokenExpiresIn"}
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}

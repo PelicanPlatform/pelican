@@ -155,7 +155,7 @@ type Config struct {
 		PortHigher int `mapstructure:"porthigher"`
 		PortLower int `mapstructure:"portlower"`
 		PromQLAuthorization bool `mapstructure:"promqlauthorization"`
-		Retention string `mapstructure:"retention"`
+		Retention time.Duration `mapstructure:"retention"`
 		TokenExpiresIn time.Duration `mapstructure:"tokenexpiresin"`
 		TokenRefreshInterval time.Duration `mapstructure:"tokenrefreshinterval"`
 	} `mapstructure:"monitoring"`
@@ -452,7 +452,7 @@ type configWithType struct {
 		PortHigher struct { Type string; Value int }
 		PortLower struct { Type string; Value int }
 		PromQLAuthorization struct { Type string; Value bool }
-		Retention struct { Type string; Value string }
+		Retention struct { Type string; Value time.Duration }
 		TokenExpiresIn struct { Type string; Value time.Duration }
 		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}
