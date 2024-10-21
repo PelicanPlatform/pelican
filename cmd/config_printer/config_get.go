@@ -19,10 +19,10 @@ type Match struct {
 }
 
 func configGet(cmd *cobra.Command, args []string) {
-	currentConfig := InitServerClientConfig(viper.GetViper())
+	currentConfig := initClientAndServerConfig(viper.GetViper())
 
 	configValues := make(map[string]string)
-	extractConfigValues(currentConfig, "", configValues)
+	flattenConfig(currentConfig, "", configValues)
 
 	var matches []Match
 
@@ -99,8 +99,8 @@ func configGet(cmd *cobra.Command, args []string) {
 	}
 }
 
-// extractConfigValues recursively extracts key-value pairs from a nested struct and returns a flattened map
-func extractConfigValues(config interface{}, parentKey string, result map[string]string) {
+// flattenConfig recursively flattens the config structure into a map[string]string.
+func flattenConfig(config interface{}, parentKey string, result map[string]string) {
 	v := reflect.ValueOf(config)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
@@ -121,23 +121,13 @@ func extractConfigValues(config interface{}, parentKey string, result map[string
 		// Handle different kinds of fields
 		switch fieldValue.Kind() {
 		case reflect.Struct:
-			extractConfigValues(fieldValue.Interface(), key, result)
+			flattenConfig(fieldValue.Interface(), key, result)
 		case reflect.Ptr:
 			if !fieldValue.IsNil() {
-				extractConfigValues(fieldValue.Interface(), key, result)
+				flattenConfig(fieldValue.Interface(), key, result)
 			}
-		case reflect.Slice, reflect.Array:
-			// Convert slice elements to strings
-			sliceValues := make([]string, fieldValue.Len())
-			for j := 0; j < fieldValue.Len(); j++ {
-				element := fieldValue.Index(j).Interface()
-				sliceValues[j] = fmt.Sprintf("%v", element)
-			}
-			result[key] = "[" + strings.Join(sliceValues, ", ") + "]"
-		case reflect.String:
-			result[key] = fmt.Sprintf("\"%s\"", fieldValue.Interface())
 		default:
-			result[key] = fmt.Sprintf("%v", fieldValue.Interface())
+			result[key] = formatValue(fieldValue.Interface())
 		}
 	}
 }

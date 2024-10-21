@@ -19,8 +19,6 @@
 package config_printer
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	_ "embed"
@@ -29,37 +27,31 @@ import (
 var (
 	ConfigCmd = &cobra.Command{
 		Use:   "config",
-		Short: "View the configuration parameters set for the Pelican",
-	}
-
-	configTestCmd = &cobra.Command{
-		Use:   "test",
-		Short: "View the configuration parameters set for the Pelican",
-		Run:   configTest,
+		Short: "View and search for configuration parameters",
 	}
 
 	configDumpCmd = &cobra.Command{
 		Use:   "dump",
-		Short: "View all the configuration parameters set for the Pelican",
+		Short: "Dump all configuration parameters",
 		Run:   configDump,
 	}
 
 	configGetCmd = &cobra.Command{
 		Use:   "get",
-		Short: "Prints out all configuration variables and the values matching arguments",
+		Short: "Retrieve config parameters that match any of the given arguments",
 		Run:   configGet,
 	}
 
 	configManCmd = &cobra.Command{
 		Use:     "man",
-		Short:   "Prints documentation for the config parameter",
+		Short:   "Print documentation for the config parameter specified in the argument",
 		Aliases: []string{"desc", "describe", "doc"},
 		Run:     configMan,
 	}
 
 	configSummaryCmd = &cobra.Command{
 		Use:     "summary",
-		Short:   "Prints config parameters that differ from the default",
+		Short:   "Print config parameters that differ from the default values",
 		Aliases: []string{"sum"},
 		Run:     configSummary,
 	}
@@ -70,12 +62,7 @@ var (
 	includeDeprecated bool
 )
 
-func configTest( /*cmd*/ *cobra.Command /*args*/, []string) {
-	fmt.Println("You have run config Test!")
-}
-
 func init() {
-	ConfigCmd.AddCommand(configTestCmd)
 	ConfigCmd.AddCommand(configDumpCmd)
 	ConfigCmd.AddCommand(configGetCmd)
 	ConfigCmd.AddCommand(configManCmd)
@@ -83,8 +70,10 @@ func init() {
 
 	configDumpCmd.Flags().StringVarP(&format, "format", "o", "yaml", "Output format (yaml or json)")
 
-	configGetCmd.Flags().StringArrayVarP(&components, "component", "c", []string{}, "Specify componets to filter output of config get multiple coponents are ored not and")
+	configGetCmd.Flags().StringArrayVarP(&components, "component", "c", []string{}, "Specify components to filter the output of config get, if multiple components are provided, parameters related to any of the components will be retrieved")
 	configGetCmd.Flags().BoolVar(&includeHidden, "include-hidden", false, "Include hidden configuration parameters")
 	configGetCmd.Flags().BoolVar(&includeDeprecated, "include-deprecated", false, "Include deprecated configuration parameters")
+
+	configSummaryCmd.Flags().StringVarP(&format, "format", "o", "yaml", "Output format (yaml or json)")
 
 }

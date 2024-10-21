@@ -19,13 +19,11 @@
 package config_printer
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"gopkg.in/yaml.v3"
 )
 
 func configSummary(cmd *cobra.Command, args []string) {
@@ -33,21 +31,16 @@ func configSummary(cmd *cobra.Command, args []string) {
 	config.SetBaseDefaultsInConfig(defaultConfig)
 	config.InitConfigDir(defaultConfig)
 
-	defaultConfigMap := InitServerClientConfig(defaultConfig)
+	defaultConfigMap := initClientAndServerConfig(defaultConfig)
 
-	currentConfigMap := InitServerClientConfig(viper.GetViper())
+	currentConfigMap := initClientAndServerConfig(viper.GetViper())
 
-	diff := CompareStructsAsym(currentConfigMap, defaultConfigMap)
+	diff := compareStructsAsym(currentConfigMap, defaultConfigMap)
 
-	diffYaml, err := yaml.Marshal(diff)
-	if err != nil {
-		fmt.Printf("Error marshalling diff to YAML: %v\n", err)
-		return
-	}
-	fmt.Println(string(diffYaml))
+	printConfig(diff, format)
 }
 
-func CompareStructsAsym(v1, v2 interface{}) interface{} {
+func compareStructsAsym(v1, v2 interface{}) interface{} {
 	val1 := reflect.ValueOf(v1)
 	val2 := reflect.ValueOf(v2)
 
@@ -76,7 +69,7 @@ func CompareStructsAsym(v1, v2 interface{}) interface{} {
 			}
 
 			// Recursively compare the fields
-			fieldDiff := CompareStructsAsym(fieldVal1, fieldVal2)
+			fieldDiff := compareStructsAsym(fieldVal1, fieldVal2)
 			if fieldDiff != nil {
 				diffMap[fieldName] = fieldDiff
 			}
