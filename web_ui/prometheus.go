@@ -74,9 +74,6 @@ import (
 var (
 	appName = "prometheus"
 
-	defaultRetentionString   = "15d"
-	defaultRetentionDuration model.Duration
-
 	globalConfig    config.Config
 	globalConfigMtx sync.RWMutex
 
@@ -85,12 +82,6 @@ var (
 
 func init() {
 	prometheus.MustRegister(version.NewCollector(strings.ReplaceAll(appName, "-", "_")))
-
-	var err error
-	defaultRetentionDuration, err = model.ParseDuration(defaultRetentionString)
-	if err != nil {
-		panic(err)
-	}
 }
 
 type flagConfig struct {
@@ -422,7 +413,12 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 		cfg.tsdb.OutOfOrderTimeWindow = promCfg.StorageConfig.TSDBConfig.OutOfOrderTimeWindow
 	}
 
-	cfg.tsdb.RetentionDuration = defaultRetentionDuration
+	retention, err := model.ParseDuration(param.Monitoring_Retention.GetString())
+	if err != nil {
+		// If we are here, it means that the duration that was set in the config is invalid
+		return fmt.Errorf("failed to parse retention duration: %v", err)
+	}
+	cfg.tsdb.RetentionDuration = retention
 
 	// Max block size settings.
 	if cfg.tsdb.MaxBlockDuration == 0 {
