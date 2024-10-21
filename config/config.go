@@ -763,8 +763,8 @@ func setWebConfigOverride(v *viper.Viper, configPath string) error {
 
 func SetBaseDefaultsInConfig(v *viper.Viper) {
 	//Load defaults.yaml
-
-	err := viper.MergeConfig(strings.NewReader(defaultsYaml))
+	v.SetConfigType("yaml")
+	err := v.MergeConfig(strings.NewReader(defaultsYaml))
 	if err != nil {
 		cobra.CheckErr(err)
 	}
@@ -776,7 +776,7 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 		loadOSDF = loadOSDF || (prefix == "STASH")
 	}
 	if loadOSDF {
-		err := viper.MergeConfig(strings.NewReader(osdfDefaultsYaml))
+		err := v.MergeConfig(strings.NewReader(osdfDefaultsYaml))
 		if err != nil {
 			cobra.CheckErr(err)
 		}
@@ -784,8 +784,6 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 
 }
 func InitConfigDir(v *viper.Viper) error {
-
-	fmt.Println("**************** IsRootExecution():", IsRootExecution(), "*******************")
 
 	configDir := v.GetString("ConfigDir")
 	if configDir == "" {
@@ -810,7 +808,6 @@ func InitConfig() {
 
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
-	viper.SetConfigType("yaml")
 
 	// Set default values in the global Viper instance
 	SetBaseDefaultsInConfig(viper.GetViper())
@@ -967,7 +964,7 @@ func PrintConfig() error {
 	return nil
 }
 func SetServerDefaults(v *viper.Viper) error {
-	configDir := viper.GetString("ConfigDir")
+	configDir := v.GetString("ConfigDir")
 	v.SetDefault("Server.WebConfigFile", filepath.Join(configDir, "web-config.yaml"))
 	v.SetDefault("Server.TLSCertificate", filepath.Join(configDir, "certificates", "tls.crt"))
 	v.SetDefault("Server.TLSKey", filepath.Join(configDir, "certificates", "tls.key"))
@@ -985,9 +982,10 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault("Server.WebConfigFile", filepath.Join(configDir, "web-config.yaml"))
 	v.SetDefault("Cache.ExportLocation", "/")
 	v.SetDefault("Registry.RequireKeyChaining", true)
+	v.SetDefault("Origin.StorageType", "posix")
 	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml becase
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
-	viper.SetDefault("Origin.S3UrlStyle", "path")
+	v.SetDefault("Origin.S3UrlStyle", "path")
 
 	if IsRootExecution() {
 		v.SetDefault("Origin.RunLocation", filepath.Join("/run", "pelican", "xrootd", "origin"))
@@ -998,12 +996,12 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault("Cache.DataLocation", "/run/pelican/cache")
 		v.SetDefault("Cache.LocalRoot", v.GetString("Cache.DataLocation"))
 
-		if viper.IsSet("Cache.DataLocation") {
+		if v.IsSet("Cache.DataLocation") {
 			v.SetDefault("Cache.DataLocations", []string{filepath.Join(v.GetString("Cache.DataLocation"), "data")})
 			v.SetDefault("Cache.MetaLocations", []string{filepath.Join(v.GetString("Cache.DataLocation"), "meta")})
 		} else {
-			viper.SetDefault("Cache.DataLocations", []string{"/run/pelican/cache/data"})
-			viper.SetDefault("Cache.MetaLocations", []string{"/run/pelican/cache/meta"})
+			v.SetDefault("Cache.DataLocations", []string{"/run/pelican/cache/data"})
+			v.SetDefault("Cache.MetaLocations", []string{"/run/pelican/cache/meta"})
 		}
 		v.SetDefault("LocalCache.RunLocation", filepath.Join("/run", "pelican", "localcache"))
 		v.SetDefault("Origin.Multiuser", true)

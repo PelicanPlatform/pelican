@@ -57,6 +57,13 @@ var (
 		Run:     configMan,
 	}
 
+	configSummaryCmd = &cobra.Command{
+		Use:     "summary",
+		Short:   "Prints config parameters that differ from the default",
+		Aliases: []string{"sum"},
+		Run:     configSummary,
+	}
+
 	format            string
 	components        []string
 	includeHidden     bool
@@ -72,6 +79,7 @@ func init() {
 	ConfigCmd.AddCommand(configDumpCmd)
 	ConfigCmd.AddCommand(configGetCmd)
 	ConfigCmd.AddCommand(configManCmd)
+	ConfigCmd.AddCommand(configSummaryCmd)
 
 	configDumpCmd.Flags().StringVarP(&format, "format", "o", "yaml", "Output format (yaml or json)")
 

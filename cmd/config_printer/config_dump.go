@@ -5,23 +5,22 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
-
-	"github.com/pelicanplatform/pelican/param"
 )
 
 func configDump(cmd *cobra.Command, args []string) {
-	rawConfig, _ := param.UnmarshalConfig()
+	currentConfig := InitServerClientConfig(viper.GetViper())
 
 	switch format {
 	case "yaml":
-		yamlData, err := yaml.Marshal(rawConfig)
+		yamlData, err := yaml.Marshal(currentConfig)
 		if err != nil {
 			fmt.Printf("Error marshaling config to YAML: %v", err)
 		}
 		fmt.Println(string(yamlData))
 	case "json":
-		jsonData, err := json.MarshalIndent(rawConfig, "", "  ")
+		jsonData, err := json.MarshalIndent(currentConfig, "", "  ")
 		if err != nil {
 			fmt.Printf("Error marshaling config to JSON: %v", err)
 		}

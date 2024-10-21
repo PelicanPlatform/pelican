@@ -17,3 +17,87 @@
  ***************************************************************/
 
 package config_printer
+
+import (
+	"fmt"
+	"reflect"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
+)
+
+func configSummary(cmd *cobra.Command, args []string) {
+	defaultConfig := viper.New()
+	config.SetBaseDefaultsInConfig(defaultConfig)
+	config.InitConfigDir(defaultConfig)
+
+	defaultConfigMap := InitServerClientConfig(defaultConfig)
+
+	currentConfigMap := InitServerClientConfig(viper.GetViper())
+
+	diff := CompareStructsAsym(currentConfigMap, defaultConfigMap)
+
+	diffYaml, err := yaml.Marshal(diff)
+	if err != nil {
+		fmt.Printf("Error marshalling diff to YAML: %v\n", err)
+		return
+	}
+	fmt.Println(string(diffYaml))
+}
+
+func CompareStructsAsym(v1, v2 interface{}) interface{} {
+	val1 := reflect.ValueOf(v1)
+	val2 := reflect.ValueOf(v2)
+
+	if val1.Kind() == reflect.Ptr {
+		val1 = val1.Elem()
+	}
+	if val2.Kind() == reflect.Ptr {
+		val2 = val2.Elem()
+	}
+
+	var diff interface{}
+
+	switch val1.Kind() {
+	case reflect.Struct:
+		diffMap := make(map[string]interface{})
+		typeOfVal1 := val1.Type()
+		for i := 0; i < val1.NumField(); i++ {
+			fieldName := typeOfVal1.Field(i).Name
+			fieldVal1 := val1.Field(i).Interface()
+
+			var fieldVal2 interface{}
+			if val2.IsValid() {
+				fieldVal2 = val2.FieldByName(fieldName).Interface()
+			} else {
+				fieldVal2 = nil
+			}
+
+			// Recursively compare the fields
+			fieldDiff := CompareStructsAsym(fieldVal1, fieldVal2)
+			if fieldDiff != nil {
+				diffMap[fieldName] = fieldDiff
+			}
+		}
+		if len(diffMap) > 0 {
+			diff = diffMap
+		}
+
+	case reflect.Slice, reflect.Array:
+		if !reflect.DeepEqual(v1, v2) {
+			if !((val1.IsNil() && val2.Len() == 0) || (val2.IsNil() && val1.Len() == 0)) {
+				diff = v1
+			}
+		}
+
+	default:
+		if !reflect.DeepEqual(v1, v2) {
+			diff = v1
+
+		}
+	}
+
+	return diff
+}

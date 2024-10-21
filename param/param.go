@@ -44,6 +44,18 @@ func UnmarshalConfig() (*Config, error) {
 	return viperConfig, nil
 }
 
+func NonGlobalUnmarshalConfig(v *viper.Viper) (*Config, error) {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+	viperConfig = new(Config)
+	err := v.Unmarshal(viperConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return viperConfig, nil
+}
+
 // Return the unmarshaled viper config struct as a pointer
 func GetUnmarshaledConfig() (*Config, error) {
 	configMutex.RLock()
