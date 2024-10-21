@@ -66,7 +66,7 @@ func listAdvertisement(serverTypes []server_structs.ServerType) []*server_struct
 func checkFilter(serverName string) (bool, filterType) {
 	filteredServersMutex.RLock()
 	defer filteredServersMutex.RUnlock()
-
+	log.Debugln("Checking the filter applied on server", serverName, "Current filteredServers map:", filteredServers)
 	status, exists := filteredServers[serverName]
 	// No filter entry
 	if !exists {
@@ -223,26 +223,29 @@ func hookServerAdsCache() {
 	})
 }
 
-// Populate internal filteredServers map by Director.FilteredServers and director db
+// Populate internal filteredServers map using Director.FilteredServers param and director db
 func ConfigFilterdServers() {
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
 
-	if !param.Director_FilteredServers.IsSet() {
-		return
+	if param.Director_FilteredServers.IsSet() {
+		for _, sn := range param.Director_FilteredServers.GetStringSlice() {
+			filteredServers[sn] = permFiltered
+		}
+		log.Debugln("Loaded filtered servers config from Director.FilteredServers param", filteredServers)
 	}
 
-	for _, sn := range param.Director_FilteredServers.GetStringSlice() {
-		filteredServers[sn] = permFiltered
-	}
-
-	persistedServerStatuses, err := GetAllServerStatuses()
-	if err != nil {
-		log.Error("Failed to read persisted ServerStatuses from director db", err)
-		return
-	}
-	for _, serverStatus := range persistedServerStatuses {
-		filteredServers[serverStatus.Name] = serverStatus.FilterType
+	if param.Director_DbLocation.IsSet() {
+		persistedServerDowntimes, err := GetAllServerDowntimes()
+		if err != nil {
+			log.Error("Failed to read persisted ServerDowntimes from director db", err)
+			return
+		}
+		for _, serverDowntime := range persistedServerDowntimes {
+			filteredServers[serverDowntime.Name] = serverDowntime.FilterType
+		}
+		log.Debugln("Loaded filtered servers config from director db's server_downtimes table, the final filteredServers var has the following value", filteredServers)
+		// if a filtered server config rule is set in both Director.FilteredServers param and director db, the latter one will eventually be used
 	}
 }
 
