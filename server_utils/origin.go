@@ -392,6 +392,7 @@ func GetOriginExports() ([]OriginExport, error) {
 			// clean up trailing / in the storage prefix
 			if strings.HasSuffix(storagePrefix, "/") {
 				log.Warningln("Removing trailing '/' from storage prefix", storagePrefix)
+				storagePrefix = strings.TrimSuffix(storagePrefix, "/")
 			}
 			originExport := OriginExport{
 				FederationPrefix: federationPrefix,
@@ -452,6 +453,7 @@ func GetOriginExports() ([]OriginExport, error) {
 			storagePrefix := param.Origin_StoragePrefix.GetString()
 			if strings.HasSuffix(storagePrefix, "/") {
 				log.Warningln("Removing trailing '/' from storage prefix", storagePrefix)
+				storagePrefix = strings.TrimSuffix(storagePrefix, "/")
 			}
 			originExport = OriginExport{
 				FederationPrefix: federationPrefix,
