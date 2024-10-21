@@ -2259,7 +2259,7 @@ name: Monitoring.Retention
 description: |+
   The duration of which Prometheus should retain the monitoring data.
 type: duration
-default: "15d"
+default: 360h
 components: ["origin", "cache", "director", "registry"]
 ---
 ############################

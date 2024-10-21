@@ -413,7 +413,7 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 		cfg.tsdb.OutOfOrderTimeWindow = promCfg.StorageConfig.TSDBConfig.OutOfOrderTimeWindow
 	}
 
-	retention, err := model.ParseDuration(param.Monitoring_Retention.GetString())
+	retention, err := model.ParseDuration(param.Monitoring_Retention.GetDuration().String())
 	if err != nil {
 		// If we are here, it means that the duration that was set in the config is invalid
 		return fmt.Errorf("failed to parse retention duration: %v", err)
