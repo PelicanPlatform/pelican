@@ -349,20 +349,27 @@ func handleWebUIResource(ctx *gin.Context) {
 		file, _ := webAssets.ReadFile(notFoundFilePath)
 		ctx.Data(
 			http.StatusNotFound,
-			mime.TypeByExtension(notFoundFilePath),
+			mime.TypeByExtension(path.Ext(notFoundFilePath)),
 			file,
 		)
 	} else {
 		// If the file is found, return the file
 		ctx.Data(
 			http.StatusOK,
-			mime.TypeByExtension(filePath),
+			mime.TypeByExtension(path.Ext(filePath)),
 			file,
 		)
 	}
 }
 
 func configureWebResource(engine *gin.Engine) {
+
+	// Register the MIME type for .txt files
+	err := mime.AddExtensionType(".txt", "text/plain")
+	if err != nil {
+		log.Errorf("Failed to register MIME type: %v", err)
+	}
+
 	engine.GET("/view/*requestPath",
 		handleGlobusPages,
 		handleWebUIRedirect,
