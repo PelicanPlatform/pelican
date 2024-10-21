@@ -27,9 +27,9 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestFilterNsAdsForCache(t *testing.T) {
@@ -111,13 +111,17 @@ func TestFilterNsAdsForCache(t *testing.T) {
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		jsonbytes, err := json.Marshal(nsAds)
-		require.NoError(t, err)
+		if req.URL.String() == "/api/v2.0/director/listNamespaces" {
+			jsonbytes, err := json.Marshal(nsAds)
+			require.NoError(t, err)
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, err = w.Write(jsonbytes)
-		require.NoError(t, err)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err = w.Write(jsonbytes)
+			require.NoError(t, err)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	defer ts.Close()
 
@@ -125,8 +129,7 @@ func TestFilterNsAdsForCache(t *testing.T) {
 
 	for _, testInput := range tests {
 		t.Run(testInput.desc, func(t *testing.T) {
-			err := config.InitClient()
-			require.NoError(t, err)
+			test_utils.InitClient(t, nil)
 			viper.Set("Federation.DirectorURL", ts.URL)
 			if testInput.permittedNS != nil {
 				viper.Set("Cache.PermittedNamespaces", testInput.permittedNS)
@@ -134,12 +137,66 @@ func TestFilterNsAdsForCache(t *testing.T) {
 			defer server_utils.ResetTestState()
 
 			cacheServer.SetFilters()
-			err = cacheServer.GetNamespaceAdsFromDirector()
+			err := cacheServer.GetNamespaceAdsFromDirector()
 			require.NoError(t, err)
 			filteredNS := cacheServer.GetNamespaceAds()
 
 			require.Equal(t, testInput.expectedNumNS, len(filteredNS))
 
+		})
+	}
+}
+
+func TestGetX509PrefixesFromDirector(t *testing.T) {
+	tests := []struct {
+		desc             string
+		directorPrefixes []string
+	}{
+		{
+			desc:             "TestNonEmptySlice",
+			directorPrefixes: []string{"pref1", "pref2", "pref3"},
+		},
+		{
+			desc:             "TestEmptySlice",
+			directorPrefixes: []string{},
+		},
+	}
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	nsAds := []server_structs.NamespaceAdV2{}
+
+	for _, testInput := range tests {
+		t.Run(testInput.desc, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.URL.String() == "/api/v2.0/director/listNamespaces" {
+					jsonbytes, err := json.Marshal(nsAds)
+					require.NoError(t, err)
+
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err = w.Write(jsonbytes)
+					require.NoError(t, err)
+				} else {
+					jsonbytes, err := json.Marshal(testInput.directorPrefixes)
+					require.NoError(t, err)
+
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, err = w.Write(jsonbytes)
+					require.NoError(t, err)
+				}
+			}))
+			defer ts.Close()
+
+			cacheServer := &CacheServer{}
+
+			test_utils.InitClient(t, nil)
+			viper.Set("Federation.DirectorURL", ts.URL)
+			err := cacheServer.GetNamespaceAdsFromDirector()
+			require.NoError(t, err)
+			cachePrefixes := viper.Get("Cache.X509ClientAuthenticationPrefixes")
+			require.Equal(t, testInput.directorPrefixes, cachePrefixes)
 		})
 	}
 }
