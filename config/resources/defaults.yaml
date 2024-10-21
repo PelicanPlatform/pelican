@@ -88,6 +88,7 @@ Monitoring:
   MetricAuthorization: true
   PromQLAuthorization: true
   AggregatePrefixes: ["/*"]
+  Retention: 15d
 Shoveler:
   MessageQueueProtocol: amqp
   PortLower: 9930
