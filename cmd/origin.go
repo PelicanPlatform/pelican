@@ -97,7 +97,7 @@ func init() {
 	originCmd.AddCommand(originServeCmd)
 
 	// The -m flag is used to specify what kind of backend we plan to use for the origin.
-	originServeCmd.Flags().StringP("mode", "m", "posix", "Set the mode for the origin service (default is 'posix'). Supported modes are 'posix' and 's3'.")
+	originServeCmd.Flags().StringP("mode", "m", "posix", "Set the mode for the origin service (default is 'posix'). Supported modes are 'posix', 's3, 'https', 'globus' and 'xroot'.")
 	if err := viper.BindPFlag("Origin.StorageType", originServeCmd.Flags().Lookup("mode")); err != nil {
 		panic(err)
 	}
@@ -155,6 +155,16 @@ instead.
 	originServeCmd.Flags().String("xroot-service-url", "", "When configured in xroot mode, specifies the hostname and port of the upstream xroot server "+
 		"(not to be mistaken with the current server's hostname).")
 	if err := viper.BindPFlag("Origin.XRootServiceUrl", originServeCmd.Flags().Lookup("xroot-service-url")); err != nil {
+		panic(err)
+	}
+
+	// https backend flags
+	originServeCmd.Flags().String("http-service-url", "", "Specify the http(s) service-url. Only used when an origin is launched in https/globus modes.")
+	if err := viper.BindPFlag("Origin.HttpServiceUrl", originServeCmd.Flags().Lookup("http-service-url")); err != nil {
+		panic(err)
+	}
+	originServeCmd.Flags().String("http-tokenfile", "", "Specify a filepath to use for configuring the http(s) token. See documentation for details.")
+	if err := viper.BindPFlag("Origin.HttpAuthTokenFile", originServeCmd.Flags().Lookup("http-tokenfile")); err != nil {
 		panic(err)
 	}
 

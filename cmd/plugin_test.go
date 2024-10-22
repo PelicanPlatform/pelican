@@ -451,18 +451,18 @@ func TestPluginDirectRead(t *testing.T) {
 // We ran into a bug where the start time for the transfer was not recorded correctly and was almost always the same as the end time
 // (since they were set at similar sections of code). This test ensures that they are different and that the start time is before the end time.
 func TestPluginCorrectStartAndEndTime(t *testing.T) {
-	test_utils.InitClient(t, nil)
 	server_utils.ResetOriginExports()
 	defer server_utils.ResetTestState()
+	var storageName string
 
 	// Set up our http backend so that we can sleep during transfer
 	body := "Hello, World!"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "HEAD" && r.URL.Path == "/test2/hello_world" {
+		if r.Method == "HEAD" && r.URL.Path == storageName {
 			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 			w.WriteHeader(http.StatusOK)
 			return
-		} else if r.Method == "GET" && r.URL.Path == "/test2/hello_world" {
+		} else if r.Method == "GET" && r.URL.Path == storageName {
 			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 			w.WriteHeader(http.StatusPartialContent)
 			time.Sleep(1 * time.Second)
@@ -473,20 +473,19 @@ func TestPluginCorrectStartAndEndTime(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	viper.Set("Origin.HttpServiceUrl", srv.URL+"/test2")
-
-	config.InitConfig()
-	tmpPath := t.TempDir()
+	viper.Set("Origin.HttpServiceUrl", srv.URL)
 
 	fed := fed_test_utils.NewFedTest(t, httpsOriginConfig)
-	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
+	storageName = fed.Exports[0].StoragePrefix + "/hello_world"
+	discoveryHost := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 
 	downloadUrl := url.URL{
 		Scheme: "pelican",
-		Host:   host,
-		Path:   "/test/hello_world",
+		Host:   discoveryHost,
+		Path:   "/my-prefix/hello_world",
 	}
 
+	tmpPath := t.TempDir()
 	workChan := make(chan PluginTransfer, 2)
 	workChan <- PluginTransfer{url: &downloadUrl, localFile: tmpPath}
 	close(workChan)

@@ -183,6 +183,10 @@ func validateFederationPrefix(prefix string) error {
 		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid '\\' characters", prefix)
 	}
 
+	if strings.Contains(prefix, "?") {
+		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid '?' characters", prefix)
+	}
+
 	if server_structs.IsCacheNS(prefix) || server_structs.IsOriginNS(prefix) {
 		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s is a reserved prefix for cache/origin server registration", prefix)
 	}
@@ -238,7 +242,7 @@ func validateBucketName(bucket string) error {
 }
 
 // GetOriginExports is used to parse the config yaml and return a list of OriginExports. It should only touch
-// the yaml the first time it's called, and then return the cached value on subsequent calls.
+// the yaml the first time it's called, and then return the in-memory value on subsequent calls.
 // When the configuration is set up using the older single-prefix style of configuration, the function will
 // convert those values (such as Origin.FederationPrefix, Origin.StoragePrefix, etc.) into the OriginExports
 // struct and return a list of one. Otherwise, we'll base things off the list of exports and ignore the single-prefix
@@ -356,15 +360,110 @@ func GetOriginExports() ([]OriginExport, error) {
 			viper.Set("Origin.EnableReads", capabilities.Reads)
 		}
 	case server_structs.OriginStorageHTTPS:
-		// Storage prefix is unused by HTTPS so we put in a dummy value of /
-		originExport = OriginExport{
-			FederationPrefix: param.Origin_FederationPrefix.GetString(),
-			StoragePrefix:    "/",
-			Capabilities:     capabilities,
+		// clean up the http service URL
+		if strings.HasSuffix(param.Origin_HttpServiceUrl.GetString(), "/") {
+			log.Warningln("Removing trailing '/' from http service URL")
+			viper.Set("Origin.HttpServiceUrl", strings.TrimSuffix(param.Origin_HttpServiceUrl.GetString(), "/"))
 		}
 
-		if err = validateExportPaths("/", originExport.FederationPrefix); err != nil {
-			return nil, err
+		// Handle exports configured via -v or potentially env vars
+		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
+			log.Infoln("Configuring exports from export volumes passed via command line or via yaml")
+			volumes := param.Origin_ExportVolumes.GetStringSlice()
+			if len(volumes) > 1 {
+				// We don't yet support multiple exports for the HTTPS backend
+				return nil, errors.Errorf("https backend does not yet support multiple exports, but %d were provided: %+v", len(volumes), volumes)
+			}
+
+			volume := volumes[0]
+			// Perform validation of the namespace
+			storagePrefix := filepath.Clean(volume)
+			federationPrefix := filepath.Clean(volume)
+			volumeMountInfo := strings.SplitN(volume, ":", 2)
+			if len(volumeMountInfo) == 2 {
+				storagePrefix = filepath.Clean(volumeMountInfo[0])
+				federationPrefix = filepath.Clean(volumeMountInfo[1])
+			}
+
+			if err = validateExportPaths(storagePrefix, federationPrefix); err != nil {
+				return nil, err
+			}
+
+			// clean up trailing / in the storage prefix
+			if strings.HasSuffix(storagePrefix, "/") {
+				log.Warningln("Removing trailing '/' from storage prefix", storagePrefix)
+				storagePrefix = strings.TrimSuffix(storagePrefix, "/")
+			}
+			originExport := OriginExport{
+				FederationPrefix: federationPrefix,
+				StoragePrefix:    storagePrefix,
+				Capabilities:     capabilities,
+			}
+
+			viper.Set("Origin.FederationPrefix", originExport.FederationPrefix)
+			viper.Set("Origin.StoragePrefix", originExport.StoragePrefix)
+
+			log.Warningln(WarnExportVolumes)
+			originExports := []OriginExport{originExport}
+			return originExports, nil
+		}
+
+		if param.Origin_Exports.IsSet() {
+			var tmpExports []OriginExport
+			if err := viper.UnmarshalKey("Origin.Exports", &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
+				return nil, err
+			}
+			if len(tmpExports) == 0 {
+				err := errors.New("Origin.Exports is defined, but no exports were found")
+				return nil, err
+			} else if len(tmpExports) > 1 {
+				err := errors.New("More than one export found, only one export is currently supported for the https backend")
+				return nil, err
+			}
+
+			// Assume there's only one export
+			export := tmpExports[0]
+
+			// Clean up any path components that might have been added by the user to guarantee the correct
+			// URL is constructed without duplicate or missing slashes
+			if strings.HasSuffix(export.StoragePrefix, "/") {
+				log.Warningln("Removing trailing '/' from storage prefix", export.StoragePrefix)
+				export.StoragePrefix = strings.TrimSuffix(export.StoragePrefix, "/")
+			}
+
+			if err = validateExportPaths(export.StoragePrefix, export.FederationPrefix); err != nil {
+				return nil, err
+			}
+
+			capabilities := export.Capabilities
+			reads := capabilities.Reads || capabilities.PublicReads
+			viper.Set("Origin.FederationPrefix", export.FederationPrefix)
+			viper.Set("Origin.StoragePrefix", export.StoragePrefix)
+			viper.Set("Origin.EnableReads", reads)
+			viper.Set("Origin.EnablePublicReads", capabilities.PublicReads)
+			viper.Set("Origin.EnableWrites", capabilities.Writes)
+			viper.Set("Origin.EnableListings", capabilities.Listings)
+			viper.Set("Origin.EnableDirectReads", capabilities.DirectReads)
+
+			originExports = []OriginExport{export}
+			return originExports, nil
+		} else { // we're using the simple Origin.FederationPrefix
+			log.Infoln("Configuring single-export origin")
+			federationPrefix := param.Origin_FederationPrefix.GetString()
+			storagePrefix := param.Origin_StoragePrefix.GetString()
+			if strings.HasSuffix(storagePrefix, "/") {
+				log.Warningln("Removing trailing '/' from storage prefix", storagePrefix)
+				storagePrefix = strings.TrimSuffix(storagePrefix, "/")
+			}
+			originExport = OriginExport{
+				FederationPrefix: federationPrefix,
+				StoragePrefix:    storagePrefix,
+				Capabilities:     capabilities,
+			}
+
+			if err = validateExportPaths(originExport.StoragePrefix, originExport.FederationPrefix); err != nil {
+				return nil, err
+			}
 		}
 	case server_structs.OriginStorageS3:
 		// Handle exports configured via -v or potentially env vars
