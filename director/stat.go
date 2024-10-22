@@ -328,9 +328,9 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 	timeout := param.Director_StatTimeout.GetDuration()
 	// Note there is a small buffer in each channel; in the case of a cache hit, we write
 	// to the channel from within this goroutine.
-	positiveReqChan := make(chan *objectMetadata, 1)
-	negativeReqChan := make(chan error, 1)
-	deniedReqChan := make(chan *headReqForbiddenErr, 1) // Requests with 403 response
+	positiveReqChan := make(chan *objectMetadata, 5)
+	negativeReqChan := make(chan error, 5)
+	deniedReqChan := make(chan *headReqForbiddenErr, 5) // Requests with 403 response
 	// Cancel the rest of the requests when requests received >= max required
 	maxCancelCtx, maxCancel := context.WithCancel(ctx)
 	numTotalReq := 0
