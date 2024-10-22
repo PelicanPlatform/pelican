@@ -251,10 +251,14 @@ func handleFilterServer(ctx *gin.Context) {
 	// If we previously temporarily allowed a server, we switch to permFiltered (reset)
 	if filterType == tempAllowed {
 		filteredServers[sn] = permFiltered
-		SetServerDowntime(sn, permFiltered)
+		if err := SetServerDowntime(sn, permFiltered); err != nil {
+			log.Errorln("Failed to persist the downtime in director db", err)
+		}
 	} else {
 		filteredServers[sn] = tempFiltered
-		SetServerDowntime(sn, tempFiltered)
+		if err := SetServerDowntime(sn, tempFiltered); err != nil {
+			log.Errorln("Failed to persist the downtime in director db", err)
+		}
 	}
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "success"})
 }
@@ -286,11 +290,15 @@ func handleAllowServer(ctx *gin.Context) {
 	if ft == tempFiltered {
 		// For temporarily filtered server, allowing them by removing the server from the map
 		delete(filteredServers, sn)
-		DeleteServerDowntime(sn)
+		if err := DeleteServerDowntime(sn); err != nil {
+			log.Errorf("Failed to remove the downtime of server %s in director db", sn)
+		}
 	} else if ft == permFiltered {
 		// For servers to filter from the config, temporarily allow the server
 		filteredServers[sn] = tempAllowed
-		SetServerDowntime(sn, tempAllowed)
+		if err := SetServerDowntime(sn, tempAllowed); err != nil {
+			log.Errorf("Failed to persist the status change of server %s in director db", sn)
+		}
 	} else if ft == topoFiltered {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
