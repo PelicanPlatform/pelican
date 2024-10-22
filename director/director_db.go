@@ -22,11 +22,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pkg/errors"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 type ServerDowntime struct {

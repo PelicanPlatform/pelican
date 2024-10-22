@@ -5,10 +5,11 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
-	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 var (
