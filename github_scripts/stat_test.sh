@@ -32,7 +32,8 @@ export PELICAN_SERVER_ENABLEUI=false
 export PELICAN_ORIGIN_RUNLOCATION=/tmp/pelican-test/stat_test/xrootdRunLocation
 
 export PELICAN_CONFIGDIR=/tmp/pelican-test/stat_test
-export PELICAN_REGISTRY_DBLOCATION=/tmp/pelican-test/stat_test/test.sql
+export PELICAN_REGISTRY_DBLOCATION=/tmp/pelican-test/stat_test/test-registry.sql
+export PELICAN_DIRECTOR_DBLOCATION=/tmp/pelican-test/stat_test/test-director.sql
 export PELICAN_OIDC_CLIENTID="sometexthere"
 export PELICAN_OIDC_CLIENTSECRETFILE=/tmp/pelican-test/stat_test/oidc-secret
 echo "Placeholder OIDC secret" > /tmp/pelican-test/stat_test/oidc-secret
@@ -63,6 +64,7 @@ cleanup() {
     unset PELICAN_FEDERATION_REGISTRYURL
     unset PELICAN_TLSSKIPVERIFY
     unset PELICAN_REGISTRY_DBLOCATION
+    unset PELICAN_DIRECTOR_DBLOCATION
     unset PELICAN_SERVER_ENABLEUI
     unset PELICAN_OIDC_CLIENTID
     unset PELICAN_OIDC_CLIENTSECRETFILE
