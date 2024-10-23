@@ -199,29 +199,27 @@ func LaunchMapMetrics(ctx context.Context, egrp *errgroup.Group) {
 }
 
 func LaunchServerCountMetric(ctx context.Context, egrp *errgroup.Group) {
-	egrp.Go(func() error {
-		ticker := time.NewTicker(15 * time.Second)
-		defer ticker.Stop()
+	// Hook into server ads cache
+	// By hooking into the insertion and eviction events, we can keep track of the number of servers in the director
+	// The metric is updated based on the server type, server name, and whether the server is from the topology
+	// At any given moment, the metric represents the number of servers in the director
 
-		for {
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-ticker.C:
-				for _, ad := range serverAds.Items() {
-					serverAd := ad.Value()
-					metrics.PelicanDirectorServerCount.With(prometheus.Labels{
-						"server_name":    serverAd.Name,
-						"server_type":    string(serverAd.Type),
-						"server_url":     serverAd.URL.String(),
-						"server_web_url": serverAd.WebURL.String(),
-						"server_lat":     fmt.Sprintf("%.4f", serverAd.Latitude),
-						"server_long":    fmt.Sprintf("%.4f", serverAd.Longitude),
-						"from_topology":  strconv.FormatBool(serverAd.FromTopology),
-					}).Inc()
-				}
-			}
-		}
+	serverAds.OnInsertion(func(ctx context.Context, ad *ttlcache.Item[string, *server_structs.Advertisement]) {
+		serverAd := ad.Value()
+		metrics.PelicanDirectorServerCount.With(prometheus.Labels{
+			"server_name":   serverAd.Name,
+			"server_type":   string(serverAd.Type),
+			"from_topology": strconv.FormatBool(serverAd.FromTopology),
+		}).Inc()
+	})
+
+	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, ad *ttlcache.Item[string, *server_structs.Advertisement]) {
+		serverAd := ad.Value()
+		metrics.PelicanDirectorServerCount.With(prometheus.Labels{
+			"server_name":   serverAd.Name,
+			"server_type":   string(serverAd.Type),
+			"from_topology": strconv.FormatBool(serverAd.FromTopology),
+		}).Dec()
 	})
 }
 
