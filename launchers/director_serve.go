@@ -37,8 +37,11 @@ import (
 func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
 
 	log.Info("Initializing Director GeoIP database...")
-	director.InitializeDB(ctx)
+	director.InitializeGeoIPDB(ctx)
 
+	if err := director.InitializeDB(); err != nil {
+		return errors.Wrap(err, "failed to initialize director sqlite database")
+	}
 	director.ConfigFilterdServers()
 
 	director.LaunchTTLCache(ctx, egrp)
@@ -46,8 +49,6 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	director.LaunchMapMetrics(ctx, egrp)
 
 	director.LaunchServerCountMetric(ctx, egrp)
-
-	director.ConfigFilterdServers()
 
 	director.LaunchServerIOQuery(ctx, egrp)
 

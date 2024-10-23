@@ -63,6 +63,7 @@ type Config struct {
 		CacheResponseHostnames []string `mapstructure:"cacheresponsehostnames"`
 		CacheSortMethod string `mapstructure:"cachesortmethod"`
 		CachesPullFromCaches bool `mapstructure:"cachespullfromcaches"`
+		DbLocation string `mapstructure:"dblocation"`
 		DefaultResponse string `mapstructure:"defaultresponse"`
 		EnableBroker bool `mapstructure:"enablebroker"`
 		EnableOIDC bool `mapstructure:"enableoidc"`
@@ -359,6 +360,7 @@ type configWithType struct {
 		CacheResponseHostnames struct { Type string; Value []string }
 		CacheSortMethod struct { Type string; Value string }
 		CachesPullFromCaches struct { Type string; Value bool }
+		DbLocation struct { Type string; Value string }
 		DefaultResponse struct { Type string; Value string }
 		EnableBroker struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
