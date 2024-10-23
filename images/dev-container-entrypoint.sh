@@ -20,5 +20,9 @@
 # Run pre-commit install
 pre-commit install
 
-# Start an interactive bash shell
-exec "/bin/bash" -i
+# Default to bash but if a command is passed, run it
+if [ $# -eq 0 ]; then
+  exec /bin/bash
+else
+  exec "$@"
+fi

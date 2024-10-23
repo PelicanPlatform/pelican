@@ -238,7 +238,7 @@ export const GlobusDataExportCard = ({
             marginRight={'0.5em'}
           >
             <Tooltip title='Configure Globus export'>
-              <Link href={'/origin/globus'}>
+              <Link href={'/origin/globus/'}>
                 <IconButton aria-label='Configure Globus Export'>
                   <Settings />
                 </IconButton>

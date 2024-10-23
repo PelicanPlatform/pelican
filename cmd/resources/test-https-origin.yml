@@ -3,5 +3,6 @@ Logging:
     Scitokens: debug
 Origin:
   StorageType: https
-  FederationPrefix: /test
+  FederationPrefix: /my-prefix
+  StoragePrefix: /test
   EnablePublicReads: true
