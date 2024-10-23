@@ -151,11 +151,11 @@ type Config struct {
 	Monitoring struct {
 		AggregatePrefixes []string `mapstructure:"aggregateprefixes"`
 		DataLocation string `mapstructure:"datalocation"`
+		DataRetention time.Duration `mapstructure:"dataretention"`
 		MetricAuthorization bool `mapstructure:"metricauthorization"`
 		PortHigher int `mapstructure:"porthigher"`
 		PortLower int `mapstructure:"portlower"`
 		PromQLAuthorization bool `mapstructure:"promqlauthorization"`
-		Retention time.Duration `mapstructure:"retention"`
 		TokenExpiresIn time.Duration `mapstructure:"tokenexpiresin"`
 		TokenRefreshInterval time.Duration `mapstructure:"tokenrefreshinterval"`
 	} `mapstructure:"monitoring"`
@@ -448,11 +448,11 @@ type configWithType struct {
 	Monitoring struct {
 		AggregatePrefixes struct { Type string; Value []string }
 		DataLocation struct { Type string; Value string }
+		DataRetention struct { Type string; Value time.Duration }
 		MetricAuthorization struct { Type string; Value bool }
 		PortHigher struct { Type string; Value int }
 		PortLower struct { Type string; Value int }
 		PromQLAuthorization struct { Type string; Value bool }
-		Retention struct { Type string; Value time.Duration }
 		TokenExpiresIn struct { Type string; Value time.Duration }
 		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}
