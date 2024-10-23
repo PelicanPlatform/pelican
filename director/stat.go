@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -263,6 +264,21 @@ func WithToken(tk string) queryOption {
 	}
 }
 
+func getStatUtils(ads []server_structs.ServerAd) map[string]*serverStatUtil {
+	statUtilsMutex.RLock()
+	defer statUtilsMutex.RUnlock()
+
+	result := make(map[string]*serverStatUtil, len(ads))
+	for _, ad := range ads {
+		url := ad.URL.String()
+		statUtil, ok := statUtils[url]
+		if ok {
+			result[url] = &statUtil
+		}
+	}
+	return result
+}
+
 // Implementation of querying origins/cache servers for their availability of an object.
 // It blocks until max successful requests has been received, all potential origins/caches responded (or timeout), or cancelContext was closed.
 //
@@ -310,9 +326,11 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 		return
 	}
 	timeout := param.Director_StatTimeout.GetDuration()
-	positiveReqChan := make(chan *objectMetadata)
-	negativeReqChan := make(chan error)
-	deniedReqChan := make(chan *headReqForbiddenErr) // Requests with 403 response
+	// Note there is a small buffer in each channel; in the case of a cache hit, we write
+	// to the channel from within this goroutine.
+	positiveReqChan := make(chan *objectMetadata, 5)
+	negativeReqChan := make(chan error, 5)
+	deniedReqChan := make(chan *headReqForbiddenErr, 5) // Requests with 403 response
 	// Cancel the rest of the requests when requests received >= max required
 	maxCancelCtx, maxCancel := context.WithCancel(ctx)
 	numTotalReq := 0
@@ -327,12 +345,9 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 		return
 	}
 
-	// Use RLock to allolw multiple queries
-	statUtilsMutex.RLock()
-	defer statUtilsMutex.RUnlock()
-
+	utils := getStatUtils(ads)
 	for _, adExt := range ads {
-		statUtil, ok := statUtils[adExt.URL.String()]
+		statUtil, ok := utils[adExt.URL.String()]
 		if !ok {
 			numTotalReq += 1
 			log.Debugf("Server %q is missing data for stat call, skip querying...", adExt.Name)
@@ -345,15 +360,24 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 		}
 		// Use an anonymous func to pass variable safely to the goroutine
 		func(serverAd server_structs.ServerAd) {
-			statUtil.Errgroup.Go(func() error {
-				baseUrl := serverAd.URL
 
-				// For the topology server, if the server does not support public read,
-				// or the token is provided, or the object is protected, then it's safe to assume this request goes to authenticated endpoint
-				// For Pelican server, we don't populate authURL and only use server URL as the base URL
-				if serverAd.FromTopology && (!serverAd.Caps.PublicReads || cfg.protected || cfg.token != "") && serverAd.AuthURL.String() != "" {
-					baseUrl = serverAd.AuthURL
-				}
+			baseUrl := serverAd.URL
+			// For the topology server, if the server does not support public read,
+			// or the token is provided, or the object is protected, then it's safe to assume this request goes to authenticated endpoint
+			// For Pelican server, we don't populate authURL and only use server URL as the base URL
+			if serverAd.FromTopology && (!serverAd.Caps.PublicReads || cfg.protected || cfg.token != "") && serverAd.AuthURL.String() != "" {
+				baseUrl = serverAd.AuthURL
+			}
+
+			totalLabels := prometheus.Labels{
+				"server_name":   serverAd.Name,
+				"server_url":    baseUrl.String(),
+				"server_type":   string(serverAd.Type),
+				"cached_result": "false",
+				"result":        "",
+			}
+
+			queryFunc := func() (metadata *objectMetadata, err error) {
 
 				activeLabels := prometheus.Labels{
 					"server_name": serverAd.Name,
@@ -363,22 +387,30 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 				metrics.PelicanDirectorStatActive.With(activeLabels).Inc()
 				defer metrics.PelicanDirectorStatActive.With(activeLabels).Dec()
 
-				metadata, err := stat.ReqHandler(maxCancelCtx, objectName, baseUrl, true, cfg.token, timeout)
+				metadata, err = stat.ReqHandler(maxCancelCtx, objectName, baseUrl, true, cfg.token, timeout)
 
+				var reqNotFound *headReqNotFoundErr
 				cancelErr := &headReqCancelledErr{}
-				if err != nil && !errors.As(err, &cancelErr) { // Skip additional requests if the previous one is cancelled
+				if err != nil && !errors.As(err, &cancelErr) && !errors.As(err, &reqNotFound) {
 					// If the request returns 403 or 500, it could be because we request a digest and xrootd
 					// does not have this turned on, or had trouble calculating the checksum
 					// Retry without digest
 					metadata, err = stat.ReqHandler(maxCancelCtx, objectName, baseUrl, false, cfg.token, timeout)
 				}
 
-				totalLabels := prometheus.Labels{
-					"server_name": serverAd.Name,
-					"server_url":  baseUrl.String(),
-					"server_type": string(serverAd.Type),
-					"result":      "",
+				// If get a 404, record it in the cache.
+				if errors.As(err, &reqNotFound) {
+					statUtil.ResultCache.Set(objectName, nil, ttlcache.DefaultTTL)
+				} else if err == nil {
+					statUtil.ResultCache.Set(objectName, metadata, ttlcache.DefaultTTL)
 				}
+
+				return
+			}
+
+			lookupFunc := func() error {
+
+				metadata, err := queryFunc()
 				if err != nil {
 					switch e := err.(type) {
 					case *headReqTimeoutErr:
@@ -418,7 +450,30 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 					positiveReqChan <- metadata
 				}
 				return nil
-			})
+			}
+
+			if item := statUtil.ResultCache.Get(objectName); item != nil {
+				// If we get a cache hit -- but the cache item is going to expire in the next 10 seconds,
+				// then we assume this is a "hot" object and we'll benefit from the preemptively refreshing
+				// the ttlcache.  If we can, asynchronously query the service.
+				if time.Until(item.ExpiresAt()) < 10*time.Second {
+					statUtil.Errgroup.TryGo(func() (err error) { _, err = queryFunc(); return })
+				}
+				totalLabels["cached_result"] = "true"
+				if metadata := item.Value(); metadata != nil {
+					totalLabels["result"] = string(metrics.StatSucceeded)
+					metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
+					positiveReqChan <- metadata
+				} else {
+					log.Debugf("Object %s not found at %s server %s: (cached result)", objectName, serverAd.Type, baseUrl.String())
+					negativeReqChan <- &headReqNotFoundErr{}
+					totalLabels["result"] = string(metrics.StatNotFound)
+					metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
+				}
+				metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
+			} else {
+				statUtil.Errgroup.TryGoUntil(ctx, lookupFunc)
+			}
 		}(adExt)
 	}
 
@@ -454,9 +509,9 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 					qResult.Status = queryFailed
 					qResult.ErrorType = queryInsufficientResErr
 					qResult.Msg = fmt.Sprintf("Number of success response: %d is less than MinStatResponse (%d) required.", len(successResult), minReq)
-					serverIssuers := []string{}
-					for _, dErr := range deniedResult {
-						serverIssuers = append(serverIssuers, dErr.IssuerUrl)
+					serverIssuers := make([]string, len(deniedResult))
+					for idx, dErr := range deniedResult {
+						serverIssuers[idx] = dErr.IssuerUrl
 					}
 					qResult.DeniedServers = serverIssuers
 					return
