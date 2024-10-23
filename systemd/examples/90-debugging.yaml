@@ -1,0 +1,25 @@
+---
+#####################################################
+# Common Debugging Configuration
+#
+# Optional configuration for incr;easing log level verbosity
+#####################################################
+
+## Set Debug: true to increase verbosity of logging in
+## /var/log/pelican
+# Debug: false
+
+## Uncomment the following sections to increase component-specific
+## logging verbosity
+# Logging:
+#   Level: "Trace"
+#   Cache:
+#     Http: "trace"
+#     Ofs: "trace"
+#     Pfc: "trace"
+#     Xrd: "trace"
+#   Origin:
+#     Http: "trace"
+#     Ofs: "trace"
+#     Scitokens: "trace"
+#     Xrootd: "trace"
