@@ -28,6 +28,7 @@ type Config struct {
 		Concurrency int `mapstructure:"concurrency"`
 		DataLocation string `mapstructure:"datalocation"`
 		DataLocations []string `mapstructure:"datalocations"`
+		DefaultCacheTimeout time.Duration `mapstructure:"defaultcachetimeout"`
 		EnableLotman bool `mapstructure:"enablelotman"`
 		EnableOIDC bool `mapstructure:"enableoidc"`
 		EnableVoms bool `mapstructure:"enablevoms"`
@@ -312,6 +313,7 @@ type Config struct {
 		MacaroonsKeyFile string `mapstructure:"macaroonskeyfile"`
 		ManagerHost string `mapstructure:"managerhost"`
 		ManagerPort int `mapstructure:"managerport"`
+		MaxStartupWait time.Duration `mapstructure:"maxstartupwait"`
 		Mount string `mapstructure:"mount"`
 		Port int `mapstructure:"port"`
 		RobotsTxtFile string `mapstructure:"robotstxtfile"`
@@ -329,6 +331,7 @@ type configWithType struct {
 		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		DataLocations struct { Type string; Value []string }
+		DefaultCacheTimeout struct { Type string; Value time.Duration }
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
@@ -613,6 +616,7 @@ type configWithType struct {
 		MacaroonsKeyFile struct { Type string; Value string }
 		ManagerHost struct { Type string; Value string }
 		ManagerPort struct { Type string; Value int }
+		MaxStartupWait struct { Type string; Value time.Duration }
 		Mount struct { Type string; Value string }
 		Port struct { Type string; Value int }
 		RobotsTxtFile struct { Type string; Value string }

@@ -376,6 +376,7 @@ var (
 )
 
 var (
+	Cache_DefaultCacheTimeout = DurationParam{"Cache.DefaultCacheTimeout"}
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
 	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
 	Client_SlowTransferWindow = DurationParam{"Client.SlowTransferWindow"}
@@ -398,6 +399,7 @@ var (
 	Transport_ResponseHeaderTimeout = DurationParam{"Transport.ResponseHeaderTimeout"}
 	Transport_TLSHandshakeTimeout = DurationParam{"Transport.TLSHandshakeTimeout"}
 	Xrootd_AuthRefreshInterval = DurationParam{"Xrootd.AuthRefreshInterval"}
+	Xrootd_MaxStartupWait = DurationParam{"Xrootd.MaxStartupWait"}
 )
 
 var (

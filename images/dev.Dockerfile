@@ -56,6 +56,7 @@ RUN yum install -y --enablerepo=osg-testing goreleaser npm xrootd-devel xrootd-s
     xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel libcap-devel sssd-client \
     xrootd-multiuser \
     zlib-devel \
+    vim valgrind gdb gtest-devel \
     && yum clean all
 
 # The ADD command with a api.github.com URL in the next couple of sections
