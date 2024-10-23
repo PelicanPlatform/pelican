@@ -580,6 +580,52 @@ func TestXrootDCacheConfig(t *testing.T) {
 		require.Error(t, err)
 		assert.NotNil(t, configPath)
 	})
+
+	t.Run("TestCacheHTTPTLSRequiredPrefixCorrectConfig", func(t *testing.T) {
+		xrootd := xrootdTest{T: t}
+		xrootd.setup()
+
+		// Set our config
+		viper.Set("Cache.X509ClientAuthenticationPrefixes", []string{"pref1", "pref2", "pref3"})
+
+		// Generate the xrootd config
+		configPath, err := ConfigXrootd(ctx, false)
+		require.NoError(t, err)
+		assert.NotNil(t, configPath)
+
+		// Verify the output
+		file, err := os.Open(configPath)
+		assert.NoError(t, err)
+		defer file.Close()
+
+		content, err := io.ReadAll(file)
+		assert.NoError(t, err)
+		assert.Contains(t, string(content), "http.tlsrequiredprefix pref1")
+		assert.Contains(t, string(content), "http.tlsrequiredprefix pref2")
+		assert.Contains(t, string(content), "http.tlsrequiredprefix pref3")
+	})
+
+	t.Run("TestCacheAuthenticationPrefixes", func(t *testing.T) {
+		xrootd := xrootdTest{T: t}
+		xrootd.setup()
+
+		// Set our config
+		viper.Set("Cache.X509AuthenticationPrefixes", []string{})
+
+		// Generate the xrootd config
+		configPath, err := ConfigXrootd(ctx, false)
+		require.NoError(t, err)
+		assert.NotNil(t, configPath)
+
+		// Verify the output
+		file, err := os.Open(configPath)
+		assert.NoError(t, err)
+		defer file.Close()
+
+		content, err := io.ReadAll(file)
+		assert.NoError(t, err)
+		assert.NotContains(t, string(content), "http.tlsrequiredprefix")
+	})
 }
 
 func TestUpdateAuth(t *testing.T) {

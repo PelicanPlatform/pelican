@@ -49,12 +49,16 @@ Director:
   CacheSortMethod: "distance"
   MinStatResponse: 1
   MaxStatResponse: 1
-  StatTimeout: 1000ms
+  StatTimeout: 2000ms
   StatConcurrencyLimit: 1000
   AdvertisementTTL: 15m
   OriginCacheHealthTestInterval: 15s
   EnableBroker: true
-  EnableStat: true
+  CheckOriginPresence: true
+  CheckCachePresence: true
+  AssumePresenceAtSingleOrigin: true
+  CachePresenceTTL: 1m
+  CachePresenceCapacity: 10000
 Cache:
   Port: 8442
   SelfTest: true

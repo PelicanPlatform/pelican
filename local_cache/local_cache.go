@@ -365,6 +365,7 @@ func (sc *LocalCache) runMux() error {
 	activeJobs := make(map[string]*activeDownload)
 	jobPath := make(map[string]string)
 	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 	clientClosed := false
 	for {
 		lenResults := len(tmpResults)
@@ -761,6 +762,7 @@ func (sc *LocalCache) updateConfig() error {
 // Periodically update the cache configuration from the registry
 func (sc *LocalCache) periodicUpdateConfig() error {
 	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-sc.ctx.Done():

@@ -123,6 +123,7 @@ func periodicMaxMindReload(ctx context.Context) {
 
 	// Update once every other day
 	ticker := time.NewTicker(48 * time.Hour)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:

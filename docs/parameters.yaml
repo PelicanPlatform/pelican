@@ -415,8 +415,10 @@ components: ["client"]
 ---
 name: DisableHttpProxy
 description: |+
-  A legacy configuration for disabling the client's HTTP proxy. See Client.DisableHttpProxy for new config.
+  [Deprecated] A legacy configuration for disabling the client's HTTP proxy. See Client.DisableHttpProxy for new config.
 type: bool
+deprecated: true
+replacedby: "Client.DisableHttpProxy"
 default: false
 components: ["client"]
 ---
@@ -429,8 +431,10 @@ components: ["client"]
 ---
 name: DisableProxyFallback
 description: |+
-  A legacy configuration for disabling the client's proxy fallback. See Client.DisableProxyFallback for new config.
+  [Deprecated] A legacy configuration for disabling the client's proxy fallback. See Client.DisableProxyFallback for new config.
 type: bool
+deprecated: true
+replacedby: "Client.DisableProxyFallback"
 default: false
 components: ["client"]
 ---
@@ -443,8 +447,10 @@ components: ["client"]
 ---
 name: MinimumDownloadSpeed
 description: |+
-  A legacy configuration for setting the client's minimum download speed. See Client.MinimumDownloadSpeed for new config.
+  [Deprecated] A legacy configuration for setting the client's minimum download speed. See Client.MinimumDownloadSpeed for new config.
 type: int
+deprecated: true
+replacedby: "Client.MinimumDownloadSpeed"
 default: 102400
 components: ["client"]
 ---
@@ -919,9 +925,9 @@ components: ["origin"]
 name: Origin.HttpServiceUrl
 description: |+
   If Origin.StorageType is set to `https`, the service URL is used as the base for requests to the backend.  To generate the
-  request, the Origin.FederationPrefix is removed from the object name, then the result is joined with the service URL.
-  For example, if one sets `Origin.HTTPServiceUrl=https://example.com/testfiles` and `Origin.FederationPrefix=/foo`, then a request
-  for an object named `/foo/bar` will generate a request to https://example.com/testfiles/bar.
+  request, the Origin.FederationPrefix is removed from the object name, then the result is joined with the service URL and storage prefix.
+  For example, if one sets `Origin.HTTPServiceUrl=https://example.com`, `Origin.StoragePrefix=/testfiles` and `Origin.FederationPrefix=/foo`,
+  then a request for an object named `/foo/bar` will generate a request to https://example.com/testfiles/bar.
 type: string
 default: none
 components: ["origin"]
@@ -1278,7 +1284,8 @@ description: |+
   - "random": Sorts caches randomly.
   - "adaptive": Sorts caches according to stochastically-generated weights that consider a combination of factors,
       including a cache's distance from the client, its IO load, and whether the cache already has the requested object.
-      See details at https://github.com/PelicanPlatform/pelican/discussions/1198
+      See details at https://github.com/PelicanPlatform/pelican/discussions/1198.  Note that if `Director.CheckCachePresence`
+      is set to false, then the adaptive algorithm cannot use the cache locality information.
 type: string
 default: distance
 components: ["director"]
@@ -1328,7 +1335,53 @@ components: ["director"]
 ---
 name: Director.EnableStat
 description: |+
-  Disable the `stat` query to the origin servers for object requests.
+  Before redirecting a cache (or, for direct reads or writes, a client) to an origin,
+  query the origin to see if the object is present.
+
+  Enabling this option generates slightly more load on the origin; however, it provides
+  improved error messages and allows a namespace to effectively be split across multiple
+  origins.
+type: bool
+default: true
+deprecated: true
+hidden: true
+replacedby: Director.CheckOriginPresence
+components: ["director"]
+---
+name: Director.CheckOriginPresence
+description: |+
+  Before redirecting a cache (or, for direct reads or writes, a client) to an origin,
+  query the origin to see if the object is present.
+
+  Enabling this option generates slightly more load on the origin; however, it provides
+  improved error messages and allows a namespace to effectively be split across multiple
+  origins.
+type: bool
+default: true
+components: ["director"]
+---
+name: Director.AssumePresenceAtSingleOrigin
+description: |+
+  If `Director.CheckOriginPresence` is enabled, the director will check for object
+  presence at the origin before redirecting a client.
+
+  If this option is enabled and there's only one possible origin for the object,
+  then the check will be skipped.
+
+  Enabling this option will reduce load on single-origin namespaces but clients will
+  get less informative error messages.
+type: bool
+default: true
+hidden: true
+components: ["director"]
+---
+name: Director.CheckCachePresence
+description: |+
+  Before redirecting a client to a cache, query the cache to see if the object is present
+  at the cache.
+
+  Enabling this option improves the cache selection algorithm, allowing the director
+  to prefer caches nearby the client with the object over caches without the object.
 type: bool
 default: true
 components: ["director"]
@@ -1337,7 +1390,7 @@ name: Director.StatTimeout
 description: |+
   The timeout for a single `stat` request.
 type: duration
-default: 200ms
+default: 2000ms
 components: ["director"]
 ---
 name: Director.StatConcurrencyLimit
@@ -1422,6 +1475,29 @@ type: stringSlice
 default: none
 components: ["director"]
 hidden: true
+---
+name: Director.CachePresenceTTL
+description: |+
+  If `Director.CheckCachePresence` is enabled, the director will check with remote cache
+  to see if the object is present before redirecting a client.
+
+  This parameter controls how long the director will cache the result of the lookup.  Longer values
+  will reduce the load generated on the caches but may reduce the accuracy of the result (as the
+  contents of the cache will change over time).
+type: duration
+default: 1m
+components: ["director"]
+---
+name: Director.CachePresenceCapacity
+description: |+
+  If `Director.CheckCachePresence` is enabled, the director will check with remote cache
+  to see if the object is present before redirecting a client.
+
+  This parameter controls how many responses, per-service, will be cached.
+type: int
+default: 10000
+hidden: true
+components: ["director"]
 ---
 ############################
 #  Registry-level configs  #

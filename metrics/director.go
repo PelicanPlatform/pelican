@@ -80,7 +80,7 @@ var (
 	PelicanDirectorStatTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_director_stat_total",
 		Help: "The total stat queries the director issues. The status can be Succeeded, Cancelled, Timeout, Forbidden, or UnknownErr",
-	}, []string{"server_name", "server_url", "server_type", "result"}) // result: see enums for DirectorStatResult
+	}, []string{"server_name", "server_url", "server_type", "result", "cached_result"}) // result: see enums for DirectorStatResult
 
 	PelicanDirectorServerCount = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_director_server_count",
@@ -91,4 +91,14 @@ var (
 		Name: "pelican_director_client_version_total",
 		Help: "The total number of requests from client versions.",
 	}, []string{"version", "service"})
+
+	PelicanDirectorRedirectionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_redirections_total",
+		Help: "The total number of redirections the director issued.",
+	}, []string{"destination", "status_code", "version", "network"})
+
+	PelicanDirectorGeoIPErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_geoip_errors",
+		Help: "The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database",
+	}, []string{"network", "source", "proj"})
 )

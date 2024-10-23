@@ -31,6 +31,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
 	"github.com/hashicorp/go-version"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
@@ -67,10 +68,14 @@ type (
 	}
 	// Utility struct to keep track of the `stat` call the director made to the origin/cache servers
 	serverStatUtil struct {
-		Context  context.Context
-		Cancel   context.CancelFunc
-		Errgroup *errgroup.Group
+		Context     context.Context
+		Cancel      context.CancelFunc
+		Errgroup    *utils.Group
+		ResultCache *ttlcache.Cache[string, *objectMetadata]
 	}
+
+	// Context key for the project name
+	ProjectContextKey struct{}
 )
 
 const (
@@ -285,6 +290,23 @@ func extractVersionAndService(ginCtx *gin.Context) (reqVer *version.Version, ser
 	return reqVer, service, nil
 }
 
+// Helper function to extract project from User-Agent
+// Will return an empty string if no project is found
+func extractProjectFromUserAgent(userAgents []string) string {
+	prefix := "project/"
+
+	for _, userAgent := range userAgents {
+		parts := strings.Split(userAgent, " ")
+		for _, part := range parts {
+			if strings.HasPrefix(part, prefix) {
+				return strings.TrimPrefix(part, prefix)
+			}
+		}
+	}
+
+	return ""
+}
+
 func versionCompatCheck(reqVer *version.Version, service string) error {
 	var minCompatVer *version.Version
 	switch service {
@@ -324,6 +346,18 @@ func checkRedirectQuery(query url.Values) error {
 
 func redirectToCache(ginCtx *gin.Context) {
 	reqVer, service, _ := extractVersionAndService(ginCtx)
+	// Flag to indicate if the request was redirected to a cache
+	// For metric collection purposes
+	// see collectDirectorRedirectionMetric
+	redirectedToCache := true
+	defer func() {
+		if !redirectedToCache {
+			collectDirectorRedirectionMetric(ginCtx, "origin")
+		} else {
+			collectDirectorRedirectionMetric(ginCtx, "cache")
+		}
+	}()
+	defer collectDirectorRedirectionMetric(ginCtx, "cache")
 	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
@@ -350,7 +384,7 @@ func redirectToCache(ginCtx *gin.Context) {
 
 	reqParams := getRequestParameters(ginCtx.Request)
 
-	disableStat := !param.Director_EnableStat.GetBool()
+	disableStat := !param.Director_CheckCachePresence.GetBool()
 
 	// Skip the stat check for object availability
 	// If either disableStat or skipstat is set, then skip the stat query
@@ -464,9 +498,17 @@ func redirectToCache(ginCtx *gin.Context) {
 			})
 			return
 		}
+		// At this point, the cacheAds is full of originAds
+		// We need to indicate that we are redirecting to an origin and not a cache
+		// This is for the purpose of metrics
+		// See collectDirectorRedirectionMetric
+		redirectedToCache = false
 	}
 
-	cacheAds, err = sortServerAds(ipAddr, cacheAds, cachesAvailabilityMap)
+	ctx := context.Background()
+	project := extractProjectFromUserAgent(ginCtx.Request.Header.Values("User-Agent"))
+	ctx = context.WithValue(ctx, ProjectContextKey{}, project)
+	cacheAds, err = sortServerAds(ctx, ipAddr, cacheAds, cachesAvailabilityMap)
 	if err != nil {
 		log.Error("Error determining server ordering for cacheAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -527,6 +569,7 @@ func redirectToCache(ginCtx *gin.Context) {
 
 func redirectToOrigin(ginCtx *gin.Context) {
 	reqVer, service, _ := extractVersionAndService(ginCtx)
+	defer collectDirectorRedirectionMetric(ginCtx, "origin")
 	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
@@ -562,7 +605,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	reqParams := getRequestParameters(ginCtx.Request)
 
 	// Skip the stat check for object availability if either disableStat or skipstat is set
-	skipStat := reqParams.Has(pelican_url.QuerySkipStat) || !param.Director_EnableStat.GetBool()
+	skipStat := reqParams.Has(pelican_url.QuerySkipStat) || !param.Director_CheckOriginPresence.GetBool()
 
 	// Include caches in the response if Director.CachesPullFromCaches is enabled
 	// AND prefercached query parameter is set
@@ -581,7 +624,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	}
 
 	// If the namespace requires a token yet there's no token available, skip the stat.
-	if !namespaceAd.Caps.PublicReads && reqParams.Get("authz") == "" {
+	if (!namespaceAd.Caps.PublicReads && reqParams.Get("authz") == "") || (param.Director_AssumePresenceAtSingleOrigin.GetBool() && len(originAds) == 1) {
 		skipStat = true
 	}
 
@@ -699,7 +742,11 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
 	}
 
-	availableAds, err = sortServerAds(ipAddr, availableAds, nil)
+	ctx := context.Background()
+	project := extractProjectFromUserAgent(ginCtx.Request.Header.Values("User-Agent"))
+	ctx = context.WithValue(ctx, ProjectContextKey{}, project)
+
+	availableAds, err = sortServerAds(ctx, ipAddr, availableAds, nil)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -1210,6 +1257,12 @@ func listNamespacesV1(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, namespaceAdsV1)
 }
 
+func listX509ClientPrefixes(ctx *gin.Context) {
+	// Return a list of client prefixes which require x509 authenticat
+
+	ctx.JSON(http.StatusOK, param.Director_X509ClientAuthenticationPrefixes.GetStringSlice())
+}
+
 func listNamespacesV2(ctx *gin.Context) {
 	namespacesAdsV2 := listNamespacesFromOrigins()
 	namespacesAdsV2 = append(namespacesAdsV2, server_structs.NamespaceAdV2{
@@ -1317,6 +1370,34 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": shortendVersion, "service": service}).Inc()
 }
 
+func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
+	labels := prometheus.Labels{
+		"destination": destination,
+		"status_code": strconv.Itoa(ctx.Writer.Status()),
+		"version":     "",
+		"network":     "",
+	}
+
+	version, _, err := extractVersionAndService(ctx)
+	if err != nil {
+		log.Warningf("Failed to extract version and service from request: %v", err)
+		return
+	}
+	if version != nil {
+		labels["version"] = version.String()
+	} else {
+		labels["version"] = "unknown"
+	}
+
+	maskedIp, ok := utils.ApplyIPMask(ctx.ClientIP())
+	if ok {
+		labels["network"] = maskedIp
+	} else {
+		labels["network"] = "unknown"
+	}
+	metrics.PelicanDirectorRedirectionsTotal.With(labels).Inc()
+}
+
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 	directorAPIV1 := router.Group("/api/v1.0/director")
 	{
@@ -1332,6 +1413,7 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
 		directorAPIV1.HEAD("/healthTest/*path", getHealthTestFile)
+		directorAPIV1.GET("/listX509ClientPrefixes", listX509ClientPrefixes)
 		directorAPIV1.Any("/origin", func(gctx *gin.Context) { // Need to do this for PROPFIND since gin does not support it
 			if gctx.Request.Method == "PROPFIND" {
 				redirectToOrigin(gctx)

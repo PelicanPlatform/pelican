@@ -52,6 +52,10 @@ type ObjectParam struct {
 func GetDeprecated() map[string][]string {
     return map[string][]string{
         "Cache.DataLocation": {"Cache.LocalRoot"},
+        "Director.EnableStat": {"Director.CheckOriginPresence"},
+        "DisableHttpProxy": {"Client.DisableHttpProxy"},
+        "DisableProxyFallback": {"Client.DisableProxyFallback"},
+        "MinimumDownloadSpeed": {"Client.MinimumDownloadSpeed"},
         "Origin.EnableDirListing": {"Origin.EnableListings"},
         "Origin.EnableFallbackRead": {"Origin.EnableDirectReads"},
         "Origin.EnableWrite": {"Origin.EnableWrites"},
@@ -297,6 +301,7 @@ var (
 	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
 	Client_WorkerCount = IntParam{"Client.WorkerCount"}
+	Director_CachePresenceCapacity = IntParam{"Director.CachePresenceCapacity"}
 	Director_MaxStatResponse = IntParam{"Director.MaxStatResponse"}
 	Director_MinStatResponse = IntParam{"Director.MinStatResponse"}
 	Director_StatConcurrencyLimit = IntParam{"Director.StatConcurrencyLimit"}
@@ -326,7 +331,10 @@ var (
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
 	Debug = BoolParam{"Debug"}
+	Director_AssumePresenceAtSingleOrigin = BoolParam{"Director.AssumePresenceAtSingleOrigin"}
 	Director_CachesPullFromCaches = BoolParam{"Director.CachesPullFromCaches"}
+	Director_CheckCachePresence = BoolParam{"Director.CheckCachePresence"}
+	Director_CheckOriginPresence = BoolParam{"Director.CheckOriginPresence"}
 	Director_EnableBroker = BoolParam{"Director.EnableBroker"}
 	Director_EnableOIDC = BoolParam{"Director.EnableOIDC"}
 	Director_EnableStat = BoolParam{"Director.EnableStat"}
@@ -373,6 +381,7 @@ var (
 	Client_SlowTransferWindow = DurationParam{"Client.SlowTransferWindow"}
 	Client_StoppedTransferTimeout = DurationParam{"Client.StoppedTransferTimeout"}
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
+	Director_CachePresenceTTL = DurationParam{"Director.CachePresenceTTL"}
 	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}

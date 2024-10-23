@@ -111,7 +111,7 @@ export default function Home() {
               <Alert severity='info'>
                 <Typography variant={'body1'}>
                   Login to register new namespaces.
-                  <Link href={'/login/?returnURL=/view/registry'}>
+                  <Link href={'/login/?returnURL=/view/registry/'}>
                     <Button
                       sx={{ ml: 2 }}
                       variant={'contained'}
@@ -175,7 +175,7 @@ export default function Home() {
           <Typography variant={'h6'} py={2}>
             Namespaces
             {approvedCacheData !== undefined && (
-              <Link href={'namespace/register'}>
+              <Link href={'namespace/register/'}>
                 <IconButton sx={{ ml: 0.5, mb: 0.5 }} size={'small'}>
                   <Add />
                 </IconButton>
@@ -197,14 +197,14 @@ export default function Home() {
             approvedNamespaceData.length === 0 && (
               <CreateNamespaceCard
                 text={'Register Namespace'}
-                url={'namespace/register'}
+                url={'namespace/register/'}
               />
             )}
 
           <Typography variant={'h6'} py={2}>
             Origins
             {approvedOriginData !== undefined && (
-              <Link href={'origin/register'}>
+              <Link href={'origin/register/'}>
                 <IconButton sx={{ ml: 0.5, mb: 0.5 }} size={'small'}>
                   <Add />
                 </IconButton>
@@ -226,14 +226,14 @@ export default function Home() {
             approvedOriginData.length === 0 && (
               <CreateNamespaceCard
                 text={'Register Origin'}
-                url={'origin/register'}
+                url={'origin/register/'}
               />
             )}
 
           <Typography variant={'h6'} py={2}>
             Caches
             {approvedCacheData !== undefined && (
-              <Link href={'cache/register'}>
+              <Link href={'cache/register/'}>
                 <IconButton sx={{ ml: 0.5, mb: 0.5 }} size={'small'}>
                   <Add />
                 </IconButton>
@@ -254,7 +254,7 @@ export default function Home() {
             approvedCacheData.length === 0 && (
               <CreateNamespaceCard
                 text={'Register Cache'}
-                url={'cache/register'}
+                url={'cache/register/'}
               />
             )}
         </Grid>

@@ -294,6 +294,7 @@ func AdvertiseOSDF(ctx context.Context) error {
 
 func PeriodicCacheReload(ctx context.Context) {
 	ticker := time.NewTicker(param.Federation_TopologyReloadInterval.GetDuration())
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:

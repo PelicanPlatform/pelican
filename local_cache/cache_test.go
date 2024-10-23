@@ -417,7 +417,7 @@ func TestOriginUnresponsive(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	server_utils.ResetTestState()
-	viper.Set("Transport.ResponseHeaderTimeout", "3s")
+	viper.Set("Transport.ResponseHeaderTimeout", "5s")
 	viper.Set("Logging.Level", "debug")
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 

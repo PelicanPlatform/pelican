@@ -85,6 +85,7 @@ const (
 // Periodically re-read the htpasswd file used for password-based authentication
 func periodicAuthDBReload(ctx context.Context) error {
 	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
