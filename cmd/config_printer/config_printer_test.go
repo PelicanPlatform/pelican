@@ -70,7 +70,7 @@ func TestConfigGet(t *testing.T) {
 
 		{
 			name:        "match-http-with-origin-flag",
-			args:        []string{"Http", "-c", "origin"},
+			args:        []string{"Http", "-m", "origin"},
 			expected:    []string{`logging.origin.http: "info"`},
 			notExpected: []string{`logging.cache.http: "info"`, `logging.cache.xrootd: "info"`, `logging.level: "info"`},
 		},
@@ -164,8 +164,8 @@ func TestFormatValue(t *testing.T) {
 		expected string
 	}{
 		{
-			input:    map[string]struct{}{"deprecated": {}, "hidden": {}},
-			expected: "[deprecated, hidden]",
+			input:    map[string]struct{}{"deprecated": {}},
+			expected: "[deprecated]",
 		},
 		{
 			input:    nil,

@@ -56,8 +56,8 @@ func parseParametersYAML() (map[string]*ParameterDoc, error) {
 			// Handle ["*"] in Components
 			componentsToAdd := param.Components
 			if len(param.Components) == 1 && param.Components[0] == "*" {
-				componentsToAdd = []string{"origin", "cache", "registry", "director"}
-				param.Components = []string{"origin", "cache", "registry", "director"}
+				componentsToAdd = []string{"origin", "cache", "registry", "director", "client"}
+				param.Components = []string{"origin", "cache", "registry", "director", "client"}
 			}
 
 			for _, component := range componentsToAdd {

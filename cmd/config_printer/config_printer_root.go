@@ -48,7 +48,7 @@ If no arguments are provided, all configuration parameters are retrieved.
 The command outputs the results in a flattened format from the nested configuration, making it grep-friendly for easier searching.`,
 		Example: `# Retrieve parameters that have either 'log' or 'monitor' in their name or value,
 # and relate to either 'origin' or 'cache', including deprecated parameters in the search space
-pelican config get log monitor -c origin -c cache --include-deprecated`,
+pelican config get log monitor -m origin -m cache --include-deprecated`,
 		Run: configGet,
 	}
 
@@ -87,8 +87,8 @@ func init() {
 
 	configDumpCmd.Flags().StringVarP(&format, "format", "o", "yaml", "Output format (yaml or json)")
 
-	configGetCmd.Flags().StringArrayVarP(&components, "component", "c", []string{},
-		"Specify components to filter the output of 'config get'. If multiple components are provided, parameters related to any of the components will be retrieved. If no components are specified, no component-based filter is applied to the search space.")
+	configGetCmd.Flags().StringArrayVarP(&components, "module", "m", []string{},
+		"Specify modules to filter the output of 'config get'. If multiple modules are provided, parameters related to any of the modules will be retrieved. If no modules are specified, no component-based filter is applied to the search space.")
 	configGetCmd.Flags().BoolVar(&includeHidden, "include-hidden", false, "Include hidden configuration parameters")
 	configGetCmd.Flags().BoolVar(&includeDeprecated, "include-deprecated", false, "Include deprecated configuration parameters")
 

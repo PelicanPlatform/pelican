@@ -1063,17 +1063,17 @@ func SetServerDefaults(v *viper.Viper) error {
 			originPort = xrootdPort
 		}
 	}
-	v.Set("Origin.CalculatedPort", strconv.Itoa(originPort))
+	v.SetDefault("Origin.CalculatedPort", strconv.Itoa(originPort))
 	if originPort == 0 {
-		v.Set("Origin.CalculatedPort", "any")
+		v.SetDefault("Origin.CalculatedPort", "any")
 	}
-	v.Set("Cache.CalculatedPort", strconv.Itoa(cachePort))
+	v.SetDefault("Cache.CalculatedPort", strconv.Itoa(cachePort))
 	if cachePort == 0 {
-		v.Set("Cache.CalculatedPort", "any")
+		v.SetDefault("Cache.CalculatedPort", "any")
 	}
 
-	v.Set("Origin.Port", originPort)
-	v.Set("Cache.Port", cachePort)
+	v.SetDefault("Origin.Port", originPort)
+	v.SetDefault("Cache.Port", cachePort)
 
 	if originPort != 443 {
 		v.SetDefault("Origin.Url", fmt.Sprintf("https://%v:%v", v.GetString("Server.Hostname"), originPort))
@@ -1110,11 +1110,25 @@ func SetServerDefaults(v *viper.Viper) error {
 		}
 	}
 
-	v.Set("Origin.AudienceURL", v.GetString("Origin.Url"))
+	v.SetDefault("Origin.AudienceURL", v.GetString("Origin.Url"))
 
-	v.SetDefault("Federation.RegistryUrl", v.GetString("Server.ExternalWebUrl"))
-	v.SetDefault("Federation.BrokerURL", v.GetString("Server.ExternalWebUrl"))
-	v.SetDefault("Federation.DirectorUrl", v.GetString("Server.ExternalWebUrl"))
+	// Set defaults for Director, Registry, and Broker URLs only if the Discovery URL is not set.
+	// This is necessary because, in Viper, there is currently no way to check if a value is coming
+	// from the default or was explicitly set by the user. Therefore, if the DiscoveryURL is present,
+	// when populating the Director, Registry, and Broker URLs, the discoverFederationImpl function
+	// checks if these values are empty. An empty value indicates that the URLs were not explicitly
+	// set, so values obtained through the discovery process should be used.
+	//
+	// If we set default values now, there would be no way for discoverFederationImpl to determine
+	// whether the values are defaults (and should be overridden) or were explicitly set by the user
+	// (and should not be overridden).
+	// A feature request to address this issue has already been submitted to the Viper repository by our team:
+	// https://github.com/spf13/viper/issues/1814
+	if !viper.IsSet("Federation.DiscoveryUrl") {
+		v.SetDefault("Federation.RegistryUrl", v.GetString("Server.ExternalWebUrl"))
+		v.SetDefault("Federation.BrokerURL", v.GetString("Server.ExternalWebUrl"))
+		v.SetDefault("Federation.DirectorUrl", v.GetString("Server.ExternalWebUrl"))
+	}
 
 	return err
 }
@@ -1251,7 +1265,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		return errors.New("the configuration Origin.Port is not set but the Origin module is enabled.  Please set Origin.Port")
 	}
 
-	if currentServers.IsEnabled(server_structs.CacheType) && !viper.IsSet("Cache.Port") && currentServers.IsEnabled(server_structs.OriginType) && !viper.IsSet("Origin.Port") {
+	if currentServers.IsEnabled(server_structs.CacheType) && currentServers.IsEnabled(server_structs.OriginType) && viper.GetInt("Cache.Port") == viper.GetInt("Origin.Port") && viper.IsSet("Xrootd.Port") {
 		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled.  Please set both variables")
 	}
 
@@ -1272,6 +1286,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if currentServers.IsEnabled(server_structs.DirectorType) {
+		viper.SetDefault("Federation.DirectorUrl", param.Server_ExternalWebUrl.GetString())
 		minStatRes := param.Director_MinStatResponse.GetInt()
 		maxStatRes := param.Director_MaxStatResponse.GetInt()
 		if minStatRes <= 0 || maxStatRes <= 0 {
@@ -1294,13 +1309,15 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		viper.SetDefault("Federation.DirectorUrl", "")
 	}
 
-	//Setting defaults back to an empty string if the server of that type is not enabled, as this URL is matched with "" in many downstream tasks to check if the server of that type is enabled.
-
-	if !currentServers.IsEnabled(server_structs.RegistryType) {
+	if currentServers.IsEnabled(server_structs.RegistryType) {
+		viper.SetDefault("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
+	} else {
 		viper.SetDefault("Federation.RegistryUrl", "")
 	}
 
-	if !currentServers.IsEnabled(server_structs.BrokerType) {
+	if currentServers.IsEnabled(server_structs.BrokerType) {
+		viper.SetDefault("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
+	} else {
 		viper.SetDefault("Federation.BrokerURL", "")
 	}
 
@@ -1380,7 +1397,7 @@ func ResetClientInitialized() {
 	clientInitialized = false
 }
 
-func SetClientDefaults(v *viper.Viper) {
+func SetClientDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 	v.SetDefault("IssuerKey", filepath.Join(configDir, "issuer.jwk"))
 	upper_prefix := GetPreferredPrefix()
@@ -1391,98 +1408,108 @@ func SetClientDefaults(v *viper.Viper) {
 	v.SetDefault("Client.WorkerCount", 5)
 	v.SetDefault("Server.TLSCACertificateFile", filepath.Join(configDir, "certificates", "tlsca.pem"))
 
+	var downloadLimit int64 = 1024 * 100
+	v.SetDefault("Client.MinimumDownloadSpeed", downloadLimit)
+	if v == viper.GetViper() {
+		viper.AutomaticEnv()
+		upper_prefix := GetPreferredPrefix()
+		viper.SetEnvPrefix(string(upper_prefix))
+
+		viper.SetConfigName("config")
+		viper.SetConfigType("yaml")
+		err := viper.ReadInConfig()
+		if err != nil {
+			if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+				return err
+			}
+			// Do not fail if the config file is missing
+		}
+		env_config_file := os.Getenv(upper_prefix.String() + "_CONFIG_FILE")
+		if len(env_config_file) != 0 {
+			fp, err := os.Open(env_config_file)
+			if err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			err = viper.ReadConfig(fp)
+			if err != nil {
+				return err
+			}
+		}
+		// Handle all the grandfathered configuration parameters
+		prefixes := GetAllPrefixes()
+		prefixes_with_osg := append(prefixes, "OSG")
+		for _, prefix := range prefixes_with_osg {
+			if _, isSet := os.LookupEnv(prefix.String() + "_DISABLE_HTTP_PROXY"); isSet {
+				viper.Set("Client.DisableHttpProxy", true)
+				break
+			}
+		}
+		for _, prefix := range prefixes_with_osg {
+			if _, isSet := os.LookupEnv(prefix.String() + "_DISABLE_PROXY_FALLBACK"); isSet {
+				viper.Set("Client.DisableProxyFallback", true)
+				break
+			}
+		}
+		for _, prefix := range prefixes {
+			if val, isSet := os.LookupEnv(prefix.String() + "_DIRECTOR_URL"); isSet {
+				viper.Set("Federation.DirectorURL", val)
+				break
+			}
+		}
+		for _, prefix := range prefixes {
+			if val, isSet := os.LookupEnv(prefix.String() + "_NAMESPACE_URL"); isSet {
+				viper.Set("Federation.RegistryUrl", val)
+				break
+			}
+		}
+		for _, prefix := range prefixes {
+			if val, isSet := os.LookupEnv(prefix.String() + "_TOPOLOGY_NAMESPACE_URL"); isSet {
+				viper.Set("Federation.TopologyNamespaceURL", val)
+				break
+			}
+		}
+		// Check the environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED (and all the prefix variants)
+		var downloadLimit int64 = 1024 * 100
+		var prefixes_with_cp []ConfigPrefix
+		for _, prefix := range prefixes {
+			prefixes_with_cp = append(prefixes_with_cp, prefix+"CP")
+		}
+		for _, prefix := range append(prefixes, prefixes_with_cp...) {
+			downloadLimitStr := os.Getenv(prefix.String() + "_MINIMUM_DOWNLOAD_SPEED")
+			if len(downloadLimitStr) == 0 {
+				continue
+			}
+			var err error
+			downloadLimit, err = strconv.ParseInt(downloadLimitStr, 10, 64)
+			if err != nil {
+				log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is not parsable as integer: %s",
+					prefixes, downloadLimitStr, err.Error())
+			}
+			break
+		}
+		if viper.IsSet("MinimumDownloadSpeed") {
+			viper.SetDefault("Client.MinimumDownloadSpeed", param.MinimumDownloadSpeed.GetInt())
+		} else {
+			viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
+		}
+		// Handle more legacy config options
+		if viper.IsSet("DisableProxyFallback") {
+			viper.SetDefault("Client.DisableProxyFallback", param.DisableProxyFallback.GetBool())
+		}
+		if viper.IsSet("DisableHttpProxy") {
+			viper.SetDefault("Client.DisableHttpProxy", param.DisableHttpProxy.GetBool())
+		}
+
+	}
+	return nil
+
 }
 
 func InitClient() error {
-	SetClientDefaults(viper.GetViper())
-	viper.AutomaticEnv()
+	err := SetClientDefaults(viper.GetViper())
 
-	upper_prefix := GetPreferredPrefix()
-	viper.SetEnvPrefix(string(upper_prefix))
-
-	viper.SetConfigName("config")
-	viper.SetConfigType("yaml")
-	err := viper.ReadInConfig()
 	if err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return err
-		}
-		// Do not fail if the config file is missing
-	}
-	env_config_file := os.Getenv(upper_prefix.String() + "_CONFIG_FILE")
-	if len(env_config_file) != 0 {
-		fp, err := os.Open(env_config_file)
-		if err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		err = viper.ReadConfig(fp)
-		if err != nil {
-			return err
-		}
-	}
-	// Handle all the grandfathered configuration parameters
-	prefixes := GetAllPrefixes()
-	prefixes_with_osg := append(prefixes, "OSG")
-	for _, prefix := range prefixes_with_osg {
-		if _, isSet := os.LookupEnv(prefix.String() + "_DISABLE_HTTP_PROXY"); isSet {
-			viper.Set("Client.DisableHttpProxy", true)
-			break
-		}
-	}
-	for _, prefix := range prefixes_with_osg {
-		if _, isSet := os.LookupEnv(prefix.String() + "_DISABLE_PROXY_FALLBACK"); isSet {
-			viper.Set("Client.DisableProxyFallback", true)
-			break
-		}
-	}
-	for _, prefix := range prefixes {
-		if val, isSet := os.LookupEnv(prefix.String() + "_DIRECTOR_URL"); isSet {
-			viper.Set("Federation.DirectorURL", val)
-			break
-		}
-	}
-	for _, prefix := range prefixes {
-		if val, isSet := os.LookupEnv(prefix.String() + "_NAMESPACE_URL"); isSet {
-			viper.Set("Federation.RegistryUrl", val)
-			break
-		}
-	}
-	for _, prefix := range prefixes {
-		if val, isSet := os.LookupEnv(prefix.String() + "_TOPOLOGY_NAMESPACE_URL"); isSet {
-			viper.Set("Federation.TopologyNamespaceURL", val)
-			break
-		}
-	}
-	// Check the environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED (and all the prefix variants)
-	var downloadLimit int64 = 1024 * 100
-	var prefixes_with_cp []ConfigPrefix
-	for _, prefix := range prefixes {
-		prefixes_with_cp = append(prefixes_with_cp, prefix+"CP")
-	}
-	for _, prefix := range append(prefixes, prefixes_with_cp...) {
-		downloadLimitStr := os.Getenv(prefix.String() + "_MINIMUM_DOWNLOAD_SPEED")
-		if len(downloadLimitStr) == 0 {
-			continue
-		}
-		var err error
-		downloadLimit, err = strconv.ParseInt(downloadLimitStr, 10, 64)
-		if err != nil {
-			log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is not parsable as integer: %s",
-				prefixes, downloadLimitStr, err.Error())
-		}
-		break
-	}
-	if viper.IsSet("MinimumDownloadSpeed") {
-		viper.SetDefault("Client.MinimumDownloadSpeed", param.MinimumDownloadSpeed.GetInt())
-	} else {
-		viper.Set("Client.MinimumDownloadSpeed", downloadLimit)
-	}
-	// Handle more legacy config options
-	if viper.IsSet("DisableProxyFallback") {
-		viper.SetDefault("Client.DisableProxyFallback", param.DisableProxyFallback.GetBool())
-	}
-	if viper.IsSet("DisableHttpProxy") {
-		viper.SetDefault("Client.DisableHttpProxy", param.DisableHttpProxy.GetBool())
+		return err
 	}
 
 	setupTransport()

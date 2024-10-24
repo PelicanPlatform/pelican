@@ -19,6 +19,7 @@
 package config_printer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -31,8 +32,16 @@ import (
 )
 
 func initClientAndServerConfig(v *viper.Viper) *param.Config {
-	config.SetServerDefaults(v)
 	config.SetClientDefaults(v)
+	config.SetServerDefaults(v)
+
+	if v == viper.GetViper() {
+		globalFedInfo, globalFedErr := config.GetFederation(context.Background())
+		if globalFedErr != nil {
+			fmt.Printf("Error: %v", globalFedErr)
+		}
+		config.SetFederation(globalFedInfo)
+	}
 
 	exapandedConfig, err := param.UnmarshalConfig(v)
 	if err != nil {
