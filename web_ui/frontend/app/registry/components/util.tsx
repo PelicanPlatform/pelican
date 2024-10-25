@@ -98,61 +98,15 @@ export const namespaceToOrigin = (data: Namespace) => {
   return data;
 };
 
-export const getNamespace = async (
-  id: string | number
-): Promise<Namespace | undefined> => {
-  const url = new URL(
-    `/api/v1.0/registry_ui/namespaces/${id}`,
-    window.location.origin
-  );
-  const response = await fetch(url);
-  if (response.ok) {
-    return await response.json();
-  } else {
-    throw new Error(await getErrorMessage(response));
-  }
-};
-
-export const postGeneralNamespace = async (
-  data: Namespace
-): Promise<Alert | undefined> => {
-  return await handleRequestAlert('/api/v1.0/registry_ui/namespaces', {
-    body: JSON.stringify(data),
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-  });
-};
-
-export const putGeneralNamespace = async (
-  data: Namespace
-): Promise<Alert | undefined> => {
-  return await handleRequestAlert(
-    `/api/v1.0/registry_ui/namespaces/${data.id}`,
-    {
-      body: JSON.stringify(data),
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-    }
-  );
-};
-
 export const submitNamespaceForm = async (
   data: Partial<Namespace>,
   toUrl: URL | undefined,
-  handleSubmit: (data: Partial<Namespace>) => Promise<Alert | undefined>
+  handleSubmit: (data: Partial<Namespace>) => Promise<Response>
 ) => {
-  const submitAlert = await handleSubmit(data);
+  const response = await handleSubmit(data);
 
   // Clear the form on successful submit
-  if (submitAlert == undefined) {
+  if (response != undefined) {
     window.location.href = toUrl ? toUrl.toString() : '/view/registry/';
   }
-
-  return submitAlert;
 };

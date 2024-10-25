@@ -19,12 +19,13 @@
 'use client';
 
 import {
-  namespaceToCache,
-  postGeneralNamespace,
+  namespaceToCache
 } from '@/app/registry/components/util';
 import { PostPage } from '@/app/registry/components/PostPage';
 import { Box, Grid, Typography } from '@mui/material';
 import React from 'react';
+import { postGeneralNamespace } from '@/helpers/api';
+
 
 export default function Page() {
   const postCache = async (data: any) => {

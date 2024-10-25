@@ -1,35 +1,43 @@
 import { Portal } from '@mui/base';
-import React from 'react';
-import { Alert, SnackbarProps, Snackbar } from '@mui/material';
-
-import { Alert as AlertType } from '@/index';
+import React, { ReactNode } from 'react';
+import { Alert, AlertProps, Snackbar, SnackbarProps, AlertTitle } from '@mui/material';
 
 export interface AlertPortalProps {
-  alert?: AlertType;
   onClose: () => void;
+  title?: string;
+  autoHideDuration?: number;
+  message?: ReactNode | string;
+  alertProps?: Omit<AlertProps, 'onClose'>;
   snackBarProps?: SnackbarProps;
 }
 
 export const AlertPortal = ({
-  alert,
   onClose,
+  title,
+  autoHideDuration,
+  message,
+  alertProps,
   snackBarProps,
 }: AlertPortalProps) => {
+
+  if (autoHideDuration) {
+    setTimeout(() => onClose(), autoHideDuration)
+  }
+
   return (
     <Portal>
       <Snackbar
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         open={alert !== undefined}
-        onClose={onClose}
         {...snackBarProps}
       >
         <Alert
-          onClose={onClose}
-          severity={alert?.severity}
-          variant='filled'
+          onClose={autoHideDuration ? undefined : onClose}
+          severity={alertProps?.severity}
           sx={{ width: '100%' }}
         >
-          {alert?.message}
+          { title && <AlertTitle>{title}</AlertTitle> }
+          {message}
         </Alert>
       </Snackbar>
     </Portal>

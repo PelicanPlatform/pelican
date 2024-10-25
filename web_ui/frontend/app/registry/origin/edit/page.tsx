@@ -20,11 +20,11 @@
 
 import { PutPage } from '@/app/registry/components/PutPage';
 import {
-  namespaceToOrigin,
-  putGeneralNamespace,
+  namespaceToOrigin
 } from '@/app/registry/components/util';
 import { Box, Grid, Typography } from '@mui/material';
 import React from 'react';
+import { putGeneralNamespace } from '@/helpers/api';
 
 export default function Page() {
   const putCache = async (data: any) => {

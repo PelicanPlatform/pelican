@@ -28,7 +28,7 @@ import {
 } from '@mui/material';
 import React, {
   ReactNode,
-  Suspense,
+  Suspense, useContext,
   useEffect,
   useMemo,
   useState,
@@ -38,16 +38,19 @@ import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { Namespace, Alert as AlertType } from '@/index';
 import Form from '@/app/registry/components/Form';
 import {
-  getNamespace,
   submitNamespaceForm,
 } from '@/app/registry/components/util';
+import { getNamespace } from '@/helpers/api';
 import { NamespaceFormPage } from '@/app/registry/components'
+import { AlertDispatchContext } from '@/components/AlertProvider';
+import { alertOnError } from '@/helpers/util';
 
 const PutPage = ({ update }: NamespaceFormPage) => {
   const [id, setId] = useState<number | undefined>(undefined);
   const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined);
   const [namespace, setNamespace] = useState<Namespace | undefined>(undefined);
-  const [alert, setAlert] = useState<AlertType | undefined>(undefined);
+
+  const dispatch = useContext(AlertDispatchContext);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -55,7 +58,14 @@ const PutPage = ({ update }: NamespaceFormPage) => {
     const fromUrl = urlParams.get('fromUrl');
 
     if (id === null) {
-      setAlert({ severity: 'error', message: 'No Namespace ID Provided' });
+      dispatch({
+        type: "openAlert",
+        payload: {
+          title: "No Namespace ID Provided",
+          message: "Your URL should contain a query parameter 'id' with the ID of the namespace you want to edit",
+          onClose: () => dispatch({ type: "closeAlert" })
+        }
+      })
       return;
     }
 
@@ -65,23 +75,46 @@ const PutPage = ({ update }: NamespaceFormPage) => {
         setFromUrl(parsedUrl);
       }
     } catch (e) {
-      setAlert({ severity: 'error', message: 'Invalid fromUrl provided' });
+      dispatch({
+        type: "openAlert",
+        payload: {
+          title: "Invalid fromUrl provided",
+          message: "The `fromUrl` parameter provided is not a valid URL, this will only impact your redirection on completion of this form",
+          alertProps: {
+            severity: "warning"
+          },
+          onClose: () => dispatch({ type: "closeAlert" })
+        }
+      })
     }
 
     try {
       setId(parseInt(id));
     } catch (e) {
-      setAlert({ severity: 'error', message: 'Invalid Namespace ID Provided' });
+      dispatch({
+        type: "openAlert",
+        payload: {
+          title: "Invalid Namespace ID provided",
+          message: "The Namespace Id provided is not a valid number. Please report this issue, as well as what link directed you here.",
+          alertProps: {
+            severity: "error"
+          },
+          onClose: () => dispatch({ type: "closeAlert" })
+        }
+      })
     }
   }, []);
 
   useEffect(() => {
     (async () => {
       if (id !== undefined) {
-        try {
-          setNamespace(await getNamespace(id));
-        } catch (e) {
-          setAlert({ severity: 'error', message: e as string });
+        const response = await alertOnError(
+          async () => await getNamespace(id),
+          "Couldn't get namespace",
+          dispatch
+        )
+        if(response){
+          setNamespace(response);
         }
       }
     })();
@@ -91,17 +124,16 @@ const PutPage = ({ update }: NamespaceFormPage) => {
     <AuthenticatedContent redirect={true} boxProps={{ width: '100%' }}>
       <Grid container spacing={2}>
         <Grid item xs={12} lg={8}>
-          <Collapse in={alert !== undefined}>
-            <Box mb={2}>
-              <Alert severity={alert?.severity}>{alert?.message}</Alert>
-            </Box>
-          </Collapse>
           {namespace ? (
             <Form
               namespace={namespace}
               onSubmit={async (data) => {
                 let namespace = { ...data, id: id };
-                setAlert(await submitNamespaceForm(namespace, fromUrl, update));
+                await alertOnError(
+                  async () => await submitNamespaceForm(namespace, fromUrl, update),
+                  "Failed to update namespace",
+                  dispatch
+                )
               }}
             />
           ) : (

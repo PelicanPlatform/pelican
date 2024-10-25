@@ -19,44 +19,49 @@
 'use client';
 
 import { Box, Grid, Collapse, Alert, Skeleton } from '@mui/material';
-import React, { useEffect, useState } from 'react';
-
-import { Alert as AlertType, Namespace } from '@/index';
+import React, { useContext, useEffect, useState } from 'react';
 import Form from '@/app/registry/components/Form';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { submitNamespaceForm } from '@/app/registry/components/util';
 import { NamespaceFormPage } from '@/app/registry/components';
+import { alertOnError } from '@/helpers/util';
+import { AlertDispatchContext } from '@/components/AlertProvider';
 
 const PostPage = ({ update }: NamespaceFormPage) => {
+
+  const dispatch = useContext(AlertDispatchContext);
+
   const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined);
-  const [alert, setAlert] = useState<AlertType | undefined>(undefined);
 
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const fromUrl = urlParams.get('fromUrl');
+    (async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const fromUrl = urlParams.get('fromUrl');
 
-    try {
       if (fromUrl != undefined) {
-        const parsedUrl = new URL(fromUrl);
-        setFromUrl(parsedUrl);
+        const parsedUrl = await alertOnError<URL>(
+          () => new URL(fromUrl),
+          "Failed to parse URL",
+          dispatch
+        );
+        if (parsedUrl) {
+          setFromUrl(parsedUrl);
+        }
       }
-    } catch (e) {
-      setAlert({ severity: 'error', message: 'Invalid fromUrl provided' });
-    }
+    })()
   }, []);
 
   return (
     <AuthenticatedContent redirect={true} boxProps={{ width: '100%' }}>
       <Grid container spacing={2}>
         <Grid item xs={12} lg={7} justifyContent={'space-between'}>
-          <Collapse in={alert !== undefined}>
-            <Box mb={2}>
-              <Alert severity={alert?.severity}>{alert?.message}</Alert>
-            </Box>
-          </Collapse>
           <Form
-            onSubmit={async (data) => {
-              setAlert(await submitNamespaceForm(data, fromUrl, update));
+            onSubmit={async (namespace) => {
+              await alertOnError(
+                async () => await submitNamespaceForm(namespace, fromUrl, update),
+                "Failed to update namespace",
+                dispatch
+              )
             }}
           />
         </Grid>

@@ -1,5 +1,5 @@
 import { Authenticated, secureFetch } from '@/helpers/login';
-import React, { useRef, useState } from 'react';
+import React, { useContext, useRef, useState } from 'react';
 import {
   Avatar,
   Box,
@@ -21,8 +21,10 @@ import { NamespaceIcon } from '@/components/Namespace/index';
 import useSWR from 'swr';
 import Link from 'next/link';
 import { User } from '@/index';
-import { getErrorMessage } from '@/helpers/util';
+import { alertOnError, getErrorMessage } from '@/helpers/util';
 import { DirectorDropdown } from '@/app/director/components/DirectorDropdown';
+import { allowServer, filterServer } from '@/helpers/api';
+import { AlertDispatchContext } from '@/components/AlertProvider';
 
 export interface DirectorCardProps {
   server: Server;
@@ -30,10 +32,10 @@ export interface DirectorCardProps {
 }
 
 export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
-  const [filtered, setFiltered] = useState<boolean>(server.filtered);
-  const [error, setError] = useState<string | undefined>(undefined);
   const [disabled, setDisabled] = useState<boolean>(false);
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
+
+  const dispatch = useContext(AlertDispatchContext);
 
   const { mutate } = useSWR<Server[]>('getServers');
 
@@ -75,38 +77,34 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
                         <Switch
                           key={server.name}
                           disabled={disabled}
-                          checked={!filtered}
+                          checked={!server.filtered}
                           color={'success'}
-                          onClick={async (x) => {
-                            x.stopPropagation();
+                          onClick={async (e) => {
+                            e.stopPropagation();
 
                             // Disable the switch
                             setDisabled(true);
 
-                            // Provide optimistic feedback
-                            setFiltered(!filtered);
-
                             // Update the server
-                            let error;
-                            if (filtered) {
-                              error = await allowServer(server.name);
-                            } else {
-                              error = await filterServer(server.name);
-                            }
+                            await alertOnError(
+                              async () => {
+                                if (server.filtered) {
+                                  await allowServer(server.name);
+                                } else {
+                                  await filterServer(server.name);
+                                }
+                              },
+                              'Failed to toggle server status',
+                              dispatch
+                            )
 
-                            // Revert if we were too optimistic
-                            if (error) {
-                              setFiltered(!filtered);
-                              setError(error);
-                            } else {
-                              mutate();
-                            }
+                            mutate();
 
                             setDisabled(false);
                           }}
                         />
                       }
-                      label={!filtered ? 'Active' : 'Disabled'}
+                      label={server.filtered ? 'Disabled' : 'Active'}
                     />
                   </FormGroup>
                 </Tooltip>
@@ -127,69 +125,8 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
         </Box>
       </Paper>
       <DirectorDropdown server={server} transition={dropdownOpen} />
-      <Portal>
-        <Snackbar
-          anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-          open={error !== undefined}
-          onClose={() => setError(undefined)}
-        >
-          <Alert
-            onClose={() => setError(undefined)}
-            severity='error'
-            variant='filled'
-            sx={{ width: '100%' }}
-          >
-            {error}
-            <br />
-            If this error persists on reload, please file a ticket via the (?)
-            in the bottom left.
-          </Alert>
-        </Snackbar>
-      </Portal>
     </>
   );
-};
-
-const filterServer = async (name: string): Promise<string | undefined> => {
-  try {
-    const response = await secureFetch(
-      `/api/v1.0/director_ui/servers/filter/${name}`,
-      {
-        method: 'PATCH',
-      }
-    );
-    if (response.ok) {
-      return;
-    } else {
-      return await getErrorMessage(response);
-    }
-  } catch (e) {
-    if (e instanceof Error) {
-      return e.message;
-    }
-    return 'Could not connect to server';
-  }
-};
-
-const allowServer = async (name: string): Promise<string | undefined> => {
-  try {
-    const response = await secureFetch(
-      `/api/v1.0/director_ui/servers/allow/${name}`,
-      {
-        method: 'PATCH',
-      }
-    );
-    if (response.ok) {
-      return;
-    } else {
-      return await getErrorMessage(response);
-    }
-  } catch (e) {
-    if (e instanceof Error) {
-      return e.message;
-    }
-    return 'Could not connect to server';
-  }
 };
 
 export default DirectorCard;
