@@ -309,22 +309,26 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 	// Ensure the OA4MP storage directory exists and has correct permissions and ownership
 	OA4MPStoragePath := "/opt/scitokens-server/var/storage"
 
-	if err := os.Chmod(OA4MPStoragePath, 0700); err != nil {
+	if err = os.Chmod(OA4MPStoragePath, 0700); err != nil {
 		if os.IsNotExist(err) {
 			log.Debugln("OA4MP storage directory does not exist. Creating", OA4MPStoragePath)
 			if err = os.MkdirAll(OA4MPStoragePath, 0755); err != nil {
-				log.Fatal("Failed to create directory", OA4MPStoragePath, ":", err)
+				err = errors.Wrap(err, "Failed to create OA4MP storage directory")
+				return
 			}
 			if err = os.Chmod(OA4MPStoragePath, 0700); err != nil {
-				log.Errorln("Failed to change permissions of", OA4MPStoragePath, "after creating it:", err)
+				err = errors.Wrap(err, "Failed to change the permissions of OA4MP storage directory after creating it")
+				return
 			}
 		} else {
-			log.Errorln("Failed to change permissions of", OA4MPStoragePath, ":", err)
+			err = errors.Wrap(err, "Failed to change the permissions of OA4MP storage directory")
+			return
 		}
 	}
 
-	if err := os.Chown(OA4MPStoragePath, user.Uid, user.Gid); err != nil {
-		log.Errorln("Failed to change ownership of", OA4MPStoragePath, "to tomcat:", err)
+	if err = os.Chown(OA4MPStoragePath, user.Uid, user.Gid); err != nil {
+		err = errors.Wrap(err, "Failed to change the ownership of OA4MP storage directory")
+		return
 	}
 
 	qdlBoot := filepath.Join(param.Issuer_QDLLocation.GetString(), "var", "scripts", "boot.qdl")
