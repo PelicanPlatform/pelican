@@ -156,6 +156,7 @@ type Config struct {
 	Monitoring struct {
 		AggregatePrefixes []string `mapstructure:"aggregateprefixes"`
 		DataLocation string `mapstructure:"datalocation"`
+		DataRetention time.Duration `mapstructure:"dataretention"`
 		MetricAuthorization bool `mapstructure:"metricauthorization"`
 		PortHigher int `mapstructure:"porthigher"`
 		PortLower int `mapstructure:"portlower"`
@@ -457,6 +458,7 @@ type configWithType struct {
 	Monitoring struct {
 		AggregatePrefixes struct { Type string; Value []string }
 		DataLocation struct { Type string; Value string }
+		DataRetention struct { Type string; Value time.Duration }
 		MetricAuthorization struct { Type string; Value bool }
 		PortHigher struct { Type string; Value int }
 		PortLower struct { Type string; Value int }
