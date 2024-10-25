@@ -41,7 +41,7 @@ import {
   getNamespace,
   submitNamespaceForm,
 } from '@/app/registry/components/util';
-import type { NamespaceFormPage } from './CustomRegistrationField/index.d';
+import { NamespaceFormPage } from '@/app/registry/components'
 
 const PutPage = ({ update }: NamespaceFormPage) => {
   const [id, setId] = useState<number | undefined>(undefined);

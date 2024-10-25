@@ -6,7 +6,7 @@ import FormControl from '@mui/material/FormControl';
 import FormHelperText from '@mui/material/FormHelperText';
 import { DateTime } from 'luxon';
 
-import type { CustomRegistrationFieldProps } from './index.d';
+import type { BaseCustomRegistrationFieldProps } from './index';
 
 const EpochTimeField = ({
   onChange,
@@ -15,7 +15,7 @@ const EpochTimeField = ({
   required,
   description,
   value,
-}: CustomRegistrationFieldProps<number>) => {
+}: BaseCustomRegistrationFieldProps<number>) => {
   return (
     <FormControl fullWidth>
       <DateTimePicker

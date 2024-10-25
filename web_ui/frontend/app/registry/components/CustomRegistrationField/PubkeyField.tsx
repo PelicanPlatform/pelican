@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { StringField } from './StringField';
-import type { CustomRegistrationFieldProps } from './index.d';
+import type { BaseCustomRegistrationFieldProps } from './index';
 
 const JWKPlaceholder = {
   keys: [
@@ -25,7 +25,7 @@ const pubkeyValidator = (value: string) => {
   }
 };
 
-const PubkeyField = ({ ...props }: CustomRegistrationFieldProps<string>) => {
+const PubkeyField = ({ ...props }: BaseCustomRegistrationFieldProps<string>) => {
   return (
     <StringField
       multiline={true}

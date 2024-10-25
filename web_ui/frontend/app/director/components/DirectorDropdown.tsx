@@ -107,7 +107,7 @@ const directoryListToTreeHelper = (
     tree[path[0]] = {};
   }
 
-  tree[path[0]] = directoryListToTreeHelper(path.slice(1), tree[path[0]]);
+  tree[path[0]] = directoryListToTreeHelper(path.slice(1), tree[path[0]] as StringTree);
 
   return tree;
 };

@@ -26,7 +26,12 @@ export const calculateKeys = (key: string) => {
   return [key];
 };
 
-export const getValue = (o: any, key: string[]): string | undefined => {
+/**
+ * Get the value of a key in an object
+ * @param o Object to get the value from
+ * @param key List of keys to traverse
+ */
+export const getValue = (o: Record<string, any> | undefined, key: string[]): any => {
   if (o === undefined) {
     return undefined;
   }

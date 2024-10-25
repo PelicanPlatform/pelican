@@ -34,9 +34,11 @@ export interface Capabilities {
   DirectReads: boolean;
 }
 
-export type StringTree = Record<string, StringTree | true>;
+export interface StringTree {
+  [key: string]: StringTree | true;
+}
 
-interface Alert {
+export interface Alert {
   severity: 'error' | 'warning' | 'info' | 'success';
   message: string;
 }
@@ -50,7 +52,7 @@ export interface Namespace {
   custom_fields?: Record<string, any>;
 }
 
-interface Institution {
+export interface Institution {
   id: string;
   name: string;
 }
