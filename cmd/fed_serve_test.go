@@ -93,7 +93,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
-	viper.Set("Director.DbLocation", filepath.Join(t.TempDir(), "ns-director.sqlite"))
+	viper.Set("Director.DbLocation", filepath.Join(t.TempDir(), "director.sqlite"))
 
 	defer cancel()
 

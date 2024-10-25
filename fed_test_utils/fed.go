@@ -147,7 +147,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
 	viper.Set("Director.CacheSortMethod", "distance")
-	viper.Set("Director.DbLocation", filepath.Join(t.TempDir(), "ns-director.sqlite"))
+	viper.Set("Director.DbLocation", filepath.Join(t.TempDir(), "director.sqlite"))
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)

@@ -1041,7 +1041,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		viper.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin", "globus"))
 	} else {
 		viper.SetDefault(param.Origin_DbLocation.GetName(), filepath.Join(configDir, "origin.sqlite"))
-		viper.SetDefault(param.Director_DbLocation.GetName(), filepath.Join(configDir, "ns-director.sqlite"))
+		viper.SetDefault(param.Director_DbLocation.GetName(), filepath.Join(configDir, "director.sqlite"))
 		viper.SetDefault("Director.GeoIPLocation", filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		viper.SetDefault("Registry.DbLocation", filepath.Join(configDir, "ns-registry.sqlite"))
 		// Lotdb will live at <configDir>/.lot/lotman_cpp.sqlite

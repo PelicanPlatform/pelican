@@ -109,7 +109,7 @@ func TestFedServeCache(t *testing.T) {
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)
 	viper.Set("Origin.EnablePublicReads", false)
-	viper.Set("Director.DbLocation", filepath.Join(t.TempDir(), "ns-director.sqlite"))
+	viper.Set("Director.DbLocation", filepath.Join(t.TempDir(), "director.sqlite"))
 
 	require.NoError(t, err)
 
