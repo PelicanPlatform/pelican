@@ -313,21 +313,21 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		if os.IsNotExist(err) {
 			log.Debugln("OA4MP storage directory does not exist. Creating", OA4MPStoragePath)
 			if err = os.MkdirAll(OA4MPStoragePath, 0755); err != nil {
-				err = errors.Wrap(err, "Failed to create OA4MP storage directory")
+				err = errors.Wrap(err, "failed to create OA4MP storage directory")
 				return
 			}
 			if err = os.Chmod(OA4MPStoragePath, 0700); err != nil {
-				err = errors.Wrap(err, "Failed to change the permissions of OA4MP storage directory after creating it")
+				err = errors.Wrap(err, "failed to change the permissions of OA4MP storage directory after creating it")
 				return
 			}
 		} else {
-			err = errors.Wrap(err, "Failed to change the permissions of OA4MP storage directory")
+			err = errors.Wrap(err, "failed to change the permissions of OA4MP storage directory")
 			return
 		}
 	}
 
 	if err = os.Chown(OA4MPStoragePath, user.Uid, user.Gid); err != nil {
-		err = errors.Wrap(err, "Failed to change the ownership of OA4MP storage directory")
+		err = errors.Wrap(err, "failed to change the ownership of OA4MP storage directory")
 		return
 	}
 
