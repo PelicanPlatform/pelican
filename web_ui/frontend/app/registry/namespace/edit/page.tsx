@@ -19,7 +19,7 @@
 'use client';
 
 import { PutPage } from '@/app/registry/components/PutPage';
-import { putGeneralNamespace } from '@/app/registry/components/util';
+import { putGeneralNamespace } from '@/helpers/api';
 import { Box, Grid, Typography } from '@mui/material';
 import React from 'react';
 

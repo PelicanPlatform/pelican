@@ -35,12 +35,18 @@ import useSWR from 'swr';
 import { getUser } from '@/helpers/login';
 import { ServerType } from '@/index';
 import {
+  alertOnError,
   getEnabledServers,
   getErrorMessage,
   getOauthEnabledServers,
 } from '@/helpers/util';
+import { login } from '@/helpers/api';
+import { AlertDispatchContext } from '@/components/AlertProvider';
 
 const AdminLogin = () => {
+
+  const dispatch = useContext(AlertDispatchContext);
+
   const router = useRouter();
   const { mutate } = useSWR('getUser', getUser);
 
@@ -68,34 +74,20 @@ const AdminLogin = () => {
   async function submit(password: string) {
     setLoading(true);
 
-    let response;
-    try {
-      response = await fetch('/api/v1.0/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          user: 'admin',
-          password: password,
-        }),
-      });
+    const response = await alertOnError(
+      async () => await login(password),
+      "Could not login",
+      dispatch
+    )
+    if (response) {
+      await mutate(getUser);
 
-      if (response.ok) {
-        await mutate(getUser);
-
-        const url = new URL(window.location.href);
-        let returnUrl = url.searchParams.get('returnURL') || '';
-        returnUrl = returnUrl.replace(`/view`, '');
-        router.push(returnUrl ? returnUrl : '../');
-      } else {
-        setLoading(false);
-        setError(await getErrorMessage(response));
-      }
-    } catch (e) {
-      console.error(e);
+      const url = new URL(window.location.href);
+      let returnUrl = url.searchParams.get('returnURL') || '';
+      returnUrl = returnUrl.replace(`/view`, '');
+      router.push(returnUrl ? returnUrl : '../');
+    } else {
       setLoading(false);
-      setError('Could not connect to server');
     }
   }
 

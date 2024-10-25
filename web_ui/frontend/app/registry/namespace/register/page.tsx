@@ -18,7 +18,7 @@
 
 'use client';
 
-import { postGeneralNamespace } from '@/app/registry/components/util';
+import { postGeneralNamespace } from '@/helpers/api';
 import { PostPage } from '@/app/registry/components/PostPage';
 import { Box, Grid, Typography } from '@mui/material';
 import React from 'react';

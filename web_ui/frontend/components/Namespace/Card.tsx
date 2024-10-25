@@ -1,5 +1,5 @@
 import { Alert, Alert as AlertType, Namespace } from '@/index';
-import React, { useRef, useState } from 'react';
+import React, { useContext, useRef, useState } from 'react';
 import {
   Avatar,
   Box,
@@ -14,9 +14,11 @@ import Link from 'next/link';
 import InformationDropdown from './InformationDropdown';
 import { NamespaceIcon } from '@/components/Namespace/index';
 import { User } from '@/index';
-import AlertPortal from '@/components/AlertPortal';
-import { deleteNamespace } from './DeniedCard';
+import { deleteNamespace } from '@/helpers/api';
 import { useSWRConfig } from 'swr';
+import { AlertDispatchContext } from '@/components/AlertProvider';
+import CodeBlock from '@/components/CodeBlock';
+import { alertOnError } from '@/helpers/util';
 
 export interface CardProps {
   namespace: Namespace;
@@ -25,9 +27,9 @@ export interface CardProps {
 }
 
 export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
+  const dispatch = useContext(AlertDispatchContext);
   const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
-  const [alert, setAlert] = useState<AlertType | undefined>(undefined);
   const { mutate } = useSWRConfig();
   return (
     <>
@@ -102,20 +104,14 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                       color={'error'}
                       onClick={async (e) => {
                         e.stopPropagation();
-                        try {
-                          await deleteNamespace(namespace.id);
-                          setAlert({
-                            severity: 'success',
-                            message: 'Registration deleted',
-                          });
-                          setTimeout(() => mutate('getNamespaces'), 600);
-                          if (onUpdate) {
-                            onUpdate();
-                          }
-                        } catch (e) {
-                          if (e instanceof Error) {
-                            setAlert({ severity: 'error', message: e.message });
-                          }
+                        await alertOnError(
+                          async () => await deleteNamespace(namespace.id),
+                          'Could Not Delete Registration',
+                          dispatch
+                        )
+                        setTimeout(() => mutate('getNamespaces'), 600);
+                        if (onUpdate) {
+                          onUpdate();
                         }
                       }}
                     >
@@ -135,7 +131,6 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
           />
         </Box>
       </Paper>
-      <AlertPortal alert={alert} onClose={() => setAlert(undefined)} />
     </>
   );
 };
