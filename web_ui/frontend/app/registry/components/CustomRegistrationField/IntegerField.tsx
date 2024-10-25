@@ -1,7 +1,7 @@
 import { TextField } from '@mui/material';
 import React from 'react';
 
-import type { CustomRegistrationFieldProps } from './index.d';
+import type { BaseCustomRegistrationFieldProps } from './index';
 
 const validator = (value: string) => {
   if (value && isNaN(Number(value))) {
@@ -17,7 +17,7 @@ const IntegerField = ({
   required,
   description,
   value,
-}: CustomRegistrationFieldProps<number>) => {
+}: BaseCustomRegistrationFieldProps<number>) => {
   const [error, setError] = React.useState<string | undefined>(undefined);
 
   // Check that the value is a number or undefined throwing error if not

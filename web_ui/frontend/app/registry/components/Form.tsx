@@ -11,7 +11,7 @@ import {
   populateKey,
   submitNamespaceForm,
 } from '@/app/registry/components/util';
-import { CustomRegistrationPropsEnum } from './CustomRegistrationField/index.d';
+import { CustomRegistrationFieldProps } from './CustomRegistrationField';
 import { getErrorMessage } from '@/helpers/util';
 
 interface FormProps {
@@ -20,7 +20,7 @@ interface FormProps {
 }
 
 const getRegistrationFields = async (): Promise<
-  CustomRegistrationPropsEnum[]
+  Omit<CustomRegistrationFieldProps, 'onChange'>[]
 > => {
   const response = await fetch('/api/v1.0/registry_ui/namespaces', {
     method: 'OPTIONS',
@@ -57,7 +57,7 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
     namespace || {}
   );
 
-  const { data: fields, error } = useSWR<CustomRegistrationPropsEnum[]>(
+  const { data: fields, error } = useSWR<Omit<CustomRegistrationFieldProps, 'onChange'>[]>(
     'getRegistrationFields',
     getRegistrationFields,
     { fallbackData: [] }

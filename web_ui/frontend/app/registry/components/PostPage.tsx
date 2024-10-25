@@ -25,7 +25,7 @@ import { Alert as AlertType, Namespace } from '@/index';
 import Form from '@/app/registry/components/Form';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { submitNamespaceForm } from '@/app/registry/components/util';
-import type { NamespaceFormPage } from './CustomRegistrationField/index.d';
+import { NamespaceFormPage } from '@/app/registry/components';
 
 const PostPage = ({ update }: NamespaceFormPage) => {
   const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined);
