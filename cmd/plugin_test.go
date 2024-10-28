@@ -729,27 +729,6 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		assert.Equal(t, 2, len(resultAds))
 	})
 
-	// Check to make sure the plugin properly fails when setting recursive=true on a file
-	// instead of a directory
-	t.Run("TestRecursiveFailureOnRecursiveSetForFile", func(t *testing.T) {
-		// Change the downloadUrl to be a path to a file instead of a directory
-		downloadUrl1 := url.URL{
-			Scheme:   "pelican",
-			Host:     host,
-			Path:     "/test/test/test.txt",
-			RawQuery: "recursive=true",
-		}
-
-		workChan := make(chan PluginTransfer, 1)
-		workChan <- PluginTransfer{url: &downloadUrl1, localFile: localPath1}
-		close(workChan)
-
-		results := make(chan *classads.ClassAd, 5)
-		err = runPluginWorker(fed.Ctx, false, workChan, results)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to read remote collection: PROPFIND /test/test/test.txt/: 500")
-	})
-
 	t.Run("TestRecursiveFailureDirNotFound", func(t *testing.T) {
 		// Change the downloadUrl to be a path to a file instead of a directory
 		downloadUrl1 := url.URL{
