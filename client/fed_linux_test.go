@@ -740,11 +740,11 @@ func TestSyncDownload(t *testing.T) {
 		// Set path for object to upload/download
 		dirName := t.TempDir()
 		filename1 := filepath.Base(tempFile1.Name())
-		uploadUrlObj := fmt.Sprintf("%s/%s", uploadUrl, filename1)
+		downloadUrlObj := fmt.Sprintf("%s/%s", uploadUrl, filename1)
 		downloadObjName := filepath.Join(dirName, filename1)
 
 		// Synchronize a download of a single file into an existing directory (should create the file)
-		transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadUrlObj, dirName, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		transferDetailsDownload, err := client.DoGet(fed.Ctx, downloadUrlObj, dirName, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
 		require.NoError(t, err)
 		require.Len(t, transferDetailsDownload, 1)
 		contentBytes, err := os.ReadFile(downloadObjName)
@@ -753,10 +753,10 @@ func TestSyncDownload(t *testing.T) {
 
 		// Change the upload url to a new file
 		filenameInner := filepath.Base(innerTempFile.Name())
-		uploadUrlObj = fmt.Sprintf("%s/%s/%s", uploadUrl, filepath.Base(innerTempDir), filenameInner)
+		downloadUrlObj = fmt.Sprintf("%s/%s/%s", uploadUrl, filepath.Base(innerTempDir), filenameInner)
 
 		// Synchronize a download of a single file into a an existing filename (should overwrite the contents)
-		transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadUrlObj, downloadObjName, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		transferDetailsDownload, err = client.DoGet(fed.Ctx, downloadUrlObj, downloadObjName, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
 		require.NoError(t, err)
 		require.Len(t, transferDetailsDownload, 1)
 		contentBytes, err = os.ReadFile(downloadObjName)
@@ -765,7 +765,7 @@ func TestSyncDownload(t *testing.T) {
 
 		// Synchronize a download of a single file into a non-existent filename (should create the file)
 		nonExistFilename := filepath.Join(dirName, "non-existent")
-		transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadUrlObj, nonExistFilename, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		transferDetailsDownload, err = client.DoGet(fed.Ctx, downloadUrlObj, nonExistFilename, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
 		require.NoError(t, err)
 		require.Len(t, transferDetailsDownload, 1)
 		contentBytes, err = os.ReadFile(nonExistFilename)
@@ -774,7 +774,7 @@ func TestSyncDownload(t *testing.T) {
 
 		// Synchronize a download of a single file into a non-existent directory w/ trailing filepath separator (should create the directory and file)
 		nonExistDir := filepath.Join(dirName, "new-dir") + string(filepath.Separator)
-		transferDetailsDownload, err = client.DoGet(fed.Ctx, uploadUrlObj, nonExistDir, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
+		transferDetailsDownload, err = client.DoGet(fed.Ctx, downloadUrlObj, nonExistDir, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
 		require.NoError(t, err)
 		require.Len(t, transferDetailsDownload, 1)
 		contentBytes, err = os.ReadFile(filepath.Join(dirName, "new-dir", filenameInner))

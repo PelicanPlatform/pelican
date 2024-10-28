@@ -2510,7 +2510,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 		if err != nil {
 			return errors.Wrap(err, "failed to stat local path")
 		}
-		// If the path leads to a file and not a directory, create a job to uploade the file and return
+		// If the path leads to a file and not a directory, create a job to upload the file and return
 		if !info.IsDir() {
 			if remotePath := path.Join(job.job.remoteURL.Path, strings.TrimPrefix(localPath, job.job.localPath)); skipUpload(job.job, localPath, job.job.remoteURL) {
 				log.Infoln("Skipping upload of object", remotePath, "as it already exists at the destination")
