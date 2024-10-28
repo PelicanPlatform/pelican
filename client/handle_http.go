@@ -1829,6 +1829,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 	req.HTTPRequest.Header.Set("TE", "trailers")
 	req.HTTPRequest.Header.Set("User-Agent", getUserAgent(project))
+
+	req.NoResume = true
 	req = req.WithContext(ctx)
 
 	// Test the transfer speed every 0.5 seconds
