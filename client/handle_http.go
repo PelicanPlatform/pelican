@@ -2415,6 +2415,46 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 	}
 	infos, err := client.ReadDir(remotePath)
 	if err != nil {
+		// Check if we got a 404:
+		if gowebdav.IsErrNotFound(err) {
+			return errors.New("404: object not found")
+		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+			info, err := client.Stat(remotePath)
+			if err != nil {
+				return errors.Wrap(err, "failed to stat remote path")
+			}
+			// If the path leads to a file and not a collection, create a job to download the file and return
+			if !info.IsDir() {
+				if skipDownload(job.job.syncLevel, info, job.job.localPath) {
+					log.Infoln("Skipping download of object", remotePath, "as it already exists at", job.job.localPath)
+				} else {
+					job.job.activeXfer.Add(1)
+					select {
+					case <-job.job.ctx.Done():
+						return job.job.ctx.Err()
+					case files <- &clientTransferFile{
+						uuid:  job.uuid,
+						jobId: job.job.uuid,
+						file: &transferFile{
+							ctx:        job.job.ctx,
+							callback:   job.job.callback,
+							job:        job.job,
+							engine:     te,
+							remoteURL:  &url.URL{Path: remotePath},
+							packOption: transfers[0].PackOption,
+							localPath:  job.job.localPath,
+							upload:     job.job.upload,
+							token:      job.job.token,
+							attempts:   transfers,
+						},
+					}:
+						job.job.totalXfer += 1
+					}
+				}
+			}
+			return nil
+		}
+		// Otherwise, a different error occurred and we should return it
 		return errors.Wrap(err, "failed to read remote collection")
 	}
 	localBase := strings.TrimPrefix(remotePath, job.job.remoteURL.Path)
@@ -2464,7 +2504,42 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 	// Get our list of directory entries
 	infos, err := os.ReadDir(localPath)
 	if err != nil {
-		return err
+		info, err := os.Stat(localPath)
+		if err != nil {
+			return errors.Wrap(err, "failed to stat local path")
+		}
+		// If the path leads to a file and not a directory, create a job to uploade the file and return
+		if !info.IsDir() {
+			if remotePath := path.Join(job.job.remoteURL.Path, strings.TrimPrefix(localPath, job.job.localPath)); skipUpload(job.job, localPath, job.job.remoteURL) {
+				log.Infoln("Skipping upload of object", remotePath, "as it already exists at the destination")
+			} else if info.Mode().Type().IsRegular() {
+				job.job.activeXfer.Add(1)
+				select {
+				case <-job.job.ctx.Done():
+					return job.job.ctx.Err()
+				case files <- &clientTransferFile{
+					uuid:  job.uuid,
+					jobId: job.job.uuid,
+					file: &transferFile{
+						ctx:        job.job.ctx,
+						callback:   job.job.callback,
+						job:        job.job,
+						engine:     te,
+						remoteURL:  &url.URL{Path: remotePath},
+						packOption: transfers[0].PackOption,
+						localPath:  job.job.localPath,
+						upload:     job.job.upload,
+						token:      job.job.token,
+						attempts:   transfers,
+					},
+				}:
+					job.job.totalXfer += 1
+				}
+			}
+			return nil
+		}
+		// Otherwise, a different error occurred and we should return it
+		return errors.Wrap(err, "failed to upload local collection")
 	}
 
 	for _, info := range infos {
