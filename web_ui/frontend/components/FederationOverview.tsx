@@ -7,6 +7,7 @@ import { Box, Typography } from '@mui/material';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import Link from 'next/link';
 import { getErrorMessage, getObjectValue } from '@/helpers/util';
+import { getConfig } from '@/helpers/api';
 
 const LinkBox = ({ href, text }: { href: string; text: string }) => {
   return (
@@ -30,15 +31,15 @@ const LinkBox = ({ href, text }: { href: string; text: string }) => {
 };
 
 const UrlData = [
-  { key: ['Federation', 'NamespaceUrl', 'Value'], text: 'Namespace Registry' },
-  { key: ['Federation', 'DirectorUrl', 'Value'], text: 'Director' },
-  { key: ['Federation', 'RegistryUrl', 'Value'], text: 'Registry' },
+  { key: ['Federation', 'NamespaceUrl'], text: 'Namespace Registry' },
+  { key: ['Federation', 'DirectorUrl'], text: 'Director' },
+  { key: ['Federation', 'RegistryUrl'], text: 'Registry' },
   {
-    key: ['Federation', 'TopologyNamespaceUrl', 'Value'],
+    key: ['Federation', 'TopologyNamespaceUrl'],
     text: 'Topology Namespace',
   },
-  { key: ['Federation', 'DiscoveryUrl', 'Value'], text: 'Discovery' },
-  { key: ['Federation', 'JwkUrl', 'Value'], text: 'JWK' },
+  { key: ['Federation', 'DiscoveryUrl'], text: 'Discovery' },
+  { key: ['Federation', 'JwkUrl'], text: 'JWK' },
 ];
 
 const FederationOverview = () => {
@@ -46,35 +47,32 @@ const FederationOverview = () => {
     { text: string; url: string | undefined }[]
   >([]);
 
-  let getConfig = async () => {
-    let response = await fetch('/api/v1.0/config');
-    if (response.ok) {
-      const responseData = (await response.json()) as Config;
+  let getConfigJson = async () => {
+    const response = await getConfig()
+    const responseData = (await response.json()) as Config;
 
-      const federationUrls = UrlData.map(({ key, text }) => {
-        let url = getObjectValue<string>(responseData, key);
-        if (
-          url &&
-          !url?.startsWith('http://') &&
-          !url?.startsWith('https://')
-        ) {
-          url = 'https://' + url;
-        }
+    const federationUrls = UrlData.map(({ key, text }) => {
+      let url = getObjectValue<string>(responseData, key);
+      if (
+        url &&
+        !url?.startsWith('http://') &&
+        !url?.startsWith('https://')
+      ) {
+        url = 'https://' + url;
+      }
 
-        return {
-          text,
-          url,
-        };
-      });
+      return {
+        text,
+        url,
+      };
+    });
 
-      setConfig(federationUrls);
-    } else {
-      console.error(await getErrorMessage(response));
-    }
+    setConfig(federationUrls);
+
   };
 
   useEffect(() => {
-    getConfig();
+    getConfigJson();
   }, []);
 
   if (config === undefined) {

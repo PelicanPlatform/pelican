@@ -38,6 +38,16 @@ export async function fetchApi(
 
 
 /**
+ * Get config
+ */
+export const getConfig = async (): Promise<Response> => {
+  return fetchApi(
+    async () => await secureFetch('/api/v1.0/config')
+  )
+}
+
+
+/**
  * Deletes a namespace
  * @param id Namespace ID
  */
