@@ -407,13 +407,19 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 
 	//Check if path exists or if its in a folder
 	if destStat, err := os.Stat(localDestPath); os.IsNotExist(err) {
-		localDestination = localDestPath
+		trailingChar := ""
+		if string(localDestination[len(localDestination)-1]) == string(filepath.Separator) {
+			trailingChar = string(filepath.Separator)
+		}
+		localDestination = localDestPath + trailingChar
 	} else if destStat.IsDir() && pUrl.Query().Get(pelican_url.QueryPack) == "" {
 		// If we have an auto-pack request, it's OK for the destination to be a directory
 		// Otherwise, get the base name of the source and append it to the destination dir.
 		// Note that we use the pUrl.Path, as this will have stripped any query params for us
 		remoteObjectFilename := path.Base(pUrl.Path)
-		localDestination = path.Join(localDestPath, remoteObjectFilename)
+		if !recursive {
+			localDestination = path.Join(localDestPath, remoteObjectFilename)
+		}
 	}
 
 	success := false
