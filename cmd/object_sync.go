@@ -181,6 +181,13 @@ func syncMain(cmd *cobra.Command, args []string) {
 		}
 	} else {
 		for _, src := range sources {
+			if srcStat, err := os.Stat(src); err != nil {
+				log.Errorln("Source: " + src + " does not exist")
+				os.Exit(1)
+			} else if !srcStat.IsDir() && string(dest[len(dest)-1]) == `/` {
+				log.Warningln("Destination: " + dest + " ends with '/', but the source is a file. If the destination does not exist, it will be treated as an object, not a collection.")
+			}
+
 			if _, err = client.DoPut(ctx, src, dest, true,
 				client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation),
 				client.WithCaches(caches...), client.WithSynchronize(client.SyncSize)); err != nil {
