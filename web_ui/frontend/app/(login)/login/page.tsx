@@ -52,16 +52,23 @@ const AdminLogin = () => {
 
   let [password, setPassword] = useState<string>('');
   let [loading, setLoading] = useState(false);
-  let [error, setError] = useState<string | undefined>(undefined);
   const [toggled, setToggled] = useState(false);
 
-  const { data: enabledServers } = useSWR<ServerType[]>(
+  const { data: enabledServers } = useSWR<ServerType[] | undefined>(
     'getEnabledServers',
-    getEnabledServers
+    async () => await alertOnError(
+      getEnabledServers,
+      "Could not get enabled servers",
+      dispatch
+    )
   );
-  const { data: oauthServers } = useSWR<ServerType[]>(
+  const { data: oauthServers } = useSWR<ServerType[] | undefined>(
     'getOauthEnabledServers',
-    getOauthEnabledServers,
+    async () => await alertOnError(
+      getOauthEnabledServers,
+      "Could not get oauth enabled servers",
+      dispatch
+    ),
     { fallbackData: [] }
   );
 
@@ -108,23 +115,12 @@ const AdminLogin = () => {
               sx: { width: '50%' },
               onChange: (e) => {
                 setPassword(e.target.value);
-                setError(undefined);
               },
             },
           }}
         />
       </Box>
       <Box display={'flex'} flexDirection={'column'}>
-        <Grow in={error !== undefined}>
-          <Typography
-            textAlign={'center'}
-            variant={'subtitle2'}
-            color={'error.main'}
-            mb={1}
-          >
-            {error}
-          </Typography>
-        </Grow>
         <LoadingButton
           variant='outlined'
           sx={{ margin: 'auto' }}
@@ -164,14 +160,25 @@ const AdminLogin = () => {
 };
 
 export default function Home() {
+
+  const dispatch = useContext(AlertDispatchContext);
+
   const [returnUrl, setReturnUrl] = useState<string | undefined>(undefined);
-  const { data: enabledServers } = useSWR<ServerType[]>(
+  const { data: enabledServers } = useSWR<ServerType[] | undefined>(
     'getEnabledServers',
-    getEnabledServers
+    async () => await alertOnError(
+      getEnabledServers,
+      "Could not get enabled servers",
+      dispatch
+    )
   );
-  const { data: oauthServers } = useSWR<ServerType[]>(
+  const { data: oauthServers } = useSWR<ServerType[] | undefined>(
     'getOauthEnabledServers',
-    getOauthEnabledServers,
+    async () => await alertOnError(
+      getOauthEnabledServers,
+      "Could not determine if the active server had OAuth enabled",
+      dispatch
+    ),
     { fallbackData: [] }
   );
 
