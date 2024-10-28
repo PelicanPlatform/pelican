@@ -26,28 +26,43 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 // Mock configuration setup
-func setupMockConfig() {
+func setupMockConfig() error {
 	// Set default config
 	config.SetBaseDefaultsInConfig(viper.GetViper())
-	config.InitConfigDir(viper.GetViper())
-	config.SetServerDefaults(viper.GetViper())
-	config.SetClientDefaults(viper.GetViper())
+	err := config.InitConfigDir(viper.GetViper())
+	if err != nil {
+		return err
+	}
+	err = config.SetServerDefaults(viper.GetViper())
+	if err != nil {
+		return err
+	}
+	err = config.SetClientDefaults(viper.GetViper())
+	if err != nil {
+		return err
+	}
 	// Setting Non-default values
 	viper.Set("Logging.Cache.Http", "info")
 	viper.Set("Logging.Cache.Xrootd", "info")
 	viper.Set("Logging.Level", "info")
 	viper.Set("Logging.Origin.Http", "info")
+
+	return nil
 }
 
 func TestConfigGet(t *testing.T) {
 
-	setupMockConfig()
+	err := setupMockConfig()
+	if err != nil {
+		t.Fatalf("Error: %v", err)
+	}
 
 	testCases := []struct {
 		name        string
@@ -88,7 +103,10 @@ func TestConfigGet(t *testing.T) {
 		// Close the pipe and read the output
 		w.Close()
 		var buf bytes.Buffer
-		io.Copy(&buf, r)
+		n, err := io.Copy(&buf, r)
+		if err != nil {
+			t.Fatalf("failed to copy to output buffer: %v. Copied %d bytes before failure", err, n)
+		}
 		os.Stdout = oldStdout
 
 		// Get the actual output
@@ -119,7 +137,10 @@ func TestConfigGet(t *testing.T) {
 
 func TestConfigSummary(t *testing.T) {
 
-	setupMockConfig()
+	err := setupMockConfig()
+	if err != nil {
+		t.Fatalf("Error: %v", err)
+	}
 
 	// Set a value same as default value
 	viper.Set("Debug", false)
@@ -129,12 +150,15 @@ func TestConfigSummary(t *testing.T) {
 	os.Stdout = w
 
 	ConfigCmd.SetArgs([]string{"summary"})
-	err := ConfigCmd.Execute()
+	err = ConfigCmd.Execute()
 	assert.NoError(t, err)
 
 	w.Close()
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	n, err := io.Copy(&buf, r)
+	if err != nil {
+		t.Fatalf("failed to copy to output buffer: %v. Copied %d bytes before failure", err, n)
+	}
 	os.Stdout = oldStdout
 
 	expectedLines := []string{`logging:`, `    cache:`, `    origin:`, `    level: info`, `        http: info`}

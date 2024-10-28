@@ -19,17 +19,22 @@
 package config_printer
 
 import (
+	"fmt"
 	"reflect"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func configSummary(cmd *cobra.Command, args []string) {
 	defaultConfig := viper.New()
 	config.SetBaseDefaultsInConfig(defaultConfig)
-	config.InitConfigDir(defaultConfig)
+	err := config.InitConfigDir(defaultConfig)
+	if err != nil {
+		fmt.Printf("Error initializing config directory: %v\n", err)
+	}
 
 	defaultConfigMap := initClientAndServerConfig(defaultConfig)
 

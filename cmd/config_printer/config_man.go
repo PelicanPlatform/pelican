@@ -23,8 +23,9 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/pelicanplatform/pelican/docs"
 	"github.com/spf13/cobra"
+
+	"github.com/pelicanplatform/pelican/docs"
 
 	"github.com/charmbracelet/glamour"
 )

@@ -25,9 +25,10 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
-	"github.com/pelicanplatform/pelican/docs"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/docs"
 )
 
 type Match struct {

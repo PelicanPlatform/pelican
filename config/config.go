@@ -1139,11 +1139,14 @@ func SetServerDefaults(v *viper.Viper) error {
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
 
 	setEnabledServer(currentServers)
-	SetServerDefaults(viper.GetViper())
+	err := SetServerDefaults(viper.GetViper())
+	if err != nil {
+		return err
+	}
 
 	webConfigPath := viper.GetString("Server.WebConfigFile")
 	if webConfigPath != "" {
-		if err := os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
+		if err = os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
 			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
 		}
 	}
@@ -1176,7 +1179,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		}
 	}
 
-	err := os.MkdirAll(param.Monitoring_DataLocation.GetString(), 0750)
+	err = os.MkdirAll(param.Monitoring_DataLocation.GetString(), 0750)
 	if err != nil {
 		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
 	}

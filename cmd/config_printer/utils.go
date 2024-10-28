@@ -25,15 +25,22 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func initClientAndServerConfig(v *viper.Viper) *param.Config {
-	config.SetClientDefaults(v)
-	config.SetServerDefaults(v)
+	err := config.SetClientDefaults(v)
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
+	err = config.SetServerDefaults(v)
+	if err != nil {
+		fmt.Println("Error:", err)
+	}
 
 	if v == viper.GetViper() {
 		globalFedInfo, globalFedErr := config.GetFederation(context.Background())

@@ -42,9 +42,9 @@ pelican config dump`,
 	configGetCmd = &cobra.Command{
 		Use:   "get [arguments] [flags]",
 		Short: "Retrieve config parameters that match any of the given arguments",
-		Long: `The 'get' command retrieves and displays configuration parameters that contain any of the provided argument patterns in their name or value. 
+		Long: `The 'get' command retrieves and displays configuration parameters that contain any of the provided argument patterns in their name or value.
 The search space can be narrowed or expanded using available flags. The matching is case-insensitive.
-If no arguments are provided, all configuration parameters are retrieved. 
+If no arguments are provided, all configuration parameters are retrieved.
 The command outputs the results in a flattened format from the nested configuration, making it grep-friendly for easier searching.`,
 		Example: `# Retrieve parameters that have either 'log' or 'monitor' in their name or value,
 # and relate to either 'origin' or 'cache', including deprecated parameters in the search space
@@ -55,7 +55,7 @@ pelican config get log monitor -m origin -m cache --include-deprecated`,
 	configManCmd = &cobra.Command{
 		Use:   "describe [parameter]",
 		Short: "Print documentation for the specified config parameter",
-		Long: `The 'describe' command prints detailed documentation for a specified configuration parameter, 
+		Long: `The 'describe' command prints detailed documentation for a specified configuration parameter,
 including its type, default value, description, related components, and whether it is deprecated or hidden.`,
 		Aliases: []string{"desc", "man", "doc"},
 		Example: `# View documentation for the Server.WebPort parameter
