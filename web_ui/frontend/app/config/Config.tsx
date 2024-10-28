@@ -27,7 +27,7 @@ import {
   IconButton,
   Alert,
 } from '@mui/material';
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import {
   AppRegistration,
   AssistantDirection,
@@ -51,21 +51,30 @@ import StatusSnackBar, {
   StatusSnackBarProps,
 } from '@/components/StatusSnackBar';
 import { ServerType } from '@/index';
-import { getEnabledServers } from '@/helpers/util';
+import { alertOnError, getEnabledServers } from '@/helpers/util';
 import DownloadButton from '@/components/DownloadButton';
 import { PaddedContent } from '@/components/layout';
 import { ConfigDisplay, TableOfContents } from '@/app/config/components';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
+import { getConfig } from '@/helpers/api';
+import { AlertDispatchContext } from '@/components/AlertProvider';
 
 function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
+
+  const dispatch = useContext(AlertDispatchContext);
+
   const [status, setStatus] = useState<StatusSnackBarProps | undefined>(
     undefined
   );
   const [patch, _setPatch] = useState<ParameterValueRecord>({});
 
-  const { data, mutate, error } = useSWR<ParameterValueRecord>(
+  const { data, mutate, error } = useSWR<ParameterValueRecord | undefined>(
     'getConfig',
-    getConfig
+    async () => await alertOnError(
+      getConfigJson,
+      "Could not get config",
+      dispatch
+    )
   );
   const { data: enabledServers } = useSWR<ServerType[]>(
     'getEnabledServers',
@@ -93,8 +102,6 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
       isEqual(patch[key], serverConfig?.[key])
     );
   }, [serverConfig, patch]);
-
-  console.error(error, data);
 
   return (
     <>
@@ -215,17 +222,11 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
   );
 }
 
-const getConfig = async (): Promise<ParameterValueRecord> => {
-  let response = await fetch('/api/v1.0/config');
-
-  if (!response.ok) {
-    if (response.status == 401) {
-      throw new Error('You must be logged in to view and access the config');
-    }
-    throw new Error('Failed to fetch config');
+const getConfigJson = async (): Promise<ParameterValueRecord | undefined> => {
+  const response = await getConfig()
+  if(response){
+    return await response.json();
   }
-
-  return await response.json();
 };
 
 export default Config;
