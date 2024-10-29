@@ -96,7 +96,7 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
                               },
                               'Failed to toggle server status',
                               dispatch
-                            )
+                            );
 
                             mutate();
 

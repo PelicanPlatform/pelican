@@ -31,7 +31,10 @@ export const calculateKeys = (key: string) => {
  * @param o Object to get the value from
  * @param key List of keys to traverse
  */
-export const getValue = (o: Record<string, any> | undefined, key: string[]): any => {
+export const getValue = (
+  o: Record<string, any> | undefined,
+  key: string[]
+): any => {
   if (o === undefined) {
     return undefined;
   }

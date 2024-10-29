@@ -25,7 +25,9 @@ const pubkeyValidator = (value: string) => {
   }
 };
 
-const PubkeyField = ({ ...props }: BaseCustomRegistrationFieldProps<string>) => {
+const PubkeyField = ({
+  ...props
+}: BaseCustomRegistrationFieldProps<string>) => {
   return (
     <StringField
       multiline={true}

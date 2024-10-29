@@ -1,5 +1,5 @@
-import { Config, ParameterValueRecord } from '@/components/configuration';
-import { getConfig as getConfigResponse } from '@/helpers/api'
+import { ParameterValueRecord } from '@/components/configuration';
+import { getConfig as getConfigResponse } from '@/helpers/api';
 import { flattenObject } from '@/app/config/util';
 
 export const getConfig = async (): Promise<ParameterValueRecord> => {

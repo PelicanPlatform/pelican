@@ -44,7 +44,6 @@ import { login } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
 const AdminLogin = () => {
-
   const dispatch = useContext(AlertDispatchContext);
 
   const router = useRouter();
@@ -56,19 +55,21 @@ const AdminLogin = () => {
 
   const { data: enabledServers } = useSWR<ServerType[] | undefined>(
     'getEnabledServers',
-    async () => await alertOnError(
-      getEnabledServers,
-      "Could not get enabled servers",
-      dispatch
-    )
+    async () =>
+      await alertOnError(
+        getEnabledServers,
+        'Could not get enabled servers',
+        dispatch
+      )
   );
   const { data: oauthServers } = useSWR<ServerType[] | undefined>(
     'getOauthEnabledServers',
-    async () => await alertOnError(
-      getOauthEnabledServers,
-      "Could not get oauth enabled servers",
-      dispatch
-    ),
+    async () =>
+      await alertOnError(
+        getOauthEnabledServers,
+        'Could not get oauth enabled servers',
+        dispatch
+      ),
     { fallbackData: [] }
   );
 
@@ -83,9 +84,9 @@ const AdminLogin = () => {
 
     const response = await alertOnError(
       async () => await login(password),
-      "Could not login",
+      'Could not login',
       dispatch
-    )
+    );
     if (response) {
       await mutate(getUser);
 
@@ -160,25 +161,26 @@ const AdminLogin = () => {
 };
 
 export default function Home() {
-
   const dispatch = useContext(AlertDispatchContext);
 
   const [returnUrl, setReturnUrl] = useState<string | undefined>(undefined);
   const { data: enabledServers } = useSWR<ServerType[] | undefined>(
     'getEnabledServers',
-    async () => await alertOnError(
-      getEnabledServers,
-      "Could not get enabled servers",
-      dispatch
-    )
+    async () =>
+      await alertOnError(
+        getEnabledServers,
+        'Could not get enabled servers',
+        dispatch
+      )
   );
   const { data: oauthServers } = useSWR<ServerType[] | undefined>(
     'getOauthEnabledServers',
-    async () => await alertOnError(
-      getOauthEnabledServers,
-      "Could not determine if the active server had OAuth enabled",
-      dispatch
-    ),
+    async () =>
+      await alertOnError(
+        getOauthEnabledServers,
+        'Could not determine if the active server had OAuth enabled',
+        dispatch
+      ),
     { fallbackData: [] }
   );
 

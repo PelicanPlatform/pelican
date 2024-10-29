@@ -1,6 +1,12 @@
 import { Portal } from '@mui/base';
 import React, { ReactNode } from 'react';
-import { Alert, AlertProps, Snackbar, SnackbarProps, AlertTitle } from '@mui/material';
+import {
+  Alert,
+  AlertProps,
+  Snackbar,
+  SnackbarProps,
+  AlertTitle,
+} from '@mui/material';
 
 export interface AlertPortalProps {
   onClose: () => void;
@@ -19,9 +25,8 @@ export const AlertPortal = ({
   alertProps,
   snackBarProps,
 }: AlertPortalProps) => {
-
   if (autoHideDuration) {
-    setTimeout(() => onClose(), autoHideDuration)
+    setTimeout(() => onClose(), autoHideDuration);
   }
 
   return (
@@ -36,7 +41,7 @@ export const AlertPortal = ({
           severity={alertProps?.severity}
           sx={{ width: '100%' }}
         >
-          { title && <AlertTitle>{title}</AlertTitle> }
+          {title && <AlertTitle>{title}</AlertTitle>}
           {message}
         </Alert>
       </Snackbar>

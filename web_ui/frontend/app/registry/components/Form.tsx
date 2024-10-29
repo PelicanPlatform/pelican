@@ -1,5 +1,11 @@
 import { Box, Button, Alert } from '@mui/material';
-import React, { useEffect, useState, Dispatch, SetStateAction, useContext } from 'react';
+import React, {
+  useEffect,
+  useState,
+  Dispatch,
+  SetStateAction,
+  useContext,
+} from 'react';
 import useSWR from 'swr';
 
 import { Namespace } from '@/index';
@@ -42,20 +48,22 @@ const onChange = (
 };
 
 const Form = ({ namespace, onSubmit }: FormProps) => {
-
   const dispatch = useContext(AlertDispatchContext);
 
   const [data, setData] = useState<Partial<Namespace> | undefined>(
     namespace || {}
   );
 
-  const { data: fields, error } = useSWR<Omit<CustomRegistrationFieldProps, 'onChange'>[] | undefined>(
+  const { data: fields, error } = useSWR<
+    Omit<CustomRegistrationFieldProps, 'onChange'>[] | undefined
+  >(
     'optionsNamespaceRegistrationFields',
-    async () => await alertOnError(
-      optionsNamespaceRegistrationFields,
-      "Couldn't fetch registration fields",
-      dispatch
-    ),
+    async () =>
+      await alertOnError(
+        optionsNamespaceRegistrationFields,
+        "Couldn't fetch registration fields",
+        dispatch
+      ),
     { fallbackData: [] }
   );
 

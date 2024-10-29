@@ -18,18 +18,10 @@
 
 'use client';
 
-import {
-  Box,
-  Grid,
-  Typography,
-  Alert,
-  Collapse
-} from '@mui/material';
+import { Box, Grid, Typography, Alert, Collapse } from '@mui/material';
 import React, { useContext, useMemo } from 'react';
 
-import {
-  CardSkeleton
-} from '@/components/Namespace';
+import { CardSkeleton } from '@/components/Namespace';
 import { getUser } from '@/helpers/login';
 import NamespaceCardList from '@/components/Namespace/NamespaceCardList';
 import useSWR from 'swr';
@@ -41,24 +33,13 @@ import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 
 export default function Home() {
+  const dispatch = useContext(AlertDispatchContext);
 
-  const dispatch = useContext(AlertDispatchContext)
-
-  const { data } = useSWR(
-    'getNamespaces',
-    async () => alertOnError(
-      getExtendedNamespaces,
-      "Couldn't fetch namespaces",
-      dispatch
-    )
-  )
-  const { data: user, error } = useSWR(
-    'getUser',
-    async () => alertOnError(
-      getUser,
-      "Couldn't fetch user",
-      dispatch
-    )
+  const { data } = useSWR('getNamespaces', async () =>
+    alertOnError(getExtendedNamespaces, "Couldn't fetch namespaces", dispatch)
+  );
+  const { data: user, error } = useSWR('getUser', async () =>
+    alertOnError(getUser, "Couldn't fetch user", dispatch)
   );
 
   const deniedNamespaces = useMemo(

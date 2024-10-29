@@ -19,9 +19,7 @@
 'use client';
 
 import { PutPage } from '@/app/registry/components/PutPage';
-import {
-  namespaceToOrigin
-} from '@/app/registry/components/util';
+import { namespaceToOrigin } from '@/app/registry/components/util';
 import { Box, Grid, Typography } from '@mui/material';
 import React from 'react';
 import { putGeneralNamespace } from '@/helpers/api';

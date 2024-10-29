@@ -26,26 +26,22 @@ export async function fetchApi(
       }
       throw new Error(alertMessage);
     }
-    return response
+    return response;
   } catch (e) {
     if (e instanceof Error) {
-      throw Error("Fetch to API Failed", { cause: e })
+      throw Error('Fetch to API Failed', { cause: e });
     } else {
-      throw Error("Fetch to API Failed", { cause: e})
+      throw Error('Fetch to API Failed', { cause: e });
     }
   }
 }
-
 
 /**
  * Get config
  */
 export const getConfig = async (): Promise<Response> => {
-  return fetchApi(
-    async () => await secureFetch('/api/v1.0/config')
-  )
-}
-
+  return fetchApi(async () => await secureFetch('/api/v1.0/config'));
+};
 
 /**
  * Deletes a namespace
@@ -53,12 +49,12 @@ export const getConfig = async (): Promise<Response> => {
  */
 export const deleteNamespace = async (id: number) => {
   return fetchApi(
-    async () => await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}`, {
-      method: 'DELETE',
-    })
-  )
+    async () =>
+      await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}`, {
+        method: 'DELETE',
+      })
+  );
 };
-
 
 /**
  * Approves a namespace
@@ -66,14 +62,12 @@ export const deleteNamespace = async (id: number) => {
  */
 export const approveNamespace = async (id: number) => {
   return fetchApi(
-    async () => await secureFetch(
-      `/api/v1.0/registry_ui/namespaces/${id}/approve`,
-      {
+    async () =>
+      await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}/approve`, {
         method: 'PATCH',
-      }
-    )
-  )
-}
+      })
+  );
+};
 
 /**
  * Denies a namespace
@@ -81,14 +75,12 @@ export const approveNamespace = async (id: number) => {
  */
 export const denyNamespace = async (id: number) => {
   return fetchApi(
-    async () => await secureFetch(
-      `/api/v1.0/registry_ui/namespaces/${id}/deny`,
-      {
+    async () =>
+      await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}/deny`, {
         method: 'PATCH',
-      }
-    )
-  )
-}
+      })
+  );
+};
 
 /**
  * Enables a server on the director
@@ -96,14 +88,12 @@ export const denyNamespace = async (id: number) => {
  */
 export const allowServer = async (name: string) => {
   return fetchApi(
-    async () => await secureFetch(
-      `/api/v1.0/director_ui/servers/allow/${name}`,
-      {
+    async () =>
+      await secureFetch(`/api/v1.0/director_ui/servers/allow/${name}`, {
         method: 'PATCH',
-      }
-    )
-  )
-}
+      })
+  );
+};
 
 /**
  * Filters ( Disables ) a server on the director
@@ -111,20 +101,20 @@ export const allowServer = async (name: string) => {
  */
 export const filterServer = async (name: string) => {
   return fetchApi(
-    async () => await secureFetch(
-      `/api/v1.0/director_ui/servers/filter/${name}`,
-      {
+    async () =>
+      await secureFetch(`/api/v1.0/director_ui/servers/filter/${name}`, {
         method: 'PATCH',
-      }
-    )
-  )
-}
+      })
+  );
+};
 
 /**
  * Get extended namespaces
  */
-export const getExtendedNamespaces = async (): Promise<{ namespace: Namespace }[]> => {
-  const response = await getNamespaces()
+export const getExtendedNamespaces = async (): Promise<
+  { namespace: Namespace }[]
+> => {
+  const response = await getNamespaces();
   const data: Namespace[] = await response.json();
   data.sort((a, b) => (a.id > b.id ? 1 : -1));
   data.forEach((namespace) => {
@@ -143,7 +133,7 @@ export const getExtendedNamespaces = async (): Promise<{ namespace: Namespace }[
   return data.map((d) => {
     return { namespace: d };
   });
-}
+};
 
 /**
  * Get namespaces
@@ -156,7 +146,7 @@ export const getNamespaces = async (): Promise<Response> => {
 
   const response = await fetchApi(async () => await fetch(url));
   return await response.json();
-}
+};
 
 /**
  * Gets a namespace by ID
@@ -177,35 +167,31 @@ export const postGeneralNamespace = async (
   data: Namespace
 ): Promise<Response> => {
   return await fetchApi(
-  async () =>
-    await fetch('/api/v1.0/registry_ui/namespaces', {
-      body: JSON.stringify(data),
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-    })
-  )
+    async () =>
+      await fetch('/api/v1.0/registry_ui/namespaces', {
+        body: JSON.stringify(data),
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      })
+  );
 };
 
 export const putGeneralNamespace = async (
   data: Namespace
 ): Promise<Response> => {
-  return await fetchApi(
-    async () => {
-      return fetch(`/api/v1.0/registry_ui/namespaces/${data.id}`,
-        {
-          body: JSON.stringify(data),
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          credentials: 'include',
-        }
-      )
-    }
-  )
+  return await fetchApi(async () => {
+    return fetch(`/api/v1.0/registry_ui/namespaces/${data.id}`, {
+      body: JSON.stringify(data),
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+    });
+  });
 };
 
 /**
@@ -215,10 +201,13 @@ export const putGeneralNamespace = async (
 export const optionsNamespaceRegistrationFields = async (): Promise<
   Omit<CustomRegistrationFieldProps, 'onChange'>[]
 > => {
-  const response = await fetchApi(async () => await fetch('/api/v1.0/registry_ui/namespaces', {
-    method: 'OPTIONS',
-  }))
-  return response.json()
+  const response = await fetchApi(
+    async () =>
+      await fetch('/api/v1.0/registry_ui/namespaces', {
+        method: 'OPTIONS',
+      })
+  );
+  return response.json();
 };
 
 /**
@@ -236,8 +225,8 @@ export const initLogin = async (code: string): Promise<Response> => {
           code: code,
         }),
       })
-  )
-}
+  );
+};
 
 /**
  * Reset ( Do initial ) Login
@@ -254,13 +243,16 @@ export const resetLogin = async (password: string): Promise<Response> => {
           password: password,
         }),
       })
-  )
-}
+  );
+};
 
 /**
  * Login
  */
-export const login = async (password: string, user: string = "admin"): Promise<Response> => {
+export const login = async (
+  password: string,
+  user: string = 'admin'
+): Promise<Response> => {
   return await fetchApi(
     async () =>
       await fetch('/api/v1.0/auth/login', {
@@ -273,5 +265,5 @@ export const login = async (password: string, user: string = "admin"): Promise<R
           password: password,
         }),
       })
-  )
-}
+  );
+};

@@ -28,7 +28,7 @@ export const PendingCard = ({
   const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
 
-  const dispatch = useContext(AlertDispatchContext)
+  const dispatch = useContext(AlertDispatchContext);
 
   return (
     <Box>
@@ -73,13 +73,13 @@ export const PendingCard = ({
                     sx={{ bgcolor: '#ff00001a', mx: 1 }}
                     color={'error'}
                     onClick={async (e) => {
-                      e.stopPropagation()
+                      e.stopPropagation();
                       await alertOnError(
                         () => denyNamespace(namespace.id),
                         "Couldn't deny namespace",
                         dispatch
-                      )
-                      onUpdate()
+                      );
+                      onUpdate();
                     }}
                   >
                     <Block />
@@ -90,13 +90,13 @@ export const PendingCard = ({
                     sx={{ bgcolor: '#2e7d3224', mx: 1 }}
                     color={'success'}
                     onClick={async (e) => {
-                      e.stopPropagation()
+                      e.stopPropagation();
                       await alertOnError(
                         () => approveNamespace(namespace.id),
                         "Couldn't approve namespace",
                         dispatch
-                      )
-                      onUpdate()
+                      );
+                      onUpdate();
                     }}
                   >
                     <Check />

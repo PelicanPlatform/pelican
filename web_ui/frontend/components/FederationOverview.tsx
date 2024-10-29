@@ -48,16 +48,12 @@ const FederationOverview = () => {
   >([]);
 
   let getConfigJson = async () => {
-    const response = await getConfig()
+    const response = await getConfig();
     const responseData = (await response.json()) as Config;
 
     const federationUrls = UrlData.map(({ key, text }) => {
       let url = getObjectValue<string>(responseData, key);
-      if (
-        url &&
-        !url?.startsWith('http://') &&
-        !url?.startsWith('https://')
-      ) {
+      if (url && !url?.startsWith('http://') && !url?.startsWith('https://')) {
         url = 'https://' + url;
       }
 
@@ -68,7 +64,6 @@ const FederationOverview = () => {
     });
 
     setConfig(federationUrls);
-
   };
 
   useEffect(() => {

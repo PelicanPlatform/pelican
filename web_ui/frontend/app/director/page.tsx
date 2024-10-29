@@ -22,9 +22,7 @@ import { Box, Grid, Skeleton, Typography } from '@mui/material';
 import { useContext, useMemo } from 'react';
 import useSWR from 'swr';
 import { Server } from '@/index';
-import {
-  DirectorCardList,
-} from './components';
+import { DirectorCardList } from './components';
 import { getUser } from '@/helpers/login';
 import FederationOverview from '@/components/FederationOverview';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
@@ -34,17 +32,16 @@ import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
 export default function Page() {
-
   const dispatch = useContext(AlertDispatchContext);
 
   const { data } = useSWR<Server[] | undefined>(
     'getServers',
-    async () => await alertOnError(getServers, 'Failed to fetch servers', dispatch)
+    async () =>
+      await alertOnError(getServers, 'Failed to fetch servers', dispatch)
   );
 
-  const { data: user, error } = useSWR(
-    'getUser',
-    () => alertOnError(getUser, "Failed to fetch user", dispatch)
+  const { data: user, error } = useSWR('getUser', () =>
+    alertOnError(getUser, 'Failed to fetch user', dispatch)
   );
 
   const cacheData = useMemo(() => {

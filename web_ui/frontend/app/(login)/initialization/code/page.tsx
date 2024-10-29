@@ -28,7 +28,6 @@ import { initLogin } from '@/helpers/api';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
-
 export default function Home() {
   const router = useRouter();
   let [code, _setCode] = useState<Code>([
@@ -41,7 +40,7 @@ export default function Home() {
   ]);
   let [loading, setLoading] = useState(false);
 
-  const dispatch = useContext(AlertDispatchContext)
+  const dispatch = useContext(AlertDispatchContext);
 
   const setCode = (code: Code) => {
     _setCode(code);
@@ -58,8 +57,8 @@ export default function Home() {
       async () => await initLogin(code),
       'Could not login',
       dispatch
-    )
-    if(response) {
+    );
+    if (response) {
       router.push('../password/');
     } else {
       setLoading(false);
