@@ -27,7 +27,14 @@ import {
   IconButton,
   Alert,
 } from '@mui/material';
-import React, { memo, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import {
   AppRegistration,
   AssistantDirection,
@@ -60,7 +67,6 @@ import { getConfig } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
 function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
-
   const dispatch = useContext(AlertDispatchContext);
 
   const [status, setStatus] = useState<StatusSnackBarProps | undefined>(
@@ -70,11 +76,8 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
 
   const { data, mutate, error } = useSWR<ParameterValueRecord | undefined>(
     'getConfig',
-    async () => await alertOnError(
-      getConfigJson,
-      "Could not get config",
-      dispatch
-    )
+    async () =>
+      await alertOnError(getConfigJson, 'Could not get config', dispatch)
   );
   const { data: enabledServers } = useSWR<ServerType[]>(
     'getEnabledServers',
@@ -223,8 +226,8 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
 }
 
 const getConfigJson = async (): Promise<ParameterValueRecord | undefined> => {
-  const response = await getConfig()
-  if(response){
+  const response = await getConfig();
+  if (response) {
     return await response.json();
   }
 };

@@ -37,7 +37,6 @@ export interface FlatObject {
 
 export type NamespaceCardProps = CardProps & PendingCardProps;
 
-
 export const getServerType = (namespace: Namespace) => {
   // If the namespace is empty the value is undefined
   if (namespace?.prefix == null || namespace.prefix == '') {

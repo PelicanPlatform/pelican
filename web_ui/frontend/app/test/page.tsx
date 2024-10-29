@@ -5,7 +5,6 @@ import React, { useContext } from 'react';
 import { Box } from '@mui/material';
 import CodeBlock from '@/components/CodeBlock';
 
-
 const Page = () => {
   const dispatch = useContext(AlertDispatchContext);
 
@@ -16,9 +15,9 @@ const Page = () => {
           dispatch({
             type: 'openAlert',
             payload: {
-              title: "Response Time Slow",
+              title: 'Response Time Slow',
               alertProps: {
-                severity: 'error'
+                severity: 'error',
               },
               message: (
                 <Box>
@@ -34,8 +33,7 @@ const Page = () => {
                 </Box>
               ),
               onClose: () => dispatch({ type: 'closeAlert' }),
-
-            }
+            },
           });
         }}
       >
@@ -50,6 +48,6 @@ const Page = () => {
       </button>
     </div>
   );
-}
+};
 
 export default Page;

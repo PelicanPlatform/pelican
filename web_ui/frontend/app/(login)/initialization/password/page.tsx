@@ -30,14 +30,12 @@ import { AlertDispatchContext } from '@/components/AlertProvider';
 import { initLogin, resetLogin } from '@/helpers/api';
 
 export default function Home() {
-
-  const dispatch = useContext(AlertDispatchContext)
+  const dispatch = useContext(AlertDispatchContext);
 
   const router = useRouter();
   let [password, _setPassword] = useState<string>('');
   let [confirmPassword, _setConfirmPassword] = useState<string>('');
   let [loading, setLoading] = useState(false);
-
 
   async function submit(password: string) {
     setLoading(true);
@@ -46,8 +44,8 @@ export default function Home() {
       async () => await resetLogin(password),
       'Could not login',
       dispatch
-    )
-    if(response) {
+    );
+    if (response) {
       router.push('../password/');
     } else {
       setLoading(false);
@@ -64,12 +62,12 @@ export default function Home() {
         type: 'openAlert',
         payload: {
           alertProps: {
-            severity: 'warning'
+            severity: 'warning',
           },
           message: 'Passwords do not match',
-          onClose: () => dispatch({ type: 'closeAlert' })
-        }
-      })
+          onClose: () => dispatch({ type: 'closeAlert' }),
+        },
+      });
     }
   }
 

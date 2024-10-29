@@ -8,18 +8,20 @@ import { Box } from '@mui/material';
  * @param children
  * @constructor
  */
-export const CodeBlock = ({children}: {children: string | string[]}) => {
-  return <Box>
-    <SyntaxHighlighter
-      style={stackoverflowLight}
-      wrapLines
-      onClick={() => {
-        navigator.clipboard.writeText(children.toString());
-      }}
-    >
-      {children}
-    </SyntaxHighlighter>
-  </Box>
-}
+export const CodeBlock = ({ children }: { children: string | string[] }) => {
+  return (
+    <Box>
+      <SyntaxHighlighter
+        style={stackoverflowLight}
+        wrapLines
+        onClick={() => {
+          navigator.clipboard.writeText(children.toString());
+        }}
+      >
+        {children}
+      </SyntaxHighlighter>
+    </Box>
+  );
+};
 
 export default CodeBlock;

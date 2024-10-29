@@ -28,7 +28,8 @@ import {
 } from '@mui/material';
 import React, {
   ReactNode,
-  Suspense, useContext,
+  Suspense,
+  useContext,
   useEffect,
   useMemo,
   useState,
@@ -37,11 +38,9 @@ import React, {
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { Namespace, Alert as AlertType } from '@/index';
 import Form from '@/app/registry/components/Form';
-import {
-  submitNamespaceForm,
-} from '@/app/registry/components/util';
+import { submitNamespaceForm } from '@/app/registry/components/util';
 import { getNamespace } from '@/helpers/api';
-import { NamespaceFormPage } from '@/app/registry/components'
+import { NamespaceFormPage } from '@/app/registry/components';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 
@@ -59,13 +58,14 @@ const PutPage = ({ update }: NamespaceFormPage) => {
 
     if (id === null) {
       dispatch({
-        type: "openAlert",
+        type: 'openAlert',
         payload: {
-          title: "No Namespace ID Provided",
-          message: "Your URL should contain a query parameter 'id' with the ID of the namespace you want to edit",
-          onClose: () => dispatch({ type: "closeAlert" })
-        }
-      })
+          title: 'No Namespace ID Provided',
+          message:
+            "Your URL should contain a query parameter 'id' with the ID of the namespace you want to edit",
+          onClose: () => dispatch({ type: 'closeAlert' }),
+        },
+      });
       return;
     }
 
@@ -76,32 +76,34 @@ const PutPage = ({ update }: NamespaceFormPage) => {
       }
     } catch (e) {
       dispatch({
-        type: "openAlert",
+        type: 'openAlert',
         payload: {
-          title: "Invalid fromUrl provided",
-          message: "The `fromUrl` parameter provided is not a valid URL, this will only impact your redirection on completion of this form",
+          title: 'Invalid fromUrl provided',
+          message:
+            'The `fromUrl` parameter provided is not a valid URL, this will only impact your redirection on completion of this form',
           alertProps: {
-            severity: "warning"
+            severity: 'warning',
           },
-          onClose: () => dispatch({ type: "closeAlert" })
-        }
-      })
+          onClose: () => dispatch({ type: 'closeAlert' }),
+        },
+      });
     }
 
     try {
       setId(parseInt(id));
     } catch (e) {
       dispatch({
-        type: "openAlert",
+        type: 'openAlert',
         payload: {
-          title: "Invalid Namespace ID provided",
-          message: "The Namespace Id provided is not a valid number. Please report this issue, as well as what link directed you here.",
+          title: 'Invalid Namespace ID provided',
+          message:
+            'The Namespace Id provided is not a valid number. Please report this issue, as well as what link directed you here.',
           alertProps: {
-            severity: "error"
+            severity: 'error',
           },
-          onClose: () => dispatch({ type: "closeAlert" })
-        }
-      })
+          onClose: () => dispatch({ type: 'closeAlert' }),
+        },
+      });
     }
   }, []);
 
@@ -112,8 +114,8 @@ const PutPage = ({ update }: NamespaceFormPage) => {
           async () => await getNamespace(id),
           "Couldn't get namespace",
           dispatch
-        )
-        if(response){
+        );
+        if (response) {
           setNamespace(response);
         }
       }
@@ -130,10 +132,11 @@ const PutPage = ({ update }: NamespaceFormPage) => {
               onSubmit={async (data) => {
                 let namespace = { ...data, id: id };
                 await alertOnError(
-                  async () => await submitNamespaceForm(namespace, fromUrl, update),
-                  "Failed to update namespace",
+                  async () =>
+                    await submitNamespaceForm(namespace, fromUrl, update),
+                  'Failed to update namespace',
                   dispatch
-                )
+                );
               }}
             />
           ) : (

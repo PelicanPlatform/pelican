@@ -49,16 +49,18 @@ import { alertOnError } from '@/helpers/util';
 import { getExtendedNamespaces } from '@/helpers/api';
 
 export default function Home() {
-
   const dispatch = useContext(AlertDispatchContext);
 
-  const { data, mutate: mutateNamespaces } = useSWR<{ namespace: Namespace }[] | undefined>(
+  const { data, mutate: mutateNamespaces } = useSWR<
+    { namespace: Namespace }[] | undefined
+  >(
     'getNamespaces',
-    () => alertOnError(
-      getExtendedNamespaces,
-      'Failed to fetch namespaces',
-      dispatch
-    ),
+    () =>
+      alertOnError(
+        getExtendedNamespaces,
+        'Failed to fetch namespaces',
+        dispatch
+      ),
     {
       fallbackData: [],
     }
@@ -66,7 +68,7 @@ export default function Home() {
 
   const { data: user, error } = useSWR(
     'getUser',
-    async () => await alertOnError(getUser, "Error Getting User", dispatch)
+    async () => await alertOnError(getUser, 'Error Getting User', dispatch)
   );
 
   const pendingData = useMemo(() => {

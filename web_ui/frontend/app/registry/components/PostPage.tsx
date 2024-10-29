@@ -28,7 +28,6 @@ import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
 const PostPage = ({ update }: NamespaceFormPage) => {
-
   const dispatch = useContext(AlertDispatchContext);
 
   const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined);
@@ -41,14 +40,14 @@ const PostPage = ({ update }: NamespaceFormPage) => {
       if (fromUrl != undefined) {
         const parsedUrl = await alertOnError<URL>(
           () => new URL(fromUrl),
-          "Failed to parse URL",
+          'Failed to parse URL',
           dispatch
         );
         if (parsedUrl) {
           setFromUrl(parsedUrl);
         }
       }
-    })()
+    })();
   }, []);
 
   return (
@@ -58,10 +57,11 @@ const PostPage = ({ update }: NamespaceFormPage) => {
           <Form
             onSubmit={async (namespace) => {
               await alertOnError(
-                async () => await submitNamespaceForm(namespace, fromUrl, update),
-                "Failed to update namespace",
+                async () =>
+                  await submitNamespaceForm(namespace, fromUrl, update),
+                'Failed to update namespace',
                 dispatch
-              )
+              );
             }}
           />
         </Grid>

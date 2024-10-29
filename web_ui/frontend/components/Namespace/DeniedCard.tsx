@@ -24,7 +24,7 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
   const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
   const dispatch = useContext(AlertDispatchContext);
-  const alert = useContext(AlertContext)
+  const alert = useContext(AlertContext);
   const { mutate } = useSWRConfig();
 
   return (
@@ -88,7 +88,7 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
                           () => deleteNamespace(namespace.id),
                           'Could Not Delete Registration',
                           dispatch
-                        )
+                        );
                       }}
                     >
                       <Delete />
@@ -104,7 +104,7 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
                           () => approveNamespace(namespace.id),
                           'Could Not Approve Registration',
                           dispatch
-                        )
+                        );
                         setTimeout(() => mutate('getNamespaces'), 600);
                       }}
                     >

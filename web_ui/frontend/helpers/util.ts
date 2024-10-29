@@ -84,7 +84,6 @@ export function evaluateOrReturn<T, F>(
   return o as T;
 }
 
-
 /**
  * Get the average of an array of numbers
  * @param arr Array of numbers
@@ -95,28 +94,27 @@ export const average = (arr: number[]) => {
 
 type ErrorWithCause = Error & { cause?: Error };
 
-
 /**
  * If an error is caught from f then display the error via an alert UI
  */
-export async function alertOnError<T=any>(
+export async function alertOnError<T = any>(
   f: () => Promise<T> | T | undefined,
   title: string = 'Error',
   dispatch: Dispatch<AlertReducerAction>
-){
+) {
   try {
     return await f();
   } catch (error) {
     console.error(error);
-    if(error instanceof Error) {
+    if (error instanceof Error) {
       dispatch({
-        type: "openErrorAlert",
+        type: 'openErrorAlert',
         payload: {
           title,
           error: errorToString(error as ErrorWithCause),
-          onClose: () => dispatch({ type: "closeAlert" })
-        }
-      })
+          onClose: () => dispatch({ type: 'closeAlert' }),
+        },
+      });
     }
   }
 }
@@ -125,17 +123,18 @@ export async function alertOnError<T=any>(
  * Convert a error into a string
  * @param error
  */
-export const errorToString = (error: ErrorWithCause) : string => {
-
-  if(error?.cause){
-
+export const errorToString = (error: ErrorWithCause): string => {
+  if (error?.cause) {
     // Check that error is instance of Error
-    if(!(error?.cause instanceof Error)) {
-      console.error("Malformed error, cause is not an instance of Error", error)
+    if (!(error?.cause instanceof Error)) {
+      console.error(
+        'Malformed error, cause is not an instance of Error',
+        error
+      );
     }
 
-    return `${error.message}\n↳ ${errorToString(error.cause as ErrorWithCause)}`
+    return `${error.message}\n↳ ${errorToString(error.cause as ErrorWithCause)}`;
   }
 
-  return `${error.message}`
-}
+  return `${error.message}`;
+};

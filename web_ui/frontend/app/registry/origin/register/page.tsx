@@ -18,9 +18,7 @@
 
 'use client';
 
-import {
-  namespaceToOrigin
-} from '@/app/registry/components/util';
+import { namespaceToOrigin } from '@/app/registry/components/util';
 import { PostPage } from '@/app/registry/components/PostPage';
 import { Box, Grid, Typography } from '@mui/material';
 import React from 'react';

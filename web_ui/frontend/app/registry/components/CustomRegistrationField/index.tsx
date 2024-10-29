@@ -1,4 +1,3 @@
-
 import { BooleanField } from './BooleanField';
 import { StringField } from './StringField';
 import { IntegerField } from './IntegerField';
