@@ -1,0 +1,29 @@
+From 5b7357cb59a1ffe2fb99b68c1dc5796fd063acdb Mon Sep 17 00:00:00 2001
+From: Brian Bockelman <bbockelman@morgridge.org>
+Date: Thu, 25 Jan 2024 09:46:39 -0600
+Subject: [PATCH] Add support for pelican:// protocol
+
+In https://github.com/PelicanPlatform/xrdcl-pelican, we are developing
+a XrdCl plugin that can talk to the infrastructure for a new project,
+christening the URL scheme `pelican://`.
+
+This commit adds the new schema so it can be utilized from both
+xrdcp (primarily for testing) and XCache.
+---
+ src/Xrd/XrdPollPoll.icc  | 3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/src/Xrd/XrdPollPoll.icc b/src/Xrd/XrdPollPoll.icc
+index da6e03ef1..f7a3d71c4 100644
+--- a/src/Xrd/XrdPollPoll.icc
++++ b/src/Xrd/XrdPollPoll.icc
+@@ -390,7 +390,8 @@ void XrdPollPoll::doRequests(int maxreq)
+                   piP->isEnabled = false;
+                  }
+          else if (ReqBuff.req == PipeData::RmFD)
+-                 {PollTab[pti].fd     = -1;
++                 {
++                  PollTab[pti].fd     = -2;
+                   doDetach(pti);
+                   act = " detached fd ";
+                   piP->isEnabled = false;
