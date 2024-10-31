@@ -2153,6 +2153,14 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		ioreader = ap
 		sizer = ap
 	} else {
+
+		if fileInfo.IsDir() {
+			log.Errorln("The given path", transfer.localPath, "is a directory. Use --recursive or -r flag if using the pelican object command for directories")
+			err := errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected; use --recursive or -r flag if using the pelican object command for directories")
+			transferResult.Error = err
+			return transferResult, err
+		}
+
 		// Try opening the file to send
 		file, err := os.Open(transfer.localPath)
 		if err != nil {
