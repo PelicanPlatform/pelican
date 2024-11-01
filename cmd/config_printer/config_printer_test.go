@@ -96,20 +96,23 @@ func TestConfigGet(t *testing.T) {
 		r, w, _ := os.Pipe()
 		os.Stdout = w
 
+		var buf bytes.Buffer
+		done := make(chan struct{})
+		go func() {
+			// Read from the pipe concurrently
+			io.Copy(&buf, r)
+			done <- struct{}{}
+		}()
+
 		ConfigCmd.SetArgs(append([]string{"get"}, arguments...))
 		err := ConfigCmd.Execute()
 		assert.NoError(t, err)
 
-		// Close the pipe and read the output
+		// Close the write end of the pipe and wait for the reader to finish
 		w.Close()
-		var buf bytes.Buffer
-		n, err := io.Copy(&buf, r)
-		if err != nil {
-			t.Fatalf("failed to copy to output buffer: %v. Copied %d bytes before failure", err, n)
-		}
+		<-done
 		os.Stdout = oldStdout
 
-		// Get the actual output
 		got := strings.TrimSpace(strings.ToLower(buf.String()))
 
 		for _, expected := range expectedLines {
@@ -149,22 +152,27 @@ func TestConfigSummary(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		// Read from the pipe concurrently
+		io.Copy(&buf, r)
+		done <- struct{}{}
+	}()
+
 	ConfigCmd.SetArgs([]string{"summary"})
 	err = ConfigCmd.Execute()
 	assert.NoError(t, err)
 
+	// Close the write end of the pipe and wait for the reader to finish
 	w.Close()
-	var buf bytes.Buffer
-	n, err := io.Copy(&buf, r)
-	if err != nil {
-		t.Fatalf("failed to copy to output buffer: %v. Copied %d bytes before failure", err, n)
-	}
+	<-done
 	os.Stdout = oldStdout
+
+	got := strings.TrimSpace(strings.ToLower(buf.String()))
 
 	expectedLines := []string{`logging:`, `    cache:`, `    origin:`, `    level: info`, `        http: info`}
 	notExpectedLines := []string{`debug: true`}
-
-	got := strings.TrimSpace(strings.ToLower(buf.String()))
 
 	for _, expected := range expectedLines {
 		expectedLower := strings.ToLower(expected)
