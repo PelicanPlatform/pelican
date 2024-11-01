@@ -26,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 
@@ -100,7 +101,10 @@ func TestConfigGet(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			// Read from the pipe concurrently
-			io.Copy(&buf, r)
+			n, err := io.Copy(&buf, r)
+			if err != nil {
+				logrus.Errorf("failed to copy to output buffer: %v. Copied %d bytes before failure", err, n)
+			}
 			done <- struct{}{}
 		}()
 
@@ -156,7 +160,10 @@ func TestConfigSummary(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		// Read from the pipe concurrently
-		io.Copy(&buf, r)
+		n, err := io.Copy(&buf, r)
+		if err != nil {
+			logrus.Errorf("failed to copy to output buffer: %v. Copied %d bytes before failure", err, n)
+		}
 		done <- struct{}{}
 	}()
 
