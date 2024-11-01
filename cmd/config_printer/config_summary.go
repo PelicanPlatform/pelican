@@ -42,7 +42,9 @@ func configSummary(cmd *cobra.Command, args []string) {
 
 	diff := compareStructsAsym(currentConfigMap, defaultConfigMap)
 
-	printConfig(diff, format)
+	if diff != nil {
+		printConfig(diff, format)
+	}
 }
 
 func compareStructsAsym(v1, v2 interface{}) interface{} {
