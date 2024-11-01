@@ -1,0 +1,15 @@
+---
+#####################################################
+# Pelican Origin Multiuser Configuration (OPTIONAL)
+#
+# Optional configuration that allows a Pelican origin to switch users
+# for reads/writes. Enable this configuration if your origin is
+# serving POSIX-mounted data that is also accessible from another
+# POSIX system (e.g., an HTCondor Access Point)
+#####################################################
+
+## If you need Pelican multiuser behavior, uncomment the following
+## lines and set both values to 'true'
+# Origin:
+#   Multiuser: false
+#   ScitokensMapSubject: false
