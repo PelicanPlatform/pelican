@@ -60,6 +60,11 @@ func setupMockConfig() error {
 
 func TestConfigGet(t *testing.T) {
 
+	config.ResetConfig()
+	t.Cleanup(func() {
+		config.ResetConfig()
+	})
+
 	err := setupMockConfig()
 	if err != nil {
 		t.Fatalf("Error: %v", err)
@@ -143,6 +148,11 @@ func TestConfigGet(t *testing.T) {
 }
 
 func TestConfigSummary(t *testing.T) {
+
+	config.ResetConfig()
+	t.Cleanup(func() {
+		config.ResetConfig()
+	})
 
 	err := setupMockConfig()
 	if err != nil {
