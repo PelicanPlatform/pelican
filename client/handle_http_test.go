@@ -42,6 +42,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -929,4 +930,61 @@ func TestNewTransferEngine(t *testing.T) {
 		_, err = NewTransferEngine(ctx)
 		assert.NoError(t, err)
 	})
+}
+
+func TestListHttp(t *testing.T) {
+	type test struct {
+		name          string
+		pUrl          *pelican_url.PelicanURL
+		dirResp       server_structs.DirectorResponse
+		expectedError string
+	}
+	tests := []test{
+		{
+			name: "valid-collections-url",
+			pUrl: &pelican_url.PelicanURL{
+				Scheme: "pelican",
+				Host:   "something.com",
+				Path:   "/foo/bar/baz",
+			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					RequireToken: false,
+					Namespace:    "/foo/bar",
+					CollectionsUrl: &url.URL{
+						Scheme: "https",
+						Host:   "collections.example.com",
+					},
+				},
+			},
+			expectedError: "no such host", // punt on setting up a real server, and accept this "success" looks like a connection error
+		},
+		{
+			name: "no-collections-url",
+			pUrl: &pelican_url.PelicanURL{
+				Scheme: "pelican",
+				Host:   "something.com",
+				Path:   "/foo/bar/baz",
+			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					RequireToken: false,
+					Namespace:    "/foo/bar",
+				},
+			},
+			expectedError: "Collections URL not found in director response. Are you sure there's an origin for prefix /foo/bar that supports listings?",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := listHttp(test.pUrl, test.dirResp, nil)
+			if test.expectedError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), test.expectedError)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
