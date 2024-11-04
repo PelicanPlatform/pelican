@@ -84,7 +84,7 @@ var (
 
 	PelicanDirectorServerCount = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_director_server_count",
-		Help: "The number of servers, delineated by pelican/non-pelican and origin/cache",
+		Help: "The number of servers currently recognized by the Director, delineated by pelican/non-pelican and origin/cache",
 	}, []string{"server_name", "server_type", "from_topology"})
 
 	PelicanDirectorClientVersionTotal = promauto.NewCounterVec(prometheus.CounterOpts{
