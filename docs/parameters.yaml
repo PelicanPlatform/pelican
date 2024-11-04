@@ -1078,7 +1078,34 @@ components: ["cache"]
 ---
 name: Cache.LocalRoot
 description: |+
-  The location where the filesystem namespace is actually rooted
+  A path to the directory where xrootd will create its default namespace, `meta`, and `data` directories. For example,
+  setting `Cache.LocalRoot=/run/pelican/cache` without specifying further `Cache.DataLocations` or `Cache.MetaLocations`
+  values will result in the cache creating a directory structure like:
+  ```
+  .
+  └── /run/pelican/cache/
+      ├── data/
+      │   ├── 00 #hexadecimal values
+      │   ├── 01
+      │   ├── ...
+      │   └── FF
+      ├── meta/
+      │   ├── 00 #hexadecimal values
+      │   ├── 01
+      │   ├── ...
+      │   └── FF
+      ├── namespace1/
+      │   ├── foo1.txt --> /run/pelican/cache/data/00
+      │   └── foo2.txt --> /run/pelican/cache/data/01
+      └── namespace2/
+          └── bar.txt --> /run/pelican/cache/data/FF
+  ```
+  In this setup, actual data files live at `/run/pelican/cache/data` and are given hexadecimal names, while
+  references (symbolic links) to those files are stored in `/run/pelican/cache/namespace1`, `/run/pelican/cache/namespace2`,
+  etc. The `meta` directory is used for object metadata. Object requests to XRootD will be served from the namespace directories, and
+  resolve the underlying object through these symbolic links.
+
+  We recommend tying the `Cache.LocalRoot` to a fast storage device, such as an SSD, to ensure optimal cache performance.
 type: string
 root_default: /run/pelican/cache
 default: $XDG_RUNTIME_DIR/pelican/cache
@@ -1094,8 +1121,13 @@ components: ["cache"]
 ---
 name: Cache.DataLocations
 description: |+
-  A list of directories for the locations of the cache data files - this is where the actual data in the cache is stored.
-  These paths should *not* be in same path as XrootD.Mount or else it will expose the data files as part of the files within the cache.
+  A list of filesystem paths/directories where the cache's object data will be stored. This list of directories can be used to string together
+  multiple storage devices to increase the cache's storage capacity, as long as each of the directories is accessible by the cache service.
+  For example, setting `Cache.DataLocations=["/mnt/cache1", "/mnt/cache2"]` will result in splitting cache data between two mounted drives,
+  `/mnt/cache1` and `/mnt/cache2`. As such, these drives should be fast storage devices, such as SSDs.
+
+  For more information, see the [xrootd oss documentation](https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.pdf) for the `oss.space` directive
+  as well as the [xrootd pfc documentation](https://xrootd.slac.stanford.edu/doc/dev56/pss_config.pdf) for the `pfc.spaces` directive.
 type: stringSlice
 root_default: ["/run/pelican/cache/data"]
 default: ["$XDG_RUNTIME_DIR/pelican/cache/data"]
@@ -1103,8 +1135,12 @@ components: ["cache"]
 ---
 name: Cache.MetaLocations
 description: |+
-  A list of directories for the locations of the cache metadata. These paths should *not* be in the same path as XrootD.Mount or else it
-  will expose the metadata files as part of the files within the cache
+  A list of filesystem paths/directories where the cache's object metadata will be stored. Values in this list may point to separate drives as long
+  as they're accessible by the cache service. For example, setting `Cache.MetaLocations=["/mnt/meta1", "/mnt/meta2"]` will result in
+  splitting cache metadata between two the mounted drives. As such, these drives should be fast storage devices, such as SSDs.
+
+  For more information, see the [xrootd oss documentation](https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.pdf) for the `oss.space` directive
+  as well as the [xrootd pfc documentation](https://xrootd.slac.stanford.edu/doc/dev56/pss_config.pdf) for the `pfc.spaces` directive.
 type: stringSlice
 root_default: ["/run/pelican/cache/meta"]
 default: ["$XDG_RUNTIME_DIR/pelican/cache/meta"]
