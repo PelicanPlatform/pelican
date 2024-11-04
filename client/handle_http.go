@@ -2591,6 +2591,10 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 // This function performs the ls command by walking through the specified collections and printing the contents of the files
 func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator) (fileInfos []FileInfo, err error) {
 	// Get our collection listing host
+	if dirResp.XPelNsHdr.CollectionsUrl == nil {
+		return nil, errors.Errorf("Collections URL not found in director response. Are you sure there's an origin for prefix %s that supports listings?", dirResp.XPelNsHdr.Namespace)
+	}
+
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
 	log.Debugln("Collections URL: ", collectionsUrl.String())
 
