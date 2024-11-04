@@ -904,13 +904,14 @@ func HandlePacket(packet []byte) error {
 		if xrdUserId, appinfo, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			if userids.Has(xrdUserId) {
 				userId := userids.Get(xrdUserId).Value()
+				project := utils.ExtractProjectFromUserAgent([]string{appinfo})
 				if sessions.Has(userId) {
 					existingRec := sessions.Get(userId).Value()
-					existingRec.Project = appinfo
+					existingRec.Project = project
 					existingRec.Host = xrdUserId.Host
 					sessions.Set(userId, existingRec, ttlcache.DefaultTTL)
 				} else {
-					sessions.Set(userId, UserRecord{Project: appinfo, Host: xrdUserId.Host}, ttlcache.DefaultTTL)
+					sessions.Set(userId, UserRecord{Project: project, Host: xrdUserId.Host}, ttlcache.DefaultTTL)
 				}
 			}
 		} else {
