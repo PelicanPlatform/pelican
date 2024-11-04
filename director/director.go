@@ -105,6 +105,10 @@ var (
 	statUtilsMutex = sync.RWMutex{}
 )
 
+func init() {
+	hookServerAdsCache()
+}
+
 func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth bool) (redirectURL url.URL) {
 	var serverURL url.URL
 	if requiresAuth && ad.AuthURL.String() != "" {
