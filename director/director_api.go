@@ -198,7 +198,7 @@ func LaunchMapMetrics(ctx context.Context, egrp *errgroup.Group) {
 	})
 }
 
-func HookServerAdsCache() {
+func hookServerAdsCache() {
 	// Hook into server ads cache
 	// By hooking into the insertion and eviction events, we can keep track of the number of servers in the director
 	// The metric is updated based on the server type, server name, and whether the server is from the topology

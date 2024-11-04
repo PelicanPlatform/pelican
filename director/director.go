@@ -106,7 +106,7 @@ var (
 )
 
 func init() {
-	HookServerAdsCache()
+	hookServerAdsCache()
 }
 
 func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth bool) (redirectURL url.URL) {
