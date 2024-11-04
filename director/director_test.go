@@ -50,6 +50,7 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 func NamespaceAdContainsPath(ns []server_structs.NamespaceAdV2, path string) bool {
@@ -2013,42 +2014,42 @@ func TestGetFinalRedirectURL(t *testing.T) {
 func TestExtractProjectFromUserAgent(t *testing.T) {
 	t.Run("Single User-Agent with project prefix", func(t *testing.T) {
 		userAgents := []string{"pelican-client/1.0.0 project/test"}
-		result := extractProjectFromUserAgent(userAgents)
+		result := utils.ExtractProjectFromUserAgent(userAgents)
 		assert.Equal(t, "test", result)
 	})
 	t.Run("Singlue User-Agent with swapped order", func(t *testing.T) {
 		userAgents := []string{"project/test pelican-client/1.0.0"}
-		result := extractProjectFromUserAgent(userAgents)
+		result := utils.ExtractProjectFromUserAgent(userAgents)
 		assert.Equal(t, "test", result)
 	})
 
 	t.Run("Single User-Agent with additional segments", func(t *testing.T) {
 		userAgents := []string{"pelican-client/blah project/myproject foo/bar"}
-		result := extractProjectFromUserAgent(userAgents)
+		result := utils.ExtractProjectFromUserAgent(userAgents)
 		assert.Equal(t, "myproject", result)
 	})
 
 	t.Run("Multiple User-Agents with project prefix", func(t *testing.T) {
 		userAgents := []string{"pelican-client/1.0.0 project/test", "pelican-client/1.0.0 project/test2"}
-		result := extractProjectFromUserAgent(userAgents)
+		result := utils.ExtractProjectFromUserAgent(userAgents)
 		assert.Equal(t, "test", result)
 	})
 
 	t.Run("Multiple User-Agents with swapped order", func(t *testing.T) {
 		userAgents := []string{"project/test pelican-client/1.0.0", "project/test2 pelican-client/1.0.0"}
-		result := extractProjectFromUserAgent(userAgents)
+		result := utils.ExtractProjectFromUserAgent(userAgents)
 		assert.Equal(t, "test", result)
 	})
 
 	t.Run("No Project Prefix", func(t *testing.T) {
 		userAgents := []string{"pelican-client/1.0.0"}
-		result := extractProjectFromUserAgent(userAgents)
+		result := utils.ExtractProjectFromUserAgent(userAgents)
 		assert.Equal(t, "", result)
 	})
 
 	t.Run("No User-Agent", func(t *testing.T) {
 		userAgents := []string{}
-		result := extractProjectFromUserAgent(userAgents)
+		result := utils.ExtractProjectFromUserAgent(userAgents)
 		assert.Equal(t, "", result)
 	})
 }
