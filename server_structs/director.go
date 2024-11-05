@@ -187,48 +187,36 @@ type (
 	}
 )
 
-// A helper function to handle JSON->NSAdV2 unmarshalling across multiple deprecated JSON keys.
+// A helper function to handle JSON->Caps unmarshalling across multiple deprecated JSON keys.
 //
-// When the Director sends a list of NamespaceAdV2 structs as JSON, it may contain
-// the old capabilities struct. This function checks if the raw JSON contains the
-// "FallbackRead" field, indicating the old capabilities struct, and unmarshals
-// the JSON into the new struct accordingly. This is to ensure backwards compatibility
-// We can probably think about removing this function when we don't see origins/directors
+// Old Caches/Origins will send various bits of JSON to the Director containing the JSON representation
+// of the OldCapabilities struct. To make sure these old JSON representations are unmarshalled correctly
+// into the new Capabilities struct, this function determines which JSON format is being sent and handles
+// conversion if necessary. We can probably think about removing this function when we don't see origins/directors
 // running Pelican <= v7.11.0.
-func (n *NamespaceAdV2) UnmarshalJSON(data []byte) error {
-	// Use alias struct of NamespaceAdV2 to prevent infinite recursion of UnmarshalJSON
-	type Alias NamespaceAdV2
-	aux := &struct {
-		Caps json.RawMessage `json:"Caps"`
-		*Alias
-	}{
-		Alias: (*Alias)(n),
-	}
-
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	// Check if the raw Caps JSON contains "FallbackRead", indicating
-	// the old caps struct. Since the struct-to-JSON code has never included
-	// 'omitempty', we can safely assume that the field is ALWAYS present in
-	// old versions of the JSON.
-	if strings.Contains(string(aux.Caps), "FallBackRead") {
+func (c *Capabilities) UnmarshalJSON(data []byte) error {
+	// Check if it's the old format by looking for a unique field, e.g., "FallBackRead"
+	if strings.Contains(string(data), "FallBackRead") {
+		// Detected old JSON format, so unmarshal into OldCapabilities
 		var oldCaps OldCapabilities
-		if err := json.Unmarshal(aux.Caps, &oldCaps); err != nil {
+		if err := json.Unmarshal(data, &oldCaps); err != nil {
 			return err
 		}
 
-		// Map old capabilities to new capabilities
-		n.Caps.PublicReads = oldCaps.PublicRead
-		n.Caps.Reads = oldCaps.Read
-		n.Caps.Writes = oldCaps.Write
-		n.Caps.Listings = oldCaps.Listing
-		n.Caps.DirectReads = oldCaps.FallBackRead
+		// Map the old fields to the new struct
+		c.PublicReads = oldCaps.PublicRead
+		c.Reads = oldCaps.Read
+		c.Writes = oldCaps.Write
+		c.Listings = oldCaps.Listing
+		c.DirectReads = oldCaps.FallBackRead
 	} else {
-		if err := json.Unmarshal(aux.Caps, &n.Caps); err != nil {
+		// Assume it's the new JSON format and unmarshal directly into Capabilities
+		type Alias Capabilities // Create an alias to avoid recursive calls to UnmarshalJSON
+		var newCaps Alias
+		if err := json.Unmarshal(data, &newCaps); err != nil {
 			return err
 		}
+		*c = Capabilities(newCaps) // Copy unmarshalled values back to the original struct
 	}
 
 	return nil
