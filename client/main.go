@@ -309,7 +309,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 
 	fileInfos, err = listHttp(pUrl, dirResp, token)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to do the list")
+		return nil, errors.Wrap(err, "failed to perform list request")
 	}
 
 	return fileInfos, nil
