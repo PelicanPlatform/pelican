@@ -321,17 +321,23 @@ func TestStashPluginMain(t *testing.T) {
 // - An appropriate message indicating the directory upload failure is returned in the corresponding classad.
 func TestInfileUploadWithDirAndFiles(t *testing.T) {
 
+	server_utils.ResetTestState()
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+
 	if os.Getenv("RUN_STASHPLUGIN") == "1" {
+		viper.Set("Logging.Level", "debug")
+		viper.Set("TLSSkipVerify", true)
+
+		if err := config.PrintConfig(); err != nil {
+			return
+		}
 		infile := os.Getenv("TEMP_INFILE")
 		outfile := os.Getenv("TEMP_OUTFILE")
 		args := []string{"-upload", "-infile", infile, "-outfile", outfile}
 		stashPluginMain(args)
 	}
-
-	server_utils.ResetTestState()
-	t.Cleanup(func() {
-		server_utils.ResetTestState()
-	})
 
 	oldPrefix, err := config.SetPreferredPrefix(config.StashPrefix)
 	assert.NoError(t, err)
@@ -363,6 +369,7 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 	defer tempObject2.Close()
 
 	viper.Set("Origin.EnablePublicReads", true)
+	viper.Set("TLSSkipVerify", true)
 	// Since we have the prefix as STASH, we need to unset various osg-htc.org URLs to
 	// avoid real web lookups.
 	viper.Set("Federation.DiscoveryUrl", "")
@@ -428,10 +435,14 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=TestInfileUploadWithDirAndFiles")
 	cmd.Env = append(os.Environ(), "RUN_STASHPLUGIN=1", "TEMP_INFILE="+tempInfile.Name(), "TEMP_OUTFILE="+tempOutfilePath, "BEARER_TOKEN="+token)
 
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
-
 	err = cmd.Run()
+
+	output := strings.Replace(stderr.String(), "\\\\", "\\", -1)
+	t.Log("Stderr of the Plugin Subprocess Start\n", output, "\nStderr of the Plugin Subprocess End\n")
 
 	expectedMessage := "Pelican Client Error: the provided path '" + tempUploadDir + "' is a directory, but a file is expected"
 
