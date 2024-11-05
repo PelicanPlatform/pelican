@@ -2155,8 +2155,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	} else {
 
 		if fileInfo.IsDir() {
-			log.Errorln("The given path", transfer.localPath, "is a directory. Use --recursive or -r flag if using the pelican object command for directories")
-			err := errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected; use --recursive or -r flag if using the pelican object command for directories")
+			err := errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected")
 			transferResult.Error = err
 			return transferResult, err
 		}

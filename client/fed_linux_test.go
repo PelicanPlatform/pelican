@@ -835,3 +835,91 @@ func TestSyncDownload(t *testing.T) {
 		require.Equal(t, newTestFileContent, string(contentBytes))
 	})
 }
+
+// This test verifies the behavior when a directory path is passed to the object put command without the recursive option.
+// In this scenario, an appropriate error message should be logged, and no directory or file should be created at the destination.
+func TestObjectPutNonRecursiveDirPath(t *testing.T) {
+	// Create instance of test federation
+	server_utils.ResetTestState()
+
+	fed := fed_test_utils.NewFedTest(t, mixedAuthOriginCfg)
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
+
+	te, err := client.NewTransferEngine(fed.Ctx)
+	require.NoError(t, err)
+
+	// Create a token file
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+
+	tokenConfig := token.NewWLCGToken()
+	tokenConfig.Lifetime = time.Minute
+	tokenConfig.Issuer = issuer
+	tokenConfig.Subject = "origin"
+	tokenConfig.AddAudienceAny()
+	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
+	token, err := tokenConfig.CreateToken()
+	require.NoError(t, err)
+	tempToken, err := os.CreateTemp(t.TempDir(), "token")
+	require.NoError(t, err, "Error creating temp token file")
+	defer os.Remove(tempToken.Name())
+	_, err = tempToken.WriteString(token)
+	require.NoError(t, err, "Error writing to temp token file")
+	tempToken.Close()
+
+	// Disable progress bars to not reuse the same mpb instance
+	viper.Set("Logging.DisableProgressBars", true)
+
+	tempDir, err := os.MkdirTemp("", "UploadDir")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+	permissions := os.FileMode(0755)
+	err = os.Chmod(tempDir, permissions)
+	require.NoError(t, err)
+
+	t.Run("testObjectPutNonRecursiveDirPath", func(t *testing.T) {
+
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		require.NoError(t, err)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
+
+		for _, export := range fed.Exports {
+			tempPath := tempDir
+			dirName := filepath.Base(tempPath)
+			uploadUrl := fmt.Sprintf("pelican://%s%s/%s/%s", discoveryUrl.Host,
+				export.FederationPrefix, "osdf_osdf", dirName)
+
+			// Upload the file with PUT with recursive bool set to false
+			_, err := client.DoPut(fed.Ctx, tempDir, uploadUrl, false, client.WithTokenLocation(tempToken.Name()))
+
+			require.Error(t, err, "Expected an error when passing a dir path to object put command without recursive option set")
+			expectedMessage := "the provided path '" + tempPath + "' is a directory, but a file is expected"
+			require.Contains(t, err.Error(), expectedMessage, "Error message did not match expected text")
+
+			// Check if any file is created at the destination by using get
+			if export.Capabilities.PublicReads {
+				_, err = client.DoGet(fed.Ctx, uploadUrl, t.TempDir(), false)
+			} else {
+				_, err = client.DoGet(fed.Ctx, uploadUrl, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
+			}
+
+			require.Error(t, err, "Expected an error when attempting to find a non-existent object")
+			require.Contains(t, err.Error(), "server returned 404 Not Found", "Error message did not match expected text")
+
+		}
+	})
+
+	t.Cleanup(func() {
+		if err := te.Shutdown(); err != nil {
+			log.Errorln("Failure when shutting down transfer engine:", err)
+		}
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		server_utils.ResetTestState()
+
+	})
+}
