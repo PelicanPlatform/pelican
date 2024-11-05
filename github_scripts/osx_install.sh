@@ -23,6 +23,10 @@ scriptdir=$PWD/`dirname $0`
 
 brew install minio ninja coreutils
 
+# The new macos-latest runner has some issues with /usr/local/<lib/include>. Adjust perms ahead of time
+sudo mkdir -p /usr/local/lib && sudo mkdir -p /usr/local/include
+sudo chmod -R 777 /usr/local && sudo chown -R $(whoami):admin /usr/local
+
 mkdir dependencies
 pushd dependencies
 
