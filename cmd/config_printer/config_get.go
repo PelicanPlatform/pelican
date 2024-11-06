@@ -45,6 +45,16 @@ func configGet(cmd *cobra.Command, args []string) {
 
 	var matches []Match
 
+	containsComponent := func(components []string, c string) bool {
+		for _, component := range components {
+			//case-insensitive comparison
+			if strings.EqualFold(component, c) {
+				return true
+			}
+		}
+		return false
+	}
+
 	for key, valueStr := range configValues {
 		highlightedKey := key
 		highlightedValue := valueStr
@@ -64,8 +74,8 @@ func configGet(cmd *cobra.Command, args []string) {
 			if len(components) > 0 {
 				componentsCheckFailed := true
 				for _, c := range components {
-					_, tagExists := docParam.Tags[strings.ToLower(c)]
-					if tagExists {
+
+					if containsComponent(docParam.Components, c) {
 						componentsCheckFailed = false
 						break
 					}

@@ -77,7 +77,7 @@ func printConfig(configData interface{}, format string) {
 }
 
 func formatValue(value interface{}) string {
-	if value == nil {
+	if value == nil || value == "none" {
 		return "none"
 	}
 

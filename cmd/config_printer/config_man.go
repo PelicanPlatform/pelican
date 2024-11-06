@@ -51,7 +51,26 @@ func configMan(cmd *cobra.Command, args []string) {
 	fmt.Printf("%s %s\n", labelColor.Sprint("Parameter:"), paramColor.Sprint(matchedParam.Name))
 	fmt.Printf("%s %s\n", labelColor.Sprint("Type:"), matchedParam.Type)
 	fmt.Printf("%s %s\n", labelColor.Sprint("Default:"), formatValue(matchedParam.Default))
-	fmt.Printf("%s %s\n", labelColor.Sprint("Tags:"), formatValue(matchedParam.Tags))
+
+	if matchedParam.RootDefault != nil {
+		fmt.Printf("%s %s\n", labelColor.Sprint("Root Default:"), formatValue(matchedParam.RootDefault))
+	}
+	if matchedParam.OsdfDefault != nil {
+		fmt.Printf("%s %s\n", labelColor.Sprint("OSDF Default:"), formatValue(matchedParam.OsdfDefault))
+	}
+
+	if matchedParam.Deprecated {
+		fmt.Printf("%s %v\n", labelColor.Sprint("Deprecated:"), formatValue(matchedParam.Deprecated))
+	}
+	if matchedParam.ReplacedBy != nil {
+		fmt.Printf("%s %s\n", labelColor.Sprint("Replaced By:"), formatValue(matchedParam.ReplacedBy))
+	}
+	if matchedParam.Hidden {
+		fmt.Printf("%s %v\n", labelColor.Sprint("Hidden:"), formatValue(matchedParam.Hidden))
+	}
+
+	fmt.Printf("%s %s\n", labelColor.Sprint("Components:"), formatValue(matchedParam.Components))
+
 	fmt.Printf("%s\n\n", labelColor.Sprint("Description:"))
 	renderedDescription, _ := glamour.Render(matchedParam.Description, "dark")
 	fmt.Println(renderedDescription)
