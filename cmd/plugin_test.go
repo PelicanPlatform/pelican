@@ -313,12 +313,11 @@ func TestStashPluginMain(t *testing.T) {
 	assert.Contains(t, output, amountDownloaded)
 }
 
-// This test addresses the issue mentioned in issue #1645. It creates a directory containing two files.
-// The paths of both files and the directory itself (without any recursive option) are added to the infile,
-// which is then passed to the plugin for upload. The test verifies the following:
+// This test creates a directory containing two files, adds the paths of both files and the directory itself (without any recursive option) to the infile, and then passes it to the plugin for upload.
+// The test then verifies the following:
 // - Both files are successfully uploaded.
 // - The directory itself is not uploaded, and no empty file with the directory name is created at the destination.
-// - An appropriate message indicating the directory upload failure is returned in the corresponding classad.
+// - An appropriate message indicating the directory upload failure is returned in the corresponding resultad.
 func TestInfileUploadWithDirAndFiles(t *testing.T) {
 
 	server_utils.ResetTestState()
