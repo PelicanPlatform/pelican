@@ -117,7 +117,7 @@ type (
 		MetaLocations                    []string
 		LocalRoot                        string
 		PSSOrigin                        string
-		Prefetch                         int
+		BlocksToPrefetch                 int
 		Concurrency                      int
 		X509ClientAuthenticationPrefixes []string
 	}

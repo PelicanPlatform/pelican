@@ -65,6 +65,7 @@ Cache:
   SelfTestInterval: 15s
   LowWatermark: 90
   HighWaterMark: 95
+  BlocksToPrefetch: 0
 LocalCache:
   HighWaterMarkPercentage: 95
   LowWaterMarkPercentage: 85

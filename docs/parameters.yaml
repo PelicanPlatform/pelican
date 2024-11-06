@@ -1240,9 +1240,11 @@ type: bool
 default: false
 components: ["cache"]
 ---
-name: Cache.Prefetch
+name: Cache.BlocksToPrefetch
 description: |+
-  The number of blocks the cache will prefetch per file
+  The number of 1 megabyte blocks the cache will read ahead when recieving requests. This will put the data in the cache
+  potentially before it is needed and reduce the latency to the client when a request is made. However, it can also cause
+  many extra requests to an origin and potentially overload it when unnessesary. As such, this is turned off by default.
 type: int
 default: 0
 components: ["cache"]
