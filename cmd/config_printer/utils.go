@@ -25,6 +25,7 @@ import (
 	"reflect"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
 
@@ -32,50 +33,61 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
+// initClientAndServerConfig is used to initialize the values of a config instance.
+//
+// It takes a Viper instance, populates the client and server parameters, unmarshals it into
+// a config struct, and returns it.
 func initClientAndServerConfig(v *viper.Viper) *param.Config {
-	err := config.SetClientDefaults(v)
-	if err != nil {
-		fmt.Println("Error:", err)
+	if err := config.SetClientDefaults(v); err != nil {
+		log.Errorf("Error setting client defaults: %v", err)
 	}
-	err = config.SetServerDefaults(v)
-	if err != nil {
-		fmt.Println("Error:", err)
+	if err := config.SetServerDefaults(v); err != nil {
+		log.Errorf("Error setting server defaults: %v", err)
 	}
 
 	if v == viper.GetViper() {
 		globalFedInfo, globalFedErr := config.GetFederation(context.Background())
 		if globalFedErr != nil {
-			fmt.Printf("Error: %v", globalFedErr)
+			log.Errorf("Error getting federation info: %v", globalFedErr)
 		}
 		config.SetFederation(globalFedInfo)
 	}
 
 	exapandedConfig, err := param.UnmarshalConfig(v)
 	if err != nil {
-		fmt.Println("Error:", err)
+		log.Errorf("Error unmarshaling config: %v", err)
 	}
 	return exapandedConfig
 }
 
+// printConfig is used to print a config.
+//
+// It takes as input a config instance of type interface{} (not necessarily a full Config struct)
+// and another parameter, format, which can be "yaml" or "json". It then prints the config in the
+// corresponding format.
 func printConfig(configData interface{}, format string) {
 	switch format {
 	case "yaml":
-		yamlData, err := yaml.Marshal(configData)
-		if err != nil {
-			fmt.Printf("Error marshaling config to YAML: %v", err)
+		if yamlData, err := yaml.Marshal(configData); err != nil {
+			log.Errorf("Error marshaling config to YAML: %v", err)
+		} else {
+			fmt.Println(string(yamlData))
 		}
-		fmt.Println(string(yamlData))
 	case "json":
-		jsonData, err := json.MarshalIndent(configData, "", "  ")
-		if err != nil {
-			fmt.Printf("Error marshaling config to JSON: %v", err)
+		if jsonData, err := json.MarshalIndent(configData, "", "  "); err != nil {
+			log.Errorf("Error marshaling config to JSON: %v", err)
+		} else {
+			fmt.Println(string(jsonData))
 		}
-		fmt.Println(string(jsonData))
 	default:
-		fmt.Printf("Unsupported format: %s. Use 'yaml' or 'json'.", format)
+		log.Errorf("Unsupported format: %s. Use 'yaml' or 'json'.", format)
 	}
 }
 
+// formatValue formats values appropriately for printing.
+//
+// It renders values of different kinds for printing. For example, a slice `[]int{1, 2, 3, 4}`
+// would be formatted as "[1,2,3,4]".
 func formatValue(value interface{}) string {
 	if value == nil || value == "none" {
 		return "none"

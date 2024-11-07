@@ -761,6 +761,7 @@ func setWebConfigOverride(v *viper.Viper, configPath string) error {
 	return nil
 }
 
+// For the given Viper instance, load up the default YAML files.
 func SetBaseDefaultsInConfig(v *viper.Viper) {
 	//Load defaults.yaml
 	v.SetConfigType("yaml")
@@ -783,6 +784,8 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 	}
 
 }
+
+// For the given Viper instance, set the default config directory.
 func InitConfigDir(v *viper.Viper) error {
 
 	configDir := v.GetString("ConfigDir")
@@ -846,17 +849,15 @@ func InitConfig() {
 		dir := filepath.Dir(logLocation)
 		if dir != "" {
 			if err := os.MkdirAll(dir, 0640); err != nil {
-				log.Errorf("Failed to access/create specified directory. Error: %v", err)
-				os.Exit(1)
+				cobra.CheckErr(fmt.Errorf("failed to access/create specified directory: %w", err))
 			}
 		}
-		// Note: do not need to close the file, logrus does it for us
+
+		// Note: logrus handles file closure, so no need to close manually
 		f, err := os.OpenFile(logLocation, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
 		if err != nil {
-			log.Errorf("Failed to access specified log file. Error: %v", err)
-			os.Exit(1)
+			cobra.CheckErr(fmt.Errorf("failed to access specified log file: %w", err))
 		}
-
 		fmt.Fprintf(os.Stderr, "Logging.LogLocation is set to %s. All logs are redirected to the log file.\n", logLocation)
 		log.SetOutput(f)
 	}
@@ -886,8 +887,7 @@ func InitConfig() {
 		err = setupTranslation()
 	})
 	if err != nil {
-		log.Errorln("Failed to set up translation for the validator: ", err.Error())
-		os.Exit(1)
+		cobra.CheckErr(fmt.Errorf("failed to set up translation for the validator: %w", err))
 	}
 }
 
@@ -1127,294 +1127,51 @@ func SetServerDefaults(v *viper.Viper) error {
 	return err
 }
 
-// // Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
-// // Note not all configurations are supported: currently, if you enable both cache and origin then an error
-// // is thrown
-// func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
-
-// 	setEnabledServer(currentServers)
-// 	err := SetServerDefaults(viper.GetViper())
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	webConfigPath := viper.GetString("Server.WebConfigFile")
-// 	if webConfigPath != "" {
-// 		if err = os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
-// 			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
-// 		}
-// 	}
-// 	if err := setWebConfigOverride(viper.GetViper(), webConfigPath); err != nil {
-// 		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
-// 	}
-// 	if param.Cache_DataLocation.IsSet() {
-// 		log.Warningf("Deprecated configuration key %s is set. Please migrate to use %s instead", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
-// 		log.Warningf("Will attempt to use the value of %s as default for %s", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
-// 	}
-
-// 	if !IsRootExecution() {
-// 		var runtimeDir string
-// 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
-// 			runtimeDir = filepath.Join(userRuntimeDir, "pelican")
-// 			err := os.MkdirAll(runtimeDir, 0750)
-// 			if err != nil {
-// 				return err
-// 			}
-// 		} else {
-// 			var err error
-// 			runtimeDir, err = os.MkdirTemp("", "pelican-xrootd-*")
-// 			if err != nil {
-// 				return err
-// 			}
-// 			cleanupDirOnShutdown(ctx, runtimeDir)
-// 		}
-// 		if !viper.IsSet("Cache.RunLocation") && !viper.IsSet("Origin.RunLocation") && viper.IsSet("Xrootd.RunLocation") {
-// 			return errors.New("Xrootd.RunLocation is set, but both modules are enabled.  Please set Cache.RunLocation and Origin.RunLocation or disable Xrootd.RunLocation so the default location can be used.")
-// 		}
-// 	}
-
-// 	err = os.MkdirAll(param.Monitoring_DataLocation.GetString(), 0750)
-// 	if err != nil {
-// 		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
-// 	}
-
-// 	err = os.MkdirAll(param.Shoveler_QueueDirectory.GetString(), 0750)
-// 	if err != nil {
-// 		return errors.Wrapf(err, "Failure when creating a directory for the shoveler on-disk queue")
-// 	}
-// 	if currentServers.IsEnabled(server_structs.OriginType) {
-// 		ost := param.Origin_StorageType.GetString()
-// 		switch ost {
-// 		case "https":
-// 			httpSvcUrl := param.Origin_HttpServiceUrl.GetString()
-// 			if httpSvcUrl == "" {
-// 				return errors.New("Origin.HTTPServiceUrl may not be empty when the origin is configured with an https backend")
-// 			}
-// 			_, err := url.Parse(httpSvcUrl)
-// 			if err != nil {
-// 				return errors.Wrap(err, "unable to parse Origin.HTTPServiceUrl as a URL")
-// 			}
-// 		case "globus":
-// 			pvd, err := GetOIDCProdiver()
-// 			if err != nil || pvd != Globus {
-// 				log.Info("Server OIDC provider is not Globus. Use Origin.GlobusClientIDFile instead")
-// 			} else {
-// 				// OIDC provider is globus
-// 				break
-// 			}
-// 			// Check if ClientID and ClientSecret are valid
-// 			clientIDPath := param.Origin_GlobusClientIDFile.GetString()
-// 			clientSecretPath := param.Origin_GlobusClientSecretFile.GetString()
-// 			if clientIDPath == "" {
-// 				return errors.New("Origin.GlobusClientIDFile may not be empty with Globus storage backend ")
-// 			}
-// 			_, err = os.Stat(clientIDPath)
-// 			if err != nil {
-// 				return errors.Wrap(err, "Origin.GlobusClientIDFile is not a valid filepath")
-// 			}
-// 			if clientSecretPath == "" {
-// 				return errors.New("Origin.GlobusClientSecretFile may not be empty with Globus storage backend ")
-// 			}
-// 			_, err = os.Stat(clientSecretPath)
-// 			if err != nil {
-// 				return errors.Wrap(err, "Origin.GlobusClientSecretFile is not a valid filepath")
-// 			}
-// 		case "xroot":
-// 			xrootSvcUrl := param.Origin_XRootServiceUrl.GetString()
-// 			if xrootSvcUrl == "" {
-// 				return errors.New("Origin.XRootServiceUrl may not be empty when the origin is configured with an xroot backend")
-// 			}
-// 			_, err := url.Parse(xrootSvcUrl)
-// 			if err != nil {
-// 				return errors.Wrap(err, "unable to parse Origin.XrootServiceUrl as a URL")
-// 			}
-// 		case "s3":
-// 			s3SvcUrl := param.Origin_S3ServiceUrl.GetString()
-// 			if s3SvcUrl == "" {
-// 				return errors.New("Origin.S3ServiceUrl may not be empty when the origin is configured with an s3 backend")
-// 			}
-// 			_, err := url.Parse(s3SvcUrl)
-// 			if err != nil {
-// 				return errors.Wrap(err, "unable to parse Origin.S3ServiceUrl as a URL")
-// 			}
-// 		}
-
-// 		if ost != "posix" {
-// 			if param.Origin_SelfTest.GetBool() {
-// 				if viper.IsSet("Origin.SelfTest") {
-// 					log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-// 				}
-// 				viper.Set(param.Origin_SelfTest.GetName(), false)
-// 			}
-// 			if param.Origin_DirectorTest.GetBool() {
-// 				if viper.IsSet("Origin.DirectorTest") {
-// 					log.Warning("Origin.DirectorTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-// 				}
-// 				viper.Set(param.Origin_DirectorTest.GetName(), false)
-// 			}
-// 		}
-// 	}
-
-// 	if currentServers.IsEnabled(server_structs.CacheType) && !viper.IsSet("Cache.Port") && !viper.IsSet("Xrootd.Port") {
-// 		return errors.New("the configuration Cache.Port is not set but the Cache module is enabled.  Please set Cache.Port")
-// 	}
-// 	if currentServers.IsEnabled(server_structs.OriginType) && !viper.IsSet("Origin.Port") && !viper.IsSet("Xrootd.Port") {
-// 		return errors.New("the configuration Origin.Port is not set but the Origin module is enabled.  Please set Origin.Port")
-// 	}
-
-// 	if currentServers.IsEnabled(server_structs.CacheType) && currentServers.IsEnabled(server_structs.OriginType) && viper.GetInt("Cache.Port") == viper.GetInt("Origin.Port") && viper.IsSet("Xrootd.Port") {
-// 		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled.  Please set both variables")
-// 	}
-
-// 	if param.Cache_LowWatermark.IsSet() || param.Cache_HighWaterMark.IsSet() {
-// 		lowWmStr := param.Cache_LowWatermark.GetString()
-// 		highWmStr := param.Cache_HighWaterMark.GetString()
-// 		ok, highWmNum, err := checkWatermark(highWmStr)
-// 		if !ok && err != nil {
-// 			return errors.Wrap(err, "invalid Cache.HighWaterMark value")
-// 		}
-// 		ok, lowWmNum, err := checkWatermark(lowWmStr)
-// 		if !ok && err != nil {
-// 			return errors.Wrap(err, "invalid Cache.LowWatermark value")
-// 		}
-// 		if lowWmNum >= highWmNum {
-// 			return fmt.Errorf("invalid Cache.HighWaterMark and  Cache.LowWatermark values. Cache.HighWaterMark must be greater than Cache.LowWaterMark. Got %s, %s", highWmStr, lowWmStr)
-// 		}
-// 	}
-
-// 	if currentServers.IsEnabled(server_structs.DirectorType) {
-// 		viper.SetDefault("Federation.DirectorUrl", param.Server_ExternalWebUrl.GetString())
-// 		minStatRes := param.Director_MinStatResponse.GetInt()
-// 		maxStatRes := param.Director_MaxStatResponse.GetInt()
-// 		if minStatRes <= 0 || maxStatRes <= 0 {
-// 			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse and MinStatResponse must be positive integers")
-// 		}
-// 		if maxStatRes < minStatRes {
-// 			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
-// 		}
-
-// 		switch s := (server_structs.SortType)(param.Director_CacheSortMethod.GetString()); s {
-// 		case server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType:
-// 			break
-// 		case server_structs.SortType(""):
-// 			viper.Set("Director.CacheSortMethod", server_structs.DistanceType)
-// 		default:
-// 			return errors.New(fmt.Sprintf("Invalid Director.CacheSortMethod. Must be one of '%s', '%s', '%s', or '%s', but you configured '%s'.",
-// 				server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType, s))
-// 		}
-// 	} else {
-// 		viper.SetDefault("Federation.DirectorUrl", "")
-// 	}
-
-// 	if currentServers.IsEnabled(server_structs.RegistryType) {
-// 		viper.SetDefault("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
-// 	} else {
-// 		viper.SetDefault("Federation.RegistryUrl", "")
-// 	}
-
-// 	if currentServers.IsEnabled(server_structs.BrokerType) {
-// 		viper.SetDefault("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
-// 	} else {
-// 		viper.SetDefault("Federation.BrokerURL", "")
-// 	}
-
-// 	tokenRefreshInterval := param.Monitoring_TokenRefreshInterval.GetDuration()
-// 	tokenExpiresIn := param.Monitoring_TokenExpiresIn.GetDuration()
-
-// 	if tokenExpiresIn == 0 || tokenRefreshInterval == 0 || tokenRefreshInterval > tokenExpiresIn {
-// 		viper.Set("Monitoring.TokenRefreshInterval", time.Minute*5)
-// 		viper.Set("Monitoring.TokenExpiresIn", time.Hour*1)
-// 		log.Warningln("Invalid Monitoring.TokenRefreshInterval or Monitoring.TokenExpiresIn. Fallback to 5m for refresh interval and 1h for valid interval")
-// 	}
-
-// 	if currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType) {
-// 		if param.Xrootd_ConfigFile.IsSet() {
-// 			_, err := os.Stat(param.Xrootd_ConfigFile.GetString())
-// 			if err != nil {
-// 				return fmt.Errorf("fail to open the file Xrootd.ConfigFile at %s: %v", param.Xrootd_ConfigFile.GetString(), err)
-// 			}
-// 		}
-// 	}
-
-// 	// Unmarshal Viper config into a Go struct
-// 	unmarshalledConfig, err := param.UnmarshalConfig(viper.GetViper())
-// 	if err != nil || unmarshalledConfig == nil {
-// 		return err
-// 	}
-
-// 	// Reset issuerPrivateJWK to ensure test cases can use their own temp IssuerKey
-// 	ResetIssuerJWKPtr()
-
-// 	// As necessary, generate private keys, JWKS and corresponding certs
-
-// 	// Note: This function will generate a private key in the location stored by the viper var "IssuerKey"
-// 	// iff there isn't any valid private key present in that location
-// 	_, err = GetIssuerPublicJWKS()
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	// Check if we have required files in place to set up TLS, or we will generate them
-// 	err = GenerateCert()
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	// Generate the session secret and save it as the default value
-// 	if err := GenerateSessionSecret(); err != nil {
-// 		return err
-// 	}
-// 	// After we know we have the certs we need, call setupTransport (which uses those certs for its TLSConfig)
-// 	setupTransport()
-
-// 	// Setup CSRF middleware. To use it, you need to add this middleware to your chain
-// 	// of http handlers by calling config.GetCSRFHandler()
-// 	setupCSRFHandler()
-
-// 	// Sets up the server log filter mechanism
-// 	initFilterLogging()
-
-// 	// Sets (or resets) the federation info.  Unlike in clients, we do this at startup
-// 	// instead of deferring it
-// 	fedDiscoveryOnce = &sync.Once{}
-// 	if _, err := GetFederation(ctx); err != nil {
-// 		return err
-// 	}
-
-// 	return nil
-// }
-
 // Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
 
 	setEnabledServer(currentServers)
-	err := SetServerDefaults(viper.GetViper())
-	if err != nil {
+
+	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
+	// of Origin.StorageType to "posix" and Origin.SelfTest to true. After these defaults are applied,
+	// it becomes impossible to determine if the values are coming from the default settings or from user input.
+	if currentServers.IsEnabled(server_structs.OriginType) && param.Origin_StorageType.GetString() != "posix" {
+		if param.Origin_SelfTest.GetBool() {
+			log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			viper.Set(param.Origin_SelfTest.GetName(), false)
+		}
+		if param.Origin_DirectorTest.GetBool() {
+			log.Warning("Origin.DirectorTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
+			viper.Set(param.Origin_DirectorTest.GetName(), false)
+		}
+	}
+
+	if param.Cache_DataLocation.IsSet() {
+		log.Warningf("Deprecated configuration key %s is set. Please migrate to use %s instead", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
+		log.Warningf("Will attempt to use the value of %s as default for %s", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
+	}
+
+	if err := SetServerDefaults(viper.GetViper()); err != nil {
 		return err
 	}
 
 	webConfigPath := param.Server_WebConfigFile.GetString()
 	if webConfigPath != "" {
-		if err = os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
+		if err := os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
 			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
 		}
 	}
 	if err := setWebConfigOverride(viper.GetViper(), webConfigPath); err != nil {
 		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
 	}
-	if param.Cache_DataLocation.IsSet() {
-		log.Warningf("Deprecated configuration key %s is set. Please migrate to use %s instead", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
-		log.Warningf("Will attempt to use the value of %s as default for %s", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
-	}
 
 	if !IsRootExecution() {
 		var runtimeDir string
 		if userRuntimeDir := os.Getenv("XDG_RUNTIME_DIR"); userRuntimeDir != "" {
 			runtimeDir = filepath.Join(userRuntimeDir, "pelican")
-			err := os.MkdirAll(runtimeDir, 0750)
-			if err != nil {
+			if err := os.MkdirAll(runtimeDir, 0750); err != nil {
 				return err
 			}
 		} else {
@@ -1426,18 +1183,16 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			cleanupDirOnShutdown(ctx, runtimeDir)
 		}
 		if !param.Cache_RunLocation.IsSet() && !param.Origin_RunLocation.IsSet() && param.Xrootd_RunLocation.IsSet() {
-			return errors.New("Xrootd.RunLocation is set, but both modules are enabled.  Please set Cache.RunLocation and Origin.RunLocation or disable Xrootd.RunLocation so the default location can be used.")
+			return errors.New("Xrootd.RunLocation is set, but both modules are enabled. Please set Cache.RunLocation and Origin.RunLocation or disable Xrootd.RunLocation so the default location can be used.")
 		}
 	}
 
-	err = os.MkdirAll(param.Monitoring_DataLocation.GetString(), 0750)
-	if err != nil {
-		return errors.Wrapf(err, "Failure when creating a directory for the monitoring data")
+	if err := os.MkdirAll(param.Monitoring_DataLocation.GetString(), 0750); err != nil {
+		return errors.Wrapf(err, "failure when creating a directory for the monitoring data")
 	}
 
-	err = os.MkdirAll(param.Shoveler_QueueDirectory.GetString(), 0750)
-	if err != nil {
-		return errors.Wrapf(err, "Failure when creating a directory for the shoveler on-disk queue")
+	if err := os.MkdirAll(param.Shoveler_QueueDirectory.GetString(), 0750); err != nil {
+		return errors.Wrapf(err, "failure when creating a directory for the shoveler on-disk queue")
 	}
 	if currentServers.IsEnabled(server_structs.OriginType) {
 		ost := param.Origin_StorageType.GetString()
@@ -1495,32 +1250,17 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 				return errors.Wrap(err, "unable to parse Origin.S3ServiceUrl as a URL")
 			}
 		}
-
-		if ost != "posix" {
-			if param.Origin_SelfTest.GetBool() {
-				if param.Origin_SelfTest.IsSet() {
-					log.Warning("Origin.SelfTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-				}
-				viper.Set(param.Origin_SelfTest.GetName(), false)
-			}
-			if param.Origin_DirectorTest.GetBool() {
-				if param.Origin_DirectorTest.IsSet() {
-					log.Warning("Origin.DirectorTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
-				}
-				viper.Set(param.Origin_DirectorTest.GetName(), false)
-			}
-		}
 	}
 
 	if currentServers.IsEnabled(server_structs.CacheType) && !param.Cache_Port.IsSet() && !param.Xrootd_Port.IsSet() {
-		return errors.New("the configuration Cache.Port is not set but the Cache module is enabled.  Please set Cache.Port")
+		return errors.New("the configuration Cache.Port is not set but the Cache module is enabled. Please set Cache.Port")
 	}
 	if currentServers.IsEnabled(server_structs.OriginType) && !param.Origin_Port.IsSet() && !param.Xrootd_Port.IsSet() {
-		return errors.New("the configuration Origin.Port is not set but the Origin module is enabled.  Please set Origin.Port")
+		return errors.New("the configuration Origin.Port is not set but the Origin module is enabled. Please set Origin.Port")
 	}
 
 	if currentServers.IsEnabled(server_structs.CacheType) && currentServers.IsEnabled(server_structs.OriginType) && param.Cache_Port.GetInt() == param.Origin_Port.GetInt() && param.Xrootd_Port.IsSet() {
-		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled.  Please set both variables")
+		return errors.New("neither Cache.Port nor Origin.Port is set but both modules are enabled. Please set both variables")
 	}
 
 	if param.Cache_LowWatermark.IsSet() || param.Cache_HighWaterMark.IsSet() {
@@ -1535,7 +1275,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			return errors.Wrap(err, "invalid Cache.LowWatermark value")
 		}
 		if lowWmNum >= highWmNum {
-			return fmt.Errorf("invalid Cache.HighWaterMark and  Cache.LowWatermark values. Cache.HighWaterMark must be greater than Cache.LowWaterMark. Got %s, %s", highWmStr, lowWmStr)
+			return fmt.Errorf("invalid Cache.HighWaterMark and Cache.LowWatermark values. Cache.HighWaterMark must be greater than Cache.LowWaterMark. Got %s, %s", highWmStr, lowWmStr)
 		}
 	}
 
@@ -1544,10 +1284,10 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		minStatRes := param.Director_MinStatResponse.GetInt()
 		maxStatRes := param.Director_MaxStatResponse.GetInt()
 		if minStatRes <= 0 || maxStatRes <= 0 {
-			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse and MinStatResponse must be positive integers")
+			return errors.New("invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse and MinStatResponse must be positive integers")
 		}
 		if maxStatRes < minStatRes {
-			return errors.New("Invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
+			return errors.New("invalid Director.MinStatResponse and Director.MaxStatResponse. MaxStatResponse is less than MinStatResponse")
 		}
 
 		switch s := (server_structs.SortType)(param.Director_CacheSortMethod.GetString()); s {
@@ -1556,7 +1296,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		case server_structs.SortType(""):
 			viper.Set(param.Director_CacheSortMethod.GetName(), server_structs.DistanceType)
 		default:
-			return errors.New(fmt.Sprintf("Invalid Director.CacheSortMethod. Must be one of '%s', '%s', '%s', or '%s', but you configured '%s'.",
+			return errors.New(fmt.Sprintf("invalid Director.CacheSortMethod. Must be one of '%s', '%s', '%s', or '%s', but you configured '%s'.",
 				server_structs.DistanceType, server_structs.DistanceAndLoadType, server_structs.RandomType, server_structs.AdaptiveType, s))
 		}
 	} else {
@@ -1655,8 +1395,8 @@ func SetClientDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
-	upper_prefix := GetPreferredPrefix()
-	if upper_prefix == OsdfPrefix || upper_prefix == StashPrefix {
+	upperPrefix := GetPreferredPrefix()
+	if upperPrefix == OsdfPrefix || upperPrefix == StashPrefix {
 		v.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
 	}
 	// Set our default worker count
@@ -1667,8 +1407,8 @@ func SetClientDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), downloadLimit)
 	if v == viper.GetViper() {
 		viper.AutomaticEnv()
-		upper_prefix := GetPreferredPrefix()
-		viper.SetEnvPrefix(string(upper_prefix))
+		upperPrefix := GetPreferredPrefix()
+		viper.SetEnvPrefix(string(upperPrefix))
 
 		viper.SetConfigName("config")
 		viper.SetConfigType("yaml")
@@ -1679,7 +1419,7 @@ func SetClientDefaults(v *viper.Viper) error {
 			}
 			// Do not fail if the config file is missing
 		}
-		env_config_file := os.Getenv(upper_prefix.String() + "_CONFIG_FILE")
+		env_config_file := os.Getenv(upperPrefix.String() + "_CONFIG_FILE")
 		if len(env_config_file) != 0 {
 			fp, err := os.Open(env_config_file)
 			if err != nil && !os.IsNotExist(err) {
@@ -1760,9 +1500,7 @@ func SetClientDefaults(v *viper.Viper) error {
 }
 
 func InitClient() error {
-	err := SetClientDefaults(viper.GetViper())
-
-	if err != nil {
+	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
 	}
 

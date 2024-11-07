@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 
@@ -37,16 +37,13 @@ import (
 func setupMockConfig() error {
 	// Set default config
 	config.SetBaseDefaultsInConfig(viper.GetViper())
-	err := config.InitConfigDir(viper.GetViper())
-	if err != nil {
+	if err := config.InitConfigDir(viper.GetViper()); err != nil {
 		return err
 	}
-	err = config.SetServerDefaults(viper.GetViper())
-	if err != nil {
+	if err := config.SetServerDefaults(viper.GetViper()); err != nil {
 		return err
 	}
-	err = config.SetClientDefaults(viper.GetViper())
-	if err != nil {
+	if err := config.SetClientDefaults(viper.GetViper()); err != nil {
 		return err
 	}
 	// Setting Non-default values
@@ -58,6 +55,9 @@ func setupMockConfig() error {
 	return nil
 }
 
+// TestConfigGet verifies the correct working of the `config get` command.
+// It checks for the correct output with different numbers of search parameters
+// and ensures that the search space is adjusted based on the given flags.
 func TestConfigGet(t *testing.T) {
 
 	config.ResetConfig()
@@ -65,8 +65,7 @@ func TestConfigGet(t *testing.T) {
 		config.ResetConfig()
 	})
 
-	err := setupMockConfig()
-	if err != nil {
+	if err := setupMockConfig(); err != nil {
 		t.Fatalf("Error: %v", err)
 	}
 
@@ -108,7 +107,7 @@ func TestConfigGet(t *testing.T) {
 			// Read from the pipe concurrently
 			n, err := io.Copy(&buf, r)
 			if err != nil {
-				logrus.Errorf("failed to copy to output buffer: %v. Copied %d bytes before failure", err, n)
+				log.Errorf("failed to copy to output buffer: %v. Copied %d bytes before failure", err, n)
 			}
 			done <- struct{}{}
 		}()
@@ -135,7 +134,7 @@ func TestConfigGet(t *testing.T) {
 		}
 
 		if t.Failed() {
-			fmt.Println("Test Failed! Captured Output:\n", buf.String()) // Print full terminal output
+			log.Debugln("Test Failed! Captured Output:\n", buf.String()) // Print full terminal output
 		}
 	}
 
@@ -147,6 +146,9 @@ func TestConfigGet(t *testing.T) {
 	}
 }
 
+// TestConfigSummary verifies the correct working of the `config summary` command.
+// It checks that default values are not included in the output, while non-default
+// values set in the config are.
 func TestConfigSummary(t *testing.T) {
 
 	config.ResetConfig()
@@ -154,8 +156,7 @@ func TestConfigSummary(t *testing.T) {
 		config.ResetConfig()
 	})
 
-	err := setupMockConfig()
-	if err != nil {
+	if err := setupMockConfig(); err != nil {
 		t.Fatalf("Error: %v", err)
 	}
 
@@ -172,13 +173,13 @@ func TestConfigSummary(t *testing.T) {
 		// Read from the pipe concurrently
 		n, err := io.Copy(&buf, r)
 		if err != nil {
-			logrus.Errorf("failed to copy to output buffer: %v. Copied %d bytes before failure", err, n)
+			log.Errorf("failed to copy to output buffer: %v. Copied %d bytes before failure", err, n)
 		}
 		done <- struct{}{}
 	}()
 
 	ConfigCmd.SetArgs([]string{"summary"})
-	err = ConfigCmd.Execute()
+	err := ConfigCmd.Execute()
 	assert.NoError(t, err)
 
 	// Close the write end of the pipe and wait for the reader to finish
@@ -202,11 +203,12 @@ func TestConfigSummary(t *testing.T) {
 	}
 
 	if t.Failed() {
-		fmt.Println("Test Failed! Captured Output:\n", buf.String()) // Print full terminal output
+		log.Debugln("Test Failed! Captured Output:\n", buf.String()) // Print full terminal output
 	}
 
 }
 
+// TestFormatValue verifies the correct working of the formatValue function.
 func TestFormatValue(t *testing.T) {
 	tests := []struct {
 		input    interface{}

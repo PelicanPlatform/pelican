@@ -19,7 +19,12 @@
 package config_printer
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/spf13/cobra"
+
+	"github.com/pelicanplatform/pelican/docs"
 )
 
 var (
@@ -37,6 +42,12 @@ var (
 		Example: `# Dump all configuration parameters
 pelican config dump`,
 		Run: configDump,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if format != "yaml" && format != "json" {
+				return fmt.Errorf("unsupported format: %s. Use 'yaml' or 'json'", format)
+			}
+			return nil
+		},
 	}
 
 	configGetCmd = &cobra.Command{
@@ -50,6 +61,21 @@ The command outputs the results in a flattened format from the nested configurat
 # and relate to either 'origin' or 'cache', including deprecated parameters in the search space
 pelican config get log monitor -m origin -m cache --include-deprecated`,
 		Run: configGet,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			for _, comp := range components {
+				found := false
+				for _, recognized := range docs.RecognizedComponents {
+					if strings.EqualFold(comp, recognized) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return fmt.Errorf("unsupported module: %s. Please use a recognized module: %v", comp, docs.RecognizedComponents)
+				}
+			}
+			return nil
+		},
 	}
 
 	configManCmd = &cobra.Command{
@@ -61,6 +87,12 @@ including its type, default value, description, related components, and whether 
 		Example: `# View documentation for the Server.WebPort parameter
 pelican config describe server.webPort`,
 		Run: configMan,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return fmt.Errorf("please provide exactly one configuration parameter name")
+			}
+			return nil
+		},
 	}
 
 	configSummaryCmd = &cobra.Command{
@@ -71,6 +103,12 @@ pelican config describe server.webPort`,
 		Example: `# Show configuration parameters that are set differently from their default values
 pelican config summary`,
 		Run: configSummary,
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if format != "yaml" && format != "json" {
+				return fmt.Errorf("unsupported format: %s. Use 'yaml' or 'json'", format)
+			}
+			return nil
+		},
 	}
 
 	format            string
@@ -88,7 +126,7 @@ func init() {
 	configDumpCmd.Flags().StringVarP(&format, "format", "o", "yaml", "Output format (yaml or json)")
 
 	configGetCmd.Flags().StringArrayVarP(&components, "module", "m", []string{},
-		"Specify modules to filter the output of 'config get'. If multiple modules are provided, parameters related to any of the modules will be retrieved. If no modules are specified, no component-based filter is applied to the search space.")
+		"Specify modules to filter the output of `config get`. The recognized modules are `client`, `registry`, `director`, `origin`, `cache`, and `localcache`. Multiple modules can be specified at the same time, for example: `config get -m cache -m origin`. If multiple modules are provided, parameters related to any of the modules will be retrieved. If no modules are specified, no module-based filter is applied to the search space.")
 	configGetCmd.Flags().BoolVar(&includeHidden, "include-hidden", false, "Include hidden configuration parameters")
 	configGetCmd.Flags().BoolVar(&includeDeprecated, "include-deprecated", false, "Include deprecated configuration parameters")
 

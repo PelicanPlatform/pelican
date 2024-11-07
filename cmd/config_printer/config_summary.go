@@ -19,9 +19,9 @@
 package config_printer
 
 import (
-	"fmt"
 	"reflect"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -31,23 +31,22 @@ import (
 func configSummary(cmd *cobra.Command, args []string) {
 	defaultConfig := viper.New()
 	config.SetBaseDefaultsInConfig(defaultConfig)
-	err := config.InitConfigDir(defaultConfig)
-	if err != nil {
-		fmt.Printf("Error initializing config directory: %v\n", err)
+
+	if err := config.InitConfigDir(defaultConfig); err != nil {
+		log.Errorf("Error initializing config directory: %v", err)
 	}
 
 	defaultConfigMap := initClientAndServerConfig(defaultConfig)
-
 	currentConfigMap := initClientAndServerConfig(viper.GetViper())
 
-	diff := compareStructsAsym(currentConfigMap, defaultConfigMap)
-
-	if diff != nil {
+	if diff := compareStructsAsym(currentConfigMap, defaultConfigMap); diff != nil {
 		printConfig(diff, format)
 	}
 }
 
-// compareStructsAsym recursively iterates through the fields of two given config
+// compareStructsAsym is used to compare two config instances.
+//
+// It recursively iterates through the fields of the given config
 // instances, `v1` and `v2`. It generates a nested structure containing the parameters
 // in `v1` that have different corresponding values in `v2`.
 func compareStructsAsym(v1, v2 interface{}) interface{} {

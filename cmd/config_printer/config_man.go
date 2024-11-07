@@ -22,19 +22,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/glamour"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/docs"
-
-	"github.com/charmbracelet/glamour"
 )
 
 func configMan(cmd *cobra.Command, args []string) {
-	if len(args) == 0 {
-		fmt.Println("Please provide a configuration parameter name.")
-		return
-	}
 	paramName := args[0]
 
 	matchedParam, exists := docs.ParsedParameters[strings.ToLower(paramName)]
@@ -69,7 +64,7 @@ func configMan(cmd *cobra.Command, args []string) {
 		fmt.Printf("%s %v\n", labelColor.Sprint("Hidden:"), formatValue(matchedParam.Hidden))
 	}
 
-	fmt.Printf("%s %s\n", labelColor.Sprint("Components:"), formatValue(matchedParam.Components))
+	fmt.Printf("%s %s\n", labelColor.Sprint("Modules:"), formatValue(matchedParam.Components))
 
 	fmt.Printf("%s\n\n", labelColor.Sprint("Description:"))
 	renderedDescription, _ := glamour.Render(matchedParam.Description, "dark")
