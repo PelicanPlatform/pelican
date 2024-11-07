@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 func InitServerOSDefaults(v *viper.Viper) error {
@@ -33,10 +35,10 @@ func InitServerOSDefaults(v *viper.Viper) error {
 	// if Server_TLSCertificate (host certificate) is not explicitly set so that
 	// we can sign our host cert by our CA instead of self-signing
 	tlscaFile := filepath.Join(v.GetString("ConfigDir"), "certificates", "tlsca.pem")
-	v.SetDefault("Server.TLSCACertificateFile", tlscaFile)
+	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), tlscaFile)
 
 	tlscaKeyFile := filepath.Join(v.GetString("ConfigDir"), "certificates", "tlscakey.pem")
-	v.SetDefault("Server.TLSCAKey", tlscaKeyFile)
+	v.SetDefault(param.Server_TLSCAKey.GetName(), tlscaKeyFile)
 
 	if err := os.MkdirAll(filepath.Dir(tlscaFile), 0755); err != nil {
 		return err
