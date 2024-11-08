@@ -37,12 +37,14 @@ type Config struct {
 		LocalRoot string `mapstructure:"localroot" yaml:"LocalRoot"`
 		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
 		MetaLocations []string `mapstructure:"metalocations" yaml:"MetaLocations"`
+		NamespaceLocation string `mapstructure:"namespacelocation" yaml:"NamespaceLocation"`
 		PermittedNamespaces []string `mapstructure:"permittednamespaces" yaml:"PermittedNamespaces"`
 		Port int `mapstructure:"port" yaml:"Port"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
 		SentinelLocation string `mapstructure:"sentinellocation" yaml:"SentinelLocation"`
+		StorageLocation string `mapstructure:"storagelocation" yaml:"StorageLocation"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
 	} `mapstructure:"cache" yaml:"Cache"`
@@ -341,12 +343,14 @@ type configWithType struct {
 		LocalRoot struct { Type string; Value string }
 		LowWatermark struct { Type string; Value string }
 		MetaLocations struct { Type string; Value []string }
+		NamespaceLocation struct { Type string; Value string }
 		PermittedNamespaces struct { Type string; Value []string }
 		Port struct { Type string; Value int }
 		RunLocation struct { Type string; Value string }
 		SelfTest struct { Type string; Value bool }
 		SelfTestInterval struct { Type string; Value time.Duration }
 		SentinelLocation struct { Type string; Value string }
+		StorageLocation struct { Type string; Value string }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 	}

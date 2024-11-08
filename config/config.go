@@ -952,18 +952,16 @@ func SetServerDefaults(v *viper.Viper) error {
 	if IsRootExecution() {
 		v.SetDefault(param.Origin_RunLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin"))
 		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "cache"))
-		// To ensure Cache.DataLocation still works, we default Cache.LocalRoot to Cache.DataLocation
-		// The logic is extracted from handleDeprecatedConfig as we manually set the default value here
-		v.SetDefault(param.Cache_DataLocation.GetName(), "/run/pelican/cache")
-		v.SetDefault(param.Cache_LocalRoot.GetName(), v.GetString(param.Cache_DataLocation.GetName()))
 
-		if v.IsSet(param.Cache_DataLocation.GetName()) {
-			v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_DataLocation.GetName()), "data")})
-			v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_DataLocation.GetName()), "meta")})
-		} else {
-			v.SetDefault(param.Cache_DataLocations.GetName(), []string{"/run/pelican/cache/data"})
-			v.SetDefault(param.Cache_MetaLocations.GetName(), []string{"/run/pelican/cache/meta"})
+		// Several deprecated keys point to Cache.StorageLocation, and by the time here we've already mapped those
+		// keys in handleDeprecatedConfig(). To prevent overriding potentially-mapped deprecated keys, we only re-set
+		// the default here if this key is not set.
+		if !v.IsSet(param.Cache_StorageLocation.GetName()) {
+			v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join("/run", "pelican", "cache"))
 		}
+		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(param.Cache_StorageLocation.GetString(), "namespace"))
+		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "data")})
+		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "meta")})
 
 		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join("/run", "pelican", "localcache"))
 		v.SetDefault(param.Origin_Multiuser.GetName(), true)
@@ -1011,18 +1009,17 @@ func SetServerDefaults(v *viper.Viper) error {
 		}
 
 		v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin", "globus"))
-		// To ensure Cache.DataLocation still works, we default Cache.LocalRoot to Cache.DataLocation
-		// The logic is extracted from handleDeprecatedConfig as we manually set the default value here
-		v.SetDefault(param.Cache_DataLocation.GetName(), filepath.Join(runtimeDir, "cache"))
-		v.SetDefault(param.Cache_LocalRoot.GetName(), v.GetString(param.Cache_DataLocation.GetName()))
 
-		if v.IsSet(param.Cache_DataLocation.GetName()) {
-			v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_DataLocation.GetName()), "data")})
-			v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(v.GetString(param.Cache_DataLocation.GetName()), "meta")})
-		} else {
-			v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(runtimeDir, "pelican/cache/data")})
-			v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(runtimeDir, "pelican/cache/meta")})
+		// Several deprecated keys point to Cache.StorageLocation, and by the time here we've already mapped those
+		// keys in handleDeprecatedConfig(). To prevent overriding potentially-mapped deprecated keys, we only re-set
+		// the default here if this key is not set.
+		if !viper.IsSet(param.Cache_StorageLocation.GetName()) {
+			viper.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join(runtimeDir, "cache"))
 		}
+		viper.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(param.Cache_StorageLocation.GetString(), "namespace"))
+		viper.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "data")})
+		viper.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "meta")})
+
 		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join(runtimeDir, "cache"))
 		v.SetDefault(param.Origin_Multiuser.GetName(), false)
 	}
@@ -1152,11 +1149,6 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			log.Warning("Origin.DirectorTest may not be enabled when the origin is configured with non-posix backends. Turning off...")
 			viper.Set(param.Origin_DirectorTest.GetName(), false)
 		}
-	}
-
-	if param.Cache_DataLocation.IsSet() {
-		log.Warningf("Deprecated configuration key %s is set. Please migrate to use %s instead", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
-		log.Warningf("Will attempt to use the value of %s as default for %s", param.Cache_DataLocation.GetName(), param.Cache_LocalRoot.GetName())
 	}
 
 	if err := SetServerDefaults(viper.GetViper()); err != nil {
