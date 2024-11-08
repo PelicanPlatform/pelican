@@ -66,7 +66,7 @@ func listAdvertisement(serverTypes []server_structs.ServerType) []*server_struct
 func checkFilter(serverName string) (bool, filterType) {
 	filteredServersMutex.RLock()
 	defer filteredServersMutex.RUnlock()
-	log.Debugln("Checking the filter applied on server", serverName, "Current filteredServers map:", filteredServers)
+	log.Debugf("Checking for a downtime filter applied to server %s", serverName)
 	status, exists := filteredServers[serverName]
 	// No filter entry
 	if !exists {
@@ -232,19 +232,19 @@ func ConfigFilterdServers() {
 		for _, sn := range param.Director_FilteredServers.GetStringSlice() {
 			filteredServers[sn] = permFiltered
 		}
-		log.Debugln("Loaded filtered servers config from Director.FilteredServers param", filteredServers)
+		log.Debugln("Loaded server downtime configuration from the Director.FilteredServers parameter:", filteredServers)
 	}
 
-	if param.Director_DbLocation.IsSet() {
-		persistedServerDowntimes, err := GetAllServerDowntimes()
+	if param.Director_DbLocation.GetString() != "" {
+		persistedServerDowntimes, err := getAllServerDowntimes()
 		if err != nil {
-			log.Error("Failed to read persisted ServerDowntimes from director db", err)
+			log.Error("Failed to read persisted server downtimes from director db", err)
 			return
 		}
 		for _, serverDowntime := range persistedServerDowntimes {
 			filteredServers[serverDowntime.Name] = serverDowntime.FilterType
 		}
-		log.Debugln("Loaded filtered servers config from director db's server_downtimes table, the final filteredServers var has the following value", filteredServers)
+		log.Debugln("Loaded filtered servers config from director db:", filteredServers)
 		// if a filtered server config rule is set in both Director.FilteredServers param and director db, the latter one will eventually be used
 	}
 }

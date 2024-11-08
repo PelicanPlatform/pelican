@@ -44,90 +44,114 @@ var db *gorm.DB
 //go:embed migrations/*.sql
 var embedMigrations embed.FS
 
+// Initialize the Director's sqlite database, which is used to persist information about server downtimes
 func InitializeDB() error {
 	dbPath := param.Director_DbLocation.GetString()
 	tdb, err := server_utils.InitSQLiteDB(dbPath)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to initialize the Director's sqlite database")
 	}
 	db = tdb
 	sqldb, err := db.DB()
 	if err != nil {
-		return errors.Wrapf(err, "Failed to get sql.DB from gorm DB: %s", dbPath)
+		return errors.Wrapf(err, "failed to get sql.DB from gorm DB: %s", dbPath)
 	}
 	// Run database migrations
 	if err := server_utils.MigrateDB(sqldb, embedMigrations); err != nil {
-		return err
+		return errors.Wrap(err, "failed to migrate the Director's sqlite database using embedded migration files")
 	}
 	return nil
 }
 
-func ShutdownDirectorDB() error {
+// Shut down the Director's sqlite database
+func shutdownDirectorDB() error {
 	return server_utils.ShutdownDB(db)
 }
 
-func CreateServerDowntime(name string, filterType filterType) error {
+// Create a new db entry representing the downtime info of a server
+func createServerDowntime(serverName string, filterType filterType) error {
 	id, err := uuid.NewV7()
 	if err != nil {
-		return errors.Wrap(err, "Unable to create new UUID for new entry in server status table")
+		return errors.Wrap(err, "unable to create new UUID for new entry in server status table")
 	}
 	serverDowntime := ServerDowntime{
 		UUID:       id.String(),
-		Name:       name,
+		Name:       serverName,
 		FilterType: filterType,
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
 
 	if err := db.Create(serverDowntime).Error; err != nil {
-		return err
+		return errors.Wrap(err, "unable to create server downtime table")
 	}
 	return nil
 }
 
-func GetServerDowntime(name string) (filterType, error) {
+// Retrieve the downtime info of a given server (filter applied to the server)
+func getServerDowntime(serverName string) (filterType, error) {
 	var serverDowntime ServerDowntime
-	err := db.First(&serverDowntime, "name = ?", name).Error
+	err := db.First(&serverDowntime, "name = ?", serverName).Error
 	if err != nil {
-		return "", err
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", errors.Wrapf(err, "%s is not found in the Director db", serverName)
+		}
+		return "", errors.Wrapf(err, "unable to get the downtime of %s", serverName)
 	}
 	return filterType(serverDowntime.FilterType), nil
 }
 
-func GetAllServerDowntimes() ([]ServerDowntime, error) {
+// Retrieve the downtime info of all servers saved in the Director's sqlite database
+func getAllServerDowntimes() ([]ServerDowntime, error) {
 	var statuses []ServerDowntime
 	result := db.Find(&statuses)
 
 	if result.Error != nil {
-		return nil, result.Error
+		return nil, errors.Wrap(result.Error, "unable to get the downtime of all servers")
 	}
 	return statuses, nil
 }
 
-// Set filterType of a given server. If the server doesn't exist in director db, create a new entry for it
-func SetServerDowntime(name string, filterType filterType) error {
+// Set the downtime info (filterType) of a given server
+func setServerDowntime(serverName string, filterType filterType) error {
 	var serverDowntime ServerDowntime
-	// slience the logger for this query because there's definitely an ErrRecordNotFound when a new downtime info inserted
-	err := db.Session(&gorm.Session{Logger: db.Logger.LogMode(logger.Silent)}).First(&serverDowntime, "name = ?", name).Error
+	// slience the logger for this query because there's definitely an ErrRecordNotFound when a new downtime info entry inserted
+	err := db.Session(&gorm.Session{Logger: db.Logger.LogMode(logger.Silent)}).First(&serverDowntime, "name = ?", serverName).Error
 
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return CreateServerDowntime(name, filterType)
-	} else if err != nil {
-		return errors.Wrap(err, "Error retrieving Server Status")
+	// If the server doesn't exist in director db, create a new entry for it
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return createServerDowntime(serverName, filterType)
+		}
+
+		return errors.Wrapf(err, "unable to retrieve downtime status for server %s", serverName)
 	}
 
 	serverDowntime.FilterType = filterType
 	serverDowntime.UpdatedAt = time.Now()
 
 	if err := db.Save(&serverDowntime).Error; err != nil {
-		return err
+		return errors.Wrap(err, "unable to update")
 	}
 	return nil
 }
 
-func DeleteServerDowntime(name string) error {
-	if err := db.Where("name = ?", name).Delete(&ServerDowntime{}).Error; err != nil {
-		return errors.Wrap(err, "Failed to delete an entry in Server Status table")
+// Define a function type for setServerDowntime
+type setServerDowntimeFunc func(string, filterType) error
+
+// Make the function a variable so it can be mocked in tests
+var setServerDowntimeFn setServerDowntimeFunc = setServerDowntime
+
+// Delete the downtime info of a given server from the Director's sqlite database
+func deleteServerDowntime(serverName string) error {
+	if err := db.Where("name = ?", serverName).Delete(&ServerDowntime{}).Error; err != nil {
+		return errors.Wrap(err, "failed to delete an entry in Server Status table")
 	}
 	return nil
 }
+
+// Define a function type for deleteServerDowntime
+type deleteServerDowntimeFunc func(string) error
+
+// Make the function a variable so it can be mocked in tests
+var deleteServerDowntimeFn deleteServerDowntimeFunc = deleteServerDowntime

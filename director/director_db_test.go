@@ -20,7 +20,7 @@ var (
 	}
 )
 
-func setupMockDirectorDB(t *testing.T) {
+func SetupMockDirectorDB(t *testing.T) {
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	db = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
@@ -28,8 +28,8 @@ func setupMockDirectorDB(t *testing.T) {
 	require.NoError(t, err, "Failed to migrate DB for Globus table")
 }
 
-func teardownMockDirectorDB(t *testing.T) {
-	err := ShutdownDirectorDB()
+func TeardownMockDirectorDB(t *testing.T) {
+	err := shutdownDirectorDB()
 	require.NoError(t, err, "Error tearing down mock director DB")
 }
 
@@ -39,44 +39,44 @@ func insertMockDBData(ss []ServerDowntime) error {
 
 func TestDirectorDBBasics(t *testing.T) {
 	server_utils.ResetTestState()
-	setupMockDirectorDB(t)
+	SetupMockDirectorDB(t)
 	t.Cleanup(func() {
-		teardownMockDirectorDB(t)
+		TeardownMockDirectorDB(t)
 	})
 	err := insertMockDBData(mockSS)
 	require.NoError(t, err)
 
 	t.Run("get-downtime", func(t *testing.T) {
-		filterType, err := GetServerDowntime(mockSS[1].Name)
+		filterType, err := getServerDowntime(mockSS[1].Name)
 		assert.Equal(t, filterType, permFiltered)
 		require.NoError(t, err)
 	})
 
 	t.Run("get-all-downtime", func(t *testing.T) {
-		statuses, err := GetAllServerDowntimes()
+		statuses, err := getAllServerDowntimes()
 		require.NoError(t, err)
 		assert.Len(t, statuses, len(mockSS))
 	})
 
 	t.Run("set-downtime", func(t *testing.T) {
-		err = SetServerDowntime(mockSS[1].Name, tempAllowed)
+		err = setServerDowntime(mockSS[1].Name, tempAllowed)
 		require.NoError(t, err)
-		filterType, err := GetServerDowntime(mockSS[1].Name)
+		filterType, err := getServerDowntime(mockSS[1].Name)
 		assert.Equal(t, filterType, tempAllowed)
 		require.NoError(t, err)
 	})
 
 	t.Run("duplicate-name-insert", func(t *testing.T) {
-		err := CreateServerDowntime(mockSS[1].Name, tempAllowed)
+		err := createServerDowntime(mockSS[1].Name, tempAllowed)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "UNIQUE constraint failed")
 	})
 
 	t.Run("delete-downtime-entry-from-directory-db", func(t *testing.T) {
-		err = DeleteServerDowntime(mockSS[0].Name)
+		err = deleteServerDowntime(mockSS[0].Name)
 		require.NoError(t, err, "Error deleting server status")
 
-		_, err = GetServerDowntime(mockSS[0].Name)
+		_, err = getServerDowntime(mockSS[0].Name)
 		assert.Error(t, err, "Expected error retrieving deleted server status")
 	})
 }

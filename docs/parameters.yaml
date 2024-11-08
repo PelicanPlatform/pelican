@@ -1245,7 +1245,7 @@ components: ["cache"]
 ############################
 name: Director.DbLocation
 description: |+
-  A filepath to the intended location of the director's database.
+  A filepath to the intended location of the director's database, where server downtime info is stored.
 type: filename
 root_default: /var/lib/pelican/director.sqlite
 default: $ConfigBase/director.sqlite
