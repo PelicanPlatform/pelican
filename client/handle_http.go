@@ -2153,6 +2153,13 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		ioreader = ap
 		sizer = ap
 	} else {
+
+		if fileInfo.IsDir() {
+			err := errors.New("the provided path '" + transfer.localPath + "' is a directory, but a file is expected")
+			transferResult.Error = err
+			return transferResult, err
+		}
+
 		// Try opening the file to send
 		file, err := os.Open(transfer.localPath)
 		if err != nil {

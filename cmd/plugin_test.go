@@ -56,6 +56,8 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 var (
@@ -309,6 +311,178 @@ func TestStashPluginMain(t *testing.T) {
 	assert.Contains(t, output, successfulDownloadMsg)
 	amountDownloaded := "Downloaded bytes: 17"
 	assert.Contains(t, output, amountDownloaded)
+}
+
+// This test creates a directory containing two files, adds the paths of both files and the directory itself (without any recursive option) to the infile, and then passes it to the plugin for upload.
+// The test then verifies the following:
+// - Both files are successfully uploaded.
+// - The directory itself is not uploaded, and no empty file with the directory name is created at the destination.
+// - An appropriate message indicating the directory upload failure is returned in the corresponding resultad.
+func TestInfileUploadWithDirAndFiles(t *testing.T) {
+
+	server_utils.ResetTestState()
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+
+	if os.Getenv("RUN_STASHPLUGIN") == "1" {
+		viper.Set("Logging.Level", "debug")
+		viper.Set("TLSSkipVerify", true)
+
+		if err := config.PrintConfig(); err != nil {
+			return
+		}
+		infile := os.Getenv("TEMP_INFILE")
+		outfile := os.Getenv("TEMP_OUTFILE")
+		args := []string{"-upload", "-infile", infile, "-outfile", outfile}
+		stashPluginMain(args)
+	}
+
+	oldPrefix, err := config.SetPreferredPrefix(config.StashPrefix)
+	assert.NoError(t, err)
+
+	defer func() {
+		_, err = config.SetPreferredPrefix(oldPrefix)
+		require.NoError(t, err)
+	}()
+
+	tempUploadDir, err := os.MkdirTemp("", "TempUploadDir")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempUploadDir)
+	permissions := os.FileMode(0755)
+	err = os.Chmod(tempUploadDir, permissions)
+	require.NoError(t, err)
+
+	tempObject1Content := "temp object 1 content"
+	tempObject1, err := os.Create(filepath.Join(tempUploadDir, "tempObject1"))
+	assert.NoError(t, err, "Error creating temp file")
+	_, err = tempObject1.WriteString(tempObject1Content)
+	assert.NoError(t, err, "Error writing to temp file")
+	defer tempObject1.Close()
+
+	tempObject2Content := "temp object 2 content"
+	tempObject2, err := os.Create(filepath.Join(tempUploadDir, "tempObject2"))
+	assert.NoError(t, err, "Error creating temp file")
+	_, err = tempObject2.WriteString(tempObject2Content)
+	assert.NoError(t, err, "Error writing to temp file")
+	defer tempObject2.Close()
+
+	viper.Set("Origin.EnablePublicReads", true)
+	viper.Set("TLSSkipVerify", true)
+	// Since we have the prefix as STASH, we need to unset various osg-htc.org URLs to
+	// avoid real web lookups.
+	viper.Set("Federation.DiscoveryUrl", "")
+	viper.Set("Xrootd.SummaryMonitoringHost", "")
+	viper.Set("Xrootd.DetailedMonitoringHost", "")
+	viper.Set("Logging.Level", "debug")
+	fed := FedTest{T: t}
+	fed.Spinup()
+	defer fed.Teardown()
+
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+
+	tokenConfig := token.NewWLCGToken()
+	tokenConfig.Lifetime = time.Minute
+	tokenConfig.Issuer = issuer
+	tokenConfig.Subject = "origin"
+	tokenConfig.AddAudienceAny()
+	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
+	token, err := tokenConfig.CreateToken()
+	require.NoError(t, err)
+	tempToken, err := os.CreateTemp(t.TempDir(), "token")
+	require.NoError(t, err, "Error creating temp token file")
+	defer os.Remove(tempToken.Name())
+	_, err = tempToken.WriteString(token)
+	require.NoError(t, err, "Error writing to temp token file")
+	tempToken.Close()
+
+	viper.Set("Logging.DisableProgressBars", true)
+	tempDir, err := os.MkdirTemp("", "TempDir")
+	require.NoError(t, err, "Error creating temp dir")
+	defer os.RemoveAll(tempDir)
+
+	tempInfile, err := os.Create(filepath.Join(tempDir, "tempInfile"))
+	require.NoError(t, err, "Error creating temp infile")
+	defer os.Remove(tempInfile.Name())
+
+	urlTemplate := "pelican://%s:%d/test/%s"
+	serverHostname := param.Server_Hostname.GetString()
+	serverWebPort := param.Server_WebPort.GetInt()
+
+	infileContent := fmt.Sprintf(
+		"[ Url = %s; LocalFileName = %s ]\n"+
+			"[ Url = %s; LocalFileName = %s ]\n"+
+			"[ Url = %s; LocalFileName = %s ]\n",
+		fmt.Sprintf(urlTemplate, serverHostname, serverWebPort, "tempObject1"), tempObject1.Name(),
+		fmt.Sprintf(urlTemplate, serverHostname, serverWebPort, "TempUploadDir"), tempUploadDir,
+		fmt.Sprintf(urlTemplate, serverHostname, serverWebPort, "tempObject2"), tempObject2.Name(),
+	)
+
+	_, err = tempInfile.WriteString(infileContent)
+	require.NoError(t, err, "Error writing to temp file")
+
+	err = tempInfile.Close()
+	require.NoError(t, err)
+
+	t.Logf("Infile contents for testing:\n%s", infileContent)
+
+	tempOutfilePath := filepath.Join(tempDir, "tempOutfile")
+
+	// Create a process to run the command (since stashPluginMain calls os.Exit(0))
+	cmd := exec.Command(os.Args[0], "-test.run=TestInfileUploadWithDirAndFiles")
+	cmd.Env = append(os.Environ(), "RUN_STASHPLUGIN=1", "TEMP_INFILE="+tempInfile.Name(), "TEMP_OUTFILE="+tempOutfilePath, "BEARER_TOKEN="+token)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	err = cmd.Run()
+
+	output := strings.Replace(stderr.String(), "\\\\", "\\", -1)
+	t.Log("Stderr of the Plugin Subprocess Start\n", output, "\nStderr of the Plugin Subprocess End\n")
+
+	expectedMessage := "Pelican Client Error: the provided path '" + tempUploadDir + "' is a directory, but a file is expected"
+
+	outfileContent, err := os.ReadFile(tempOutfilePath)
+	require.NoError(t, err, "Error reading Outfile")
+
+	t.Logf("Contents of generated outfile :\n%s", string(outfileContent))
+
+	assert.Contains(t, string(outfileContent), expectedMessage, "Expected message not found in Outfile")
+
+	entries, err := os.ReadDir(fed.OriginDir)
+	require.NoError(t, err)
+
+	foundTempObject1 := false
+	foundTempObject2 := false
+
+	for _, entry := range entries {
+		switch entry.Name() {
+		case "tempObject1":
+			if entry.Type().IsRegular() {
+				foundTempObject1 = true
+				content, err := os.ReadFile(filepath.Join(fed.OriginDir, entry.Name()))
+				require.NoError(t, err, "Error reading tempObject1")
+				assert.Equal(t, tempObject1Content, string(content), "tempObject1 does not contain the expected content")
+			}
+		case "tempObject2":
+			if entry.Type().IsRegular() {
+				foundTempObject2 = true
+				content, err := os.ReadFile(filepath.Join(fed.OriginDir, entry.Name()))
+				require.NoError(t, err, "Error reading tempObject2")
+				assert.Equal(t, tempObject2Content, string(content), "tempObject2 does not contain the expected content")
+			}
+		default:
+			// If any other file or directory is present, fail the test
+			t.Fatalf("Unexpected entry found in fed.OriginDir: %s", entry.Name())
+		}
+	}
+
+	assert.True(t, foundTempObject1, "Expected tempObject1 file to be present in fed.OriginDir")
+	assert.True(t, foundTempObject2, "Expected tempObject2 file to be present in fed.OriginDir")
+	assert.Equal(t, 2, len(entries), "Expected exactly 2 entries in fed.OriginDir")
 }
 
 // Test multiple downloads from the plugin
