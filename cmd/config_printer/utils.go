@@ -98,11 +98,11 @@ func formatValue(value interface{}) string {
 	case reflect.Map:
 		// Handle map[string]struct{} as a set
 		if rv.Type().Key().Kind() == reflect.String && rv.Type().Elem().Kind() == reflect.Struct {
-			var keys []string
+			var quotedKeys []string
 			for _, key := range rv.MapKeys() {
-				keys = append(keys, key.String())
+				quotedKeys = append(quotedKeys, fmt.Sprintf("\"%s\"", key.String()))
 			}
-			return "[" + strings.Join(keys, ", ") + "]"
+			return "[" + strings.Join(quotedKeys, ", ") + "]"
 		}
 		// Generic map handling (if needed)
 		var elements []string

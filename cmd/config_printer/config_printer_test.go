@@ -216,7 +216,7 @@ func TestFormatValue(t *testing.T) {
 	}{
 		{
 			input:    map[string]struct{}{"deprecated": {}},
-			expected: "[deprecated]",
+			expected: "[\"deprecated\"]",
 		},
 		{
 			input:    nil,
@@ -224,7 +224,7 @@ func TestFormatValue(t *testing.T) {
 		},
 		{
 			input:    []string{"origin", "director", "registry"},
-			expected: "[origin, director, registry]",
+			expected: "[\"origin\", \"director\", \"registry\"]",
 		},
 		{
 			input:    "/etc/pelican/issuer.jwk",
