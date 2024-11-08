@@ -105,12 +105,17 @@ func formatValue(value interface{}) string {
 			return "[" + strings.Join(keys, ", ") + "]"
 		}
 		// Generic map handling (if needed)
-		return fmt.Sprintf("%v", value)
+		var elements []string
+		for _, key := range rv.MapKeys() {
+			formattedValue := formatValue(rv.MapIndex(key).Interface())
+			elements = append(elements, fmt.Sprintf("%s: %s", key, formattedValue))
+		}
+		return "{" + strings.Join(elements, ", ") + "}"
 	case reflect.Slice, reflect.Array:
 		var elements []string
 		for i := 0; i < rv.Len(); i++ {
 			elem := rv.Index(i).Interface()
-			elements = append(elements, fmt.Sprintf("%v", elem))
+			elements = append(elements, formatValue(elem))
 		}
 		return "[" + strings.Join(elements, ", ") + "]"
 	case reflect.String:
