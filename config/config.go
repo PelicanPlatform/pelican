@@ -1515,6 +1515,13 @@ func InitClient() error {
 
 	clientInitialized = true
 
+	// Print Pelican configuration after client config initialization if log level is set to debug
+	if log.GetLevel() == log.DebugLevel {
+		if err = PrintConfig(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
