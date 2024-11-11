@@ -148,6 +148,17 @@ func checkOverrides(addr net.IP) (coordinate *Coordinate) {
 	return nil
 }
 
+func setProjectLabel(ctx context.Context, labels prometheus.Labels) bool {
+	project, ok := ctx.Value(ProjectContextKey{}).(string)
+	if !ok || project == "" {
+		labels["proj"] = "unknown"
+		return false
+	} else {
+		labels["proj"] = project
+		return true
+	}
+}
+
 func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64, err error) {
 	ip := net.IP(addr.AsSlice())
 	override := checkOverrides(ip)
@@ -170,13 +181,10 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 		labels["network"] = network
 	}
 
-	project, ok := ctx.Value(ProjectContextKey{}).(string)
-	if !ok || project == "" {
+	ok = setProjectLabel(ctx, labels)
+	if !ok {
 		log.Warningf("Failed to get project from context")
-		labels["proj"] = "unknown"
 		labels["source"] = "server"
-	} else {
-		labels["proj"] = project
 	}
 
 	reader := maxMindReader.Load()
