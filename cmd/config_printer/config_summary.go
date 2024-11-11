@@ -108,7 +108,7 @@ func compareStructsAsym(v1, v2 interface{}) interface{} {
 		}
 
 	case reflect.Slice, reflect.Array:
-		if val1.IsNil() && val2.IsNil() {
+		if (val1.IsNil() || val1.Len() == 0) && (val2.IsNil() || val2.Len() == 0) {
 			return nil
 		}
 

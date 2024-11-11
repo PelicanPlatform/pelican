@@ -34,12 +34,10 @@ import (
 )
 
 // Mock configuration setup
-func setupMockConfig() error {
+func setupMockConfig(t *testing.T) error {
 	// Set default config
 	config.SetBaseDefaultsInConfig(viper.GetViper())
-	if err := config.InitConfigDir(viper.GetViper()); err != nil {
-		return err
-	}
+	viper.Set("ConfigDir", t.TempDir())
 	if err := config.SetServerDefaults(viper.GetViper()); err != nil {
 		return err
 	}
@@ -65,7 +63,7 @@ func TestConfigGet(t *testing.T) {
 		config.ResetConfig()
 	})
 
-	if err := setupMockConfig(); err != nil {
+	if err := setupMockConfig(t); err != nil {
 		t.Fatalf("Error: %v", err)
 	}
 
@@ -156,7 +154,7 @@ func TestConfigSummary(t *testing.T) {
 		config.ResetConfig()
 	})
 
-	if err := setupMockConfig(); err != nil {
+	if err := setupMockConfig(t); err != nil {
 		t.Fatalf("Error: %v", err)
 	}
 
