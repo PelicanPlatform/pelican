@@ -1242,7 +1242,7 @@ components: ["cache"]
 ---
 name: Cache.BlocksToPrefetch
 description: |+
-  The number of 1 megabyte blocks the cache will read ahead when recieving requests. This will put the data in the cache
+  The number of 128 kilobyte blocks the cache will read ahead when recieving requests. This will put the data in the cache
   potentially before it is needed and reduce the latency to the client when a request is made. However, it can also cause
   many extra requests to an origin and potentially overload it when unnessesary. As such, this is turned off by default.
 type: int
