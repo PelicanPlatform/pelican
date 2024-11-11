@@ -238,7 +238,7 @@ func ConfigFilterdServers() {
 	if param.Director_DbLocation.GetString() != "" {
 		persistedServerDowntimes, err := getAllServerDowntimes()
 		if err != nil {
-			log.Error("Failed to read persisted server downtimes from director db", err)
+			log.Error("Failed to read persisted server downtimes from director db:", err)
 			return
 		}
 		for _, serverDowntime := range persistedServerDowntimes {
