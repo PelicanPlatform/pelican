@@ -32,13 +32,11 @@ const LinkBox = ({ href, text }: { href: string; text: string }) => {
   );
 };
 
-
 const FederationOverview = () => {
-
-  const {data : federationUrls , error} = useSWR(
+  const { data: federationUrls, error } = useSWR(
     'getFederationUrls',
     getFederationUrls,
-    {fallbackData: []}
+    { fallbackData: [] }
   );
 
   return (

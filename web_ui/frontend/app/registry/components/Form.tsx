@@ -64,7 +64,7 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
         "Couldn't fetch registration fields",
         dispatch
       );
-      if(response){
+      if (response) {
         return await response.json();
       }
     },
