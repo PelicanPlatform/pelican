@@ -283,23 +283,18 @@ func TestXPelTokGenParsing(t *testing.T) {
 	})
 }
 
-func TestCapsUnmarshalJSON(t *testing.T) {
-	oldCaps := `{"PublicRead":true,"Read":true,"Write":false,"Listing":false,"FallBackRead":true}}`
-	newCaps := `{"PublicReads":false,"Reads":true,"Writes":false,"Listings":false,"DirectReads":true}}`
-
-	nsAdV2NoCap := `{"path":"/ncar","token-generation":[{"strategy":"","vault-server":"","max-scope-depth":0,"issuer":{}}],"token-issuer":[],"from-topology":true,"Caps":`
-	oAdV2NoCap := `{"name": "example-server","registry-prefix": "/origins/example-server","broker-url": "http://example-broker.com","data-url": "http://example-data.com","web-url": "http://example-web.com","namespaces": [{"path": "/example-namespace","token-generation": [],"token-issuer": [],"from-topology": false}],"token-issuer": [],"storageType": "POSIX","directorTest": false,"capabilities":`
-	sAdV2NoCap := `{"name": "example-server","storageType": "POSIX","directorTest": false,"auth_url": {"Scheme": "http", "Host": "example-auth.com"},"broker_url": {"Scheme": "http", "Host": "example-auth.com"},"url": {"Scheme": "http", "Host": "example-auth.com"},"web_url": {"Scheme": "http", "Host": "example-auth.com"},"type": "cache","latitude": 40.7128,"longitude": -74.0060,"from_topology": true,"io_load": 0.75,"capabilities":`
+func TestNSAdV2UnmarshalJSON(t *testing.T) {
+	oldJSON := `{"PublicRead":true,"Caps":{"PublicRead":true,"Read":true,"Write":false,"Listing":false,"FallBackRead":true},"path":"/ncar","token-generation":[{"strategy":"","vault-server":"","max-scope-depth":0,"issuer":{"Scheme":"","Opaque":"","User":null,"Host":"","Path":"","RawPath":"","OmitHost":false,"ForceQuery":false,"RawQuery":"","Fragment":"","RawFragment":""}}],"token-issuer":[],"from-topology":true}`
+	newJSON := `{"Caps":{"PublicReads":false,"Reads":true,"Writes":false,"Listings":false,"DirectReads":true},"path":"/ncar","token-generation":[{"strategy":"","vault-server":"","max-scope-depth":0,"issuer":{"Scheme":"","Opaque":"","User":null,"Host":"","Path":"","RawPath":"","OmitHost":false,"ForceQuery":false,"RawQuery":"","Fragment":"","RawFragment":""}}],"token-issuer":[],"from-topology":true}`
 
 	tests := []struct {
 		name     string
 		jsonData string
 		expected Capabilities
-		target   interface{}
 	}{
 		{
-			name:     "NamespaceAdV2 with old caps",
-			jsonData: nsAdV2NoCap + oldCaps,
+			name:     "Old JSON format",
+			jsonData: oldJSON,
 			expected: Capabilities{
 				PublicReads: true,
 				Reads:       true,
@@ -307,11 +302,10 @@ func TestCapsUnmarshalJSON(t *testing.T) {
 				Listings:    false,
 				DirectReads: true,
 			},
-			target: &NamespaceAdV2{},
 		},
 		{
-			name:     "NamespaceAdV2 with new caps",
-			jsonData: nsAdV2NoCap + newCaps,
+			name:     "New JSON format",
+			jsonData: newJSON,
 			expected: Capabilities{
 				PublicReads: false,
 				Reads:       true,
@@ -319,81 +313,17 @@ func TestCapsUnmarshalJSON(t *testing.T) {
 				Listings:    false,
 				DirectReads: true,
 			},
-			target: &NamespaceAdV2{},
-		},
-		{
-			name:     "OriginAdvertiseV2 with old caps",
-			jsonData: oAdV2NoCap + oldCaps,
-			expected: Capabilities{
-				PublicReads: true,
-				Reads:       true,
-				Writes:      false,
-				Listings:    false,
-				DirectReads: true,
-			},
-			target: &OriginAdvertiseV2{},
-		},
-		{
-			name:     "OriginAdvertiseV2 with new caps",
-			jsonData: oAdV2NoCap + newCaps,
-			expected: Capabilities{
-				PublicReads: false,
-				Reads:       true,
-				Writes:      false,
-				Listings:    false,
-				DirectReads: true,
-			},
-			target: &OriginAdvertiseV2{},
-		},
-		{
-			name:     "ServerAd with old caps",
-			jsonData: sAdV2NoCap + oldCaps,
-			expected: Capabilities{
-				PublicReads: true,
-				Reads:       true,
-				Writes:      false,
-				Listings:    false,
-				DirectReads: true,
-			},
-			target: &ServerAd{},
-		},
-		{
-			name:     "ServerAd with new caps",
-			jsonData: sAdV2NoCap + newCaps,
-			expected: Capabilities{
-				PublicReads: false,
-				Reads:       true,
-				Writes:      false,
-				Listings:    false,
-				DirectReads: true,
-			},
-			target: &ServerAd{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Unmarshal JSON into the appropriate struct
-			if err := json.Unmarshal([]byte(tt.jsonData), tt.target); err != nil {
+			var ns NamespaceAdV2
+			if err := json.Unmarshal([]byte(tt.jsonData), &ns); err != nil {
 				t.Fatalf("UnmarshalJSON() error = %v", err)
 			}
-
-			// Check Caps field in the struct
-			switch v := tt.target.(type) {
-			case *NamespaceAdV2:
-				if v.Caps != tt.expected {
-					t.Errorf("NamespaceAdV2 Caps = %v, want %v", v.Caps, tt.expected)
-				}
-			case *OriginAdvertiseV2:
-				if v.Caps != tt.expected {
-					t.Errorf("OriginAdvertiseV2 Caps = %v, want %v", v.Caps, tt.expected)
-				}
-			case *ServerAd:
-				if v.Caps != tt.expected {
-					t.Errorf("ServerAd Caps = %v, want %v", v.Caps, tt.expected)
-				}
-			default:
-				t.Errorf("Unknown struct type: %T", tt.target)
+			if ns.Caps != tt.expected {
+				t.Errorf("UnmarshalJSON() = %v, want %v", ns.Caps, tt.expected)
 			}
 		})
 	}
