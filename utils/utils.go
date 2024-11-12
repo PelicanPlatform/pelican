@@ -127,3 +127,20 @@ func ExtractVersionAndServiceFromUserAgent(userAgent string) (reqVer, service st
 	service = (strings.Split(userAgentSplit[0], "-"))[1]
 	return reqVer, service
 }
+
+// Helper function to extract project from User-Agent
+// Will return an empty string if no project is found
+func ExtractProjectFromUserAgent(userAgents []string) string {
+	prefix := "project/"
+
+	for _, userAgent := range userAgents {
+		parts := strings.Split(userAgent, " ")
+		for _, part := range parts {
+			if strings.HasPrefix(part, prefix) {
+				return strings.TrimPrefix(part, prefix)
+			}
+		}
+	}
+
+	return ""
+}
