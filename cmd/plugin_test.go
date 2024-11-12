@@ -191,6 +191,7 @@ func (f *FedTest) Spinup() {
 	viper.Set("Origin.Port", 0)
 	viper.Set("Server.WebPort", 0)
 	viper.Set("Origin.RunLocation", tmpPath)
+	viper.Set("Director.DbLocation", filepath.Join(f.T.TempDir(), "director.sqlite"))
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(f.T, err)

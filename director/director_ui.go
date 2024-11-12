@@ -248,12 +248,33 @@ func handleFilterServer(ctx *gin.Context) {
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
 
+	// Backup the original filter type to revert in case of failure
+	originalFilterType, hasOriginalFilter := filteredServers[sn]
+
+	// Decide new filter type and update map
 	// If we previously temporarily allowed a server, we switch to permFiltered (reset)
+	newFilterType := tempFiltered
 	if filterType == tempAllowed {
-		filteredServers[sn] = permFiltered
-	} else {
-		filteredServers[sn] = tempFiltered
+		newFilterType = permFiltered
 	}
+	filteredServers[sn] = newFilterType
+
+	// Attempt to persist change in the database
+	if err := setServerDowntimeFn(sn, newFilterType); err != nil {
+		// Revert the change in filteredServers if SetServerDowntime fails
+		if hasOriginalFilter {
+			filteredServers[sn] = originalFilterType
+		} else {
+			delete(filteredServers, sn)
+		}
+
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to persist server downtime due to database error",
+		})
+		return
+	}
+
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "success"})
 }
 
@@ -281,13 +302,48 @@ func handleAllowServer(ctx *gin.Context) {
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
 
+	// Backup the original filter (downtime) type to revert in case of failure
+	originalFilterType, hasOriginalFilter := filteredServers[sn]
+
+	// Perform actions based on the current filter type
 	if ft == tempFiltered {
-		// For temporarily filtered server, allowing them by removing the server from the map
+		// Temporarily filtered server: allow it by removing from map
 		delete(filteredServers, sn)
+
+		if err := deleteServerDowntimeFn(sn); err != nil {
+			// Revert the change in filteredServers if DeleteServerDowntime fails
+			if hasOriginalFilter {
+				filteredServers[sn] = originalFilterType
+			} else {
+				delete(filteredServers, sn)
+			}
+
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to remove the downtime of server %s in director db", sn),
+			})
+			return
+		}
 	} else if ft == permFiltered {
-		// For servers to filter from the config, temporarily allow the server
+		// Permanently filtered server: temporarily allow it
 		filteredServers[sn] = tempAllowed
+
+		if err := setServerDowntimeFn(sn, tempAllowed); err != nil {
+			// Revert the change in filteredServers if SetServerDowntime fails
+			if hasOriginalFilter {
+				filteredServers[sn] = originalFilterType
+			} else {
+				delete(filteredServers, sn)
+			}
+
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to remove the downtime of server %s in director db", sn),
+			})
+			return
+		}
 	} else if ft == topoFiltered {
+		// Server is disabled by OSG Topology
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Can't allow server %s that is disabled by the OSG Topology. Contact OSG admin at support@osg-htc.org to enable the server.", sn),

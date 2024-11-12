@@ -1735,7 +1735,9 @@ func TestHandleFilterServer(t *testing.T) {
 		filteredServersMutex.Lock()
 		defer filteredServersMutex.Unlock()
 		filteredServers = map[string]filterType{}
+		TeardownMockDirectorDB(t)
 	})
+	SetupMockDirectorDB(t)
 	router := gin.Default()
 	router.GET("/servers/filter/*name", handleFilterServer)
 
@@ -1751,25 +1753,42 @@ func TestHandleFilterServer(t *testing.T) {
 		// Check the response
 		require.Equal(t, 200, w.Code)
 
+		// Check the in-memory cache storage
 		filteredServersMutex.RLock()
 		defer filteredServersMutex.RUnlock()
 		assert.Equal(t, tempFiltered, filteredServers["mock-dne"])
+
+		// Check the Director database
+		filterType, err := getServerDowntime("mock-dne")
+		assert.Equal(t, tempFiltered, filterType)
+		require.NoError(t, err)
 	})
 	t.Run("filter-server-w-permFiltered", func(t *testing.T) {
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/servers/filter/mock-pf", nil)
+
+		// Tweak the downtime status (filter type) to permFiltered
 		filteredServersMutex.Lock()
 		filteredServers["mock-pf"] = permFiltered
 		filteredServersMutex.Unlock()
+		err := setServerDowntime("mock-pf", permFiltered)
+		require.NoError(t, err)
+
 		router.ServeHTTP(w, req)
 
 		// Check the response
 		require.Equal(t, 400, w.Code)
 
+		// Check the in-memory cache storage
 		filteredServersMutex.RLock()
 		defer filteredServersMutex.RUnlock()
 		assert.Equal(t, permFiltered, filteredServers["mock-pf"])
+
+		// Check the Director database
+		filterType, err := getServerDowntime("mock-pf")
+		assert.Equal(t, permFiltered, filterType)
+		require.NoError(t, err)
 
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
@@ -1782,14 +1801,23 @@ func TestHandleFilterServer(t *testing.T) {
 		filteredServersMutex.Lock()
 		filteredServers["mock-tf"] = tempFiltered
 		filteredServersMutex.Unlock()
+		err := setServerDowntime("mock-tf", tempFiltered)
+		require.NoError(t, err)
+
 		router.ServeHTTP(w, req)
 
 		// Check the response
 		require.Equal(t, 400, w.Code)
 
+		// Check the in-memory cache storage
 		filteredServersMutex.RLock()
 		defer filteredServersMutex.RUnlock()
 		assert.Equal(t, tempFiltered, filteredServers["mock-tf"])
+
+		// Check the Director database
+		filterType, err := getServerDowntime("mock-tf")
+		assert.Equal(t, tempFiltered, filterType)
+		require.NoError(t, err)
 
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
@@ -1807,9 +1835,15 @@ func TestHandleFilterServer(t *testing.T) {
 		// Check the response
 		require.Equal(t, 200, w.Code)
 
+		// Check the in-memory cache storage
 		filteredServersMutex.RLock()
 		defer filteredServersMutex.RUnlock()
 		assert.Equal(t, permFiltered, filteredServers["mock-ta"])
+
+		// Check the Director database
+		filterType, err := getServerDowntime("mock-ta")
+		assert.Equal(t, permFiltered, filterType)
+		require.NoError(t, err)
 	})
 	t.Run("filter-with-invalid-name", func(t *testing.T) {
 		// Create a request to the endpoint
@@ -1825,12 +1859,61 @@ func TestHandleFilterServer(t *testing.T) {
 	})
 }
 
+func TestHandleFilterServerDataIntegrity(t *testing.T) {
+	t.Cleanup(func() {
+		filteredServersMutex.Lock()
+		defer filteredServersMutex.Unlock()
+		filteredServers = map[string]filterType{}
+		TeardownMockDirectorDB(t)
+	})
+	SetupMockDirectorDB(t)
+
+	router := gin.Default()
+	router.GET("/servers/filter/*name", handleFilterServer)
+
+	t.Run("db-error-when-setting-downtime", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/servers/filter/mock-error", nil)
+
+		// Set up original filter type
+		filteredServersMutex.Lock()
+		filteredServers["mock-error"] = tempAllowed
+		filteredServersMutex.Unlock()
+
+		// Mock setServerDowntime to return error
+		origSetServerDowntime := setServerDowntime
+		defer func() { setServerDowntimeFn = origSetServerDowntime }()
+		setServerDowntimeFn = func(serverName string, ft filterType) error {
+			return fmt.Errorf("mock db error")
+		}
+
+		router.ServeHTTP(w, req)
+
+		// Check response code
+		require.Equal(t, http.StatusInternalServerError, w.Code)
+
+		// Verify the server was reverted to original filter type
+		filteredServersMutex.RLock()
+		actualType, exists := filteredServers["mock-error"]
+		filteredServersMutex.RUnlock()
+		assert.True(t, exists, "Server should exist in filteredServers")
+		assert.Equal(t, tempAllowed, actualType, "Filter type should be reverted to original value")
+
+		// Check error message
+		resB, err := io.ReadAll(w.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(resB), "Failed to persist server downtime due to database error")
+	})
+}
+
 func TestHandleAllowServer(t *testing.T) {
 	t.Cleanup(func() {
 		filteredServersMutex.Lock()
 		defer filteredServersMutex.Unlock()
 		filteredServers = map[string]filterType{}
+		TeardownMockDirectorDB(t)
 	})
+	SetupMockDirectorDB(t)
 	router := gin.Default()
 	router.GET("/servers/allow/*name", handleAllowServer)
 
@@ -1838,9 +1921,15 @@ func TestHandleAllowServer(t *testing.T) {
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/servers/allow/mock-dne", nil)
+
+		// Server is not in the in-memory downtime map
 		filteredServersMutex.Lock()
 		delete(filteredServers, "mock-dne")
 		filteredServersMutex.Unlock()
+		// Server is also not in the Director db downtime table
+		err := deleteServerDowntime("mock-dne")
+		require.NoError(t, err)
+		// Note: Both map deletion and db deletion do not trigger an error if there’s nothing to delete
 		router.ServeHTTP(w, req)
 
 		// Check the response
@@ -1861,9 +1950,15 @@ func TestHandleAllowServer(t *testing.T) {
 		// Check the response
 		require.Equal(t, 200, w.Code)
 
+		// Check the in-memory cache storage
 		filteredServersMutex.RLock()
 		defer filteredServersMutex.RUnlock()
 		assert.Equal(t, tempAllowed, filteredServers["mock-pf"])
+
+		// Check the Director database
+		filterType, err := getServerDowntime("mock-pf")
+		assert.Equal(t, tempAllowed, filterType)
+		require.NoError(t, err)
 	})
 	t.Run("allow-server-w-tempFiltered", func(t *testing.T) {
 		// Create a request to the endpoint
@@ -1877,9 +1972,15 @@ func TestHandleAllowServer(t *testing.T) {
 		// Check the response
 		require.Equal(t, 200, w.Code)
 
+		// Check the in-memory cache storage
 		filteredServersMutex.RLock()
 		defer filteredServersMutex.RUnlock()
 		assert.Empty(t, filteredServers["mock-tf"])
+
+		// Check the Director database
+		filterType, err := getServerDowntime("mock-tf")
+		assert.Equal(t, "", string(filterType))
+		assert.Contains(t, err.Error(), "is not found in the Director db")
 	})
 	t.Run("allow-server-w-tempAllowed", func(t *testing.T) {
 		// Create a request to the endpoint
@@ -1888,11 +1989,15 @@ func TestHandleAllowServer(t *testing.T) {
 		filteredServersMutex.Lock()
 		filteredServers["mock-ta"] = tempAllowed
 		filteredServersMutex.Unlock()
+		err := setServerDowntime("mock-ta", tempAllowed)
+		require.NoError(t, err)
+
 		router.ServeHTTP(w, req)
 
 		// Check the response
 		require.Equal(t, 400, w.Code)
 
+		// Check the in-memory cache storage
 		filteredServersMutex.RLock()
 		defer filteredServersMutex.RUnlock()
 		assert.Equal(t, tempAllowed, filteredServers["mock-ta"])
@@ -1900,6 +2005,11 @@ func TestHandleAllowServer(t *testing.T) {
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
 		assert.Contains(t, string(resB), "Can't allow server mock-ta that is not being filtered")
+
+		// Check the Director database
+		filterType, err := getServerDowntime("mock-ta")
+		assert.Equal(t, tempAllowed, filterType)
+		require.NoError(t, err)
 	})
 	t.Run("allow-with-invalid-name", func(t *testing.T) {
 		// Create a request to the endpoint
@@ -1912,6 +2022,126 @@ func TestHandleAllowServer(t *testing.T) {
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
 		assert.Contains(t, string(resB), "'name' is a required path parameter")
+	})
+}
+
+func TestHandleAllowServerDataIntegrity(t *testing.T) {
+	t.Cleanup(func() {
+		filteredServersMutex.Lock()
+		defer filteredServersMutex.Unlock()
+		filteredServers = map[string]filterType{}
+		TeardownMockDirectorDB(t)
+	})
+	SetupMockDirectorDB(t)
+
+	router := gin.Default()
+	router.GET("/servers/allow/*name", handleAllowServer)
+
+	// Sub-test 1: When server is permanently filtered
+	t.Run("permFiltered-db-error", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/servers/allow/mock-error", nil)
+
+		// Set up initial state as permFiltered
+		filteredServersMutex.Lock()
+		filteredServers["mock-error"] = permFiltered
+		filteredServersMutex.Unlock()
+
+		// Mock setServerDowntimeFn to return error
+		origSetServerDowntime := setServerDowntimeFn
+		defer func() { setServerDowntimeFn = origSetServerDowntime }()
+		setServerDowntimeFn = func(serverName string, ft filterType) error {
+			return fmt.Errorf("mock db error")
+		}
+
+		router.ServeHTTP(w, req)
+
+		// Check response code
+		require.Equal(t, http.StatusInternalServerError, w.Code)
+
+		// Verify the server maintained original filter type
+		filteredServersMutex.RLock()
+		actualType, exists := filteredServers["mock-error"]
+		filteredServersMutex.RUnlock()
+		assert.True(t, exists, "Server should still exist in filteredServers")
+		assert.Equal(t, permFiltered, actualType, "Filter type should remain as permFiltered")
+
+		// Check error message
+		resB, err := io.ReadAll(w.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(resB), "Failed to remove the downtime of server mock-error in director db")
+	})
+
+	// Sub-test 2: When server is temporarily filtered and deletion fails
+	t.Run("tempFiltered-deletion-error", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/servers/allow/mock-error", nil)
+
+		// Set up initial state as tempFiltered
+		filteredServersMutex.Lock()
+		filteredServers["mock-error"] = tempFiltered
+		filteredServersMutex.Unlock()
+
+		// Mock deleteServerDowntime to return error
+		origDeleteServerDowntime := deleteServerDowntimeFn
+		defer func() { deleteServerDowntimeFn = origDeleteServerDowntime }()
+		deleteServerDowntimeFn = func(serverName string) error {
+			return fmt.Errorf("mock deletion error")
+		}
+
+		router.ServeHTTP(w, req)
+
+		// Check response code
+		require.Equal(t, http.StatusInternalServerError, w.Code)
+
+		// Verify the server maintained original filter type
+		filteredServersMutex.RLock()
+		actualType, exists := filteredServers["mock-error"]
+		filteredServersMutex.RUnlock()
+		assert.True(t, exists, "Server should still exist in filteredServers")
+		assert.Equal(t, tempFiltered, actualType, "Filter type should remain as tempFiltered")
+
+		// Check error message
+		resB, err := io.ReadAll(w.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(resB), "Failed to remove the downtime of server mock-error in director db")
+	})
+
+	// Sub-test 3: When server is already tempAllowed and db error occurs
+	t.Run("tempAllowed-db-error", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/servers/allow/mock-error", nil)
+
+		// Set up initial state as tempAllowed
+		filteredServersMutex.Lock()
+		filteredServers["mock-error"] = tempAllowed
+		filteredServersMutex.Unlock()
+		err := setServerDowntime("mock-error", tempAllowed)
+		require.NoError(t, err)
+
+		// Mock setServerDowntimeFn to return error
+		origSetServerDowntime := setServerDowntimeFn
+		defer func() { setServerDowntimeFn = origSetServerDowntime }()
+		setServerDowntimeFn = func(serverName string, ft filterType) error {
+			return fmt.Errorf("mock db error")
+		}
+
+		router.ServeHTTP(w, req)
+
+		// Should return 400 as the server is already tempAllowed
+		require.Equal(t, http.StatusBadRequest, w.Code)
+
+		// Verify the server maintained original filter type
+		filteredServersMutex.RLock()
+		actualType, exists := filteredServers["mock-error"]
+		filteredServersMutex.RUnlock()
+		assert.True(t, exists, "Server should still exist in filteredServers")
+		assert.Equal(t, tempAllowed, actualType, "Filter type should remain as tempAllowed")
+
+		// Check error message
+		resB, err := io.ReadAll(w.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(resB), "Can't allow server")
 	})
 }
 
