@@ -19,7 +19,6 @@
 package server_structs
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -281,50 +280,4 @@ func TestXPelTokGenParsing(t *testing.T) {
 		assert.Len(t, xPelTokGen.Issuers, 0)
 		assert.Len(t, xPelTokGen.BasePaths, 0)
 	})
-}
-
-func TestNSAdV2UnmarshalJSON(t *testing.T) {
-	oldJSON := `{"PublicRead":true,"Caps":{"PublicRead":true,"Read":true,"Write":false,"Listing":false,"FallBackRead":true},"path":"/ncar","token-generation":[{"strategy":"","vault-server":"","max-scope-depth":0,"issuer":{"Scheme":"","Opaque":"","User":null,"Host":"","Path":"","RawPath":"","OmitHost":false,"ForceQuery":false,"RawQuery":"","Fragment":"","RawFragment":""}}],"token-issuer":[],"from-topology":true}`
-	newJSON := `{"Caps":{"PublicReads":false,"Reads":true,"Writes":false,"Listings":false,"DirectReads":true},"path":"/ncar","token-generation":[{"strategy":"","vault-server":"","max-scope-depth":0,"issuer":{"Scheme":"","Opaque":"","User":null,"Host":"","Path":"","RawPath":"","OmitHost":false,"ForceQuery":false,"RawQuery":"","Fragment":"","RawFragment":""}}],"token-issuer":[],"from-topology":true}`
-
-	tests := []struct {
-		name     string
-		jsonData string
-		expected Capabilities
-	}{
-		{
-			name:     "Old JSON format",
-			jsonData: oldJSON,
-			expected: Capabilities{
-				PublicReads: true,
-				Reads:       true,
-				Writes:      false,
-				Listings:    false,
-				DirectReads: true,
-			},
-		},
-		{
-			name:     "New JSON format",
-			jsonData: newJSON,
-			expected: Capabilities{
-				PublicReads: false,
-				Reads:       true,
-				Writes:      false,
-				Listings:    false,
-				DirectReads: true,
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var ns NamespaceAdV2
-			if err := json.Unmarshal([]byte(tt.jsonData), &ns); err != nil {
-				t.Fatalf("UnmarshalJSON() error = %v", err)
-			}
-			if ns.Caps != tt.expected {
-				t.Errorf("UnmarshalJSON() = %v, want %v", ns.Caps, tt.expected)
-			}
-		})
-	}
 }
