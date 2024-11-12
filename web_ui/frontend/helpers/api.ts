@@ -1,9 +1,12 @@
+/**
+ * API Helper Functions
+ *
+ * Strictly return the response from the API, throwing an error if the response is not ok
+ */
+
 import { secureFetch } from '@/helpers/login';
 import { getErrorMessage } from '@/helpers/util';
-import { Alert, Namespace } from '@/index';
-import { CustomRegistrationFieldProps } from '@/app/registry/components/CustomRegistrationField';
-
-// TODO: Decide if we should standardize the output in all of these functions. Should they all be responses?
+import { Namespace } from '@/index';
 
 /**
  * Wraps an api request with error handling for both the request and the response if error
@@ -60,7 +63,7 @@ export const deleteNamespace = async (id: number) => {
  * Approves a namespace
  * @param id Namespace ID
  */
-export const approveNamespace = async (id: number) => {
+export const approveNamespace = async (id: number): Promise<Response> => {
   return fetchApi(
     async () =>
       await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}/approve`, {
@@ -73,7 +76,7 @@ export const approveNamespace = async (id: number) => {
  * Denies a namespace
  * @param id Namespace ID
  */
-export const denyNamespace = async (id: number) => {
+export const denyNamespace = async (id: number): Promise<Response> => {
   return fetchApi(
     async () =>
       await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}/deny`, {
@@ -86,7 +89,7 @@ export const denyNamespace = async (id: number) => {
  * Enables a server on the director
  * @param name Server name
  */
-export const allowServer = async (name: string) => {
+export const allowServer = async (name: string): Promise<Response> => {
   return fetchApi(
     async () =>
       await secureFetch(`/api/v1.0/director_ui/servers/allow/${name}`, {
@@ -99,40 +102,13 @@ export const allowServer = async (name: string) => {
  * Filters ( Disables ) a server on the director
  * @param name Server name
  */
-export const filterServer = async (name: string) => {
+export const filterServer = async (name: string): Promise<Response> => {
   return fetchApi(
     async () =>
       await secureFetch(`/api/v1.0/director_ui/servers/filter/${name}`, {
         method: 'PATCH',
       })
   );
-};
-
-/**
- * Get extended namespaces
- */
-export const getExtendedNamespaces = async (): Promise<
-  { namespace: Namespace }[]
-> => {
-  const response = await getNamespaces();
-  const data: Namespace[] = await response.json();
-  data.sort((a, b) => (a.id > b.id ? 1 : -1));
-  data.forEach((namespace) => {
-    if (namespace.prefix.startsWith('/caches/')) {
-      namespace.type = 'cache';
-      namespace.prefix = namespace.prefix.replace('/caches/', '');
-    } else if (namespace.prefix.startsWith('/origins/')) {
-      namespace.type = 'origin';
-      namespace.prefix = namespace.prefix.replace('/origins/', '');
-    } else {
-      namespace.type = 'namespace';
-    }
-  });
-
-  // TODO: This extra should be done somewhere else, why is it done?
-  return data.map((d) => {
-    return { namespace: d };
-  });
 };
 
 /**
@@ -144,8 +120,7 @@ export const getNamespaces = async (): Promise<Response> => {
     window.location.origin
   );
 
-  const response = await fetchApi(async () => await fetch(url));
-  return await response.json();
+  return await fetchApi(async () => await fetch(url));
 };
 
 /**
@@ -154,13 +129,12 @@ export const getNamespaces = async (): Promise<Response> => {
  */
 export const getNamespace = async (
   id: string | number
-): Promise<Namespace | undefined> => {
+): Promise<Response> => {
   const url = new URL(
     `/api/v1.0/registry_ui/namespaces/${id}`,
     window.location.origin
   );
-  const response = await fetchApi(async () => await fetch(url));
-  return await response.json();
+  return await fetchApi(async () => await fetch(url));
 };
 
 export const postGeneralNamespace = async (
@@ -168,7 +142,7 @@ export const postGeneralNamespace = async (
 ): Promise<Response> => {
   return await fetchApi(
     async () =>
-      await fetch('/api/v1.0/registry_ui/namespaces', {
+      await secureFetch('/api/v1.0/registry_ui/namespaces', {
         body: JSON.stringify(data),
         method: 'POST',
         headers: {
@@ -183,7 +157,7 @@ export const putGeneralNamespace = async (
   data: Namespace
 ): Promise<Response> => {
   return await fetchApi(async () => {
-    return fetch(`/api/v1.0/registry_ui/namespaces/${data.id}`, {
+    return secureFetch(`/api/v1.0/registry_ui/namespaces/${data.id}`, {
       body: JSON.stringify(data),
       method: 'PUT',
       headers: {
@@ -196,18 +170,14 @@ export const putGeneralNamespace = async (
 
 /**
  * Get registration fields from options for namespace
- * // TODO: Complain about the misuse of options
  */
-export const optionsNamespaceRegistrationFields = async (): Promise<
-  Omit<CustomRegistrationFieldProps, 'onChange'>[]
-> => {
-  const response = await fetchApi(
+export const optionsNamespaceRegistrationFields = async (): Promise<Response> => {
+  return await fetchApi(
     async () =>
       await fetch('/api/v1.0/registry_ui/namespaces', {
         method: 'OPTIONS',
       })
   );
-  return response.json();
 };
 
 /**

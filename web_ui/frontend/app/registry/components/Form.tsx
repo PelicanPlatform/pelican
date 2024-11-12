@@ -58,12 +58,16 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
     Omit<CustomRegistrationFieldProps, 'onChange'>[] | undefined
   >(
     'optionsNamespaceRegistrationFields',
-    async () =>
-      await alertOnError(
+    async () => {
+      const response = await alertOnError(
         optionsNamespaceRegistrationFields,
         "Couldn't fetch registration fields",
         dispatch
-      ),
+      );
+      if(response){
+        return await response.json();
+      }
+    },
     { fallbackData: [] }
   );
 

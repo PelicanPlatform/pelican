@@ -46,7 +46,7 @@ import { CardProps } from '@/components/Namespace/Card';
 import { PendingCardProps } from '@/components/Namespace/PendingCard';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
-import { getExtendedNamespaces } from '@/helpers/api';
+import { getExtendedNamespaces } from '@/helpers/get';
 
 export default function Home() {
   const dispatch = useContext(AlertDispatchContext);
@@ -54,7 +54,7 @@ export default function Home() {
   const { data, mutate: mutateNamespaces } = useSWR<
     { namespace: Namespace }[] | undefined
   >(
-    'getNamespaces',
+    'getExtendedNamespaces',
     () =>
       alertOnError(
         getExtendedNamespaces,

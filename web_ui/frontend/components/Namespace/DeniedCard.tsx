@@ -105,7 +105,7 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
                           'Could Not Approve Registration',
                           dispatch
                         );
-                        setTimeout(() => mutate('getNamespaces'), 600);
+                        setTimeout(() => mutate('getExtendedNamespaces'), 600);
                       }}
                     >
                       <Check />
