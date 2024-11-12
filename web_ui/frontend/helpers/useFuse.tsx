@@ -44,6 +44,7 @@ function useFuse<T>(
       ...fuseOptions,
       threshold: 0.2,
       keys: keys,
+      ignoreLocation: true,
     };
   }, [fuseOptions, keys]);
 
