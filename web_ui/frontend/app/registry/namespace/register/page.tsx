@@ -22,6 +22,7 @@ import { postGeneralNamespace } from '@/helpers/api';
 import { PostPage } from '@/app/registry/components/PostPage';
 import { Box, Grid, Typography } from '@mui/material';
 import React from 'react';
+import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 
 export default function Page() {
   const postCache = async (data: any) => {
@@ -40,7 +41,9 @@ export default function Page() {
           </Typography>
         </Grid>
         <Grid item xs={12}>
-          <PostPage update={postCache} />
+          <AuthenticatedContent redirect={true}>
+              <PostPage update={postCache} />
+          </AuthenticatedContent>
         </Grid>
       </Grid>
     </Box>

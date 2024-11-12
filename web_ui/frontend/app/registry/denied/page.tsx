@@ -28,14 +28,14 @@ import useSWR from 'swr';
 import { CardProps } from '@/components/Namespace/Card';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import DeniedCard from '@/components/Namespace/DeniedCard';
-import { getExtendedNamespaces } from '@/helpers/api';
+import { getExtendedNamespaces } from '@/helpers/get';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 
 export default function Home() {
   const dispatch = useContext(AlertDispatchContext);
 
-  const { data } = useSWR('getNamespaces', async () =>
+  const { data } = useSWR('getExtendedNamespaces', async () =>
     alertOnError(getExtendedNamespaces, "Couldn't fetch namespaces", dispatch)
   );
   const { data: user, error } = useSWR('getUser', async () =>

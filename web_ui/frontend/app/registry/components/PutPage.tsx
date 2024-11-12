@@ -116,7 +116,7 @@ const PutPage = ({ update }: NamespaceFormPage) => {
           dispatch
         );
         if (response) {
-          setNamespace(response);
+          setNamespace(await response.json());
         }
       }
     })();

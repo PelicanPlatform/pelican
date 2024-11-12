@@ -23,6 +23,7 @@ import { namespaceToOrigin } from '@/app/registry/components/util';
 import { Box, Grid, Typography } from '@mui/material';
 import React from 'react';
 import { putGeneralNamespace } from '@/helpers/api';
+import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 
 export default function Page() {
   const putCache = async (data: any) => {
@@ -42,7 +43,9 @@ export default function Page() {
           </Typography>
         </Grid>
         <Grid item xs={12}>
-          <PutPage update={putCache} />
+          <AuthenticatedContent redirect={true} promptLogin={false}>
+            <PutPage update={putCache} />
+          </AuthenticatedContent>
         </Grid>
       </Grid>
     </Box>

@@ -109,7 +109,7 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                           'Could Not Delete Registration',
                           dispatch
                         );
-                        setTimeout(() => mutate('getNamespaces'), 600);
+                        setTimeout(() => mutate('getExtendedNamespaces'), 600);
                         if (onUpdate) {
                           onUpdate();
                         }
