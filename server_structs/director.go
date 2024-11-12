@@ -45,21 +45,13 @@ type (
 		CredentialIssuer url.URL      `json:"issuer"`
 	}
 
-	// A struct for unmarshalling the old JSON while we stage the breaking change across releases
-	OldCapabilities struct {
-		PublicRead   bool
-		Read         bool
-		Write        bool
-		Listing      bool
-		FallBackRead bool
-	}
-
+	// Note that the json are kept in uppercase for backward compatibility
 	Capabilities struct {
-		PublicReads bool
-		Reads       bool
-		Writes      bool
-		Listings    bool
-		DirectReads bool
+		PublicReads bool `json:"PublicRead"`
+		Reads       bool `json:"Read"`
+		Writes      bool `json:"Write"`
+		Listings    bool `json:"Listing"`
+		DirectReads bool `json:"FallBackRead"`
 	}
 
 	NamespaceAdV2 struct {
@@ -186,53 +178,6 @@ type (
 		XPelTokGenHdr XPelTokGen
 	}
 )
-
-// A helper function to handle JSON->NSAdV2 unmarshalling across multiple deprecated JSON keys.
-//
-// When the Director sends a list of NamespaceAdV2 structs as JSON, it may contain
-// the old capabilities struct. This function checks if the raw JSON contains the
-// "FallbackRead" field, indicating the old capabilities struct, and unmarshals
-// the JSON into the new struct accordingly. This is to ensure backwards compatibility
-// We can probably think about removing this function when we don't see origins/directors
-// running Pelican <= v7.11.0.
-func (n *NamespaceAdV2) UnmarshalJSON(data []byte) error {
-	// Use alias struct of NamespaceAdV2 to prevent infinite recursion of UnmarshalJSON
-	type Alias NamespaceAdV2
-	aux := &struct {
-		Caps json.RawMessage `json:"Caps"`
-		*Alias
-	}{
-		Alias: (*Alias)(n),
-	}
-
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	// Check if the raw Caps JSON contains "FallbackRead", indicating
-	// the old caps struct. Since the struct-to-JSON code has never included
-	// 'omitempty', we can safely assume that the field is ALWAYS present in
-	// old versions of the JSON.
-	if strings.Contains(string(aux.Caps), "FallBackRead") {
-		var oldCaps OldCapabilities
-		if err := json.Unmarshal(aux.Caps, &oldCaps); err != nil {
-			return err
-		}
-
-		// Map old capabilities to new capabilities
-		n.Caps.PublicReads = oldCaps.PublicRead
-		n.Caps.Reads = oldCaps.Read
-		n.Caps.Writes = oldCaps.Write
-		n.Caps.Listings = oldCaps.Listing
-		n.Caps.DirectReads = oldCaps.FallBackRead
-	} else {
-		if err := json.Unmarshal(aux.Caps, &n.Caps); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
 
 func (x XPelNs) GetName() string {
 	return "X-Pelican-Namespace"
