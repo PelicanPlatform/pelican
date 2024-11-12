@@ -25,6 +25,7 @@ import (
 
 type Config struct {
 	Cache struct {
+		BlocksToPrefetch int `mapstructure:"blockstoprefetch"`
 		Concurrency int `mapstructure:"concurrency"`
 		DataLocation string `mapstructure:"datalocation"`
 		DataLocations []string `mapstructure:"datalocations"`
@@ -327,6 +328,7 @@ type Config struct {
 
 type configWithType struct {
 	Cache struct {
+		BlocksToPrefetch struct { Type string; Value int }
 		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		DataLocations struct { Type string; Value []string }

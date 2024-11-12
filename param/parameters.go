@@ -296,6 +296,7 @@ var (
 )
 
 var (
+	Cache_BlocksToPrefetch = IntParam{"Cache.BlocksToPrefetch"}
 	Cache_Concurrency = IntParam{"Cache.Concurrency"}
 	Cache_Port = IntParam{"Cache.Port"}
 	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
