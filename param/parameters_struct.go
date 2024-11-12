@@ -69,7 +69,7 @@ type Config struct {
 		CachesPullFromCaches bool `mapstructure:"cachespullfromcaches" yaml:"CachesPullFromCaches"`
 		CheckCachePresence bool `mapstructure:"checkcachepresence" yaml:"CheckCachePresence"`
 		CheckOriginPresence bool `mapstructure:"checkoriginpresence" yaml:"CheckOriginPresence"`
-		DbLocation string `mapstructure:"dblocation" yaml"DbLocation"`
+		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultResponse string `mapstructure:"defaultresponse" yaml:"DefaultResponse"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
