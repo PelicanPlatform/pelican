@@ -4,7 +4,6 @@
  * @module helpers/get
  */
 
-
 import { Config, ParameterValueRecord } from '@/components/configuration';
 import { getConfig as getConfigResponse, getNamespaces } from '@/helpers/api';
 import { flattenObject } from '@/app/config/util';
@@ -64,13 +63,12 @@ export const getFederationUrls = async () => {
       };
     });
 
-    return federationUrls
+    return federationUrls;
   } catch (e) {
     console.error(e);
     return [];
   }
-
-}
+};
 const UrlData = [
   { key: ['Federation', 'NamespaceUrl'], text: 'Namespace Registry' },
   { key: ['Federation', 'DirectorUrl'], text: 'Director' },

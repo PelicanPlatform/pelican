@@ -127,9 +127,7 @@ export const getNamespaces = async (): Promise<Response> => {
  * Gets a namespace by ID
  * @param id Namespace ID
  */
-export const getNamespace = async (
-  id: string | number
-): Promise<Response> => {
+export const getNamespace = async (id: string | number): Promise<Response> => {
   const url = new URL(
     `/api/v1.0/registry_ui/namespaces/${id}`,
     window.location.origin
@@ -171,14 +169,15 @@ export const putGeneralNamespace = async (
 /**
  * Get registration fields from options for namespace
  */
-export const optionsNamespaceRegistrationFields = async (): Promise<Response> => {
-  return await fetchApi(
-    async () =>
-      await fetch('/api/v1.0/registry_ui/namespaces', {
-        method: 'OPTIONS',
-      })
-  );
-};
+export const optionsNamespaceRegistrationFields =
+  async (): Promise<Response> => {
+    return await fetchApi(
+      async () =>
+        await fetch('/api/v1.0/registry_ui/namespaces', {
+          method: 'OPTIONS',
+        })
+    );
+  };
 
 /**
  * Initializes a login via terminal code

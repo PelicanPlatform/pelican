@@ -42,7 +42,7 @@ export default function Page() {
         </Grid>
         <Grid item xs={12}>
           <AuthenticatedContent redirect={true}>
-              <PostPage update={postCache} />
+            <PostPage update={postCache} />
           </AuthenticatedContent>
         </Grid>
       </Grid>
