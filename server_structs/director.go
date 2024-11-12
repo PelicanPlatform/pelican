@@ -45,21 +45,13 @@ type (
 		CredentialIssuer url.URL      `json:"issuer"`
 	}
 
-	// A struct for unmarshalling the old JSON while we stage the breaking change across releases
-	OldCapabilities struct {
-		PublicRead   bool
-		Read         bool
-		Write        bool
-		Listing      bool
-		FallBackRead bool
-	}
-
+	// Note that the json are kept in uppercase for backward compatibility
 	Capabilities struct {
-		PublicReads bool
-		Reads       bool
-		Writes      bool
-		Listings    bool
-		DirectReads bool
+		PublicReads bool `json:"PublicRead"`
+		Reads       bool `json:"Read"`
+		Writes      bool `json:"Write"`
+		Listings    bool `json:"Listing"`
+		DirectReads bool `json:"FallBackRead"`
 	}
 
 	NamespaceAdV2 struct {
@@ -186,41 +178,6 @@ type (
 		XPelTokGenHdr XPelTokGen
 	}
 )
-
-// A helper function to handle JSON->Caps unmarshalling across multiple deprecated JSON keys.
-//
-// Old Caches/Origins will send various bits of JSON to the Director containing the JSON representation
-// of the OldCapabilities struct. To make sure these old JSON representations are unmarshalled correctly
-// into the new Capabilities struct, this function determines which JSON format is being sent and handles
-// conversion if necessary. We can probably think about removing this function when we don't see origins/directors
-// running Pelican <= v7.11.0.
-func (c *Capabilities) UnmarshalJSON(data []byte) error {
-	// Check if it's the old format by looking for a unique field, e.g., "FallBackRead"
-	if strings.Contains(string(data), "FallBackRead") {
-		// Detected old JSON format, so unmarshal into OldCapabilities
-		var oldCaps OldCapabilities
-		if err := json.Unmarshal(data, &oldCaps); err != nil {
-			return err
-		}
-
-		// Map the old fields to the new struct
-		c.PublicReads = oldCaps.PublicRead
-		c.Reads = oldCaps.Read
-		c.Writes = oldCaps.Write
-		c.Listings = oldCaps.Listing
-		c.DirectReads = oldCaps.FallBackRead
-	} else {
-		// Assume it's the new JSON format and unmarshal directly into Capabilities
-		type Alias Capabilities // Create an alias to avoid recursive calls to UnmarshalJSON
-		var newCaps Alias
-		if err := json.Unmarshal(data, &newCaps); err != nil {
-			return err
-		}
-		*c = Capabilities(newCaps) // Copy unmarshalled values back to the original struct
-	}
-
-	return nil
-}
 
 func (x XPelNs) GetName() string {
 	return "X-Pelican-Namespace"
