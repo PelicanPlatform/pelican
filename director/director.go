@@ -1147,6 +1147,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		Type:                sType.String(),
 		Caps:                adV2.Caps,
 		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
+		Version:             adV2.Version,
 	}
 
 	recordAd(engineCtx, sAd, &adV2.Namespaces)
