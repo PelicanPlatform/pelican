@@ -25,305 +25,305 @@ import (
 
 type Config struct {
 	Cache struct {
-		BlocksToPrefetch int `mapstructure:"blockstoprefetch"`
-		Concurrency int `mapstructure:"concurrency"`
-		DataLocation string `mapstructure:"datalocation"`
-		DataLocations []string `mapstructure:"datalocations"`
-		EnableLotman bool `mapstructure:"enablelotman"`
-		EnableOIDC bool `mapstructure:"enableoidc"`
-		EnableVoms bool `mapstructure:"enablevoms"`
-		ExportLocation string `mapstructure:"exportlocation"`
-		HighWaterMark string `mapstructure:"highwatermark"`
-		LocalRoot string `mapstructure:"localroot"`
-		LowWatermark string `mapstructure:"lowwatermark"`
-		MetaLocations []string `mapstructure:"metalocations"`
-		PermittedNamespaces []string `mapstructure:"permittednamespaces"`
-		Port int `mapstructure:"port"`
-		RunLocation string `mapstructure:"runlocation"`
-		SelfTest bool `mapstructure:"selftest"`
-		SelfTestInterval time.Duration `mapstructure:"selftestinterval"`
-		SentinelLocation string `mapstructure:"sentinellocation"`
-		Url string `mapstructure:"url"`
-		XRootDPrefix string `mapstructure:"xrootdprefix"`
-	} `mapstructure:"cache"`
+		BlocksToPrefetch int `mapstructure:"blockstoprefetch" yaml:"BlocksToPrefetch"`
+		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
+		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
+		DataLocations []string `mapstructure:"datalocations" yaml:"DataLocations"`
+		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
+		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
+		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
+		ExportLocation string `mapstructure:"exportlocation" yaml:"ExportLocation"`
+		HighWaterMark string `mapstructure:"highwatermark" yaml:"HighWaterMark"`
+		LocalRoot string `mapstructure:"localroot" yaml:"LocalRoot"`
+		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
+		MetaLocations []string `mapstructure:"metalocations" yaml:"MetaLocations"`
+		PermittedNamespaces []string `mapstructure:"permittednamespaces" yaml:"PermittedNamespaces"`
+		Port int `mapstructure:"port" yaml:"Port"`
+		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
+		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
+		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
+		SentinelLocation string `mapstructure:"sentinellocation" yaml:"SentinelLocation"`
+		Url string `mapstructure:"url" yaml:"Url"`
+		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
+	} `mapstructure:"cache" yaml:"Cache"`
 	Client struct {
-		DisableHttpProxy bool `mapstructure:"disablehttpproxy"`
-		DisableProxyFallback bool `mapstructure:"disableproxyfallback"`
-		MaximumDownloadSpeed int `mapstructure:"maximumdownloadspeed"`
-		MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed"`
-		SlowTransferRampupTime time.Duration `mapstructure:"slowtransferrampuptime"`
-		SlowTransferWindow time.Duration `mapstructure:"slowtransferwindow"`
-		StoppedTransferTimeout time.Duration `mapstructure:"stoppedtransfertimeout"`
-		WorkerCount int `mapstructure:"workercount"`
-	} `mapstructure:"client"`
-	ConfigDir string `mapstructure:"configdir"`
-	ConfigLocations []string `mapstructure:"configlocations"`
-	Debug bool `mapstructure:"debug"`
+		DisableHttpProxy bool `mapstructure:"disablehttpproxy" yaml:"DisableHttpProxy"`
+		DisableProxyFallback bool `mapstructure:"disableproxyfallback" yaml:"DisableProxyFallback"`
+		MaximumDownloadSpeed int `mapstructure:"maximumdownloadspeed" yaml:"MaximumDownloadSpeed"`
+		MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
+		SlowTransferRampupTime time.Duration `mapstructure:"slowtransferrampuptime" yaml:"SlowTransferRampupTime"`
+		SlowTransferWindow time.Duration `mapstructure:"slowtransferwindow" yaml:"SlowTransferWindow"`
+		StoppedTransferTimeout time.Duration `mapstructure:"stoppedtransfertimeout" yaml:"StoppedTransferTimeout"`
+		WorkerCount int `mapstructure:"workercount" yaml:"WorkerCount"`
+	} `mapstructure:"client" yaml:"Client"`
+	ConfigDir string `mapstructure:"configdir" yaml:"ConfigDir"`
+	ConfigLocations []string `mapstructure:"configlocations" yaml:"ConfigLocations"`
+	Debug bool `mapstructure:"debug" yaml:"Debug"`
 	Director struct {
-		AdvertisementTTL time.Duration `mapstructure:"advertisementttl"`
-		AssumePresenceAtSingleOrigin bool `mapstructure:"assumepresenceatsingleorigin"`
-		CachePresenceCapacity int `mapstructure:"cachepresencecapacity"`
-		CachePresenceTTL time.Duration `mapstructure:"cachepresencettl"`
-		CacheResponseHostnames []string `mapstructure:"cacheresponsehostnames"`
-		CacheSortMethod string `mapstructure:"cachesortmethod"`
-		CachesPullFromCaches bool `mapstructure:"cachespullfromcaches"`
-		CheckCachePresence bool `mapstructure:"checkcachepresence"`
-		CheckOriginPresence bool `mapstructure:"checkoriginpresence"`
-		DbLocation string `mapstructure:"dblocation"`
-		DefaultResponse string `mapstructure:"defaultresponse"`
-		EnableBroker bool `mapstructure:"enablebroker"`
-		EnableOIDC bool `mapstructure:"enableoidc"`
-		EnableStat bool `mapstructure:"enablestat"`
-		FilteredServers []string `mapstructure:"filteredservers"`
-		GeoIPLocation string `mapstructure:"geoiplocation"`
-		MaxMindKeyFile string `mapstructure:"maxmindkeyfile"`
-		MaxStatResponse int `mapstructure:"maxstatresponse"`
-		MinStatResponse int `mapstructure:"minstatresponse"`
-		OriginCacheHealthTestInterval time.Duration `mapstructure:"origincachehealthtestinterval"`
-		OriginResponseHostnames []string `mapstructure:"originresponsehostnames"`
-		StatConcurrencyLimit int `mapstructure:"statconcurrencylimit"`
-		StatTimeout time.Duration `mapstructure:"stattimeout"`
-		SupportContactEmail string `mapstructure:"supportcontactemail"`
-		SupportContactUrl string `mapstructure:"supportcontacturl"`
-		X509ClientAuthenticationPrefixes []string `mapstructure:"x509clientauthenticationprefixes"`
-	} `mapstructure:"director"`
-	DisableHttpProxy bool `mapstructure:"disablehttpproxy"`
-	DisableProxyFallback bool `mapstructure:"disableproxyfallback"`
+		AdvertisementTTL time.Duration `mapstructure:"advertisementttl" yaml:"AdvertisementTTL"`
+		AssumePresenceAtSingleOrigin bool `mapstructure:"assumepresenceatsingleorigin" yaml:"AssumePresenceAtSingleOrigin"`
+		CachePresenceCapacity int `mapstructure:"cachepresencecapacity" yaml:"CachePresenceCapacity"`
+		CachePresenceTTL time.Duration `mapstructure:"cachepresencettl" yaml:"CachePresenceTTL"`
+		CacheResponseHostnames []string `mapstructure:"cacheresponsehostnames" yaml:"CacheResponseHostnames"`
+		CacheSortMethod string `mapstructure:"cachesortmethod" yaml:"CacheSortMethod"`
+		CachesPullFromCaches bool `mapstructure:"cachespullfromcaches" yaml:"CachesPullFromCaches"`
+		CheckCachePresence bool `mapstructure:"checkcachepresence" yaml:"CheckCachePresence"`
+		CheckOriginPresence bool `mapstructure:"checkoriginpresence" yaml:"CheckOriginPresence"`
+		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		DefaultResponse string `mapstructure:"defaultresponse" yaml:"DefaultResponse"`
+		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
+		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
+		EnableStat bool `mapstructure:"enablestat" yaml:"EnableStat"`
+		FilteredServers []string `mapstructure:"filteredservers" yaml:"FilteredServers"`
+		GeoIPLocation string `mapstructure:"geoiplocation" yaml:"GeoIPLocation"`
+		MaxMindKeyFile string `mapstructure:"maxmindkeyfile" yaml:"MaxMindKeyFile"`
+		MaxStatResponse int `mapstructure:"maxstatresponse" yaml:"MaxStatResponse"`
+		MinStatResponse int `mapstructure:"minstatresponse" yaml:"MinStatResponse"`
+		OriginCacheHealthTestInterval time.Duration `mapstructure:"origincachehealthtestinterval" yaml:"OriginCacheHealthTestInterval"`
+		OriginResponseHostnames []string `mapstructure:"originresponsehostnames" yaml:"OriginResponseHostnames"`
+		StatConcurrencyLimit int `mapstructure:"statconcurrencylimit" yaml:"StatConcurrencyLimit"`
+		StatTimeout time.Duration `mapstructure:"stattimeout" yaml:"StatTimeout"`
+		SupportContactEmail string `mapstructure:"supportcontactemail" yaml:"SupportContactEmail"`
+		SupportContactUrl string `mapstructure:"supportcontacturl" yaml:"SupportContactUrl"`
+		X509ClientAuthenticationPrefixes []string `mapstructure:"x509clientauthenticationprefixes" yaml:"X509ClientAuthenticationPrefixes"`
+	} `mapstructure:"director" yaml:"Director"`
+	DisableHttpProxy bool `mapstructure:"disablehttpproxy" yaml:"DisableHttpProxy"`
+	DisableProxyFallback bool `mapstructure:"disableproxyfallback" yaml:"DisableProxyFallback"`
 	Federation struct {
-		BrokerUrl string `mapstructure:"brokerurl"`
-		DirectorUrl string `mapstructure:"directorurl"`
-		DiscoveryUrl string `mapstructure:"discoveryurl"`
-		JwkUrl string `mapstructure:"jwkurl"`
-		RegistryUrl string `mapstructure:"registryurl"`
-		TopologyDowntimeUrl string `mapstructure:"topologydowntimeurl"`
-		TopologyNamespaceUrl string `mapstructure:"topologynamespaceurl"`
-		TopologyReloadInterval time.Duration `mapstructure:"topologyreloadinterval"`
-		TopologyUrl string `mapstructure:"topologyurl"`
-	} `mapstructure:"federation"`
-	GeoIPOverrides interface{} `mapstructure:"geoipoverrides"`
+		BrokerUrl string `mapstructure:"brokerurl" yaml:"BrokerUrl"`
+		DirectorUrl string `mapstructure:"directorurl" yaml:"DirectorUrl"`
+		DiscoveryUrl string `mapstructure:"discoveryurl" yaml:"DiscoveryUrl"`
+		JwkUrl string `mapstructure:"jwkurl" yaml:"JwkUrl"`
+		RegistryUrl string `mapstructure:"registryurl" yaml:"RegistryUrl"`
+		TopologyDowntimeUrl string `mapstructure:"topologydowntimeurl" yaml:"TopologyDowntimeUrl"`
+		TopologyNamespaceUrl string `mapstructure:"topologynamespaceurl" yaml:"TopologyNamespaceUrl"`
+		TopologyReloadInterval time.Duration `mapstructure:"topologyreloadinterval" yaml:"TopologyReloadInterval"`
+		TopologyUrl string `mapstructure:"topologyurl" yaml:"TopologyUrl"`
+	} `mapstructure:"federation" yaml:"Federation"`
+	GeoIPOverrides interface{} `mapstructure:"geoipoverrides" yaml:"GeoIPOverrides"`
 	Issuer struct {
-		AuthenticationSource string `mapstructure:"authenticationsource"`
-		AuthorizationTemplates interface{} `mapstructure:"authorizationtemplates"`
-		GroupFile string `mapstructure:"groupfile"`
-		GroupRequirements []string `mapstructure:"grouprequirements"`
-		GroupSource string `mapstructure:"groupsource"`
-		IssuerClaimValue string `mapstructure:"issuerclaimvalue"`
-		OIDCAuthenticationRequirements interface{} `mapstructure:"oidcauthenticationrequirements"`
-		OIDCAuthenticationUserClaim string `mapstructure:"oidcauthenticationuserclaim"`
-		OIDCGroupClaim string `mapstructure:"oidcgroupclaim"`
-		QDLLocation string `mapstructure:"qdllocation"`
-		ScitokensServerLocation string `mapstructure:"scitokensserverlocation"`
-		TomcatLocation string `mapstructure:"tomcatlocation"`
-		UserStripDomain bool `mapstructure:"userstripdomain"`
-	} `mapstructure:"issuer"`
-	IssuerKey string `mapstructure:"issuerkey"`
+		AuthenticationSource string `mapstructure:"authenticationsource" yaml:"AuthenticationSource"`
+		AuthorizationTemplates interface{} `mapstructure:"authorizationtemplates" yaml:"AuthorizationTemplates"`
+		GroupFile string `mapstructure:"groupfile" yaml:"GroupFile"`
+		GroupRequirements []string `mapstructure:"grouprequirements" yaml:"GroupRequirements"`
+		GroupSource string `mapstructure:"groupsource" yaml:"GroupSource"`
+		IssuerClaimValue string `mapstructure:"issuerclaimvalue" yaml:"IssuerClaimValue"`
+		OIDCAuthenticationRequirements interface{} `mapstructure:"oidcauthenticationrequirements" yaml:"OIDCAuthenticationRequirements"`
+		OIDCAuthenticationUserClaim string `mapstructure:"oidcauthenticationuserclaim" yaml:"OIDCAuthenticationUserClaim"`
+		OIDCGroupClaim string `mapstructure:"oidcgroupclaim" yaml:"OIDCGroupClaim"`
+		QDLLocation string `mapstructure:"qdllocation" yaml:"QDLLocation"`
+		ScitokensServerLocation string `mapstructure:"scitokensserverlocation" yaml:"ScitokensServerLocation"`
+		TomcatLocation string `mapstructure:"tomcatlocation" yaml:"TomcatLocation"`
+		UserStripDomain bool `mapstructure:"userstripdomain" yaml:"UserStripDomain"`
+	} `mapstructure:"issuer" yaml:"Issuer"`
+	IssuerKey string `mapstructure:"issuerkey" yaml:"IssuerKey"`
 	LocalCache struct {
-		DataLocation string `mapstructure:"datalocation"`
-		HighWaterMarkPercentage int `mapstructure:"highwatermarkpercentage"`
-		LowWaterMarkPercentage int `mapstructure:"lowwatermarkpercentage"`
-		RunLocation string `mapstructure:"runlocation"`
-		Size string `mapstructure:"size"`
-		Socket string `mapstructure:"socket"`
-	} `mapstructure:"localcache"`
+		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
+		HighWaterMarkPercentage int `mapstructure:"highwatermarkpercentage" yaml:"HighWaterMarkPercentage"`
+		LowWaterMarkPercentage int `mapstructure:"lowwatermarkpercentage" yaml:"LowWaterMarkPercentage"`
+		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
+		Size string `mapstructure:"size" yaml:"Size"`
+		Socket string `mapstructure:"socket" yaml:"Socket"`
+	} `mapstructure:"localcache" yaml:"LocalCache"`
 	Logging struct {
 		Cache struct {
-			Http string `mapstructure:"http"`
-			Ofs string `mapstructure:"ofs"`
-			Pfc string `mapstructure:"pfc"`
-			Pss string `mapstructure:"pss"`
-			Scitokens string `mapstructure:"scitokens"`
-			Xrd string `mapstructure:"xrd"`
-			Xrootd string `mapstructure:"xrootd"`
-		} `mapstructure:"cache"`
-		DisableProgressBars bool `mapstructure:"disableprogressbars"`
-		Level string `mapstructure:"level"`
-		LogLocation string `mapstructure:"loglocation"`
+			Http string `mapstructure:"http" yaml:"Http"`
+			Ofs string `mapstructure:"ofs" yaml:"Ofs"`
+			Pfc string `mapstructure:"pfc" yaml:"Pfc"`
+			Pss string `mapstructure:"pss" yaml:"Pss"`
+			Scitokens string `mapstructure:"scitokens" yaml:"Scitokens"`
+			Xrd string `mapstructure:"xrd" yaml:"Xrd"`
+			Xrootd string `mapstructure:"xrootd" yaml:"Xrootd"`
+		} `mapstructure:"cache" yaml:"Cache"`
+		DisableProgressBars bool `mapstructure:"disableprogressbars" yaml:"DisableProgressBars"`
+		Level string `mapstructure:"level" yaml:"Level"`
+		LogLocation string `mapstructure:"loglocation" yaml:"LogLocation"`
 		Origin struct {
-			Cms string `mapstructure:"cms"`
-			Http string `mapstructure:"http"`
-			Ofs string `mapstructure:"ofs"`
-			Oss string `mapstructure:"oss"`
-			Scitokens string `mapstructure:"scitokens"`
-			Xrd string `mapstructure:"xrd"`
-			Xrootd string `mapstructure:"xrootd"`
-		} `mapstructure:"origin"`
-	} `mapstructure:"logging"`
+			Cms string `mapstructure:"cms" yaml:"Cms"`
+			Http string `mapstructure:"http" yaml:"Http"`
+			Ofs string `mapstructure:"ofs" yaml:"Ofs"`
+			Oss string `mapstructure:"oss" yaml:"Oss"`
+			Scitokens string `mapstructure:"scitokens" yaml:"Scitokens"`
+			Xrd string `mapstructure:"xrd" yaml:"Xrd"`
+			Xrootd string `mapstructure:"xrootd" yaml:"Xrootd"`
+		} `mapstructure:"origin" yaml:"Origin"`
+	} `mapstructure:"logging" yaml:"Logging"`
 	Lotman struct {
-		DbLocation string `mapstructure:"dblocation"`
-		EnableAPI bool `mapstructure:"enableapi"`
-		LibLocation string `mapstructure:"liblocation"`
-		Lots interface{} `mapstructure:"lots"`
-	} `mapstructure:"lotman"`
-	MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed"`
+		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		EnableAPI bool `mapstructure:"enableapi" yaml:"EnableAPI"`
+		LibLocation string `mapstructure:"liblocation" yaml:"LibLocation"`
+		Lots interface{} `mapstructure:"lots" yaml:"Lots"`
+	} `mapstructure:"lotman" yaml:"Lotman"`
+	MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
 	Monitoring struct {
-		AggregatePrefixes []string `mapstructure:"aggregateprefixes"`
-		DataLocation string `mapstructure:"datalocation"`
-		DataRetention time.Duration `mapstructure:"dataretention"`
-		MetricAuthorization bool `mapstructure:"metricauthorization"`
-		PortHigher int `mapstructure:"porthigher"`
-		PortLower int `mapstructure:"portlower"`
-		PromQLAuthorization bool `mapstructure:"promqlauthorization"`
-		TokenExpiresIn time.Duration `mapstructure:"tokenexpiresin"`
-		TokenRefreshInterval time.Duration `mapstructure:"tokenrefreshinterval"`
-	} `mapstructure:"monitoring"`
+		AggregatePrefixes []string `mapstructure:"aggregateprefixes" yaml:"AggregatePrefixes"`
+		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
+		DataRetention time.Duration `mapstructure:"dataretention" yaml:"DataRetention"`
+		MetricAuthorization bool `mapstructure:"metricauthorization" yaml:"MetricAuthorization"`
+		PortHigher int `mapstructure:"porthigher" yaml:"PortHigher"`
+		PortLower int `mapstructure:"portlower" yaml:"PortLower"`
+		PromQLAuthorization bool `mapstructure:"promqlauthorization" yaml:"PromQLAuthorization"`
+		TokenExpiresIn time.Duration `mapstructure:"tokenexpiresin" yaml:"TokenExpiresIn"`
+		TokenRefreshInterval time.Duration `mapstructure:"tokenrefreshinterval" yaml:"TokenRefreshInterval"`
+	} `mapstructure:"monitoring" yaml:"Monitoring"`
 	OIDC struct {
-		AuthorizationEndpoint string `mapstructure:"authorizationendpoint"`
-		ClientID string `mapstructure:"clientid"`
-		ClientIDFile string `mapstructure:"clientidfile"`
-		ClientRedirectHostname string `mapstructure:"clientredirecthostname"`
-		ClientSecretFile string `mapstructure:"clientsecretfile"`
-		DeviceAuthEndpoint string `mapstructure:"deviceauthendpoint"`
-		Issuer string `mapstructure:"issuer"`
-		TokenEndpoint string `mapstructure:"tokenendpoint"`
-		UserInfoEndpoint string `mapstructure:"userinfoendpoint"`
-	} `mapstructure:"oidc"`
+		AuthorizationEndpoint string `mapstructure:"authorizationendpoint" yaml:"AuthorizationEndpoint"`
+		ClientID string `mapstructure:"clientid" yaml:"ClientID"`
+		ClientIDFile string `mapstructure:"clientidfile" yaml:"ClientIDFile"`
+		ClientRedirectHostname string `mapstructure:"clientredirecthostname" yaml:"ClientRedirectHostname"`
+		ClientSecretFile string `mapstructure:"clientsecretfile" yaml:"ClientSecretFile"`
+		DeviceAuthEndpoint string `mapstructure:"deviceauthendpoint" yaml:"DeviceAuthEndpoint"`
+		Issuer string `mapstructure:"issuer" yaml:"Issuer"`
+		TokenEndpoint string `mapstructure:"tokenendpoint" yaml:"TokenEndpoint"`
+		UserInfoEndpoint string `mapstructure:"userinfoendpoint" yaml:"UserInfoEndpoint"`
+	} `mapstructure:"oidc" yaml:"OIDC"`
 	Origin struct {
-		DbLocation string `mapstructure:"dblocation"`
-		DirectorTest bool `mapstructure:"directortest"`
-		EnableBroker bool `mapstructure:"enablebroker"`
-		EnableCmsd bool `mapstructure:"enablecmsd"`
-		EnableDirListing bool `mapstructure:"enabledirlisting"`
-		EnableDirectReads bool `mapstructure:"enabledirectreads"`
-		EnableFallbackRead bool `mapstructure:"enablefallbackread"`
-		EnableIssuer bool `mapstructure:"enableissuer"`
-		EnableListings bool `mapstructure:"enablelistings"`
-		EnableMacaroons bool `mapstructure:"enablemacaroons"`
-		EnableOIDC bool `mapstructure:"enableoidc"`
-		EnablePublicReads bool `mapstructure:"enablepublicreads"`
-		EnableReads bool `mapstructure:"enablereads"`
-		EnableUI bool `mapstructure:"enableui"`
-		EnableVoms bool `mapstructure:"enablevoms"`
-		EnableWrite bool `mapstructure:"enablewrite"`
-		EnableWrites bool `mapstructure:"enablewrites"`
-		ExportVolume string `mapstructure:"exportvolume"`
-		ExportVolumes []string `mapstructure:"exportvolumes"`
-		Exports interface{} `mapstructure:"exports"`
-		FederationPrefix string `mapstructure:"federationprefix"`
-		GlobusClientIDFile string `mapstructure:"globusclientidfile"`
-		GlobusClientSecretFile string `mapstructure:"globusclientsecretfile"`
-		GlobusCollectionID string `mapstructure:"globuscollectionid"`
-		GlobusCollectionName string `mapstructure:"globuscollectionname"`
-		GlobusConfigLocation string `mapstructure:"globusconfiglocation"`
-		HttpAuthTokenFile string `mapstructure:"httpauthtokenfile"`
-		HttpServiceUrl string `mapstructure:"httpserviceurl"`
-		Mode string `mapstructure:"mode"`
-		Multiuser bool `mapstructure:"multiuser"`
-		NamespacePrefix string `mapstructure:"namespaceprefix"`
-		Port int `mapstructure:"port"`
-		RunLocation string `mapstructure:"runlocation"`
-		S3AccessKeyfile string `mapstructure:"s3accesskeyfile"`
-		S3Bucket string `mapstructure:"s3bucket"`
-		S3Region string `mapstructure:"s3region"`
-		S3SecretKeyfile string `mapstructure:"s3secretkeyfile"`
-		S3ServiceName string `mapstructure:"s3servicename"`
-		S3ServiceUrl string `mapstructure:"s3serviceurl"`
-		S3UrlStyle string `mapstructure:"s3urlstyle"`
-		ScitokensDefaultUser string `mapstructure:"scitokensdefaultuser"`
-		ScitokensMapSubject bool `mapstructure:"scitokensmapsubject"`
-		ScitokensNameMapFile string `mapstructure:"scitokensnamemapfile"`
-		ScitokensRestrictedPaths []string `mapstructure:"scitokensrestrictedpaths"`
-		ScitokensUsernameClaim string `mapstructure:"scitokensusernameclaim"`
-		SelfTest bool `mapstructure:"selftest"`
-		SelfTestInterval time.Duration `mapstructure:"selftestinterval"`
-		StoragePrefix string `mapstructure:"storageprefix"`
-		StorageType string `mapstructure:"storagetype"`
-		Url string `mapstructure:"url"`
-		XRootDPrefix string `mapstructure:"xrootdprefix"`
-		XRootServiceUrl string `mapstructure:"xrootserviceurl"`
-	} `mapstructure:"origin"`
+		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
+		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
+		EnableCmsd bool `mapstructure:"enablecmsd" yaml:"EnableCmsd"`
+		EnableDirListing bool `mapstructure:"enabledirlisting" yaml:"EnableDirListing"`
+		EnableDirectReads bool `mapstructure:"enabledirectreads" yaml:"EnableDirectReads"`
+		EnableFallbackRead bool `mapstructure:"enablefallbackread" yaml:"EnableFallbackRead"`
+		EnableIssuer bool `mapstructure:"enableissuer" yaml:"EnableIssuer"`
+		EnableListings bool `mapstructure:"enablelistings" yaml:"EnableListings"`
+		EnableMacaroons bool `mapstructure:"enablemacaroons" yaml:"EnableMacaroons"`
+		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
+		EnablePublicReads bool `mapstructure:"enablepublicreads" yaml:"EnablePublicReads"`
+		EnableReads bool `mapstructure:"enablereads" yaml:"EnableReads"`
+		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
+		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
+		EnableWrite bool `mapstructure:"enablewrite" yaml:"EnableWrite"`
+		EnableWrites bool `mapstructure:"enablewrites" yaml:"EnableWrites"`
+		ExportVolume string `mapstructure:"exportvolume" yaml:"ExportVolume"`
+		ExportVolumes []string `mapstructure:"exportvolumes" yaml:"ExportVolumes"`
+		Exports interface{} `mapstructure:"exports" yaml:"Exports"`
+		FederationPrefix string `mapstructure:"federationprefix" yaml:"FederationPrefix"`
+		GlobusClientIDFile string `mapstructure:"globusclientidfile" yaml:"GlobusClientIDFile"`
+		GlobusClientSecretFile string `mapstructure:"globusclientsecretfile" yaml:"GlobusClientSecretFile"`
+		GlobusCollectionID string `mapstructure:"globuscollectionid" yaml:"GlobusCollectionID"`
+		GlobusCollectionName string `mapstructure:"globuscollectionname" yaml:"GlobusCollectionName"`
+		GlobusConfigLocation string `mapstructure:"globusconfiglocation" yaml:"GlobusConfigLocation"`
+		HttpAuthTokenFile string `mapstructure:"httpauthtokenfile" yaml:"HttpAuthTokenFile"`
+		HttpServiceUrl string `mapstructure:"httpserviceurl" yaml:"HttpServiceUrl"`
+		Mode string `mapstructure:"mode" yaml:"Mode"`
+		Multiuser bool `mapstructure:"multiuser" yaml:"Multiuser"`
+		NamespacePrefix string `mapstructure:"namespaceprefix" yaml:"NamespacePrefix"`
+		Port int `mapstructure:"port" yaml:"Port"`
+		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
+		S3AccessKeyfile string `mapstructure:"s3accesskeyfile" yaml:"S3AccessKeyfile"`
+		S3Bucket string `mapstructure:"s3bucket" yaml:"S3Bucket"`
+		S3Region string `mapstructure:"s3region" yaml:"S3Region"`
+		S3SecretKeyfile string `mapstructure:"s3secretkeyfile" yaml:"S3SecretKeyfile"`
+		S3ServiceName string `mapstructure:"s3servicename" yaml:"S3ServiceName"`
+		S3ServiceUrl string `mapstructure:"s3serviceurl" yaml:"S3ServiceUrl"`
+		S3UrlStyle string `mapstructure:"s3urlstyle" yaml:"S3UrlStyle"`
+		ScitokensDefaultUser string `mapstructure:"scitokensdefaultuser" yaml:"ScitokensDefaultUser"`
+		ScitokensMapSubject bool `mapstructure:"scitokensmapsubject" yaml:"ScitokensMapSubject"`
+		ScitokensNameMapFile string `mapstructure:"scitokensnamemapfile" yaml:"ScitokensNameMapFile"`
+		ScitokensRestrictedPaths []string `mapstructure:"scitokensrestrictedpaths" yaml:"ScitokensRestrictedPaths"`
+		ScitokensUsernameClaim string `mapstructure:"scitokensusernameclaim" yaml:"ScitokensUsernameClaim"`
+		SelfTest bool `mapstructure:"selftest" yaml:"SelfTest"`
+		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
+		StoragePrefix string `mapstructure:"storageprefix" yaml:"StoragePrefix"`
+		StorageType string `mapstructure:"storagetype" yaml:"StorageType"`
+		Url string `mapstructure:"url" yaml:"Url"`
+		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
+		XRootServiceUrl string `mapstructure:"xrootserviceurl" yaml:"XRootServiceUrl"`
+	} `mapstructure:"origin" yaml:"Origin"`
 	Plugin struct {
-		Token string `mapstructure:"token"`
-	} `mapstructure:"plugin"`
+		Token string `mapstructure:"token" yaml:"Token"`
+	} `mapstructure:"plugin" yaml:"Plugin"`
 	Registry struct {
-		AdminUsers []string `mapstructure:"adminusers"`
-		CustomRegistrationFields interface{} `mapstructure:"customregistrationfields"`
-		DbLocation string `mapstructure:"dblocation"`
-		Institutions interface{} `mapstructure:"institutions"`
-		InstitutionsUrl string `mapstructure:"institutionsurl"`
-		InstitutionsUrlReloadMinutes time.Duration `mapstructure:"institutionsurlreloadminutes"`
-		RequireCacheApproval bool `mapstructure:"requirecacheapproval"`
-		RequireKeyChaining bool `mapstructure:"requirekeychaining"`
-		RequireOriginApproval bool `mapstructure:"requireoriginapproval"`
-	} `mapstructure:"registry"`
+		AdminUsers []string `mapstructure:"adminusers" yaml:"AdminUsers"`
+		CustomRegistrationFields interface{} `mapstructure:"customregistrationfields" yaml:"CustomRegistrationFields"`
+		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		Institutions interface{} `mapstructure:"institutions" yaml:"Institutions"`
+		InstitutionsUrl string `mapstructure:"institutionsurl" yaml:"InstitutionsUrl"`
+		InstitutionsUrlReloadMinutes time.Duration `mapstructure:"institutionsurlreloadminutes" yaml:"InstitutionsUrlReloadMinutes"`
+		RequireCacheApproval bool `mapstructure:"requirecacheapproval" yaml:"RequireCacheApproval"`
+		RequireKeyChaining bool `mapstructure:"requirekeychaining" yaml:"RequireKeyChaining"`
+		RequireOriginApproval bool `mapstructure:"requireoriginapproval" yaml:"RequireOriginApproval"`
+	} `mapstructure:"registry" yaml:"Registry"`
 	Server struct {
-		EnablePprof bool `mapstructure:"enablepprof"`
-		EnableUI bool `mapstructure:"enableui"`
-		ExternalWebUrl string `mapstructure:"externalweburl"`
-		Hostname string `mapstructure:"hostname"`
-		IssuerHostname string `mapstructure:"issuerhostname"`
-		IssuerJwks string `mapstructure:"issuerjwks"`
-		IssuerPort int `mapstructure:"issuerport"`
-		IssuerUrl string `mapstructure:"issuerurl"`
-		Modules []string `mapstructure:"modules"`
-		RegistrationRetryInterval time.Duration `mapstructure:"registrationretryinterval"`
-		SessionSecretFile string `mapstructure:"sessionsecretfile"`
-		StartupTimeout time.Duration `mapstructure:"startuptimeout"`
-		TLSCACertificateDirectory string `mapstructure:"tlscacertificatedirectory"`
-		TLSCACertificateFile string `mapstructure:"tlscacertificatefile"`
-		TLSCAKey string `mapstructure:"tlscakey"`
-		TLSCertificate string `mapstructure:"tlscertificate"`
-		TLSKey string `mapstructure:"tlskey"`
-		UIActivationCodeFile string `mapstructure:"uiactivationcodefile"`
-		UIAdminUsers []string `mapstructure:"uiadminusers"`
-		UILoginRateLimit int `mapstructure:"uiloginratelimit"`
-		UIPasswordFile string `mapstructure:"uipasswordfile"`
-		WebConfigFile string `mapstructure:"webconfigfile"`
-		WebHost string `mapstructure:"webhost"`
-		WebPort int `mapstructure:"webport"`
-	} `mapstructure:"server"`
+		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
+		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
+		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
+		Hostname string `mapstructure:"hostname" yaml:"Hostname"`
+		IssuerHostname string `mapstructure:"issuerhostname" yaml:"IssuerHostname"`
+		IssuerJwks string `mapstructure:"issuerjwks" yaml:"IssuerJwks"`
+		IssuerPort int `mapstructure:"issuerport" yaml:"IssuerPort"`
+		IssuerUrl string `mapstructure:"issuerurl" yaml:"IssuerUrl"`
+		Modules []string `mapstructure:"modules" yaml:"Modules"`
+		RegistrationRetryInterval time.Duration `mapstructure:"registrationretryinterval" yaml:"RegistrationRetryInterval"`
+		SessionSecretFile string `mapstructure:"sessionsecretfile" yaml:"SessionSecretFile"`
+		StartupTimeout time.Duration `mapstructure:"startuptimeout" yaml:"StartupTimeout"`
+		TLSCACertificateDirectory string `mapstructure:"tlscacertificatedirectory" yaml:"TLSCACertificateDirectory"`
+		TLSCACertificateFile string `mapstructure:"tlscacertificatefile" yaml:"TLSCACertificateFile"`
+		TLSCAKey string `mapstructure:"tlscakey" yaml:"TLSCAKey"`
+		TLSCertificate string `mapstructure:"tlscertificate" yaml:"TLSCertificate"`
+		TLSKey string `mapstructure:"tlskey" yaml:"TLSKey"`
+		UIActivationCodeFile string `mapstructure:"uiactivationcodefile" yaml:"UIActivationCodeFile"`
+		UIAdminUsers []string `mapstructure:"uiadminusers" yaml:"UIAdminUsers"`
+		UILoginRateLimit int `mapstructure:"uiloginratelimit" yaml:"UILoginRateLimit"`
+		UIPasswordFile string `mapstructure:"uipasswordfile" yaml:"UIPasswordFile"`
+		WebConfigFile string `mapstructure:"webconfigfile" yaml:"WebConfigFile"`
+		WebHost string `mapstructure:"webhost" yaml:"WebHost"`
+		WebPort int `mapstructure:"webport" yaml:"WebPort"`
+	} `mapstructure:"server" yaml:"Server"`
 	Shoveler struct {
-		AMQPExchange string `mapstructure:"amqpexchange"`
-		AMQPTokenLocation string `mapstructure:"amqptokenlocation"`
-		Enable bool `mapstructure:"enable"`
-		IPMapping interface{} `mapstructure:"ipmapping"`
-		MessageQueueProtocol string `mapstructure:"messagequeueprotocol"`
-		OutputDestinations []string `mapstructure:"outputdestinations"`
-		PortHigher int `mapstructure:"porthigher"`
-		PortLower int `mapstructure:"portlower"`
-		QueueDirectory string `mapstructure:"queuedirectory"`
-		StompCert string `mapstructure:"stompcert"`
-		StompCertKey string `mapstructure:"stompcertkey"`
-		StompPassword string `mapstructure:"stomppassword"`
-		StompUsername string `mapstructure:"stompusername"`
-		Topic string `mapstructure:"topic"`
-		URL string `mapstructure:"url"`
-		VerifyHeader bool `mapstructure:"verifyheader"`
-	} `mapstructure:"shoveler"`
+		AMQPExchange string `mapstructure:"amqpexchange" yaml:"AMQPExchange"`
+		AMQPTokenLocation string `mapstructure:"amqptokenlocation" yaml:"AMQPTokenLocation"`
+		Enable bool `mapstructure:"enable" yaml:"Enable"`
+		IPMapping interface{} `mapstructure:"ipmapping" yaml:"IPMapping"`
+		MessageQueueProtocol string `mapstructure:"messagequeueprotocol" yaml:"MessageQueueProtocol"`
+		OutputDestinations []string `mapstructure:"outputdestinations" yaml:"OutputDestinations"`
+		PortHigher int `mapstructure:"porthigher" yaml:"PortHigher"`
+		PortLower int `mapstructure:"portlower" yaml:"PortLower"`
+		QueueDirectory string `mapstructure:"queuedirectory" yaml:"QueueDirectory"`
+		StompCert string `mapstructure:"stompcert" yaml:"StompCert"`
+		StompCertKey string `mapstructure:"stompcertkey" yaml:"StompCertKey"`
+		StompPassword string `mapstructure:"stomppassword" yaml:"StompPassword"`
+		StompUsername string `mapstructure:"stompusername" yaml:"StompUsername"`
+		Topic string `mapstructure:"topic" yaml:"Topic"`
+		URL string `mapstructure:"url" yaml:"URL"`
+		VerifyHeader bool `mapstructure:"verifyheader" yaml:"VerifyHeader"`
+	} `mapstructure:"shoveler" yaml:"Shoveler"`
 	StagePlugin struct {
-		Hook bool `mapstructure:"hook"`
-		MountPrefix string `mapstructure:"mountprefix"`
-		OriginPrefix string `mapstructure:"originprefix"`
-		ShadowOriginPrefix string `mapstructure:"shadoworiginprefix"`
-	} `mapstructure:"stageplugin"`
-	TLSSkipVerify bool `mapstructure:"tlsskipverify"`
+		Hook bool `mapstructure:"hook" yaml:"Hook"`
+		MountPrefix string `mapstructure:"mountprefix" yaml:"MountPrefix"`
+		OriginPrefix string `mapstructure:"originprefix" yaml:"OriginPrefix"`
+		ShadowOriginPrefix string `mapstructure:"shadoworiginprefix" yaml:"ShadowOriginPrefix"`
+	} `mapstructure:"stageplugin" yaml:"StagePlugin"`
+	TLSSkipVerify bool `mapstructure:"tlsskipverify" yaml:"TLSSkipVerify"`
 	Transport struct {
-		DialerKeepAlive time.Duration `mapstructure:"dialerkeepalive"`
-		DialerTimeout time.Duration `mapstructure:"dialertimeout"`
-		ExpectContinueTimeout time.Duration `mapstructure:"expectcontinuetimeout"`
-		IdleConnTimeout time.Duration `mapstructure:"idleconntimeout"`
-		MaxIdleConns int `mapstructure:"maxidleconns"`
-		ResponseHeaderTimeout time.Duration `mapstructure:"responseheadertimeout"`
-		TLSHandshakeTimeout time.Duration `mapstructure:"tlshandshaketimeout"`
-	} `mapstructure:"transport"`
+		DialerKeepAlive time.Duration `mapstructure:"dialerkeepalive" yaml:"DialerKeepAlive"`
+		DialerTimeout time.Duration `mapstructure:"dialertimeout" yaml:"DialerTimeout"`
+		ExpectContinueTimeout time.Duration `mapstructure:"expectcontinuetimeout" yaml:"ExpectContinueTimeout"`
+		IdleConnTimeout time.Duration `mapstructure:"idleconntimeout" yaml:"IdleConnTimeout"`
+		MaxIdleConns int `mapstructure:"maxidleconns" yaml:"MaxIdleConns"`
+		ResponseHeaderTimeout time.Duration `mapstructure:"responseheadertimeout" yaml:"ResponseHeaderTimeout"`
+		TLSHandshakeTimeout time.Duration `mapstructure:"tlshandshaketimeout" yaml:"TLSHandshakeTimeout"`
+	} `mapstructure:"transport" yaml:"Transport"`
 	Xrootd struct {
-		AuthRefreshInterval time.Duration `mapstructure:"authrefreshinterval"`
-		Authfile string `mapstructure:"authfile"`
-		ConfigFile string `mapstructure:"configfile"`
-		DetailedMonitoringHost string `mapstructure:"detailedmonitoringhost"`
-		DetailedMonitoringPort int `mapstructure:"detailedmonitoringport"`
-		LocalMonitoringHost string `mapstructure:"localmonitoringhost"`
-		MacaroonsKeyFile string `mapstructure:"macaroonskeyfile"`
-		ManagerHost string `mapstructure:"managerhost"`
-		ManagerPort int `mapstructure:"managerport"`
-		Mount string `mapstructure:"mount"`
-		Port int `mapstructure:"port"`
-		RobotsTxtFile string `mapstructure:"robotstxtfile"`
-		RunLocation string `mapstructure:"runlocation"`
-		ScitokensConfig string `mapstructure:"scitokensconfig"`
-		Sitename string `mapstructure:"sitename"`
-		SummaryMonitoringHost string `mapstructure:"summarymonitoringhost"`
-		SummaryMonitoringPort int `mapstructure:"summarymonitoringport"`
-	} `mapstructure:"xrootd"`
+		AuthRefreshInterval time.Duration `mapstructure:"authrefreshinterval" yaml:"AuthRefreshInterval"`
+		Authfile string `mapstructure:"authfile" yaml:"Authfile"`
+		ConfigFile string `mapstructure:"configfile" yaml:"ConfigFile"`
+		DetailedMonitoringHost string `mapstructure:"detailedmonitoringhost" yaml:"DetailedMonitoringHost"`
+		DetailedMonitoringPort int `mapstructure:"detailedmonitoringport" yaml:"DetailedMonitoringPort"`
+		LocalMonitoringHost string `mapstructure:"localmonitoringhost" yaml:"LocalMonitoringHost"`
+		MacaroonsKeyFile string `mapstructure:"macaroonskeyfile" yaml:"MacaroonsKeyFile"`
+		ManagerHost string `mapstructure:"managerhost" yaml:"ManagerHost"`
+		ManagerPort int `mapstructure:"managerport" yaml:"ManagerPort"`
+		Mount string `mapstructure:"mount" yaml:"Mount"`
+		Port int `mapstructure:"port" yaml:"Port"`
+		RobotsTxtFile string `mapstructure:"robotstxtfile" yaml:"RobotsTxtFile"`
+		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
+		ScitokensConfig string `mapstructure:"scitokensconfig" yaml:"ScitokensConfig"`
+		Sitename string `mapstructure:"sitename" yaml:"Sitename"`
+		SummaryMonitoringHost string `mapstructure:"summarymonitoringhost" yaml:"SummaryMonitoringHost"`
+		SummaryMonitoringPort int `mapstructure:"summarymonitoringport" yaml:"SummaryMonitoringPort"`
+	} `mapstructure:"xrootd" yaml:"Xrootd"`
 }
 
 

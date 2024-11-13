@@ -1,5 +1,3 @@
-//go:build linux
-
 /***************************************************************
  *
  * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
@@ -18,21 +16,14 @@
  *
  ***************************************************************/
 
-package config
+package config_printer
 
 import (
-	"path/filepath"
-
+	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-
-	"github.com/pelicanplatform/pelican/param"
 )
 
-func InitServerOSDefaults(v *viper.Viper) error {
-	// For Linux, even if we have well-known system CAs, we don't want to
-	// use them, because we want to always generate our own CA if Server_TLSCertificate (host certificate)
-	// is not explicitly set so that we can sign our host cert by our CA instead of self-signing
-	configDir := v.GetString("ConfigDir")
-	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), filepath.Join(configDir, "certificates", "tlsca.pem"))
-	return nil
+func configDump(cmd *cobra.Command, args []string) {
+	currentConfig := initClientAndServerConfig(viper.GetViper())
+	printConfig(currentConfig, format)
 }

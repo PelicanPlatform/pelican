@@ -32,11 +32,11 @@ var (
 )
 
 // Unmarshal Viper config into a struct viperConfig and returns it
-func UnmarshalConfig() (*Config, error) {
+func UnmarshalConfig(v *viper.Viper) (*Config, error) {
 	configMutex.Lock()
 	defer configMutex.Unlock()
 	viperConfig = new(Config)
-	err := viper.Unmarshal(viperConfig)
+	err := v.Unmarshal(viperConfig)
 	if err != nil {
 		return nil, err
 	}

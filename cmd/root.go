@@ -33,6 +33,7 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/cmd/config_printer"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
 )
@@ -135,6 +136,7 @@ func init() {
 	rootCmd.AddCommand(rootPluginCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(generateCmd)
+	rootCmd.AddCommand(config_printer.ConfigCmd)
 	preferredPrefix := config.GetPreferredPrefix()
 	rootCmd.Use = strings.ToLower(preferredPrefix.String())
 

@@ -255,7 +255,7 @@ func generateGoStructCode(field *GoField, indent string) string {
 	if field.Type != "" {
 		// Tack on a mapstructure value with the field's tag (ie the name of the field but lowercased). This
 		// gets used to check viper keys against the struct fields, where Viper lowercases everything.
-		return fmt.Sprintf("%s%s %s `mapstructure:\"%s\"`\n", indent, field.Name, field.Type, field.Tag)
+		return fmt.Sprintf("%s%s %s `mapstructure:\"%s\" yaml:\"%s\"`\n", indent, field.Name, field.Type, field.Tag, field.Name)
 	}
 	code := fmt.Sprintf("%s%s struct {\n", indent, field.Name)
 	keys := make([]string, 0, len(field.NestedFields))
@@ -269,7 +269,7 @@ func generateGoStructCode(field *GoField, indent string) string {
 		code += generateGoStructCode(nested, indent+"	")
 	}
 	if field.Tag != "" {
-		code += fmt.Sprintf("%s} `mapstructure:\"%s\"`\n", indent, field.Tag)
+		code += fmt.Sprintf("%s} `mapstructure:\"%s\" yaml:\"%s\"`\n", indent, field.Tag, field.Name)
 	} else {
 		code += fmt.Sprintf("%s}\n", indent)
 	}

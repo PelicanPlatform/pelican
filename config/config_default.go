@@ -25,18 +25,20 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
-func InitServerOSDefaults() error {
+func InitServerOSDefaults(v *viper.Viper) error {
 	// Windows / Mac don't have a default set of CAs installed at
 	// a well-known location as is expected by XRootD. We want to always generate our own CA
 	// if Server_TLSCertificate (host certificate) is not explicitly set so that
 	// we can sign our host cert by our CA instead of self-signing
-	tlscaFile := filepath.Join(viper.GetString("ConfigDir"), "certificates", "tlsca.pem")
-	viper.SetDefault("Server.TLSCACertificateFile", tlscaFile)
+	tlscaFile := filepath.Join(v.GetString("ConfigDir"), "certificates", "tlsca.pem")
+	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), tlscaFile)
 
-	tlscaKeyFile := filepath.Join(viper.GetString("ConfigDir"), "certificates", "tlscakey.pem")
-	viper.SetDefault("Server.TLSCAKey", tlscaKeyFile)
+	tlscaKeyFile := filepath.Join(v.GetString("ConfigDir"), "certificates", "tlscakey.pem")
+	v.SetDefault(param.Server_TLSCAKey.GetName(), tlscaKeyFile)
 
 	if err := os.MkdirAll(filepath.Dir(tlscaFile), 0755); err != nil {
 		return err

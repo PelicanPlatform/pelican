@@ -73,7 +73,7 @@ func getConfigValues(ctx *gin.Context) {
 		})
 		return
 	}
-	rawConfig, err := param.UnmarshalConfig()
+	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
