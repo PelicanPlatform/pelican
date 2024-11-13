@@ -87,6 +87,7 @@ type (
 		Caps                Capabilities      `json:"capabilities"`
 		FromTopology        bool              `json:"from_topology"`
 		IOLoad              float64           `json:"io_load"`
+		Version             string            `json:"version"`
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
