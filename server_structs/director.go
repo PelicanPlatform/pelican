@@ -114,6 +114,7 @@ type (
 		Issuer              []TokenIssuer     `json:"token-issuer"`
 		StorageType         OriginStorageType `json:"storageType"`
 		DisableDirectorTest bool              `json:"directorTest"` // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
+		Version             string            `json:"version"`
 	}
 
 	OriginAdvertiseV1 struct {
