@@ -37,6 +37,7 @@ type (
 		ServerType string `form:"server_type"` // "cache" or "origin"
 	}
 
+	// A response struct for a server Ad that provides a minimal view into the servers data
 	listServerResponse struct {
 		Name                string                           `json:"name"`
 		StorageType         server_structs.OriginStorageType `json:"storageType"`
@@ -58,6 +59,65 @@ type (
 		HealthStatus      HealthTestStatus            `json:"healthStatus"`
 		IOLoad            float64                     `json:"ioLoad"`
 		NamespacePrefixes []string                    `json:"namespacePrefixes"`
+	}
+
+	// A response struct for a server Ad that provides a detailed view into the servers data
+	serverResponse struct {
+		Name                string                           `json:"name"`
+		StorageType         server_structs.OriginStorageType `json:"storageType"`
+		DisableDirectorTest bool                             `json:"disableDirectorTest"`
+		// AuthURL is Deprecated. For Pelican severs, URL is used as the base URL for object access.
+		// This is to maintain compatibility with the topology servers, where it uses AuthURL for
+		// accessing protected objects and URL for public objects.
+		AuthURL      string                      `json:"authUrl"`
+		BrokerURL    string                      `json:"brokerUrl"`
+		URL          string                      `json:"url"`    // This is server's XRootD URL for file transfer
+		WebURL       string                      `json:"webUrl"` // This is server's Web interface and API
+		Type         string                      `json:"type"`
+		Latitude     float64                     `json:"latitude"`
+		Longitude    float64                     `json:"longitude"`
+		Caps         server_structs.Capabilities `json:"capabilities"`
+		Filtered     bool                        `json:"filtered"`
+		FilteredType string                      `json:"filteredType"`
+		FromTopology bool                        `json:"fromTopology"`
+		HealthStatus HealthTestStatus            `json:"healthStatus"`
+		IOLoad       float64                     `json:"ioLoad"`
+		Namespaces   []NamespaceAdV2Response     `json:"namespaces"`
+	}
+
+	// TokenIssuerResponse creates a response struct for TokenIssuer
+	TokenIssuerResponse struct {
+		BasePaths       []string `json:"base-paths"`
+		RestrictedPaths []string `json:"restricted-paths"`
+		IssuerUrl       string   `json:"issuer"`
+	}
+
+	// TokenGenResponse creates a response struct for TokenGen
+	TokenGenResponse struct {
+		Strategy         server_structs.StrategyType `json:"strategy"`
+		VaultServer      string                      `json:"vault-server"`
+		MaxScopeDepth    uint                        `json:"max-scope-depth"`
+		CredentialIssuer string                      `json:"issuer"`
+	}
+
+	// NamespaceAdV2Response creates a response struct for NamespaceAdV2
+	NamespaceAdV2Response struct {
+		Path         string                      `json:"path"`
+		Caps         server_structs.Capabilities `json:"capabilities"`
+		Generation   []TokenGenResponse          `json:"token-generation"`
+		Issuer       []TokenIssuerResponse       `json:"token-issuer"`
+		FromTopology bool                        `json:"from-topology"`
+	}
+
+	// NamespaceAdV2MappedResponse creates a response struct for NamespaceAdV2 with mapped origins and caches
+	NamespaceAdV2MappedResponse struct {
+		Path         string                      `json:"path"`
+		Caps         server_structs.Capabilities `json:"capabilities"`
+		Generation   []TokenGenResponse          `json:"token-generation"`
+		Issuer       []TokenIssuerResponse       `json:"token-issuer"`
+		FromTopology bool                        `json:"from-topology"`
+		Origins      []string                    `json:"origins"`
+		Caches       []string                    `json:"caches"`
 	}
 
 	statRequest struct {
@@ -107,46 +167,207 @@ func listServers(ctx *gin.Context) {
 	defer healthTestUtilsMutex.RUnlock()
 	resList := make([]listServerResponse, 0)
 	for _, server := range servers {
-		healthStatus := HealthStatusUnknown
-		healthUtil, ok := healthTestUtils[server.URL.String()]
-		if ok {
-			healthStatus = healthUtil.Status
-		} else {
-			if server.DisableDirectorTest {
-				healthStatus = HealthStatusDisabled
-			} else {
-				if !server.FromTopology {
-					log.Debugf("listServers: healthTestUtils not found for server at %s", server.URL.String())
-				}
-			}
-		}
-		filtered, ft := checkFilter(server.Name)
-
-		res := listServerResponse{
-			Name:                server.Name,
-			StorageType:         server.StorageType,
-			DisableDirectorTest: server.DisableDirectorTest,
-			BrokerURL:           server.BrokerURL.String(),
-			// For web UI, if authURL is not set, we don't want to confuse user by copying server URL as authURL
-			AuthURL:      server.AuthURL.String(),
-			URL:          server.URL.String(),
-			WebURL:       server.WebURL.String(),
-			Type:         server.Type,
-			Latitude:     server.Latitude,
-			Longitude:    server.Longitude,
-			Caps:         server.Caps,
-			Filtered:     filtered,
-			FilteredType: ft.String(),
-			FromTopology: server.FromTopology,
-			HealthStatus: healthStatus,
-			IOLoad:       server.GetIOLoad(),
-		}
-		for _, ns := range server.NamespaceAds {
-			res.NamespacePrefixes = append(res.NamespacePrefixes, ns.Path)
-		}
-		resList = append(resList, res)
+		res := advertisementToServerResponse(server)
+		listRes := serverResponseToListServerResponse(res)
+		resList = append(resList, listRes)
 	}
 	ctx.JSON(http.StatusOK, resList)
+}
+
+// Convert NamespaceAdV2 to namespaceResponse
+func namespaceAdV2ToResponse(ns *server_structs.NamespaceAdV2) NamespaceAdV2Response {
+	res := NamespaceAdV2Response{
+		Path:         ns.Path,
+		Caps:         ns.Caps,
+		FromTopology: ns.FromTopology,
+	}
+	for _, gen := range ns.Generation {
+		res.Generation = append(res.Generation, TokenGenResponse{
+			Strategy:         gen.Strategy,
+			VaultServer:      gen.VaultServer,
+			MaxScopeDepth:    gen.MaxScopeDepth,
+			CredentialIssuer: gen.CredentialIssuer.String(),
+		})
+	}
+	for _, issuer := range ns.Issuer {
+		res.Issuer = append(res.Issuer, TokenIssuerResponse{
+			BasePaths:       issuer.BasePaths,
+			RestrictedPaths: issuer.RestrictedPaths,
+			IssuerUrl:       issuer.IssuerUrl.String(),
+		})
+	}
+	return res
+}
+
+// namespaceAdV2ToMappedResponse converts a NamespaceAdV2 to a NamespaceAdV2MappedResponse
+func namespaceAdV2ToMappedResponse(ns *server_structs.NamespaceAdV2) NamespaceAdV2MappedResponse {
+	nsRes := namespaceAdV2ToResponse(ns)
+	return NamespaceAdV2MappedResponse{
+		Path:       nsRes.Path,
+		Caps:       nsRes.Caps,
+		Generation: nsRes.Generation,
+		Issuer:     nsRes.Issuer,
+		Origins:    []string{},
+		Caches:     []string{},
+	}
+}
+
+// Convert Advertisement to serverResponse
+func advertisementToServerResponse(ad *server_structs.Advertisement) serverResponse {
+	healthStatus := HealthStatusUnknown
+	healthUtil, ok := healthTestUtils[ad.URL.String()]
+	if ok {
+		healthStatus = healthUtil.Status
+	} else {
+		if ad.DisableDirectorTest {
+			healthStatus = HealthStatusDisabled
+		} else {
+			if !ad.FromTopology {
+				log.Debugf("advertisementToServerResponse: healthTestUtils not found for server at %s", ad.URL.String())
+			}
+		}
+	}
+	filtered, ft := checkFilter(ad.Name)
+	res := serverResponse{
+		Name:                ad.Name,
+		StorageType:         ad.StorageType,
+		DisableDirectorTest: ad.DisableDirectorTest,
+		BrokerURL:           ad.BrokerURL.String(),
+		AuthURL:             ad.AuthURL.String(),
+		URL:                 ad.URL.String(),
+		WebURL:              ad.WebURL.String(),
+		Type:                ad.Type,
+		Latitude:            ad.Latitude,
+		Longitude:           ad.Longitude,
+		Caps:                ad.Caps,
+		Filtered:            filtered,
+		FilteredType:        ft.String(),
+		FromTopology:        ad.FromTopology,
+		HealthStatus:        healthStatus,
+		IOLoad:              ad.GetIOLoad(),
+	}
+	for _, ns := range ad.NamespaceAds {
+		nsRes := namespaceAdV2ToResponse(&ns)
+		res.Namespaces = append(res.Namespaces, nsRes)
+	}
+	return res
+}
+
+// Convert serverResponse to a listServerResponse
+func serverResponseToListServerResponse(res serverResponse) listServerResponse {
+	listRes := listServerResponse{
+		Name:                res.Name,
+		StorageType:         res.StorageType,
+		DisableDirectorTest: res.DisableDirectorTest,
+		BrokerURL:           res.BrokerURL,
+		AuthURL:             res.AuthURL,
+		URL:                 res.URL,
+		WebURL:              res.WebURL,
+		Type:                res.Type,
+		Latitude:            res.Latitude,
+		Longitude:           res.Longitude,
+		Caps:                res.Caps,
+		Filtered:            res.Filtered,
+		FilteredType:        res.FilteredType,
+		FromTopology:        res.FromTopology,
+		HealthStatus:        res.HealthStatus,
+		IOLoad:              res.IOLoad,
+	}
+	for _, ns := range res.Namespaces {
+		listRes.NamespacePrefixes = append(listRes.NamespacePrefixes, ns.Path)
+	}
+	return listRes
+}
+
+// Given a server name returns the server advertisement
+func getServer(serverName string) *server_structs.Advertisement {
+	servers := listAdvertisement([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
+	for _, server := range servers {
+		if server.Name == serverName {
+			return server
+		}
+	}
+	return nil
+}
+
+// API wrapper around getServer to return a serverResponse
+func getServerHandler(ctx *gin.Context) {
+	serverName := ctx.Param("name")
+	if serverName == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server name is required",
+		})
+		return
+	}
+	server := getServer(serverName)
+	if server == nil {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server not found",
+		})
+		return
+	}
+	serverResponse := advertisementToServerResponse(server)
+	ctx.JSON(http.StatusOK, serverResponse)
+}
+
+// Get all namespaces for a server
+func listServerNamespaces(ctx *gin.Context) {
+	serverName := ctx.Param("name")
+	if serverName == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server name is required",
+		})
+		return
+	}
+	server := getServer(serverName)
+	if server == nil {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server not found",
+		})
+		return
+	}
+	var nsRes []NamespaceAdV2Response
+	for _, n := range server.NamespaceAds {
+		nsRes = append(nsRes, namespaceAdV2ToResponse(&n))
+	}
+	ctx.JSON(http.StatusOK, nsRes)
+}
+
+// Get list of all namespaces as a response
+func listNamespaceResponses() []NamespaceAdV2MappedResponse {
+
+	namespaceMap := make(map[string]NamespaceAdV2MappedResponse)
+
+	for _, a := range listAdvertisement([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType}) {
+		s := a.ServerAd
+		for _, ns := range a.NamespaceAds {
+
+			// If the namespace is not in the map, add it
+			if _, ok := namespaceMap[ns.Path]; !ok {
+				namespaceMap[ns.Path] = namespaceAdV2ToMappedResponse(&ns)
+			}
+
+			// Add the server name to its type
+			nsRes := namespaceMap[ns.Path]
+			if s.Type == server_structs.OriginType.String() {
+				nsRes.Origins = append(nsRes.Origins, s.Name)
+			} else if s.Type == server_structs.CacheType.String() {
+				nsRes.Caches = append(nsRes.Caches, s.Name)
+			}
+			namespaceMap[ns.Path] = nsRes
+		}
+	}
+
+	return maps.Values(namespaceMap)
+}
+
+// Get list of all namespaces
+func listNamespacesHandler(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, listNamespaceResponses())
 }
 
 // Issue a stat query to origins for an object and return which origins serve the object
@@ -366,10 +587,13 @@ func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 	// Follow RESTful schema
 	{
 		directorWebAPI.GET("/servers", listServers)
+		directorWebAPI.GET("/servers/:name", getServerHandler)
+		directorWebAPI.GET("/servers/:name/namespaces", listServerNamespaces)
 		directorWebAPI.PATCH("/servers/filter/*name", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleFilterServer)
 		directorWebAPI.PATCH("/servers/allow/*name", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleAllowServer)
 		directorWebAPI.GET("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
 		directorWebAPI.HEAD("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
+		directorWebAPI.GET("/namespaces", listNamespacesHandler)
 		directorWebAPI.GET("/contact", handleDirectorContact)
 	}
 }
