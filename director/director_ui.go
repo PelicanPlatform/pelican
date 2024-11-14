@@ -88,16 +88,16 @@ type (
 
 	// TokenIssuerResponse creates a response struct for TokenIssuer
 	TokenIssuerResponse struct {
-		BasePaths       []string `json:"base-paths"`
-		RestrictedPaths []string `json:"restricted-paths"`
+		BasePaths       []string `json:"basePaths"`
+		RestrictedPaths []string `json:"restrictedPaths"`
 		IssuerUrl       string   `json:"issuer"`
 	}
 
 	// TokenGenResponse creates a response struct for TokenGen
 	TokenGenResponse struct {
 		Strategy         server_structs.StrategyType `json:"strategy"`
-		VaultServer      string                      `json:"vault-server"`
-		MaxScopeDepth    uint                        `json:"max-scope-depth"`
+		VaultServer      string                      `json:"vaultServer"`
+		MaxScopeDepth    uint                        `json:"maxScopeDepth"`
 		CredentialIssuer string                      `json:"issuer"`
 	}
 
@@ -105,18 +105,18 @@ type (
 	NamespaceAdV2Response struct {
 		Path         string                      `json:"path"`
 		Caps         server_structs.Capabilities `json:"capabilities"`
-		Generation   []TokenGenResponse          `json:"token-generation"`
-		Issuer       []TokenIssuerResponse       `json:"token-issuer"`
-		FromTopology bool                        `json:"from-topology"`
+		Generation   []TokenGenResponse          `json:"tokenGeneration"`
+		Issuer       []TokenIssuerResponse       `json:"tokenIssuer"`
+		FromTopology bool                        `json:"fromTopology"`
 	}
 
 	// NamespaceAdV2MappedResponse creates a response struct for NamespaceAdV2 with mapped origins and caches
 	NamespaceAdV2MappedResponse struct {
 		Path         string                      `json:"path"`
 		Caps         server_structs.Capabilities `json:"capabilities"`
-		Generation   []TokenGenResponse          `json:"token-generation"`
-		Issuer       []TokenIssuerResponse       `json:"token-issuer"`
-		FromTopology bool                        `json:"from-topology"`
+		Generation   []TokenGenResponse          `json:"tokenGeneration"`
+		Issuer       []TokenIssuerResponse       `json:"tokenIssuer"`
+		FromTopology bool                        `json:"fromTopology"`
 		Origins      []string                    `json:"origins"`
 		Caches       []string                    `json:"caches"`
 	}

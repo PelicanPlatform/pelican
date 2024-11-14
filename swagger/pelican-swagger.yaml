@@ -241,9 +241,9 @@ definitions:
       strategy:
         type: string
         example: "OAuth2"
-      vault-server:
+      vaultServer:
         type: string
-      max-scope-depth:
+      maxScopeDepth:
         type: integer
       issuer:
         type: string
@@ -254,11 +254,11 @@ definitions:
       issuer:
         type: string
         format: uri
-      base-paths:
+      basePaths:
         type: array
         items:
           type: string
-      restricted-paths:
+      restrictedPaths:
         type: array
         items:
           type: string
@@ -271,17 +271,17 @@ definitions:
       path:
         type: string
         example: "/barten/time"
-      token-generation:
+      tokenGeneration:
         type: array
         items:
           type: object
           $ref: "#/definitions/TokenGeneration"
-      token-issuer:
+      tokenIssuer:
         type: array
         items:
           type: object
           $ref: "#/definitions/TokenIssuer"
-      from-topology:
+      fromTopology:
         type: boolean
         example: false
   NamespaceAdV2Mapped:
@@ -462,7 +462,7 @@ definitions:
         type: string
         description: Type of the server. Origin|Cache
         example: Origin
-      latitute:
+      latitude:
         type: number
         description: The latitute of the server based on its IP address
         default: 0
@@ -1720,7 +1720,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: "#/definitions/DirectorServerResponseDetailed"
+            $ref: "#/definitions/DirectorServerResponse"
         "400":
           description: Bad request, invalid server name
           schema:
