@@ -29,6 +29,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
@@ -362,7 +363,7 @@ func listNamespaceResponses() []NamespaceAdV2MappedResponse {
 		}
 	}
 
-	return maps.Values(namespaceMap)
+	return utils.MapToSlice(namespaceMap)
 }
 
 // Get list of all namespaces
