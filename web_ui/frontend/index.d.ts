@@ -1,4 +1,5 @@
 import { NamespaceAdminMetadata } from '@/components/Namespace';
+import { Capabilities } from '@/types';
 
 export interface User {
   authenticated: boolean;
@@ -24,14 +25,6 @@ export interface Server {
   fromTopology: boolean;
   healthStatus: string;
   namespacePrefixes: string[];
-}
-
-export interface Capabilities {
-  PublicReads: boolean;
-  Reads: boolean;
-  Writes: boolean;
-  Listings: boolean;
-  DirectReads: boolean;
 }
 
 export type StringTree = Record<string, StringTree | true>;

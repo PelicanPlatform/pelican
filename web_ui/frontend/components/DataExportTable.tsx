@@ -20,7 +20,7 @@ import { Skeleton } from '@mui/material';
 import { Edit, Settings, Check, Clear } from '@mui/icons-material';
 import useSWR from 'swr';
 import { getErrorMessage } from '@/helpers/util';
-import type { Capabilities } from '@/index';
+import { Capabilities } from '@/types';
 import { CapabilitiesDisplay } from '@/components';
 
 type RegistrationStatus =

@@ -1,5 +1,5 @@
 import { Authenticated, secureFetch } from '@/helpers/login';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Avatar,
   Box,
@@ -23,9 +23,10 @@ import Link from 'next/link';
 import { User } from '@/index';
 import { getErrorMessage } from '@/helpers/util';
 import { DirectorDropdown } from '@/app/director/components/DirectorDropdown';
+import { ServerDetailed, ServerGeneral } from '@/types';
 
 export interface DirectorCardProps {
-  server: Server;
+  server: ServerGeneral;
   authenticated?: User;
 }
 
@@ -34,8 +35,18 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
   const [error, setError] = useState<string | undefined>(undefined);
   const [disabled, setDisabled] = useState<boolean>(false);
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
+  const [detailedServer, setDetailedServer] = useState<
+    ServerDetailed | undefined
+  >();
 
   const { mutate } = useSWR<Server[]>('getServers');
+
+  // TODO: REMOVE
+  useEffect(() => {
+    (async () => {
+      setDetailedServer(await getServer(server.name));
+    })();
+  }, []);
 
   return (
     <>
@@ -56,7 +67,12 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
               server.healthStatus === 'Error' ? red[100] : 'secondary.main',
             p: 1,
           }}
-          onClick={() => setDropdownOpen(!dropdownOpen)}
+          onClick={async () => {
+            setDropdownOpen(!dropdownOpen);
+            if (detailedServer === undefined) {
+              setDetailedServer(await getServer(server.name));
+            }
+          }}
         >
           <Box my={'auto'} ml={1} display={'flex'} flexDirection={'row'}>
             <NamespaceIcon
@@ -126,7 +142,10 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
           </Box>
         </Box>
       </Paper>
-      <DirectorDropdown server={server} transition={dropdownOpen} />
+      <DirectorDropdown
+        server={detailedServer || server}
+        transition={dropdownOpen}
+      />
       <Portal>
         <Snackbar
           anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
@@ -189,6 +208,19 @@ const allowServer = async (name: string): Promise<string | undefined> => {
       return e.message;
     }
     return 'Could not connect to server';
+  }
+};
+
+const getServer = async (name: string): Promise<ServerDetailed | undefined> => {
+  try {
+    const response = await secureFetch(`/api/v1.0/director_ui/servers/${name}`);
+    if (response.ok) {
+      return await response.json();
+    } else {
+      return undefined;
+    }
+  } catch (e) {
+    return undefined;
   }
 };
 

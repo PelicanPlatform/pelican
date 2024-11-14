@@ -21,19 +21,15 @@
 import { Box, Grid, Skeleton, Typography } from '@mui/material';
 import { useMemo } from 'react';
 import useSWR from 'swr';
-import { Server } from '@/index';
-import {
-  DirectorCardList,
-  DirectorCard,
-  DirectorCardProps,
-} from './components';
+import { DirectorCardList } from './components';
 import { getUser } from '@/helpers/login';
 import FederationOverview from '@/components/FederationOverview';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { PaddedContent } from '@/components/layout';
+import { ServerGeneral } from '@/types';
 
 export default function Page() {
-  const { data } = useSWR<Server[]>('getServers', getServers);
+  const { data } = useSWR<ServerGeneral[]>('getServers', getServers);
 
   const { data: user, error } = useSWR('getUser', getUser);
 
@@ -99,7 +95,7 @@ const getServers = async () => {
 
   let response = await fetch(url);
   if (response.ok) {
-    const responseData: Server[] = await response.json();
+    const responseData: ServerGeneral[] = await response.json();
     responseData.sort((a, b) => a.name.localeCompare(b.name));
     return responseData;
   }
