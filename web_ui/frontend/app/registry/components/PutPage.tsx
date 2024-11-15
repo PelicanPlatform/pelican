@@ -83,7 +83,7 @@ const PutPage = ({ update }: NamespaceFormPage) => {
           if (e instanceof Error) {
             setAlert({ severity: 'error', message: e.message });
           }
-          setAlert({ severity: 'error', message: "Could not fetch namespace" });
+          setAlert({ severity: 'error', message: 'Could not fetch namespace' });
         }
       }
     })();
