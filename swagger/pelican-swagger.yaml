@@ -235,6 +235,70 @@ definitions:
       custom_fields:
         type: object
         description: The custom fields user registered, configurable by setting Registry.CustomRegistrationFields.
+  TokenGeneration:
+    type: object
+    properties:
+      strategy:
+        type: string
+        example: "OAuth2"
+      vaultServer:
+        type: string
+      maxScopeDepth:
+        type: integer
+      issuer:
+        type: string
+        format: uri
+  TokenIssuer:
+    type: object
+    properties:
+      issuer:
+        type: string
+        format: uri
+      basePaths:
+        type: array
+        items:
+          type: string
+      restrictedPaths:
+        type: array
+        items:
+          type: string
+  NamespaceAdV2:
+    type: object
+    properties:
+      Caps:
+        type: object
+        $ref: "#/definitions/OriginExportCapabilities"
+      path:
+        type: string
+        example: "/barten/time"
+      tokenGeneration:
+        type: array
+        items:
+          type: object
+          $ref: "#/definitions/TokenGeneration"
+      tokenIssuer:
+        type: array
+        items:
+          type: object
+          $ref: "#/definitions/TokenIssuer"
+      fromTopology:
+        type: boolean
+        example: false
+  NamespaceAdV2Mapped:
+    allOf:
+      - $ref: "#/definitions/NamespaceAdV2"
+      - type: object
+        properties:
+          origins:
+            type: array
+            items:
+              type: string
+            example: ["example-origin.com"]
+          caches:
+            type: array
+            items:
+              type: string
+            example: ["example-cache.com"]
   NamespaceForRegistration:
     type: object
     required:
@@ -398,7 +462,7 @@ definitions:
         type: string
         description: Type of the server. Origin|Cache
         example: Origin
-      latitute:
+      latitude:
         type: number
         description: The latitute of the server based on its IP address
         default: 0
@@ -1638,6 +1702,78 @@ paths:
           description: "Bad request, query parameter is invalid"
           schema:
             type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /director_ui/servers/{name}:
+    get:
+      tags:
+        - "director_ui"
+      summary: Get details of a specific server
+      parameters:
+        - name: name
+          in: path
+          required: true
+          type: string
+          description: The name of the server
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/DirectorServerResponse"
+        "400":
+          description: Bad request, invalid server name
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Server not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /director_ui/servers/{name}/namespaces:
+    get:
+      tags:
+        - "director_ui"
+      summary: Get a list of namespaces for a specific server
+      parameters:
+        - name: name
+          in: path
+          required: true
+          type: string
+          description: The name of the server
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/NamespaceAdV2"
+        "400":
+          description: Bad request, invalid server name
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Server not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /director_ui/namespaces:
+    get:
+      tags:
+        - "director_ui"
+      summary: Get a list of namespaces advertised to the director
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/NamespaceAdV2Mapped"
+        "400":
+          description: Bad request
+          schema:
             $ref: "#/definitions/ErrorModelV2"
   /director_ui/servers/filter/{name}:
     patch:
