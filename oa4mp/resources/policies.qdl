@@ -22,7 +22,7 @@ group_list. := claims.groups;
 remove(claims.groups);
 
 {{ if .GroupRequirements }}
-if [0 == size(|^group_list. \/ { {{- range $idx, $grp := .GroupRequirements -}}{{- if eq $idx 0 -}}'{{- $grp -}}'{{else}}, '{{- $grp -}}'{{- end -}}{{- end -}} })] then
+if [0 == size(|^group_list. /\ { {{- range $idx, $grp := .GroupRequirements -}}{{- if eq $idx 0 -}}'{{- $grp -}}'{{else}}, '{{- $grp -}}'{{- end -}}{{- end -}} })] then
 [
     sys_err.ok := false;
     sys_err.message := 'Authenticated user is not in any of the following groups: {{ range $idx, $grp := .GroupRequirements -}}{{- if eq $idx 0 -}}"{{- $grp -}}"{{else}}, "{{- $grp -}}"{{- end -}}{{- end -}}';
