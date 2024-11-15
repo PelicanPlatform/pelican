@@ -69,7 +69,7 @@ const AuthenticatedContent = ({
     if (data && checkAuthentication) {
       return checkAuthentication(data);
     } else {
-      return data?.authenticated !== undefined;
+      return !!data?.authenticated;
     }
   }, [data, checkAuthentication]);
 

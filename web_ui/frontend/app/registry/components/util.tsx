@@ -94,12 +94,16 @@ export const namespaceToOrigin = (data: Namespace) => {
 };
 
 export const getNamespace = async (
-  id: string | number
+  id: string | number,
+  accessToken?: string
 ): Promise<Namespace | undefined> => {
   const url = new URL(
     `/api/v1.0/registry_ui/namespaces/${id}`,
     window.location.origin
   );
+  if (accessToken) {
+    url.searchParams.append('access_token', accessToken);
+  }
   const response = await fetch(url);
   if (response.ok) {
     return await response.json();

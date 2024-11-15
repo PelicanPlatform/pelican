@@ -53,6 +53,7 @@ const PutPage = ({ update }: NamespaceFormPage) => {
     const urlParams = new URLSearchParams(window.location.search);
     const id = urlParams.get('id');
     const fromUrl = urlParams.get('fromUrl');
+    const accessToken = urlParams.get('access_token');
 
     if (id === null) {
       setAlert({ severity: 'error', message: 'No Namespace ID Provided' });
@@ -73,19 +74,20 @@ const PutPage = ({ update }: NamespaceFormPage) => {
     } catch (e) {
       setAlert({ severity: 'error', message: 'Invalid Namespace ID Provided' });
     }
-  }, []);
 
-  useEffect(() => {
     (async () => {
       if (id !== undefined) {
         try {
-          setNamespace(await getNamespace(id));
+          setNamespace(await getNamespace(id, accessToken || undefined));
         } catch (e) {
-          setAlert({ severity: 'error', message: e as string });
+          if (e instanceof Error) {
+            setAlert({ severity: 'error', message: e.message });
+          }
+          setAlert({ severity: 'error', message: "Could not fetch namespace" });
         }
       }
     })();
-  }, [id]);
+  }, []);
 
   return (
     <AuthenticatedContent redirect={true} boxProps={{ width: '100%' }}>
