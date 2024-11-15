@@ -344,7 +344,6 @@ func redirectToCache(ginCtx *gin.Context) {
 			collectDirectorRedirectionMetric(ginCtx, "cache")
 		}
 	}()
-	defer collectDirectorRedirectionMetric(ginCtx, "cache")
 	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
