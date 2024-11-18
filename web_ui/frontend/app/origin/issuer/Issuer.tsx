@@ -75,6 +75,7 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
   const configView = useMemo(() => {
     return merge(structuredClone(serverConfig), structuredClone(patch));
   }, [serverConfig, patch]);
+
   const submitPatch = useCallback(async (patch: any) => {
     setStatus({ message: 'Submitting', severity: 'info' });
 

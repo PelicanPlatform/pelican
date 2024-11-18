@@ -25,6 +25,8 @@ export interface Namespace {
   tokenGeneration: TokenGeneration[];
   tokenIssuer: TokenIssuer[];
   fromTopology: boolean;
+  caches: string[];
+  origins: string[];
 }
 
 interface ServerBase {
@@ -35,7 +37,7 @@ interface ServerBase {
   brokerUrl: string;
   url: string;
   webUrl: string;
-  type: string;
+  type: 'Origin' | 'Cache';
   latitude: number;
   longitude: number;
   capabilities: Capabilities;

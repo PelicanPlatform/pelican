@@ -41,13 +41,6 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
 
   const { mutate } = useSWR<Server[]>('getServers');
 
-  // TODO: REMOVE
-  useEffect(() => {
-    (async () => {
-      setDetailedServer(await getServer(server.name));
-    })();
-  }, []);
-
   return (
     <>
       <Paper>

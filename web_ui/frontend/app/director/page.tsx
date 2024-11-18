@@ -26,10 +26,12 @@ import { getUser } from '@/helpers/login';
 import FederationOverview from '@/components/FederationOverview';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { PaddedContent } from '@/components/layout';
-import { ServerGeneral } from '@/types';
+import { Namespace, ServerGeneral } from '@/types';
+import { NamespaceCardList } from './components/NamespaceCardList';
 
 export default function Page() {
   const { data } = useSWR<ServerGeneral[]>('getServers', getServers);
+  const { data: namespaces } = useSWR<Namespace[]>('getNamespaces', getNamespaces);
 
   const { data: user, error } = useSWR('getUser', getUser);
 
@@ -80,6 +82,22 @@ export default function Page() {
             )}
           </Grid>
           <Grid item xs={12} lg={8} xl={6}>
+            <Typography variant={'h4'} pb={2}>
+              Namespaces
+            </Typography>
+            {cacheData ? (
+              <NamespaceCardList
+                data={namespaces?.map((namespace) => {
+                  return {namespace}
+                }) || []}
+              />
+            ) : (
+              <Box>
+                <Skeleton variant='rectangular' height={118} />
+              </Box>
+            )}
+          </Grid>
+          <Grid item xs={12} lg={8} xl={6}>
             <AuthenticatedContent>
               <FederationOverview />
             </AuthenticatedContent>
@@ -102,3 +120,16 @@ const getServers = async () => {
 
   throw new Error('Failed to fetch servers');
 };
+
+const getNamespaces = async () => {
+  const url = new URL('/api/v1.0/director_ui/namespaces', window.location.origin);
+
+  let response = await fetch(url);
+  if (response.ok) {
+    const responseData: Namespace[] = await response.json();
+    responseData.sort((a, b) => a.path.localeCompare(b.path));
+    return responseData;
+  }
+
+  throw new Error('Failed to fetch servers');
+}

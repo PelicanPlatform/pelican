@@ -2,6 +2,7 @@ import { StringTree } from '@/index';
 
 export * from './DirectorCard';
 export * from './DirectorCardList';
+export * from './NamespaceCard';
 
 export const directoryListToTree = (directoryList: string[]): StringTree => {
   let tree = {};
