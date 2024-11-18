@@ -22,8 +22,8 @@ export interface TokenIssuer {
 export interface Namespace {
   path: string;
   capabilities: Capabilities;
-  tokenGeneration: TokenGeneration[];
-  tokenIssuer: TokenIssuer[];
+  tokenGeneration: TokenGeneration[] | null;
+  tokenIssuer: TokenIssuer[] | null;
   fromTopology: boolean;
   caches: string[];
   origins: string[];

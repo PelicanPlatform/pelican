@@ -22,7 +22,7 @@ export const NamespaceDropdown = ({
           <Grid item xs={12} md={12}>
             <InformationSpan name={'Path'} value={namespace.path} />
             <InformationSpanHeader title={'Token Generation'} />
-            {namespace.tokenGeneration.map((tg) =>
+            {namespace.tokenGeneration?.map((tg) =>
               <Fragment key={tg.issuer}>
                 <InformationSpan indent={1} name={'Issuer'} value={tg.issuer} />
                 <InformationSpan indent={2} name={'Strategy'} value={tg.strategy} />
@@ -31,7 +31,7 @@ export const NamespaceDropdown = ({
               </Fragment>
             )}
             <InformationSpanHeader title={'Token Issuer'} />
-            {namespace.tokenIssuer.map((ti) =>
+            {namespace.tokenIssuer?.map((ti) =>
               <Fragment key={ti.issuer}>
                 <InformationSpan indent={1} name={'Issuer'} value={ti.issuer} />
                 <InformationSpanHeader indent={2} title={"Base Paths"} />

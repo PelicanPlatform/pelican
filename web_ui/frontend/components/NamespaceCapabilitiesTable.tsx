@@ -7,9 +7,10 @@
  */
 
 import { Namespace, ServerDetailed, ServerGeneral } from '@/types';
-import { Box, Grid, Typography } from '@mui/material';
+import { Box, Grid, Typography, useTheme } from '@mui/material';
 import { CapabilitiesRow } from '@/app/director/components/DirectorDropdown';
 import { grey } from '@mui/material/colors';
+import { NamespaceIcon } from '@/components/Namespace';
 
 interface NamespaceCapabilitiesTableProps {
   namespace: Namespace
@@ -27,6 +28,9 @@ export const NamespaceCapabilitiesTable = ({
   namespace,
   servers
 }: NamespaceCapabilitiesTableProps) => {
+
+  const theme = useTheme();
+
   return (
     <Grid container spacing={1}>
       <Grid item xs={12}>
@@ -41,7 +45,7 @@ export const NamespaceCapabilitiesTable = ({
             <Grid item xs={3}>
               <Box display={'flex'} height={'100%'}>
                 <Typography variant={'body2'} my={'auto'}>
-                  {namespace.path} Capabilities
+                  Namespace Capabilities
                 </Typography>
               </Box>
             </Grid>
@@ -60,7 +64,8 @@ export const NamespaceCapabilitiesTable = ({
                 <Grid container spacing={1}>
                   <Grid item xs={3}>
                     <Box display={'flex'} height={'100%'}>
-                      <Typography variant={'body2'} my={'auto'}>
+                      <Typography variant={'body2'} my={'auto'} display={"flex"}>
+                        <NamespaceIcon serverType={server.type.toLowerCase() as 'origin' | 'cache'} size={"small"} bgcolor={"white"} color={theme.palette.primary.main} />
                         {server.name}
                       </Typography>
                     </Box>
