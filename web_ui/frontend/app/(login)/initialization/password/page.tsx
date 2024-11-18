@@ -46,7 +46,7 @@ export default function Home() {
       dispatch
     );
     if (response) {
-      router.push('../password/');
+      router.push('/');
     } else {
       setLoading(false);
     }
