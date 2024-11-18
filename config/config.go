@@ -1001,7 +1001,6 @@ func filterConfigRecursive(v reflect.Value, currentPath string, component string
 
 // PrintClientConfig prints the client config in JSON format to stderr.
 func PrintClientConfig() error {
-
 	clientConfig, err := GetComponentConfig("client")
 	if err != nil {
 		return err
