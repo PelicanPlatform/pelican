@@ -133,7 +133,7 @@ export const getDirectorServer = async (name: string): Promise<Response> => {
   );
 
   return await fetchApi(async () => await fetch(url));
-}
+};
 
 /**
  * Get namespaces from director
@@ -146,7 +146,6 @@ export const getDirectorNamespaces = async () => {
 
   return await fetchApi(async () => await fetch(url));
 };
-
 
 /**
  * Get namespaces

@@ -67,12 +67,12 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
             if (detailedServer === undefined) {
               alertOnError(
                 async () => {
-                  const response = await getDirectorServer(server.name)
+                  const response = await getDirectorServer(server.name);
                   setDetailedServer(await response.json());
                 },
-                "Failed to fetch server details",
+                'Failed to fetch server details',
                 dispatch
-              )
+              );
             }
           }}
         >

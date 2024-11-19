@@ -38,12 +38,21 @@ export default function Page() {
   const { data } = useSWR<ServerGeneral[] | undefined>(
     'getDirectorServers',
     async () =>
-      await alertOnError(getDirectorServers, 'Failed to fetch servers', dispatch)
+      await alertOnError(
+        getDirectorServers,
+        'Failed to fetch servers',
+        dispatch
+      )
   );
 
   const { data: namespaces } = useSWR<DirectorNamespace[] | undefined>(
     'getDirectorNamespaces',
-    async () => await alertOnError(getDirectorNamespaces, "Faild to fetch Namespaces", dispatch)
+    async () =>
+      await alertOnError(
+        getDirectorNamespaces,
+        'Faild to fetch Namespaces',
+        dispatch
+      )
   );
 
   const { data: user, error } = useSWR('getUser', () =>

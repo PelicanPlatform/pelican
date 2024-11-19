@@ -47,7 +47,9 @@ import { alertOnError } from '@/helpers/util';
 const PutPage = ({ update }: NamespaceFormPage) => {
   const [id, setId] = useState<number | undefined>(undefined);
   const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined);
-  const [namespace, setNamespace] = useState<RegistryNamespace | undefined>(undefined);
+  const [namespace, setNamespace] = useState<RegistryNamespace | undefined>(
+    undefined
+  );
 
   const dispatch = useContext(AlertDispatchContext);
 

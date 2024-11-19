@@ -27,7 +27,6 @@ export interface Server {
   namespacePrefixes: string[];
 }
 
-
 export type StringTree = { [key: string]: StringTree | true };
 
 export interface Alert {

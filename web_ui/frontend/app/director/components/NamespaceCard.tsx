@@ -13,7 +13,6 @@ export interface NamespaceCardProps {
 }
 
 export const NamespaceCard = ({ namespace }: NamespaceCardProps) => {
-
   const dispatch = useContext(AlertDispatchContext);
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
   const [servers, setServers] = useState<ServerDetailed[] | undefined>(
@@ -62,7 +61,9 @@ export const NamespaceCard = ({ namespace }: NamespaceCardProps) => {
 
 const getAssociatedServers = async (namespace: DirectorNamespace) => {
   const servers = await Promise.all(
-    [...namespace.origins, ...namespace.caches].map(async (name) => (await getDirectorServer(name)).json())
+    [...namespace.origins, ...namespace.caches].map(async (name) =>
+      (await getDirectorServer(name)).json()
+    )
   );
 
   // Alert the console if any servers are undefined, as this is unlikely to happen naturally
