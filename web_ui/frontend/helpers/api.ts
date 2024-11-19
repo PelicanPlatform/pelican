@@ -161,7 +161,6 @@ export const postGeneralNamespace = async (
 export const putGeneralNamespace = async (
   data: Namespace
 ): Promise<Response> => {
-
   // If an access_token is in the URL, add it to the request
   const url = new URL(
     `/api/v1.0/registry_ui/namespaces/${data.id}`,
