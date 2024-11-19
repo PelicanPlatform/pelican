@@ -31,7 +31,10 @@ import { NamespaceCardList } from './components/NamespaceCardList';
 
 export default function Page() {
   const { data } = useSWR<ServerGeneral[]>('getServers', getServers);
-  const { data: namespaces } = useSWR<Namespace[]>('getNamespaces', getNamespaces);
+  const { data: namespaces } = useSWR<Namespace[]>(
+    'getNamespaces',
+    getNamespaces
+  );
 
   const { data: user, error } = useSWR('getUser', getUser);
 
@@ -87,9 +90,11 @@ export default function Page() {
             </Typography>
             {cacheData ? (
               <NamespaceCardList
-                data={namespaces?.map((namespace) => {
-                  return {namespace}
-                }) || []}
+                data={
+                  namespaces?.map((namespace) => {
+                    return { namespace };
+                  }) || []
+                }
               />
             ) : (
               <Box>
@@ -122,7 +127,10 @@ const getServers = async () => {
 };
 
 const getNamespaces = async () => {
-  const url = new URL('/api/v1.0/director_ui/namespaces', window.location.origin);
+  const url = new URL(
+    '/api/v1.0/director_ui/namespaces',
+    window.location.origin
+  );
 
   let response = await fetch(url);
   if (response.ok) {
@@ -132,4 +140,4 @@ const getNamespaces = async () => {
   }
 
   throw new Error('Failed to fetch servers');
-}
+};

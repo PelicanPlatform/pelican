@@ -13,7 +13,6 @@ const NamespaceIcon = ({
   color?: string;
   bgcolor?: string;
 }) => {
-
   const avatarPixelSize = useMemo(() => {
     switch (size) {
       case 'large':
@@ -25,7 +24,7 @@ const NamespaceIcon = ({
       default:
         return 30;
     }
-  }, [size])
+  }, [size]);
 
   const iconPixelSize = useMemo(() => {
     switch (size) {
@@ -38,7 +37,7 @@ const NamespaceIcon = ({
       default:
         return 24;
     }
-  }, [])
+  }, []);
 
   if (serverType == 'namespace') {
     return (
@@ -51,10 +50,10 @@ const NamespaceIcon = ({
               width: avatarPixelSize,
               my: 'auto',
               mr: 1,
-              bgcolor
+              bgcolor,
             }}
           >
-            <FolderOpen sx={{fontSize: iconPixelSize}} htmlColor={color} />
+            <FolderOpen sx={{ fontSize: iconPixelSize }} htmlColor={color} />
           </Avatar>
         </Tooltip>
       </Box>
@@ -72,10 +71,10 @@ const NamespaceIcon = ({
               width: avatarPixelSize,
               my: 'auto',
               mr: 1,
-              bgcolor
+              bgcolor,
             }}
           >
-            <TripOrigin sx={{fontSize: iconPixelSize}} htmlColor={color} />
+            <TripOrigin sx={{ fontSize: iconPixelSize }} htmlColor={color} />
           </Avatar>
         </Tooltip>
       </Box>
@@ -93,10 +92,10 @@ const NamespaceIcon = ({
               width: avatarPixelSize,
               my: 'auto',
               mr: 1,
-              bgcolor
+              bgcolor,
             }}
           >
-            <Storage sx={{fontSize: iconPixelSize}} htmlColor={color} />
+            <Storage sx={{ fontSize: iconPixelSize }} htmlColor={color} />
           </Avatar>
         </Tooltip>
       </Box>

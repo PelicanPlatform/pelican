@@ -13,7 +13,7 @@ interface NamespaceDropdownProps {
 export const NamespaceDropdown = ({
   namespace,
   servers,
-  transition
+  transition,
 }: NamespaceDropdownProps) => {
   return (
     <>
@@ -22,33 +22,57 @@ export const NamespaceDropdown = ({
           <Grid item xs={12} md={12}>
             <InformationSpan name={'Path'} value={namespace.path} />
             <InformationSpanHeader title={'Token Generation'} />
-            {namespace.tokenGeneration?.map((tg) =>
+            {namespace.tokenGeneration?.map((tg) => (
               <Fragment key={tg.issuer}>
                 <InformationSpan indent={1} name={'Issuer'} value={tg.issuer} />
-                <InformationSpan indent={2} name={'Strategy'} value={tg.strategy} />
-                <InformationSpan indent={2} name={'VaultServer'} value={tg.vaultServer} />
-                <InformationSpan indent={2} name={'Max Scope Depth'} value={tg.maxScopeDepth.toString()} />
+                <InformationSpan
+                  indent={2}
+                  name={'Strategy'}
+                  value={tg.strategy}
+                />
+                <InformationSpan
+                  indent={2}
+                  name={'VaultServer'}
+                  value={tg.vaultServer}
+                />
+                <InformationSpan
+                  indent={2}
+                  name={'Max Scope Depth'}
+                  value={tg.maxScopeDepth.toString()}
+                />
               </Fragment>
-            )}
+            ))}
             <InformationSpanHeader title={'Token Issuer'} />
-            {namespace.tokenIssuer?.map((ti) =>
+            {namespace.tokenIssuer?.map((ti) => (
               <Fragment key={ti.issuer}>
                 <InformationSpan indent={1} name={'Issuer'} value={ti.issuer} />
-                <InformationSpanHeader indent={2} title={"Base Paths"} />
-                {ti.basePaths.map((bp) =>
-                  <InformationSpan key={bp} indent={3} name={'Base Path'} value={bp} />
-                )}
-                { ti.restrictedPaths && (
+                <InformationSpanHeader indent={2} title={'Base Paths'} />
+                {ti.basePaths.map((bp) => (
+                  <InformationSpan
+                    key={bp}
+                    indent={3}
+                    name={'Base Path'}
+                    value={bp}
+                  />
+                ))}
+                {ti.restrictedPaths && (
                   <>
-                    <InformationSpanHeader indent={2} title={"Restricted Paths"} />
-                    {ti.restrictedPaths?.map((rp) =>
-                      <InformationSpan key={rp} indent={3} name={'Restricted Path'} value={rp} />
-                    )}
+                    <InformationSpanHeader
+                      indent={2}
+                      title={'Restricted Paths'}
+                    />
+                    {ti.restrictedPaths?.map((rp) => (
+                      <InformationSpan
+                        key={rp}
+                        indent={3}
+                        name={'Restricted Path'}
+                        value={rp}
+                      />
+                    ))}
                   </>
-                  )
-                }
+                )}
               </Fragment>
-            )}
+            ))}
           </Grid>
         </Grid>
         <Box sx={{ my: 1 }}>

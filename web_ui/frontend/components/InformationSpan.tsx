@@ -4,10 +4,10 @@ import React, { ReactNode } from 'react';
 
 export const InformationSpanHeader = ({
   title,
-  indent = 0
+  indent = 0,
 }: {
-  title: string,
-  indent?: number
+  title: string;
+  indent?: number;
 }) => {
   return (
     <Box
@@ -25,18 +25,19 @@ export const InformationSpanHeader = ({
       }}
     >
       <Typography variant={'body2'} sx={{ display: 'inline', mr: 2 }}>
-        {"\u00A0\u00A0\u00A0\u00A0".repeat(Math.max(indent - 1, 0))}{indent > 0 ? "↳\u00A0" : ""}{title}
+        {'\u00A0\u00A0\u00A0\u00A0'.repeat(Math.max(indent - 1, 0))}
+        {indent > 0 ? '↳\u00A0' : ''}
+        {title}
       </Typography>
-      <Typography variant={'body2'} sx={{ display: 'inline' }}>
-      </Typography>
+      <Typography variant={'body2'} sx={{ display: 'inline' }}></Typography>
     </Box>
   );
-}
+};
 
 export const InformationSpan = ({
   name,
   value,
-  indent = 0
+  indent = 0,
 }: {
   name: string;
   value: string;
@@ -58,7 +59,9 @@ export const InformationSpan = ({
         }}
       >
         <Typography variant={'body2'} sx={{ display: 'inline', mr: 2 }}>
-          {"\u00A0\u00A0\u00A0\u00A0".repeat(Math.max(indent - 1, 0))}{indent > 0 ? "↳\u00A0" : ""}{name}:
+          {'\u00A0\u00A0\u00A0\u00A0'.repeat(Math.max(indent - 1, 0))}
+          {indent > 0 ? '↳\u00A0' : ''}
+          {name}:
         </Typography>
         <Typography variant={'body2'} sx={{ display: 'inline' }}>
           {value}
