@@ -119,10 +119,26 @@ if [ $# -ne 0 ]; then
             echo >&2 "Exec of tini failed!"
             exit 1
             ;;
+        pelican-server)
+            # Our server-specific binary which may come with additional
+            # features/system requirements (like Lotman)
+            echo "Running pelican-server with arguments: $@"
+            exec tini -- /pelican/pelican-server "$@"
+            # we shouldn't get here
+            echo >&2 "Exec of tini failed!"
+            exit 1
+            ;;
         osdf)
             # Run osdf with the rest of the arguments
             echo "Running osdf with arguments: $@"
             exec tini -- /pelican/osdf "$@"
+            # we shouldn't get here
+            echo >&2 "Exec of tini failed!"
+            exit 1
+            ;;
+        osdf-server)
+            echo "Running osdf-server with arguments: $@"
+            exec tini -- /pelican/osdf-server "$@"
             # we shouldn't get here
             echo >&2 "Exec of tini failed!"
             exit 1

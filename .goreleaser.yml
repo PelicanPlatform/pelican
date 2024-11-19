@@ -50,7 +50,23 @@ builds:
         goarch: ppc64le
       - goos: darwin
         goarch: ppc64le
-
+  # Set things up to build a second server binary that enables Lotman. Eventually
+  # we'll also use this to filter which moduels are built into the binary.
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - "amd64"
+      - "arm64"
+    id: "pelican-server"
+    dir: ./cmd
+    binary: pelican-server
+    tags:
+      - forceposix
+      - lotman
+    ldflags:
+      - -s -w -X github.com/pelicanplatform/pelican/config.commit={{.Commit}} -X github.com/pelicanplatform/pelican/config.date={{.Date}} -X github.com/pelicanplatform/pelican/config.builtBy=goreleaser -X github.com/pelicanplatform/pelican/config.version={{.Version}}
 archives:
   - id: pelican
     name_template: >-
