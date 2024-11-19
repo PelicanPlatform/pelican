@@ -1,6 +1,6 @@
 import React from 'react';
 import { secureFetch } from '@/helpers/login';
-import { Alert, Namespace } from '@/index';
+import { Alert, RegistryNamespace } from '@/index';
 import { getErrorMessage } from '@/helpers/util';
 
 export const populateKey = (o: any, key: string[], value: any) => {
@@ -26,7 +26,15 @@ export const calculateKeys = (key: string) => {
   return [key];
 };
 
-export const getValue = (o: any, key: string[]): string | undefined => {
+/**
+ * Get the value of a key in an object
+ * @param o Object to get the value from
+ * @param key List of keys to traverse
+ */
+export const getValue = (
+  o: Record<string, any> | undefined,
+  key: string[]
+): any => {
   if (o === undefined) {
     return undefined;
   }
@@ -49,31 +57,7 @@ export const deleteKey = (o: any, key: string[]) => {
   return o;
 };
 
-const handleRequestAlert = async (
-  url: string,
-  options: any
-): Promise<Alert | undefined> => {
-  try {
-    const response = await secureFetch(url, options);
-
-    if (!response.ok) {
-      let errorMessage = await getErrorMessage(response);
-      return { severity: 'error', message: errorMessage };
-    }
-  } catch (e) {
-    return { severity: 'error', message: `Fetch error: ${e}` };
-  }
-};
-
-const namespaceFormNodeToJSON = (formData: FormData) => {
-  let data: any = {};
-  formData.forEach((value: any, name: any) => {
-    populateKey(data, calculateKeys(name), value);
-  });
-  return data;
-};
-
-export const namespaceToCache = (data: Namespace) => {
+export const namespaceToCache = (data: RegistryNamespace) => {
   // Build the cache prefix
   if (data.prefix.startsWith('/caches/')) {
     return data;
@@ -83,7 +67,7 @@ export const namespaceToCache = (data: Namespace) => {
   return data;
 };
 
-export const namespaceToOrigin = (data: Namespace) => {
+export const namespaceToOrigin = (data: RegistryNamespace) => {
   // Build the cache prefix
   if (data.prefix.startsWith('/origins/')) {
     return data;
@@ -93,61 +77,15 @@ export const namespaceToOrigin = (data: Namespace) => {
   return data;
 };
 
-export const getNamespace = async (
-  id: string | number
-): Promise<Namespace | undefined> => {
-  const url = new URL(
-    `/api/v1.0/registry_ui/namespaces/${id}`,
-    window.location.origin
-  );
-  const response = await fetch(url);
-  if (response.ok) {
-    return await response.json();
-  } else {
-    throw new Error(await getErrorMessage(response));
-  }
-};
-
-export const postGeneralNamespace = async (
-  data: Namespace
-): Promise<Alert | undefined> => {
-  return await handleRequestAlert('/api/v1.0/registry_ui/namespaces', {
-    body: JSON.stringify(data),
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-  });
-};
-
-export const putGeneralNamespace = async (
-  data: Namespace
-): Promise<Alert | undefined> => {
-  return await handleRequestAlert(
-    `/api/v1.0/registry_ui/namespaces/${data.id}`,
-    {
-      body: JSON.stringify(data),
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-    }
-  );
-};
-
 export const submitNamespaceForm = async (
-  data: Partial<Namespace>,
+  data: Partial<RegistryNamespace>,
   toUrl: URL | undefined,
-  handleSubmit: (data: Partial<Namespace>) => Promise<Alert | undefined>
+  handleSubmit: (data: Partial<RegistryNamespace>) => Promise<Response>
 ) => {
-  const submitAlert = await handleSubmit(data);
+  const response = await handleSubmit(data);
 
   // Clear the form on successful submit
-  if (submitAlert == undefined) {
+  if (response != undefined) {
     window.location.href = toUrl ? toUrl.toString() : '/view/registry/';
   }
-
-  return submitAlert;
 };

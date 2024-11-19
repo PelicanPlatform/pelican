@@ -19,24 +19,36 @@
 'use client';
 
 import { Box, Grid, Skeleton, Typography } from '@mui/material';
-import { useMemo } from 'react';
+import { useContext, useMemo } from 'react';
 import useSWR from 'swr';
 import { DirectorCardList } from './components';
 import { getUser } from '@/helpers/login';
 import FederationOverview from '@/components/FederationOverview';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { PaddedContent } from '@/components/layout';
-import { Namespace, ServerGeneral } from '@/types';
+import { DirectorNamespace, ServerGeneral } from '@/types';
 import { NamespaceCardList } from './components/NamespaceCardList';
+import { getDirectorServers, getDirectorNamespaces } from '@/helpers/get';
+import { alertOnError } from '@/helpers/util';
+import { AlertDispatchContext } from '@/components/AlertProvider';
 
 export default function Page() {
-  const { data } = useSWR<ServerGeneral[]>('getServers', getServers);
-  const { data: namespaces } = useSWR<Namespace[]>(
-    'getNamespaces',
-    getNamespaces
+  const dispatch = useContext(AlertDispatchContext);
+
+  const { data } = useSWR<ServerGeneral[] | undefined>(
+    'getDirectorServers',
+    async () =>
+      await alertOnError(getDirectorServers, 'Failed to fetch servers', dispatch)
   );
 
-  const { data: user, error } = useSWR('getUser', getUser);
+  const { data: namespaces } = useSWR<DirectorNamespace[] | undefined>(
+    'getDirectorNamespaces',
+    async () => await alertOnError(getDirectorNamespaces, "Faild to fetch Namespaces", dispatch)
+  );
+
+  const { data: user, error } = useSWR('getUser', () =>
+    alertOnError(getUser, 'Failed to fetch user', dispatch)
+  );
 
   const cacheData = useMemo(() => {
     return data?.filter((server) => server.type === 'Cache');
@@ -112,32 +124,3 @@ export default function Page() {
     </PaddedContent>
   );
 }
-
-const getServers = async () => {
-  const url = new URL('/api/v1.0/director_ui/servers', window.location.origin);
-
-  let response = await fetch(url);
-  if (response.ok) {
-    const responseData: ServerGeneral[] = await response.json();
-    responseData.sort((a, b) => a.name.localeCompare(b.name));
-    return responseData;
-  }
-
-  throw new Error('Failed to fetch servers');
-};
-
-const getNamespaces = async () => {
-  const url = new URL(
-    '/api/v1.0/director_ui/namespaces',
-    window.location.origin
-  );
-
-  let response = await fetch(url);
-  if (response.ok) {
-    const responseData: Namespace[] = await response.json();
-    responseData.sort((a, b) => a.path.localeCompare(b.path));
-    return responseData;
-  }
-
-  throw new Error('Failed to fetch servers');
-};

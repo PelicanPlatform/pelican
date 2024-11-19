@@ -1,15 +1,20 @@
 import { secureFetch } from '@/helpers/login';
-import React, { useState } from 'react';
+import React, { useContext, useState } from 'react';
 import { Box, Paper, Typography } from '@mui/material';
 import { NamespaceIcon } from '@/components/Namespace/index';
 import { NamespaceDropdown } from './NamespaceDropdown';
-import { Namespace, ServerDetailed, ServerGeneral } from '@/types';
+import { DirectorNamespace, ServerDetailed, ServerGeneral } from '@/types';
+import { getDirectorServer } from '@/helpers/api';
+import { alertOnError } from '@/helpers/util';
+import { AlertDispatchContext } from '@/components/AlertProvider';
 
 export interface NamespaceCardProps {
-  namespace: Namespace;
+  namespace: DirectorNamespace;
 }
 
 export const NamespaceCard = ({ namespace }: NamespaceCardProps) => {
+
+  const dispatch = useContext(AlertDispatchContext);
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
   const [servers, setServers] = useState<ServerDetailed[] | undefined>(
     undefined
@@ -32,7 +37,11 @@ export const NamespaceCard = ({ namespace }: NamespaceCardProps) => {
           onClick={async () => {
             setDropdownOpen(!dropdownOpen);
             if (servers === undefined) {
-              setServers(await getAssociatedServers(namespace));
+              alertOnError(
+                async () => setServers(await getAssociatedServers(namespace)),
+                'Failed to fetch servers',
+                dispatch
+              );
             }
           }}
         >
@@ -51,9 +60,9 @@ export const NamespaceCard = ({ namespace }: NamespaceCardProps) => {
   );
 };
 
-const getAssociatedServers = async (namespace: Namespace) => {
+const getAssociatedServers = async (namespace: DirectorNamespace) => {
   const servers = await Promise.all(
-    [...namespace.origins, ...namespace.caches].map(getServer)
+    [...namespace.origins, ...namespace.caches].map(async (name) => (await getDirectorServer(name)).json())
   );
 
   // Alert the console if any servers are undefined, as this is unlikely to happen naturally
@@ -62,20 +71,6 @@ const getAssociatedServers = async (namespace: Namespace) => {
   }
 
   return servers.filter((s) => s !== undefined) as ServerDetailed[];
-};
-
-// TODO: Consolidate this when https://github.com/PelicanPlatform/pelican/pull/1687 is merged
-const getServer = async (name: string): Promise<ServerDetailed | undefined> => {
-  try {
-    const response = await secureFetch(`/api/v1.0/director_ui/servers/${name}`);
-    if (response.ok) {
-      return await response.json();
-    } else {
-      return undefined;
-    }
-  } catch (e) {
-    return undefined;
-  }
 };
 
 export default NamespaceCard;

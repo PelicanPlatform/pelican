@@ -2,10 +2,10 @@ import { TextField } from '@mui/material';
 import type { StandardTextFieldProps } from '@mui/material';
 import React from 'react';
 
-import type { CustomRegistrationFieldProps } from './index.d';
+import type { BaseCustomRegistrationFieldProps } from './index';
 
 type TextFieldProps = Omit<StandardTextFieldProps, 'onChange'> &
-  CustomRegistrationFieldProps<string>;
+  BaseCustomRegistrationFieldProps<string>;
 
 interface StringFieldProps extends TextFieldProps {
   validator?: (value: string) => string | undefined;

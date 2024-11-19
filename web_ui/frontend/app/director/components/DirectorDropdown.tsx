@@ -3,7 +3,6 @@ import { Box, Grid, Typography } from '@mui/material';
 import DirectoryTree from '@/components/DirectoryTree';
 import React from 'react';
 import { SinglePointMap } from '@/components/Map';
-import { directoryListToTree } from '@/app/director/components/index';
 import { ServerCapabilitiesTable } from '@/components/ServerCapabilitiesTable';
 import { Capabilities, ServerDetailed, ServerGeneral } from '@/types';
 import { Capability } from '@/components/configuration';

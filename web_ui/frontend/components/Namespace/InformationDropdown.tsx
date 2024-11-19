@@ -1,7 +1,10 @@
 import { Box, Tooltip, Collapse, Grid, Typography } from '@mui/material';
 import React from 'react';
-import { NamespaceAdminMetadata } from './index.d';
-import { Dropdown, InformationSpan } from '@/components';
+import {
+  Dropdown,
+  InformationSpan,
+  NamespaceAdminMetadata,
+} from '@/components';
 
 interface InformationDropdownProps {
   adminMetadata: NamespaceAdminMetadata;

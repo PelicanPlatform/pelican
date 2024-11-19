@@ -1,11 +1,11 @@
 import { Dropdown, InformationSpan, InformationSpanHeader } from '@/components';
 import { Box, Grid } from '@mui/material';
 import React, { Fragment } from 'react';
-import { Namespace, ServerDetailed } from '@/types';
+import { DirectorNamespace, ServerDetailed } from '@/types';
 import { NamespaceCapabilitiesTable } from '@/components/NamespaceCapabilitiesTable';
 
 interface NamespaceDropdownProps {
-  namespace: Namespace;
+  namespace: DirectorNamespace;
   servers?: ServerDetailed[];
   transition: boolean;
 }

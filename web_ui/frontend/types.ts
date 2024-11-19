@@ -19,7 +19,7 @@ export interface TokenIssuer {
   issuer: string;
 }
 
-export interface Namespace {
+export interface DirectorNamespace {
   path: string;
   capabilities: Capabilities;
   tokenGeneration: TokenGeneration[] | null;
@@ -49,7 +49,7 @@ interface ServerBase {
 }
 
 export interface ServerDetailed extends ServerBase {
-  namespaces: Namespace[];
+  namespaces: DirectorNamespace[];
 }
 
 export interface ServerGeneral extends ServerBase {

@@ -20,43 +20,35 @@
 
 import { Box, Grow, Typography } from '@mui/material';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 
 import LoadingButton from '../../components/LoadingButton';
 
 import PasswordInput from '../../components/PasswordInput';
-import { getErrorMessage } from '@/helpers/util';
+import { alertOnError, getErrorMessage } from '@/helpers/util';
+import { AlertDispatchContext } from '@/components/AlertProvider';
+import { initLogin, resetLogin } from '@/helpers/api';
 
 export default function Home() {
+  const dispatch = useContext(AlertDispatchContext);
+
   const router = useRouter();
   let [password, _setPassword] = useState<string>('');
   let [confirmPassword, _setConfirmPassword] = useState<string>('');
   let [loading, setLoading] = useState(false);
-  let [error, setError] = useState<string | undefined>(undefined);
 
   async function submit(password: string) {
     setLoading(true);
 
-    try {
-      let response = await fetch('/api/v1.0/auth/resetLogin', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          password: password,
-        }),
-      });
-
-      if (response.ok) {
-        router.push('/');
-      } else {
-        setLoading(false);
-        setError(await getErrorMessage(response));
-      }
-    } catch {
+    let response = await alertOnError(
+      async () => await resetLogin(password),
+      'Could not login',
+      dispatch
+    );
+    if (response) {
+      router.push('/');
+    } else {
       setLoading(false);
-      setError('Could not connect to server');
     }
   }
 
@@ -66,7 +58,16 @@ export default function Home() {
     if (password == confirmPassword) {
       submit(password);
     } else {
-      setError('Passwords do not match');
+      dispatch({
+        type: 'openAlert',
+        payload: {
+          alertProps: {
+            severity: 'warning',
+          },
+          message: 'Passwords do not match',
+          onClose: () => dispatch({ type: 'closeAlert' }),
+        },
+      });
     }
   }
 
@@ -89,7 +90,6 @@ export default function Home() {
                   InputProps: {
                     onChange: (e) => {
                       _setPassword(e.target.value);
-                      setError(undefined);
                     },
                   },
                 }}
@@ -102,7 +102,6 @@ export default function Home() {
                   InputProps: {
                     onChange: (e) => {
                       _setConfirmPassword(e.target.value);
-                      setError(undefined);
                     },
                   },
                   error: password != confirmPassword,
@@ -112,16 +111,6 @@ export default function Home() {
               />
             </Box>
             <Box mt={2} display={'flex'} flexDirection={'column'}>
-              <Grow in={error !== undefined}>
-                <Typography
-                  textAlign={'center'}
-                  variant={'subtitle2'}
-                  color={'error.main'}
-                  mb={1}
-                >
-                  {error}
-                </Typography>
-              </Grow>
               <LoadingButton
                 variant='outlined'
                 sx={{ margin: 'auto' }}

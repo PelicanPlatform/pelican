@@ -28,7 +28,7 @@ import {
   Collapse,
   IconButton,
 } from '@mui/material';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useContext } from 'react';
 
 import {
   PendingCard,
@@ -38,25 +38,38 @@ import {
   NamespaceCardList,
 } from '@/components';
 import Link from 'next/link';
-import { Namespace, Alert as AlertType } from '@/index';
+import { RegistryNamespace, Alert as AlertType } from '@/index';
 import { getUser } from '@/helpers/login';
 import { Add } from '@mui/icons-material';
 import useSWR from 'swr';
 import { CardProps } from '@/components/Namespace/Card';
 import { PendingCardProps } from '@/components/Namespace/PendingCard';
+import { AlertDispatchContext } from '@/components/AlertProvider';
+import { alertOnError } from '@/helpers/util';
+import { getExtendedNamespaces } from '@/helpers/get';
 
 export default function Home() {
-  const [alert, setAlert] = useState<AlertType | undefined>(undefined);
+  const dispatch = useContext(AlertDispatchContext);
 
-  const { data, mutate: mutateNamespaces } = useSWR<{ namespace: Namespace }[]>(
-    'getNamespaces',
-    getData,
+  const { data, mutate: mutateNamespaces } = useSWR<
+    { namespace: RegistryNamespace }[] | undefined
+  >(
+    'getExtendedNamespaces',
+    () =>
+      alertOnError(
+        getExtendedNamespaces,
+        'Failed to fetch namespaces',
+        dispatch
+      ),
     {
       fallbackData: [],
     }
   );
 
-  const { data: user, error } = useSWR('getUser', getUser);
+  const { data: user, error } = useSWR(
+    'getUser',
+    async () => await alertOnError(getUser, 'Error Getting User', dispatch)
+  );
 
   const pendingData = useMemo(() => {
     return data?.filter(
@@ -97,33 +110,7 @@ export default function Home() {
   return (
     <Box width={'100%'}>
       <Grid container spacing={2}>
-        <Grid item xs={12} lg={6} xl={5}>
-          <Typography variant={'h4'}>Namespace Registry</Typography>
-          <Collapse in={alert !== undefined}>
-            <Box mt={2}>
-              <Alert severity={alert?.severity}>{alert?.message}</Alert>
-            </Box>
-          </Collapse>
-        </Grid>
         <Grid item xs={12} lg={8} justifyContent={'space-between'}>
-          {user == undefined ||
-            (!user.authenticated && (
-              <Alert severity='info'>
-                <Typography variant={'body1'}>
-                  Login to register new namespaces.
-                  <Link href={'/login/?returnURL=/view/registry/'}>
-                    <Button
-                      sx={{ ml: 2 }}
-                      variant={'contained'}
-                      size={'small'}
-                      color={'primary'}
-                    >
-                      Login
-                    </Button>
-                  </Link>
-                </Typography>
-              </Alert>
-            ))}
           {pendingData && pendingData.length > 0 && (
             <Grid item xs={12}>
               <Paper
@@ -151,7 +138,6 @@ export default function Home() {
                   Card={PendingCard}
                   cardProps={{
                     authenticated: user,
-                    onAlert: (a: AlertType) => setAlert(a),
                     onUpdate: () => mutateNamespaces(),
                   }}
                 />
@@ -263,36 +249,3 @@ export default function Home() {
     </Box>
   );
 }
-
-const getData = async () => {
-  let data: { namespace: Namespace }[] = [];
-
-  const url = new URL(
-    '/api/v1.0/registry_ui/namespaces',
-    window.location.origin
-  );
-
-  const response = await fetch(url);
-  if (response.ok) {
-    const responseData: Namespace[] = await response.json();
-    responseData.sort((a, b) => (a.id > b.id ? 1 : -1));
-    responseData.forEach((namespace) => {
-      if (namespace.prefix.startsWith('/caches/')) {
-        namespace.type = 'cache';
-        namespace.prefix = namespace.prefix.replace('/caches/', '');
-      } else if (namespace.prefix.startsWith('/origins/')) {
-        namespace.type = 'origin';
-        namespace.prefix = namespace.prefix.replace('/origins/', '');
-      } else {
-        namespace.type = 'namespace';
-      }
-    });
-
-    // Convert data to Partial CardProps
-    data = responseData.map((d) => {
-      return { namespace: d };
-    });
-  }
-
-  return data;
-};

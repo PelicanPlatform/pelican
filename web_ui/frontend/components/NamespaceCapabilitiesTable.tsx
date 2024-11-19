@@ -6,14 +6,14 @@
  * Table to display the server capabilities with its namespaces
  */
 
-import { Namespace, ServerDetailed, ServerGeneral } from '@/types';
+import { DirectorNamespace, ServerDetailed, ServerGeneral } from '@/types';
 import { Box, Grid, Typography, useTheme } from '@mui/material';
 import { CapabilitiesRow } from '@/app/director/components/DirectorDropdown';
 import { grey } from '@mui/material/colors';
 import { NamespaceIcon } from '@/components/Namespace';
 
 interface NamespaceCapabilitiesTableProps {
-  namespace: Namespace;
+  namespace: DirectorNamespace;
   servers?: ServerDetailed[];
 }
 
