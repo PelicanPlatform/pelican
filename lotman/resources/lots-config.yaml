@@ -20,7 +20,7 @@
 Lotman:
   Lots:
     - LotName: "default"
-      Owner: "https://fake-federation.com"
+      Owner: "SHOULD_OVERRIDE"
       Parents:
         - "default"
       ManagementPolicyAttrs:
@@ -38,7 +38,7 @@ Lotman:
           Value: 123456
 
     - LotName: "root"
-      Owner: "https://fake-federation.com"
+      Owner: "SHOULD_OVERRIDE"
       Parents:
         - "root"
       Paths:
