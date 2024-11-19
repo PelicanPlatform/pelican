@@ -128,25 +128,26 @@ export const postGeneralNamespace = async (
 export const putGeneralNamespace = async (
   data: Namespace
 ): Promise<Alert | undefined> => {
-
   // If an access_token is in the URL, add it to the request
-  const url = new URL(`/api/v1.0/registry_ui/namespaces/${data.id}`, window.location.origin);
-  const accessToken = new URLSearchParams(window.location.search).get('access_token');
+  const url = new URL(
+    `/api/v1.0/registry_ui/namespaces/${data.id}`,
+    window.location.origin
+  );
+  const accessToken = new URLSearchParams(window.location.search).get(
+    'access_token'
+  );
   if (accessToken) {
     url.searchParams.append('access_token', accessToken);
   }
 
-  return await handleRequestAlert(
-    url.toString(),
-    {
-      body: JSON.stringify(data),
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-    }
-  );
+  return await handleRequestAlert(url.toString(), {
+    body: JSON.stringify(data),
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+  });
 };
 
 export const submitNamespaceForm = async (
