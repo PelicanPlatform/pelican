@@ -376,7 +376,10 @@ func TestLargeFile(t *testing.T) {
 	viper.Set("Client.MaximumDownloadSpeed", 40*1024*1024)
 	ft := fed_test_utils.NewFedTest(t, pubOriginCfg)
 
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	// Set a custom timeout for this test to see if we can make it less flaky
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancelTest, egrp := test_utils.TestContext(ctx, t)
+
 	te, err := client.NewTransferEngine(ctx)
 	require.NoError(t, err)
 
@@ -399,6 +402,7 @@ func TestLargeFile(t *testing.T) {
 
 	t.Cleanup(func() {
 		cancel()
+		cancelTest()
 		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
 			require.NoError(t, err)
 		}
@@ -408,7 +412,6 @@ func TestLargeFile(t *testing.T) {
 		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
 		server_utils.ResetTestState()
 	})
-
 }
 
 // Create a federation then SIGSTOP the origin to prevent it from responding.
