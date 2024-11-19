@@ -1,6 +1,5 @@
-//go:build false
+//go:build lotman && linux && !ppc64le
 
-//linux && !ppc64le
 /***************************************************************
 *
 * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research

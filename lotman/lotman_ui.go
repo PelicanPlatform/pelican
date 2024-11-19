@@ -1,5 +1,4 @@
-//go:build false
-//linux && !ppc64le
+//go:build lotman && linux && !ppc64le
 
 /***************************************************************
 *

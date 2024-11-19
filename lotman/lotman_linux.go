@@ -1,5 +1,4 @@
-//go:build false
-// For now we're shutting off LotMan due to weirdness with purego
+//go:build lotman && linux && !ppc64le
 
 /***************************************************************
 *
