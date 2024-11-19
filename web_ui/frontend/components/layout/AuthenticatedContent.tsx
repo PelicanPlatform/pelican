@@ -84,9 +84,9 @@ const AuthenticatedContent = ({
   // Redirect to login page if not authenticated and redirect is true
   useEffect(() => {
     if (!isValidating && !authenticated && redirect) {
-      router.push('/login/?returnURL=' + pageUrl);
+      router.replace('/login/?returnURL=' + pageUrl);
     }
-  }, [data, isValidating]);
+  }, [data, isValidating, authenticated]);
 
   // If there was a error then print it to the screen
   if (error) {

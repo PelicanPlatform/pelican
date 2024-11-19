@@ -19,9 +19,10 @@
 'use client';
 
 import { PutPage } from '@/app/registry/components/PutPage';
-import { putGeneralNamespace } from '@/app/registry/components/util';
+import { putGeneralNamespace } from '@/helpers/api';
 import { Box, Grid, Typography } from '@mui/material';
 import React from 'react';
+import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 
 export default function Page() {
   const putCache = async (data: any) => {
@@ -40,7 +41,9 @@ export default function Page() {
           </Typography>
         </Grid>
         <Grid item xs={12}>
-          <PutPage update={putCache} />
+          <AuthenticatedContent redirect={true}>
+            <PutPage update={putCache} />
+          </AuthenticatedContent>
         </Grid>
       </Grid>
     </Box>

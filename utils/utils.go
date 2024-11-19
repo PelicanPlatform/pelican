@@ -144,3 +144,12 @@ func ExtractProjectFromUserAgent(userAgents []string) string {
 
 	return ""
 }
+
+// Convert map to slice of values
+func MapToSlice[K comparable, V any](m map[K]V) []V {
+	s := make([]V, 0, len(m))
+	for _, v := range m {
+		s = append(s, v)
+	}
+	return s
+}

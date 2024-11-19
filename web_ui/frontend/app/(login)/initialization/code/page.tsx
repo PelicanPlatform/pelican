@@ -18,13 +18,15 @@
 
 'use client';
 
-import { Box, Typography, Grow } from '@mui/material';
+import { Box, Typography } from '@mui/material';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 
 import CodeInput, { Code } from '../../components/CodeInput';
 import LoadingButton from '../../components/LoadingButton';
-import { getErrorMessage } from '@/helpers/util';
+import { initLogin } from '@/helpers/api';
+import { alertOnError } from '@/helpers/util';
+import { AlertDispatchContext } from '@/components/AlertProvider';
 
 export default function Home() {
   const router = useRouter();
@@ -37,11 +39,11 @@ export default function Home() {
     undefined,
   ]);
   let [loading, setLoading] = useState(false);
-  let [error, setError] = useState<string | undefined>(undefined);
+
+  const dispatch = useContext(AlertDispatchContext);
 
   const setCode = (code: Code) => {
     _setCode(code);
-    setError(undefined);
 
     if (!code.includes(undefined)) {
       submit(code.map((x) => x!.toString()).join(''));
@@ -51,26 +53,15 @@ export default function Home() {
   async function submit(code: string) {
     setLoading(true);
 
-    try {
-      let response = await fetch('/api/v1.0/auth/initLogin', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          code: code,
-        }),
-      });
-
-      if (response.ok) {
-        router.push('../password/');
-      } else {
-        setLoading(false);
-        setError(await getErrorMessage(response));
-      }
-    } catch {
+    let response = await alertOnError(
+      async () => await initLogin(code),
+      'Could not login',
+      dispatch
+    );
+    if (response) {
+      router.push('../password/');
+    } else {
       setLoading(false);
-      setError('Could not connect to server');
     }
   }
 
@@ -97,16 +88,6 @@ export default function Home() {
           <form onSubmit={onSubmit} action='#'>
             <CodeInput setCode={setCode} length={6} />
             <Box mt={2} display={'flex'} flexDirection={'column'}>
-              <Grow in={error !== undefined}>
-                <Typography
-                  textAlign={'center'}
-                  variant={'subtitle2'}
-                  color={'error.main'}
-                  mb={1}
-                >
-                  {error}
-                </Typography>
-              </Grow>
               <LoadingButton
                 variant='outlined'
                 sx={{ margin: 'auto' }}

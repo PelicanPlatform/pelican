@@ -1,7 +1,7 @@
 import { Autocomplete, TextField } from '@mui/material';
 import React, { useMemo } from 'react';
 
-import type { CustomRegistrationFieldProps } from './index.d';
+import type { BaseCustomRegistrationFieldProps } from './index';
 
 const EnumerationField = ({
   onChange,
@@ -11,7 +11,7 @@ const EnumerationField = ({
   description,
   value,
   options,
-}: CustomRegistrationFieldProps<string>) => {
+}: BaseCustomRegistrationFieldProps<string>) => {
   const textValue = useMemo(
     () => options?.find((option) => option.id === value),
     [value, options]

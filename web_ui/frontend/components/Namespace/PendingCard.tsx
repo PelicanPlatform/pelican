@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useContext, useMemo, useRef, useState } from 'react';
 import { Authenticated, secureFetch } from '@/helpers/login';
 import { Avatar, Box, IconButton, Tooltip, Typography } from '@mui/material';
 import { Block, Check, Edit, Person } from '@mui/icons-material';
@@ -8,6 +8,9 @@ import { Alert, Namespace } from '@/index';
 import InformationDropdown from './InformationDropdown';
 import { getServerType, NamespaceIcon } from '@/components/Namespace/index';
 import { User } from '@/index';
+import { alertOnError } from '@/helpers/util';
+import { AlertDispatchContext } from '@/components/AlertProvider';
+import { approveNamespace, denyNamespace } from '@/helpers/api';
 
 export interface PendingCardProps {
   namespace: Namespace;
@@ -25,61 +28,7 @@ export const PendingCard = ({
   const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
 
-  const approveNamespace = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-
-    try {
-      const response = await secureFetch(
-        `/api/v1.0/registry_ui/namespaces/${namespace.id}/approve`,
-        {
-          method: 'PATCH',
-        }
-      );
-
-      if (!response.ok) {
-        onAlert({
-          severity: 'error',
-          message: `Failed to approve ${namespace.type} registration: ${namespace.prefix}`,
-        });
-      } else {
-        onUpdate();
-        onAlert({
-          severity: 'success',
-          message: `Successfully approved ${namespace.type} registration: ${namespace.prefix}`,
-        });
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  const denyNamespace = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-
-    try {
-      const response = await secureFetch(
-        `/api/v1.0/registry_ui/namespaces/${namespace.id}/deny`,
-        {
-          method: 'PATCH',
-        }
-      );
-
-      if (!response.ok) {
-        onAlert({
-          severity: 'error',
-          message: `Failed to deny ${namespace.type} registration: ${namespace.prefix}`,
-        });
-      } else {
-        onUpdate();
-        onAlert({
-          severity: 'success',
-          message: `Successfully denied ${namespace.type} registration: ${namespace.prefix}`,
-        });
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  };
+  const dispatch = useContext(AlertDispatchContext);
 
   return (
     <Box>
@@ -123,7 +72,15 @@ export const PendingCard = ({
                   <IconButton
                     sx={{ bgcolor: '#ff00001a', mx: 1 }}
                     color={'error'}
-                    onClick={(e) => denyNamespace(e)}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await alertOnError(
+                        () => denyNamespace(namespace.id),
+                        "Couldn't deny namespace",
+                        dispatch
+                      );
+                      onUpdate();
+                    }}
                   >
                     <Block />
                   </IconButton>
@@ -132,7 +89,15 @@ export const PendingCard = ({
                   <IconButton
                     sx={{ bgcolor: '#2e7d3224', mx: 1 }}
                     color={'success'}
-                    onClick={(e) => approveNamespace(e)}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await alertOnError(
+                        () => approveNamespace(namespace.id),
+                        "Couldn't approve namespace",
+                        dispatch
+                      );
+                      onUpdate();
+                    }}
                   >
                     <Check />
                   </IconButton>

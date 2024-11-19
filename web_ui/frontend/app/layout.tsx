@@ -17,7 +17,8 @@
  ***************************************************************/
 
 import { LocalizationProvider } from '@/clientComponents';
-import { ThemeProviderClient } from '@/public/theme';
+import { ThemeProviderClient } from '@/components/ThemeProvider';
+import { AlertProvider } from '@/components/AlertProvider';
 import './globals.css';
 
 export const metadata = {
@@ -34,7 +35,9 @@ export default function RootLayout({
     <html lang='en'>
       <ThemeProviderClient>
         <LocalizationProvider>
-          <body>{children}</body>
+          <AlertProvider>
+            <body>{children}</body>
+          </AlertProvider>
         </LocalizationProvider>
       </ThemeProviderClient>
     </html>

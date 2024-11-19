@@ -1,5 +1,11 @@
 import { Box, Button, Alert } from '@mui/material';
-import React, { useEffect, useState, Dispatch, SetStateAction } from 'react';
+import React, {
+  useEffect,
+  useState,
+  Dispatch,
+  SetStateAction,
+  useContext,
+} from 'react';
 import useSWR from 'swr';
 
 import { Namespace } from '@/index';
@@ -11,26 +17,15 @@ import {
   populateKey,
   submitNamespaceForm,
 } from '@/app/registry/components/util';
-import { CustomRegistrationPropsEnum } from './CustomRegistrationField/index.d';
-import { getErrorMessage } from '@/helpers/util';
+import { CustomRegistrationFieldProps } from './CustomRegistrationField';
+import { alertOnError, getErrorMessage } from '@/helpers/util';
+import { optionsNamespaceRegistrationFields } from '@/helpers/api';
+import { AlertDispatchContext } from '@/components/AlertProvider';
 
 interface FormProps {
   namespace?: Namespace;
   onSubmit: (data: Partial<Namespace>) => Promise<void>;
 }
-
-const getRegistrationFields = async (): Promise<
-  CustomRegistrationPropsEnum[]
-> => {
-  const response = await fetch('/api/v1.0/registry_ui/namespaces', {
-    method: 'OPTIONS',
-  });
-  if (response.ok) {
-    return await response.json();
-  } else {
-    throw new Error(await getErrorMessage(response));
-  }
-};
 
 const onChange = (
   name: string,
@@ -53,13 +48,26 @@ const onChange = (
 };
 
 const Form = ({ namespace, onSubmit }: FormProps) => {
+  const dispatch = useContext(AlertDispatchContext);
+
   const [data, setData] = useState<Partial<Namespace> | undefined>(
     namespace || {}
   );
 
-  const { data: fields, error } = useSWR<CustomRegistrationPropsEnum[]>(
-    'getRegistrationFields',
-    getRegistrationFields,
+  const { data: fields, error } = useSWR<
+    Omit<CustomRegistrationFieldProps, 'onChange'>[] | undefined
+  >(
+    'optionsNamespaceRegistrationFields',
+    async () => {
+      const response = await alertOnError(
+        optionsNamespaceRegistrationFields,
+        "Couldn't fetch registration fields",
+        dispatch
+      );
+      if (response) {
+        return await response.json();
+      }
+    },
     { fallbackData: [] }
   );
 

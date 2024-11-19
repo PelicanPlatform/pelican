@@ -68,9 +68,8 @@ func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers 
 	doAdvertise(ctx, servers)
 
 	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
 	egrp.Go(func() error {
-
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
