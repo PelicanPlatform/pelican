@@ -55,6 +55,7 @@ const PutPage = ({ update }: NamespaceFormPage) => {
     const urlParams = new URLSearchParams(window.location.search);
     const id = urlParams.get('id');
     const fromUrl = urlParams.get('fromUrl');
+    const accessToken = urlParams.get('access_token');
 
     if (id === null) {
       dispatch({
@@ -105,13 +106,11 @@ const PutPage = ({ update }: NamespaceFormPage) => {
         },
       });
     }
-  }, []);
 
-  useEffect(() => {
     (async () => {
       if (id !== undefined) {
         const response = await alertOnError(
-          async () => await getNamespace(id),
+          async () => await getNamespace(id, accessToken || undefined),
           "Couldn't get namespace",
           dispatch
         );
@@ -120,7 +119,7 @@ const PutPage = ({ update }: NamespaceFormPage) => {
         }
       }
     })();
-  }, [id]);
+  }, []);
 
   return (
     <AuthenticatedContent redirect={true} boxProps={{ width: '100%' }}>

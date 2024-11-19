@@ -126,12 +126,19 @@ export const getNamespaces = async (): Promise<Response> => {
 /**
  * Gets a namespace by ID
  * @param id Namespace ID
+ * @param accessToken Access token
  */
-export const getNamespace = async (id: string | number): Promise<Response> => {
+export const getNamespace = async (
+  id: string | number,
+  accessToken?: string
+): Promise<Response> => {
   const url = new URL(
     `/api/v1.0/registry_ui/namespaces/${id}`,
     window.location.origin
   );
+  if (accessToken) {
+    url.searchParams.append('access_token', accessToken);
+  }
   return await fetchApi(async () => await fetch(url));
 };
 
@@ -154,8 +161,20 @@ export const postGeneralNamespace = async (
 export const putGeneralNamespace = async (
   data: Namespace
 ): Promise<Response> => {
+  // If an access_token is in the URL, add it to the request
+  const url = new URL(
+    `/api/v1.0/registry_ui/namespaces/${data.id}`,
+    window.location.origin
+  );
+  const accessToken = new URLSearchParams(window.location.search).get(
+    'access_token'
+  );
+  if (accessToken) {
+    url.searchParams.append('access_token', accessToken);
+  }
+
   return await fetchApi(async () => {
-    return secureFetch(`/api/v1.0/registry_ui/namespaces/${data.id}`, {
+    return secureFetch(url.toString(), {
       body: JSON.stringify(data),
       method: 'PUT',
       headers: {

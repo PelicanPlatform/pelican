@@ -57,30 +57,6 @@ export const deleteKey = (o: any, key: string[]) => {
   return o;
 };
 
-const handleRequestAlert = async (
-  url: string,
-  options: any
-): Promise<Alert | undefined> => {
-  try {
-    const response = await secureFetch(url, options);
-
-    if (!response.ok) {
-      let errorMessage = await getErrorMessage(response);
-      return { severity: 'error', message: errorMessage };
-    }
-  } catch (e) {
-    return { severity: 'error', message: `Fetch error: ${e}` };
-  }
-};
-
-const namespaceFormNodeToJSON = (formData: FormData) => {
-  let data: any = {};
-  formData.forEach((value: any, name: any) => {
-    populateKey(data, calculateKeys(name), value);
-  });
-  return data;
-};
-
 export const namespaceToCache = (data: Namespace) => {
   // Build the cache prefix
   if (data.prefix.startsWith('/caches/')) {
