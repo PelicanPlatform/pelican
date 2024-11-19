@@ -24,6 +24,7 @@ package lotman
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -35,6 +36,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -298,13 +300,17 @@ func GetAuthorizedCallers(lotName string) (*[]string, error) {
 // 1. The federation's discovery url
 // 2. The federation's director url
 // TODO: Consider what happens to the lot if either of these values change in the future after the lot is created?
-func getFederationIssuer() string {
-	federationIssuer := param.Federation_DiscoveryUrl.GetString()
+func getFederationIssuer() (string, error) {
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return "", err
+	}
+	federationIssuer := fedInfo.DiscoveryEndpoint
 	if federationIssuer == "" {
-		federationIssuer = param.Federation_DirectorUrl.GetString()
+		federationIssuer = fedInfo.DirectorEndpoint
 	}
 
-	return federationIssuer
+	return federationIssuer, nil
 }
 
 // Initialize the LotMan library and bind its functions to the global vars
@@ -358,14 +364,22 @@ func InitLotman() bool {
 		log.Warningf("Error while unmarshaling Lots from config: %v", err)
 	}
 
-	federationIssuer := getFederationIssuer()
+	federationIssuer, err := getFederationIssuer()
+	if err != nil {
+		log.Errorf("Error getting federation issuer: %v", err)
+		return false
+	}
+	if federationIssuer == "" {
+		log.Errorln("Unable to determine federation issuer which is needed by Lotman to determine lot ownership")
+		return false
+	}
 
 	callerMutex.Lock()
 	defer callerMutex.Unlock()
 	ret = LotmanSetContextStr("caller", federationIssuer, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		log.Errorf("Error setting context for default lot: %s", string(errMsg))
+		log.Errorf("Error setting caller context to %s for default lot: %s", federationIssuer, string(errMsg))
 		return false
 	}
 

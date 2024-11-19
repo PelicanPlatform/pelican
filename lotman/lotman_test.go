@@ -25,6 +25,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -36,19 +38,33 @@ import (
 )
 
 //go:embed resources/lots-config.yaml
-
 var yamlMockup string
 
-func setupLotmanFromConf(t *testing.T, readConfig bool, name string) (bool, func()) {
-	// Load in our config
-	if readConfig {
-		viper.Set("Federation.DiscoveryUrl", "https://fake-federation.com")
-		viper.SetConfigType("yaml")
-		err := viper.ReadConfig(strings.NewReader(yamlMockup))
-		if err != nil {
-			t.Fatalf("Error reading config: %v", err)
-		}
-	}
+// Initialize Lotman
+// If we read from the embedded yaml, we need to override the SHOULD_OVERRIDE keys with the discUrl
+// so that underlying metadata discovery can happen against the mock discovery host
+func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string) (bool, func()) {
+	// Load in our config and handle overriding the SHOULD_OVERRIDE keys with the discUrl
+    // Load in our config
+    if readConfig {
+        viper.SetConfigType("yaml")
+        err := viper.ReadConfig(strings.NewReader(yamlMockup))
+        if err != nil {
+            t.Fatalf("Error reading config: %v", err)
+        }
+
+        // Traverse the settings and modify the "Owner" keys directly in Viper
+        lots := viper.Get("Lotman.Lots").([]interface{})
+        for i, lot := range lots {
+            if lotMap, ok := lot.(map[string]interface{}); ok {
+                if owner, ok := lotMap["owner"].(string); ok && owner == "SHOULD_OVERRIDE" {
+					lotMap["owner"] = discUrl
+					lots[i] = lotMap
+                }
+            }
+        }
+		viper.Set("Lotman.Lots", lots)
+    }
 
 	tmpPathPattern := name + "*"
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
@@ -62,21 +78,43 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string) (bool, func
 	}
 }
 
+// Create a mock discovery host that returns the servers URL as the value for each pelican-configuration key
+func getMockDiscoveryHost() *httptest.Server {
+    return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.URL.Path == "/.well-known/pelican-configuration" {
+            w.Header().Set("Content-Type", "application/json")
+            serverURL := r.Host
+            response := fmt.Sprintf(`{
+  "director_endpoint": "https://%s/osdf-director.osg-htc.org",
+  "namespace_registration_endpoint": "https://%s/osdf-registry.osg-htc.org",
+  "jwks_uri": "https://%s/osdf/public_signing_key.jwks"
+}`, serverURL, serverURL, serverURL)
+            w.Write([]byte(response))
+        } else {
+            http.NotFound(w, r)
+        }
+    }))
+}
+
 // Test the library initializer. NOTE: this also tests CreateLot, which is a part of initialization.
 func TestLotmanInit(t *testing.T) {
 	server_utils.ResetTestState()
 
 	t.Run("TestBadInit", func(t *testing.T) {
 		// We haven't set various bits needed to create the lots, like discovery URL
-		success, cleanup := setupLotmanFromConf(t, false, "LotmanBadInit")
+		success, cleanup := setupLotmanFromConf(t, false, "LotmanBadInit", "")
 		defer cleanup()
 		require.False(t, success)
 	})
 
 	t.Run("TestGoodInit", func(t *testing.T) {
 		viper.Set("Log.Level", "debug")
-		viper.Set("Federation.DiscoveryUrl", "https://fake-federation.com")
-		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit")
+		server := getMockDiscoveryHost()
+		// Set the Federation.DiscoveryUrl to the test server's URL
+		// Lotman uses the discovered URLs/keys to determine some aspects of lot ownership
+		viper.Set("Federation.DiscoveryUrl", server.URL)
+
+		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit", server.URL)
 		defer cleanup()
 		require.True(t, success)
 
@@ -94,7 +132,7 @@ func TestLotmanInit(t *testing.T) {
 		err := json.Unmarshal(defaultOutput, &defaultLot)
 		require.NoError(t, err, fmt.Sprintf("Error unmarshalling default lot JSON: %s", string(defaultOutput)))
 		require.Equal(t, "default", defaultLot.LotName)
-		require.Equal(t, "https://fake-federation.com", defaultLot.Owner)
+		require.Equal(t, server.URL, defaultLot.Owner)
 		require.Equal(t, "default", defaultLot.Parents[0])
 		require.Equal(t, 0.0, *(defaultLot.MPA.DedicatedGB))
 		require.Equal(t, int64(0), (defaultLot.MPA.MaxNumObjects.Value))
@@ -110,7 +148,7 @@ func TestLotmanInit(t *testing.T) {
 		err = json.Unmarshal(rootOutput, &rootLot)
 		require.NoError(t, err, fmt.Sprintf("Error unmarshalling root lot JSON: %s", string(rootOutput)))
 		require.Equal(t, "root", rootLot.LotName)
-		require.Equal(t, "https://fake-federation.com", rootLot.Owner)
+		require.Equal(t, server.URL, rootLot.Owner)
 		require.Equal(t, "root", rootLot.Parents[0])
 		require.Equal(t, 0.0, *(rootLot.MPA.DedicatedGB))
 		require.Equal(t, int64(0), (rootLot.MPA.MaxNumObjects.Value))
@@ -119,8 +157,9 @@ func TestLotmanInit(t *testing.T) {
 
 func TestLotmanInitFromConfig(t *testing.T) {
 	server_utils.ResetTestState()
-
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf")
+	server := getMockDiscoveryHost()
+	viper.Set("Federation.DiscoveryUrl", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL)
 	defer cleanup()
 	require.True(t, success)
 
@@ -139,7 +178,7 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	err := json.Unmarshal(defaultOutput, &defaultLot)
 	require.NoError(t, err, fmt.Sprintf("Error unmarshalling default lot JSON: %s", string(defaultOutput)))
 	require.Equal(t, "default", defaultLot.LotName)
-	require.Equal(t, "https://fake-federation.com", defaultLot.Owner)
+	require.Equal(t, server.URL, defaultLot.Owner)
 	require.Equal(t, "default", defaultLot.Parents[0])
 	require.Equal(t, 100.0, *(defaultLot.MPA.DedicatedGB))
 	require.Equal(t, int64(1000), (defaultLot.MPA.MaxNumObjects.Value))
@@ -156,7 +195,7 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	err = json.Unmarshal(rootOutput, &rootLot)
 	require.NoError(t, err, fmt.Sprintf("Error unmarshalling root lot JSON: %s", string(rootOutput)))
 	require.Equal(t, "root", rootLot.LotName)
-	require.Equal(t, "https://fake-federation.com", rootLot.Owner)
+	require.Equal(t, server.URL, rootLot.Owner)
 	require.Equal(t, "root", rootLot.Parents[0])
 	require.Equal(t, 1.0, *(rootLot.MPA.DedicatedGB))
 	require.Equal(t, int64(10), rootLot.MPA.MaxNumObjects.Value)
@@ -219,7 +258,9 @@ func TestGetLotmanLib(t *testing.T) {
 
 func TestGetAuthzCallers(t *testing.T) {
 	server_utils.ResetTestState()
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetAuthzCalleres")
+	server := getMockDiscoveryHost()
+	viper.Set("Federation.DiscoveryUrl", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetAuthzCalleres", server.URL)
 	defer cleanup()
 	require.True(t, success)
 
@@ -228,7 +269,7 @@ func TestGetAuthzCallers(t *testing.T) {
 	authzedCallers, err := GetAuthorizedCallers("test-2")
 	require.NoError(t, err, "Failed to get authorized callers")
 	require.Equal(t, 2, len(*authzedCallers))
-	require.Contains(t, *authzedCallers, "https://fake-federation.com")
+	require.Contains(t, *authzedCallers, server.URL)
 	require.Contains(t, *authzedCallers, "https://different-fake-federation.com")
 
 	// test with a non-existent lot
@@ -238,7 +279,9 @@ func TestGetAuthzCallers(t *testing.T) {
 
 func TestGetLot(t *testing.T) {
 	server_utils.ResetTestState()
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetLot")
+	server := getMockDiscoveryHost()
+	viper.Set("Federation.DiscoveryUrl", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetLot", server.URL)
 	defer cleanup()
 	require.True(t, success)
 
@@ -250,7 +293,7 @@ func TestGetLot(t *testing.T) {
 	require.Contains(t, lot.Parents, "root")
 	require.Contains(t, lot.Parents, "test-1")
 	require.Equal(t, 3, len(lot.Owners))
-	require.Contains(t, lot.Owners, "https://fake-federation.com")
+	require.Contains(t, lot.Owners, server.URL)
 	require.Contains(t, lot.Owners, "https://different-fake-federation.com")
 	require.Contains(t, lot.Owners, "https://another-fake-federation.com")
 	require.Equal(t, 1.11, *(lot.MPA.DedicatedGB))
@@ -261,7 +304,9 @@ func TestGetLot(t *testing.T) {
 
 func TestUpdateLot(t *testing.T) {
 	server_utils.ResetTestState()
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf")
+	server := getMockDiscoveryHost()
+	viper.Set("Federation.DiscoveryUrl", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL)
 	defer cleanup()
 	require.True(t, success)
 
@@ -284,7 +329,7 @@ func TestUpdateLot(t *testing.T) {
 		},
 	}
 
-	err := UpdateLot(&lotUpdate, "https://fake-federation.com")
+	err := UpdateLot(&lotUpdate, server.URL)
 	require.NoError(t, err, "Failed to update lot")
 
 	// Now check that the update was successful
@@ -299,12 +344,14 @@ func TestUpdateLot(t *testing.T) {
 
 func TestDeleteLotsRec(t *testing.T) {
 	server_utils.ResetTestState()
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf")
+	server := getMockDiscoveryHost()
+	viper.Set("Federation.DiscoveryUrl", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL)
 	defer cleanup()
 	require.True(t, success)
 
 	// Delete test-1, then verify both it and test-2 are gone
-	err := DeleteLotsRecursive("test-1", "https://fake-federation.com")
+	err := DeleteLotsRecursive("test-1", server.URL)
 	require.NoError(t, err, "Failed to delete lot")
 
 	// Now check that the delete was successful

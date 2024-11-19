@@ -36,7 +36,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
@@ -117,7 +116,10 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 	if len(lot.Parents) != 0 && lot.Parents[0] == "root" {
 		// We check that the token is signed by the federation
 		// First check for discovery URL and then for director URL, both of which should host the federation's pubkey
-		issuerUrl := getFederationIssuer()
+		issuerUrl, err := getFederationIssuer()
+		if err != nil {
+			return false, err
+		}
 
 		kSet, err := server_utils.GetJWKSFromIssUrl(issuerUrl)
 		if err != nil {
@@ -200,7 +202,12 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 
 	// Get the namespace by querying the director and checking the headers
 	errMsgPrefix := "the provided token is acceptible, but no owner could be determined because "
-	directorUrlStr := param.Federation_DirectorUrl.GetString()
+
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return false, errors.Wrap(err, errMsgPrefix+"the federation information could not be retrieved")
+	}
+	directorUrlStr := fedInfo.DirectorEndpoint
 	if directorUrlStr == "" {
 		return false, errors.New(errMsgPrefix + "the federation director URL is not set")
 	}
@@ -211,7 +218,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 
 	directorUrl.Path, err = url.JoinPath("/api/v1.0/director/object", path)
 	if err != nil {
-		return false, errors.Wrap(err, errMsgPrefix+"the director URL could not be joined with the path")
+		return false, errors.Wrap(err, errMsgPrefix+"the director's object path could not be constructed")
 	}
 
 	// Get the namespace by querying the director and checking the headers. The client should NOT
