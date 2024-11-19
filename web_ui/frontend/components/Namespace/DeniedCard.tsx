@@ -1,14 +1,17 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useContext, useMemo, useRef, useState } from 'react';
 import { green, red } from '@mui/material/colors';
 import { Authenticated, secureFetch } from '@/helpers/login';
 import { Avatar, Box, IconButton, Tooltip, Typography } from '@mui/material';
 import { Block, Check, Delete, Edit, Person } from '@mui/icons-material';
-import { Alert as AlertType, Alert, Namespace } from '@/index';
+import { Alert, Namespace } from '@/index';
 import InformationDropdown from './InformationDropdown';
 import { getServerType, NamespaceIcon } from '@/components/Namespace/index';
+import { AlertContext, AlertDispatchContext } from '@/components/AlertProvider';
 import { User } from '@/index';
-import AlertPortal from '@/components/AlertPortal';
 import { useSWRConfig } from 'swr';
+import CodeBlock from '@/components/CodeBlock';
+import { approveNamespace, deleteNamespace } from '@/helpers/api';
+import { alertOnError } from '@/helpers/util';
 
 export interface DeniedCardProps {
   namespace: Namespace;
@@ -17,60 +20,11 @@ export interface DeniedCardProps {
   authenticated?: User;
 }
 
-export const deleteNamespace = async (id: number) => {
-  const response = await secureFetch(`/api/v1.0/registry_ui/namespaces/${id}`, {
-    method: 'DELETE',
-  });
-
-  if (!response.ok) {
-    let alertMessage;
-    try {
-      let data = await response.json();
-      if (data?.msg) {
-        alertMessage = data?.msg;
-      }
-      alertMessage = 'Details not provided';
-    } catch (e) {
-      if (e instanceof Error) {
-        alertMessage = e.message;
-      }
-    }
-
-    throw new Error('Failed to delete namespace: ' + alertMessage);
-  }
-};
-
-const approveNamespace = async (id: number) => {
-  const response = await secureFetch(
-    `/api/v1.0/registry_ui/namespaces/${id}/approve`,
-    {
-      method: 'PATCH',
-    }
-  );
-
-  if (!response.ok) {
-    let alertMessage;
-    try {
-      let data = await response.json();
-      if (data?.msg) {
-        alertMessage = data?.msg;
-      }
-      alertMessage = 'Details not provided';
-    } catch (e) {
-      if (e instanceof Error) {
-        alertMessage = e.message;
-      }
-    }
-
-    throw new Error('Failed to approve registration: ' + alertMessage);
-  }
-};
-
 export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
   const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
-  const [alert, setAlert] = useState<AlertType | undefined>(undefined);
-
+  const dispatch = useContext(AlertDispatchContext);
+  const alert = useContext(AlertContext);
   const { mutate } = useSWRConfig();
 
   return (
@@ -86,9 +40,9 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
             borderRadius: transition ? '10px 10px 0px 0px' : 2,
             transition: 'background-color .3s ease-out',
             bgcolor:
-              alert?.severity == 'success'
+              alert?.alertProps?.severity == 'success'
                 ? green[100]
-                : alert?.severity == 'error'
+                : alert?.alertProps?.severity == 'error'
                   ? red[100]
                   : 'inherit',
             '&:hover': {
@@ -130,18 +84,11 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
                       color={'error'}
                       onClick={async (e) => {
                         e.stopPropagation();
-                        try {
-                          await deleteNamespace(namespace.id);
-                          setAlert({
-                            severity: 'success',
-                            message: 'Registration deleted',
-                          });
-                          setTimeout(() => mutate('getNamespaces'), 600);
-                        } catch (e) {
-                          if (e instanceof Error) {
-                            setAlert({ severity: 'error', message: e.message });
-                          }
-                        }
+                        await alertOnError(
+                          () => deleteNamespace(namespace.id),
+                          'Could Not Delete Registration',
+                          dispatch
+                        );
                       }}
                     >
                       <Delete />
@@ -153,18 +100,12 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
                       color={'success'}
                       onClick={async (e) => {
                         e.stopPropagation();
-                        try {
-                          await approveNamespace(namespace.id);
-                          setAlert({
-                            severity: 'success',
-                            message: 'Registration Approved',
-                          });
-                          setTimeout(() => mutate('getNamespaces'), 600);
-                        } catch (e) {
-                          if (e instanceof Error) {
-                            setAlert({ severity: 'error', message: e.message });
-                          }
-                        }
+                        await alertOnError(
+                          () => approveNamespace(namespace.id),
+                          'Could Not Approve Registration',
+                          dispatch
+                        );
+                        setTimeout(() => mutate('getExtendedNamespaces'), 600);
                       }}
                     >
                       <Check />
@@ -183,13 +124,6 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
           />
         </Box>
       </Box>
-      {alert?.severity == 'error' && (
-        <AlertPortal
-          key={JSON.stringify(alert)}
-          alert={alert}
-          onClose={() => setAlert(undefined)}
-        />
-      )}
     </>
   );
 };

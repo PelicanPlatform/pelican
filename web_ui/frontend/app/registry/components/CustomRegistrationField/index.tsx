@@ -1,17 +1,30 @@
-import type { CustomRegistrationField } from '@/components/configuration/index';
 import { BooleanField } from './BooleanField';
-import { ErrorField } from './ErrorField';
 import { StringField } from './StringField';
 import { IntegerField } from './IntegerField';
 import PubkeyField from './PubkeyField';
 
-import { CustomRegistrationFieldPropsEnum } from './index.d';
 import EpochTimeField from '@/app/registry/components/CustomRegistrationField/EpochTimeField';
 import EnumerationField from '@/app/registry/components/CustomRegistrationField/EnumerationField';
+import { CustomRegistrationField as CustomRegistrationFieldConfiguration } from '@/components/configuration';
+import type { CustomRegistrationField } from '@/components/configuration';
+
+export type CustomRegistrationFieldProps =
+  | (BaseCustomRegistrationFieldProps<number> & { type: 'int' })
+  | (BaseCustomRegistrationFieldProps<string> & { type: 'string' })
+  | (BaseCustomRegistrationFieldProps<boolean> & { type: 'bool' })
+  | (BaseCustomRegistrationFieldProps<number> & { type: 'datetime' })
+  | (BaseCustomRegistrationFieldProps<string> & { type: 'enum' });
+
+export interface BaseCustomRegistrationFieldProps<T>
+  extends CustomRegistrationFieldConfiguration {
+  onChange: (value: T | null) => void;
+  value?: T;
+  displayed_name: string;
+}
 
 const CustomRegistrationField = ({
   ...props
-}: CustomRegistrationFieldPropsEnum) => {
+}: CustomRegistrationFieldProps) => {
   // If the field is the pubkey field, render the pubkey field
   if (props.type == 'string' && props.name === 'pubkey') {
     return <PubkeyField {...props} />;

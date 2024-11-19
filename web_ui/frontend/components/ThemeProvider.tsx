@@ -30,7 +30,7 @@ const poppins = Poppins({
   display: 'swap',
 });
 
-let theme = createTheme({
+let themeProvider = createTheme({
   palette: {
     primary: {
       main: '#0885ff',
@@ -78,7 +78,7 @@ let theme = createTheme({
   },
 });
 
-theme = responsiveFontSizes(theme, { factor: 3 });
+themeProvider = responsiveFontSizes(themeProvider, { factor: 3 });
 
 interface ThemeProviderClientProps {
   children: React.ReactNode;
@@ -87,5 +87,5 @@ interface ThemeProviderClientProps {
 export const ThemeProviderClient: FC<ThemeProviderClientProps> = ({
   children,
 }) => {
-  return <ThemeProvider theme={theme}>{children}</ThemeProvider>;
+  return <ThemeProvider theme={themeProvider}>{children}</ThemeProvider>;
 };
