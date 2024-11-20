@@ -54,12 +54,13 @@ type AdminMetadata struct {
 }
 
 type Namespace struct {
-	ID            int                    `json:"id" post:"exclude" gorm:"primaryKey"`
-	Prefix        string                 `json:"prefix" validate:"required"`
-	Pubkey        string                 `json:"pubkey" validate:"required" description:"Pubkey is your Pelican server public key in JWKS form"`
-	Identity      string                 `json:"identity" post:"exclude"`
-	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
-	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
+	ID               int                    `json:"id" post:"exclude" gorm:"primaryKey"`
+	Prefix           string                 `json:"prefix" validate:"required"`
+	Pubkey           string                 `json:"pubkey" validate:"required" description:"Pubkey is your Pelican server public key in JWKS form"`
+	Identity         string                 `json:"identity" post:"exclude"`
+	AdminMetadata    AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
+	ProhibitedCaches []string               `json:"prohibited_caches" gorm:"-"`
+	CustomFields     map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
 }
 
 type (
@@ -95,6 +96,12 @@ type (
 
 	CheckNamespaceCompleteRes struct {
 		Results map[string]NamespaceCompletenessResult `json:"results"`
+	}
+
+	ProhibitedCache struct {
+		ID            int    `json:"id" gorm:"primaryKey"`
+		PrefixID      int    `json:"prefix_id"`
+		CacheHostname string `json:"cache_hostname"`
 	}
 )
 

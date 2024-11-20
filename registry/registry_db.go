@@ -267,6 +267,17 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 		return nil, errors.Wrap(err, "error retrieving namespace registration by its prefix")
 	}
 
+	// Fetch prohibited caches
+	var cacheHostnames []string
+	err = db.Model(&server_structs.ProhibitedCache{}).
+		Where("prefix_id = ?", ns.ID).
+		Pluck("cache_hostname", &cacheHostnames).Error
+	if err != nil {
+		return nil, errors.Wrap(err, "error retrieving prohibited caches")
+	}
+
+	ns.ProhibitedCaches = cacheHostnames
+
 	// By default, JSON unmarshal will convert any generic number to float
 	// and we only allow integer in custom fields, so we convert them back
 	for key, val := range ns.CustomFields {
