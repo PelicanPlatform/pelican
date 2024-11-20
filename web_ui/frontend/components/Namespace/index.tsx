@@ -1,4 +1,4 @@
-import { Namespace } from '@/index';
+import { RegistryNamespace } from '@/index';
 import Card from './Card';
 import CreateNamespaceCard from './CreateNamespaceCard';
 import CardSkeleton from './CardSkeleton';
@@ -37,7 +37,7 @@ export interface FlatObject {
 
 export type NamespaceCardProps = CardProps & PendingCardProps;
 
-export const getServerType = (namespace: Namespace) => {
+export const getServerType = (namespace: RegistryNamespace) => {
   // If the namespace is empty the value is undefined
   if (namespace?.prefix == null || namespace.prefix == '') {
     return '';

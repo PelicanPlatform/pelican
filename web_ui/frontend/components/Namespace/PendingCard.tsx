@@ -4,7 +4,7 @@ import { Avatar, Box, IconButton, Tooltip, Typography } from '@mui/material';
 import { Block, Check, Edit, Person } from '@mui/icons-material';
 import Link from 'next/link';
 
-import { Alert, Namespace } from '@/index';
+import { Alert, RegistryNamespace } from '@/index';
 import InformationDropdown from './InformationDropdown';
 import { getServerType, NamespaceIcon } from '@/components/Namespace/index';
 import { User } from '@/index';
@@ -13,7 +13,7 @@ import { AlertDispatchContext } from '@/components/AlertProvider';
 import { approveNamespace, denyNamespace } from '@/helpers/api';
 
 export interface PendingCardProps {
-  namespace: Namespace;
+  namespace: RegistryNamespace;
   onUpdate: () => void;
   onAlert: (alert: Alert) => void;
   authenticated?: User;

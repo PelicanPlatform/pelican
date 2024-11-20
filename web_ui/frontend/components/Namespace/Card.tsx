@@ -1,4 +1,4 @@
-import { Alert, Alert as AlertType, Namespace } from '@/index';
+import { Alert, Alert as AlertType, RegistryNamespace } from '@/index';
 import React, { useContext, useRef, useState } from 'react';
 import {
   Avatar,
@@ -21,7 +21,7 @@ import CodeBlock from '@/components/CodeBlock';
 import { alertOnError } from '@/helpers/util';
 
 export interface CardProps {
-  namespace: Namespace;
+  namespace: RegistryNamespace;
   onUpdate?: () => void;
   authenticated?: User;
 }

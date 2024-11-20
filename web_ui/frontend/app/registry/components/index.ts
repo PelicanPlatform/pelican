@@ -1,5 +1,5 @@
-import { Alert as AlertType, Namespace } from '@/index';
+import { Alert as AlertType, RegistryNamespace } from '@/index';
 
 export interface NamespaceFormPage {
-  update: (data: Partial<Namespace>) => Promise<Response>;
+  update: (data: Partial<RegistryNamespace>) => Promise<Response>;
 }

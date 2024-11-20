@@ -3,7 +3,7 @@ import { green, red } from '@mui/material/colors';
 import { Authenticated, secureFetch } from '@/helpers/login';
 import { Avatar, Box, IconButton, Tooltip, Typography } from '@mui/material';
 import { Block, Check, Delete, Edit, Person } from '@mui/icons-material';
-import { Alert, Namespace } from '@/index';
+import { Alert, RegistryNamespace } from '@/index';
 import InformationDropdown from './InformationDropdown';
 import { getServerType, NamespaceIcon } from '@/components/Namespace/index';
 import { AlertContext, AlertDispatchContext } from '@/components/AlertProvider';
@@ -14,7 +14,7 @@ import { approveNamespace, deleteNamespace } from '@/helpers/api';
 import { alertOnError } from '@/helpers/util';
 
 export interface DeniedCardProps {
-  namespace: Namespace;
+  namespace: RegistryNamespace;
   onUpdate: () => void;
   onAlert: (alert: Alert) => void;
   authenticated?: User;

@@ -17,7 +17,7 @@ import {
 interface CardListProps<T> {
   data?: Partial<T>[];
   Card: ComponentType<any>;
-  cardProps: Partial<T>;
+  cardProps?: Partial<T>;
 }
 
 export function CardList<T>({ data, Card, cardProps }: CardListProps<T>) {

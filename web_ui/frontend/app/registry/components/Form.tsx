@@ -8,7 +8,7 @@ import React, {
 } from 'react';
 import useSWR from 'swr';
 
-import { Namespace } from '@/index';
+import { RegistryNamespace } from '@/index';
 import CustomRegistrationField from '@/app/registry/components/CustomRegistrationField/index';
 import {
   calculateKeys,
@@ -23,14 +23,14 @@ import { optionsNamespaceRegistrationFields } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
 interface FormProps {
-  namespace?: Namespace;
-  onSubmit: (data: Partial<Namespace>) => Promise<void>;
+  namespace?: RegistryNamespace;
+  onSubmit: (data: Partial<RegistryNamespace>) => Promise<void>;
 }
 
 const onChange = (
   name: string,
   value: string | number | boolean | null,
-  setData: Dispatch<SetStateAction<Partial<Namespace | undefined>>>
+  setData: Dispatch<SetStateAction<Partial<RegistryNamespace | undefined>>>
 ) => {
   setData((prevData) => {
     // If the value is undefined delete this key from the data dictionary
@@ -50,7 +50,7 @@ const onChange = (
 const Form = ({ namespace, onSubmit }: FormProps) => {
   const dispatch = useContext(AlertDispatchContext);
 
-  const [data, setData] = useState<Partial<Namespace> | undefined>(
+  const [data, setData] = useState<Partial<RegistryNamespace> | undefined>(
     namespace || {}
   );
 

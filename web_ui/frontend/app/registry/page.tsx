@@ -38,7 +38,7 @@ import {
   NamespaceCardList,
 } from '@/components';
 import Link from 'next/link';
-import { Namespace, Alert as AlertType } from '@/index';
+import { RegistryNamespace, Alert as AlertType } from '@/index';
 import { getUser } from '@/helpers/login';
 import { Add } from '@mui/icons-material';
 import useSWR from 'swr';
@@ -52,7 +52,7 @@ export default function Home() {
   const dispatch = useContext(AlertDispatchContext);
 
   const { data, mutate: mutateNamespaces } = useSWR<
-    { namespace: Namespace }[] | undefined
+    { namespace: RegistryNamespace }[] | undefined
   >(
     'getExtendedNamespaces',
     () =>

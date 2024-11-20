@@ -1,6 +1,6 @@
 import React from 'react';
 import { secureFetch } from '@/helpers/login';
-import { Alert, Namespace } from '@/index';
+import { Alert, RegistryNamespace } from '@/index';
 import { getErrorMessage } from '@/helpers/util';
 
 export const populateKey = (o: any, key: string[], value: any) => {
@@ -57,7 +57,7 @@ export const deleteKey = (o: any, key: string[]) => {
   return o;
 };
 
-export const namespaceToCache = (data: Namespace) => {
+export const namespaceToCache = (data: RegistryNamespace) => {
   // Build the cache prefix
   if (data.prefix.startsWith('/caches/')) {
     return data;
@@ -67,7 +67,7 @@ export const namespaceToCache = (data: Namespace) => {
   return data;
 };
 
-export const namespaceToOrigin = (data: Namespace) => {
+export const namespaceToOrigin = (data: RegistryNamespace) => {
   // Build the cache prefix
   if (data.prefix.startsWith('/origins/')) {
     return data;
@@ -78,9 +78,9 @@ export const namespaceToOrigin = (data: Namespace) => {
 };
 
 export const submitNamespaceForm = async (
-  data: Partial<Namespace>,
+  data: Partial<RegistryNamespace>,
   toUrl: URL | undefined,
-  handleSubmit: (data: Partial<Namespace>) => Promise<Response>
+  handleSubmit: (data: Partial<RegistryNamespace>) => Promise<Response>
 ) => {
   const response = await handleSubmit(data);
 

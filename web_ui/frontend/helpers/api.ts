@@ -6,7 +6,8 @@
 
 import { secureFetch } from '@/helpers/login';
 import { getErrorMessage } from '@/helpers/util';
-import { Namespace } from '@/index';
+import { RegistryNamespace } from '@/index';
+import { ServerGeneral } from '@/types';
 
 /**
  * Wraps an api request with error handling for both the request and the response if error
@@ -112,6 +113,41 @@ export const filterServer = async (name: string): Promise<Response> => {
 };
 
 /**
+ * Get director servers
+ *
+ */
+export const getDirectorServers = async () => {
+  const url = new URL('/api/v1.0/director_ui/servers', window.location.origin);
+
+  return await fetchApi(async () => await fetch(url));
+};
+
+/**
+ * Get a director server by name
+ * @param name Server name
+ */
+export const getDirectorServer = async (name: string): Promise<Response> => {
+  const url = new URL(
+    `/api/v1.0/director_ui/servers/${name}`,
+    window.location.origin
+  );
+
+  return await fetchApi(async () => await fetch(url));
+};
+
+/**
+ * Get namespaces from director
+ */
+export const getDirectorNamespaces = async () => {
+  const url = new URL(
+    '/api/v1.0/director_ui/namespaces',
+    window.location.origin
+  );
+
+  return await fetchApi(async () => await fetch(url));
+};
+
+/**
  * Get namespaces
  */
 export const getNamespaces = async (): Promise<Response> => {
@@ -143,7 +179,7 @@ export const getNamespace = async (
 };
 
 export const postGeneralNamespace = async (
-  data: Namespace
+  data: RegistryNamespace
 ): Promise<Response> => {
   return await fetchApi(
     async () =>
@@ -159,7 +195,7 @@ export const postGeneralNamespace = async (
 };
 
 export const putGeneralNamespace = async (
-  data: Namespace
+  data: RegistryNamespace
 ): Promise<Response> => {
   // If an access_token is in the URL, add it to the request
   const url = new URL(

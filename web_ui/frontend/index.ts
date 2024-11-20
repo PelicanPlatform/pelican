@@ -1,4 +1,5 @@
 import { NamespaceAdminMetadata } from '@/components/Namespace';
+import { Capabilities } from '@/types';
 
 export interface User {
   authenticated: boolean;
@@ -26,24 +27,14 @@ export interface Server {
   namespacePrefixes: string[];
 }
 
-export interface Capabilities {
-  PublicReads: boolean;
-  Reads: boolean;
-  Writes: boolean;
-  Listings: boolean;
-  DirectReads: boolean;
-}
-
-export interface StringTree {
-  [key: string]: StringTree | true;
-}
+export type StringTree = { [key: string]: StringTree | true };
 
 export interface Alert {
   severity: 'error' | 'warning' | 'info' | 'success';
   message: string;
 }
 
-export interface Namespace {
+export interface RegistryNamespace {
   id: number;
   prefix: string;
   pubkey: string;

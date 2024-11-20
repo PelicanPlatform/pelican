@@ -5,10 +5,41 @@
  */
 
 import { Config, ParameterValueRecord } from '@/components/configuration';
-import { getConfig as getConfigResponse, getNamespaces } from '@/helpers/api';
+import {
+  getDirectorNamespaces as getDirectorNamespacesResponse,
+  getDirectorServers as getDirectorServersResponse,
+  getConfig as getConfigResponse,
+  getNamespaces,
+} from '@/helpers/api';
 import { flattenObject } from '@/app/config/util';
-import { Namespace } from '@/index';
+import { DirectorNamespace } from '@/types';
+import { RegistryNamespace } from '@/index';
 import { getObjectValue } from '@/helpers/util';
+import { ServerGeneral } from '@/types';
+
+/**
+ * Director Getters
+ */
+
+/**
+ * Get and sort director servers
+ */
+export const getDirectorServers = async () => {
+  const response = await getDirectorServersResponse();
+  const responseData: ServerGeneral[] = await response.json();
+  responseData.sort((a, b) => a.name.localeCompare(b.name));
+  return responseData;
+};
+
+/**
+ * Get and sort director namespaces
+ */
+export const getDirectorNamespaces = async () => {
+  const response = await getDirectorNamespacesResponse();
+  const responseData: DirectorNamespace[] = await response.json();
+  responseData.sort((a, b) => a.path.localeCompare(b.path));
+  return responseData;
+};
 
 export const getConfig = async (): Promise<ParameterValueRecord> => {
   let response = await getConfigResponse();
@@ -21,10 +52,10 @@ export const getConfig = async (): Promise<ParameterValueRecord> => {
  * Get extended namespaces
  */
 export const getExtendedNamespaces = async (): Promise<
-  { namespace: Namespace }[]
+  { namespace: RegistryNamespace }[]
 > => {
   const response = await getNamespaces();
-  const data: Namespace[] = await response.json();
+  const data: RegistryNamespace[] = await response.json();
   data.sort((a, b) => (a.id > b.id ? 1 : -1));
   data.forEach((namespace) => {
     if (namespace.prefix.startsWith('/caches/')) {

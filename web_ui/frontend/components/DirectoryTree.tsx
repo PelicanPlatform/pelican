@@ -10,8 +10,6 @@ export const DirectoryTree = ({ data }: { data: StringTree }) => {
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
 
   const handleSelect = (ids: string[]) => {
-    console.log(ids, calculateSelectedItems(ids[0]));
-
     setSelectedItems(calculateSelectedItems(ids[0]));
   };
 
@@ -30,6 +28,7 @@ const CustomTreeItemSmall = ({ ...props }: TreeItemProps) => {
   return (
     <TreeItem
       {...props}
+      sx={{ borderLeft: '1px solid #000000' }}
       label={<Typography variant={'body2'}>{props.label}</Typography>}
     />
   );

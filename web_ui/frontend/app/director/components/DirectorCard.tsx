@@ -1,5 +1,5 @@
 import { Authenticated, secureFetch } from '@/helpers/login';
-import React, { useContext, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import {
   Avatar,
   Box,
@@ -23,17 +23,21 @@ import Link from 'next/link';
 import { User } from '@/index';
 import { alertOnError, getErrorMessage } from '@/helpers/util';
 import { DirectorDropdown } from '@/app/director/components/DirectorDropdown';
-import { allowServer, filterServer } from '@/helpers/api';
+import { ServerDetailed, ServerGeneral } from '@/types';
+import { allowServer, filterServer, getDirectorServer } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 
 export interface DirectorCardProps {
-  server: Server;
+  server: ServerGeneral;
   authenticated?: User;
 }
 
 export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
   const [disabled, setDisabled] = useState<boolean>(false);
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
+  const [detailedServer, setDetailedServer] = useState<
+    ServerDetailed | undefined
+  >();
 
   const dispatch = useContext(AlertDispatchContext);
 
@@ -58,7 +62,19 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
               server.healthStatus === 'Error' ? red[100] : 'secondary.main',
             p: 1,
           }}
-          onClick={() => setDropdownOpen(!dropdownOpen)}
+          onClick={async () => {
+            setDropdownOpen(!dropdownOpen);
+            if (detailedServer === undefined) {
+              alertOnError(
+                async () => {
+                  const response = await getDirectorServer(server.name);
+                  setDetailedServer(await response.json());
+                },
+                'Failed to fetch server details',
+                dispatch
+              );
+            }
+          }}
         >
           <Box my={'auto'} ml={1} display={'flex'} flexDirection={'row'}>
             <NamespaceIcon
@@ -124,7 +140,10 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
           </Box>
         </Box>
       </Paper>
-      <DirectorDropdown server={server} transition={dropdownOpen} />
+      <DirectorDropdown
+        server={detailedServer || server}
+        transition={dropdownOpen}
+      />
     </>
   );
 };

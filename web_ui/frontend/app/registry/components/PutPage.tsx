@@ -36,7 +36,7 @@ import React, {
 } from 'react';
 
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
-import { Namespace, Alert as AlertType } from '@/index';
+import { RegistryNamespace, Alert as AlertType } from '@/index';
 import Form from '@/app/registry/components/Form';
 import { submitNamespaceForm } from '@/app/registry/components/util';
 import { getNamespace } from '@/helpers/api';
@@ -47,7 +47,9 @@ import { alertOnError } from '@/helpers/util';
 const PutPage = ({ update }: NamespaceFormPage) => {
   const [id, setId] = useState<number | undefined>(undefined);
   const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined);
-  const [namespace, setNamespace] = useState<Namespace | undefined>(undefined);
+  const [namespace, setNamespace] = useState<RegistryNamespace | undefined>(
+    undefined
+  );
 
   const dispatch = useContext(AlertDispatchContext);
 
