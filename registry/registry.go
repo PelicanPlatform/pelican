@@ -895,6 +895,9 @@ func wildcardHandler(ctx *gin.Context) {
 
 		ctx.JSON(http.StatusOK, nsCfg)
 		return
+	} else if strings.HasSuffix(path, "/namespaces/prohibitedCaches") {
+		getProhibitedCachesHandler(ctx)
+		return
 	} else {
 		// Default to get the namespace by its prefix
 		getNamespaceHandler(ctx)
@@ -1152,6 +1155,21 @@ func checkStatusHandler(ctx *gin.Context) {
 		}
 	}
 	ctx.JSON(http.StatusOK, server_structs.CheckNamespaceCompleteRes{Results: results})
+}
+
+// Wrapper for getProhibitedCaches
+func getProhibitedCachesHandler(ctx *gin.Context) {
+	caches, err := getProhibitedCaches()
+
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error fetching prohibited caches: %s", err.Error()),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, caches)
 }
 
 func RegisterRegistryAPI(router *gin.RouterGroup) {

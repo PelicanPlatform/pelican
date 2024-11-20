@@ -291,6 +291,34 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 	return &ns, nil
 }
 
+// Fetch data from the database and return a map where the keys
+// are federation prefixes and the values are lists of prohibited cache hostnames.
+// Only prefixes with prohibited caches are included in the result map.
+func getProhibitedCaches() (map[string][]string, error) {
+	prohibitedCacheMap := make(map[string][]string)
+
+	type Result struct {
+		Prefix        string
+		CacheHostname string
+	}
+
+	var results []Result
+
+	err := db.Model(&server_structs.Namespace{}).
+		Select("namespace.prefix, prohibited_caches.cache_hostname").
+		Joins("inner join prohibited_caches on prohibited_caches.prefix_id = namespace.id").
+		Scan(&results).Error
+	if err != nil {
+		return nil, errors.Wrap(err, "error retrieving prohibited caches")
+	}
+
+	for _, result := range results {
+		prohibitedCacheMap[result.Prefix] = append(prohibitedCacheMap[result.Prefix], result.CacheHostname)
+	}
+
+	return prohibitedCacheMap, nil
+}
+
 // Get a collection of namespaces by filtering against various non-default namespace fields
 // excluding Namespace.ID, Namespace.Identity, Namespace.Pubkey, and various dates
 //
