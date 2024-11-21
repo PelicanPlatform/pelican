@@ -88,7 +88,7 @@ jobs:
         args: build --single-target --clean --snapshot
     - name: Copy files (Ubuntu)
       run: |
-        cp dist/pelican_linux_amd64_v1/${{ inputs.binary_name }} ./
+        cp dist/${{ inputs.binary_name }}_linux_amd64_v1/${{ inputs.binary_name }} ./
     - name: Run Integration Tests
       run: ./github_scripts/citests.sh
     - name: Run End-to-End Test for Object get/put
