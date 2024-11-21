@@ -333,18 +333,6 @@ func checkRedirectQuery(query url.Values) error {
 
 func redirectToCache(ginCtx *gin.Context) {
 	reqVer, service, _ := extractVersionAndService(ginCtx)
-	// Flag to indicate if the request was redirected to a cache
-	// For metric collection purposes
-	// see collectDirectorRedirectionMetric
-	redirectedToCache := true
-	defer func() {
-		if !redirectedToCache {
-			collectDirectorRedirectionMetric(ginCtx, "origin")
-		} else {
-			collectDirectorRedirectionMetric(ginCtx, "cache")
-		}
-	}()
-	defer collectDirectorRedirectionMetric(ginCtx, "cache")
 	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
@@ -485,11 +473,6 @@ func redirectToCache(ginCtx *gin.Context) {
 			})
 			return
 		}
-		// At this point, the cacheAds is full of originAds
-		// We need to indicate that we are redirecting to an origin and not a cache
-		// This is for the purpose of metrics
-		// See collectDirectorRedirectionMetric
-		redirectedToCache = false
 	}
 
 	ctx := context.Background()
@@ -556,7 +539,6 @@ func redirectToCache(ginCtx *gin.Context) {
 
 func redirectToOrigin(ginCtx *gin.Context) {
 	reqVer, service, _ := extractVersionAndService(ginCtx)
-	defer collectDirectorRedirectionMetric(ginCtx, "origin")
 	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
@@ -1355,34 +1337,6 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 	shortendVersion := strings.Join(strSegments, ".")
 
 	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": shortendVersion, "service": service}).Inc()
-}
-
-func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
-	labels := prometheus.Labels{
-		"destination": destination,
-		"status_code": strconv.Itoa(ctx.Writer.Status()),
-		"version":     "",
-		"network":     "",
-	}
-
-	version, _, err := extractVersionAndService(ctx)
-	if err != nil {
-		log.Warningf("Failed to extract version and service from request: %v", err)
-		return
-	}
-	if version != nil {
-		labels["version"] = version.String()
-	} else {
-		labels["version"] = "unknown"
-	}
-
-	maskedIp, ok := utils.ApplyIPMask(ctx.ClientIP())
-	if ok {
-		labels["network"] = maskedIp
-	} else {
-		labels["network"] = "unknown"
-	}
-	metrics.PelicanDirectorRedirectionsTotal.With(labels).Inc()
 }
 
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
