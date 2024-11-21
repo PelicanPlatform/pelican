@@ -81,6 +81,7 @@ type Config struct {
 		MinStatResponse int `mapstructure:"minstatresponse" yaml:"MinStatResponse"`
 		OriginCacheHealthTestInterval time.Duration `mapstructure:"origincachehealthtestinterval" yaml:"OriginCacheHealthTestInterval"`
 		OriginResponseHostnames []string `mapstructure:"originresponsehostnames" yaml:"OriginResponseHostnames"`
+		ProhibitedCachesRefreshInterval time.Duration `mapstructure:"prohibitedcachesrefreshinterval" yaml:"ProhibitedCachesRefreshInterval"`
 		StatConcurrencyLimit int `mapstructure:"statconcurrencylimit" yaml:"StatConcurrencyLimit"`
 		StatTimeout time.Duration `mapstructure:"stattimeout" yaml:"StatTimeout"`
 		SupportContactEmail string `mapstructure:"supportcontactemail" yaml:"SupportContactEmail"`
@@ -385,6 +386,7 @@ type configWithType struct {
 		MinStatResponse struct { Type string; Value int }
 		OriginCacheHealthTestInterval struct { Type string; Value time.Duration }
 		OriginResponseHostnames struct { Type string; Value []string }
+		ProhibitedCachesRefreshInterval struct { Type string; Value time.Duration }
 		StatConcurrencyLimit struct { Type string; Value int }
 		StatTimeout struct { Type string; Value time.Duration }
 		SupportContactEmail struct { Type string; Value string }

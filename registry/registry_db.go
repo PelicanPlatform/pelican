@@ -291,9 +291,9 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 	return &ns, nil
 }
 
-// Fetch data from the database and return a map where the keys
+// getProhibitedCaches queries the database and returns a map where the keys
 // are federation prefixes and the values are lists of prohibited cache hostnames.
-// Only prefixes with prohibited caches are included in the result map.
+// Only prefixes with at least one prohibited cache are included in the resulting map.
 func getProhibitedCaches() (map[string][]string, error) {
 	prohibitedCacheMap := make(map[string][]string)
 

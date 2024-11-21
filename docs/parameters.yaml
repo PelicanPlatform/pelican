@@ -1516,6 +1516,14 @@ default: 10000
 hidden: true
 components: ["director"]
 ---
+name: Director.ProhibitedCachesRefreshInterval
+description: |+
+  Specifies the time interval after which the director queries the registry to refresh its in-memory data about prohibited caches.
+  Prohibited caches data is essentially a mapping of federation prefixes to a list of caches to which the data should not be propagated for the given prefix.
+type: duration
+default: 1min
+components: ["director"]
+---
 ############################
 #  Registry-level configs  #
 ############################

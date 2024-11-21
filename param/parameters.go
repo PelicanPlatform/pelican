@@ -385,6 +385,7 @@ var (
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
 	Director_CachePresenceTTL = DurationParam{"Director.CachePresenceTTL"}
 	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
+	Director_ProhibitedCachesRefreshInterval = DurationParam{"Director.ProhibitedCachesRefreshInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
 	Monitoring_DataRetention = DurationParam{"Monitoring.DataRetention"}

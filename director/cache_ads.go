@@ -304,6 +304,33 @@ func matchesPrefix(reqPath string, namespaceAds []server_structs.NamespaceAdV2) 
 	return best
 }
 
+// isProhibited checks if the given server is prohibited from serving
+// the specified namespace. It validates this by referencing the
+// prohibitedCaches map that the director maintains in memory.
+func isProhibited(nsAd *server_structs.NamespaceAdV2, ad *server_structs.Advertisement) bool {
+	if ad.Type == server_structs.OriginType.String() {
+		return false
+	}
+
+	serverHost := ad.ServerAd.URL.Host
+	serverHostname := strings.Split(serverHost, ":")[0]
+
+	prohibitedCachesMutex.RLock()
+	defer prohibitedCachesMutex.RUnlock()
+
+	for prefix, caches := range prohibitedCaches {
+		if strings.HasPrefix(nsAd.Path, prefix) {
+			for _, cacheHostname := range caches {
+				if strings.EqualFold(serverHostname, cacheHostname) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
 func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2, originAds []server_structs.ServerAd, cacheAds []server_structs.ServerAd) {
 	skippedServers := []server_structs.ServerAd{}
 
@@ -326,7 +353,7 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 			log.Debugf("Skipping %s server %s as it's in the filtered server list with type %s", ad.Type, ad.Name, ft)
 			continue
 		}
-		if ns := matchesPrefix(reqPath, ad.NamespaceAds); ns != nil {
+		if ns := matchesPrefix(reqPath, ad.NamespaceAds); ns != nil && !isProhibited(ns, ad) {
 			if best == nil || len(ns.Path) > len(best.Path) {
 				best = ns
 				// If anything was previously set by a namespace that constituted a shorter

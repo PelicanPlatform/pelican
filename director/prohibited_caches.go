@@ -31,9 +31,11 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 )
 
 var (
+	// prohibitedCaches maps federation prefixes to a list of cache hostnames where data should not propagate.
 	prohibitedCaches      map[string][]string
 	prohibitedCachesMutex sync.RWMutex
 )
@@ -82,7 +84,7 @@ func fetchProhibitedCaches(ctx context.Context) (map[string][]string, error) {
 // LaunchPeriodicProhibitedCachesFetch starts a new goroutine that periodically
 // refreshes the prohibited cache data maintained by the director in memory.
 func LaunchPeriodicProhibitedCachesFetch(ctx context.Context, egrp *errgroup.Group) {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(param.Director_ProhibitedCachesRefreshInterval.GetDuration())
 
 	data, err := fetchProhibitedCaches(ctx)
 	if err != nil {

@@ -59,6 +59,7 @@ Director:
   AssumePresenceAtSingleOrigin: true
   CachePresenceTTL: 1m
   CachePresenceCapacity: 10000
+  ProhibitedCachesRefreshInterval: 1m
 Cache:
   Port: 8442
   SelfTest: true

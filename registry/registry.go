@@ -1157,7 +1157,7 @@ func checkStatusHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, server_structs.CheckNamespaceCompleteRes{Results: results})
 }
 
-// Wrapper for getProhibitedCaches
+// getProhibitedCachesHandler is a wrapper around the getProhibitedCaches function.
 func getProhibitedCachesHandler(ctx *gin.Context) {
 	caches, err := getProhibitedCaches()
 
