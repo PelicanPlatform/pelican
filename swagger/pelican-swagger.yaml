@@ -197,6 +197,11 @@ definitions:
         description: The user identity we get from CILogon if the namespace is registered via CLI with `--with-identity` flag
       admin_metadata:
         $ref: "#/definitions/AdminMetadata"
+      prohibited_caches:
+        type: array
+        items:
+          type: string
+        description: A list of cache hostnames where data for this namespace prefix should not propagate.
       custom_fields:
         type: object
         description: The custom fields user registered, configurable by setting Registry.CustomRegistrationFields.
@@ -232,6 +237,11 @@ definitions:
           It should be a marshaled (stringfied) JSON that contains either one JWK or a JWKS
       admin_metadata:
         $ref: "#/definitions/AdminMetadata"
+      prohibited_caches:
+        type: array
+        items:
+          type: string
+        description: A list of cache hostnames where data for this namespace prefix should not propagate.
       custom_fields:
         type: object
         description: The custom fields user registered, configurable by setting Registry.CustomRegistrationFields.

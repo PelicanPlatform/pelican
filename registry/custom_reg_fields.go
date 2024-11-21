@@ -167,11 +167,12 @@ func excludePubKey(nss []server_structs.Namespace) (nssNew []NamespaceWOPubkey) 
 	nssNew = make([]NamespaceWOPubkey, 0)
 	for _, ns := range nss {
 		nsNew := NamespaceWOPubkey{
-			ID:            ns.ID,
-			Prefix:        ns.Prefix,
-			Pubkey:        ns.Pubkey,
-			AdminMetadata: ns.AdminMetadata,
-			Identity:      ns.Identity,
+			ID:               ns.ID,
+			Prefix:           ns.Prefix,
+			Pubkey:           ns.Pubkey,
+			AdminMetadata:    ns.AdminMetadata,
+			Identity:         ns.Identity,
+			ProhibitedCaches: ns.ProhibitedCaches,
 		}
 		nssNew = append(nssNew, nsNew)
 	}

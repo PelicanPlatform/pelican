@@ -203,6 +203,7 @@ func TestGetNamespaceById(t *testing.T) {
 		defer resetNamespaceDB(t)
 		mockNs := mockNamespace("/test", "", "", server_structs.AdminMetadata{UserID: "foo"})
 		mockNs.CustomFields = mockCustomFields
+		mockNs.ProhibitedCaches = []string{}
 		err := insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 		nss, err := getAllNamespaces()
