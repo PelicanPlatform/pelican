@@ -375,7 +375,7 @@ func TestLargeFile(t *testing.T) {
 	server_utils.ResetTestState()
 
 	clientConfig := map[string]interface{}{
-		"Client.MaximumDownloadSpeed": 40 * 1024 * 1024,
+		"Client.MaximumDownloadSpeed":     40 * 1024 * 1024,
 		"Transport.ResponseHeaderTimeout": "1000s",
 	}
 	test_utils.InitClient(t, clientConfig)

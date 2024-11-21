@@ -132,7 +132,7 @@ jobs:
         # either 'goreleaser' (default) or 'goreleaser-pro'
         distribution: goreleaser
         version: latest
-        args: --clean --snapshot
+        args: --clean --snapshot --single-target
     - name: Copy files (Ubuntu)
       run: |
         cp dist/pelican_linux_amd64_v1/pelican ./
