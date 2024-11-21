@@ -7,6 +7,9 @@ import { Box, Typography } from '@mui/material';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import Link from 'next/link';
 import { getErrorMessage, getObjectValue } from '@/helpers/util';
+import { getConfig } from '@/helpers/api';
+import { getFederationUrls } from '@/helpers/get';
+import useSWR from 'swr';
 
 const LinkBox = ({ href, text }: { href: string; text: string }) => {
   return (
@@ -29,74 +32,26 @@ const LinkBox = ({ href, text }: { href: string; text: string }) => {
   );
 };
 
-const UrlData = [
-  { key: ['Federation', 'NamespaceUrl', 'Value'], text: 'Namespace Registry' },
-  { key: ['Federation', 'DirectorUrl', 'Value'], text: 'Director' },
-  { key: ['Federation', 'RegistryUrl', 'Value'], text: 'Registry' },
-  {
-    key: ['Federation', 'TopologyNamespaceUrl', 'Value'],
-    text: 'Topology Namespace',
-  },
-  { key: ['Federation', 'DiscoveryUrl', 'Value'], text: 'Discovery' },
-  { key: ['Federation', 'JwkUrl', 'Value'], text: 'JWK' },
-];
-
 const FederationOverview = () => {
-  const [config, setConfig] = useState<
-    { text: string; url: string | undefined }[]
-  >([]);
-
-  let getConfig = async () => {
-    let response = await fetch('/api/v1.0/config');
-    if (response.ok) {
-      const responseData = (await response.json()) as Config;
-
-      const federationUrls = UrlData.map(({ key, text }) => {
-        let url = getObjectValue<string>(responseData, key);
-        if (
-          url &&
-          !url?.startsWith('http://') &&
-          !url?.startsWith('https://')
-        ) {
-          url = 'https://' + url;
-        }
-
-        return {
-          text,
-          url,
-        };
-      });
-
-      setConfig(federationUrls);
-    } else {
-      console.error(await getErrorMessage(response));
-    }
-  };
-
-  useEffect(() => {
-    getConfig();
-  }, []);
-
-  if (config === undefined) {
-    return;
-  }
+  const { data: federationUrls, error } = useSWR(
+    'getFederationUrls',
+    getFederationUrls,
+    { fallbackData: [] }
+  );
 
   return (
-    <AuthenticatedContent
-      redirect={true}
-      checkAuthentication={(u) => u?.role == 'admin'}
-    >
-      {!Object.values(config).every((x) => x == undefined) ? (
+    <>
+      {!Object.values(federationUrls).every((x) => x == undefined) ? (
         <Typography variant={'h4'} component={'h2'} mb={2}>
           Federation Overview
         </Typography>
       ) : null}
-      {config.map(({ text, url }) => {
+      {federationUrls.map(({ text, url }) => {
         if (url) {
           return <LinkBox key={text} href={url} text={text}></LinkBox>;
         }
       })}
-    </AuthenticatedContent>
+    </>
   );
 };
 

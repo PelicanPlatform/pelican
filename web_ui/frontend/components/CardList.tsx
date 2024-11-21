@@ -17,16 +17,18 @@ import {
 interface CardListProps<T> {
   data?: Partial<T>[];
   Card: ComponentType<any>;
-  cardProps: Partial<T>;
+  cardProps?: Partial<T>;
 }
 
 export function CardList<T>({ data, Card, cardProps }: CardListProps<T>) {
   const PAGE_SIZE = 5;
   const [page, setPage] = useState<number>(1);
 
-  // Reset the page on data length change
+  // Minus the page if the data length changes
   useEffect(() => {
-    setPage(1);
+    if (data?.length && page > Math.ceil(data.length / PAGE_SIZE)) {
+      setPage(Math.max(1, Math.ceil(data.length / PAGE_SIZE)));
+    }
   }, [data?.length]);
 
   const count = useMemo(() => {

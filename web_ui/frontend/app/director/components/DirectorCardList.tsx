@@ -10,6 +10,7 @@ import { DirectorCard, DirectorCardProps } from './';
 import { Server } from '@/index';
 import { BooleanToggleButton, CardList } from '@/components';
 import useFuse from '@/helpers/useFuse';
+import { ServerGeneral } from '@/types';
 
 interface DirectorCardListProps {
   data: Partial<DirectorCardProps>[];
@@ -88,7 +89,7 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
   );
 }
 
-const serverHasError = (server?: Server) => {
+const serverHasError = (server?: ServerGeneral) => {
   return server?.healthStatus === 'Error';
 };
 

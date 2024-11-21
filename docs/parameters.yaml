@@ -44,7 +44,7 @@ description: |+
 
   Subdirectories of the provided directories are not read. Only the root config file's `ConfigLocations` key is used, and any redefinitions are ignored.
 type: stringSlice
-default: none
+default: []
 components: ["*"]
 ---
 name: Debug
@@ -566,7 +566,7 @@ description: |+
   This configuration is meant mostly to be used by passing the -v flag from the command line. Paths exported with this
   configuration will inherit the origin's abilities, so individual export configurations are not possible.
 type: stringSlice
-default: none
+default: []
 components: ["origin"]
 ---
 name: Origin.EnablePublicReads
@@ -765,7 +765,7 @@ name: Origin.ScitokensRestrictedPaths
 description: |+
   Enable the built-in issuer daemon for the origin.
 type: stringSlice
-default: none
+default: []
 components: ["origin"]
 ---
 name: Origin.ScitokensMapSubject
@@ -1210,7 +1210,7 @@ description: |+
   the cache is allowed to access any namespace that's advertised to the director. Otherwise, it will
   only be allowed to access the listed namespaces.
 type: stringSlice
-default: none
+default: []
 components: ["cache"]
 ---
 name: Cache.SelfTest
@@ -1285,7 +1285,7 @@ description: |+
 
   If present, the hostname is taken from the X-Forwarded-Host header in the request. Otherwise, Host is used.
 type: stringSlice
-default: none
+default: []
 components: ["director"]
 ---
 name: Director.CacheSortMethod
@@ -1314,7 +1314,7 @@ description: |+
 
   If present, the hostname is taken from the X-Forwarded-Host header in the request. Otherwise, Host is used.
 type: stringSlice
-default: none
+default: []
 components: ["director"]
 ---
 name: Director.MaxMindKeyFile
@@ -1447,7 +1447,7 @@ description: |+
   A list of server resource names that the Director should consider in downtime, preventing the Director from issuing redirects to them.
   Additional downtimes are aggregated from Topology (when the Director is served in OSDF mode), and the Web UI.
 type: stringSlice
-default: none
+default: []
 components: ["director"]
 ---
 name: Director.SupportContactEmail
@@ -1489,7 +1489,7 @@ description: |+
 
   This setting allows for compatibility with specific legacy OSDF origins and is not needed for new origins.
 type: stringSlice
-default: none
+default: []
 components: ["director"]
 hidden: true
 ---
@@ -1852,7 +1852,7 @@ description: |+
 
   The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
 type: stringSlice
-default: none
+default: []
 components: ["registry","origin","cache"]
 ---
 name: Server.StartupTimeout
@@ -2477,7 +2477,7 @@ name: Shoveler.OutputDestinations
 description: |+
   A list of <IP:Port> destinations to forward XRootD monitoring packet to.
 type: stringSlice
-default: none
+default: []
 components: ["origin", "cache"]
 ---
 name: Shoveler.VerifyHeader

@@ -9,7 +9,7 @@ import React, { ChangeEvent, ReactNode, SyntheticEvent, useMemo } from 'react';
 
 import { createId } from '@/components/configuration/util';
 import FormHelperText from '@mui/material/FormHelperText';
-import type { CustomRegistrationFieldProps } from './index.d';
+import type { BaseCustomRegistrationFieldProps } from './index';
 
 const BooleanField = ({
   onChange,
@@ -18,7 +18,7 @@ const BooleanField = ({
   required,
   description,
   value,
-}: CustomRegistrationFieldProps<boolean>) => {
+}: BaseCustomRegistrationFieldProps<boolean>) => {
   const id = useMemo(() => createId(name), [name]);
   const labelId = useMemo(() => `${id}-label`, [id]);
 

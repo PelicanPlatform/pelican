@@ -333,6 +333,7 @@ func checkRedirectQuery(query url.Values) error {
 
 func redirectToCache(ginCtx *gin.Context) {
 	reqVer, service, _ := extractVersionAndService(ginCtx)
+
 	err := versionCompatCheck(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)

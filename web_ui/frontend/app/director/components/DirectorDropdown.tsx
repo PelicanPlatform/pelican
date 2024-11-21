@@ -1,17 +1,14 @@
-import { Capabilities, Server, StringTree } from '@/index';
-import {
-  CapabilitiesChip,
-  CapabilitiesDisplay,
-  Dropdown,
-  InformationSpan,
-} from '@/components';
+import { CapabilitiesChip, Dropdown, InformationSpan } from '@/components';
 import { Box, Grid, Typography } from '@mui/material';
 import DirectoryTree from '@/components/DirectoryTree';
 import React from 'react';
 import { SinglePointMap } from '@/components/Map';
+import { ServerCapabilitiesTable } from '@/components/ServerCapabilitiesTable';
+import { Capabilities, ServerDetailed, ServerGeneral } from '@/types';
+import { Capability } from '@/components/configuration';
 
 interface DirectorDropdownProps {
-  server: Server;
+  server: ServerGeneral | ServerDetailed;
   transition: boolean;
 }
 
@@ -20,94 +17,68 @@ export const DirectorDropdown = ({
   transition,
 }: DirectorDropdownProps) => {
   return (
-    <Dropdown transition={transition} flexDirection={'column'}>
-      <Grid container spacing={1}>
-        <Grid item xs={12} md={7}>
-          <InformationSpan name={'Type'} value={server.type} />
-          <InformationSpan name={'Status'} value={server.healthStatus} />
-          <InformationSpan name={'URL'} value={server.url} />
-          <InformationSpan
-            name={'Longitude'}
-            value={server.longitude.toString()}
-          />
-          <InformationSpan
-            name={'Latitude'}
-            value={server.latitude.toString()}
-          />
+    <>
+      <Dropdown transition={transition} flexDirection={'column'}>
+        <Grid container spacing={1}>
+          <Grid item xs={12} md={7}>
+            <InformationSpan name={'Type'} value={server.type} />
+            <InformationSpan name={'Status'} value={server.healthStatus} />
+            <InformationSpan name={'URL'} value={server.url} />
+            <InformationSpan
+              name={'Longitude'}
+              value={server.longitude.toString()}
+            />
+            <InformationSpan
+              name={'Latitude'}
+              value={server.latitude.toString()}
+            />
+          </Grid>
+          <Grid item xs={12} md={5}>
+            <Box
+              borderRadius={1}
+              height={'100%'}
+              minHeight={'140px'}
+              overflow={'hidden'}
+            >
+              {transition && (
+                <SinglePointMap
+                  point={{ lat: server.latitude, lng: server.longitude }}
+                />
+              )}
+            </Box>
+          </Grid>
         </Grid>
-        <Grid item xs={12} md={5}>
-          <Box
-            borderRadius={1}
-            height={'100%'}
-            minHeight={'140px'}
-            overflow={'hidden'}
-          >
-            {transition && (
-              <SinglePointMap
-                point={{ lat: server.latitude, lng: server.longitude }}
-              />
-            )}
-          </Box>
-        </Grid>
-      </Grid>
-      {server.capabilities && (
-        <Box mt={1}>
-          <CapabilitiesRow capabilities={server.capabilities} />
+        <Box sx={{ my: 1 }}>
+          <ServerCapabilitiesTable server={server} />
         </Box>
-      )}
-      <Box sx={{ my: 1 }}>
-        <Typography
-          variant={'body2'}
-          sx={{ fontWeight: 500, display: 'inline', mr: 2 }}
-        >
-          Namespace Prefixes
-        </Typography>
-        <DirectoryTree data={directoryListToTree(server.namespacePrefixes)} />
-      </Box>
-    </Dropdown>
+      </Dropdown>
+    </>
   );
 };
 
-const CapabilitiesRow = ({ capabilities }: { capabilities: Capabilities }) => {
+export const CapabilitiesRow = ({
+  capabilities,
+  parentCapabilities,
+}: {
+  capabilities: Capabilities;
+  parentCapabilities?: Capabilities;
+}) => {
   return (
     <Grid container spacing={1}>
       {Object.entries(capabilities).map(([key, value]) => {
+        const castKey = key as keyof Capabilities;
         return (
           <Grid item md={12 / 5} sm={12 / 4} xs={12 / 2} key={key}>
-            <CapabilitiesChip name={key} value={value} />
+            <CapabilitiesChip
+              name={key}
+              value={value}
+              parentValue={
+                parentCapabilities ? parentCapabilities[castKey] : undefined
+              }
+            />
           </Grid>
         );
       })}
     </Grid>
   );
-};
-
-const directoryListToTree = (directoryList: string[]): StringTree => {
-  let tree = {};
-  directoryList.forEach((directory) => {
-    const path = directory
-      .split('/')
-      .filter((x) => x != '')
-      .map((x) => '/' + x);
-    tree = directoryListToTreeHelper(path, tree);
-  });
-
-  return tree;
-};
-
-const directoryListToTreeHelper = (
-  path: string[],
-  tree: StringTree
-): true | StringTree => {
-  if (path.length == 0) {
-    return true;
-  }
-
-  if (!tree[path[0]] || tree[path[0]] === true) {
-    tree[path[0]] = {};
-  }
-
-  tree[path[0]] = directoryListToTreeHelper(path.slice(1), tree[path[0]]);
-
-  return tree;
 };

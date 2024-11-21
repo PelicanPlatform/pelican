@@ -1,8 +1,8 @@
-import { Capabilities } from '@/index';
+import { Capabilities } from '@/types';
 import { Box, Tooltip, Typography } from '@mui/material';
-import { grey } from '@mui/material/colors';
+import { green, grey } from '@mui/material/colors';
 import { Check, Clear } from '@mui/icons-material';
-import React from 'react';
+import React, { useMemo } from 'react';
 
 export const CapabilitiesDisplay = ({
   capabilities,
@@ -14,7 +14,7 @@ export const CapabilitiesDisplay = ({
       {Object.entries(capabilities).map(([key, value]) => {
         return (
           <Tooltip title={key} key={key}>
-            <CapabilitiesChip key={key} name={key} value={value} />
+            <CapabilitiesChip key={key} name={key} value={value as boolean} />
           </Tooltip>
         );
       })}
@@ -22,13 +22,29 @@ export const CapabilitiesDisplay = ({
   );
 };
 
+/**
+ * Capabilities chip used to convey the capabilities of a server or namespace
+ * There are two levels of activity to help represent the relationship between
+ * activity and the server or namespace.
+ * @param name
+ * @param value
+ * @param active
+ * @constructor
+ */
 export const CapabilitiesChip = ({
   name,
   value,
+  parentValue,
 }: {
   name: string;
   value: boolean;
+  parentValue?: boolean;
 }) => {
+  // Switch statement to determine the color of the chip
+  const isActive = useMemo(() => {
+    return parentValue !== undefined ? value && parentValue : value;
+  }, [value, parentValue]);
+
   return (
     <Box
       sx={{
@@ -38,8 +54,8 @@ export const CapabilitiesChip = ({
         py: 0.4,
         px: 1,
         mb: 0.2,
-        backgroundColor: value ? grey[300] : grey[100],
-        color: value ? 'black' : grey[700],
+        backgroundColor: isActive ? green[300] : grey[100],
+        color: isActive ? 'black' : grey[700],
         border: '1px 1px solid black',
       }}
     >
