@@ -156,8 +156,8 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	}
 
 	labels := prometheus.Labels{
-		"source":  "",
-		"proj":    "",
+		"source": "",
+		"proj":   "",
 	}
 
 	project, ok := ctx.Value(ProjectContextKey{}).(string)
