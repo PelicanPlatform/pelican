@@ -21,6 +21,8 @@ package server_structs
 import (
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type RegistrationStatus string
@@ -59,7 +61,7 @@ type Namespace struct {
 	Pubkey           string                 `json:"pubkey" validate:"required" description:"Pubkey is your Pelican server public key in JWKS form"`
 	Identity         string                 `json:"identity" post:"exclude"`
 	AdminMetadata    AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
-	ProhibitedCaches []string               `json:"prohibited_caches" gorm:"-"`
+	ProhibitedCaches []string               `json:"prohibited_caches" gorm:"serializer:json"`
 	CustomFields     map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
 }
 
@@ -97,12 +99,6 @@ type (
 	CheckNamespaceCompleteRes struct {
 		Results map[string]NamespaceCompletenessResult `json:"results"`
 	}
-
-	ProhibitedCache struct {
-		ID            int    `json:"id" gorm:"primaryKey"`
-		PrefixID      int    `json:"prefix_id"`
-		CacheHostname string `json:"cache_hostname"`
-	}
 )
 
 const (
@@ -139,4 +135,13 @@ func (Namespace) TableName() string {
 
 func IsValidRegStatus(s string) bool {
 	return s == "Pending" || s == "Approved" || s == "Denied" || s == "Unknown"
+}
+
+// GORM hook to set ProhibitedCaches to an empty slice instead of nil before saving (create or update).
+// This ensures that when converted to JSON, it appears as [] instead of null.
+func (n *Namespace) BeforeSave(tx *gorm.DB) (err error) {
+	if n.ProhibitedCaches == nil {
+		n.ProhibitedCaches = []string{}
+	}
+	return nil
 }

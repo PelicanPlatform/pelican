@@ -166,7 +166,7 @@ func namespaceBelongsToUserId(id int, userId string) (bool, error) {
 	var result server_structs.Namespace
 	err := db.First(&result, "id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, fmt.Errorf("Namespace with id = %d does not exists", id)
+		return false, fmt.Errorf("namespace with id = %d does not exists", id)
 	} else if err != nil {
 		return false, errors.Wrap(err, "error retrieving namespace")
 	}
@@ -242,22 +242,6 @@ func getNamespaceById(id int) (*server_structs.Namespace, error) {
 		return nil, errors.Wrap(err, "error retrieving pubkey")
 	}
 
-	// Fetch prohibited caches
-	cacheHostnames := []string{}
-	if !db.Migrator().HasTable(&server_structs.ProhibitedCache{}) {
-		log.Warn("ProhibitedCache table does not exist")
-		cacheHostnames = []string{}
-	} else {
-		err := db.Model(&server_structs.ProhibitedCache{}).
-			Where("prefix_id = ?", ns.ID).
-			Pluck("cache_hostname", &cacheHostnames).Error
-		if err != nil {
-			return nil, errors.Wrap(err, "error retrieving prohibited caches")
-		}
-	}
-
-	ns.ProhibitedCaches = cacheHostnames
-
 	// By default, JSON unmarshal will convert any generic number to float
 	// and we only allow integer in custom fields, so we convert them back
 	for key, val := range ns.CustomFields {
@@ -284,22 +268,6 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 		return nil, errors.Wrap(err, "error retrieving namespace registration by its prefix")
 	}
 
-	// Fetch prohibited caches
-	cacheHostnames := []string{}
-	if !db.Migrator().HasTable(&server_structs.ProhibitedCache{}) {
-		log.Warn("ProhibitedCache table does not exist")
-		cacheHostnames = []string{}
-	} else {
-		err := db.Model(&server_structs.ProhibitedCache{}).
-			Where("prefix_id = ?", ns.ID).
-			Pluck("cache_hostname", &cacheHostnames).Error
-		if err != nil {
-			return nil, errors.Wrap(err, "error retrieving prohibited caches")
-		}
-	}
-
-	ns.ProhibitedCaches = cacheHostnames
-
 	// By default, JSON unmarshal will convert any generic number to float
 	// and we only allow integer in custom fields, so we convert them back
 	for key, val := range ns.CustomFields {
@@ -317,31 +285,19 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 // are federation prefixes and the values are lists of prohibited cache hostnames.
 // Only prefixes with at least one prohibited cache are included in the resulting map.
 func getProhibitedCaches() (map[string][]string, error) {
+	var namespaces []server_structs.Namespace
 	prohibitedCacheMap := make(map[string][]string)
 
-	type Result struct {
-		Prefix        string
-		CacheHostname string
-	}
-
-	// Check if the table exists before querying
-	if !db.Migrator().HasTable(&server_structs.ProhibitedCache{}) {
-		log.Warn("ProhibitedCache table does not exist")
-		return prohibitedCacheMap, nil
-	}
-
-	var results []Result
-
-	err := db.Model(&server_structs.Namespace{}).
-		Select("namespace.prefix, prohibited_caches.cache_hostname").
-		Joins("inner join prohibited_caches on prohibited_caches.prefix_id = namespace.id").
-		Scan(&results).Error
+	err := db.Select("prefix, prohibited_caches").
+		Find(&namespaces).Error
 	if err != nil {
 		return nil, errors.Wrap(err, "error retrieving prohibited caches")
 	}
 
-	for _, result := range results {
-		prohibitedCacheMap[result.Prefix] = append(prohibitedCacheMap[result.Prefix], result.CacheHostname)
+	for _, ns := range namespaces {
+		if len(ns.ProhibitedCaches) > 0 {
+			prohibitedCacheMap[ns.Prefix] = ns.ProhibitedCaches
+		}
 	}
 
 	return prohibitedCacheMap, nil
@@ -392,22 +348,6 @@ func getNamespacesByFilter(filterNs server_structs.Namespace, pType prefixType, 
 		return nil, err
 	}
 
-	prohibitedCaches := []server_structs.ProhibitedCache{}
-
-	// Check if the table exists before querying
-	if !db.Migrator().HasTable(&server_structs.ProhibitedCache{}) {
-		log.Warn("prohibited_caches table does not exist")
-	} else {
-		if err := db.Find(&prohibitedCaches).Error; err != nil {
-			log.Warn("Error querying prohibited_caches table, skipping populating prohibited caches data")
-		}
-	}
-
-	prohibitedCachesMap := make(map[int][]string)
-	for _, cache := range prohibitedCaches {
-		prohibitedCachesMap[cache.PrefixID] = append(prohibitedCachesMap[cache.PrefixID], cache.CacheHostname)
-	}
-
 	namespacesOut := []server_structs.Namespace{}
 	for idx, ns := range namespacesIn {
 		// If we want legacy registration and the query result doesn't have AdminMetadata, put it in the return value
@@ -450,11 +390,6 @@ func getNamespacesByFilter(filterNs server_structs.Namespace, pType prefixType, 
 			continue
 		}
 		// Congrats! You passed all the filter check and this namespace matches what you want
-		if caches, ok := prohibitedCachesMap[namespacesIn[idx].ID]; ok {
-			namespacesIn[idx].ProhibitedCaches = caches
-		} else {
-			namespacesIn[idx].ProhibitedCaches = []string{}
-		}
 		namespacesOut = append(namespacesOut, namespacesIn[idx])
 	}
 	return namespacesOut, nil
