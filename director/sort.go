@@ -34,6 +34,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -171,10 +172,14 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	reader := maxMindReader.Load()
 	if reader == nil {
 		err = errors.New("No GeoIP database is available")
+		labels["source"] = "server"
+		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 		return
 	}
 	record, err := reader.City(ip)
 	if err != nil {
+		labels["source"] = "server"
+		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 		return
 	}
 	lat = record.Location.Latitude
@@ -185,6 +190,8 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	// comes from a private range.
 	if lat == 0 && long == 0 {
 		log.Warningf("GeoIP Resolution of the address %s resulted in the null lat/long. This will result in random server sorting.", ip.String())
+		labels["source"] = "client"
+		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 	}
 
 	// MaxMind provides an accuracy radius in kilometers. When it actually has no clue how to resolve a valid, public
@@ -196,6 +203,8 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 			"This will be treated as GeoIP resolution failure and result in random server sorting. Setting lat/long to null.", ip.String(), record.Location.AccuracyRadius)
 		lat = 0
 		long = 0
+		labels["source"] = "client"
+		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 	}
 
 	return
