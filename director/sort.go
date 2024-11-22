@@ -37,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -156,8 +157,17 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	}
 
 	labels := prometheus.Labels{
-		"source": "",
-		"proj":   "",
+		"network": "",
+		"source":  "",
+		"proj":    "",
+	}
+
+	network, ok := utils.ApplyIPMask(addr.String())
+	if !ok {
+		log.Warningf("Failed to apply IP mask to address %s", ip.String())
+		labels["network"] = "unknown"
+	} else {
+		labels["network"] = network
 	}
 
 	project, ok := ctx.Value(ProjectContextKey{}).(string)
