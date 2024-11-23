@@ -36,7 +36,7 @@ import (
 
 var (
 	// prohibitedCaches maps federation prefixes to a list of cache hostnames where data should not propagate.
-	prohibitedCaches      map[string][]string
+	prohibitedCaches      = make(map[string][]string)
 	prohibitedCachesMutex sync.RWMutex
 )
 
@@ -56,11 +56,11 @@ func fetchProhibitedCaches(ctx context.Context) (map[string][]string, error) {
 
 	client := http.Client{Transport: config.GetTransport()}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqUrl.String(), nil)
-
-	req.Header.Add("Content-Type", "application/json")
 	if err != nil {
 		return nil, err
 	}
+
+	req.Header.Add("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
