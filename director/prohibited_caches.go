@@ -28,6 +28,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -84,7 +85,16 @@ func fetchProhibitedCaches(ctx context.Context) (map[string][]string, error) {
 // LaunchPeriodicProhibitedCachesFetch starts a new goroutine that periodically
 // refreshes the prohibited cache data maintained by the director in memory.
 func LaunchPeriodicProhibitedCachesFetch(ctx context.Context, egrp *errgroup.Group) {
-	ticker := time.NewTicker(param.Director_ProhibitedCachesRefreshInterval.GetDuration())
+	refreshInterval := param.Director_ProhibitedCachesRefreshInterval.GetDuration()
+
+	if refreshInterval < 1*time.Millisecond {
+		log.Warnf("Director.ProhibitedCachesRefreshInterval is set to: %v, which is too low. Falling back to default: 1m", refreshInterval)
+
+		viper.Set("Director.ProhibitedCachesRefreshInterval", "1m")
+		refreshInterval = 1 * time.Minute
+	}
+
+	ticker := time.NewTicker(refreshInterval)
 
 	data, err := fetchProhibitedCaches(ctx)
 	if err != nil {
