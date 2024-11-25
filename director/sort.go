@@ -246,8 +246,7 @@ func assignRandBoundedCoord(minLat, maxLat, minLong, maxLong float64) (lat, long
 
 // Given a client address, attempt to get the lat/long of the client. If the address is invalid or
 // the lat/long is not resolvable, assign a random location in the contiguous US.
-func getClientLatLong(ctx context.Context, addr netip.Addr) (coord Coordinate) {
-	var err error
+func getClientLatLong(ctx context.Context, addr netip.Addr) (coord Coordinate, err error) {
 	if !addr.IsValid() {
 		log.Warningf("Unable to sort servers based on client-server distance. Invalid client IP address: %s", addr.String())
 		coord.Lat, coord.Long = assignRandBoundedCoord(usLatMin, usLatMax, usLongMin, usLongMax)
@@ -303,7 +302,18 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 	weights := make(SwapMaps, len(ads))
 	sortMethod := param.Director_CacheSortMethod.GetString()
 	// This will handle the case where the client address is invalid or the lat/long is not resolvable.
-	clientCoord := getClientLatLong(ctx, clientAddr)
+	clientCoord, err := getClientLatLong(ctx, clientAddr)
+	if err != nil {
+		// If it is a geoIP error, then we get the labels and increment the error counter
+		// Otherwise we log the error and continue
+		switch err := err.(type) {
+		case GeoIPError:
+			labels := err.labels
+			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
+		default:
+			log.Warningf("Error while getting the client IP address: %v", err)
+		}
+	}
 
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {

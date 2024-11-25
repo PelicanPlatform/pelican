@@ -472,7 +472,7 @@ func TestGetClientLatLong(t *testing.T) {
 		assert.False(t, clientIpCache.Has(clientIp))
 		ctx := context.Background()
 		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
-		coord1 := getClientLatLong(ctx, clientIp)
+		coord1, _ := getClientLatLong(ctx, clientIp)
 
 		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
 		assert.True(t, coord1.Long <= usLongMax && coord1.Long >= usLongMin)
@@ -482,7 +482,7 @@ func TestGetClientLatLong(t *testing.T) {
 		// Get it again to make sure it's coming from the cache
 		ctx = context.Background()
 		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
-		coord2 := getClientLatLong(ctx, clientIp)
+		coord2, _ := getClientLatLong(ctx, clientIp)
 		assert.Equal(t, coord1.Lat, coord2.Lat)
 		assert.Equal(t, coord1.Long, coord2.Long)
 		assert.Contains(t, logOutput.String(), "Retrieving pre-assigned lat/long for unresolved client IP")
@@ -498,7 +498,7 @@ func TestGetClientLatLong(t *testing.T) {
 		assert.False(t, clientIpCache.Has(clientIp))
 		ctx := context.Background()
 		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
-		coord1 := getClientLatLong(ctx, clientIp)
+		coord1, _ := getClientLatLong(ctx, clientIp)
 
 		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
 		assert.True(t, coord1.Long <= usLongMax && coord1.Long >= usLongMin)
@@ -508,7 +508,7 @@ func TestGetClientLatLong(t *testing.T) {
 		// Get it again to make sure it's coming from the cache
 		ctx = context.Background()
 		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
-		coord2 := getClientLatLong(ctx, clientIp)
+		coord2, _ := getClientLatLong(ctx, clientIp)
 		assert.Equal(t, coord1.Lat, coord2.Lat)
 		assert.Equal(t, coord1.Long, coord2.Long)
 		assert.Contains(t, logOutput.String(), "Retrieving pre-assigned lat/long for client IP")
