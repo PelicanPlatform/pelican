@@ -82,7 +82,7 @@ func (f filterType) String() string {
 //  4. Set up utilities for collecting origin/health server file transfer test status
 //  5. Return the updated ServerAd. The ServerAd passed in will not be modified
 func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) (updatedAd server_structs.ServerAd) {
-	if err := updateLatLong(ctx, &sAd); err != nil {
+	if err := updateLatLong(&sAd); err != nil {
 		switch err := err.(type) {
 		case GeoIPError:
 			labels := err.labels
@@ -246,7 +246,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	return sAd
 }
 
-func updateLatLong(ctx context.Context, ad *server_structs.ServerAd) error {
+func updateLatLong(ad *server_structs.ServerAd) error {
 	if ad == nil {
 		return errors.New("Cannot provide a nil ad to UpdateLatLong")
 	}
