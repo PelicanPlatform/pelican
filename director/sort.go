@@ -158,18 +158,16 @@ func checkOverrides(addr net.IP) (coordinate *Coordinate) {
 	return nil
 }
 
-func setProjectLabel(ctx context.Context, labels prometheus.Labels) bool {
+func setProjectLabel(ctx context.Context, labels *prometheus.Labels) {
 	project, ok := ctx.Value(ProjectContextKey{}).(string)
 	if !ok || project == "" {
-		labels["proj"] = "unknown"
-		return false
+		(*labels)["proj"] = "unknown"
 	} else {
-		labels["proj"] = project
-		return true
+		(*labels)["proj"] = project
 	}
 }
 
-func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64, err error) {
+func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	ip := net.IP(addr.AsSlice())
 	override := checkOverrides(ip)
 	if override != nil {
@@ -180,7 +178,7 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	labels := prometheus.Labels{
 		"network": "",
 		"source":  "",
-		"proj":    "",
+		"proj":    "", // this will be set in the setProjectLabel function
 	}
 
 	network, ok := utils.ApplyIPMask(addr.String())
@@ -189,11 +187,6 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 		labels["network"] = "unknown"
 	} else {
 		labels["network"] = network
-	}
-
-	ok = setProjectLabel(ctx, labels)
-	if !ok {
-		labels["source"] = "server"
 	}
 
 	reader := maxMindReader.Load()
@@ -246,7 +239,7 @@ func assignRandBoundedCoord(minLat, maxLat, minLong, maxLong float64) (lat, long
 
 // Given a client address, attempt to get the lat/long of the client. If the address is invalid or
 // the lat/long is not resolvable, assign a random location in the contiguous US.
-func getClientLatLong(ctx context.Context, addr netip.Addr) (coord Coordinate, err error) {
+func getClientLatLong(addr netip.Addr) (coord Coordinate, err error) {
 	if !addr.IsValid() {
 		log.Warningf("Unable to sort servers based on client-server distance. Invalid client IP address: %s", addr.String())
 		coord.Lat, coord.Long = assignRandBoundedCoord(usLatMin, usLatMax, usLongMin, usLongMax)
@@ -260,7 +253,7 @@ func getClientLatLong(ctx context.Context, addr netip.Addr) (coord Coordinate, e
 		return
 	}
 
-	coord.Lat, coord.Long, err = getLatLong(ctx, addr)
+	coord.Lat, coord.Long, err = getLatLong(addr)
 	if err != nil || (coord.Lat == 0 && coord.Long == 0) {
 		if err != nil {
 			log.Warningf("Error while getting the client IP address: %v", err)
@@ -302,13 +295,14 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 	weights := make(SwapMaps, len(ads))
 	sortMethod := param.Director_CacheSortMethod.GetString()
 	// This will handle the case where the client address is invalid or the lat/long is not resolvable.
-	clientCoord, err := getClientLatLong(ctx, clientAddr)
+	clientCoord, err := getClientLatLong(clientAddr)
 	if err != nil {
 		// If it is a geoIP error, then we get the labels and increment the error counter
 		// Otherwise we log the error and continue
 		switch err := err.(type) {
 		case GeoIPError:
 			labels := err.labels
+			setProjectLabel(ctx, &labels)
 			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 		default:
 			log.Warningf("Error while getting the client IP address: %v", err)
