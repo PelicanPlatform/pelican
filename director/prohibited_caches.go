@@ -108,9 +108,9 @@ func LaunchPeriodicProhibitedCachesFetch(ctx context.Context, egrp *errgroup.Gro
 	// Initial fetch of prohibited caches
 	data, err := fetchProhibitedCaches(ctx)
 	if err != nil {
-		ticker.Reset(10 * time.Second) // Higher frequency (10s)
+		ticker.Reset(1 * time.Second) // Higher frequency (10s)
 		log.Warningf("Error fetching prohibited caches on first attempt: %v", err)
-		log.Debug("Switching to higher frequency (10s) for prohibited caches fetch")
+		log.Debug("Switching to higher frequency (1s) for prohibited caches fetch")
 	} else {
 		prohibitedCaches.Store(&data)
 		prohibitedCachesLastSetTimestamp.Store(time.Now().Unix())
@@ -130,7 +130,7 @@ func LaunchPeriodicProhibitedCachesFetch(ctx context.Context, egrp *errgroup.Gro
 					lastSet := prohibitedCachesLastSetTimestamp.Load()
 					if time.Since(time.Unix(lastSet, 0)) >= 15*time.Minute {
 						log.Debug("Prohibited caches last updated over 15 minutes ago, switching to higher frequency")
-						ticker.Reset(5 * time.Second) // Higher frequency (10s)
+						ticker.Reset(1 * time.Second) // Higher frequency (1s)
 					}
 					continue
 				}

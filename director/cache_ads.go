@@ -311,6 +311,22 @@ func isProhibited(nsAd *server_structs.NamespaceAdV2, ad *server_structs.Adverti
 	if ad.Type == server_structs.OriginType.String() {
 		return false
 	}
+	if prohibitedCachesLastSetTimestamp.Load() == 0 {
+		log.Warning("Prohibited caches data is not set, waiting for it to be set before continuing with cache matchmaking")
+		start := time.Now()
+		// Wait until last set timestamp is updated
+		for prohibitedCachesLastSetTimestamp.Load() == 0 {
+			if time.Since(start) >= 3*time.Second {
+				log.Error("Prohibited caches data was not set within the 3-second timeout")
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	if time.Since(time.Unix(prohibitedCachesLastSetTimestamp.Load(), 0)) >= 15*time.Minute {
+		log.Error("Prohibited caches data is outdated, caches will not be used.")
+		return true
+	}
 
 	serverHost := ad.ServerAd.URL.Host
 	serverHostname := strings.Split(serverHost, ":")[0]
