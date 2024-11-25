@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -37,9 +37,18 @@ import (
 
 var (
 	// prohibitedCaches maps federation prefixes to a list of cache hostnames where data should not propagate.
-	prohibitedCaches      = make(map[string][]string)
-	prohibitedCachesMutex sync.RWMutex
+	prohibitedCaches atomic.Pointer[map[string][]string]
+	// prohibitedCachesLastSetTimestamp tracks when prohibitedCaches was last explicitly set.
+	prohibitedCachesLastSetTimestamp atomic.Int64
 )
+
+func init() {
+	emptyMap := make(map[string][]string)
+	prohibitedCaches.Store(&emptyMap)
+
+	// Initialize prohibitedCachesLastSetTimestamp to 0 (indicating never set)
+	prohibitedCachesLastSetTimestamp.Store(0)
+}
 
 // fetchProhibitedCaches makes a request to the registry endpoint to retrieve
 // information about prohibited caches and returns the result.
@@ -96,29 +105,38 @@ func LaunchPeriodicProhibitedCachesFetch(ctx context.Context, egrp *errgroup.Gro
 
 	ticker := time.NewTicker(refreshInterval)
 
+	// Initial fetch of prohibited caches
 	data, err := fetchProhibitedCaches(ctx)
 	if err != nil {
+		ticker.Reset(10 * time.Second) // Higher frequency (10s)
 		log.Warningf("Error fetching prohibited caches on first attempt: %v", err)
+		log.Debug("Switching to higher frequency (10s) for prohibited caches fetch")
 	} else {
-		prohibitedCachesMutex.Lock()
-		prohibitedCaches = data
-		prohibitedCachesMutex.Unlock()
+		prohibitedCaches.Store(&data)
+		prohibitedCachesLastSetTimestamp.Store(time.Now().Unix())
 		log.Debug("Prohibited caches updated successfully on first attempt")
 	}
 
 	egrp.Go(func() error {
 		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ticker.C:
+				// Fetch the prohibited caches
 				data, err := fetchProhibitedCaches(ctx)
 				if err != nil {
 					log.Warningf("Error fetching prohibited caches: %v", err)
+					lastSet := prohibitedCachesLastSetTimestamp.Load()
+					if time.Since(time.Unix(lastSet, 0)) >= 15*time.Minute {
+						log.Debug("Prohibited caches last updated over 15 minutes ago, switching to higher frequency")
+						ticker.Reset(5 * time.Second) // Higher frequency (10s)
+					}
 					continue
 				}
-				prohibitedCachesMutex.Lock()
-				prohibitedCaches = data
-				prohibitedCachesMutex.Unlock()
+				ticker.Reset(refreshInterval) // Normal frequency
+				prohibitedCaches.Store(&data)
+				prohibitedCachesLastSetTimestamp.Store(time.Now().Unix())
 				log.Debug("Prohibited caches updated successfully")
 			case <-ctx.Done():
 				log.Debug("Periodic fetch terminated")

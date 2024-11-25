@@ -41,9 +41,10 @@ func TestLaunchPeriodicProhibitedCachesFetch(t *testing.T) {
 	defer config.ResetConfig()
 
 	mockDataChan := make(chan map[string][]string, 2)
-	mockDataChan <- map[string][]string{
-		"/foo/bar": {"hostname1", "hostname2"},
+	mockData := map[string][]string{
+		"/foo/bar": {"hostname5", "hostname6"},
 	}
+	mockDataChan <- mockData
 
 	var lastData map[string][]string
 
@@ -74,23 +75,22 @@ func TestLaunchPeriodicProhibitedCachesFetch(t *testing.T) {
 
 	time.Sleep(500 * time.Millisecond)
 
-	prohibitedCachesMutex.RLock()
-	assert.Equal(t, map[string][]string{
-		"/foo/bar": {"hostname1", "hostname2"},
-	}, prohibitedCaches)
-	prohibitedCachesMutex.RUnlock()
+	currentMapPtr := prohibitedCaches.Load()
+	assert.NotNil(t, currentMapPtr, "prohibitedCaches should not be nil")
 
-	mockDataChan <- map[string][]string{
+	assert.Equal(t, mockData, *currentMapPtr, "prohibitedCaches does not match the expected value")
+
+	mockData = map[string][]string{
 		"/foo/bar": {"hostname3", "hostname4"},
 	}
+	mockDataChan <- mockData
 
 	time.Sleep(500 * time.Millisecond)
 
-	prohibitedCachesMutex.RLock()
-	assert.Equal(t, map[string][]string{
-		"/foo/bar": {"hostname3", "hostname4"},
-	}, prohibitedCaches)
-	prohibitedCachesMutex.RUnlock()
+	currentMapPtr = prohibitedCaches.Load()
+	assert.NotNil(t, currentMapPtr, "prohibitedCaches should not be nil")
+
+	assert.Equal(t, mockData, *currentMapPtr, "prohibitedCaches does not match the expected value")
 
 	cancel()
 

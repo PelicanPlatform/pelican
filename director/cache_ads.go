@@ -315,10 +315,12 @@ func isProhibited(nsAd *server_structs.NamespaceAdV2, ad *server_structs.Adverti
 	serverHost := ad.ServerAd.URL.Host
 	serverHostname := strings.Split(serverHost, ":")[0]
 
-	prohibitedCachesMutex.RLock()
-	defer prohibitedCachesMutex.RUnlock()
+	prohibitedCachesData := prohibitedCaches.Load()
+	if prohibitedCachesData == nil {
+		return false
+	}
 
-	for prefix, caches := range prohibitedCaches {
+	for prefix, caches := range *prohibitedCachesData {
 		if strings.HasPrefix(nsAd.Path, prefix) {
 			for _, cacheHostname := range caches {
 				if strings.EqualFold(serverHostname, cacheHostname) {

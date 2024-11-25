@@ -211,9 +211,9 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.Equal(t, 0, len(cAds))
 
 	// Prohibited caches should not be matched
-	prohibitedCachesMutex.Lock()
-	prohibitedCaches["/chtc"] = []string{"cache1.wisc.edu"}
-	prohibitedCachesMutex.Unlock()
+	prohibitedCaches.Store(&map[string][]string{
+		"/chtc": {"cache1.wisc.edu"},
+	})
 
 	nsAd, oAds, cAds = getAdsForPath("/chtc/PUBLIC")
 	assert.Equal(t, 1, len(oAds))
@@ -221,9 +221,7 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.True(t, hasServerAdWithName(oAds, "origin2"))
 	assert.False(t, hasServerAdWithName(cAds, "cache1"))
 
-	prohibitedCachesMutex.Lock()
-	delete(prohibitedCaches, "/chtc")
-	prohibitedCachesMutex.Unlock()
+	prohibitedCaches.Store(&map[string][]string{})
 
 	// Filtered server should not be included
 	filteredServersMutex.Lock()
