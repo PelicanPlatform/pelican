@@ -21,6 +21,7 @@ package director
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"math/rand"
 	"net"
 	"net/netip"
@@ -59,7 +60,49 @@ type (
 		IP         string     `mapstructure:"IP"`
 		Coordinate Coordinate `mapstructure:"Coordinate"`
 	}
+
+	GeoIPMaskError struct {
+		IpStr string
+	}
+	GeoIPProjectError struct{}
+	GeoIPMaxMindError struct{}
+	GeoIPNullError    struct {
+		IpStr string
+	}
+	GeoIPReaderError struct {
+		errStr string
+	}
+	GeoIPAccuracyError struct {
+		IpStr     string
+		AcuRadius uint16
+	}
 )
+
+func (e GeoIPMaskError) Error() string {
+	return fmt.Sprintf("Failed to apply IP mask to address %s", e.IpStr)
+}
+
+func (e GeoIPProjectError) Error() string {
+	return "Failed to get project from context"
+}
+
+func (e GeoIPMaxMindError) Error() string {
+	return "No GeoIP database is available"
+}
+
+func (e GeoIPNullError) Error() string {
+	return fmt.Sprintf("GeoIP Resolution of the address %s resulted in the null lat/long. This will result in random server sorting.", e.IpStr)
+}
+
+func (e GeoIPReaderError) Error() string {
+	return e.errStr
+}
+
+func (e GeoIPAccuracyError) Error() string {
+	errStr := fmt.Sprintf("GeoIP resolution of the address %s resulted in a suspiciously large accuracy radius of %d km. ", e.IpStr, e.AcuRadius)
+	errStr += "This will be treated as GeoIP resolution failure and result in random server sorting. Setting lat/long to null."
+	return errStr
+}
 
 var (
 	invalidOverrideLogOnce = map[string]bool{}
@@ -176,6 +219,7 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	network, ok := utils.ApplyIPMask(addr.String())
 	if !ok {
 		log.Warningf("Failed to apply IP mask to address %s", ip.String())
+		err = GeoIPMaskError{IpStr: ip.String()}
 		labels["network"] = "unknown"
 	} else {
 		labels["network"] = network
@@ -184,18 +228,20 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	ok = setProjectLabel(ctx, labels)
 	if !ok {
 		log.Warningf("Failed to get project from context")
+		err = GeoIPProjectError{}
 		labels["source"] = "server"
 	}
 
 	reader := maxMindReader.Load()
 	if reader == nil {
-		err = errors.New("No GeoIP database is available")
+		err = GeoIPMaxMindError{}
 		labels["source"] = "server"
 		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 		return
 	}
 	record, err := reader.City(ip)
 	if err != nil {
+		err = GeoIPReaderError{errStr: err.Error()}
 		labels["source"] = "server"
 		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 		return
@@ -208,6 +254,7 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	// comes from a private range.
 	if lat == 0 && long == 0 {
 		log.Warningf("GeoIP Resolution of the address %s resulted in the null lat/long. This will result in random server sorting.", ip.String())
+		err = GeoIPNullError{IpStr: ip.String()}
 		labels["source"] = "client"
 		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 	}
@@ -219,6 +266,7 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	if record.Location.AccuracyRadius >= 900 {
 		log.Warningf("GeoIP resolution of the address %s resulted in a suspiciously large accuracy radius of %d km. "+
 			"This will be treated as GeoIP resolution failure and result in random server sorting. Setting lat/long to null.", ip.String(), record.Location.AccuracyRadius)
+		err = GeoIPAccuracyError{IpStr: ip.String(), AcuRadius: record.Location.AccuracyRadius}
 		lat = 0
 		long = 0
 		labels["source"] = "client"
