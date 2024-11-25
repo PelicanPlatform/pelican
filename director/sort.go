@@ -209,7 +209,7 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	// comes from a private range.
 	if lat == 0 && long == 0 {
 		errMsg := fmt.Sprintf("GeoIP Resolution of the address %s resulted in the null lat/long. This will result in random server sorting.", ip.String())
-		log.Warningf(errMsg)
+		log.Warning(errMsg)
 		labels["source"] = "client"
 		err = GeoIPError{labels: labels, errorMsg: errMsg}
 	}
@@ -221,6 +221,7 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	if record.Location.AccuracyRadius >= 900 {
 		errMsg := fmt.Sprintf("GeoIP resolution of the address %s resulted in a suspiciously large accuracy radius of %d km. "+
 			"This will be treated as GeoIP resolution failure and result in random server sorting. Setting lat/long to null.", ip.String(), record.Location.AccuracyRadius)
+		log.Warning(errMsg)
 		lat = 0
 		long = 0
 		labels["source"] = "client"
