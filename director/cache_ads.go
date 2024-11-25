@@ -33,6 +33,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
@@ -82,7 +83,13 @@ func (f filterType) String() string {
 //  5. Return the updated ServerAd. The ServerAd passed in will not be modified
 func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) (updatedAd server_structs.ServerAd) {
 	if err := updateLatLong(ctx, &sAd); err != nil {
-		log.Debugln("Failed to lookup GeoIP coordinates for host", sAd.URL.Host)
+		switch err := err.(type) {
+		case GeoIPError:
+			labels := err.labels
+			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
+		default:
+			log.Debugln("Failed to lookup GeoIP coordinates for host", sAd.URL.Host)
+		}
 	}
 
 	if sAd.URL.String() == "" {
