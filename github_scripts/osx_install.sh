@@ -43,7 +43,7 @@ popd
 
 # Build XRootD from source
 # Add patches to xrootd source code if needed
-git clone depth = 1 https://github.com/xrootd/xrootd.git
+git clone --depth=1 https://github.com/xrootd/xrootd.git
 pushd xrootd
 #git checkout tags/v5.7.1
 patch -p1 < $scriptdir/pelican_protocol.patch
