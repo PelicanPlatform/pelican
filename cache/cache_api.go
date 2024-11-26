@@ -37,7 +37,7 @@ import (
 func CheckCacheSentinelLocation() error {
 	if param.Cache_SentinelLocation.IsSet() {
 		sentinelPath := param.Cache_SentinelLocation.GetString()
-		dataLoc := param.Cache_LocalRoot.GetString()
+		dataLoc := param.Cache_StorageLocation.GetString()
 		sentinelPath = path.Clean(sentinelPath)
 		if path.Base(sentinelPath) != sentinelPath {
 			return errors.Errorf("invalid Cache.SentinelLocation path. File must not contain a directory. Got %s", sentinelPath)
@@ -51,17 +51,17 @@ func CheckCacheSentinelLocation() error {
 	return nil
 }
 
-// Periodically scan the /<Cache.LocalRoot>/pelican/monitoring directory to clean up test files
+// Periodically scan the ${Cache.StorageLocation}/pelican/monitoring directory to clean up test files
 // TODO: Director test files should be under /pelican/monitoring/directorTest and the file names
 // should have director-test- as the prefix
 func LaunchDirectorTestFileCleanup(ctx context.Context) {
 	server_utils.LaunchWatcherMaintenance(ctx,
-		[]string{filepath.Join(param.Cache_LocalRoot.GetString(), "pelican", "monitoring")},
+		[]string{filepath.Join(param.Cache_StorageLocation.GetString(), "pelican", "monitoring")},
 		"cache director-based health test clean up",
 		time.Minute,
 		func(notifyEvent bool) error {
 			// We run this function regardless of notifyEvent to do the cleanup
-			dirPath := filepath.Join(param.Cache_LocalRoot.GetString(), "pelican", "monitoring")
+			dirPath := filepath.Join(param.Cache_StorageLocation.GetString(), "pelican", "monitoring")
 			dirInfo, err := os.Stat(dirPath)
 			if err != nil {
 				return err

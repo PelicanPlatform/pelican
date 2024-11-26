@@ -623,7 +623,7 @@ func TestDirectReads(t *testing.T) {
 		assert.Equal(t, transferResults[0].TransferredBytes, int64(17))
 
 		// Assert that the file was not cached
-		cacheDataLocation := param.Cache_LocalRoot.GetString() + export.FederationPrefix
+		cacheDataLocation := param.Cache_StorageLocation.GetString() + export.FederationPrefix
 		filepath := filepath.Join(cacheDataLocation, filepath.Base(tempFile.Name()))
 		_, err = os.Stat(filepath)
 		assert.True(t, os.IsNotExist(err))
