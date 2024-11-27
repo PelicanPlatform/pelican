@@ -165,7 +165,7 @@ func LaunchDaemons(ctx context.Context, launchers []daemon.Launcher, egrp *errgr
 		return
 	}
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(param.Xrootd_MaxStartupWait.GetDuration())
 	defer ticker.Stop()
 	select {
 	case <-ctx.Done():
@@ -180,8 +180,8 @@ func LaunchDaemons(ctx context.Context, launchers []daemon.Launcher, egrp *errgr
 			portStartCallback(port)
 		}
 	case <-ticker.C:
-		log.Errorln("XRootD did not startup after 10s of waiting")
-		err = errors.New("XRootD did not startup after 10s of waiting")
+		log.Errorln("XRootD did not startup after", param.Xrootd_MaxStartupWait.GetDuration().String(), "of waiting")
+		err = errors.New("XRootD did not startup after " + param.Xrootd_MaxStartupWait.GetDuration().String() + " of waiting")
 		return
 	}
 

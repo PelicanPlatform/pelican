@@ -315,6 +315,7 @@ type Config struct {
 		MacaroonsKeyFile string `mapstructure:"macaroonskeyfile" yaml:"MacaroonsKeyFile"`
 		ManagerHost string `mapstructure:"managerhost" yaml:"ManagerHost"`
 		ManagerPort int `mapstructure:"managerport" yaml:"ManagerPort"`
+		MaxStartupWait time.Duration `mapstructure:"maxstartupwait" yaml:"MaxStartupWait"`
 		Mount string `mapstructure:"mount" yaml:"Mount"`
 		Port int `mapstructure:"port" yaml:"Port"`
 		RobotsTxtFile string `mapstructure:"robotstxtfile" yaml:"RobotsTxtFile"`
@@ -619,6 +620,7 @@ type configWithType struct {
 		MacaroonsKeyFile struct { Type string; Value string }
 		ManagerHost struct { Type string; Value string }
 		ManagerPort struct { Type string; Value int }
+		MaxStartupWait struct { Type string; Value time.Duration }
 		Mount struct { Type string; Value string }
 		Port struct { Type string; Value int }
 		RobotsTxtFile struct { Type string; Value string }

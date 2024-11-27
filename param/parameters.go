@@ -401,6 +401,7 @@ var (
 	Transport_ResponseHeaderTimeout = DurationParam{"Transport.ResponseHeaderTimeout"}
 	Transport_TLSHandshakeTimeout = DurationParam{"Transport.TLSHandshakeTimeout"}
 	Xrootd_AuthRefreshInterval = DurationParam{"Xrootd.AuthRefreshInterval"}
+	Xrootd_MaxStartupWait = DurationParam{"Xrootd.MaxStartupWait"}
 )
 
 var (
