@@ -953,9 +953,9 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Origin_RunLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin"))
 		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "cache"))
 
-		// Several deprecated keys point to Cache.StorageLocation, and by the time here we've already mapped those
-		// keys in handleDeprecatedConfig(). To prevent overriding potentially-mapped deprecated keys, we only re-set
-		// the default here if this key is not set.
+		// Several deprecated keys point to Cache.StorageLocation, and by the time we reach this section of code, we should
+		// have already mapped those keys in handleDeprecatedConfig(). To prevent overriding potentially-mapped deprecated keys,
+		// we only re-set he default here if this key is not set.
 		if !v.IsSet(param.Cache_StorageLocation.GetName()) {
 			v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join("/run", "pelican", "cache"))
 		}
@@ -1010,9 +1010,9 @@ func SetServerDefaults(v *viper.Viper) error {
 
 		v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin", "globus"))
 
-		// Several deprecated keys point to Cache.StorageLocation, and by the time here we've already mapped those
-		// keys in handleDeprecatedConfig(). To prevent overriding potentially-mapped deprecated keys, we only re-set
-		// the default here if this key is not set.
+		// Several deprecated keys point to Cache.StorageLocation, and by the time we reach this section of code, we should
+		// have already mapped those keys in handleDeprecatedConfig(). To prevent overriding potentially-mapped deprecated keys,
+		// we only re-set he default here if this key is not set.
 		if !viper.IsSet(param.Cache_StorageLocation.GetName()) {
 			viper.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join(runtimeDir, "cache"))
 		}

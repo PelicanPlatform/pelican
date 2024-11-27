@@ -1068,7 +1068,7 @@ components: ["localcache"]
 ############################
 name: Cache.StorageLocation
 description: |+
-  An absolute path to the directory where xrootd will create its default namespace, `meta`, and `data` directories. For example,
+  An absolute path to the directory where xrootd will create its default `namespace`, `meta`, and `data` directories. For example,
   setting `Cache.StorageLocation=/run/pelican/cache` without specifying further `Cache.DataLocations` or `Cache.MetaLocations`
   values will result in the cache creating a directory structure like:
   ```
