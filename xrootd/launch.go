@@ -91,6 +91,8 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 		if confDir := os.Getenv("XRD_PLUGINCONFDIR"); confDir != "" {
 			result.ExtraEnv = append(result.ExtraEnv, "XRD_PLUGINCONFDIR="+confDir)
 		}
+		result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANFEDERATIONMETADATATIMEOUT="+param.Cache_DefaultCacheTimeout.GetDuration().String())
+		result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANDEFAULTHEADERTIMEOUT="+param.Cache_DefaultCacheTimeout.GetDuration().String())
 	}
 	return
 }
