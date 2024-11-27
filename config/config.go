@@ -32,6 +32,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -50,6 +51,7 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/docs"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -171,7 +173,8 @@ var (
 		"":            true,
 	}
 
-	clientInitialized = false
+	clientInitialized     = false
+	printClientConfigOnce sync.Once
 )
 
 func init() {
@@ -922,6 +925,99 @@ func PrintConfig() error {
 	return nil
 }
 
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+// GetComponentConfig filters the full config and returns only the config parameters related to the given component.
+// The filtering is based on whether the given component is part of the components in docs.parameters.yaml.
+func GetComponentConfig(component string) (map[string]interface{}, error) {
+	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
+	if err != nil {
+		return nil, err
+	}
+	value, hasValue := filterConfigRecursive(reflect.ValueOf(rawConfig), "", component)
+	if hasValue {
+		return (*value).(map[string]interface{}), nil
+	}
+	return nil, nil
+}
+
+// filterConfigRecursive is a helper function for GetComponentConfig.
+// It recursively creates a nested config map of the parameters that relate to the given component.
+func filterConfigRecursive(v reflect.Value, currentPath string, component string) (*interface{}, bool) {
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	switch v.Kind() {
+	case reflect.Struct:
+		t := v.Type()
+		result := make(map[string]interface{})
+		hasField := false
+		for i := 0; i < v.NumField(); i++ {
+			field := v.Field(i)
+			fieldType := t.Field(i)
+			if !fieldType.IsExported() {
+				continue
+			}
+
+			fieldName := strings.ToLower(fieldType.Name)
+
+			var newPath string
+			if currentPath == "" {
+				newPath = fieldName
+			} else {
+				newPath = currentPath + "." + fieldName
+			}
+
+			fieldValue, fieldHasValue := filterConfigRecursive(field, newPath, component)
+			if fieldHasValue && fieldValue != nil {
+				result[fieldName] = *fieldValue
+				hasField = true
+			}
+		}
+		if hasField {
+			resultInterface := interface{}(result)
+			return &resultInterface, true
+		}
+		return nil, false
+	default:
+		lowerPath := strings.ToLower(currentPath)
+		paramDoc, exists := docs.ParsedParameters[lowerPath]
+		if exists && contains(paramDoc.Components, component) {
+			resultValue := v.Interface()
+			resultInterface := interface{}(resultValue)
+			return &resultInterface, true
+		}
+		return nil, false
+	}
+}
+
+// PrintClientConfig prints the client config in JSON format to stderr.
+func PrintClientConfig() error {
+	clientConfig, err := GetComponentConfig("client")
+	if err != nil {
+		return err
+	}
+
+	bytes, err := json.MarshalIndent(clientConfig, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr,
+		"================ Pelican Client Configuration ================\n",
+		string(bytes),
+		"\n",
+		"============= End of Pelican Client Configuration ============")
+	return nil
+}
+
 func SetServerDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 	v.SetConfigType("yaml")
@@ -1514,6 +1610,18 @@ func InitClient() error {
 	fedDiscoveryOnce = &sync.Once{}
 
 	clientInitialized = true
+
+	var printClientConfigErr error
+	printClientConfigOnce.Do(func() {
+		if log.GetLevel() == log.DebugLevel {
+			printClientConfigErr = PrintClientConfig()
+		}
+	})
+
+	// Return any error encountered during PrintClientConfig
+	if printClientConfigErr != nil {
+		return printClientConfigErr
+	}
 
 	return nil
 }

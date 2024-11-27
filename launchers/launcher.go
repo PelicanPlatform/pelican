@@ -60,13 +60,6 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	config.LogPelicanVersion()
 
-	// Print Pelican config at server start if it's in debug or info level
-	if log.GetLevel() >= log.InfoLevel {
-		if err = config.PrintConfig(); err != nil {
-			return
-		}
-	}
-
 	egrp.Go(func() error {
 		_ = config.RestartFlag
 		log.Debug("Will shutdown process on signal")
@@ -95,6 +88,13 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	if err = config.InitServer(ctx, modules); err != nil {
 		err = errors.Wrap(err, "Failure when configuring the server")
 		return
+	}
+
+	// Print Pelican config at server start if it's in debug or info level
+	if log.GetLevel() >= log.InfoLevel {
+		if err = config.PrintConfig(); err != nil {
+			return
+		}
 	}
 
 	// Set up necessary APIs to support Web UI, including auth and metrics
