@@ -1,0 +1,14 @@
+# Toggle webhook to pull latest release onto dl.pelicanplatform.org
+name: post-release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  toggle-webhook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Toggle Webhook
+        run: |
+          curl -X POST https://dl.pelicanplatform.org/api/api/hooks/release-download-toggle
