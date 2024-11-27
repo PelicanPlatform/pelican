@@ -1326,6 +1326,16 @@ type: int
 default: 0
 components: ["cache"]
 ---
+name: Cache.DefaultCacheTimeout
+description: |+
+  The default value of the cache operation timeout if one is not specified by the client.
+
+  Newer clients should always specify a timeout; changing this default is rarely necessary.
+type: duration
+default: 9.5s
+hidden: true
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################
@@ -2354,6 +2364,15 @@ description: |+
 type: string
 default: none
 components: ["origin"]
+---
+name: Xrootd.MaxStartupWait
+description: |+
+  The maximum amount of time pelican will wait for the xrootd daemons to
+  successfully start
+type: duration
+default: 10s
+hidden: true
+components: ["origin", "cache"]
 ---
 ############################
 # Monitoring-level configs #
