@@ -115,7 +115,7 @@ type (
 		RunLocation                      string
 		DataLocations                    []string
 		MetaLocations                    []string
-		LocalRoot                        string
+		NamespaceLocation                string
 		PSSOrigin                        string
 		BlocksToPrefetch                 int
 		Concurrency                      int
@@ -274,32 +274,32 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 	return nil
 }
 
-func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, uid int, gid int) (string, error) {
-	viper.Set("Xrootd.Mount", exportPath)
-	filepath.Join(exportPath, "/")
-	err := config.MkdirAll(exportPath, 0775, uid, gid)
-	if err != nil {
-		return "", errors.Wrapf(err, "Unable to create export directory %v",
-			filepath.Dir(exportPath))
+func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) error {
+	storageLocation := param.Cache_StorageLocation.GetString()
+	if err := config.MkdirAll(storageLocation, 0775, uid, gid); err != nil {
+		return errors.Wrapf(err, "Unable to create the cache's storage directory '%s'", storageLocation)
+	}
+	// Setting Cache.StorageLocation to /run/pelican/cache is a default we use for testing, but it shouldn't ever be used
+	// in a production setting. If the user hasn't overridden the default, log a warning.
+	if storageLocation == filepath.Join("/run", "pelican", "cache") {
+		log.Warnf("%s is set to the default /run/pelican/cache. This default is to allow quick testing but should not be used in production.", param.Cache_StorageLocation.GetName())
 	}
 
-	localRoot := param.Cache_LocalRoot.GetString()
-
-	localRoot = filepath.Clean(localRoot)
-	err = config.MkdirAll(localRoot, 0775, uid, gid)
-
-	if err != nil {
-		return "", errors.Wrapf(err, "Unable to create local root %v",
-			filepath.Dir(localRoot))
+	namespaceLocation := param.Cache_NamespaceLocation.GetString()
+	if err := config.MkdirAll(namespaceLocation, 0775, uid, gid); err != nil {
+		return errors.Wrapf(err, "Unable to create the cache's storage directory '%s'", storageLocation)
 	}
 
 	dataPaths := param.Cache_DataLocations.GetStringSlice()
 	for _, dPath := range dataPaths {
 		dataPath := filepath.Clean(dPath)
-		err = config.MkdirAll(dataPath, 0775, uid, gid)
+		// Data locations should never be below the namespace location
+		if strings.HasPrefix(dPath, namespaceLocation) {
+			return errors.Errorf("A configured data location '%s' is a subdirectory of the namespace location '%s'. Please ensure these directories are not nested.", dPath, namespaceLocation)
+		}
 
-		if err != nil {
-			return "", errors.Wrapf(err, "Unable to create data directory %v",
+		if err := config.MkdirAll(dataPath, 0775, uid, gid); err != nil {
+			return errors.Wrapf(err, "Unable to create data directory %v",
 				filepath.Dir(dataPath))
 		}
 	}
@@ -307,17 +307,20 @@ func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, 
 	metaPaths := param.Cache_MetaLocations.GetStringSlice()
 	for _, mPath := range metaPaths {
 		metaPath := filepath.Clean(mPath)
-		err = config.MkdirAll(metaPath, 0775, uid, gid)
+		// Similar to data locations, meta locations should never be below the namespace location
+		if strings.HasPrefix(mPath, namespaceLocation) {
+			return errors.Errorf("The configured meta location '%s' is a subdirectory of the namespace location '%s'. Please ensure these directories are not nested.", mPath, namespaceLocation)
+		}
 
-		if err != nil {
-			return "", errors.Wrapf(err, "Unable to create meta directory %v",
+		if err := config.MkdirAll(metaPath, 0775, uid, gid); err != nil {
+			return errors.Wrapf(err, "Unable to create meta directory %v",
 				filepath.Dir(metaPath))
 		}
 	}
 
 	fedInfo, err := config.GetFederation(context.Background())
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to pull information from the federation")
+		return errors.Wrap(err, "Failed to pull information from the federation")
 	}
 
 	if discoveryUrlStr := param.Federation_DiscoveryUrl.GetString(); discoveryUrlStr != "" {
@@ -328,14 +331,14 @@ func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, 
 				discoveryUrl.Host = discoveryUrl.Path
 				discoveryUrl.Path = ""
 			} else if discoveryUrl.Path != "" && discoveryUrl.Path != "/" {
-				return "", errors.New("The Federation.DiscoveryUrl's path is non-empty, ensure the Federation.DiscoveryUrl has the format <host>:<port>")
+				return errors.New("The Federation.DiscoveryUrl's path is non-empty, ensure the Federation.DiscoveryUrl has the format <host>:<port>")
 			}
 			discoveryUrl.Scheme = "pelican"
 			discoveryUrl.Path = ""
 			discoveryUrl.RawQuery = ""
 			viper.Set("Cache.PSSOrigin", discoveryUrl.String())
 		} else {
-			return "", errors.Wrapf(err, "Failed to parse discovery URL %s", discoveryUrlStr)
+			return errors.Wrapf(err, "Failed to parse discovery URL %s", discoveryUrlStr)
 		}
 	}
 
@@ -344,27 +347,27 @@ func CheckCacheXrootdEnv(exportPath string, server server_structs.XRootDServer, 
 		if err == nil {
 			log.Debugln("Parsing director URL for 'pss.origin' setting:", directorUrlStr)
 			if directorUrl.Path != "" && directorUrl.Path != "/" {
-				return "", errors.New("The Federation.DirectorUrl's path is non-empty, ensure the Federation.DirectorUrl has the format <host>:<port>")
+				return errors.New("The Federation.DirectorUrl's path is non-empty, ensure the Federation.DirectorUrl has the format <host>:<port>")
 			}
 			directorUrl.Scheme = "pelican"
 			viper.Set("Cache.PSSOrigin", directorUrl.String())
 		} else {
-			return "", errors.Wrapf(err, "Failed to parse director URL %s", directorUrlStr)
+			return errors.Wrapf(err, "Failed to parse director URL %s", directorUrlStr)
 		}
 	}
 
 	if viper.GetString("Cache.PSSOrigin") == "" {
-		return "", errors.New("One of Federation.DiscoveryUrl or Federation.DirectorUrl must be set to configure a cache")
+		return errors.New("One of Federation.DiscoveryUrl or Federation.DirectorUrl must be set to configure a cache")
 	}
 
 	if cacheServer, ok := server.(*cache.CacheServer); ok {
 		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
 		if err != nil {
-			return "", errors.Wrap(err, "Failed to create scitokens configuration for the cache")
+			return errors.Wrap(err, "Failed to create scitokens configuration for the cache")
 		}
 	}
 
-	return exportPath, nil
+	return nil
 }
 
 func CheckXrootdEnv(server server_structs.XRootDServer) error {
@@ -446,7 +449,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	if server.GetServerType().IsEnabled(server_structs.OriginType) {
 		err = CheckOriginXrootdEnv(exportPath, server, uid, gid, groupname)
 	} else {
-		exportPath, err = CheckCacheXrootdEnv(exportPath, server, uid, gid)
+		err = CheckCacheXrootdEnv(server, uid, gid)
 	}
 	if err != nil {
 		return err

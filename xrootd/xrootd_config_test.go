@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
@@ -625,6 +626,33 @@ func TestXrootDCacheConfig(t *testing.T) {
 		content, err := io.ReadAll(file)
 		assert.NoError(t, err)
 		assert.NotContains(t, string(content), "http.tlsrequiredprefix")
+	})
+
+	t.Run("TestNestedDataMetaNamespace", func(t *testing.T) {
+		testDir := t.TempDir()
+		viper.Set("Cache.StorageLocation", testDir)
+		namespaceLocation := filepath.Join(testDir, "namespace")
+		viper.Set("Cache.NamespaceLocation", namespaceLocation)
+
+		cache := &cache.CacheServer{}
+		uid := os.Getuid()
+		gid := os.Getgid()
+
+		// Data location test
+		nestedDataLocation := filepath.Join(namespaceLocation, "data")
+		viper.Set("Cache.DataLocations", []string{nestedDataLocation})
+		err := CheckCacheXrootdEnv(cache, uid, gid)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Please ensure these directories are not nested.")
+		// Now set to a valid location so we can hit the meta error in the next part of the test
+		viper.Set("Cache.DataLocations", []string{filepath.Join(testDir, "data")})
+
+		// Meta location test
+		nestedMetaLocation := filepath.Join(namespaceLocation, "meta")
+		viper.Set("Cache.MetaLocations", []string{nestedMetaLocation})
+		err = CheckCacheXrootdEnv(cache, uid, gid)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "Please ensure these directories are not nested.")
 	})
 }
 

@@ -59,7 +59,7 @@ func InitSelfTestDir() error {
 		return err
 	}
 
-	basePath := param.Cache_LocalRoot.GetString()
+	basePath := param.Cache_StorageLocation.GetString()
 	pelicanMonPath := filepath.Join(basePath, "/pelican")
 	monitoringPath := filepath.Join(pelicanMonPath, "/monitoring")
 	selfTestPath := filepath.Join(monitoringPath, "/selfTest")
@@ -80,9 +80,9 @@ func InitSelfTestDir() error {
 }
 
 func generateTestFile() (string, error) {
-	basePath := param.Cache_LocalRoot.GetString()
+	basePath := param.Cache_StorageLocation.GetString()
 	if basePath == "" {
-		return "", errors.New("failed to generate self-test file for cache: Cache.LocalRoot is not set.")
+		return "", errors.New("failed to generate self-test file for cache: Cache.StorageLocation is not set.")
 	}
 	selfTestPath := filepath.Join(basePath, selfTestDir)
 	_, err := os.Stat(selfTestPath)
@@ -225,7 +225,7 @@ func downloadTestFile(ctx context.Context, fileUrl string) error {
 }
 
 func deleteTestFile(fileUrlStr string) error {
-	basePath := param.Cache_LocalRoot.GetString()
+	basePath := param.Cache_StorageLocation.GetString()
 	fileUrl, err := url.Parse(fileUrlStr)
 	if err != nil {
 		return errors.Wrap(err, "invalid file url to remove the test file")
