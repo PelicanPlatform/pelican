@@ -315,6 +315,57 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	return fileInfos, nil
 }
 
+func DoDelete(ctx context.Context, remoteObject string, options ...TransferOption) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Debugln("Panic captured while attempting to perform transfer (DoList):", r)
+			log.Debugln("Panic caused by the following", string(debug.Stack()))
+			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoList: %v", r)
+			err = errors.New(ret)
+		}
+	}()
+
+	pUrl, err := ParseRemoteAsPUrl(ctx, remoteObject)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse remote path: %s", remoteObject)
+	}
+	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, false, "")
+	if err != nil {
+		return err
+	}
+	token := newTokenGenerator(pUrl, &dirResp, false, true)
+	for _, option := range options {
+		switch option.Ident() {
+		case identTransferOptionTokenLocation{}:
+			token.SetTokenLocation(option.Value().(string))
+		case identTransferOptionAcquireToken{}:
+			token.EnableAcquire = option.Value().(bool)
+		case identTransferOptionToken{}:
+			token.SetToken(option.Value().(string))
+		}
+	}
+
+	// if dirResp.XPelNsHdr.RequireToken {
+	// 	tokenContents, err := token.get()
+	// 	if err != nil || tokenContents == "" {
+	// 		return errors.Wrap(err, "failed to get token for transfer")
+	// 	}
+	// } else {
+	// 	token = nil
+	// }
+
+	tokenContents, err := token.get()
+	log.Debugln("Got tokenContents : ", tokenContents)
+	if err != nil || tokenContents == "" {
+		return errors.Wrap(err, "failed to get token for transfer")
+	}
+	err = deleteHttp(pUrl, dirResp, token)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 /*
 	Start of transfer for pelican object put, gets information from the target destination before doing our HTTP PUT request
 

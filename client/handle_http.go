@@ -2654,6 +2654,36 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	return fileInfos, nil
 }
 
+func deleteHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.DirectorResponse, token *tokenGenerator) (err error) {
+	if dirResp.XPelNsHdr.CollectionsUrl == nil {
+		return errors.Errorf("Collections URL not found in director response. Are you sure there's an origin for prefix %s that supports deletions?", dirResp.XPelNsHdr.Namespace)
+	}
+
+	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
+	log.Debugln("Collections URL: ", collectionsUrl.String())
+
+	log.Debugln("Using token: ", token)
+
+	project := searchJobAd(projectName)
+	client := createWebDavClient(collectionsUrl, token, project)
+	remotePath := remoteUrl.Path
+
+	err = client.Remove(remotePath)
+	if err != nil {
+		if gowebdav.IsErrNotFound(err) {
+			return errors.New("404: object not found")
+		} else if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+			return errors.Errorf("405: deletion is not supported by the discovered origin")
+		} else if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+			return errors.Wrap(err, "500: internal server error occurred while trying to delete")
+		}
+		return errors.Wrap(err, "failed to delete remote object")
+	}
+
+	log.Infof("Successfully deleted: %s", remotePath)
+	return nil
+}
+
 // Invoke a stat request against a remote URL that accepts WebDAV protocol,
 // using the provided namespace information
 //
