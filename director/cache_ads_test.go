@@ -159,6 +159,9 @@ func TestGetAdsForPath(t *testing.T) {
 	recordAd(context.Background(), cacheAd1, &c1Slice)
 	recordAd(context.Background(), cacheAd2, &o1Slice)
 
+	// Override the check for prohibited caches
+	prohibitedCachesLastSetTimestamp.Store(time.Now().Unix())
+
 	// If /chtc is served both from topology and Pelican, the Topology server/namespace should be ignored
 	nsAd, oAds, cAds := getAdsForPath("/chtc")
 	assert.Equal(t, "/chtc", nsAd.Path)
@@ -209,6 +212,19 @@ func TestGetAdsForPath(t *testing.T) {
 	assert.Equal(t, "", nsAd.Path)
 	assert.Equal(t, 0, len(oAds))
 	assert.Equal(t, 0, len(cAds))
+
+	// Prohibited caches should not be matched
+	prohibitedCaches.Store(&map[string][]string{
+		"/chtc": {"cache1.wisc.edu"},
+	})
+
+	nsAd, oAds, cAds = getAdsForPath("/chtc/PUBLIC")
+	assert.Equal(t, 1, len(oAds))
+	assert.Equal(t, 0, len(cAds))
+	assert.True(t, hasServerAdWithName(oAds, "origin2"))
+	assert.False(t, hasServerAdWithName(cAds, "cache1"))
+
+	prohibitedCaches.Store(&map[string][]string{})
 
 	// Filtered server should not be included
 	filteredServersMutex.Lock()

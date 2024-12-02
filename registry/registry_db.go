@@ -38,11 +38,12 @@ import (
 )
 
 type NamespaceWOPubkey struct {
-	ID            int                          `json:"id"`
-	Prefix        string                       `json:"prefix"`
-	Pubkey        string                       `json:"-"` // Don't include pubkey in this case
-	Identity      string                       `json:"identity"`
-	AdminMetadata server_structs.AdminMetadata `json:"admin_metadata"`
+	ID               int                          `json:"id"`
+	Prefix           string                       `json:"prefix"`
+	Pubkey           string                       `json:"-"` // Don't include pubkey in this case
+	Identity         string                       `json:"identity"`
+	AdminMetadata    server_structs.AdminMetadata `json:"admin_metadata"`
+	ProhibitedCaches []string                     `json:"prohibited_caches"`
 }
 
 type Topology struct {
@@ -165,7 +166,7 @@ func namespaceBelongsToUserId(id int, userId string) (bool, error) {
 	var result server_structs.Namespace
 	err := db.First(&result, "id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return false, fmt.Errorf("Namespace with id = %d does not exists", id)
+		return false, fmt.Errorf("namespace with id = %d does not exists", id)
 	} else if err != nil {
 		return false, errors.Wrap(err, "error retrieving namespace")
 	}
@@ -278,6 +279,28 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 		}
 	}
 	return &ns, nil
+}
+
+// getProhibitedCaches queries the database and returns a map where the keys
+// are federation prefixes and the values are lists of prohibited cache hostnames.
+// Only prefixes with at least one prohibited cache are included in the resulting map.
+func getProhibitedCaches() (map[string][]string, error) {
+	var namespaces []server_structs.Namespace
+	prohibitedCacheMap := make(map[string][]string)
+
+	err := db.Select("prefix, prohibited_caches").
+		Find(&namespaces).Error
+	if err != nil {
+		return nil, errors.Wrap(err, "error retrieving prohibited caches")
+	}
+
+	for _, ns := range namespaces {
+		if len(ns.ProhibitedCaches) > 0 {
+			prohibitedCacheMap[ns.Prefix] = ns.ProhibitedCaches
+		}
+	}
+
+	return prohibitedCacheMap, nil
 }
 
 // Get a collection of namespaces by filtering against various non-default namespace fields

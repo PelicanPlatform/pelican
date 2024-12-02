@@ -304,6 +304,51 @@ func matchesPrefix(reqPath string, namespaceAds []server_structs.NamespaceAdV2) 
 	return best
 }
 
+// isProhibited checks if the given server is prohibited from serving
+// the specified namespace. It validates this by referencing the
+// prohibitedCaches map that the director maintains in memory.
+func isProhibited(nsAd *server_structs.NamespaceAdV2, ad *server_structs.Advertisement) bool {
+	if ad.Type == server_structs.OriginType.String() {
+		return false
+	}
+	if prohibitedCachesLastSetTimestamp.Load() == 0 {
+		log.Warning("Prohibited caches data is not set, waiting for it to be set before continuing with cache matchmaking")
+		start := time.Now()
+		// Wait until last set timestamp is updated
+		for prohibitedCachesLastSetTimestamp.Load() == 0 {
+			if time.Since(start) >= 3*time.Second {
+				log.Error("Prohibited caches data was not set within the 3-second timeout")
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+	if time.Since(time.Unix(prohibitedCachesLastSetTimestamp.Load(), 0)) >= 15*time.Minute {
+		log.Error("Prohibited caches data is outdated, caches will not be used.")
+		return true
+	}
+
+	serverHost := ad.ServerAd.URL.Host
+	serverHostname := strings.Split(serverHost, ":")[0]
+
+	prohibitedCachesData := prohibitedCaches.Load()
+	if prohibitedCachesData == nil {
+		return false
+	}
+
+	for prefix, caches := range *prohibitedCachesData {
+		if strings.HasPrefix(nsAd.Path, prefix) {
+			for _, cacheHostname := range caches {
+				if strings.EqualFold(serverHostname, cacheHostname) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
 func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2, originAds []server_structs.ServerAd, cacheAds []server_structs.ServerAd) {
 	skippedServers := []server_structs.ServerAd{}
 
@@ -326,7 +371,7 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 			log.Debugf("Skipping %s server %s as it's in the filtered server list with type %s", ad.Type, ad.Name, ft)
 			continue
 		}
-		if ns := matchesPrefix(reqPath, ad.NamespaceAds); ns != nil {
+		if ns := matchesPrefix(reqPath, ad.NamespaceAds); ns != nil && !isProhibited(ns, ad) {
 			if best == nil || len(ns.Path) > len(best.Path) {
 				best = ns
 				// If anything was previously set by a namespace that constituted a shorter

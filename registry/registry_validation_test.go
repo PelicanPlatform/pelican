@@ -114,7 +114,7 @@ func TestValidateCustomFields(t *testing.T) {
 
 		valid, err := validateCustomFields(customFields)
 		require.Error(t, err, "Expected an error due to invalid enum value")
-		assert.Contains(t, err.Error(), `Bad configuration, the custom field "Enum Field" has empty options`)
+		assert.Contains(t, err.Error(), `bad configuration, the custom field "Enum Field" has empty options`)
 		assert.False(t, valid, "Validation should fail due to invalid enum value")
 	})
 	t.Run("enum-field-with-optionsUrl", func(t *testing.T) {
