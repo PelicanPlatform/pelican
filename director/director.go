@@ -1137,6 +1137,15 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		adV2.DisableDirectorTest = true
 	}
 
+	// if we didn't receive a version but we were able to extract the request version from the user agent,
+	// then we can use the request version as the server version (they should be the same)
+	// otherwise, we set the version to unknown because our sources of truth are not available
+	if adV2.Version == "" && reqVer != nil {
+		adV2.Version = reqVer.String()
+	} else {
+		adV2.Version = "unknown"
+	}
+
 	sAd := server_structs.ServerAd{
 		Name:                adV2.Name,
 		StorageType:         st,
