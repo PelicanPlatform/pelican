@@ -156,6 +156,13 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	if modules.IsEnabled(server_structs.OriginType) {
 
+		var server server_structs.XRootDServer
+		server, err = OriginServe(ctx, engine, egrp, modules)
+		if err != nil {
+			return
+		}
+		servers = append(servers, server)
+
 		var originExports []server_utils.OriginExport
 		originExports, err = server_utils.GetOriginExports()
 		if err != nil {
@@ -166,13 +173,6 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		if err != nil && !ok {
 			return
 		}
-
-		var server server_structs.XRootDServer
-		server, err = OriginServe(ctx, engine, egrp, modules)
-		if err != nil {
-			return
-		}
-		servers = append(servers, server)
 
 		// Ordering: `LaunchBrokerListener` depends on the "right" value of Origin.FederationPrefix
 		// which is possibly not set until `OriginServe` is called.
