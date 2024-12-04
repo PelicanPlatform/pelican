@@ -64,7 +64,7 @@ const AuthenticatedContent = ({
   trustThenValidate = false,
   children,
   boxProps,
-  allowedRoles
+  allowedRoles,
 }: AuthenticatedContentProps) => {
   if (redirect && promptLogin) {
     throw new Error('redirect XOR promptLogin must be true');

@@ -13,7 +13,11 @@ import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 
 const Page = () => {
   return (
-    <AuthenticatedContent allowedRoles={['admin']} trustThenValidate={true} redirect={true}>
+    <AuthenticatedContent
+      allowedRoles={['admin']}
+      trustThenValidate={true}
+      redirect={true}
+    >
       <Grid container spacing={1} direction={'row'}>
         <Grid item xs={5} display={'flex'}>
           <Grid container spacing={1}>

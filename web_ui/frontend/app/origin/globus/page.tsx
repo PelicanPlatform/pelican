@@ -26,10 +26,7 @@ import { GlobusExportTable } from '@/components/GlobusExportTable';
 
 export default function Home() {
   return (
-    <AuthenticatedContent
-      redirect={true}
-      allowedRoles={['admin']}
-    >
+    <AuthenticatedContent redirect={true} allowedRoles={['admin']}>
       <Box width={'100%'}>
         <Typography variant='h4' mb={2}>
           Globus Exports
