@@ -41,18 +41,30 @@ interface AuthenticatedContentProps {
   promptLogin?: boolean;
   redirect?: boolean;
   trustThenValidate?: boolean;
-  children: React.ReactNode;
   boxProps?: BoxProps;
-  checkAuthentication?: (user: User) => boolean;
+  allowedRoles?: User['role'][];
+  replace?: boolean;
+  children: React.ReactNode;
 }
 
+/**
+ * AuthenticatedContent is a component that will show the children if the user is authenticated.
+ * @param promptLogin If true then the user will be prompted to login if they are not authenticated
+ * @param redirect If true then the user will be redirected to the login page if they are not authenticated
+ * @param trustThenValidate If true then the user will be shown the content if they are not authenticated but will be validated after
+ * @param boxProps The props to pass to the Box component
+ * @param allowedRoles The roles that are allowed to see the content
+ * @param replace If true then the
+ * @param children The content to show if the user is authenticated
+ * @constructor
+ */
 const AuthenticatedContent = ({
   promptLogin = false,
   redirect = false,
   trustThenValidate = false,
   children,
   boxProps,
-  checkAuthentication,
+  allowedRoles
 }: AuthenticatedContentProps) => {
   if (redirect && promptLogin) {
     throw new Error('redirect XOR promptLogin must be true');
@@ -66,12 +78,12 @@ const AuthenticatedContent = ({
   const [pageUrl, setPageUrl] = useState<string>('');
 
   const authenticated = useMemo(() => {
-    if (data && checkAuthentication) {
-      return checkAuthentication(data);
+    if (data && allowedRoles) {
+      return data?.role && allowedRoles.includes(data?.role);
     } else {
       return !!data?.authenticated;
     }
-  }, [data, checkAuthentication]);
+  }, [data, allowedRoles]);
 
   useEffect(() => {
     // Keep pathname as is since backend handles the redirect after logging in and needs the full path
