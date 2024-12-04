@@ -1,4 +1,4 @@
-# Toggle webhook to pull latest release onto dl.pelicanplatform.org
+# Toggle webhook to pull latest release onto pelicanplatform.org and update the download offerings there
 name: post-release
 
 on:
