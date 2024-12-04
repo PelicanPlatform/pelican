@@ -12,7 +12,7 @@ import {
   Pagination,
   Paper,
   Alert,
-  IconButton,
+  IconButton, LinearProgress,
 } from '@mui/material';
 import React, { ReactElement, useEffect, useMemo, useState } from 'react';
 import { Skeleton } from '@mui/material';
@@ -22,6 +22,7 @@ import useSWR from 'swr';
 import { getErrorMessage } from '@/helpers/util';
 import { Capabilities } from '@/types';
 import { CapabilitiesDisplay } from '@/components';
+import CircularProgress from '@mui/material/CircularProgress';
 
 type RegistrationStatus =
   | 'Not Supported'
@@ -351,11 +352,19 @@ export const getExportData = async (): Promise<ExportRes> => {
 };
 
 export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
-  const [fromUrl, setFromUrl] = useState<string | undefined>(undefined);
-  const { data, error } = useSWR('getDataExport', getExportData);
+  const [pending, setPending] = useState<boolean>(false);
+  const [ fromUrl, setFromUrl ] = useState<string | undefined>(undefined);
+  const { data, error, mutate } = useSWR('getDataExport', getExportData, {
+    refreshInterval: 10000
+  });
 
   useEffect(() => {
     setFromUrl(window.location.href);
+    setPending(true);
+    setTimeout(() => {
+      mutate()
+      setPending(false);
+    }, 5000);
   }, []);
 
   if (error) {
@@ -396,6 +405,12 @@ export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
 
   return (
     <Box {...boxProps}>
+      {pending &&
+        <Box display={"flex"} flexDirection={"column"}>
+          <LinearProgress sx={{mb:1, w: "100%"}} />
+          <Typography variant={'subtitle2'} color={grey[400]} mx={"auto"}>Checking Registry for Updates</Typography>
+        </Box>
+      }
       <Typography pb={1} variant={'h5'} component={'h3'}>
         Origin
       </Typography>
