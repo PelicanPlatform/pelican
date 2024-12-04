@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
@@ -34,13 +33,23 @@ var (
 	objectDeleteCmd = &cobra.Command{
 		Use:   "delete {object}",
 		Short: "Delete an object from a namespace in a federation",
-		RunE:  deleteMain,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 {
+				return fmt.Errorf("no location provided for deletion")
+			}
+			if len(args) > 1 {
+				return fmt.Errorf("too many arguments provided; only one argument is allowed")
+			}
+			return nil
+		},
+		RunE: deleteMain,
 	}
 )
 
 func init() {
 	flagSet := objectDeleteCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
+	flagSet.BoolP("recursive", "r", false, "Recursively delete a collection")
 
 	objectCmd.AddCommand(objectDeleteCmd)
 }
@@ -59,38 +68,15 @@ func deleteMain(cmd *cobra.Command, args []string) error {
 	}
 
 	tokenLocation, _ := cmd.Flags().GetString("token")
+	remoteDestination := args[len(args)-1]
+	isRecursive, _ := cmd.Flags().GetBool("recursive")
 
-	if len(args) < 1 {
-		_ = cmd.Help()
-		return fmt.Errorf("no location provided for deletion")
-	}
-	object := args[len(args)-1]
-	log.Debugln("Object to be deleted:", object)
+	err = client.DoDelete(ctx, remoteDestination, isRecursive, client.WithTokenLocation(tokenLocation))
 
-	err = client.DoDelete(ctx, object, client.WithTokenLocation(tokenLocation))
-	// if err != nil {
-	// 	if client.IsRetryable(err) {
-	// 		return fmt.Errorf("temporary error deleting object: %s. Please try again later", object)
-	// 	}
-	// 	return fmt.Errorf("unexpected error while deleting object: %v", err)
-	// }
-
-	// Exit with failure
 	if err != nil {
-		// Print the list of errors
-		errMsg := err.Error()
-		var te *client.TransferErrors
-		if errors.As(err, &te) {
-			errMsg = te.UserError()
-		}
-		log.Errorln("Failure getting " + object + ": " + errMsg)
-		if client.ShouldRetry(err) {
-			log.Errorln("Errors are retryable")
-			os.Exit(11)
-		}
+		log.Errorf("Failure deleting %s: %v", remoteDestination, err.Error())
 		os.Exit(1)
 	}
 
-	log.Infoln("Successfully deleted object:", object)
 	return nil
 }

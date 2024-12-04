@@ -315,7 +315,8 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	return fileInfos, nil
 }
 
-func DoDelete(ctx context.Context, remoteObject string, options ...TransferOption) (err error) {
+func DoDelete(ctx context.Context, remoteDestination string, recursive bool, options ...TransferOption) (err error) {
+	log.Debug("Starting DoDelete")
 	defer func() {
 		if r := recover(); r != nil {
 			log.Debugln("Panic captured while attempting to perform transfer (DoList):", r)
@@ -325,9 +326,12 @@ func DoDelete(ctx context.Context, remoteObject string, options ...TransferOptio
 		}
 	}()
 
-	pUrl, err := ParseRemoteAsPUrl(ctx, remoteObject)
+	pUrl, err := ParseRemoteAsPUrl(ctx, remoteDestination)
 	if err != nil {
-		return errors.Wrapf(err, "failed to parse remote path: %s", remoteObject)
+		return errors.Wrapf(err, "failed to parse remote path: %s", remoteDestination)
+	}
+	if _, exists := pUrl.Query()[pelican_url.QueryRecursive]; exists {
+		recursive = true
 	}
 	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, true, "")
 	if err != nil {
@@ -345,21 +349,12 @@ func DoDelete(ctx context.Context, remoteObject string, options ...TransferOptio
 		}
 	}
 
-	// if dirResp.XPelNsHdr.RequireToken {
-	// 	tokenContents, err := token.get()
-	// 	if err != nil || tokenContents == "" {
-	// 		return errors.Wrap(err, "failed to get token for transfer")
-	// 	}
-	// } else {
-	// 	token = nil
-	// }
-
 	tokenContents, err := token.get()
-	log.Debugln("Got tokenContents : ", tokenContents)
 	if err != nil || tokenContents == "" {
 		return errors.Wrap(err, "failed to get token for transfer")
 	}
-	err = deleteHttp(pUrl, dirResp, token)
+
+	err = deleteHttp(pUrl, recursive, dirResp, token)
 	if err != nil {
 		return err
 	}
