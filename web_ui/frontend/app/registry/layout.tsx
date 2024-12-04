@@ -35,6 +35,7 @@ import SpeedDial, {
 } from '@/components/layout/SidebarSpeedDial';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { PaddedContent } from '@/components/layout';
+import BuildIcon from '@mui/icons-material/Build';
 
 export const metadata = {
   title: 'Pelican Registry',
@@ -81,9 +82,11 @@ export default function RootLayout({
             <Block />
           </ButtonLink>
         </AuthenticatedContent>
-        <ButtonLink title={'Config'} href={'/config/'}>
-          <Build />
-        </ButtonLink>
+        <AuthenticatedContent allowedRoles={['admin']}>
+          <ButtonLink title={'Config'} href={'/config/'}>
+            <BuildIcon />
+          </ButtonLink>
+        </AuthenticatedContent>
       </Sidebar>
       <Main>
         <PaddedContent>{children}</PaddedContent>
