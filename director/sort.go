@@ -61,13 +61,13 @@ type (
 		Coordinate Coordinate `mapstructure:"Coordinate"`
 	}
 
-	GeoIPError struct {
+	geoIPError struct {
 		labels   prometheus.Labels
 		errorMsg string
 	}
 )
 
-func (e GeoIPError) Error() string {
+func (e geoIPError) Error() string {
 	return e.errorMsg
 }
 
@@ -192,13 +192,13 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	reader := maxMindReader.Load()
 	if reader == nil {
 		labels["source"] = "server"
-		err = GeoIPError{labels: labels, errorMsg: "No GeoIP database is available"}
+		err = geoIPError{labels: labels, errorMsg: "No GeoIP database is available"}
 		return
 	}
 	record, err := reader.City(ip)
 	if err != nil {
 		labels["source"] = "server"
-		err = GeoIPError{labels: labels, errorMsg: err.Error()}
+		err = geoIPError{labels: labels, errorMsg: err.Error()}
 		return
 	}
 	lat = record.Location.Latitude
@@ -211,7 +211,7 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 		errMsg := fmt.Sprintf("GeoIP Resolution of the address %s resulted in the null lat/long. This will result in random server sorting.", ip.String())
 		log.Warning(errMsg)
 		labels["source"] = "client"
-		err = GeoIPError{labels: labels, errorMsg: errMsg}
+		err = geoIPError{labels: labels, errorMsg: errMsg}
 	}
 
 	// MaxMind provides an accuracy radius in kilometers. When it actually has no clue how to resolve a valid, public
@@ -225,7 +225,7 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 		lat = 0
 		long = 0
 		labels["source"] = "client"
-		err = GeoIPError{labels: labels, errorMsg: errMsg}
+		err = geoIPError{labels: labels, errorMsg: errMsg}
 	}
 
 	return
@@ -300,14 +300,12 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 	if err != nil {
 		// If it is a geoIP error, then we get the labels and increment the error counter
 		// Otherwise we log the error and continue
-		switch err := err.(type) {
-		case GeoIPError:
-			labels := err.labels
+		if geoIPError, ok := err.(geoIPError); ok {
+			labels := geoIPError.labels
 			setProjectLabel(ctx, &labels)
 			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
-		default:
-			log.Warningf("Error while getting the client IP address: %v", err)
 		}
+		log.Warningf("Error while getting the client IP address: %v", err)
 	}
 
 	// For each ad, we apply the configured sort method to determine a priority weight.
