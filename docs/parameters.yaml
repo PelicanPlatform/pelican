@@ -211,9 +211,9 @@ components: ["origin"]
 ---
 name: Logging.Origin.Http
 description: |+
-  Logging level for the HTTP component of the origin. Increasing to debug will cause the Xrootd daemon to log.
+  Logging level for the HTTP component of the origin. Increasing to debug
+  will cause the Xrootd daemon to log all headers and requests.
   Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
-  all headers and requests.
 type: string
 default: error
 components: ["origin"]
