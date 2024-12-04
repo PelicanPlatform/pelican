@@ -329,11 +329,11 @@ func DoDelete(ctx context.Context, remoteObject string, options ...TransferOptio
 	if err != nil {
 		return errors.Wrapf(err, "failed to parse remote path: %s", remoteObject)
 	}
-	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, false, "")
+	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, true, "")
 	if err != nil {
 		return err
 	}
-	token := newTokenGenerator(pUrl, &dirResp, false, true)
+	token := newTokenGenerator(pUrl, &dirResp, true, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
