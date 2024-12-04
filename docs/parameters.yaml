@@ -763,35 +763,65 @@ components: ["origin"]
 ---
 name: Origin.ScitokensRestrictedPaths
 description: |+
-  Enable the built-in issuer daemon for the origin.
+  This parameter is used to configure
+  [XRootD's SciTokens authorization plugin](https://github.com/xrootd/xrootd/tree/master/src/XrdSciTokens).
+
+  Any restrictions on the paths that the issuer can authorize inside their
+  namespace. This is meant to be a mechanism to help with transitions, where
+  the underlying storage is setup such that an issuer's namespace contains
+  directories that should not be managed by the issuer.
 type: stringSlice
 default: []
 components: ["origin"]
 ---
 name: Origin.ScitokensMapSubject
 description: |+
-  Enable the built-in issuer daemon for the origin.
+  This parameter is used to configure
+  [XRootD's SciTokens authorization plugin](https://github.com/xrootd/xrootd/tree/master/src/XrdSciTokens).
+
+  If set to `true`, the contents of the token's `sub` claim will be copied
+  into the XRootD username. When `Origin.Multiuser` is also set to `true`,
+  this will allow XRootD to read and write files using the Unix username
+  specified in the token.
 type: bool
 default: false
 components: ["origin"]
 ---
 name: Origin.ScitokensDefaultUser
 description: |+
-  Enable the built-in issuer daemon for the origin.
+  This parameter is used to configure
+  [XRootD's SciTokens authorization plugin](https://github.com/xrootd/xrootd/tree/master/src/XrdSciTokens).
+
+  If set, then all authorized operations will be performed under the
+  provided username when interacting with the file system. This is useful
+  when all files owned by an issuer should be mapped to a particular Unix
+  user account.
 type: string
 default: none
 components: ["origin"]
 ---
 name: Origin.ScitokensUsernameClaim
 description: |+
-  Enable the built-in issuer daemon for the origin.
+  This parameter is used to configure
+  [XRootD's SciTokens authorization plugin](https://github.com/xrootd/xrootd/tree/master/src/XrdSciTokens).
+
+  If set, then the provided claim will be used to determine the XRootD
+  username, and it will override the
+  `Origin.ScitokensMapSubject` and `Origin.ScitokensDefaultUser` parameters.
 type: string
 default: none
 components: ["origin"]
 ---
 name: Origin.ScitokensNameMapFile
 description: |+
-  Enable the built-in issuer daemon for the origin.
+  This parameter is used to configure
+  [XRootD's SciTokens authorization plugin](https://github.com/xrootd/xrootd/tree/master/src/XrdSciTokens).
+
+  If set, then the referenced file is parsed as a JSON object and the
+  specified mappings are applied to the username inside the XRootD
+  framework. See the
+  [XrdSciTokens documentation](https://github.com/xrootd/xrootd/tree/master/src/XrdSciTokens#mapfile-format)
+  for more information on the mapfile's format.
 type: string
 default: none
 components: ["origin"]
