@@ -96,7 +96,7 @@ export default function Home() {
     <AuthenticatedContent
       boxProps={{ width: '100%' }}
       redirect={true}
-      checkAuthentication={(u: User) => u?.role == 'admin'}
+      allowedRoles={['admin']}
     >
       <Box
         pt={10}

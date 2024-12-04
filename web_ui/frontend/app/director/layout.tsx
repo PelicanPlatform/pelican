@@ -20,7 +20,8 @@ import { Box } from '@mui/material';
 import { ButtonLink, Sidebar } from '@/components/layout/Sidebar';
 import BuildIcon from '@mui/icons-material/Build';
 import Main from '@/components/layout/Main';
-import { Dashboard, Equalizer, MapOutlined } from '@mui/icons-material';
+import { Block, Dashboard, Equalizer, MapOutlined } from '@mui/icons-material';
+import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 
 export const metadata = {
   title: 'Pelican Director',
@@ -38,15 +39,19 @@ export default function RootLayout({
         <ButtonLink title={'Dashboard'} href={'/director/'}>
           <Dashboard />
         </ButtonLink>
-        <ButtonLink title={'Metrics'} href={'/director/metrics/'}>
-          <Equalizer />
-        </ButtonLink>
         <ButtonLink title={'Map'} href={'/director/map/'}>
           <MapOutlined />
         </ButtonLink>
-        <ButtonLink title={'Config'} href={'/config/'}>
-          <BuildIcon />
-        </ButtonLink>
+        <AuthenticatedContent allowedRoles={['admin']}>
+          <ButtonLink title={'Metrics'} href={'/director/metrics/'}>
+            <Equalizer />
+          </ButtonLink>
+        </AuthenticatedContent>
+        <AuthenticatedContent allowedRoles={['admin']}>
+          <ButtonLink title={'Config'} href={'/config/'}>
+            <BuildIcon />
+          </ButtonLink>
+        </AuthenticatedContent>
       </Sidebar>
       <Main>{children}</Main>
     </Box>

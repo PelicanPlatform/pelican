@@ -51,10 +51,7 @@ export default function Home() {
   };
 
   return (
-    <AuthenticatedContent
-      redirect={true}
-      checkAuthentication={(u: User) => u?.role == 'admin'}
-    >
+    <AuthenticatedContent redirect={true} allowedRoles={['admin']}>
       <Box width={'100%'}>
         <Grid container spacing={2}>
           <Grid item xs={12} lg={6}>
