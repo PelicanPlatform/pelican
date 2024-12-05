@@ -236,9 +236,9 @@ func TestDirectorRegistration(t *testing.T) {
 		return tok
 	}
 
-	setupRequest := func(c *gin.Context, r *gin.Engine, bodyByt []byte, token string, stype server_structs.ServerType) {
+	setupRequest := func(c *gin.Context, r *gin.Engine, bodyByte []byte, token string, stype server_structs.ServerType) {
 		r.POST("/", func(gctx *gin.Context) { registerServeAd(ctx, gctx, stype) })
-		c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(bodyByt))
+		c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(bodyByte))
 		c.Request.Header.Set("Authorization", "Bearer "+token)
 		c.Request.Header.Set("Content-Type", "application/json")
 		// Hard code the current min version. When this test starts failing because of new stuff in the Director,
@@ -1515,7 +1515,7 @@ func TestRedirects(t *testing.T) {
 	router := gin.Default()
 	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
 
-	// Check that the checkkHostnameRedirects uses the pre-configured hostnames to redirect
+	// Check that the checkHostnameRedirects uses the pre-configured hostnames to redirect
 	// requests that come in at the default paths, but not if the request is made
 	// specifically for an object or a cache via the API.
 	t.Run("redirect-check-hostnames", func(t *testing.T) {
@@ -1979,7 +1979,7 @@ func TestHandleFilterServer(t *testing.T) {
 
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "Can't filter a server that already has been fitlered")
+		assert.Contains(t, string(resB), "Can't filter a server that already has been filtered")
 	})
 	t.Run("filter-server-w-tempFiltered", func(t *testing.T) {
 		// Create a request to the endpoint
@@ -2008,7 +2008,7 @@ func TestHandleFilterServer(t *testing.T) {
 
 		resB, err := io.ReadAll(w.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(resB), "Can't filter a server that already has been fitlered")
+		assert.Contains(t, string(resB), "Can't filter a server that already has been filtered")
 	})
 	t.Run("filter-server-w-tempAllowed", func(t *testing.T) {
 		// Create a request to the endpoint

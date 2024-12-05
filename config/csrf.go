@@ -31,8 +31,8 @@ import (
 
 var (
 	// Global CSRF handler that shares the same auth key
-	csrfHanlder     gin.HandlerFunc
-	onceCSRFHanlder sync.Once
+	csrfHandler     gin.HandlerFunc
+	onceCSRFHandler sync.Once
 )
 
 func setupCSRFHandler() {
@@ -52,15 +52,15 @@ func setupCSRFHandler() {
 			}
 		})),
 	)
-	csrfHanlder = adapter.Wrap(CSRF)
+	csrfHandler = adapter.Wrap(CSRF)
 }
 
 func GetCSRFHandler() (gin.HandlerFunc, error) {
-	onceCSRFHanlder.Do(func() {
+	onceCSRFHandler.Do(func() {
 		setupCSRFHandler()
 	})
-	if csrfHanlder == nil {
+	if csrfHandler == nil {
 		return nil, errors.New("Error setting up the CSRF handler")
 	}
-	return csrfHanlder, nil
+	return csrfHandler, nil
 }

@@ -105,7 +105,7 @@ func mockFileOpenPacket(pseq int, fileId, userId uint32, SID int64, path string)
 	return bytePacket, nil
 }
 
-func mockFileXfrPacket(pseq int, fileId uint32, SID int64, read, readv, wrtie int64) ([]byte, error) {
+func mockFileXfrPacket(pseq int, fileId uint32, SID int64, read, readv, write int64) ([]byte, error) {
 	// f-stream file transfer event
 	mockMonHeader := XrdXrootdMonHeader{ // 8B
 		Code: 'f',
@@ -135,7 +135,7 @@ func mockFileXfrPacket(pseq int, fileId uint32, SID int64, read, readv, wrtie in
 		Xfr: XrdXrootdMonStatXFR{ // 24B
 			Read:  read,
 			Readv: readv,
-			Write: wrtie,
+			Write: write,
 		},
 	}
 	mockMonHeader.Plen = uint16(8 + mockMonFileTOD.Hdr.RecSize + mockMonFileXfr.Hdr.RecSize)
@@ -358,7 +358,7 @@ func TestHandlePacket(t *testing.T) {
 		expectedLinkConnectIncDup := strings.NewReader(mockPromLinkConnectInc)
 		expectedLinkByteXferIncDup := strings.NewReader(mockPromLinkByteXferInc)
 
-		// First time received a summmary packet
+		// First time received a summary packet
 		err = HandlePacket(mockLinkSummaryBaseBytes)
 		require.NoError(t, err, "Error handling the packet")
 		if err := testutil.CollectAndCompare(Connections, expectedLinkConnectBase, "xrootd_server_connection_count"); err != nil {
@@ -368,7 +368,7 @@ func TestHandlePacket(t *testing.T) {
 			require.NoError(t, err, "Collected metric is different from expected")
 		}
 
-		// Second time received a summmary packet, with numbers more than first time
+		// Second time received a summary packet, with numbers more than first time
 		// And metrics should be updated to the max number
 
 		// Have one CMSD summary packets which should be ignored
@@ -587,7 +587,7 @@ func TestHandlePacket(t *testing.T) {
 		// it seems to return "/" all the time as the length of monitorPaths is
 		// never changed
 		assert.Equal(t, "/", transferEntry.Path, "Path in transfer cache entry doesn't match expected")
-		// TODO: Figure out why there's such discrepency here and the d-stream (where userid == sid),
+		// TODO: Figure out why there's such discrepancy here and the d-stream (where userid == sid),
 		// but for other tests to run, just change to what returns to me for now
 		assert.Equal(t, mockUserID, transferEntry.UserId.Id, "UserID in transfer cache entry doesn't match expected")
 		transfers.DeleteAll()
@@ -632,7 +632,7 @@ func TestHandlePacket(t *testing.T) {
 		assert.Equal(t, mockReadV, int64(transferEntry.ReadvBytes))
 		assert.Equal(t, mockWrite, int64(transferEntry.WriteBytes))
 		assert.Equal(t, "/", transferEntry.Path, "Path in transfer cache entry doesn't match expected")
-		// TODO: Figure out why there's such discrepency here and the d-stream (where userid == sid),
+		// TODO: Figure out why there's such discrepancy here and the d-stream (where userid == sid),
 		// but for other tests to run, just change to what returns to me for now
 		assert.Equal(t, mockUserID, transferEntry.UserId.Id, "UserID in transfer cache entry doesn't match expected")
 		transfers.DeleteAll()

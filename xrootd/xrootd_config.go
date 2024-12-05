@@ -848,7 +848,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 			case "pelican":
 				urlParsed.Host += ":443"
 			default:
-				log.Warningf("The Director URL (%s) does not contain an explicit port number; XRootD 5.6.3 and earlier are known to segfault in thie case", xrdConfig.Cache.PSSOrigin)
+				log.Warningf("The Director URL (%s) does not contain an explicit port number; XRootD 5.6.3 and earlier are known to segfault in this case", xrdConfig.Cache.PSSOrigin)
 			}
 			xrdConfig.Cache.PSSOrigin = urlParsed.String()
 		}

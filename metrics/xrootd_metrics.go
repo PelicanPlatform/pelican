@@ -506,7 +506,7 @@ func ParseXrdUserId(userid string) (xrdUserId XrdUserId, err error) {
 	}
 	pid, err := strconv.Atoi(protUserIdInfo[1][lastIdx+1 : len(protUserIdInfo[1])])
 	if err != nil {
-		err = errors.Wrap(err, "Unsable to parse PID as integer")
+		err = errors.Wrap(err, "Unable to parse PID as integer")
 		return
 	}
 
@@ -731,7 +731,7 @@ func HandlePacket(packet []byte) error {
 				if fileHdr.RecFlag&0x01 == 0x01 { // hasLFN
 					lfnSize := uint32(fileHdr.RecSize - 20)
 					lfn := NullTermToString(packet[offset+20 : offset+lfnSize+20])
-					// path has been difined
+					// path has been defined
 					path = computePrefix(lfn, monitorPaths)
 					log.Debugf("MonPacket: User LFN %v matches prefix %v",
 						lfn, path)
@@ -1108,7 +1108,7 @@ func HandleSummaryPacket(packet []byte) error {
 	correctedData := re.ReplaceAll(packet, []byte(`</hits>`))
 
 	if err := xml.Unmarshal(correctedData, &summaryStats); err != nil {
-		return errors.Wrap(err, "error unmarshaling summary packet")
+		return errors.Wrap(err, "error unmarshalling summary packet")
 	}
 
 	log.Debug("Received a summary statistics packet")
@@ -1125,7 +1125,7 @@ func HandleSummaryPacket(packet []byte) error {
 			// stat.In: Bytes received
 			// stat.Out: Bytes sent
 
-			// Note that stat.Total is the total connections since the start-up of the servcie
+			// Note that stat.Total is the total connections since the start-up of the service
 			// So we just want to make sure here that no negative value is present
 			incBy := float64(stat.Total - lastStats.Total)
 			if stat.Total < lastStats.Total {

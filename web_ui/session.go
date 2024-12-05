@@ -47,7 +47,7 @@ func setupSession() {
 }
 
 // Setup and return the session handler for web UI APIs.
-// Calling mutiple times will only set up the handler once
+// Calling multiple times will only set up the handler once
 func GetSessionHandler() (gin.HandlerFunc, error) {
 	sessionHandlerOnce.Do(setupSession)
 	if sessionSetupErr != nil {

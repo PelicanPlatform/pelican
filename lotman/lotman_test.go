@@ -345,11 +345,11 @@ func TestUpdateLot(t *testing.T) {
 	require.True(t, success)
 
 	// Update the test-1 lot
-	dedGB := float64(999.0)
+	dedicatedGB := float64(999.0)
 	lotUpdate := LotUpdate{
 		LotName: "test-1",
 		MPA: &MPA{
-			DedicatedGB: &dedGB,
+			DedicatedGB: &dedicatedGB,
 			MaxNumObjects: &Int64FromFloat{
 				Value: 84,
 			},
@@ -370,7 +370,7 @@ func TestUpdateLot(t *testing.T) {
 	lot, err := GetLot("test-1", true)
 	require.NoError(t, err, "Failed to get lot")
 	require.Equal(t, "test-1", lot.LotName)
-	require.Equal(t, dedGB, *(lot.MPA.DedicatedGB))
+	require.Equal(t, dedicatedGB, *(lot.MPA.DedicatedGB))
 	require.Equal(t, int64(84), lot.MPA.MaxNumObjects.Value)
 	require.Equal(t, "/test-1-updated", lot.Paths[0].Path)
 	require.False(t, lot.Paths[0].Recursive)

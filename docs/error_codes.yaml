@@ -125,7 +125,7 @@ code: 5011
 clientExitCode: 8
 description: >-
   If the client successfully contacted the server but the desired file does not exist for download.
-  The user might have enterred the wrong URL or the file might not yet be at the specified origin.
+  The user might have entered the wrong URL or the file might not yet be at the specified origin.
 retryable: false
 ---
 type: Specification.FileNotCreated
@@ -158,5 +158,5 @@ type: Transfer.SlowTransfer
 code: 6002
 clientExitCode: 11
 description: >-
-  The client started transferring data but the transfer was slower than the minumum configured timeout rate.
+  The client started transferring data but the transfer was slower than the minimum configured timeout rate.
 retryable: true

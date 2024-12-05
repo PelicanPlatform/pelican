@@ -211,7 +211,7 @@ func (tci *tokenContentIterator) discoverHTCondorTokenLocations(tokenName string
 
 func (tci *tokenContentIterator) next() (string, bool) {
 	/*
-		Search for the location of the authentiction token.  It can be set explicitly on the command line,
+		Search for the location of the authentication token.  It can be set explicitly on the command line,
 		with the environment variable "BEARER_TOKEN", or it can be searched in the standard HTCondor directory pointed
 		to by the environment variable "_CONDOR_CREDS".
 	*/
