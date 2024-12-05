@@ -85,7 +85,7 @@ func LaunchDirectorTestFileCleanup(ctx context.Context) {
 				}
 				directorItems = append(directorItems, item)
 			}
-			if len(directorItems) <= 2 { // At mininum there are the test file and .cinfo file, and we don't want to remove the last two
+			if len(directorItems) <= 2 { // At minimum there are the test file and .cinfo file, and we don't want to remove the last two
 				return nil
 			}
 			for idx, item := range directorItems {

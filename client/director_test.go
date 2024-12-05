@@ -182,7 +182,7 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 			expectedError: "",
 		},
 		{
-			name:          "PUT request changes verb", // also generates 405, although this is a feauture of the director
+			name:          "PUT request changes verb", // also generates 405, although this is a feature of the director
 			resourcePath:  "/test",
 			directorUrl:   ts.URL,
 			isPut:         true,
@@ -190,7 +190,7 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 			expectedError: "error 405: No writeable origins were found",
 		},
 		{
-			name:          "Queries are propagated", // also generates 405, although this is a feauture of the director
+			name:          "Queries are propagated", // also generates 405, although this is a feature of the director
 			resourcePath:  "/test",
 			directorUrl:   ts.URL,
 			isPut:         false,

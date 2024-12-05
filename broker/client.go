@@ -163,7 +163,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	if err = config.GenerateCACert(); err != nil {
 		return
 	}
-	caCert, err := config.LoadCertficate(param.Server_TLSCACertificateFile.GetString())
+	caCert, err := config.LoadCertificate(param.Server_TLSCACertificateFile.GetString())
 	if err != nil {
 		return
 	}
@@ -529,7 +529,7 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 	hj.realConn.Close()
 	newConn, err := net.FileConn(fp)
 	if err != nil {
-		err = errors.Wrap(err, "Failure when making scoket from duplicated connection")
+		err = errors.Wrap(err, "Failure when making socket from duplicated connection")
 		return
 	}
 	fp.Close()

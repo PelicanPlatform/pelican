@@ -14,11 +14,11 @@
 # limitations under the License.
 #
 
-# This file contains structured documentaion about the scopes of JWTs
+# This file contains structured documentation about the scopes of JWTs
 # that will be issued and exchanged for Pelican servers to communicate with
 # each other as well as for users to access functions in Pelican server Web UI
 
-# Naming covention: <resource_name>.<action_name> snake case for naming
+# Naming convention: <resource_name>.<action_name> snake case for naming
 
 ############################
 #     Top-level Scopes     #

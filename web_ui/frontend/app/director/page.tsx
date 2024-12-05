@@ -50,7 +50,7 @@ export default function Page() {
     async () =>
       await alertOnError(
         getDirectorNamespaces,
-        'Faild to fetch Namespaces',
+        'Failed to fetch Namespaces',
         dispatch
       )
   );

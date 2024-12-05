@@ -35,3 +35,10 @@ repos:
     rev: v1.56.2
     hooks:
     -   id: golangci-lint
+-   repo: https://github.com/crate-ci/typos
+    rev: v1.28.2
+    hooks:
+    -   id: typos
+        # Override the default arguments, which include writing back all
+        # suggested changes. We don't want false positives to mangle files.
+        args: [--force-exclude, --sort]

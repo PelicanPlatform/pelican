@@ -205,7 +205,7 @@ func TestOSDFAuthCreation(t *testing.T) {
 			hostname: "cache-test",
 		},
 		{
-			desc:     "osdf-cach-auth-merge",
+			desc:     "osdf-cache-auth-merge",
 			authIn:   cacheAuthfileMultilineInput,
 			authOut:  cacheMergedAuthfileEntries,
 			server:   &cache.CacheServer{},

@@ -78,12 +78,12 @@ type (
 		//
 		// dataUrl: the base url to access data on the server. This is usually the url pointed at the XRootD instance on the server
 		//
-		// digest: requst digest for object checkusm. XRootD responds with 403 if digest feature is turned off on the server
+		// digest: request digest for object checksum. XRootD responds with 403 if digest feature is turned off on the server
 		//
 		// token: a bearer token to be used when issuing the request
 		ReqHandler func(maxCancelCtx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error)
 		// Manage a `stat` request to origin servers given an objectName
-		Query func(cancelContext context.Context, objectName string, sType server_structs.ServerType, mininum, maximum int, options ...queryOption) queryResult
+		Query func(cancelContext context.Context, objectName string, sType server_structs.ServerType, minimum, maximum int, options ...queryOption) queryResult
 	}
 )
 
@@ -225,11 +225,11 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 	} else {
 		cLenStr := res.Header.Get("Content-Length")
 		checksumStr := res.Header.Get("Digest")
-		clen, err := strconv.Atoi(cLenStr)
+		cLen, err := strconv.Atoi(cLenStr)
 		if err != nil {
 			return nil, errors.New(fmt.Sprintf("error parsing content-length header from response. Header was: %s", cLenStr))
 		}
-		return &objectMetadata{ContentLength: clen, Checksum: checksumStr, URL: *dataUrl.JoinPath(objectName)}, nil
+		return &objectMetadata{ContentLength: cLen, Checksum: checksumStr, URL: *dataUrl.JoinPath(objectName)}, nil
 	}
 }
 
@@ -440,7 +440,7 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 						return nil
 					default:
 						negativeReqChan <- err
-						totalLabels["result"] = string(metrics.StatUnkownErr)
+						totalLabels["result"] = string(metrics.StatUnknownErr)
 						metrics.PelicanDirectorStatTotal.With(totalLabels).Inc()
 						return nil
 					}

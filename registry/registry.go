@@ -392,7 +392,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 	}
 }
 
-// Handle the namespace registration with nonce generation and verifcation, regardless of
+// Handle the namespace registration with nonce generation and verification, regardless of
 // using OIDC Authorization or not
 func keySignChallenge(ctx *gin.Context, data *registrationData) (bool, map[string]interface{}, error) {
 	if data.ClientNonce != "" && data.ClientPayload != "" && data.ClientSignature != "" &&

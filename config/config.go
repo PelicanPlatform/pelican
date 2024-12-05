@@ -534,7 +534,7 @@ func setupTransport() {
 	if param.TLSSkipVerify.GetBool() {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
-	if caCert, err := LoadCertficate(param.Server_TLSCACertificateFile.GetString()); err == nil {
+	if caCert, err := LoadCertificate(param.Server_TLSCACertificateFile.GetString()); err == nil {
 		systemPool, err := x509.SystemCertPool()
 		if err == nil {
 			systemPool.AddCert(caCert)
@@ -591,7 +591,7 @@ func GetTransport() *http.Transport {
 	return transport
 }
 
-// Get singleton global validte method for field validation
+// Get singleton global validate method for field validation
 func GetValidate() *validator.Validate {
 	return validate
 }
@@ -1041,7 +1041,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Origin_StorageType.GetName(), "posix")
 	v.SetDefault(param.Origin_SelfTest.GetName(), true)
 	v.SetDefault(param.Origin_DirectorTest.GetName(), true)
-	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml becase
+	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml because
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
 	v.SetDefault(param.Origin_S3UrlStyle.GetName(), "path")
 

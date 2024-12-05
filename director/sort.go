@@ -81,7 +81,7 @@ var (
 
 // Constants for the director sorting algorithm
 const (
-	souceServerAdsLimit      = 6    // Number of servers under consideration
+	sourceServerAdsLimit     = 6    // Number of servers under consideration
 	distanceHalvingThreshold = 10   // Threshold where the distance havling factor kicks in, in miles
 	distanceHalvingFactor    = 200  // Halving distance for the GeoIP weight, in miles
 	objAvailabilityFactor    = 2    // Multiplier for knowing whether an object is present
@@ -118,7 +118,7 @@ func checkOverrides(addr net.IP) (coordinate *Coordinate) {
 	if geoIPOverrides == nil {
 		err := param.GeoIPOverrides.Unmarshal(&geoIPOverrides)
 		if err != nil {
-			log.Warningf("Error while unmarshaling GeoIP Overrides: %v", err)
+			log.Warningf("Error while unmarshalling GeoIP Overrides: %v", err)
 		}
 	}
 
