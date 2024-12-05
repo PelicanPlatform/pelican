@@ -756,7 +756,7 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 
 // Generate a minimally scoped auth token that allows the origin
 // to query itself for its sentinel file
-func generateSentinelCheckScitoken(resourceScope string) (string, error) {
+func generateSentinelReadToken(resourceScope string) (string, error) {
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
 	if issuerUrl == "" { // if both are empty, then error
 		return "", errors.New("failed to create a sentinel check auth token because required configuration 'Server.ExternalWebUrl' is empty")
@@ -789,7 +789,7 @@ func CheckOriginSentinelLocations(exports []OriginExport) (ok bool, err error) {
 			}
 
 			fullPath := filepath.Join(export.FederationPrefix, sentinelPath)
-			tkn, err := generateSentinelCheckScitoken(sentinelPath)
+			tkn, err := generateSentinelReadToken(sentinelPath)
 			if err != nil {
 				return false, errors.Wrap(err, "failed to generate self-auth token for sentinel object check")
 			}
