@@ -231,16 +231,7 @@ func TestMultiExportOrigin(t *testing.T) {
 	require.True(t, ok)
 }
 
-func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	server_utils.ResetTestState()
-
-	defer server_utils.ResetTestState()
-
-	federationPrefix := "/test"
+func mockupS3Origin(ctx context.Context, egrp *errgroup.Group, t *testing.T, federationPrefix, bucketName, urlStyle string) context.CancelFunc {
 	regionName := "us-east-1"
 	serviceUrl := "https://s3.amazonaws.com"
 	viper.Set("Origin.FederationPrefix", federationPrefix)
@@ -260,7 +251,19 @@ func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
 	viper.Set("Server.WebPort", 0)
 	viper.Set("TLSSkipVerify", true)
 
-	mockupCancel := originMockup(ctx, egrp, t)
+	return originMockup(ctx, egrp, t)
+}
+
+func runS3Test(t *testing.T, bucketName, urlStyle, objectName string) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	federationPrefix := "/test"
+
+	mockupCancel := mockupS3Origin(ctx, egrp, t, federationPrefix, bucketName, urlStyle)
 	defer mockupCancel()
 
 	originEndpoint := param.Origin_Url.GetString()
@@ -302,5 +305,151 @@ func TestS3OriginConfig(t *testing.T) {
 
 	t.Run("S3OriginNoBucket", func(t *testing.T) {
 		runS3Test(t, "", "path", "noaa-wod-pds/MD5SUMS")
+	})
+}
+
+func TestS3OriginWithSentinel(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	federationPrefix := "/test"
+	bucketName := "noaa-wod-pds"
+
+	mockupCancel := mockupS3Origin(ctx, egrp, t, federationPrefix, bucketName, "path")
+	defer mockupCancel()
+
+	mockExportValidStn := server_utils.OriginExport{
+		StoragePrefix:    viper.GetString("Origin.StoragePrefix"),
+		FederationPrefix: viper.GetString("Origin.FederationPrefix"),
+		Capabilities:     server_structs.Capabilities{Reads: true},
+		SentinelLocation: "MD5SUMS",
+	}
+
+	originEndpoint := param.Origin_Url.GetString()
+	// At this point, a 403 means the server is running, which means its ready to grab objects from
+	err := server_utils.WaitUntilWorking(ctx, "GET", originEndpoint, "xrootd", 403, true)
+	if err != nil {
+		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
+	}
+
+	// mock export with no sentinel
+	mockExportNoStn := server_utils.OriginExport{
+		StoragePrefix:    viper.GetString("Origin.StoragePrefix"),
+		FederationPrefix: viper.GetString("Origin.FederationPrefix"),
+		Capabilities:     server_structs.Capabilities{Reads: true},
+	}
+
+	// mock export with an invalid sentinel
+	mockExportInvalidStn := server_utils.OriginExport{
+		StoragePrefix:    viper.GetString("Origin.StoragePrefix"),
+		FederationPrefix: viper.GetString("Origin.FederationPrefix"),
+		Capabilities:     server_structs.Capabilities{Reads: true},
+		SentinelLocation: "MD5SUMS_dne",
+	}
+
+	t.Run("valid-sentinel-return-ok", func(t *testing.T) {
+		ok, err := server_utils.CheckOriginSentinelLocations([]server_utils.OriginExport{mockExportValidStn})
+		require.NoError(t, err)
+		require.True(t, ok)
+	})
+	t.Run("empty-sentinel-return-ok", func(t *testing.T) {
+		ok, err := server_utils.CheckOriginSentinelLocations([]server_utils.OriginExport{mockExportNoStn})
+		require.NoError(t, err)
+		require.True(t, ok)
+	})
+
+	t.Run("invalid-sentinel-return-error", func(t *testing.T) {
+		ok, err := server_utils.CheckOriginSentinelLocations([]server_utils.OriginExport{mockExportInvalidStn})
+		require.Error(t, err)
+		require.False(t, ok)
+	})
+}
+
+func TestPosixOriginWithSentinel(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	server_utils.ResetTestState()
+
+	defer server_utils.ResetTestState()
+
+	// Create a test temp dir, ensure it's readable by XRootD
+	tmpPathPattern := "XRD-Tst_Orgn*"
+	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
+	require.NoError(t, err)
+	err = os.Chmod(tmpPath, 0755)
+	require.NoError(t, err)
+
+	viper.Set("Origin.StoragePrefix", tmpPath)
+	viper.Set("Origin.FederationPrefix", "/test")
+	viper.Set("Origin.StorageType", "posix")
+	// Disable functionality we're not using (and is difficult to make work on Mac)
+	viper.Set("Origin.EnableCmsd", false)
+	viper.Set("Origin.EnableMacaroons", false)
+	viper.Set("Origin.EnableVoms", false)
+	viper.Set("Origin.Port", 0)
+	viper.Set("Server.WebPort", 0)
+	viper.Set("TLSSkipVerify", true)
+	viper.Set("Logging.Origin.Scitokens", "trace")
+
+	mockupCancel := originMockup(ctx, egrp, t)
+	defer mockupCancel()
+
+	// mock export with a valid sentinel
+	mockExportValidStn := server_utils.OriginExport{
+		StoragePrefix:    viper.GetString("Origin.StoragePrefix"),
+		FederationPrefix: viper.GetString("Origin.FederationPrefix"),
+		Capabilities:     server_structs.Capabilities{Reads: true},
+		SentinelLocation: "mock_sentinel",
+	}
+	// mock export with no sentinel
+	mockExportNoStn := server_utils.OriginExport{
+		StoragePrefix:    viper.GetString("Origin.StoragePrefix"),
+		FederationPrefix: viper.GetString("Origin.FederationPrefix"),
+		Capabilities:     server_structs.Capabilities{Reads: true},
+	}
+	// mock export with an invalid sentinel
+	mockExportInvalidStn := server_utils.OriginExport{
+		StoragePrefix:    viper.GetString("Origin.StoragePrefix"),
+		FederationPrefix: viper.GetString("Origin.FederationPrefix"),
+		Capabilities:     server_structs.Capabilities{Reads: true},
+		SentinelLocation: "sentinel_dne",
+	}
+
+	// Create a sentinel file, ensure it's readable by XRootD
+	tempStn := filepath.Join(mockExportValidStn.StoragePrefix, mockExportValidStn.SentinelLocation)
+	file, err := os.Create(tempStn)
+	require.NoError(t, err)
+	err = file.Close()
+	require.NoError(t, err)
+	err = os.Chmod(tempStn, 0755)
+	require.NoError(t, err)
+
+	err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, false)
+	if err != nil {
+		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
+	}
+	require.NoError(t, err)
+
+	t.Run("valid-sentinel-return-ok", func(t *testing.T) {
+		ok, err := server_utils.CheckOriginSentinelLocations([]server_utils.OriginExport{mockExportValidStn})
+		require.NoError(t, err)
+		require.True(t, ok)
+	})
+
+	t.Run("empty-sentinel-return-ok", func(t *testing.T) {
+		ok, err := server_utils.CheckOriginSentinelLocations([]server_utils.OriginExport{mockExportNoStn})
+		require.NoError(t, err)
+		require.True(t, ok)
+	})
+
+	t.Run("invalid-sentinel-return-error", func(t *testing.T) {
+		ok, err := server_utils.CheckOriginSentinelLocations([]server_utils.OriginExport{mockExportInvalidStn})
+		require.Error(t, err)
+		require.False(t, ok)
 	})
 }
