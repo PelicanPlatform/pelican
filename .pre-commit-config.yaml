@@ -42,3 +42,8 @@ repos:
         # Override the default arguments, which include writing back all
         # suggested changes. We don't want false positives to mangle files.
         args: [--force-exclude, --sort]
+-   repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+    -   id: shellcheck
+        args: [--severity=warning]

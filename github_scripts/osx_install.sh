@@ -1,4 +1,4 @@
-#!/bin/sh -ex
+#!/bin/bash
 # Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
 #
 # Licensed under the Apache License, Version 2.0 (the "License"); you
@@ -14,6 +14,8 @@
 # limitations under the License.
 #
 
+set -ex
+
 #
 # This script installs all the xrootd-related dependencies into the
 # Mac OS X instance in GitHub.
@@ -25,7 +27,7 @@ brew install minio ninja coreutils
 
 # The new macos-latest runner has some issues with /usr/local/<lib/include>. Adjust perms ahead of time
 sudo mkdir -p /usr/local/lib && sudo mkdir -p /usr/local/include
-sudo chmod -R 777 /usr/local && sudo chown -R $(whoami):admin /usr/local
+sudo chmod -R 777 /usr/local && sudo chown -R "$(whoami)":admin /usr/local
 
 mkdir dependencies
 pushd dependencies
@@ -71,7 +73,7 @@ mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
 ninja install
-xrootd_libdir=$(grealpath $(dirname $(grealpath `which xrootd`))/../lib/)
+xrootd_libdir=$(grealpath "$(dirname "$(grealpath "$(which xrootd)")")"/../lib/)
 echo "Will install into: $xrootd_libdir"
 sudo mkdir -p $xrootd_libdir
 sudo ln -s $PWD/release_dir/lib/libXrdHTTPServer-5.so $xrootd_libdir
