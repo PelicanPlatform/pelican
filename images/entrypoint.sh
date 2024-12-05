@@ -52,7 +52,7 @@ if [ "$2" == "origin" ]; then
 
         shopt -s nullglob
         for fullfile in /opt/scitokens-server/etc/trusted-cas/*.pem; do
-            aliasname=$(basename "$file")
+            filename=$(basename "$fullfile")
             aliasname="${filename%.*}"
             keytool -cacerts -importcert -noprompt -storepass changeit -file "$fullfile" -alias "$aliasname"
         done
@@ -85,7 +85,7 @@ if [ "$2" == "origin" ]; then
     # Tomcat requires us to provide the intermediate chain (which, in Kubernetes, is often in the same
     # file as the host certificate itself.  If there wasn't one provided, try splitting it out.
     if [ ! -e /opt/tomcat/conf/chain.pem ]; then
-        pushd /tmp > /dev/null
+        pushd /tmp > /dev/null || { echo "pushd failed"; exit 1; }
         if csplit -f tls- -b "%02d.crt.pem" -s -z "/opt/tomcat/conf/hostcert.pem" '/-----BEGIN CERTIFICATE-----/' '{1}' 2>/dev/null ; then
             cp /tmp/tls-01.crt.pem /opt/tomcat/conf/chain.pem
             rm /tmp/tls-*.crt.pem
@@ -93,7 +93,7 @@ if [ "$2" == "origin" ]; then
             # No intermediate CAs found.  Create an empty file.
             touch /opt/tomcat/conf/chain.pem
         fi
-        popd > /dev/null
+        popd > /dev/null || { echo "popd failed"; exit 1; }
     fi
 fi
 
@@ -113,7 +113,7 @@ if [ $# -ne 0 ]; then
     case "$program_selector" in
         pelican)
             # Run pelican with the rest of the arguments
-            echo "Running pelican with arguments: $@"
+            echo "Running pelican with arguments: $*"
             exec tini -- /pelican/pelican "$@"
             # we shouldn't get here
             echo >&2 "Exec of tini failed!"
@@ -121,7 +121,7 @@ if [ $# -ne 0 ]; then
             ;;
         osdf)
             # Run osdf with the rest of the arguments
-            echo "Running osdf with arguments: $@"
+            echo "Running osdf with arguments: $*"
             exec tini -- /pelican/osdf "$@"
             # we shouldn't get here
             echo >&2 "Exec of tini failed!"
