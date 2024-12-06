@@ -69,6 +69,9 @@ var (
 
 	//go:embed resources/test-https-origin.yml
 	httpsOriginConfig string
+
+	//go:embed resources/origin-with-and-without-write.yaml
+	originConfigWithAndWithoutWrite string
 )
 
 // Helper function to get a temporary token file

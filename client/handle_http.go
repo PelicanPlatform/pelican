@@ -2655,8 +2655,9 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 }
 
 func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp server_structs.DirectorResponse, token *tokenGenerator) (err error) {
+	log.Debugln("Attempting to delete:", remoteUrl.Path)
 	if dirResp.XPelNsHdr.CollectionsUrl == nil {
-		return errors.Errorf("Collections URL not found in director response. Are you sure there's an origin for prefix %s that supports deletions?", dirResp.XPelNsHdr.Namespace)
+		return errors.Errorf("collections URL not found in director response.")
 	}
 
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
@@ -2699,7 +2700,7 @@ func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp serve
 		}
 		return errors.Wrap(err, "failed to delete remote object")
 	}
-
+	log.Debugln("Successfully deleted:", remoteUrl.Path)
 	return nil
 }
 

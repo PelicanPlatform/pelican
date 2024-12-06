@@ -316,7 +316,6 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 }
 
 func DoDelete(ctx context.Context, remoteDestination string, recursive bool, options ...TransferOption) (err error) {
-	log.Debug("Starting DoDelete")
 	defer func() {
 		if r := recover(); r != nil {
 			log.Debugln("Panic captured while attempting to perform transfer (DoList):", r)

@@ -918,8 +918,191 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
-		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
-		server_utils.ResetTestState()
+	})
+}
 
+func TestObjectDelete(t *testing.T) {
+	server_utils.ResetTestState()
+	fed := fed_test_utils.NewFedTest(t, originConfigWithAndWithoutWrite)
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
+
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+
+	tokenConfig := token.NewWLCGToken()
+	tokenConfig.Lifetime = time.Minute
+	tokenConfig.Issuer = issuer
+	tokenConfig.Subject = "origin"
+	tokenConfig.AddAudienceAny()
+	tokenConfig.AddResourceScopes(
+		token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"),
+	)
+	token, err := tokenConfig.CreateToken()
+	require.NoError(t, err)
+
+	tempToken, err := os.CreateTemp(t.TempDir(), "token")
+	require.NoError(t, err, "Error creating temp token file")
+	defer os.Remove(tempToken.Name())
+
+	_, err = tempToken.WriteString(token)
+	require.NoError(t, err, "Error writing to temp token file")
+	tempToken.Close()
+
+	viper.Set("Logging.DisableProgressBars", true)
+
+	storagePrefix := fed.Exports[0].StoragePrefix
+
+	// Create a file to be deleted
+	fileToBeDeleted := filepath.Join(storagePrefix, "filetobedeleted.txt")
+	file, err := os.Create(fileToBeDeleted)
+	require.NoError(t, err, "Error creating file to be deleted")
+	_, err = file.WriteString("This file will be deleted.")
+	require.NoError(t, err, "Error writing to file to be deleted")
+	defer file.Close()
+
+	// Create an empty directory to be deleted
+	emptyDirToBeDeleted := filepath.Join(storagePrefix, "emptydirtobedeleted")
+	err = os.Mkdir(emptyDirToBeDeleted, 0777)
+	require.NoError(t, err)
+
+	// Create a complex directory structure with subdirectories and files
+	complexDir := filepath.Join(storagePrefix, "complexdir")
+	err = os.Mkdir(complexDir, 0777)
+	require.NoError(t, err)
+
+	// Note: Even though os.Mkdir is called with permissions permissions, it may create directories
+	// with 0755 permissions due to internal behavior. To ensure the directory has the desired
+	// permissions permissions, we explicitly call os.Chmod after creating the directory.
+	//
+	// We need to set 0777 permissions on the directory to enable deletion of its contents by non-owners.
+	err = os.Chmod(complexDir, 0777)
+	require.NoError(t, err)
+
+	nestedFile1Path := filepath.Join(complexDir, "nestedfile1.txt")
+	nestedFile1, err := os.Create(nestedFile1Path)
+	require.NoError(t, err)
+	_, err = nestedFile1.WriteString("This is nested file 1.")
+	require.NoError(t, err)
+	err = nestedFile1.Close()
+	require.NoError(t, err)
+
+	nestedDir1 := filepath.Join(complexDir, "subdir1")
+	nestedDir2 := filepath.Join(complexDir, "subdir2")
+
+	err = os.MkdirAll(nestedDir1, 0777)
+	require.NoError(t, err)
+	err = os.Chmod(nestedDir1, 0777)
+	require.NoError(t, err)
+
+	err = os.MkdirAll(nestedDir2, 0777)
+	require.NoError(t, err)
+	err = os.Chmod(nestedDir2, 0777)
+	require.NoError(t, err)
+
+	nestedFile2Path := filepath.Join(nestedDir1, "nestedfile2.txt")
+	nestedFile2, err := os.Create(nestedFile2Path)
+	require.NoError(t, err)
+	_, err = nestedFile2.WriteString("This is nested file 2.")
+	require.NoError(t, err)
+	err = nestedFile2.Close()
+	require.NoError(t, err)
+
+	nestedFile3Path := filepath.Join(nestedDir2, "nestedfile3.txt")
+	nestedFile3, err := os.Create(nestedFile3Path)
+	require.NoError(t, err)
+	_, err = nestedFile3.WriteString("This is nested file 3.")
+	require.NoError(t, err)
+	err = nestedFile3.Close()
+	require.NoError(t, err)
+
+	// Create a file in the non-writable namespace
+	fileNonWritableNs := filepath.Join(fed.Exports[1].StoragePrefix, "filenonwritablenamespace.txt")
+	file, err = os.Create(fileNonWritableNs)
+	require.NoError(t, err)
+	_, err = file.WriteString(fmt.Sprintf("This is the content of %s.", fileNonWritableNs))
+	require.NoError(t, err)
+	defer file.Close()
+
+	// Test deleting a non-existent file
+	t.Run("testDeleteNonExistentFile", func(t *testing.T) {
+		doesNotExistPath := fmt.Sprintf("pelican://%s%s/doesNotExist", discoveryUrl.Host, "/with-write")
+		err := client.DoDelete(fed.Ctx, doesNotExistPath, false, client.WithTokenLocation(tempToken.Name()))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "404")
+	})
+
+	// Test deleting an existing file
+	t.Run("testDeleteFile", func(t *testing.T) {
+		fileToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(fileToBeDeleted))
+		err = client.DoDelete(fed.Ctx, fileToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+
+		_, err = os.Stat(fileToBeDeleted)
+		if err != nil {
+			if os.IsNotExist(err) {
+				require.True(t, true, "File does not exist as expected")
+			} else {
+				require.NoError(t, err, "Unexpected error occurred while checking file")
+			}
+		} else {
+			require.Fail(t, "File should not exist but it does")
+		}
+	})
+
+	// Test deleting an empty directory
+	t.Run("testDeleteEmptyDirectory", func(t *testing.T) {
+		emptyDirPelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(emptyDirToBeDeleted))
+		err := client.DoDelete(fed.Ctx, emptyDirPelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		_, err = os.Stat(emptyDirToBeDeleted)
+		if err != nil {
+			if os.IsNotExist(err) {
+				require.True(t, true, "Directory successfully deleted")
+			} else {
+				require.NoError(t, err, "Unexpected error occurred while checking directory")
+			}
+		} else {
+			require.Fail(t, "Directory should not exist but it does")
+		}
+	})
+
+	// Test deleting a non-empty directory without the recursive flag
+	t.Run("testDeleteNonEmptyDirectoryWithoutRecursive", func(t *testing.T) {
+		dirToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(complexDir))
+		err := client.DoDelete(fed.Ctx, dirToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "cannot delete non-empty directory")
+
+		info, err := os.Stat(complexDir)
+		require.NoError(t, err, "Error checking complex directory existence")
+		require.True(t, info.IsDir(), "Complex directory should exist but does not")
+	})
+
+	// Test deleting a non-empty directory with the recursive flag
+	t.Run("testDeleteNonEmptyDirectoryWithRecursive", func(t *testing.T) {
+		dirToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(complexDir))
+		err = client.DoDelete(fed.Ctx, dirToDeletePelicanUrl, true, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		_, err = os.Stat(complexDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				require.True(t, true, "Directory successfully deleted")
+			} else {
+				require.NoError(t, err, "Unexpected error occurred while checking directory")
+			}
+		} else {
+			require.Fail(t, "Directory should not exist but it does")
+		}
+	})
+
+	// Test attempting to delete a file in a non-writable namespace and expecting a permission error
+	t.Run("testDeleteForNonWritableNamespace", func(t *testing.T) {
+		dirToDeletePelicanUrl := fmt.Sprintf("pelican://%s/without-write/%s", discoveryUrl.Host, filepath.Base(fileNonWritableNs))
+		err := client.DoDelete(fed.Ctx, dirToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "403")
 	})
 }

@@ -1,0 +1,10 @@
+Origin:
+  StorageType: "posix"
+  EnableDirectReads: true
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /with-write
+      Capabilities: ["PublicReads", "Writes", "Listings"]
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /without-write
+      Capabilities: ["PublicReads", "Listings"]
