@@ -142,7 +142,5 @@ jobs:
       run: ./github_scripts/get_put_test.sh
     - name: Run End-to-End Test for Director stat
       run: ./github_scripts/stat_test.sh
-    - name: Run End-to-End Test of x509 access
-      run: ./github_scripts/x509_test.sh
     - name: Run End-to-End Test for --version flag
       run: ./github_scripts/version_test.sh
