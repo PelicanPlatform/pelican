@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-# This test the functionally of the x509 defer check
+# This test the functionality of the x509 defer check
 # Some prefixes allow for x509 authentication rather than using tokens, this tests
 # that a file that requires authorization is retrievable when using either x509 authentication or a token
 # and also tests that files that aren't allowed to use x509 authentication are not retrievable
