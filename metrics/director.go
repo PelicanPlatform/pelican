@@ -33,11 +33,11 @@ const (
 	MetricSucceeded MetricSimpleStatus = "Succeeded"
 	MetricFailed    MetricSimpleStatus = "Failed"
 
-	StatSucceeded DirectorStatResult = "Succeeded"
-	StatNotFound  DirectorStatResult = "NotFound"
-	StatTimeout   DirectorStatResult = "Timeout"
-	StatCancelled DirectorStatResult = "Cancelled"
-	StatForbidden DirectorStatResult = "Forbidden"
+	StatSucceeded  DirectorStatResult = "Succeeded"
+	StatNotFound   DirectorStatResult = "NotFound"
+	StatTimeout    DirectorStatResult = "Timeout"
+	StatCancelled  DirectorStatResult = "Cancelled"
+	StatForbidden  DirectorStatResult = "Forbidden"
 	StatUnknownErr DirectorStatResult = "UnknownErr"
 )
 
