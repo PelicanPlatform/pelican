@@ -220,8 +220,11 @@ RUN rm -rf /pelican/pelican
 ####################
 
 FROM pelican-base AS cache
-
-ENTRYPOINT [ "/entrypoint.sh", "pelican", "cache"]
+RUN rm -rf /pelican/pelican
+COPY --from=pelican-build /pelican/dist/pelican-server_linux_amd64_v1/pelican-server /pelican/pelican-server
+RUN chmod +x /pelican/pelican-server
+# For now, we're only using pelican-server in the cache, but eventually we'll use it in all servers
+ENTRYPOINT [ "/entrypoint.sh", "pelican-server", "cache"]
 CMD [ "serve" ]
 
 ####################
@@ -260,8 +263,10 @@ CMD [ "serve" ]
 ####################
 
 FROM osdf-base AS osdf-cache
-
-ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "cache"]
+RUN rm -rf /pelican/osdf
+COPY --from=pelican-build /pelican/dist/pelican-server_linux_amd64_v1/pelican-server /pelican/osdf-server
+RUN chmod +x /pelican/osdf-server
+ENTRYPOINT [ "/entrypoint.sh" ,"osdf-server", "cache"]
 CMD [ "serve" ]
 
 ####################
