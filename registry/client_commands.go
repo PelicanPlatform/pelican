@@ -168,16 +168,54 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 	if err != nil {
 		return errors.Wrap(err, "failed to sign payload")
 	}
+	// Also sign the payload with the previous private key
+	prevPrivateKey := config.GetPreviousIssuerPrivateJWK()
 
-	// // Create data for the second POST request
+	var prevSignature []byte
+	// When Pelican starts at the first time or the admin never changes the key, there is no previous private key
+	if prevPrivateKey != nil {
+		prevPrivateKeyRaw := &ecdsa.PrivateKey{}
+		if err = prevPrivateKey.Raw(prevPrivateKeyRaw); err != nil {
+			return errors.Wrap(err, "failed to get previous raw private key in ECDSA")
+		}
+		prevSignature, err = signPayload([]byte(clientPayload), prevPrivateKeyRaw)
+		if err != nil {
+			return errors.Wrapf(err, "failed to sign payload with previous private key, previous signature is '%s'", prevSignature)
+		}
+	}
+
+	// Send origin's all public keys in another key set
+	privateKeys := config.GetIssuerPrivateKeys()
+	if len(privateKeys) == 0 {
+		return errors.Wrap(err, "The server doesn't have any in-memory private key")
+	}
+	allKeysSet := jwk.NewSet()
+	for _, privKey := range privateKeys {
+		pubKey, err := privKey.PublicKey()
+		if err != nil {
+			return errors.Wrapf(err, "failed to get the public key of a private key")
+		}
+		if err = allKeysSet.AddKey(pubKey); err != nil {
+			return errors.Wrap(err, "failed to add public key to all keys JWKS")
+		}
+	}
+
+	// Create data for the second POST request
 	unidentifiedPayload := map[string]interface{}{
-		"pubkey":            keySet,
-		"prefix":            prefix,
-		"site_name":         siteName,
-		"client_nonce":      clientNonce,
-		"server_nonce":      respData.ServerNonce,
-		"client_payload":    clientPayload,
-		"client_signature":  hex.EncodeToString(signature),
+		"pubkey":           keySet,
+		"all_pubkeys":      allKeysSet,
+		"prefix":           prefix,
+		"site_name":        siteName,
+		"client_nonce":     clientNonce,
+		"server_nonce":     respData.ServerNonce,
+		"client_payload":   clientPayload,
+		"client_signature": hex.EncodeToString(signature),
+		"client_prev_signature": func() string {
+			if prevSignature == nil {
+				return ""
+			}
+			return hex.EncodeToString(prevSignature)
+		}(),
 		"server_payload":    respData.ServerPayload,
 		"server_signature":  respData.ServerSignature,
 		"access_token":      accessToken,

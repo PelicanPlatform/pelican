@@ -161,10 +161,32 @@ func handleExports(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, res)
 }
 
+// Create a new private key in the given directory, but without loading it immediately
+// This new key will be detected and loaded later by the ongoing goroutine `LaunchIssuerKeysDirRefresh`,
+// which periodically refreshes the keys in the issuer keys directory
+func createNewIssuerKey(ctx *gin.Context) {
+	issuerKeysDir := param.IssuerKeysDirectory.GetString()
+
+	_, err := config.GeneratePEM(issuerKeysDir)
+	if err != nil {
+		log.Errorf("Error creating a new private key in a new .pem file: %v", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Error creating a new private key in a new .pem file"})
+	}
+
+	ctx.JSON(http.StatusOK,
+		server_structs.SimpleApiResp{
+			Status: server_structs.RespOK,
+			Msg:    "Created a new issuer key and set it as the active private key",
+		})
+}
+
 func RegisterOriginWebAPI(engine *gin.Engine) error {
 	originWebAPI := engine.Group("/api/v1.0/origin_ui")
 	{
 		originWebAPI.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleExports)
+		originWebAPI.GET("/newIssuerKey", web_ui.AuthHandler, web_ui.AdminAuthHandler, createNewIssuerKey)
 	}
 
 	// Globus backend specific. Config other origin routes above this line

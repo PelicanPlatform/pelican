@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 type (
@@ -199,7 +200,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 	}
 }
 
-func registerNamespacePrep(ctx context.Context, prefix string) (key jwk.Key, registrationUrl string, isRegistered bool, err error) {
+func registerNamespacePrep(ctx context.Context, prefix string) (key jwk.Key, registrationUrl string, err error) {
 	// TODO: We eventually want to be able to export multiple prefixes; at that point, we'll
 	// refactor to loop around all the namespaces
 	if prefix == "" {
@@ -226,32 +227,12 @@ func registerNamespacePrep(ctx context.Context, prefix string) (key jwk.Key, reg
 		err = errors.Wrap(err, "Failed to construct registration endpoint URL: %v")
 		return
 	}
+
 	key, err = config.GetIssuerPrivateJWK()
 	if err != nil {
-		err = errors.Wrap(err, "failed to load the origin's JWK")
-		return
+		err = errors.Wrap(err, "Failed to obtain origin's active private key")
 	}
-	if key.KeyID() == "" {
-		if err = jwk.AssignKeyID(key); err != nil {
-			err = errors.Wrap(err, "Error when generating a key ID for registration")
-			return
-		}
-	}
-	keyStatus, err := keyIsRegistered(key, registrationUrl, prefix)
-	if err != nil {
-		err = errors.Wrap(err, "Failed to determine whether namespace is already registered")
-		return
-	}
-	switch keyStatus {
-	case keyMatch:
-		isRegistered = true
-		return
-	case keyMismatch:
-		err = errors.Errorf("Namespace %v already registered under a different key", prefix)
-		return
-	case noKeyPresent:
-		log.Infof("Namespace %v not registered; new registration will proceed\n", prefix)
-	}
+
 	return
 }
 
@@ -273,19 +254,10 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 	}
 	siteName := param.Xrootd_Sitename.GetString()
 
-	key, url, isRegistered, err := registerNamespacePrep(ctx, prefix)
+	key, url, err := registerNamespacePrep(ctx, prefix)
 	if err != nil {
 		return err
 	}
-	if isRegistered {
-		metrics.SetComponentHealthStatus(metrics.OriginCache_Registry, metrics.StatusOK, "")
-		log.Debugf("Origin already has prefix %v registered\n", prefix)
-		if err := origin.FetchAndSetRegStatus(prefix); err != nil {
-			return errors.Wrapf(err, "failed to fetch registration status for the prefix %s", prefix)
-		}
-		return nil
-	}
-
 	if err = registerNamespaceImpl(key, prefix, siteName, url); err == nil {
 		return nil
 	}
@@ -312,4 +284,49 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 		}
 	})
 	return nil
+}
+
+// Check the directory containing .pem files every 5 minutes, load new private key(s)
+// if new file(s) are detected, then register the new public key
+func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group) {
+	egrp.Go(func() error {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Debugln("Stopping periodic check for private keys directory.")
+				return nil
+			case <-ticker.C:
+				// Refresh the disk to pick up any new private key
+				config.UpdatePreviousIssuerPrivateJWK()
+				key, err := config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
+				if err != nil {
+					return errors.Wrap(err, "Failed to refresh the disk to pick up any new private key")
+				}
+				log.Debugln("Private keys directory refreshed successfully. The active (latest) private key is", key.KeyID())
+				log.Debugln("Previous private key is", config.GetPreviousIssuerPrivateJWK().KeyID())
+
+				// Update public key in registry db with the new active private key
+				extUrlStr := param.Server_ExternalWebUrl.GetString()
+				extUrl, _ := url.Parse(extUrlStr)
+				namespace := server_structs.GetOriginNs(extUrl.Host)
+				if err := RegisterNamespaceWithRetry(ctx, egrp, namespace); err != nil {
+					log.Errorf("Error registering updated private key: %v", err)
+				}
+
+				originExports, err := server_utils.GetOriginExports()
+				if err != nil {
+					return err
+				}
+				for _, export := range originExports {
+					if err := RegisterNamespaceWithRetry(ctx, egrp, export.FederationPrefix); err != nil {
+						return err
+					}
+				}
+
+			}
+		}
+	})
 }

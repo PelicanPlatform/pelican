@@ -92,15 +92,17 @@ type NamespaceConfig struct {
 Various auxiliary functions used for client-server security handshakes
 */
 type registrationData struct {
-	ClientNonce     string `json:"client_nonce"`
-	ClientPayload   string `json:"client_payload"`
-	ClientSignature string `json:"client_signature"`
+	ClientNonce         string `json:"client_nonce"`
+	ClientPayload       string `json:"client_payload"`
+	ClientSignature     string `json:"client_signature"`
+	ClientPrevSignature string `json:"client_prev_signature"`
 
 	ServerNonce     string `json:"server_nonce"`
 	ServerPayload   string `json:"server_payload"`
 	ServerSignature string `json:"server_signature"`
 
 	Pubkey           json.RawMessage `json:"pubkey"`
+	AllPubkeys       json.RawMessage `json:"all_pubkeys"`
 	Prefix           string          `json:"prefix"`
 	SiteName         string          `json:"site_name"`
 	AccessToken      string          `json:"access_token"`
@@ -173,16 +175,26 @@ func loadServerKeys() (*ecdsa.PrivateKey, error) {
 	// Note: go 1.21 introduces `OnceValues` which automates this procedure.
 	// TODO: Reimplement the function once we switch to a minimum of 1.21
 	serverCredsLoad.Do(func() {
-		issuerFileName := param.IssuerKey.GetString()
-		var privateKey crypto.PrivateKey
-		privateKey, serverCredsErr = config.LoadPrivateKey(issuerFileName, false)
-
-		switch key := privateKey.(type) {
-		case *ecdsa.PrivateKey:
-			serverCredsPrivKey = key
-		default:
-			serverCredsErr = errors.Errorf("unsupported key type for server issuer key: %T", key)
+		var privateKey jwk.Key
+		privateKey, serverCredsErr = config.GetIssuerPrivateJWK()
+		if serverCredsErr != nil {
+			return
 		}
+
+		// Extract the underlying ECDSA private key
+		var rawKey interface{}
+		if err := privateKey.Raw(&rawKey); err != nil {
+			serverCredsErr = errors.Errorf("failed to extract raw key: %v", err)
+			return
+		}
+
+		ecdsaKey, ok := rawKey.(*ecdsa.PrivateKey)
+		if !ok {
+			serverCredsErr = errors.Errorf("unsupported key type for server issuer key: %T", rawKey)
+			return
+		}
+
+		serverCredsPrivKey = ecdsaKey
 	})
 
 	return serverCredsPrivKey, serverCredsErr
@@ -249,8 +261,10 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		return false, nil, errors.Wrap(err, "failed to generate raw pubkey from jwks")
 	}
 
+	// Verify the Proof of Possession of the client and server's active private keys
 	clientPayload := []byte(data.ClientNonce + data.ServerNonce)
 	clientSignature, err := hex.DecodeString(data.ClientSignature)
+	log.Debugf("client's active signature: %s; active key: %s", string(clientSignature), key.KeyID())
 	if err != nil {
 		return false, nil, errors.Wrap(err, "Failed to decode the client's signature")
 	}
@@ -282,11 +296,121 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			return false, nil, errors.Wrap(err, "Server encountered an error checking if namespace already exists")
 		}
 		if exists {
-			returnMsg := map[string]interface{}{
-				"message": fmt.Sprintf("The prefix %s is already registered -- nothing else to do!", data.Prefix),
+			// Update the namespace's public key with the latest one when authorized origin provides a new key
+			existingNs, err := getNamespaceByPrefix(data.Prefix)
+			if err != nil {
+				log.Errorf("Failed to get existing namespace to update: %v", err)
+				return false, nil, errors.Wrap(err, "Server encountered an error getting existing namespace to update")
 			}
-			log.Infof("Skipping registration of prefix %s because it's already registered.", data.Prefix)
-			return false, returnMsg, nil
+
+			// Check the origin is authorized to update (possessing the public key used for prefix initial registration)
+			// Parse all public keys of the sender into a JWKS
+			clientKeySet, err := jwk.Parse(data.AllPubkeys)
+			if err != nil {
+				log.Errorf("Failed to parse in-memory public keys of the client: %v", err)
+				return false, nil, errors.Wrapf(err, "Invalid in-memory public keys format of the client")
+			}
+			// Parse `existingNs.Pubkey` as a JWKS
+			existingKeySet := jwk.NewSet()
+			err = json.Unmarshal([]byte(existingNs.Pubkey), &existingKeySet)
+			if err != nil {
+				log.Errorf("Failed to parse existing namespace public key as JWKS: %v", err)
+				return false, nil, errors.Wrap(err, "Invalid existing namespace public key format")
+			}
+
+			// Check if any key in `clientKeySet` matches a key in `existingKeySet`
+			ctx := context.Background()
+			existingKeysIter := existingKeySet.Keys(ctx)
+			clientKeysIter := clientKeySet.Keys(ctx)
+			matchFound := false
+
+			for existingKeysIter.Next(ctx) {
+				existingKey := existingKeysIter.Pair().Value.(jwk.Key)
+
+				existingKid, ok := existingKey.Get("kid")
+				if !ok {
+					log.Warnf("Skipping registry db existing key without 'kid'")
+					continue
+				}
+
+				for clientKeysIter.Next(ctx) {
+					clientKey := clientKeysIter.Pair().Value.(jwk.Key)
+
+					clientKid, ok := clientKey.Get("kid")
+					if !ok {
+						log.Warnf("Skipping client key without 'kid'")
+						continue
+					}
+
+					if existingKid == clientKid {
+						// Verify the Proof of Possession of client's previous active private key
+						// Get client's previous public key recorded in db
+						var prevRawkey interface{}
+						if err := existingKey.Raw(&prevRawkey); err != nil {
+							return false, nil, errors.Wrap(err, "failed to generate raw pubkey from client's previous pubkey")
+						}
+						// Get client's previous signature from payload
+						var prevKeyVerified bool
+						if data.ClientPrevSignature == "" {
+							prevKeyVerified = true
+							log.Debugf("This is the initial namespace registration. Client's previous signature is an empty string")
+						} else {
+							clientPrevSignature, err := hex.DecodeString(data.ClientPrevSignature)
+							if err != nil {
+								return false, nil, errors.Wrap(err, "Failed to decode the client's previous signature")
+							}
+							prevKeyVerified = verifySignature(clientPayload, clientPrevSignature, (prevRawkey).(*ecdsa.PublicKey))
+						}
+
+						if prevKeyVerified {
+							matchFound = true
+							break
+						} else {
+							log.Debugf("Client cannot prove that it possesses the key it claims, key id: %s", existingKid)
+						}
+					}
+				}
+
+				if matchFound {
+					break
+				}
+			}
+
+			if !matchFound {
+				return false, nil, permissionDeniedError{
+					Message: fmt.Sprintf("The client that tries to prefix '%s' cannot be authorized: either it doesn't contain any public key matching the existing namespace's public key in db, or it fails to pass the proof of possession verification", data.Prefix),
+				}
+			}
+
+			log.Debugf("New public key %s is going to replace the old one: %s", string(data.Pubkey), existingNs.Pubkey)
+
+			// Process origin's new public key
+			pubkeyData, err := json.Marshal(data.Pubkey)
+			if err != nil {
+				return false, nil, errors.Wrapf(err, "Failed to convert public key from json to string format for the prefix %s", data.Prefix)
+			}
+			pubkeyDbString := string(pubkeyData)
+
+			// Perform the update action when origin provides a new key
+			if pubkeyDbString != existingNs.Pubkey {
+				err = updateNamespacePubKey(data.Prefix, pubkeyDbString)
+				if err != nil {
+					log.Errorf("Failed to update the public key of namespace %s: %v", data.Prefix, err)
+					return false, nil, errors.Wrap(err, "Server encountered an error updating the public key of an existing namespace")
+				}
+				// Skip the rest steps in namesapce initial registration
+				returnMsg := map[string]interface{}{
+					"message": fmt.Sprintf("Updated the public key of namespace %s:", data.Prefix),
+				}
+				log.Infof("Updated the public key of namespace %s:", data.Prefix)
+				return false, returnMsg, nil
+			} else {
+				returnMsg := map[string]interface{}{
+					"message": fmt.Sprintf("The prefix %s is already registered -- nothing else to do!", data.Prefix),
+				}
+				log.Infof("Skipping registration of prefix %s because it's already registered.", data.Prefix)
+				return false, returnMsg, nil
+			}
 		}
 
 		reqPrefix, err := validatePrefix(data.Prefix)

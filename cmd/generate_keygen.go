@@ -39,7 +39,7 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to get the current working directory")
 	}
 	if privateKeyPath == "" {
-		privateKeyPath = filepath.Join(wd, "issuer.jwk")
+		privateKeyPath = filepath.Join(wd, "issuer-keys")
 	} else {
 		privateKeyPath = filepath.Clean(strings.TrimSpace(privateKeyPath))
 	}
@@ -68,7 +68,7 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("file exists for public key under %s", publicKeyPath)
 	}
 
-	viper.Set(param.IssuerKey.GetName(), privateKeyPath)
+	viper.Set(param.IssuerKeysDirectory.GetName(), privateKeyPath)
 
 	// GetIssuerPublicJWKS will generate the private key at IssuerKey if it does not exist
 	// and parse the private key and generate the corresponding public key for us

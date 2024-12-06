@@ -96,7 +96,7 @@ func TestMain(m *testing.M) {
 	}
 
 	//Override viper default for testing
-	viper.Set("IssuerKey", filepath.Join(tempJWKDir, "issuer.jwk"))
+	viper.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(tempJWKDir, "issuer-keys"))
 
 	// Ensure we load up the default configs.
 	dirname, err := os.MkdirTemp("", "tmpDir")
@@ -218,8 +218,8 @@ func TestHandleWebUIAuth(t *testing.T) {
 		})
 
 		tmpDir := t.TempDir()
-		issuerFile := filepath.Join(tmpDir, "issuer.key")
-		viper.Set(param.IssuerKey.GetName(), issuerFile)
+		issuerFile := filepath.Join(tmpDir, "issuer-keys")
+		viper.Set(param.IssuerKeysDirectory.GetName(), issuerFile)
 		viper.Set(param.Server_ExternalWebUrl.GetName(), "https://example.com")
 
 		_, err := config.GetIssuerPrivateJWK()

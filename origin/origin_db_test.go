@@ -62,8 +62,8 @@ func setupMockOriginDB(t *testing.T) {
 
 	// Setup encryption
 	tmp := t.TempDir()
-	keyName := filepath.Join(tmp, "issuer.key")
-	viper.Set(param.IssuerKey.GetName(), keyName)
+	keyDir := filepath.Join(tmp, "issuer-keys")
+	viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
 
 	// Also update the refresh token to be encrpted
 	for idx := range mockGC {
