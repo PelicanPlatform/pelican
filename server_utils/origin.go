@@ -42,7 +42,7 @@ import (
 var originExports []OriginExport
 
 type (
-	// TODO: pull stoage-specific fields into a separate struct and mixin
+	// TODO: pull storage-specific fields into a separate struct and mixin
 	OriginExport struct {
 		StoragePrefix    string `json:"storagePrefix"`
 		FederationPrefix string `json:"federationPrefix"`

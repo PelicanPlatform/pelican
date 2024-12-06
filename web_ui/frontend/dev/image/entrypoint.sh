@@ -13,5 +13,5 @@ echo "Starting cron"
 cron
 
 # Run the original Docker entrypoint script with any passed arguments
-echo "Running original Docker entrypoint script with arguments: $@"
+echo "Running original Docker entrypoint script with arguments: $*"
 /docker-entrypoint.sh "$@"

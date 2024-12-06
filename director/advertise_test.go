@@ -303,7 +303,7 @@ func mockTopoDowntimeXMLHandler(w http.ResponseWriter, r *http.Request) {
 	downtimeInfo := server_structs.TopoCurrentDowntimes{
 		Downtimes: []server_structs.TopoServerDowntime{
 			{
-				// Current time falls in start-end window. SHould be filtered
+				// Current time falls in start-end window. Should be filtered
 				ResourceName: "BOISE_INTERNET2_OSDF_CACHE",
 				ResourceFQDN: "dtn-pas.bois.nrp.internet2.edu",
 				StartTime:    time.Now().Add(-24 * time.Hour).Format("Jan 2, 2006 03:04 PM MST"),

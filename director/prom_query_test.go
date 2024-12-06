@@ -83,7 +83,7 @@ func TestParsePromRes(t *testing.T) {
 	t.Run("error-when-unixtime-is-wrong", func(t *testing.T) {
 		mockPromQLRes := promQLRes{Data: promQLResData{
 			ResultType: "string",
-			Result:     []interface{}{"misformed-unixtime", "mock string"},
+			Result:     []interface{}{"malformed-unixtime", "mock string"},
 		}}
 		_, err := parsePromRes(mockPromQLRes)
 		require.Error(t, err)

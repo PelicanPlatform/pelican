@@ -161,7 +161,7 @@ func validateJwks(jwksStr string) (jwk.Key, error) {
 		// Let's check that we can convert to JSON and get the right thing...
 		jsonbuf, err := json.Marshal(clientJwks)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to marshal the reuqest pubKey's keyset into JSON")
+			return nil, errors.Wrap(err, "failed to marshal the request pubKey's keyset into JSON")
 		}
 		log.Debugln("Client JWKS as seen by the registry server:", string(jsonbuf))
 	}
@@ -175,7 +175,7 @@ func validateJwks(jwksStr string) (jwk.Key, error) {
 	 */
 	key, exists := clientJwks.Key(0)
 	if !exists {
-		return nil, errors.New("There was no key at index 0 in the reuqest pubKey's JWKS. Something is wrong")
+		return nil, errors.New("There was no key at index 0 in the request pubKey's JWKS. Something is wrong")
 	}
 	return key, nil
 }

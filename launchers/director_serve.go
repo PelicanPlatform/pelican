@@ -42,13 +42,13 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	if err := director.InitializeDB(); err != nil {
 		return errors.Wrap(err, "failed to initialize director sqlite database")
 	}
-	director.ConfigFilterdServers()
+	director.ConfigFilteredServers()
 
 	director.LaunchTTLCache(ctx, egrp)
 
 	director.LaunchMapMetrics(ctx, egrp)
 
-	director.ConfigFilterdServers()
+	director.ConfigFilteredServers()
 
 	director.LaunchServerIOQuery(ctx, egrp)
 

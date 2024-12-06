@@ -53,11 +53,11 @@ func initClientAndServerConfig(v *viper.Viper) *param.Config {
 		config.SetFederation(globalFedInfo)
 	}
 
-	exapandedConfig, err := param.UnmarshalConfig(v)
+	expandedConfig, err := param.UnmarshalConfig(v)
 	if err != nil {
-		log.Errorf("Error unmarshaling config: %v", err)
+		log.Errorf("Error unmarshalling config: %v", err)
 	}
-	return exapandedConfig
+	return expandedConfig
 }
 
 // printConfig is used to print a config.

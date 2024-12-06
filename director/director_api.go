@@ -224,7 +224,7 @@ func hookServerAdsCache() {
 }
 
 // Populate internal filteredServers map using Director.FilteredServers param and director db
-func ConfigFilterdServers() {
+func ConfigFilteredServers() {
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
 

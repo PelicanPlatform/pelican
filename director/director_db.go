@@ -115,7 +115,7 @@ func getAllServerDowntimes() ([]ServerDowntime, error) {
 // Set the downtime info (filterType) of a given server
 func setServerDowntime(serverName string, filterType filterType) error {
 	var serverDowntime ServerDowntime
-	// slience the logger for this query because there's definitely an ErrRecordNotFound when a new downtime info entry inserted
+	// silence the logger for this query because there's definitely an ErrRecordNotFound when a new downtime info entry inserted
 	err := db.Session(&gorm.Session{Logger: db.Logger.LogMode(logger.Silent)}).First(&serverDowntime, "name = ?", serverName).Error
 
 	// If the server doesn't exist in director db, create a new entry for it

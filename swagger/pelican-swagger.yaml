@@ -14,7 +14,7 @@ info:
     The cookie is issued after a successful call to `/api/v1.0/auth/login`. However, OpenAPI 2.0 does not support specifying cookie-based security check.
     Therefore, as an alternative, we will add `Authentication Required` to the API description where needed.
 
-    For endpoint that is only accesible by users with admin privilege, we mark the endpoint as `Admin privilege Required`.
+    For endpoint that is only accessible by users with admin privilege, we mark the endpoint as `Admin privilege Required`.
 
 
     For how to set up Pelican servers, please refer to the documentation at [docs.pelicanplatform.org](https://docs.pelicanplatform.org/)"
@@ -80,7 +80,7 @@ definitions:
         default: ""
   ErrorModel:
     type: object
-    description: The error reponse of a request
+    description: The error response of a request
     properties:
       error:
         type: string
@@ -100,7 +100,7 @@ definitions:
         description: The response message
   SuccessModel:
     type: object
-    description: The successful reponse of a request
+    description: The successful response of a request
     properties:
       msg:
         type: string
@@ -464,7 +464,7 @@ definitions:
         example: Origin
       latitude:
         type: number
-        description: The latitute of the server based on its IP address
+        description: The latitude of the server based on its IP address
         default: 0
       longitude:
         type: number
@@ -541,7 +541,7 @@ definitions:
           * "Not Supported": the Pelican registry is below v7.8.0 and does not support checking registration status.
             In this case, `edit_url` is empty.
           * "Completed": the registration is completed
-          * "Incomplete": the registration is not completed. `edit_url` will takes the user to the correspoding registration page
+          * "Incomplete": the registration is not completed. `edit_url` will takes the user to the corresponding registration page
             to finish the registration. `status_description` contains detail information of which field(s) are missing.
           * "Registration Error": there is an error registering the namespace. `edit_url` is empty and the user cannot edit the registration.
         example: Incomplete
@@ -604,7 +604,7 @@ definitions:
           * "Not Supported": the Pelican registry is below v7.8.0 and does not support checking registration status.
             In this case, `edit_url` is empty.
           * "Completed": the registration is completed
-          * "Incomplete": the registration is not completed. `edit_url` will takes the user to the correspoding registration page
+          * "Incomplete": the registration is not completed. `edit_url` will takes the user to the corresponding registration page
             to finish the registration. `status_description` contains detail information of which field(s) are missing.
           * "Registration Error": there is an error registering the origin. `edit_url` is empty and the user cannot edit the registration.
         example: Incomplete
@@ -650,7 +650,7 @@ definitions:
         type: string
         example: "Inactive"
         description: >-
-          The activation status of the Globus colleciton.
+          The activation status of the Globus collection.
           Can be either "Inactive" or "Activated".
       description:
         type: string
@@ -761,7 +761,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModelV2"
         "403":
-          description: Permission denied. Admin privilige required.
+          description: Permission denied. Admin privilege required.
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
@@ -816,7 +816,7 @@ paths:
             type: object
             $ref: "#/definitions/ErrorModelV2"
         "403":
-          description: Permission denied. Admin privilige required.
+          description: Permission denied. Admin privilege required.
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
@@ -1194,7 +1194,7 @@ paths:
           description:
             The approval status of the namespaces, can be `pending`, `approved`, `denied`, or `unknown`.
 
-            If `status == unknown`, internally it will match any registration with `status == ""` or `stauts == "unknown"`
+            If `status == unknown`, internally it will match any registration with `status == ""` or `status == "unknown"`
 
             For unauthenticated users, filter with `status != approved` will result in a 403 error.
         - name: legacy
@@ -1301,7 +1301,7 @@ paths:
           description:
             The approval status of the namespaces, can be `pending`, `approved`, `denied`, or `unknown`.
 
-            If `status == unknown`, internally it will match any registration with `status == ""` or `stauts == "unknown"`
+            If `status == unknown`, internally it will match any registration with `status == ""` or `status == "unknown"`
           type: string
       produces:
         - application/json
@@ -1484,7 +1484,7 @@ paths:
       tags:
         - "registry_ui"
       summary: Returns the public key of the namespace by id, in JWK Set format
-      description: It returns the JWK set as a downloadable attachement. Refer to https://datatracker.ietf.org/doc/html/rfc7517#section-5 for the format of JWK set
+      description: It returns the JWK set as a downloadable attachment. Refer to https://datatracker.ietf.org/doc/html/rfc7517#section-5 for the format of JWK set
       operationId: getNamespacePubkeyById
       parameters:
         - name: id
@@ -1496,7 +1496,7 @@ paths:
         - application/json
       responses:
         "200":
-          description: OK, an attachement is returned to download
+          description: OK, an attachment is returned to download
           schema:
             type: object
         "400":
@@ -2010,7 +2010,7 @@ paths:
     get:
       summary: Returns the data exports of the origin server
       description: >-
-        `Authentication Required` `Admin Previlege Required`
+        `Authentication Required` `Admin Privilege Required`
       tags:
         - "origin_ui"
       produces:
@@ -2042,7 +2042,7 @@ paths:
         - "origin_ui"
       summary: Get a list of Globus exports
       description: >-
-        `Authentication Required` `Admin Previlege Required`
+        `Authentication Required` `Admin Privilege Required`
       responses:
         "200":
           description: OK
@@ -2070,7 +2070,7 @@ paths:
     get:
       summary: Start the OAuth2 code flow for authenticating a Globus collection
       description: >-
-        `Authentication Required` `Admin Previlege Required`
+        `Authentication Required` `Admin Privilege Required`
       tags:
         - "origin_ui"
       parameters:
@@ -2110,7 +2110,7 @@ paths:
     get:
       summary: The callback endpoint for Globus OAuth2 code flow
       description: >-
-        `Authentication Required` `Admin Previlege Required`
+        `Authentication Required` `Admin Privilege Required`
       tags:
         - "origin_ui"
       parameters:

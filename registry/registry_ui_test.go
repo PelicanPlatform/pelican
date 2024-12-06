@@ -1388,7 +1388,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 	})
 }
 
-func TestListInsitutions(t *testing.T) {
+func TestListInstitutions(t *testing.T) {
 	server_utils.ResetTestState()
 	router := gin.Default()
 	router.GET("/institutions", listInstitutions)

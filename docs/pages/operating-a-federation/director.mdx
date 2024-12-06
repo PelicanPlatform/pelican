@@ -80,7 +80,7 @@ A Pelican director by default redirects object request from clients to the geosp
 
 ### `GeoIPOverrides`
 
-The MaxMind database may fail to return a valid longitute/latitute pair given a server IP. For example, the database does not support IPV6 addresses. In such cases, you may pass a list of IP addresses to `GeoIPOverrides` parameter whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects both server ads (for determining the location of origins and caches) and incoming client requests (for determing where a client request is coming from).
+The MaxMind database may fail to return a valid longitute/latitute pair given a server IP. For example, the database does not support IPV6 addresses. In such cases, you may pass a list of IP addresses to `GeoIPOverrides` parameter whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects both server ads (for determining the location of origins and caches) and incoming client requests (for determining where a client request is coming from).
 
 ### `Director.CacheResponseHostnames` and `Director.OriginResponseHostnames`
 
