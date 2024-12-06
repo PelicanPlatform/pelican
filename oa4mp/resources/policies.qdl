@@ -35,12 +35,12 @@ scopes := {};
 while [has_value(key, group_list.)]
 [
     group_scopes := { {{- range $idx, $action := .Actions }}{{- if eq $idx 0 -}}'{{- $action -}}:'{{else}}, '{{- $action -}}:'{{- end -}}{{ end -}} } + '{{- .Prefix -}}';
-    scopes := scopes \/ |^replace(~group_scopes, '$GROUP', key);
+    scopes := scopes \/ |^replace(~group_scopes, '$GROUP', encode(key, 1)); /* 1 = URL-encode (RFC 3986) */
 ];
 {{- end }}
 {{ range .UserAuthzTemplates }}
 user_scopes := { {{- range $idx, $action := .Actions }}{{- if eq $idx 0 -}}'{{- $action -}}:'{{else}}, '{{- $action -}}:'{{- end -}}{{ end -}} } + '{{- .Prefix -}}';
-scopes := scopes \/ |^replace(~user_scopes, '$USER', claims.'sub');
+scopes := scopes \/ |^replace(~user_scopes, '$USER', encode(claims.'sub', 1)); /* 1 = URL-encode (RFC 3986) */
 {{ end }}
 access_token.'scope' := detokenize(scopes, ' ', 2);
 
