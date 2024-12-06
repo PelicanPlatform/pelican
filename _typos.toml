@@ -5,6 +5,8 @@
 extend-ignore-identifiers-re = [
     ## Ignore TLAs. Two and three letter acronyms are not worth fixing.
     "^[A-Za-z]{2,3}$",
+    ## Ignore the 'dne' identifiers in server_utils/origin_test.go.
+    "(.*)_dne$",
 ]
 
 [default.extend-identifiers]
@@ -12,8 +14,6 @@ extend-ignore-identifiers-re = [
 NewCFBEncrypter = "NewCFBEncrypter"
 ## HTCondor's daemon names follow the usual "{word} + 'd'" convention.
 StartdAttrs = "StartdAttrs"
-## Other one-off identifiers that do not need fixing.
-sentinel_dne = "sentinel_dne"  # server_utils/origin_test.go
 
 [files]
 extend-exclude = [
