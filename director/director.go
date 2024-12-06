@@ -1137,12 +1137,18 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		adV2.DisableDirectorTest = true
 	}
 
-	// if we didn't receive a version but we were able to extract the request version from the user agent,
-	// then we can use the request version as the server version (they should be the same)
+	// if we didn't receive a version from the ad but we were able to extract the request version from the user agent,
+	// then we can fallback to the request version
 	// otherwise, we set the version to unknown because our sources of truth are not available
 	if adV2.Version == "" && reqVer != nil {
 		adV2.Version = reqVer.String()
-	} else {
+	} else if adV2.Version != "" && reqVer != nil {
+		_, err := version.NewVersion(adV2.Version)
+		if err != nil {
+			// ad version was not a valid version, so we fallback to the request version
+			adV2.Version = reqVer.String()
+		}
+	} else if adV2.Version == "" {
 		adV2.Version = "unknown"
 	}
 
