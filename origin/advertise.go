@@ -146,6 +146,7 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		}},
 		StorageType:         ost,
 		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
+		Version:             config.GetVersion(),
 	}
 
 	if len(prefixes) == 0 {
