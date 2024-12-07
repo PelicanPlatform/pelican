@@ -441,11 +441,11 @@ func TestRecordAd(t *testing.T) {
 			statUtils = make(map[string]serverStatUtil)
 
 			serverAds.DeleteAll()
-			geoIPOverrides = nil
+			geoNetOverrides = nil
 		})
 		server_utils.ResetTestState()
 		func() {
-			geoIPOverrides = nil
+			geoNetOverrides = nil
 
 			healthTestUtilsMutex.Lock()
 			statUtilsMutex.Lock()
