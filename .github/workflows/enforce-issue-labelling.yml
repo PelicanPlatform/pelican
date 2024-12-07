@@ -1,0 +1,32 @@
+name: Issue Validation
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  validate-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v2
+
+      - name: Validate issue has labels
+        id: check_labels
+        run: |
+          ISSUE_LABELS=$(jq -r '.issue.labels | length' $GITHUB_EVENT_PATH)
+          if [ "$ISSUE_LABELS" -eq "0" ]; then
+            echo "No labels found on the issue."
+            # Re-open the issue
+            ISSUE_NUMBER=$(jq -r '.issue.number' $GITHUB_EVENT_PATH)
+            REPO_OWNER=$(jq -r '.repository.owner.login' $GITHUB_EVENT_PATH)
+            REPO_NAME=$(jq -r '.repository.name' $GITHUB_EVENT_PATH)
+            curl -L \
+              -X PATCH \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$ISSUE_NUMBER \
+              -d '{"state":"open"}'
+            exit 1
+          fi
