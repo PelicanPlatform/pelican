@@ -88,7 +88,7 @@ func (pb *progressBars) launchDisplay(ctx context.Context) {
 			progressCtr.Wait()
 		}()
 
-		tickDuration := 200 * time.Millisecond
+		tickDuration := 500 * time.Millisecond
 		ticker := time.NewTicker(tickDuration)
 		defer ticker.Stop()
 		pbMap := make(map[string]*progressBar)
@@ -98,8 +98,8 @@ func (pb *progressBars) launchDisplay(ctx context.Context) {
 				return ctx.Err()
 			case <-pb.done:
 				for path := range pbMap {
+					// The deferred `progressCtr.Wait()` above will handle final cleanup.
 					pbMap[path].bar.Abort(true)
-					pbMap[path].bar.Wait()
 				}
 				return nil
 			case <-ticker.C:
@@ -122,6 +122,7 @@ func (pb *progressBars) launchDisplay(ctx context.Context) {
 										decor.OnComplete(decor.Name(" ] "), ""),
 										decor.OnComplete(decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 15), "Done!"),
 									),
+									mpb.BarRemoveOnComplete(),
 								),
 							}
 						}
@@ -129,6 +130,7 @@ func (pb *progressBars) launchDisplay(ctx context.Context) {
 						newStatus := pb.status[path]
 						if oldStatus.size == 0 && newStatus.size > 0 {
 							pbMap[path].bar.SetTotal(newStatus.size, false)
+							pbMap[path].bar.EnableTriggerComplete()
 						}
 						pbMap[path].bar.EwmaSetCurrent(newStatus.xfer, tickDuration)
 						pbMap[path].progressStatus = newStatus
@@ -142,7 +144,6 @@ func (pb *progressBars) launchDisplay(ctx context.Context) {
 					for _, path := range toDelete {
 						bar := pbMap[path].bar
 						bar.Abort(true)
-						bar.Wait()
 						delete(pbMap, path)
 					}
 				}()
