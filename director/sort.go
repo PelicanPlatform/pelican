@@ -27,7 +27,6 @@ import (
 	"net/netip"
 	"slices"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -121,22 +120,24 @@ func unmarshalOverrides() error {
 	// Ensure that we're starting with an empty slice.
 	geoNetOverrides = nil
 
-	err := param.GeoIPOverrides.Unmarshal(&geoIPOverrides)
-	if err != nil {
+	if err := param.GeoIPOverrides.Unmarshal(&geoIPOverrides); err != nil {
 		return err
 	}
 
 	for _, override := range geoIPOverrides {
-		var configuredCIDR string
+		var ipNet *net.IPNet
 
-		if strings.Contains(override.IP, "/") {
-			configuredCIDR = override.IP
-		} else {
-			configuredCIDR = override.IP + "/32"
+		if _, parsedNet, err := net.ParseCIDR(override.IP); err == nil {
+			ipNet = parsedNet
+		} else if ip := net.ParseIP(override.IP); ip != nil {
+			if ip4 := ip.To4(); ip4 != nil {
+				ipNet = &net.IPNet{IP: ip4, Mask: net.CIDRMask(32, 32)}
+			} else if ip16 := ip.To16(); ip16 != nil {
+				ipNet = &net.IPNet{IP: ip16, Mask: net.CIDRMask(128, 128)}
+			}
 		}
 
-		_, ipNet, err := net.ParseCIDR(configuredCIDR)
-		if err != nil {
+		if ipNet == nil {
 			// Log the error, and continue looking for good configuration.
 			log.Warningf("Failed to parse configured GeoIPOverride address (%s). Unable to use for GeoIP resolution!", override.IP)
 			continue
