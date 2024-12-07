@@ -61,6 +61,11 @@ type (
 		Coordinate Coordinate `mapstructure:"Coordinate"`
 	}
 
+	GeoNetOverride struct {
+		IPNet      net.IPNet
+		Coordinate Coordinate
+	}
+
 	geoIPError struct {
 		labels   prometheus.Labels
 		errorMsg string
@@ -72,8 +77,8 @@ func (e geoIPError) Error() string {
 }
 
 var (
-	invalidOverrideLogOnce = map[string]bool{}
-	geoIPOverrides         []GeoIPOverride
+	// Stores the unmarshalled GeoIP override config in a form that's efficient to test
+	geoNetOverrides []GeoNetOverride
 
 	// Stores a mapping of client IPs that have been randomly assigned a coordinate
 	clientIpCache = ttlcache.New(ttlcache.WithTTL[netip.Addr, Coordinate](20 * time.Minute))
@@ -108,53 +113,58 @@ func (me SwapMaps) Swap(left, right int) {
 	me[left], me[right] = me[right], me[left]
 }
 
+// Unmarshal any configured GeoIP overrides.
+// Malformed IPs and CIDRs are logged but not returned as errors.
+func unmarshalOverrides() error {
+	var geoIPOverrides []GeoIPOverride
+
+	// Ensure that we're starting with an empty slice.
+	geoNetOverrides = nil
+
+	err := param.GeoIPOverrides.Unmarshal(&geoIPOverrides)
+	if err != nil {
+		return err
+	}
+
+	for _, override := range geoIPOverrides {
+		var configuredCIDR string
+
+		if strings.Contains(override.IP, "/") {
+			configuredCIDR = override.IP
+		} else {
+			configuredCIDR = override.IP + "/32"
+		}
+
+		_, ipNet, err := net.ParseCIDR(configuredCIDR)
+		if err != nil {
+			// Log the error, and continue looking for good configuration.
+			log.Warningf("Failed to parse configured GeoIPOverride address (%s). Unable to use for GeoIP resolution!", override.IP)
+			continue
+		}
+		geoNetOverrides = append(geoNetOverrides, GeoNetOverride{IPNet: *ipNet, Coordinate: override.Coordinate})
+	}
+	return nil
+}
+
 // Check for any pre-configured IP-to-lat/long overrides. If the passed address
 // matches an override IP (either directly or via CIDR masking), then we use the
 // configured lat/long from the override instead of relying on MaxMind.
 // NOTE: We don't return an error because if checkOverrides encounters an issue,
 // we still have GeoIP to fall back on.
 func checkOverrides(addr net.IP) (coordinate *Coordinate) {
-	// Unmarshal the values, but only the first time we run through this block
-	if geoIPOverrides == nil {
-		err := param.GeoIPOverrides.Unmarshal(&geoIPOverrides)
+	// Unmarshal the GeoIP override config if we haven't already done so.
+	if geoNetOverrides == nil {
+		err := unmarshalOverrides()
 		if err != nil {
-			log.Warningf("Error while unmarshaling GeoIP Overrides: %v", err)
+			log.Warningf("Error while unmarshalling GeoIP overrides: %v", err)
+			return nil
 		}
 	}
-
-	for _, geoIPOverride := range geoIPOverrides {
-		// Check for regular IP addresses before CIDR
-		overrideIP := net.ParseIP(geoIPOverride.IP)
-		if overrideIP == nil {
-			// The IP is malformed
-			if !invalidOverrideLogOnce[geoIPOverride.IP] && !strings.Contains(geoIPOverride.IP, "/") {
-				// Don't return here, because we have more to check.
-				// Do provide a notice to the user, however.
-				log.Warningf("Failed to parse configured GeoIPOverride address (%s). Unable to use for GeoIP resolution!", geoIPOverride.IP)
-				invalidOverrideLogOnce[geoIPOverride.IP] = true
-			}
-		}
-		if overrideIP.Equal(addr) {
-			return &geoIPOverride.Coordinate
-		}
-
-		// Alternatively, we can match by CIDR blocks
-		if strings.Contains(geoIPOverride.IP, "/") {
-			_, ipNet, err := net.ParseCIDR(geoIPOverride.IP)
-			if err != nil {
-				if !invalidOverrideLogOnce[geoIPOverride.IP] {
-					// Same reason as above for not returning.
-					log.Warningf("Failed to parse configured GeoIPOverride CIDR address (%s): %v. Unable to use for GeoIP resolution!", geoIPOverride.IP, err)
-					invalidOverrideLogOnce[geoIPOverride.IP] = true
-				}
-				continue
-			}
-			if ipNet.Contains(addr) {
-				return &geoIPOverride.Coordinate
-			}
+	for _, override := range geoNetOverrides {
+		if override.IPNet.Contains(addr) {
+			return &override.Coordinate
 		}
 	}
-
 	return nil
 }
 
