@@ -1,0 +1,12 @@
+# Origin configuration with two prefixes: one with write capability and one without.
+
+Origin:
+  StorageType: "posix"
+  EnableDirectReads: true
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /with-write
+      Capabilities: ["PublicReads", "Writes", "Listings"]
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /without-write
+      Capabilities: ["PublicReads", "Listings"]

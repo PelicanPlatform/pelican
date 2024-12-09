@@ -1056,8 +1056,15 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
+	httpMethod := http.MethodPut
+	if upload {
+		httpMethod = http.MethodPut
+	} else {
+		httpMethod = http.MethodGet
+	}
+
 	tj.directorUrl = copyUrl.FedInfo.DirectorEndpoint
-	dirResp, err := GetDirectorInfoForPath(tj.ctx, &copyUrl, upload, "")
+	dirResp, err := GetDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, "")
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", pUrl.String())
@@ -1074,7 +1081,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 
 		// The director response may change if it's given a token; let's repeat the query.
 		if contents != "" {
-			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyUrl, upload, contents)
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, contents)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", copyUrl.String())
@@ -2652,6 +2659,64 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 		fileInfos = append(fileInfos, file)
 	}
 	return fileInfos, nil
+}
+
+// deleteHttp takes the collection URL from the director response to perform the delete operation.
+// If the recursive flag is set, it recursively deletes a collection by iterating over the collection tree
+// and deleting each leaf object one by one.
+//
+// Note: The current implementation of recursive collection deletion is inefficient and does not use concurrency.
+// This limitation exists because the object delete command is not openly supported and is intended to remain hidden.
+// Adding concurrency would require integrating the delete command into the transfer engine logic,
+// which would involve significant and complex changes. As the command is not fully supported, concurrency is deferred.
+func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp server_structs.DirectorResponse, token *tokenGenerator) (err error) {
+	log.Debugln("Attempting to delete:", remoteUrl.Path)
+	if dirResp.XPelNsHdr.CollectionsUrl == nil {
+		return errors.Errorf("collections URL not found in director response.")
+	}
+
+	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
+
+	project := searchJobAd(projectName)
+	client := createWebDavClient(collectionsUrl, token, project)
+	remotePath := remoteUrl.Path
+
+	info, err := client.Stat(remotePath)
+	if err != nil {
+		if gowebdav.IsErrNotFound(err) {
+			return errors.Wrap(err, "object not found")
+		}
+		return errors.Wrap(err, "failed to check object existence")
+	}
+
+	if info.IsDir() {
+		children, err := client.ReadDir(remotePath)
+		if err != nil {
+			return errors.Wrap(err, "failed to read collection contents")
+		}
+		if !recursive && len(children) > 0 {
+			return errors.New("cannot delete non-empty collection, use recursive flag or recursive query in the url")
+		}
+		if recursive {
+			for _, child := range children {
+				childPath := remotePath + "/" + child.Name()
+				err = deleteHttp(&pelican_url.PelicanURL{Path: childPath}, recursive, dirResp, token)
+				if err != nil {
+					return errors.Wrapf(err, "failed to delete child object: %s", childPath)
+				}
+			}
+		}
+	}
+
+	err = client.Remove(remotePath)
+	if err != nil {
+		if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) || gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+			return err
+		}
+		return errors.Wrap(err, "failed to delete remote object")
+	}
+	log.Debugln("Successfully deleted:", remoteUrl.Path)
+	return nil
 }
 
 // Invoke a stat request against a remote URL that accepts WebDAV protocol,
