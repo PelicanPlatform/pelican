@@ -42,7 +42,11 @@ var (
 			}
 			return nil
 		},
-		RunE:   deleteMain,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			log.Warning("Object delete command is not openly supported and will only remove data from the origin, not from caches the data might have propagated to.")
+
+			return deleteMain(cmd, args)
+		},
 		Hidden: true,
 	}
 )
