@@ -1056,8 +1056,15 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
+	httpMethod := http.MethodPut
+	if upload {
+		httpMethod = http.MethodPut
+	} else {
+		httpMethod = http.MethodGet
+	}
+
 	tj.directorUrl = copyUrl.FedInfo.DirectorEndpoint
-	dirResp, err := GetDirectorInfoForPath(tj.ctx, &copyUrl, upload, "")
+	dirResp, err := GetDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, "")
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", pUrl.String())
@@ -1074,7 +1081,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 
 		// The director response may change if it's given a token; let's repeat the query.
 		if contents != "" {
-			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyUrl, upload, contents)
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, contents)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", copyUrl.String())

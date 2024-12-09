@@ -173,22 +173,18 @@ func parseServersFromDirectorResponse(resp *http.Response) (servers []*url.URL, 
 }
 
 // Retrieve federation namespace information for a given URL.
-func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, isPut bool, token string) (parsedResponse server_structs.DirectorResponse, err error) {
+func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, httpMethod string, token string) (parsedResponse server_structs.DirectorResponse, err error) {
 	if pUrl.FedInfo.DirectorEndpoint == "" {
 		return server_structs.DirectorResponse{},
 			errors.Errorf("unable to retrieve information from a Director for object %s because none was found in pelican URL metadata.", pUrl.Path)
 	}
 
 	log.Debugln("Will query director at", pUrl.FedInfo.DirectorEndpoint, "for object", pUrl.Path)
-	verb := "GET"
-	if isPut {
-		verb = "PUT"
-	}
 
 	var dirResp *http.Response
-	dirResp, err = queryDirector(ctx, verb, pUrl, token)
+	dirResp, err = queryDirector(ctx, httpMethod, pUrl, token)
 	if err != nil {
-		if isPut && dirResp != nil && dirResp.StatusCode == 405 {
+		if (httpMethod == http.MethodPut || httpMethod == http.MethodDelete) && dirResp != nil && dirResp.StatusCode == 405 {
 			err = errors.New("error 405: No writeable origins were found")
 			return
 		} else {

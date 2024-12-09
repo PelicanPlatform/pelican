@@ -135,7 +135,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		}
 	}()
 
-	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, false, "")
+	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, http.MethodGet, "")
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +173,7 @@ func GetObjectServerHostnames(ctx context.Context, testFile string) (urls []stri
 	if err != nil {
 		return
 	}
-	parsedDirResp, err := GetDirectorInfoForPath(ctx, pUrl, false, "")
+	parsedDirResp, err := GetDirectorInfoForPath(ctx, pUrl, http.MethodGet, "")
 	if err != nil {
 		return
 	}
@@ -280,7 +280,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		}
 	}()
 
-	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, false, "")
+	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, http.MethodGet, "")
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +332,7 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 	if _, exists := pUrl.Query()[pelican_url.QueryRecursive]; exists {
 		recursive = true
 	}
-	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, true, "")
+	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, http.MethodDelete, "")
 	if err != nil {
 		return err
 	}

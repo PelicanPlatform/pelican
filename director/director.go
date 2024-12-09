@@ -894,8 +894,8 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		// Regardless of the remainder of the settings, we currently handle a PUT as a query to the origin endpoint
-		if c.Request.Method == "PUT" {
+		// Regardless of the remainder of the settings, we currently handle a PUT and DELETE as a query to the origin endpoint
+		if c.Request.Method == "PUT" || c.Request.Method == "DELETE" {
 			c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
 			redirectToOrigin(c)
 			c.Abort()
@@ -1393,6 +1393,7 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/origin/*any", redirectToOrigin)
 		directorAPIV1.HEAD("/origin/*any", redirectToOrigin)
 		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
+		directorAPIV1.DELETE("/origin/*any", redirectToOrigin)
 		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
 		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
