@@ -894,7 +894,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		// Regardless of the remainder of the settings, we currently handle a PUT and DELETE as a query to the origin endpoint
+		// Regardless of the remainder of the settings, we currently handle PUT or DELETE as a query to the origin endpoint
 		if c.Request.Method == "PUT" || c.Request.Method == "DELETE" {
 			c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
 			redirectToOrigin(c)

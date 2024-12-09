@@ -315,6 +315,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	return fileInfos, nil
 }
 
+// DoDelete queries the director using the DELETE HTTP method, retrieves the token, and initializes the delete operation.
 func DoDelete(ctx context.Context, remoteDestination string, recursive bool, options ...TransferOption) (err error) {
 	defer func() {
 		if r := recover(); r != nil {

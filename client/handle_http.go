@@ -2661,6 +2661,14 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	return fileInfos, nil
 }
 
+// deleteHttp takes the collection URL from the director response to perform the delete operation.
+// If the recursive flag is set, it recursively deletes a collection by iterating over the collection tree
+// and deleting each leaf object one by one.
+//
+// Note: The current implementation of recursive collection deletion is inefficient and does not use concurrency.
+// This limitation exists because the object delete command is not openly supported and is intended to remain hidden.
+// Adding concurrency would require integrating the delete command into the transfer engine logic,
+// which would involve significant and complex changes. As the command is not fully supported, concurrency is deferred.
 func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp server_structs.DirectorResponse, token *tokenGenerator) (err error) {
 	log.Debugln("Attempting to delete:", remoteUrl.Path)
 	if dirResp.XPelNsHdr.CollectionsUrl == nil {
@@ -2684,10 +2692,10 @@ func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp serve
 	if info.IsDir() {
 		children, err := client.ReadDir(remotePath)
 		if err != nil {
-			return errors.Wrap(err, "failed to read directory contents")
+			return errors.Wrap(err, "failed to read collection contents")
 		}
 		if !recursive && len(children) > 0 {
-			return errors.New("cannot delete non-empty directory, use recursive flag or recursive query in the url")
+			return errors.New("cannot delete non-empty collection, use recursive flag or recursive query in the url")
 		}
 		if recursive {
 			for _, child := range children {

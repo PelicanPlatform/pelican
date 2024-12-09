@@ -32,7 +32,7 @@ import (
 var (
 	objectDeleteCmd = &cobra.Command{
 		Use:   "delete {object}",
-		Short: "Delete an object from a namespace in a federation",
+		Short: "Delete an object or a collection",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) < 1 {
 				return fmt.Errorf("no location provided for deletion")
@@ -42,7 +42,8 @@ var (
 			}
 			return nil
 		},
-		RunE: deleteMain,
+		RunE:   deleteMain,
+		Hidden: true,
 	}
 )
 
@@ -54,6 +55,7 @@ func init() {
 	objectCmd.AddCommand(objectDeleteCmd)
 }
 
+// deleteMain is the top-level function for executing the object delete command.
 func deleteMain(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
