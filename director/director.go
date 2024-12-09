@@ -1143,10 +1143,13 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	if adV2.Version == "" && reqVer != nil {
 		adV2.Version = reqVer.String()
 	} else if adV2.Version != "" && reqVer != nil {
-		_, err := version.NewVersion(adV2.Version)
+		parsedAdVersion, err := version.NewVersion(adV2.Version)
 		if err != nil {
 			// ad version was not a valid version, so we fallback to the request version
 			adV2.Version = reqVer.String()
+		} else if !parsedAdVersion.Equal(reqVer) {
+			// if the reqVer doesn't match the adV2.version, we should use the adV2.version
+			adV2.Version = parsedAdVersion.String()
 		}
 	} else if adV2.Version == "" {
 		adV2.Version = "unknown"

@@ -1021,6 +1021,46 @@ func TestDirectorRegistration(t *testing.T) {
 		teardown()
 
 	})
+
+	t.Run("origin-advertise-with-mismatch-versions", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/foo/bar", publicKey)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			BrokerURL: "https://broker-url.org",
+			DataURL:   "https://or-url.org",
+			Name:      "test",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+			Version: "7.0.0",
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.OriginType)
+
+		// 7.0.1 != 7.0.0
+		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.1")
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+
+		get := serverAds.Get("https://or-url.org")
+		getAd := get.Value()
+		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		assert.Equal(t, "7.0.0", getAd.Version)
+		teardown()
+	})
 }
 
 func TestGetAuthzEscaped(t *testing.T) {
