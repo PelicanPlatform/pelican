@@ -17,6 +17,8 @@
  ***************************************************************/
 
 import { Box } from '@mui/material';
+import { PaddedContent, Main } from '@/components/layout';
+import { Navigation } from '@/components/layout/Navigation';
 
 export const metadata = {
   title: 'Pelican Configuration',
@@ -30,7 +32,10 @@ export default function RootLayout({
 }) {
   return (
     <Box display={'flex'} flexDirection={'row'}>
-      {children}
+      <Navigation sharedPage={true} />
+      <Main>
+        <PaddedContent>{children}</PaddedContent>
+      </Main>
     </Box>
   );
 }
