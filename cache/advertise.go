@@ -49,6 +49,7 @@ func (server *CacheServer) CreateAdvertisement(name, originUrl, originWebUrl str
 		DataURL:        originUrl,
 		WebURL:         originWebUrl,
 		Namespaces:     server.GetNamespaceAds(),
+		Version:        config.GetVersion(),
 	}
 
 	return &ad, nil
