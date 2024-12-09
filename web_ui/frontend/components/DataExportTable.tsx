@@ -35,7 +35,7 @@ type ExportResCommon = {
   editUrl: string;
 };
 
-type ExportRes = ExportResCommon &
+export type ExportRes = ExportResCommon &
   (
     | { type: 's3'; exports: S3ExportEntry[] }
     | { type: 'posix'; exports: PosixExportEntry[] }

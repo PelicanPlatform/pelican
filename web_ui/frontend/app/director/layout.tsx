@@ -17,10 +17,9 @@
  ***************************************************************/
 
 import { Box } from '@mui/material';
-import { ButtonLink, Sidebar } from '@/components/layout/Sidebar';
-import BuildIcon from '@mui/icons-material/Build';
 import Main from '@/components/layout/Main';
-import { Dashboard, Equalizer, MapOutlined } from '@mui/icons-material';
+import { Navigation } from '@/components/layout/Navigation';
+import NavigationConfiguration from '@/app/navigation';
 
 export const metadata = {
   title: 'Pelican Director',
@@ -34,20 +33,7 @@ export default function RootLayout({
 }) {
   return (
     <Box display={'flex'} flexDirection={'row'}>
-      <Sidebar>
-        <ButtonLink title={'Dashboard'} href={'/director/'}>
-          <Dashboard />
-        </ButtonLink>
-        <ButtonLink title={'Metrics'} href={'/director/metrics/'}>
-          <Equalizer />
-        </ButtonLink>
-        <ButtonLink title={'Map'} href={'/director/map/'}>
-          <MapOutlined />
-        </ButtonLink>
-        <ButtonLink title={'Config'} href={'/config/'}>
-          <BuildIcon />
-        </ButtonLink>
-      </Sidebar>
+      <Navigation config={NavigationConfiguration['director']} />
       <Main>{children}</Main>
     </Box>
   );
