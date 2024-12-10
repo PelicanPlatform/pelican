@@ -355,7 +355,7 @@ export const getExportData = async (): Promise<ExportRes> => {
 const generateEditUrl = (editUrl: string, fromUrl: string) => {
   try {
     let updatedFromUrl = new URL(fromUrl)
-    if(!('from_registry' in updatedFromUrl.searchParams)) {
+    if(updatedFromUrl.searchParams.get('from_registry') === null) {
       updatedFromUrl.searchParams.append('from_registry', 'true')
     }
     const url = new URL(editUrl);
@@ -413,7 +413,7 @@ export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
       {from_registry && pending &&
         <Box display={"flex"} flexDirection={"column"}>
           <LinearProgress sx={{mb:1, w: "100%"}} />
-          <Typography variant={'subtitle2'} color={grey[400]} mx={"auto"}>Checking Registry for Updates</Typography>
+          <Typography variant={'subtitle2'} color={grey[400]} mx={"auto"}>Starting Update Watcher; Will Poll Every 10 Seconds;</Typography>
         </Box>
       }
       <Typography pb={1} variant={'h5'} component={'h3'}>
