@@ -44,8 +44,8 @@ You need to contact a Certificate Authority (CA) who owns the root certificate f
 
 Once you go through the process, locate your credential files and set the following parameters to the file locations or copy the credential files to the default locations of the parameters:
 
-- `Server.TLSCertificate`
-  - The certificate file from Let's Encrypt (or another CA), usually named as `example.com.crt` or `example.com.pem`
+- `Server.TLSCertificateChain`
+  - The certificate chain file from Let's Encrypt (or another CA), usually named example.com.crt or example.com.pem, containing the host certificate followed by any required intermediate certificates.
   - Default location: `~/.config/pelican/certificates/tls.crt` for non-root users or `/etc/pelican/certificates/tls.crt` for root users.
 
 - `Server.TLSKey`

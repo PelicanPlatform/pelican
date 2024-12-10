@@ -11,6 +11,6 @@ Federation:
   DiscoveryUrl: "https://osg-htc.org"
 
 Server:
-  TLSCertificate: /etc/pki/tls/certs/pelican.crt
+  TLSCertificateChain: /etc/pki/tls/certs/pelican.crt
   TLSKey: /etc/pki/tls/private/pelican.key
   TLSCACertificateFile: /etc/pki/tls/certs/ca-bundle.crt

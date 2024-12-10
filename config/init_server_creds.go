@@ -360,7 +360,7 @@ func GenerateCert() error {
 
 	tlsCertPrivateKeyExists := false
 
-	tlsCert := param.Server_TLSCertificate.GetString()
+	tlsCert := param.Server_TLSCertificateChain.GetString()
 	if file, err := os.Open(tlsCert); err == nil {
 		file.Close()
 		// Check that the matched-pair private key is present
@@ -443,7 +443,7 @@ func GenerateCert() error {
 		return errors.Errorf("unsupported private key type: %T", key)
 	}
 
-	log.Debugln("Server.TLSCertificate and/or Server.TLSKey do not exist. Will generate a new host certificate and its private key for the server")
+	log.Debugln("Server.TLSCertificateChain and/or Server.TLSKey do not exist. Will generate a new host certificate and its private key for the server")
 	serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
 	if err != nil {
