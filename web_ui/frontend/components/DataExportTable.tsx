@@ -22,7 +22,6 @@ import useSWR from 'swr';
 import { getErrorMessage } from '@/helpers/util';
 import { Capabilities } from '@/types';
 import { CapabilitiesDisplay } from '@/components';
-import CircularProgress from '@mui/material/CircularProgress';
 import { useSearchParams } from 'next/navigation';
 
 type RegistrationStatus =
@@ -368,10 +367,14 @@ const generateEditUrl = (editUrl: string, fromUrl: string) => {
 }
 
 export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
+
+  const searchParams = useSearchParams()
+  const from_registry = searchParams.get('from_registry') == 'true'
+
   const [pending, setPending] = useState<boolean>(false);
   const [ fromUrl, setFromUrl ] = useState<string | undefined>(undefined);
   const { data, mutate } = useSWR('getDataExport', getExportData, {
-    refreshInterval: 10000
+    refreshInterval: from_registry ? 10000 : 0,
   });
 
   useEffect(() => {
@@ -380,11 +383,8 @@ export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
     setTimeout(() => {
       mutate()
       setPending(false);
-    }, 5000);
+    }, 10000);
   }, []);
-
-  const searchParams = useSearchParams()
-  const from_registry = searchParams.get('from_registry') == 'true'
 
   const dataEnhanced = useMemo(() => {
 

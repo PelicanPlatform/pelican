@@ -18,8 +18,8 @@
 
 'use client';
 
-import { useState } from 'react';
-import { Box, IconButton, Grid, Tooltip, Typography } from '@mui/material';
+import { useState, Suspense } from 'react';
+import { Box, IconButton, Grid, Tooltip, Typography, Skeleton } from '@mui/material';
 import { Key, CheckCircle } from '@mui/icons-material';
 
 import RateGraph from '@/components/graphs/RateGraph';
@@ -85,7 +85,9 @@ export default function Home() {
                 )}
               </Tooltip>
             </Box>
-            <DataExportTable />
+            <Suspense fallback={<Skeleton/>}>
+              <DataExportTable />
+            </Suspense>
           </Grid>
           <Grid item xs={12} lg={6}>
             <Box
