@@ -12,7 +12,8 @@ import {
   Pagination,
   Paper,
   Alert,
-  IconButton, LinearProgress,
+  IconButton,
+  LinearProgress,
 } from '@mui/material';
 import React, { ReactElement, useEffect, useMemo, useState } from 'react';
 import { Skeleton } from '@mui/material';
@@ -353,9 +354,9 @@ export const getExportData = async (): Promise<ExportRes> => {
 
 const generateEditUrl = (editUrl: string, fromUrl: string) => {
   try {
-    let updatedFromUrl = new URL(fromUrl)
-    if(updatedFromUrl.searchParams.get('from_registry') === null) {
-      updatedFromUrl.searchParams.append('from_registry', 'true')
+    let updatedFromUrl = new URL(fromUrl);
+    if (updatedFromUrl.searchParams.get('from_registry') === null) {
+      updatedFromUrl.searchParams.append('from_registry', 'true');
     }
     const url = new URL(editUrl);
     url.searchParams.append('fromUrl', updatedFromUrl.toString());
@@ -364,15 +365,14 @@ const generateEditUrl = (editUrl: string, fromUrl: string) => {
     console.error('Failed to generate editUrl', e);
     return editUrl;
   }
-}
+};
 
 export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
-
-  const searchParams = useSearchParams()
-  const from_registry = searchParams.get('from_registry') == 'true'
+  const searchParams = useSearchParams();
+  const from_registry = searchParams.get('from_registry') == 'true';
 
   const [pending, setPending] = useState<boolean>(false);
-  const [ fromUrl, setFromUrl ] = useState<string | undefined>(undefined);
+  const [fromUrl, setFromUrl] = useState<string | undefined>(undefined);
   const { data, mutate } = useSWR('getDataExport', getExportData, {
     refreshInterval: from_registry ? 10000 : 0,
   });
@@ -381,13 +381,12 @@ export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
     setFromUrl(window.location.href);
     setPending(true);
     setTimeout(() => {
-      mutate()
+      mutate();
       setPending(false);
     }, 10000);
   }, []);
 
   const dataEnhanced = useMemo(() => {
-
     // If no from URL return current data
     if (!fromUrl) {
       return data;
@@ -398,24 +397,25 @@ export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
       return undefined;
     }
 
-    let dataEnhanced = structuredClone(data)
+    let dataEnhanced = structuredClone(data);
     dataEnhanced.editUrl = generateEditUrl(dataEnhanced.editUrl, fromUrl);
     dataEnhanced.exports.map((val) => {
       val.editUrl = generateEditUrl(val.editUrl, fromUrl);
     });
 
     return dataEnhanced;
-
-  }, [data, fromUrl])
+  }, [data, fromUrl]);
 
   return (
     <Box {...boxProps}>
-      {from_registry && pending &&
-        <Box display={"flex"} flexDirection={"column"}>
-          <LinearProgress sx={{mb:1, w: "100%"}} />
-          <Typography variant={'subtitle2'} color={grey[400]} mx={"auto"}>Starting Update Watcher; Will Poll Every 10 Seconds;</Typography>
+      {from_registry && pending && (
+        <Box display={'flex'} flexDirection={'column'}>
+          <LinearProgress sx={{ mb: 1, w: '100%' }} />
+          <Typography variant={'subtitle2'} color={grey[400]} mx={'auto'}>
+            Starting Update Watcher; Will Poll Every 10 Seconds;
+          </Typography>
         </Box>
-      }
+      )}
       <Typography pb={1} variant={'h5'} component={'h3'}>
         Origin
       </Typography>
