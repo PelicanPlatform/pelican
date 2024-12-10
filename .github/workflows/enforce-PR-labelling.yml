@@ -4,6 +4,7 @@ on:
   pull_request:
     # one limitation here is that there's no trigger to re-run any time we "connect" or "disconnect" an issue
     types: [opened, edited, labeled, unlabeled, synchronize]
+  workflow_dispatch:
 
 jobs:
   validate-pr:
