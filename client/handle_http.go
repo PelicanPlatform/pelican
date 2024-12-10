@@ -1056,11 +1056,9 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
-	httpMethod := http.MethodPut
+	httpMethod := http.MethodGet
 	if upload {
 		httpMethod = http.MethodPut
-	} else {
-		httpMethod = http.MethodGet
 	}
 
 	tj.directorUrl = copyUrl.FedInfo.DirectorEndpoint
