@@ -33,11 +33,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <Box display={'flex'} flexDirection={'row'}>
-      <Navigation config={NavigationConfiguration['registry']} />
+    <Navigation config={NavigationConfiguration['registry']}>
       <Main>
         <PaddedContent>{children}</PaddedContent>
       </Main>
-    </Box>
+    </Navigation>
   );
 }

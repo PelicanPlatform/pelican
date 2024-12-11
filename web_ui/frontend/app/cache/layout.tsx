@@ -34,11 +34,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <Box display={'flex'} flexDirection={'row'}>
-      <Navigation config={NavigationConfiguration['cache']} />
+    <Navigation config={NavigationConfiguration['cache']}>
       <Main>
         <PaddedContent>{children}</PaddedContent>
       </Main>
-    </Box>
+    </Navigation>
   );
 }

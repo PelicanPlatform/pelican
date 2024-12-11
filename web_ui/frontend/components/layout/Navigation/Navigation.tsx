@@ -7,11 +7,16 @@ import { getUser } from '@/helpers/login';
 import { Sidebar } from '@/components/layout/Navigation/Sidebar';
 import NavigationConfig from '@/app/navigation';
 import { getEnabledServers } from '@/helpers/util';
+import { Box } from '@mui/material';
+import { AppBar } from '@/components/layout/Navigation/AppBar';
+import { ReactNode } from 'react';
 
 const Navigation = ({
+  children,
   config,
   sharedPage,
 }: {
+  children: ReactNode;
   config?: StaticNavigationItemProps[];
   sharedPage?: boolean;
 }) => {
@@ -36,13 +41,40 @@ const Navigation = ({
     }
   }
 
+  console.log(user);
+
   return (
     <>
-      <Sidebar
-        exportType={exports?.type}
-        role={user?.role}
-        config={config as StaticNavigationItemProps[]}
-      />
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: { xs: 'column', md: 'row' },
+        }}
+      >
+        <Box
+          sx={{
+            display: { xs: 'none', md: 'block' },
+          }}
+        >
+          <Sidebar
+            exportType={exports?.type}
+            role={user?.role}
+            config={config as StaticNavigationItemProps[]}
+          />
+        </Box>
+        <Box
+          sx={{
+            display: { xs: 'block', md: 'none' },
+          }}
+        >
+          <AppBar
+            exportType={exports?.type}
+            role={user?.role}
+            config={config as StaticNavigationItemProps[]}
+          />
+        </Box>
+        {children}
+      </Box>
     </>
   );
 };

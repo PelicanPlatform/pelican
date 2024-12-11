@@ -12,7 +12,7 @@ export type StaticNavigationItemProps =
   | StaticNavigationChildItemProps;
 
 export type StaticNavigationBaseItemProps = {
-  title: string;
+  title: string | (() => string);
   icon: ReactNode;
   showTitle?: boolean;
   allowedRoles?: User['role'][];
@@ -20,7 +20,7 @@ export type StaticNavigationBaseItemProps = {
 };
 
 export type StaticNavigationChildItemProps = StaticNavigationBaseItemProps & {
-  href: string;
+  href: string | (() => string);
 };
 
 export type StaticNavigationParentItemProps = StaticNavigationBaseItemProps & {

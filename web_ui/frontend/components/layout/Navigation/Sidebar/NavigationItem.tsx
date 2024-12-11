@@ -12,6 +12,7 @@ import {
 } from '@/components/layout/Navigation';
 import { ExportRes } from '@/components/DataExportTable';
 import NavigationMenu from '@/components/layout/Navigation/Sidebar/Menu';
+import { evaluateOrReturn } from '@/helpers/util';
 
 export const NavigationItem = ({
   exportType,
@@ -52,10 +53,10 @@ const NavigationChildItem = ({
 }: StaticNavigationChildItemProps) => {
   return (
     <Box pt={1}>
-      <Tooltip title={title} placement={'right'}>
-        <Link href={href}>
+      <Tooltip title={evaluateOrReturn(title)} placement={'right'}>
+        <Link href={evaluateOrReturn(href)}>
           {showTitle ? (
-            <Button startIcon={icon}>{title}</Button>
+            <Button startIcon={icon}>{evaluateOrReturn(title)}</Button>
           ) : (
             <IconButton>{icon}</IconButton>
           )}

@@ -28,6 +28,7 @@ import PelicanLogo from '@/public/static/images/PelicanPlatformLogo_Icon.png';
 import AboutMenu from './AboutMenu';
 import { NavigationItem } from '@/components/layout/Navigation/Sidebar/NavigationItem';
 import { NavigationProps } from '@/components/layout/Navigation';
+import { evaluateOrReturn } from '@/helpers/util';
 
 export const Sidebar = ({ config, exportType, role }: NavigationProps) => {
   return (
@@ -66,7 +67,7 @@ export const Sidebar = ({ config, exportType, role }: NavigationProps) => {
               {config.map((navItem) => {
                 return (
                   <NavigationItem
-                    key={navItem.title}
+                    key={evaluateOrReturn(navItem.title)}
                     config={navItem}
                     role={role}
                     exportType={exportType}

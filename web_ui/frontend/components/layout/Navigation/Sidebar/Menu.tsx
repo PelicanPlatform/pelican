@@ -15,6 +15,7 @@ import {
   StaticNavigationParentItemProps,
 } from '@/components/layout/Navigation';
 import Link from 'next/link';
+import { evaluateOrReturn } from '@/helpers/util';
 
 const NavigationMenu = ({
   config,
@@ -55,7 +56,10 @@ const NavigationMenu = ({
         }}
       >
         {config.children.map((config) => (
-          <NavigationMenuItem key={config.title} config={config} />
+          <NavigationMenuItem
+            key={evaluateOrReturn(config.title)}
+            config={config}
+          />
         ))}
       </Menu>
     </>
@@ -74,10 +78,10 @@ const NavigationMenuItem = ({
 
   // Otherwise, render the navigation item
   return (
-    <Link href={config.href}>
+    <Link href={evaluateOrReturn(config.href)}>
       <MenuItem>
         <ListItemIcon>{config.icon}</ListItemIcon>
-        <ListItemText primary={config.title} />
+        <ListItemText primary={evaluateOrReturn(config.title)} />
       </MenuItem>
     </Link>
   );

@@ -31,11 +31,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <Box display={'flex'} flexDirection={'row'}>
-      <Navigation sharedPage={true} />
+    <Navigation sharedPage={true}>
       <Main>
         <PaddedContent>{children}</PaddedContent>
       </Main>
-    </Box>
+    </Navigation>
   );
 }
