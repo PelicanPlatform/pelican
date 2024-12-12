@@ -412,7 +412,7 @@ export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
         <Box display={'flex'} flexDirection={'column'}>
           <LinearProgress sx={{ mb: 1, w: '100%' }} />
           <Typography variant={'subtitle2'} color={grey[400]} mx={'auto'}>
-            Starting Update Watcher; Will Poll Every 10 Seconds;
+            Polling from Registry for Updates Every 10 Seconds
           </Typography>
         </Box>
       )}
