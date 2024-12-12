@@ -199,7 +199,16 @@ export default function Home() {
             Login
           </Typography>
           <Box color={'grey'} mt={1} mb={2}>
-            <Typography textAlign={'center'} variant={'h6'} component={'p'}>
+            <Typography
+              variant={'h6'}
+              component={'p'}
+              sx={{
+                textAlign: 'center',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis'
+              }}
+            >
               Administer your Pelican Platform
             </Typography>
           </Box>
@@ -226,7 +235,7 @@ export default function Home() {
           <Skeleton
             variant={'rectangular'}
             height={90}
-            width={400}
+            width={'100%'}
             sx={{ borderRadius: 2 }}
           />
         )}

@@ -3,6 +3,7 @@ import { Authenticated, secureFetch } from '@/helpers/login';
 import { Avatar, Box, IconButton, Tooltip, Typography } from '@mui/material';
 import { Block, Check, Edit, Person } from '@mui/icons-material';
 import Link from 'next/link';
+import { useMediaQuery } from '@mui/material';
 
 import { Alert, RegistryNamespace } from '@/index';
 import InformationDropdown from './InformationDropdown';
@@ -11,6 +12,8 @@ import { User } from '@/index';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { approveNamespace, denyNamespace } from '@/helpers/api';
+import { Theme } from '@mui/system';
+
 
 export interface PendingCardProps {
   namespace: RegistryNamespace;
@@ -25,6 +28,9 @@ export const PendingCard = ({
   onAlert,
   authenticated,
 }: PendingCardProps) => {
+
+  const size = useMediaQuery((theme: Theme) => theme.breakpoints.down("md")) ? 'small' : 'medium';
+
   const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
 
@@ -48,9 +54,9 @@ export const PendingCard = ({
         bgcolor={'secondary'}
         onClick={() => setTransition(!transition)}
       >
-        <Box my={'auto'} ml={1} display={'flex'} flexDirection={'row'}>
+        <Box my={'auto'} ml={1} display={'flex'} flexDirection={'row'} minWidth={0}>
           <NamespaceIcon serverType={namespace.type} />
-          <Typography sx={{ pt: '2px' }}>{namespace.prefix}</Typography>
+          <Typography sx={{ pt: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{namespace.prefix}</Typography>
         </Box>
         <Box display={'flex'}>
           <Box my={'auto'} display={'flex'} flexDirection={'row'}>
@@ -59,9 +65,13 @@ export const PendingCard = ({
                 <Box sx={{ borderRight: 'solid 1px #ececec', mr: 1 }}>
                   <Tooltip title={'Created By You'}>
                     <Avatar
-                      sx={{ height: '40px', width: '40px', my: 'auto', mr: 2 }}
+                      sx={{
+                        my: 'auto',
+                        mr: 2,
+                        ...(size === 'small' ? { width: 30, height: 30 } : { width: 40, height: 40 })
+                    }}
                     >
-                      <Person />
+                      <Person fontSize={size} />
                     </Avatar>
                   </Tooltip>
                 </Box>
@@ -71,6 +81,7 @@ export const PendingCard = ({
                 <Tooltip title={'Deny Registration'}>
                   <IconButton
                     sx={{ bgcolor: '#ff00001a', mx: 1 }}
+                    size={size}
                     color={'error'}
                     onClick={async (e) => {
                       e.stopPropagation();
@@ -82,12 +93,13 @@ export const PendingCard = ({
                       onUpdate();
                     }}
                   >
-                    <Block />
+                    <Block fontSize={size} />
                   </IconButton>
                 </Tooltip>
                 <Tooltip title={'Approve Registration'}>
                   <IconButton
                     sx={{ bgcolor: '#2e7d3224', mx: 1 }}
+                    size={size}
                     color={'success'}
                     onClick={async (e) => {
                       e.stopPropagation();
@@ -99,7 +111,7 @@ export const PendingCard = ({
                       onUpdate();
                     }}
                   >
-                    <Check />
+                    <Check fontSize={size} />
                   </IconButton>
                 </Tooltip>
               </>
@@ -112,8 +124,9 @@ export const PendingCard = ({
                 >
                   <IconButton
                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                    size={size}
                   >
-                    <Edit />
+                    <Edit fontSize={size} />
                   </IconButton>
                 </Link>
               </Tooltip>

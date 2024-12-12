@@ -6,7 +6,7 @@ import {
   IconButton,
   Paper,
   Tooltip,
-  Typography,
+  Typography, useMediaQuery,
 } from '@mui/material';
 import { Delete, Download, Edit, Person } from '@mui/icons-material';
 import Link from 'next/link';
@@ -19,6 +19,7 @@ import { useSWRConfig } from 'swr';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import CodeBlock from '@/components/CodeBlock';
 import { alertOnError } from '@/helpers/util';
+import { Theme } from '@mui/system';
 
 export interface CardProps {
   namespace: RegistryNamespace;
@@ -27,10 +28,14 @@ export interface CardProps {
 }
 
 export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
+
+  const size = useMediaQuery((theme: Theme) => theme.breakpoints.down("md")) ? 'small' : 'medium';
+
   const dispatch = useContext(AlertDispatchContext);
   const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
   const { mutate } = useSWRConfig();
+
   return (
     <>
       <Paper elevation={transition ? 2 : 0}>
@@ -50,9 +55,9 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
           bgcolor={'secondary'}
           onClick={() => setTransition(!transition)}
         >
-          <Box my={'auto'} ml={1} display={'flex'} flexDirection={'row'}>
+          <Box my={'auto'} ml={1} display={'flex'} flexDirection={'row'} minWidth={0}>
             <NamespaceIcon serverType={namespace.type} />
-            <Typography sx={{ pt: '2px' }}>{namespace.prefix}</Typography>
+            <Typography sx={{ pt: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{namespace.prefix}</Typography>
           </Box>
           <Box display={'flex'} flexDirection={'row'}>
             <Box my={'auto'} display={'flex'}>
@@ -62,13 +67,12 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                     <Tooltip title={'Created By You'}>
                       <Avatar
                         sx={{
-                          height: '40px',
-                          width: '40px',
                           my: 'auto',
                           mr: 2,
+                          ...(size === 'small' ? { width: 30, height: 30 } : { width: 40, height: 40 })
                         }}
                       >
-                        <Person />
+                        <Person fontSize={size} />
                       </Avatar>
                     </Tooltip>
                   </Box>
@@ -80,8 +84,9 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                   <IconButton
                     onClick={(e: React.MouseEvent) => e.stopPropagation()}
                     sx={{ mx: 1 }}
+                    size={size}
                   >
-                    <Download />
+                    <Download fontSize={size} />
                   </IconButton>
                 </a>
               </Tooltip>
@@ -93,14 +98,16 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                     >
                       <IconButton
                         onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                        size={size}
                       >
-                        <Edit />
+                        <Edit fontSize={size} />
                       </IconButton>
                     </Link>
                   </Tooltip>
                   <Tooltip title={'Delete Registration'}>
                     <IconButton
                       sx={{ bgcolor: '#ff00001a', mx: 1 }}
+                      size={size}
                       color={'error'}
                       onClick={async (e) => {
                         e.stopPropagation();
@@ -115,7 +122,7 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                         }
                       }}
                     >
-                      <Delete />
+                      <Delete fontSize={size} />
                     </IconButton>
                   </Tooltip>
                 </>

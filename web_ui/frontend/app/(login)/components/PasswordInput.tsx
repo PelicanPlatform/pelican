@@ -60,7 +60,9 @@ export default function PasswordInput({
         label='Admin Password'
         id='outlined-start-adornment'
         size={'small'}
-        sx={{ m: 1, width: '50ch' }}
+        sx={{ m: 1 }}
+        autoComplete={'current-password'}
+        name={'password'}
         type={showPassword ? 'text' : 'password'}
         {...TextFieldProps}
         InputProps={{
