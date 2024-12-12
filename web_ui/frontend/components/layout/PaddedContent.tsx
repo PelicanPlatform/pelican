@@ -3,7 +3,7 @@ import { ReactNode } from 'react';
 
 export const PaddedContent = ({ children }: { children: ReactNode }) => {
   return (
-    <Box p={2} flexGrow={1}>
+    <Box p={2} flexGrow={1} maxWidth={"100vw"}>
       {children}
     </Box>
   );

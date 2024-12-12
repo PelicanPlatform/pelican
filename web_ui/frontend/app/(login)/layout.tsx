@@ -19,6 +19,7 @@
 import { Box } from '@mui/material';
 
 import { Header } from '@/components/layout/Header';
+import { Main, PaddedContent } from '@/components/layout';
 
 export const metadata = {
   title: 'Pelican Login',
@@ -33,9 +34,11 @@ export default function RootLayout({
   return (
     <>
       <Header text={'Pelican Platform'} />
-      <Box component={'main'} pt={'75px'} display={'flex'} minHeight={'100vh'}>
-        {children}
-      </Box>
+      <Main>
+        <PaddedContent>
+          {children}
+        </PaddedContent>
+      </Main>
     </>
   );
 }

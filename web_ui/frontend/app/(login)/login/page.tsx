@@ -108,12 +108,8 @@ const AdminLogin = () => {
     <form onSubmit={onSubmit} action='#'>
       <Box display={'flex'} justifyContent={'center'}>
         <PasswordInput
-          FormControlProps={{
-            sx: { width: '50%' },
-          }}
           TextFieldProps={{
             InputProps: {
-              sx: { width: '50%' },
               onChange: (e) => {
                 setPassword(e.target.value);
               },
@@ -143,15 +139,13 @@ const AdminLogin = () => {
   ) {
     return (
       <Box display={'flex'} flexDirection={'column'} justifyContent={'center'}>
-        <Box m={'auto'}>
-          <Button
-            size={'small'}
-            variant={'text'}
-            onClick={() => setToggled(!toggled)}
-          >
-            Server Admin Login
-          </Button>
-        </Box>
+        <Button
+          size={'small'}
+          variant={'text'}
+          onClick={() => setToggled(!toggled)}
+        >
+          Server Admin Login
+        </Button>
         <Collapse in={toggled}>{LoginComponent}</Collapse>
       </Box>
     );
@@ -210,34 +204,32 @@ export default function Home() {
             </Typography>
           </Box>
         </Box>
-        <Box mx={'auto'}>
-          {serverIntersect &&
-            (serverIntersect.includes('registry') ||
-              serverIntersect.includes('origin') ||
-              serverIntersect.includes('cache') ||
-              serverIntersect.includes('director')) && (
-              <>
-                <Box display={'flex'} justifyContent={'center'} mb={1}>
-                  <Button
-                    size={'large'}
-                    href={`/api/v1.0/auth/oauth/login?nextUrl=${returnUrl ? returnUrl : '/'}`}
-                    variant={'contained'}
-                  >
-                    Login with OAuth
-                  </Button>
-                </Box>
-              </>
-            )}
-          {serverIntersect && <AdminLogin />}
-          {!serverIntersect && (
-            <Skeleton
-              variant={'rectangular'}
-              height={90}
-              width={400}
-              sx={{ borderRadius: 2 }}
-            />
+        {serverIntersect &&
+          (serverIntersect.includes('registry') ||
+            serverIntersect.includes('origin') ||
+            serverIntersect.includes('cache') ||
+            serverIntersect.includes('director')) && (
+            <>
+              <Box display={'flex'} justifyContent={'center'} mb={1}>
+                <Button
+                  size={'large'}
+                  href={`/api/v1.0/auth/oauth/login?nextUrl=${returnUrl ? returnUrl : '/'}`}
+                  variant={'contained'}
+                >
+                  Login with OAuth
+                </Button>
+              </Box>
+            </>
           )}
-        </Box>
+        {serverIntersect && <AdminLogin />}
+        {!serverIntersect && (
+          <Skeleton
+            variant={'rectangular'}
+            height={90}
+            width={400}
+            sx={{ borderRadius: 2 }}
+          />
+        )}
       </Box>
     </>
   );
