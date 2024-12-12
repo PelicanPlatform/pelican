@@ -140,9 +140,9 @@ export default function CodeInput({
             <TextField
               inputProps={{
                 sx: {
-                  width: '50px',
+                  width: {xs: "30px", md: "50px"},
                   borderWidth: '3px',
-                  fontSize: '3rem',
+                  fontSize: {xs: "1.8rem", md: "3rem"},
                   textAlign: 'center',
                   padding: '.5rem',
                   backgroundColor: 'secondary.main',
