@@ -116,7 +116,7 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
           )}
         </Typography>
       </Box>
-      <Grid container spacing={2} sx={{mt:-5}}>
+      <Grid container spacing={2} sx={{ mt: -5 }}>
         <Grid item xs={12} md={8} lg={6}>
           <Box>
             {error && (

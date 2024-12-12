@@ -25,12 +25,15 @@ const Page = () => {
           ))}
         </Grid>
       </Grid>
-      <Grid item xs={12} md={7} display={"flex"}>
+      <Grid item xs={12} md={7} display={'flex'}>
         <Grid container spacing={1} flexGrow={1}>
           <Grid item xs={12} display={'flex'}>
             <Grid container spacing={1}>
               {[
-                <BytesMetricBoxPlot metric={'go_memstats_alloc_bytes'} title={'Server Memory Usage'} />,
+                <BytesMetricBoxPlot
+                  metric={'go_memstats_alloc_bytes'}
+                  title={'Server Memory Usage'}
+                />,
                 <MetricBoxPlot
                   metric={
                     'avg by (server_name) (irate(process_cpu_seconds_total[${range}]))'
@@ -48,9 +51,17 @@ const Page = () => {
                     'sum by (server_name) (sum_over_time(xrootd_sched_thread_count[${range}])) / sum by (server_name) (count_over_time(xrootd_sched_thread_count[${range}]))'
                   }
                   title={'XRootD Scheduler Threads'}
-                />
+                />,
               ].map((component, index) => (
-                <Grid key={index} item xs={12} sm={6} display={'flex'} maxHeight={"50%"} minHeight={"20rem"}>
+                <Grid
+                  key={index}
+                  item
+                  xs={12}
+                  sm={6}
+                  display={'flex'}
+                  maxHeight={'50%'}
+                  minHeight={'20rem'}
+                >
                   <Paper sx={{ width: '100%' }}>{component}</Paper>
                 </Grid>
               ))}
@@ -59,7 +70,7 @@ const Page = () => {
         </Grid>
       </Grid>
       <Grid item xs={12}>
-        <Grid container minHeight={"20rem"}>
+        <Grid container minHeight={'20rem'}>
           <Grid item xs={12} md={6} display={'flex'}>
             <Paper sx={{ width: '100%', minHeight: '20rem' }}>
               <TransferBarGraph />

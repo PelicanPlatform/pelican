@@ -206,7 +206,7 @@ export default function Home() {
                 textAlign: 'center',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
-                textOverflow: 'ellipsis'
+                textOverflow: 'ellipsis',
               }}
             >
               Administer your Pelican Platform

@@ -6,7 +6,8 @@ import {
   IconButton,
   Paper,
   Tooltip,
-  Typography, useMediaQuery,
+  Typography,
+  useMediaQuery,
 } from '@mui/material';
 import { Delete, Download, Edit, Person } from '@mui/icons-material';
 import Link from 'next/link';
@@ -28,8 +29,9 @@ export interface CardProps {
 }
 
 export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
-
-  const size = useMediaQuery((theme: Theme) => theme.breakpoints.down("md")) ? 'small' : 'medium';
+  const size = useMediaQuery((theme: Theme) => theme.breakpoints.down('md'))
+    ? 'small'
+    : 'medium';
 
   const dispatch = useContext(AlertDispatchContext);
   const ref = useRef<HTMLDivElement>(null);
@@ -55,9 +57,24 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
           bgcolor={'secondary'}
           onClick={() => setTransition(!transition)}
         >
-          <Box my={'auto'} ml={1} display={'flex'} flexDirection={'row'} minWidth={0}>
+          <Box
+            my={'auto'}
+            ml={1}
+            display={'flex'}
+            flexDirection={'row'}
+            minWidth={0}
+          >
             <NamespaceIcon serverType={namespace.type} />
-            <Typography sx={{ pt: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{namespace.prefix}</Typography>
+            <Typography
+              sx={{
+                pt: '2px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {namespace.prefix}
+            </Typography>
           </Box>
           <Box display={'flex'} flexDirection={'row'}>
             <Box my={'auto'} display={'flex'}>
@@ -69,7 +86,9 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                         sx={{
                           my: 'auto',
                           mr: 2,
-                          ...(size === 'small' ? { width: 30, height: 30 } : { width: 40, height: 40 })
+                          ...(size === 'small'
+                            ? { width: 30, height: 30 }
+                            : { width: 40, height: 40 }),
                         }}
                       >
                         <Person fontSize={size} />

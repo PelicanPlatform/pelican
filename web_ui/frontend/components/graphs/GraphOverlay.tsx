@@ -15,7 +15,7 @@ import {
   MenuItem,
   Select,
   Typography,
-  Grid
+  Grid,
 } from '@mui/material';
 import { DateTimePicker } from '@mui/x-date-pickers';
 import { KeyboardArrowLeft, KeyboardArrowRight } from '@mui/icons-material';
@@ -82,11 +82,9 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
 
   return (
     <>
-      <Box
-        position={'sticky'}
-      >
+      <Box position={'sticky'}>
         <Grid container justifyContent={'space-between'} alignItems={'center'}>
-          <Grid item xs={12} md={"auto"}>
+          <Grid item xs={12} md={'auto'}>
             <StringUpdateViewer>
               {graphStart.toFormat(format)} - {graphContext.time.toFormat('f')}
             </StringUpdateViewer>
@@ -183,7 +181,7 @@ const DateTimePickerWithArrows = () => {
           }}
           sx={{
             height: '100%',
-            display: {xs: 'none', md: 'flex'}
+            display: { xs: 'none', md: 'flex' },
           }}
         >
           <KeyboardArrowLeft />
@@ -206,7 +204,7 @@ const DateTimePickerWithArrows = () => {
           }}
           sx={{
             height: '100%',
-            display: {xs: 'none', md: 'flex'}
+            display: { xs: 'none', md: 'flex' },
           }}
         >
           <KeyboardArrowRight />

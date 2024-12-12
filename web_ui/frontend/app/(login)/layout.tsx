@@ -35,9 +35,7 @@ export default function RootLayout({
     <>
       <Header text={'Pelican Platform'} />
       <Main>
-        <PaddedContent>
-          {children}
-        </PaddedContent>
+        <PaddedContent>{children}</PaddedContent>
       </Main>
     </>
   );

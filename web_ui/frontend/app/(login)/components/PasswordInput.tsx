@@ -51,11 +51,7 @@ export default function PasswordInput({
   };
 
   return (
-    <FormControl
-      sx={{ mt: 1 }}
-      variant='outlined'
-      {...FormControlProps}
-    >
+    <FormControl sx={{ mt: 1 }} variant='outlined' {...FormControlProps}>
       <TextField
         label='Admin Password'
         id='outlined-start-adornment'

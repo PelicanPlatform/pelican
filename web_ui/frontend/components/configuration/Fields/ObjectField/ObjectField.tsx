@@ -186,7 +186,7 @@ const ObjectCard = ({ name, updated, onClick }: ObjectCardProps) => {
           my: 'auto',
           ml: 1,
           overflow: 'hidden',
-          textOverflow: 'ellipsis'
+          textOverflow: 'ellipsis',
         }}
       >
         {name}

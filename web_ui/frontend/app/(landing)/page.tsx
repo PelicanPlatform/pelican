@@ -19,12 +19,20 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Box, Container, Grid, List, ListItemButton, ListItemText, Skeleton, Typography } from '@mui/material';
+import {
+  Box,
+  Container,
+  Grid,
+  List,
+  ListItemButton,
+  ListItemText,
+  Skeleton,
+  Typography,
+} from '@mui/material';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { getEnabledServers } from '@/helpers/util';
 import { ServerType } from '@/index';
-
 
 export default function Home() {
   const { data: enabledServers, isLoading } = useSWR<ServerType[]>(
@@ -42,8 +50,16 @@ export default function Home() {
           {enabledServers &&
             enabledServers.map((service) => {
               return (
-                <ListItemButton key={service} component={Link} href={`./${service}/`} sx={{ p: 0 }}>
-                  <ListItemText primary={service} sx={{textAlign: 'center', textTransform: 'capitalize'}}/>
+                <ListItemButton
+                  key={service}
+                  component={Link}
+                  href={`./${service}/`}
+                  sx={{ p: 0 }}
+                >
+                  <ListItemText
+                    primary={service}
+                    sx={{ textAlign: 'center', textTransform: 'capitalize' }}
+                  />
                 </ListItemButton>
               );
             })}
