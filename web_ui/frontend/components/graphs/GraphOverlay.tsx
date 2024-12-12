@@ -15,6 +15,7 @@ import {
   MenuItem,
   Select,
   Typography,
+  Grid
 } from '@mui/material';
 import { DateTimePicker } from '@mui/x-date-pickers';
 import { KeyboardArrowLeft, KeyboardArrowRight } from '@mui/icons-material';
@@ -82,17 +83,21 @@ export const GraphOverlay = ({ children }: { children: ReactNode }) => {
   return (
     <>
       <Box
-        display={'flex'}
-        justifyContent={'space-between'}
         position={'sticky'}
       >
-        <StringUpdateViewer>
-          {graphStart.toFormat(format)} - {graphContext.time.toFormat('f')}
-        </StringUpdateViewer>
-        <Box display={'flex'}>
-          <TimeRangeSelector />
-          <DateTimePickerWithArrows />
-        </Box>
+        <Grid container justifyContent={'space-between'} alignItems={'center'}>
+          <Grid item xs={12} md={"auto"}>
+            <StringUpdateViewer>
+              {graphStart.toFormat(format)} - {graphContext.time.toFormat('f')}
+            </StringUpdateViewer>
+          </Grid>
+          <Grid item xs={12} md={'auto'} display={'flex'}>
+            <Box display={'flex'} m={'auto'}>
+              <TimeRangeSelector />
+              <DateTimePickerWithArrows />
+            </Box>
+          </Grid>
+        </Grid>
       </Box>
       {children}
     </>
@@ -176,7 +181,10 @@ const DateTimePickerWithArrows = () => {
           onClick={() => {
             dispatch({ type: 'decrementTimeByRange' });
           }}
-          sx={{ height: '100%' }}
+          sx={{
+            height: '100%',
+            display: {xs: 'none', md: 'flex'}
+          }}
         >
           <KeyboardArrowLeft />
         </Button>
@@ -196,7 +204,10 @@ const DateTimePickerWithArrows = () => {
           onClick={() => {
             dispatch({ type: 'incrementTimeByRange' });
           }}
-          sx={{ height: '100%' }}
+          sx={{
+            height: '100%',
+            display: {xs: 'none', md: 'flex'}
+          }}
         >
           <KeyboardArrowRight />
         </Button>
