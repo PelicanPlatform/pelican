@@ -109,6 +109,10 @@ nfpms:
   - package_name: pelican
     builds:
       - pelican
+    # Note that git tags like v7.0.0-rc.1 will be modified by goreleaser when building
+    # rpms to be v7.0.0~rc.1-1. The tilde is a special character in RPM versioning that
+    # signifies some version substring should be sorted as less than the rest of the version,
+    # so that v7.0.0~rc.1-1 < v7.0.0-1.
     file_name_template: "{{ .ConventionalFileName }}"
     id: pelican
     vendor: OSG Consortium
