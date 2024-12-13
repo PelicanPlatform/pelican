@@ -819,8 +819,7 @@ func InitConfig() {
 	SetBaseDefaultsInConfig(viper.GetViper())
 
 	if err := InitConfigDir(viper.GetViper()); err != nil {
-		log.Errorf("Failed to initialize the config directory, Error: %v", err)
-		os.Exit(1)
+		cobra.CheckErr(fmt.Errorf("failed to initialize the config directory: %v", err))
 	}
 
 	if configFile := viper.GetString("config"); configFile != "" {
