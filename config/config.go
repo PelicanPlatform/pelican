@@ -498,13 +498,13 @@ func CleanupTempResources() (err error) {
 	return
 }
 
-func getConfigBase() (string, error) {
+func getConfigBase() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
 	}
 
-	return filepath.Join(home, ".config", "pelican"), nil
+	return filepath.Join(home, ".config", "pelican")
 }
 
 func setupTransport() {
@@ -796,10 +796,7 @@ func InitConfigDir(v *viper.Viper) error {
 		if IsRootExecution() {
 			configDir = "/etc/pelican"
 		} else {
-			configTmp, err := getConfigBase()
-			if err != nil {
-				return err
-			}
+			configTmp := getConfigBase()
 			configDir = configTmp
 		}
 		v.SetDefault("ConfigDir", configDir)
