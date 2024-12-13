@@ -2669,13 +2669,50 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 // which would involve significant and complex changes. As the command is not fully supported, concurrency is deferred.
 func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp server_structs.DirectorResponse, token *tokenGenerator) (err error) {
 	log.Debugln("Attempting to delete:", remoteUrl.Path)
+	project := searchJobAd(projectName)
+
 	if dirResp.XPelNsHdr.CollectionsUrl == nil {
-		return errors.Errorf("collections URL not found in director response.")
+		log.Info("Collections URL not received in director response, attempting to delete directly using HTTP DELETE.")
+
+		client := grab.NewClient()
+		client.UserAgent = getUserAgent(project)
+
+		transport := config.GetTransport()
+		httpClient, ok := client.HTTPClient.(*http.Client)
+		if !ok {
+			return errors.New("internal error: implementation is not a http.Client type")
+		}
+		httpClient.Transport = transport
+
+		// Object deletion command only works for a single origin in a prefix setup.
+		serverUrl := dirResp.ObjectServers[0].String()
+		req, err := http.NewRequest("DELETE", serverUrl, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create HTTP DELETE request: %w", err)
+		}
+		tokenContents, err := token.get()
+		if err != nil || tokenContents == "" {
+			return errors.Wrap(err, "failed to get token for transfer")
+		}
+		req.Header.Set("Authorization", "Bearer "+tokenContents)
+		req.Header.Set("X-Transfer-Status", "true")
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("HTTP DELETE request failed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+			return fmt.Errorf("HTTP DELETE request returned unexpected status: %s", resp.Status)
+		}
+
+		log.Debugln("Successfully deleted:", remoteUrl.Path)
+		return nil
+
 	}
 
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
-
-	project := searchJobAd(projectName)
 	client := createWebDavClient(collectionsUrl, token, project)
 	remotePath := remoteUrl.Path
 
