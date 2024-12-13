@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
@@ -164,15 +165,16 @@ func handleExports(ctx *gin.Context) {
 // Create a new private key in the given directory, but without loading it immediately
 // This new key will be detected and loaded later by the ongoing goroutine `LaunchIssuerKeysDirRefresh`,
 // which periodically refreshes the keys in the issuer keys directory
-func createNewIssuerKey(ctx *gin.Context) {
+func createNewIssuerKey(ctx *gin.Context, generatePEM func(string) (jwk.Key, error)) {
 	issuerKeysDir := param.IssuerKeysDirectory.GetString()
 
-	_, err := config.GeneratePEM(issuerKeysDir)
+	_, err := generatePEM(issuerKeysDir)
 	if err != nil {
 		log.Errorf("Error creating a new private key in a new .pem file: %v", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Error creating a new private key in a new .pem file"})
+		return
 	}
 
 	ctx.JSON(http.StatusOK,
@@ -186,7 +188,14 @@ func RegisterOriginWebAPI(engine *gin.Engine) error {
 	originWebAPI := engine.Group("/api/v1.0/origin_ui")
 	{
 		originWebAPI.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleExports)
-		originWebAPI.GET("/newIssuerKey", web_ui.AuthHandler, web_ui.AdminAuthHandler, createNewIssuerKey)
+
+		// For unit test: GeneratePEM will be replaced by a mockup func
+		defaultGeneratePEM := func(directory string) (jwk.Key, error) {
+			return config.GeneratePEM(directory)
+		}
+		originWebAPI.GET("/newIssuerKey", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
+			createNewIssuerKey(ctx, defaultGeneratePEM)
+		})
 	}
 
 	// Globus backend specific. Config other origin routes above this line

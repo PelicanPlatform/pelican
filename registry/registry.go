@@ -305,7 +305,12 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 
 			// Check the origin is authorized to update (possessing the public key used for prefix initial registration)
 			// Parse all public keys of the sender into a JWKS
-			clientKeySet, err := jwk.Parse(data.AllPubkeys)
+			var clientKeySet jwk.Set
+			if data.AllPubkeys == nil { // backward compatibility - AllPubkeys only exists in the payload in Pelican 7.12 or later
+				clientKeySet, err = jwk.Parse(data.Pubkey)
+			} else {
+				clientKeySet, err = jwk.Parse(data.AllPubkeys)
+			}
 			if err != nil {
 				log.Errorf("Failed to parse in-memory public keys of the client: %v", err)
 				return false, nil, errors.Wrapf(err, "Invalid in-memory public keys format of the client")

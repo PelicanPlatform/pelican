@@ -1439,7 +1439,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 
 	// As necessary, generate private keys, JWKS and corresponding certs
 
-	// Note: This function will generate a private key in the location stored by the viper var "IssuerKey"
+	// Note: This function will generate a private key in the location stored by the viper var "IssuerKeysDirectory"
 	// iff there isn't any valid private key present in that location
 	_, err = GetIssuerPublicJWKS()
 	if err != nil {
