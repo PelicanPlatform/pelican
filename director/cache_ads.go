@@ -33,6 +33,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
@@ -81,7 +82,11 @@ func (f filterType) String() string {
 //  4. Set up utilities for collecting origin/health server file transfer test status
 //  5. Return the updated ServerAd. The ServerAd passed in will not be modified
 func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]server_structs.NamespaceAdV2) (updatedAd server_structs.ServerAd) {
-	if err := updateLatLong(ctx, &sAd); err != nil {
+	if err := updateLatLong(&sAd); err != nil {
+		if geoIPError, ok := err.(geoIPError); ok {
+			labels := geoIPError.labels
+			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
+		}
 		log.Debugln("Failed to lookup GeoIP coordinates for host", sAd.URL.Host)
 	}
 
@@ -239,7 +244,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	return sAd
 }
 
-func updateLatLong(ctx context.Context, ad *server_structs.ServerAd) error {
+func updateLatLong(ad *server_structs.ServerAd) error {
 	if ad == nil {
 		return errors.New("Cannot provide a nil ad to UpdateLatLong")
 	}
@@ -257,7 +262,7 @@ func updateLatLong(ctx context.Context, ad *server_structs.ServerAd) error {
 	}
 	// NOTE: If GeoIP resolution of this address fails, lat/long are set to 0.0 (the null lat/long)
 	// This causes the server to be sorted to the end of the list whenever the Director requires distance-aware sorting.
-	lat, long, err := getLatLong(ctx, addr)
+	lat, long, err := getLatLong(addr)
 	if err != nil {
 		return err
 	}

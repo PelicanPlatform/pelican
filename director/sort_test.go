@@ -49,7 +49,7 @@ func TestCheckOverrides(t *testing.T) {
 	server_utils.ResetTestState()
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
-		geoIPOverrides = nil
+		geoNetOverrides = nil
 	})
 
 	// We'll also check that our logging feature responsibly reports
@@ -80,11 +80,9 @@ func TestCheckOverrides(t *testing.T) {
 	t.Run("test-log-output", func(t *testing.T) {
 		// Check that the log caught our malformed IP and CIDR. We only need to test this once, because it is only logged the very first time.
 		require.Contains(t, logOutput.String(), "Failed to parse configured GeoIPOverride address (192.168.0). Unable to use for GeoIP resolution!")
-		require.Contains(t, logOutput.String(), "Failed to parse configured GeoIPOverride CIDR address (10.0.0./24): invalid CIDR address: 10.0.0./24."+
-			" Unable to use for GeoIP resolution!")
+		require.Contains(t, logOutput.String(), "Failed to parse configured GeoIPOverride address (10.0.0./24). Unable to use for GeoIP resolution!")
 		require.Contains(t, logOutput.String(), "Failed to parse configured GeoIPOverride address (FD00::000G). Unable to use for GeoIP resolution!")
-		require.Contains(t, logOutput.String(), "Failed to parse configured GeoIPOverride CIDR address (FD00::000F/11S): invalid CIDR address: FD00::000F/11S."+
-			" Unable to use for GeoIP resolution!")
+		require.Contains(t, logOutput.String(), "Failed to parse configured GeoIPOverride address (FD00::000F/11S). Unable to use for GeoIP resolution!")
 	})
 
 	t.Run("test-ipv4-match", func(t *testing.T) {
@@ -196,7 +194,7 @@ func TestSortServerAds(t *testing.T) {
 	server_utils.ResetTestState()
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
-		geoIPOverrides = nil
+		geoNetOverrides = nil
 	})
 
 	// A random IP that should geo-resolve to roughly the same location as the Madison server
@@ -470,9 +468,7 @@ func TestGetClientLatLong(t *testing.T) {
 
 		clientIp := netip.Addr{}
 		assert.False(t, clientIpCache.Has(clientIp))
-		ctx := context.Background()
-		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
-		coord1 := getClientLatLong(ctx, clientIp)
+		coord1, _ := getClientLatLong(clientIp)
 
 		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
 		assert.True(t, coord1.Long <= usLongMax && coord1.Long >= usLongMin)
@@ -480,9 +476,7 @@ func TestGetClientLatLong(t *testing.T) {
 		assert.NotContains(t, logOutput.String(), "Retrieving pre-assigned lat/long")
 
 		// Get it again to make sure it's coming from the cache
-		ctx = context.Background()
-		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
-		coord2 := getClientLatLong(ctx, clientIp)
+		coord2, _ := getClientLatLong(clientIp)
 		assert.Equal(t, coord1.Lat, coord2.Lat)
 		assert.Equal(t, coord1.Long, coord2.Long)
 		assert.Contains(t, logOutput.String(), "Retrieving pre-assigned lat/long for unresolved client IP")
@@ -496,9 +490,7 @@ func TestGetClientLatLong(t *testing.T) {
 
 		clientIp := netip.MustParseAddr("192.168.0.1")
 		assert.False(t, clientIpCache.Has(clientIp))
-		ctx := context.Background()
-		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
-		coord1 := getClientLatLong(ctx, clientIp)
+		coord1, _ := getClientLatLong(clientIp)
 
 		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
 		assert.True(t, coord1.Long <= usLongMax && coord1.Long >= usLongMin)
@@ -506,9 +498,7 @@ func TestGetClientLatLong(t *testing.T) {
 		assert.NotContains(t, logOutput.String(), "Retrieving pre-assigned lat/long")
 
 		// Get it again to make sure it's coming from the cache
-		ctx = context.Background()
-		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
-		coord2 := getClientLatLong(ctx, clientIp)
+		coord2, _ := getClientLatLong(clientIp)
 		assert.Equal(t, coord1.Lat, coord2.Lat)
 		assert.Equal(t, coord1.Long, coord2.Long)
 		assert.Contains(t, logOutput.String(), "Retrieving pre-assigned lat/long for client IP")

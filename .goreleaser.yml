@@ -50,9 +50,30 @@ builds:
         goarch: ppc64le
       - goos: darwin
         goarch: ppc64le
-
+  # Set things up to build a second server binary that enables Lotman. Eventually
+  # we'll also use this to filter which moduels are built into the binary.
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - "amd64"
+      - "arm64"
+    id: "pelican-server"
+    dir: ./cmd
+    binary: pelican-server
+    tags:
+      - forceposix
+      - lotman
+    ldflags:
+      - -s -w -X github.com/pelicanplatform/pelican/config.commit={{.Commit}} -X github.com/pelicanplatform/pelican/config.date={{.Date}} -X github.com/pelicanplatform/pelican/config.builtBy=goreleaser -X github.com/pelicanplatform/pelican/config.version={{.Version}}
+# Goreleaser complains if there's a different number of binaries built for different architectures
+# in the same archive. Instead of plopping pelican-server in the same archive as pelican, split the
+# builds into separate archives.
 archives:
   - id: pelican
+    builds:
+      - pelican
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -62,6 +83,15 @@ archives:
       - goos: windows
         format: zip
     wrap_in_directory: '{{ .ProjectName }}-{{ trimsuffix .Version "-next" }}'
+  - id: pelican-server
+    builds:
+      - pelican-server
+    name_template: >-
+      {{ .ProjectName }}-server_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    wrap_in_directory: '{{ .ProjectName }}-server-{{ trimsuffix .Version "-next" }}'
 checksum:
   name_template: 'checksums.txt'
 snapshot:

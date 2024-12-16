@@ -195,10 +195,10 @@ COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a
 COPY images/entrypoint.sh /entrypoint.sh
 
 # Copy here to reduce dependency on the pelican-build stage in the final-stage and x-base stage
-COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/pelican
-COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /pelican/osdf
-RUN chmod +x /pelican/pelican \
-    && chmod +x /pelican/osdf \
+COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /usr/local/bin/pelican
+COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /usr/local/bin/osdf
+RUN    chmod +x /usr/local/bin/pelican \
+    && chmod +x /usr/local/bin/osdf \
     && chmod +x /entrypoint.sh
 
 ######################
@@ -206,22 +206,25 @@ RUN chmod +x /pelican/pelican \
 ######################
 FROM final-stage AS pelican-base
 
-RUN rm -rf /pelican/osdf
+RUN rm -f /usr/local/bin/osdf
 
 ######################
 # OSDF base stage #
 ######################
 FROM final-stage AS osdf-base
 
-RUN rm -rf /pelican/pelican
+RUN rm -f /usr/local/bin/pelican
 
 ####################
 # pelican/cache    #
 ####################
 
 FROM pelican-base AS cache
-
-ENTRYPOINT [ "/entrypoint.sh", "pelican", "cache"]
+RUN rm -f /usr/local/bin/pelican
+COPY --from=pelican-build /pelican/dist/pelican-server_linux_amd64_v1/pelican-server /usr/local/sbin/pelican-server
+RUN chmod +x /usr/local/sbin/pelican-server
+# For now, we're only using pelican-server in the cache, but eventually we'll use it in all servers
+ENTRYPOINT [ "/entrypoint.sh", "pelican-server", "cache"]
 CMD [ "serve" ]
 
 ####################
@@ -260,8 +263,10 @@ CMD [ "serve" ]
 ####################
 
 FROM osdf-base AS osdf-cache
-
-ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "cache"]
+RUN rm -rf /pelican/osdf
+COPY --from=pelican-build /pelican/dist/pelican-server_linux_amd64_v1/pelican-server /usr/local/sbin/osdf-server
+RUN chmod +x /usr/local/sbin/osdf-server
+ENTRYPOINT [ "/entrypoint.sh" ,"osdf-server", "cache"]
 CMD [ "serve" ]
 
 ####################

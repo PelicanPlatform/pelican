@@ -1,5 +1,4 @@
-//go:build false
-// For now we're shutting off LotMan due to weirdness with purego
+//go:build lotman && linux && !ppc64le
 
 /***************************************************************
 *
@@ -25,6 +24,7 @@ package lotman
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,6 +36,7 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -58,6 +59,7 @@ var (
 	// Auxilliary functions
 	LotmanLotExists     func(lotName string, errMsg *[]byte) int32
 	LotmanSetContextStr func(contextKey string, contextValue string, errMsg *[]byte) int32
+	LotmanGetContextStr func(key string, output *[]byte, errMsg *[]byte) int32
 	// Functions that would normally take a char *** as an argument take an *unsafe.Pointer instead because
 	// these functions are responsible for allocating and deallocating the memory for the char ***. The Go
 	// runtime will handle the memory management for the *unsafe.Pointer.
@@ -299,13 +301,17 @@ func GetAuthorizedCallers(lotName string) (*[]string, error) {
 // 1. The federation's discovery url
 // 2. The federation's director url
 // TODO: Consider what happens to the lot if either of these values change in the future after the lot is created?
-func getFederationIssuer() string {
-	federationIssuer := param.Federation_DiscoveryUrl.GetString()
+func getFederationIssuer() (string, error) {
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return "", err
+	}
+	federationIssuer := fedInfo.DiscoveryEndpoint
 	if federationIssuer == "" {
-		federationIssuer = param.Federation_DirectorUrl.GetString()
+		federationIssuer = fedInfo.DirectorEndpoint
 	}
 
-	return federationIssuer
+	return federationIssuer, nil
 }
 
 // Initialize the LotMan library and bind its functions to the global vars
@@ -334,6 +340,7 @@ func InitLotman() bool {
 	// Auxilliary functions
 	purego.RegisterLibFunc(&LotmanLotExists, lotmanLib, "lotman_lot_exists")
 	purego.RegisterLibFunc(&LotmanSetContextStr, lotmanLib, "lotman_set_context_str")
+	purego.RegisterLibFunc(&LotmanGetContextStr, lotmanLib, "lotman_get_context_str")
 	purego.RegisterLibFunc(&LotmanGetLotOwners, lotmanLib, "lotman_get_owners")
 	purego.RegisterLibFunc(&LotmanGetLotParents, lotmanLib, "lotman_get_parent_names")
 	purego.RegisterLibFunc(&LotmanGetLotsFromDir, lotmanLib, "lotman_get_lots_from_dir")
@@ -359,14 +366,22 @@ func InitLotman() bool {
 		log.Warningf("Error while unmarshaling Lots from config: %v", err)
 	}
 
-	federationIssuer := getFederationIssuer()
+	federationIssuer, err := getFederationIssuer()
+	if err != nil {
+		log.Errorf("Error getting federation issuer: %v", err)
+		return false
+	}
+	if federationIssuer == "" {
+		log.Errorln("Unable to determine federation issuer which is needed by Lotman to determine lot ownership")
+		return false
+	}
 
 	callerMutex.Lock()
 	defer callerMutex.Unlock()
 	ret = LotmanSetContextStr("caller", federationIssuer, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		log.Errorf("Error setting context for default lot: %s", string(errMsg))
+		log.Errorf("Error setting caller context to %s for default lot: %s", federationIssuer, string(errMsg))
 		return false
 	}
 
@@ -527,6 +542,7 @@ func InitLotman() bool {
 			if ret != 0 {
 				trimBuf(&errMsg)
 				log.Errorf("Error creating lot %s: %s", lot.LotName, string(errMsg))
+				log.Infoln("Full lot JSON passed to Lotman for lot creation:", string(lotJSON))
 				return false
 			}
 		}

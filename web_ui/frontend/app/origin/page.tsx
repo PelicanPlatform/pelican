@@ -51,10 +51,7 @@ export default function Home() {
   };
 
   return (
-    <AuthenticatedContent
-      redirect={true}
-      checkAuthentication={(u: User) => u?.role == 'admin'}
-    >
+    <AuthenticatedContent redirect={true} allowedRoles={['admin']}>
       <Box width={'100%'}>
         <Grid container spacing={2}>
           <Grid item xs={12} lg={6}>
@@ -86,62 +83,6 @@ export default function Home() {
               </Tooltip>
             </Box>
             <DataExportTable />
-          </Grid>
-          <Grid item xs={12} lg={6}>
-            <Box
-              sx={{ backgroundColor: '#F6F6F6', borderRadius: '1rem' }}
-              p={2}
-            >
-              <Typography variant='h4' mb={1}>
-                Transfer Rate
-              </Typography>
-              <Box minHeight={'200px'}>
-                <RateGraph
-                  rate={TimeDuration.fromString('3h')}
-                  duration={TimeDuration.fromString('7d')}
-                  resolution={TimeDuration.fromString('3h')}
-                  metrics={[
-                    'xrootd_server_bytes{direction="rx"}',
-                    'xrootd_server_bytes{direction="tx"}',
-                  ]}
-                  boxProps={{
-                    maxHeight: '400px',
-                    flexGrow: 1,
-                    justifyContent: 'center',
-                    display: 'flex',
-                    bgcolor: 'white',
-                    borderRadius: 2,
-                    p: 1,
-                  }}
-                  options={{
-                    scales: {
-                      x: {
-                        type: 'time',
-                        time: {
-                          round: 'second',
-                          minUnit: 'minute',
-                        },
-                      },
-                    },
-                    plugins: {
-                      zoom: {
-                        zoom: {
-                          drag: {
-                            enabled: true,
-                          },
-                          mode: 'x',
-                          // TODO - Implement smart update on zoom: onZoom: (chart) => console.log(chart)
-                        },
-                      },
-                    },
-                  }}
-                  datasetOptions={[
-                    { label: 'Bytes Received (Bps)', borderColor: '#0071ff' },
-                    { label: 'Bytes Sent (Bps)', borderColor: '#54ff80' },
-                  ]}
-                />
-              </Box>
-            </Box>
           </Grid>
           <Grid item xs={12} lg={6}>
             <FederationOverview />

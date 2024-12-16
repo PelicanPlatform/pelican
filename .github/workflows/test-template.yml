@@ -1,0 +1,99 @@
+name: Test Template
+
+on:
+  workflow_call:
+    inputs:
+      tags:
+        required: true
+        type: string
+      coverprofile:
+        required: true
+        type: string
+      binary_name:
+        required: true
+        type: string
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20
+    - name: Fetch tags
+      run: |
+        git config --global --add safe.directory /__w/pelican/pelican
+        git fetch --force --tags
+    - name: Cache Next.js
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.npm
+          ${{ github.workspace }}/.next/cache
+        key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx') }}
+        restore-keys: |
+          ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
+    - name: Test
+      run: |
+        make web-build
+        go test -tags=${{ inputs.tags }} -timeout 15m -coverpkg=./... -coverprofile=${{ inputs.coverprofile }} -covermode=count ./...
+    - name: Get total code coverage
+      if: github.event_name == 'pull_request'
+      id: cc
+      run: |
+        set -x
+        cc_total=`go tool cover -func=${{ inputs.coverprofile }} | grep total | grep -Eo '[0-9]+\.[0-9]+'`
+        echo "cc_total=$cc_total" >> $GITHUB_OUTPUT
+    - name: Restore base test coverage
+      id: base-coverage
+      if: github.event.pull_request.base.sha != ''
+      uses: actions/cache@v4
+      with:
+        path: |
+          unit-base.txt
+        key: ${{ runner.os }}-unit-test-coverage-${{ (github.event.pull_request.base.sha != github.event.after) && github.event.pull_request.base.sha || github.event.after }}
+    - name: Run test for base code
+      if: steps.base-coverage.outputs.cache-hit != 'true' && github.event.pull_request.base.sha != ''
+      run: |
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        git fetch origin main ${{ github.event.pull_request.base.sha }}
+        HEAD=$(git rev-parse HEAD)
+        git reset --hard ${{ github.event.pull_request.base.sha }}
+        make web-build
+        go generate ./...
+        go test -tags=${{ inputs.tags }} -timeout 15m -coverpkg=./... -coverprofile=base_coverage.out -covermode=count ./...
+        go tool cover -func=base_coverage.out > unit-base.txt
+        git reset --hard $HEAD
+    - name: Get base code coverage value
+      if: github.event_name == 'pull_request'
+      id: cc_b
+      run: |
+        set -x
+        cc_base_total=`grep total ./unit-base.txt | grep -Eo '[0-9]+\.[0-9]+'`
+        echo "cc_base_total=$cc_base_total" >> $GITHUB_OUTPUT
+    - name: Add coverage information to action summary
+      if: github.event_name == 'pull_request'
+      run: echo 'Code coverage ' ${{steps.cc.outputs.cc_total}}'% Prev ' ${{steps.cc_b.outputs.cc_base_total}}'%' >> $GITHUB_STEP_SUMMARY
+    - name: Run GoReleaser for Ubuntu
+      uses: goreleaser/goreleaser-action@v5
+      with:
+        distribution: goreleaser
+        version: latest
+        args: build --single-target --clean --snapshot
+    - name: Copy files (Ubuntu)
+      run: |
+        cp dist/${{ inputs.binary_name }}_linux_amd64_v1/${{ inputs.binary_name }} ./pelican
+    - name: Run Integration Tests
+      run: ./github_scripts/citests.sh
+    - name: Run End-to-End Test for Object get/put
+      run: ./github_scripts/get_put_test.sh
+    - name: Run End-to-End Test for Director stat
+      run: ./github_scripts/stat_test.sh
+    - name: Run End-to-End Test for --version flag
+      run: ./github_scripts/version_test.sh

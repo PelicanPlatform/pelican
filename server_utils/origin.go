@@ -20,19 +20,23 @@ package server_utils
 
 import (
 	"fmt"
-	"os"
+	"net/http"
+	"net/url"
 	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token"
 )
 
 var originExports []OriginExport
@@ -750,18 +754,64 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 	return originExports, nil
 }
 
+// Generate a minimally scoped auth token that allows the origin
+// to query itself for its sentinel file
+func generateSentinelReadToken(resourceScope string) (string, error) {
+	issuerUrl := param.Server_ExternalWebUrl.GetString()
+	if issuerUrl == "" { // if both are empty, then error
+		return "", errors.New("failed to create a sentinel check auth token because required configuration 'Server.ExternalWebUrl' is empty")
+	}
+	fTestTokenCfg := token.NewWLCGToken()
+	fTestTokenCfg.Lifetime = time.Minute
+	fTestTokenCfg.Issuer = issuerUrl
+	fTestTokenCfg.Subject = "origin"
+	fTestTokenCfg.Claims = map[string]string{"scope": fmt.Sprintf("storage.read:/%v", resourceScope)}
+	// For self-tests, the audience is the server itself
+	fTestTokenCfg.AddAudienceAny()
+
+	// CreateToken also handles validation for us
+	tok, err := fTestTokenCfg.CreateToken()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create sentinel check auth token")
+	}
+
+	return tok, nil
+}
+
 // Check the sentinel files from Origin.Exports
 func CheckOriginSentinelLocations(exports []OriginExport) (ok bool, err error) {
 	for _, export := range exports {
 		if export.SentinelLocation != "" {
+			log.Infof("Checking that sentinel object %v is present for federation prefix %s", export.SentinelLocation, export.FederationPrefix)
 			sentinelPath := path.Clean(export.SentinelLocation)
 			if path.Base(sentinelPath) != sentinelPath {
-				return false, errors.Errorf("invalid SentinelLocation path for StoragePrefix %s, file must not contain a directory. Got %s", export.StoragePrefix, export.SentinelLocation)
+				return false, errors.Errorf("invalid SentinelLocation path for federation prefix %s, path must not contain a directory. Got %s", export.FederationPrefix, export.SentinelLocation)
 			}
-			fullPath := filepath.Join(export.StoragePrefix, sentinelPath)
-			_, err := os.Stat(fullPath)
+
+			fullPath := filepath.Join(export.FederationPrefix, sentinelPath)
+			tkn, err := generateSentinelReadToken(sentinelPath)
 			if err != nil {
-				return false, errors.Wrapf(err, "fail to open SentinelLocation %s for StoragePrefix %s. Collection check failed", export.SentinelLocation, export.StoragePrefix)
+				return false, errors.Wrap(err, "failed to generate self-auth token for sentinel object check")
+			}
+
+			sentinelUrl, err := url.JoinPath(param.Origin_Url.GetString(), fullPath)
+			if err != nil {
+				return false, errors.Wrapf(err, "unable fo form sentinel URL for Origin.Url %v, sentinel path %v", param.Origin_Url.GetString(), fullPath)
+			}
+			req, err := http.NewRequest(http.MethodGet, sentinelUrl, nil)
+			if err != nil {
+				return false, errors.Wrap(err, "failed to create GET request for sentinel object check")
+			}
+			req.Header.Set("Authorization", "Bearer "+tkn)
+
+			client := http.Client{Transport: config.GetTransport()}
+			resp, err := client.Do(req)
+			if err != nil {
+				return false, errors.Wrapf(err, "fail to open sentinel object %s for federation prefix %s.", export.SentinelLocation, export.FederationPrefix)
+			}
+
+			if resp.StatusCode != 200 {
+				return false, errors.New(fmt.Sprintf("got non-200 response code %v when checking sentinel object %s for federation prefix %s", resp.StatusCode, export.SentinelLocation, export.FederationPrefix))
 			}
 		}
 	}

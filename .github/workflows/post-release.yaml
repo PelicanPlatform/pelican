@@ -1,0 +1,15 @@
+# Toggle webhook to pull latest release onto pelicanplatform.org and update the download offerings there
+# Post release this will result in the new release being available and the Major/Minor pointers being moved/created accordingly
+name: post-release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  toggle-webhook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Toggle Webhook
+        run: |
+          curl -X POST https://dl.pelicanplatform.org/api/api/hooks/release-download-toggle

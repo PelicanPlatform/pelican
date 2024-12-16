@@ -21,12 +21,12 @@ package director
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"math/rand"
 	"net"
 	"net/netip"
 	"slices"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -59,11 +59,25 @@ type (
 		IP         string     `mapstructure:"IP"`
 		Coordinate Coordinate `mapstructure:"Coordinate"`
 	}
+
+	GeoNetOverride struct {
+		IPNet      net.IPNet
+		Coordinate Coordinate
+	}
+
+	geoIPError struct {
+		labels   prometheus.Labels
+		errorMsg string
+	}
 )
 
+func (e geoIPError) Error() string {
+	return e.errorMsg
+}
+
 var (
-	invalidOverrideLogOnce = map[string]bool{}
-	geoIPOverrides         []GeoIPOverride
+	// Stores the unmarshalled GeoIP override config in a form that's efficient to test
+	geoNetOverrides []GeoNetOverride
 
 	// Stores a mapping of client IPs that have been randomly assigned a coordinate
 	clientIpCache = ttlcache.New(ttlcache.WithTTL[netip.Addr, Coordinate](20 * time.Minute))
@@ -98,57 +112,73 @@ func (me SwapMaps) Swap(left, right int) {
 	me[left], me[right] = me[right], me[left]
 }
 
+// Unmarshal any configured GeoIP overrides.
+// Malformed IPs and CIDRs are logged but not returned as errors.
+func unmarshalOverrides() error {
+	var geoIPOverrides []GeoIPOverride
+
+	// Ensure that we're starting with an empty slice.
+	geoNetOverrides = nil
+
+	if err := param.GeoIPOverrides.Unmarshal(&geoIPOverrides); err != nil {
+		return err
+	}
+
+	for _, override := range geoIPOverrides {
+		var ipNet *net.IPNet
+
+		if _, parsedNet, err := net.ParseCIDR(override.IP); err == nil {
+			ipNet = parsedNet
+		} else if ip := net.ParseIP(override.IP); ip != nil {
+			if ip4 := ip.To4(); ip4 != nil {
+				ipNet = &net.IPNet{IP: ip4, Mask: net.CIDRMask(32, 32)}
+			} else if ip16 := ip.To16(); ip16 != nil {
+				ipNet = &net.IPNet{IP: ip16, Mask: net.CIDRMask(128, 128)}
+			}
+		}
+
+		if ipNet == nil {
+			// Log the error, and continue looking for good configuration.
+			log.Warningf("Failed to parse configured GeoIPOverride address (%s). Unable to use for GeoIP resolution!", override.IP)
+			continue
+		}
+		geoNetOverrides = append(geoNetOverrides, GeoNetOverride{IPNet: *ipNet, Coordinate: override.Coordinate})
+	}
+	return nil
+}
+
 // Check for any pre-configured IP-to-lat/long overrides. If the passed address
 // matches an override IP (either directly or via CIDR masking), then we use the
 // configured lat/long from the override instead of relying on MaxMind.
 // NOTE: We don't return an error because if checkOverrides encounters an issue,
 // we still have GeoIP to fall back on.
 func checkOverrides(addr net.IP) (coordinate *Coordinate) {
-	// Unmarshal the values, but only the first time we run through this block
-	if geoIPOverrides == nil {
-		err := param.GeoIPOverrides.Unmarshal(&geoIPOverrides)
+	// Unmarshal the GeoIP override config if we haven't already done so.
+	if geoNetOverrides == nil {
+		err := unmarshalOverrides()
 		if err != nil {
-			log.Warningf("Error while unmarshaling GeoIP Overrides: %v", err)
+			log.Warningf("Error while unmarshalling GeoIP overrides: %v", err)
+			return nil
 		}
 	}
-
-	for _, geoIPOverride := range geoIPOverrides {
-		// Check for regular IP addresses before CIDR
-		overrideIP := net.ParseIP(geoIPOverride.IP)
-		if overrideIP == nil {
-			// The IP is malformed
-			if !invalidOverrideLogOnce[geoIPOverride.IP] && !strings.Contains(geoIPOverride.IP, "/") {
-				// Don't return here, because we have more to check.
-				// Do provide a notice to the user, however.
-				log.Warningf("Failed to parse configured GeoIPOverride address (%s). Unable to use for GeoIP resolution!", geoIPOverride.IP)
-				invalidOverrideLogOnce[geoIPOverride.IP] = true
-			}
-		}
-		if overrideIP.Equal(addr) {
-			return &geoIPOverride.Coordinate
-		}
-
-		// Alternatively, we can match by CIDR blocks
-		if strings.Contains(geoIPOverride.IP, "/") {
-			_, ipNet, err := net.ParseCIDR(geoIPOverride.IP)
-			if err != nil {
-				if !invalidOverrideLogOnce[geoIPOverride.IP] {
-					// Same reason as above for not returning.
-					log.Warningf("Failed to parse configured GeoIPOverride CIDR address (%s): %v. Unable to use for GeoIP resolution!", geoIPOverride.IP, err)
-					invalidOverrideLogOnce[geoIPOverride.IP] = true
-				}
-				continue
-			}
-			if ipNet.Contains(addr) {
-				return &geoIPOverride.Coordinate
-			}
+	for _, override := range geoNetOverrides {
+		if override.IPNet.Contains(addr) {
+			return &override.Coordinate
 		}
 	}
-
 	return nil
 }
 
-func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64, err error) {
+func setProjectLabel(ctx context.Context, labels *prometheus.Labels) {
+	project, ok := ctx.Value(ProjectContextKey{}).(string)
+	if !ok || project == "" {
+		(*labels)["proj"] = "unknown"
+	} else {
+		(*labels)["proj"] = project
+	}
+}
+
+func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	ip := net.IP(addr.AsSlice())
 	override := checkOverrides(ip)
 	if override != nil {
@@ -159,7 +189,7 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	labels := prometheus.Labels{
 		"network": "",
 		"source":  "",
-		"proj":    "",
+		"proj":    "", // this will be set in the setProjectLabel function
 	}
 
 	network, ok := utils.ApplyIPMask(addr.String())
@@ -170,26 +200,16 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 		labels["network"] = network
 	}
 
-	project, ok := ctx.Value(ProjectContextKey{}).(string)
-	if !ok || project == "" {
-		log.Warningf("Failed to get project from context")
-		labels["proj"] = "unknown"
-		labels["source"] = "server"
-	} else {
-		labels["proj"] = project
-	}
-
 	reader := maxMindReader.Load()
 	if reader == nil {
-		err = errors.New("No GeoIP database is available")
 		labels["source"] = "server"
-		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
+		err = geoIPError{labels: labels, errorMsg: "No GeoIP database is available"}
 		return
 	}
 	record, err := reader.City(ip)
 	if err != nil {
 		labels["source"] = "server"
-		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
+		err = geoIPError{labels: labels, errorMsg: err.Error()}
 		return
 	}
 	lat = record.Location.Latitude
@@ -199,9 +219,10 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	// There's likely a problem with the GeoIP database or the IP address. Usually this just means the IP address
 	// comes from a private range.
 	if lat == 0 && long == 0 {
-		log.Warningf("GeoIP Resolution of the address %s resulted in the null lat/long. This will result in random server sorting.", ip.String())
+		errMsg := fmt.Sprintf("GeoIP Resolution of the address %s resulted in the null lat/long. This will result in random server sorting.", ip.String())
+		log.Warning(errMsg)
 		labels["source"] = "client"
-		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
+		err = geoIPError{labels: labels, errorMsg: errMsg}
 	}
 
 	// MaxMind provides an accuracy radius in kilometers. When it actually has no clue how to resolve a valid, public
@@ -209,12 +230,13 @@ func getLatLong(ctx context.Context, addr netip.Addr) (lat float64, long float64
 	// should be very suspicious of the data, and mark it as appearing at the null lat/long (and provide a warning in
 	// the Director), which also triggers random weighting in our sort algorithms.
 	if record.Location.AccuracyRadius >= 900 {
-		log.Warningf("GeoIP resolution of the address %s resulted in a suspiciously large accuracy radius of %d km. "+
+		errMsg := fmt.Sprintf("GeoIP resolution of the address %s resulted in a suspiciously large accuracy radius of %d km. "+
 			"This will be treated as GeoIP resolution failure and result in random server sorting. Setting lat/long to null.", ip.String(), record.Location.AccuracyRadius)
+		log.Warning(errMsg)
 		lat = 0
 		long = 0
 		labels["source"] = "client"
-		metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
+		err = geoIPError{labels: labels, errorMsg: errMsg}
 	}
 
 	return
@@ -229,8 +251,7 @@ func assignRandBoundedCoord(minLat, maxLat, minLong, maxLong float64) (lat, long
 
 // Given a client address, attempt to get the lat/long of the client. If the address is invalid or
 // the lat/long is not resolvable, assign a random location in the contiguous US.
-func getClientLatLong(ctx context.Context, addr netip.Addr) (coord Coordinate) {
-	var err error
+func getClientLatLong(addr netip.Addr) (coord Coordinate, err error) {
 	if !addr.IsValid() {
 		log.Warningf("Unable to sort servers based on client-server distance. Invalid client IP address: %s", addr.String())
 		coord.Lat, coord.Long = assignRandBoundedCoord(usLatMin, usLatMax, usLongMin, usLongMax)
@@ -244,7 +265,7 @@ func getClientLatLong(ctx context.Context, addr netip.Addr) (coord Coordinate) {
 		return
 	}
 
-	coord.Lat, coord.Long, err = getLatLong(ctx, addr)
+	coord.Lat, coord.Long, err = getLatLong(addr)
 	if err != nil || (coord.Lat == 0 && coord.Long == 0) {
 		if err != nil {
 			log.Warningf("Error while getting the client IP address: %v", err)
@@ -286,7 +307,17 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 	weights := make(SwapMaps, len(ads))
 	sortMethod := param.Director_CacheSortMethod.GetString()
 	// This will handle the case where the client address is invalid or the lat/long is not resolvable.
-	clientCoord := getClientLatLong(ctx, clientAddr)
+	clientCoord, err := getClientLatLong(clientAddr)
+	if err != nil {
+		// If it is a geoIP error, then we get the labels and increment the error counter
+		// Otherwise we log the error and continue
+		if geoIPError, ok := err.(geoIPError); ok {
+			labels := geoIPError.labels
+			setProjectLabel(ctx, &labels)
+			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
+		}
+		log.Warningf("Error while getting the client IP address: %v", err)
+	}
 
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {

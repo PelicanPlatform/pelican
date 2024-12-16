@@ -23,8 +23,6 @@ package server_utils
 import (
 	_ "embed"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -392,64 +390,6 @@ func TestGetExports(t *testing.T) {
 		assert.True(t, viper.GetBool("Origin.EnablePublicReads"))
 		assert.False(t, viper.GetBool("Origin.EnableListings"))
 		assert.True(t, viper.GetBool("Origin.EnableDirectReads"))
-	})
-}
-
-func TestCheckOriginSentinelLocation(t *testing.T) {
-	tmpDir := t.TempDir()
-	tempStn := filepath.Join(tmpDir, "mock_sentinel")
-	file, err := os.Create(tempStn)
-	require.NoError(t, err)
-	err = file.Close()
-	require.NoError(t, err)
-
-	mockExportNoStn := OriginExport{
-		StoragePrefix:    "/foo/bar",
-		FederationPrefix: "/demo/foo/bar",
-		Capabilities:     server_structs.Capabilities{Reads: true},
-	}
-	mockExportValidStn := OriginExport{
-		StoragePrefix:    tmpDir,
-		FederationPrefix: "/demo/foo/bar",
-		Capabilities:     server_structs.Capabilities{Reads: true},
-		SentinelLocation: "mock_sentinel",
-	}
-	mockExportInvalidStn := OriginExport{
-		StoragePrefix:    tmpDir,
-		FederationPrefix: "/demo/foo/bar",
-		Capabilities:     server_structs.Capabilities{Reads: true},
-		SentinelLocation: "sentinel_dne",
-	}
-
-	t.Run("empty-sentinel-return-ok", func(t *testing.T) {
-		exports := make([]OriginExport, 0)
-		exports = append(exports, mockExportNoStn)
-		exports = append(exports, mockExportNoStn)
-
-		ok, err := CheckOriginSentinelLocations(exports)
-		assert.NoError(t, err)
-		assert.True(t, ok)
-	})
-
-	t.Run("valid-sentinel-return-ok", func(t *testing.T) {
-		exports := make([]OriginExport, 0)
-		exports = append(exports, mockExportNoStn)
-		exports = append(exports, mockExportValidStn)
-
-		ok, err := CheckOriginSentinelLocations(exports)
-		assert.NoError(t, err)
-		assert.True(t, ok)
-	})
-
-	t.Run("invalid-sentinel-return-error", func(t *testing.T) {
-		exports := make([]OriginExport, 0)
-		exports = append(exports, mockExportNoStn)
-		exports = append(exports, mockExportValidStn)
-		exports = append(exports, mockExportInvalidStn)
-
-		ok, err := CheckOriginSentinelLocations(exports)
-		assert.Error(t, err)
-		assert.False(t, ok)
 	})
 }
 
