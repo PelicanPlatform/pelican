@@ -13,6 +13,7 @@ import {
   Paper,
   Alert,
   IconButton,
+  LinearProgress,
 } from '@mui/material';
 import React, { ReactElement, useEffect, useMemo, useState } from 'react';
 import { Skeleton } from '@mui/material';
@@ -22,6 +23,7 @@ import useSWR from 'swr';
 import { getErrorMessage } from '@/helpers/util';
 import { Capabilities } from '@/types';
 import { CapabilitiesDisplay } from '@/components';
+import { useSearchParams } from 'next/navigation';
 
 type RegistrationStatus =
   | 'Not Supported'
@@ -286,7 +288,7 @@ export const RecordTable = ({ data }: { data: ExportRes }): ReactElement => {
     const start = (page - 1) * 2;
     const end = start + 2;
     return Object.values(data.exports).slice(start, end);
-  }, [page]);
+  }, [page, data]);
 
   switch (data.type) {
     case 's3':
@@ -350,62 +352,80 @@ export const getExportData = async (): Promise<ExportRes> => {
   }
 };
 
+const generateEditUrl = (editUrl: string, fromUrl: string) => {
+  try {
+    let updatedFromUrl = new URL(fromUrl);
+    if (updatedFromUrl.searchParams.get('from_registry') === null) {
+      updatedFromUrl.searchParams.append('from_registry', 'true');
+    }
+    const url = new URL(editUrl);
+    url.searchParams.append('fromUrl', updatedFromUrl.toString());
+    return url.toString();
+  } catch (e) {
+    console.error('Failed to generate editUrl', e);
+    return editUrl;
+  }
+};
+
 export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
+  const searchParams = useSearchParams();
+  const from_registry = searchParams.get('from_registry') == 'true';
+
+  const [pending, setPending] = useState<boolean>(false);
   const [fromUrl, setFromUrl] = useState<string | undefined>(undefined);
-  const { data, error } = useSWR('getDataExport', getExportData);
+  const { data, mutate } = useSWR('getDataExport', getExportData, {
+    refreshInterval: from_registry ? 10000 : 0,
+  });
 
   useEffect(() => {
     setFromUrl(window.location.href);
+    setPending(true);
+    setTimeout(() => {
+      mutate();
+      setPending(false);
+    }, 10000);
   }, []);
 
-  if (error) {
-    return (
-      <Box p={1}>
-        <Typography sx={{ color: 'red' }} variant={'subtitle2'}>
-          {error.toString()}
-        </Typography>
-      </Box>
-    );
-  }
+  const dataEnhanced = useMemo(() => {
+    // If no from URL return current data
+    if (!fromUrl) {
+      return data;
+    }
 
-  const dataWFromUrl = data;
-  if (fromUrl) {
-    if (dataWFromUrl?.editUrl) {
-      try {
-        const editUrl = new URL(dataWFromUrl?.editUrl);
-        editUrl.searchParams.append('fromUrl', fromUrl);
-        dataWFromUrl.editUrl = editUrl.toString();
-      } catch (error) {
-        console.log('editUrl is not a valid url: ', error);
-      }
+    // If data is not available, return null
+    if (!data) {
+      return undefined;
     }
-    if (dataWFromUrl?.exports) {
-      dataWFromUrl.exports.map((val) => {
-        try {
-          const editUrl = new URL(val?.editUrl);
-          editUrl.searchParams.append('fromUrl', fromUrl);
-          val.editUrl = editUrl.toString();
-          return val;
-        } catch (error) {
-          console.log('editUrl is not a valid url: ', error);
-          return val;
-        }
-      });
-    }
-  }
+
+    let dataEnhanced = structuredClone(data);
+    dataEnhanced.editUrl = generateEditUrl(dataEnhanced.editUrl, fromUrl);
+    dataEnhanced.exports.map((val) => {
+      val.editUrl = generateEditUrl(val.editUrl, fromUrl);
+    });
+
+    return dataEnhanced;
+  }, [data, fromUrl]);
 
   return (
     <Box {...boxProps}>
+      {from_registry && pending && (
+        <Box display={'flex'} flexDirection={'column'}>
+          <LinearProgress sx={{ mb: 1, w: '100%' }} />
+          <Typography variant={'subtitle2'} color={grey[400]} mx={'auto'}>
+            Polling from Registry for Updates Every 10 Seconds
+          </Typography>
+        </Box>
+      )}
       <Typography pb={1} variant={'h5'} component={'h3'}>
         Origin
       </Typography>
-      {dataWFromUrl &&
-      dataWFromUrl.status &&
-      dataWFromUrl.status != 'Completed' ? (
+      {dataEnhanced &&
+      dataEnhanced.status &&
+      dataEnhanced.status != 'Completed' ? (
         <DataExportStatus
-          status={dataWFromUrl.status}
-          statusDescription={dataWFromUrl.statusDescription}
-          editUrl={dataWFromUrl.editUrl}
+          status={dataEnhanced.status}
+          statusDescription={dataEnhanced.statusDescription}
+          editUrl={dataEnhanced.editUrl}
         />
       ) : (
         <Alert severity='success'>Registration Completed</Alert>
@@ -414,8 +434,8 @@ export const DataExportTable = ({ boxProps }: { boxProps?: BoxProps }) => {
       <Typography pt={2} pb={1} variant={'h5'} component={'h3'}>
         Namespaces
       </Typography>
-      {dataWFromUrl ? (
-        <RecordTable data={dataWFromUrl} />
+      {dataEnhanced ? (
+        <RecordTable data={dataEnhanced} />
       ) : (
         <Skeleton variant={'rectangular'} height={200} width={'100%'} />
       )}
