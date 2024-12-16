@@ -31,22 +31,26 @@ const Page = () => {
             <Grid container spacing={1}>
               {[
                 <BytesMetricBoxPlot
+                  key={'bytes'}
                   metric={'go_memstats_alloc_bytes'}
                   title={'Server Memory Usage'}
                 />,
                 <MetricBoxPlot
+                  key={'cpu'}
                   metric={
                     'avg by (server_name) (irate(process_cpu_seconds_total[${range}]))'
                   }
                   title={'CPU Usage by Core'}
                 />,
                 <MetricBoxPlot
+                  key={'threads'}
                   metric={
                     'sum by (server_name) (sum_over_time(xrootd_server_connection_count[${range}])) / sum by (server_name) (count_over_time(xrootd_server_connection_count[${range}]))'
                   }
                   title={'XRootD Server Connections'}
                 />,
                 <MetricBoxPlot
+                  key={'scheduler'}
                   metric={
                     'sum by (server_name) (sum_over_time(xrootd_sched_thread_count[${range}])) / sum by (server_name) (count_over_time(xrootd_sched_thread_count[${range}]))'
                   }
