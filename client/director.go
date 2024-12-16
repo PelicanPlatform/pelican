@@ -109,6 +109,16 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		// This is a director >7.9 proxy the PROPFIND response instead of redirect to the origin
 		return
 	} else if resp.StatusCode != 307 {
+		// Attempt to query the director using the PUT HTTP method instead of DELETE,
+		// as older versions of the director may not support the DELETE endpoint.
+		if resp.StatusCode == http.StatusNotFound && verb == http.MethodDelete {
+			bodyString := string(body)
+
+			if strings.Contains(strings.ToLower(bodyString), "page not found") {
+				log.Warningf("Failed to query the DELETE endpoint; the director appears to be an older version, attempting with the PUT method")
+				return queryDirector(ctx, http.MethodPut, pUrl, token)
+			}
+		}
 		return resp, errors.Errorf("%d: %s", resp.StatusCode, errMsg)
 	}
 
@@ -185,7 +195,7 @@ func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, h
 	dirResp, err = queryDirector(ctx, httpMethod, pUrl, token)
 	if err != nil {
 		if (httpMethod == http.MethodPut || httpMethod == http.MethodDelete) && dirResp != nil && dirResp.StatusCode == 405 {
-			err = errors.New("error 405: No writeable origins were found")
+			err = errors.Errorf("the director returned status code 405, indicating it understood the request but could not find an origin that supports PUT/DELETE operations for object: %s.", pUrl.Path)
 			return
 		} else {
 			err = errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)

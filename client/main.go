@@ -319,24 +319,27 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 func DoDelete(ctx context.Context, remoteDestination string, recursive bool, options ...TransferOption) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Debugln("Panic captured while attempting to perform transfer (DoList):", r)
-			log.Debugln("Panic caused by the following", string(debug.Stack()))
-			ret := fmt.Sprintf("Unrecoverable error (panic) captured in DoList: %v", r)
+			log.Debugln("Panic occurred while attempting to perform delete operation (DoDelete):", r)
+			log.Debugln("Stack trace of the panic:", string(debug.Stack()))
+			ret := fmt.Sprintf("Unrecoverable error (panic) in DoDelete: %v", r)
 			err = errors.New(ret)
 		}
 	}()
 
 	pUrl, err := ParseRemoteAsPUrl(ctx, remoteDestination)
 	if err != nil {
-		return errors.Wrapf(err, "failed to parse remote path: %s", remoteDestination)
+		return errors.Wrapf(err, "failed to parse remote destination: %s", remoteDestination)
 	}
+
 	if _, exists := pUrl.Query()[pelican_url.QueryRecursive]; exists {
 		recursive = true
 	}
+
 	dirResp, err := GetDirectorInfoForPath(ctx, pUrl, http.MethodDelete, "")
 	if err != nil {
 		return err
 	}
+
 	token := newTokenGenerator(pUrl, &dirResp, true, true)
 	for _, option := range options {
 		switch option.Ident() {
@@ -351,13 +354,14 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 
 	tokenContents, err := token.get()
 	if err != nil || tokenContents == "" {
-		return errors.Wrap(err, "failed to get token for transfer")
+		return errors.Wrap(err, "failed to retrieve token for delete operation")
 	}
 
 	err = deleteHttp(pUrl, recursive, dirResp, token)
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 

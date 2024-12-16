@@ -187,7 +187,7 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 			directorUrl:   ts.URL,
 			httpMethod:    http.MethodPut,
 			query:         "",
-			expectedError: "error 405: No writeable origins were found",
+			expectedError: "the director returned status code 405",
 		},
 		{
 			name:          "Queries are propagated", // also generates 405, although this is a feauture of the director

@@ -2671,7 +2671,7 @@ func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp serve
 	log.Debugln("Attempting to delete:", remoteUrl.Path)
 	project := searchJobAd(projectName)
 
-	if dirResp.XPelNsHdr.CollectionsUrl == nil {
+	if dirResp.XPelNsHdr.CollectionsUrl == nil || dirResp.XPelNsHdr.CollectionsUrl.String() == "" {
 		log.Info("Collections URL not received in director response, attempting to delete directly using HTTP DELETE.")
 
 		client := grab.NewClient()
@@ -2719,7 +2719,7 @@ func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp serve
 	info, err := client.Stat(remotePath)
 	if err != nil {
 		if gowebdav.IsErrNotFound(err) {
-			return errors.Wrap(err, "object not found")
+			return errors.Wrapf(err, "cannot remove remote path %s: no such object or collection", remotePath)
 		}
 		return errors.Wrap(err, "failed to check object existence")
 	}
@@ -2727,17 +2727,18 @@ func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp serve
 	if info.IsDir() {
 		children, err := client.ReadDir(remotePath)
 		if err != nil {
-			return errors.Wrap(err, "failed to read collection contents")
+			return errors.Wrapf(err, "failed to read contents of collection %s", remotePath)
+
 		}
 		if !recursive && len(children) > 0 {
-			return errors.New("cannot delete non-empty collection, use recursive flag or recursive query in the url")
+			return errors.Errorf("%s is a non-empty collection, use recursive flag or recursive query in the url to delete it", remotePath)
 		}
 		if recursive {
 			for _, child := range children {
 				childPath := remotePath + "/" + child.Name()
 				err = deleteHttp(&pelican_url.PelicanURL{Path: childPath}, recursive, dirResp, token)
 				if err != nil {
-					return errors.Wrapf(err, "failed to delete child object: %s", childPath)
+					return errors.Wrapf(err, "failed to delete child object %s", childPath)
 				}
 			}
 		}
@@ -2745,12 +2746,15 @@ func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp serve
 
 	err = client.Remove(remotePath)
 	if err != nil {
-		if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) || gowebdav.IsErrCode(err, http.StatusInternalServerError) {
-			return err
+		if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+			return errors.Wrap(err, "method not allowed on the remote object, deletion is not permitted")
+		}
+		if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+			return errors.Wrap(err, "internal server error occurred while attempting to delete the remote object")
 		}
 		return errors.Wrap(err, "failed to delete remote object")
 	}
-	log.Debugln("Successfully deleted:", remoteUrl.Path)
+	log.Debugln("Origin reported successful deletion of:", remoteUrl.Path)
 	return nil
 }
 

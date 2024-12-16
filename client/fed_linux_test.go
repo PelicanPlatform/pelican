@@ -921,7 +921,11 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 	})
 }
 
-// TestObjectDelete verifies the expected behavior of the object delete co
+// TestObjectDelete verifies the expected behavior of the object delete command.
+// It covers scenarios such as:
+// - Failing to delete if the origin does not have write capability enabled.
+// - Failing to delete a non-empty directory when the recursive flag is not set.
+// - Ensuring the proper error messages are displayed for various failure cases.
 func TestObjectDelete(t *testing.T) {
 	server_utils.ResetTestState()
 	fed := fed_test_utils.NewFedTest(t, originConfigWithAndWithoutWrite)
@@ -945,7 +949,6 @@ func TestObjectDelete(t *testing.T) {
 
 	tempToken, err := os.CreateTemp(t.TempDir(), "token")
 	require.NoError(t, err)
-	defer os.Remove(tempToken.Name())
 
 	_, err = tempToken.WriteString(token)
 	require.NoError(t, err)
@@ -973,7 +976,7 @@ func TestObjectDelete(t *testing.T) {
 	err = os.Mkdir(complexCollection, 0777)
 	require.NoError(t, err)
 
-	// Note: Even though os.Mkdir is called with permissions permissions, it may create directories
+	// Note: Even though os.Mkdir is called with permissions, it may create directories
 	// with 0755 permissions due to internal behavior. To ensure the directory has the desired
 	// permissions permissions, we explicitly call os.Chmod after creating the directory.
 	//
@@ -1026,7 +1029,8 @@ func TestObjectDelete(t *testing.T) {
 	require.NoError(t, err)
 	defer object.Close()
 
-	// Test deleting a non-existent object
+	// Test deleting a non-existent object.
+	// The operation should fail with a 404 error indicating that the object does not exist.
 	t.Run("testDeleteNonExistentObject", func(t *testing.T) {
 		doesNotExistPath := fmt.Sprintf("pelican://%s%s/doesNotExist", discoveryUrl.Host, "/with-write")
 		err := client.DoDelete(fed.Ctx, doesNotExistPath, false, client.WithTokenLocation(tempToken.Name()))
@@ -1034,71 +1038,58 @@ func TestObjectDelete(t *testing.T) {
 		require.Contains(t, err.Error(), "404")
 	})
 
-	// Test deleting an existing object
+	// Test deleting an existing object.
+	// The operation should succeed, and the object should no longer be accessible.
 	t.Run("testDeleteObject", func(t *testing.T) {
 		objectToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(objectToBeDeleted))
 		err = client.DoDelete(fed.Ctx, objectToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
 		require.NoError(t, err)
 
 		_, err = os.Stat(objectToBeDeleted)
-		if err != nil {
-			if os.IsNotExist(err) {
-				require.True(t, true, "Object does not exist as expected")
-			} else {
-				require.NoError(t, err, "Unexpected error occurred while checking object")
-			}
-		} else {
-			require.Fail(t, "Object should not exist but it does")
-		}
+
+		require.Error(t, err, "Expected an error, but none occurred")
+		require.True(t, os.IsNotExist(err), fmt.Sprintf("Expected the error to indicate the object does not exist, but got: %v", err))
 	})
 
-	// Test deleting an empty collection
+	// Test deleting an empty collection.
+	// The operation should succeed, and the collection should no longer be accessible.
 	t.Run("testDeleteEmptyCollection", func(t *testing.T) {
 		emptyCollectionPelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(emptyCollectionToBeDeleted))
 		err := client.DoDelete(fed.Ctx, emptyCollectionPelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
 		require.NoError(t, err)
 		_, err = os.Stat(emptyCollectionToBeDeleted)
-		if err != nil {
-			if os.IsNotExist(err) {
-				require.True(t, true, "Collection successfully deleted")
-			} else {
-				require.NoError(t, err, "Unexpected error occurred while checking collection")
-			}
-		} else {
-			require.Fail(t, "Collection should not exist but it does")
-		}
+
+		require.Error(t, err, "Expected an error, but none occurred")
+		require.True(t, os.IsNotExist(err), fmt.Sprintf("Expected the error to indicate the collection does not exist, but got: %v", err))
 	})
 
-	// Test deleting a non-empty collection without the recursive flag
+	// Test deleting a non-empty collection without the recursive flag.
+	// The operation should fail with an error indicating that the collection cannot be deleted because it is not empty, and the collection should still exist.
 	t.Run("testDeleteNonEmptyCollectionWithoutRecursive", func(t *testing.T) {
 		collectionToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(complexCollection))
 		err := client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "cannot delete non-empty collection")
+		require.Contains(t, err.Error(), "is a non-empty collection, use recursive flag or recursive query in the url to delete it")
 
 		info, err := os.Stat(complexCollection)
-		require.NoError(t, err, "Error checking complex collection existence")
-		require.True(t, info.IsDir(), "Complex collection should exist but does not")
+		require.NoError(t, err, "Error checking Collection existence")
+		require.True(t, info.IsDir(), "Collection should exist but does not")
 	})
 
-	// Test deleting a non-empty collection with the recursive flag
+	// Test deleting a non-empty collection with the recursive flag.
+	// The operation should succeed, and the collection and its contents should no longer be accessible.
 	t.Run("testDeleteNonEmptyCollectionWithRecursive", func(t *testing.T) {
 		collectionToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(complexCollection))
 		err = client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, true, client.WithTokenLocation(tempToken.Name()))
 		require.NoError(t, err)
 		_, err = os.Stat(complexCollection)
-		if err != nil {
-			if os.IsNotExist(err) {
-				require.True(t, true, "Collection successfully deleted")
-			} else {
-				require.NoError(t, err, "Unexpected error occurred while checking collection")
-			}
-		} else {
-			require.Fail(t, "Collection should not exist but it does")
-		}
+
+		require.Error(t, err, "Expected an error, but none occurred")
+		require.True(t, os.IsNotExist(err), fmt.Sprintf("Expected the error to indicate the collection does not exist, but got: %v", err))
 	})
 
-	// Test attempting to delete an object in a prefix without writes capability and expecting a permission error
+	// Test attempting to delete an object in a prefix without writes capability.
+	// The operation should fail with a 403 permission error.
 	t.Run("testDeleteForNonWritableNamespace", func(t *testing.T) {
 		collectionToDeletePelicanUrl := fmt.Sprintf("pelican://%s/without-write/%s", discoveryUrl.Host, filepath.Base(objectNonWritableNs))
 		err := client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))

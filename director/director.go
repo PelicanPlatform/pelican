@@ -895,7 +895,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			return
 		}
 		// Regardless of the remainder of the settings, we currently handle PUT or DELETE as a query to the origin endpoint
-		if c.Request.Method == "PUT" || c.Request.Method == "DELETE" {
+		if c.Request.Method == http.MethodPut || c.Request.Method == http.MethodDelete {
 			c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
 			redirectToOrigin(c)
 			c.Abort()
@@ -916,7 +916,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 
 		// If we are doing a PROPFIND, we should always redirect to the origin
 		if c.Request.Method == "PROPFIND" {
-			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "PROPFIND" || c.Request.Method == "HEAD") {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "PROPFIND" || c.Request.Method == http.MethodHead) {
 				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
 				redirectToOrigin(c)
 				c.Abort()
@@ -936,7 +936,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		// If we're configured for cache mode or we haven't set the flag,
 		// we should use cache middleware
 		if defaultResponse == "cache" {
-			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "GET" || c.Request.Method == "HEAD") {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
 				c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
 				redirectToCache(c)
 				c.Abort()
@@ -946,7 +946,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			// If the path starts with the correct prefix, continue with the next handler
 			c.Next()
 		} else if defaultResponse == "origin" {
-			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "GET" || c.Request.Method == "HEAD") {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
 				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
 				redirectToOrigin(c)
 				c.Abort()
