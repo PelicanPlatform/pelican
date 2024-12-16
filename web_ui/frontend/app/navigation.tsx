@@ -68,11 +68,19 @@ const NavigationConfig: NavigationConfiguration = {
   ],
   director: [
     { title: 'Dashboard', href: '/director/', icon: <Dashboard /> },
-    { title: 'Metrics', href: '/director/metrics/', icon: <Equalizer />,
-      allowedRoles: ['admin'], },
+    {
+      title: 'Metrics',
+      href: '/director/metrics/',
+      icon: <Equalizer />,
+      allowedRoles: ['admin'],
+    },
     { title: 'Map', href: '/director/map/', icon: <MapOutlined /> },
-    { title: 'Config', href: '/config/', icon: <Build />,
-      allowedRoles: ['admin'], },
+    {
+      title: 'Config',
+      href: '/config/',
+      icon: <Build />,
+      allowedRoles: ['admin'],
+    },
   ],
   cache: [
     { title: 'Dashboard', href: '/cache/', icon: <Dashboard /> },
