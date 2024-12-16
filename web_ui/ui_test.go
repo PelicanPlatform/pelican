@@ -218,8 +218,8 @@ func TestHandleWebUIAuth(t *testing.T) {
 		})
 
 		tmpDir := t.TempDir()
-		issuerFile := filepath.Join(tmpDir, "issuer-keys")
-		viper.Set(param.IssuerKeysDirectory.GetName(), issuerFile)
+		issuerDirectory := filepath.Join(tmpDir, "issuer-keys")
+		viper.Set(param.IssuerKeysDirectory.GetName(), issuerDirectory)
 		viper.Set(param.Server_ExternalWebUrl.GetName(), "https://example.com")
 
 		_, err := config.GetIssuerPrivateJWK()

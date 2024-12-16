@@ -286,7 +286,7 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 	return nil
 }
 
-// Check the directory containing .pem files every 5 minutes, load new private key(s)
+// Check the issuer key directory containing .pem files every 5 minutes, load new private key(s)
 // if new file(s) are detected, then register the new public key
 func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group) {
 	egrp.Go(func() error {
@@ -303,7 +303,7 @@ func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group) {
 				config.UpdatePreviousIssuerPrivateJWK()
 				key, err := config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
 				if err != nil {
-					return errors.Wrap(err, "Failed to refresh the disk to pick up any new private key")
+					return err
 				}
 				log.Debugln("Private keys directory refreshed successfully. The active (latest) private key is", key.KeyID())
 				log.Debugln("Previous private key is", config.GetPreviousIssuerPrivateJWK().KeyID())

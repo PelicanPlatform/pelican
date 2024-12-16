@@ -184,7 +184,7 @@ func NamespaceRegister(privateKey jwk.Key, namespaceRegistryEndpoint string, acc
 		}
 	}
 
-	// Send origin's all public keys in another key set
+	// Send origins all public keys in another key set
 	privateKeys := config.GetIssuerPrivateKeys()
 	if len(privateKeys) == 0 {
 		return errors.Wrap(err, "The server doesn't have any in-memory private key")

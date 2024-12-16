@@ -29,6 +29,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	mathrand "math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,7 +44,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -122,6 +122,16 @@ func getCurrentIssuerKeysDir() string {
 
 func setCurrentIssuerKeysDir(dir string) {
 	currentIssuerKeysDir.Store(dir)
+}
+
+// Helper function to generate random string
+func createRandomString(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[mathrand.Intn(len(charset))]
+	}
+	return string(b)
 }
 
 // Return a pointer to an ECDSA private key or RSA private key read from keyLocation.
@@ -594,7 +604,7 @@ func migratePrivateKey(newDir string) error {
 	// Rename the existing private key file and set destination path
 	fileName := fmt.Sprintf("migrated_%d_%s.pem",
 		time.Now().UnixNano(),
-		utils.CreateRandomString(4))
+		createRandomString(4))
 	destPath := filepath.Join(newDir, fileName)
 
 	// Check if a file with the same name already exists in the destination
@@ -632,7 +642,7 @@ func loadSinglePEM(path string) (jwk.Key, error) {
 
 	key, err := jwk.ParseKey(contents, jwk.WithPEM(true))
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to parse key")
+		return nil, errors.Wrapf(err, "failed to parse issuer key file %v", path)
 	}
 
 	// Add the algorithm to the key, needed for verifying tokens elsewhere
@@ -712,7 +722,7 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 func GeneratePEM(dir string) (jwk.Key, error) {
 	filename := fmt.Sprintf("pelican_generated_%d_%s.pem",
 		time.Now().UnixNano(),
-		utils.CreateRandomString(4))
+		createRandomString(4))
 
 	keyPath := filepath.Join(dir, filename)
 	if err := GeneratePrivateKey(keyPath, elliptic.P256(), false); err != nil {
@@ -757,7 +767,7 @@ func LoadIssuerPrivateKey(issuerKeysDir string) (jwk.Key, error) {
 
 	activeKey, err := loadPEMFiles(issuerKeysDir)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to load .pem files and find the most recent private key")
+		return nil, errors.Wrapf(err, "failed to re-scan %s to load .pem files and set the key in the most recent modified file as active private key", issuerKeysDir)
 	}
 
 	return activeKey, err

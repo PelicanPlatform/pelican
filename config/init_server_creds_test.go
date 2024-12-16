@@ -188,7 +188,7 @@ func TestMultiPrivateKey(t *testing.T) {
 		require.NotNil(t, secondKey)
 		assert.NotEqual(t, key.KeyID(), secondKey.KeyID())
 
-		// Check if the active private key points to the lastest key
+		// Check if the active private key points to the latest key
 		viper.Set(param.IssuerKeysDirectory.GetName(), issuerKeysDir)
 		latestKey, err := GetIssuerPrivateJWK()
 		require.NoError(t, err)
