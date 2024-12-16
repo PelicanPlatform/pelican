@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -157,4 +158,34 @@ func TestWaitUntilWorking(t *testing.T) {
 		expectedErrorMsg := fmt.Sprintf("The testServer server at %s either did not startup or did not respond quickly enough after 1s of waiting", server.URL)
 		assert.Equal(t, expectedErrorMsg, err.Error())
 	})
+}
+
+func TestFilterTopLevelPrefixes(t *testing.T) {
+	namespaceAds := []server_structs.NamespaceAdV2{
+		{Path: "/foo"},
+		{Path: "/foo/bar"},
+		{Path: "/foo/bar/baz"},
+		{Path: "/foogoo"},
+		// Putting /goo/bar ahead of /goo/ to test that the function removes this
+		// in favor of /goo/
+		{Path: "/goo/bar"},
+		{Path: "/goo/"},
+		{Path: "/some/other/path"},
+	}
+
+	filtered := FilterTopLevelPrefixes(namespaceAds)
+
+	var filteredPaths []string
+	for _, nsAd := range filtered {
+		filteredPaths = append(filteredPaths, nsAd.Path)
+	}
+
+	expectedPaths := []string{
+		"/foo/",
+		"/foogoo/",
+		"/goo/",
+		"/some/other/path/",
+	}
+
+	assert.ElementsMatch(t, expectedPaths, filteredPaths)
 }

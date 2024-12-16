@@ -18,83 +18,50 @@
 
 # Configuration options used to test Lot declarations
 Lotman:
-  Lots:
-    - LotName: "default"
-      Owner: "SHOULD_OVERRIDE"
-      Parents:
-        - "default"
-      ManagementPolicyAttrs:
-        DedicatedGB: 100
-        OpportunisticGB: 200
-        # Wrapping these in a map is an unfortunate side effect of the
-        # way we need to handle the float-->int conversion.
-        MaxNumObjects:
-          Value: 1000
-        CreationTime:
-          Value: 1234
-        ExpirationTime:
-          Value: 12345
-        DeletionTime:
-          Value: 123456
-
-    - LotName: "root"
-      Owner: "SHOULD_OVERRIDE"
-      Parents:
-        - "root"
-      Paths:
-        - Path: "/"
-          Recursive: false
-      ManagementPolicyAttrs:
-        DedicatedGB: 1
-        OpportunisticGB: 2
-        # Wrapping these in a map is an unfortunate side effect of the
-        # way we need to handle the float-->int conversion.
-        MaxNumObjects:
-          Value: 10
-        CreationTime:
-          Value: 1234
-        ExpirationTime:
-          Value: 12345
-        DeletionTime:
-          Value: 123456
-
-    - LotName: "test-1"
-      Owner: "https://different-fake-federation.com"
-      Parents:
-        - "root"
-      Paths:
-        - Path: "/test-1"
-          Recursive: false
-      ManagementPolicyAttrs:
-        DedicatedGB: 1.11
-        OpportunisticGB: 2.22
-        # Wrapping these in a map is an unfortunate side effect of the
-        # way we need to handle the float-->int conversion.
-        MaxNumObjects:
-          Value: 42
-        CreationTime:
-          Value: 1234
-        ExpirationTime:
-          Value: 12345
-        DeletionTime:
-          Value: 123456
-    - LotName: "test-2"
-      Owner: "https://another-fake-federation.com"
-      Parents:
-        - "test-1"
-      Paths:
-        - Path: "/test-1/test-2"
-          Recursive: true
-      ManagementPolicyAttrs:
-        DedicatedGB: 1.11
-        OpportunisticGB: 2.22
-        # Wrapping these in a map is an unfortunate side effect of the
-        # way we need to handle the float-->int conversion.
-        MaxNumObjects:
-          Value: 42
-        CreationTime:
-          Value: 1234
-        ExpirationTime:
-          Value: 12345
-        DeletionTime:
-          Value: 123456
+  EnabledPolicy: "different-policy"
+  PolicyDefinitions:
+    - PolicyName: "different-policy"
+      DivideUnallocated: false
+      PurgeOrder: ["ded", "opp", "exp", "del"]
+      DiscoverPrefixes: false
+      Lots:
+        - LotName: "test-1"
+          Owner: "https://different-fake-federation.com"
+          Parents:
+            - "root"
+          Paths:
+            - Path: "/test-1"
+              Recursive: false
+          ManagementPolicyAttrs:
+            DedicatedGB: 1.11
+            OpportunisticGB: 2.22
+            # Wrapping these in a map is an unfortunate side effect of the
+            # way we need to handle the float-->int conversion.
+            MaxNumObjects:
+              Value: 42
+            CreationTime:
+              Value: 1234
+            ExpirationTime:
+              Value: 12345
+            DeletionTime:
+              Value: 123456
+        - LotName: "test-2"
+          Owner: "https://another-fake-federation.com"
+          Parents:
+            - "test-1"
+          Paths:
+            - Path: "/test-1/test-2"
+              Recursive: true
+          ManagementPolicyAttrs:
+            DedicatedGB: 1.11
+            OpportunisticGB: 2.22
+            # Wrapping these in a map is an unfortunate side effect of the
+            # way we need to handle the float-->int conversion.
+            MaxNumObjects:
+              Value: 42
+            CreationTime:
+              Value: 1234
+            ExpirationTime:
+              Value: 12345
+            DeletionTime:
+              Value: 123456

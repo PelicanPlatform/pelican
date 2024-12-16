@@ -32,6 +32,8 @@ import (
 	"net/http"
 	"reflect"
 	"time"
+	"strings"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/pkg/errors"
@@ -278,4 +280,45 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 func ResetTestState() {
 	config.ResetConfig()
 	ResetOriginExports()
+}
+
+// Given a slice of NamespaceAdV2 objects, return a slice of unique top-level prefixes.
+//
+// For example, given:
+//   - /foo
+//   - /foo/bar
+//   - /foo/bar/baz
+//   - /goo
+//   - /some/path
+//
+// the function should return /foo, /goo, and /some/path.
+func FilterTopLevelPrefixes(nsAds []server_structs.NamespaceAdV2) []server_structs.NamespaceAdV2 {
+	prefixMap := make(map[string]server_structs.NamespaceAdV2)
+	for _, nsAd := range nsAds {
+		if !strings.HasSuffix(nsAd.Path, "/") {
+			nsAd.Path = nsAd.Path + "/"
+		}
+
+		add := true
+		for prefix := range prefixMap {
+			if strings.HasPrefix(nsAd.Path, prefix) {
+				add = false
+				break
+			}
+			// Consider the case where we may have already added a longer path
+			// and we need to remove it in favor of the shorter path
+			if strings.HasPrefix(prefix, nsAd.Path) {
+				delete(prefixMap, prefix)
+			}
+		}
+		if add {
+			prefixMap[nsAd.Path] = nsAd
+		}
+	}
+
+	var uniquePrefixes []server_structs.NamespaceAdV2
+	for _, nsAd := range prefixMap {
+		uniquePrefixes = append(uniquePrefixes, nsAd)
+	}
+	return uniquePrefixes
 }

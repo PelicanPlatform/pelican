@@ -27,51 +27,86 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/pelicanplatform/pelican/server_utils"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/pelican_url"
+	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 //go:embed resources/lots-config.yaml
 var yamlMockup string
 
+// Helper function for determining policy index from lot config yaml
+func findPolicyIndex(policyName string, policies []PurgePolicy) int {
+	for i, policy := range policies {
+		if policy.PolicyName == policyName {
+			return i
+		}
+	}
+	return -1
+}
+
 // Initialize Lotman
 // If we read from the embedded yaml, we need to override the SHOULD_OVERRIDE keys with the discUrl
 // so that underlying metadata discovery can happen against the mock discovery host
-func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string) (bool, func()) {
+func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl string, nsAds []server_structs.NamespaceAdV2) (bool, func()) {
 	// Load in our config and handle overriding the SHOULD_OVERRIDE keys with the discUrl
-    // Load in our config
-    if readConfig {
-        viper.SetConfigType("yaml")
-        err := viper.ReadConfig(strings.NewReader(yamlMockup))
-        if err != nil {
-            t.Fatalf("Error reading config: %v", err)
-        }
+	// Load in our config
+	viper.Set("Cache.HighWaterMark", "100g")
+	viper.Set("Cache.LowWaterMark", "50g")
+	viper.Set("Debug", true)
+	if readConfig {
+		viper.SetConfigType("yaml")
+		err := viper.ReadConfig(strings.NewReader(yamlMockup))
+		if err != nil {
+			t.Fatalf("Error reading config: %v", err)
+		}
 
-        // Traverse the settings and modify the "Owner" keys directly in Viper
-        lots := viper.Get("Lotman.Lots").([]interface{})
-        for i, lot := range lots {
-            if lotMap, ok := lot.(map[string]interface{}); ok {
-                if owner, ok := lotMap["owner"].(string); ok && owner == "SHOULD_OVERRIDE" {
-					lotMap["owner"] = discUrl
-					lots[i] = lotMap
-                }
-            }
-        }
-		viper.Set("Lotman.Lots", lots)
-    }
+		// Grab the policy, figure out which one we're using and override the lot issuers/owners
+		var policies []PurgePolicy
+		err = viper.UnmarshalKey("Lotman.PolicyDefinitions", &policies)
+		require.NoError(t, err)
+		enabledPolicy := viper.GetString("Lotman.EnabledPolicy")
+		policyIndex := findPolicyIndex(enabledPolicy, policies)
+		if policyIndex == -1 {
+			t.Fatalf("Policy %s not found", enabledPolicy)
+		}
+		policy := policies[policyIndex]
+
+		for i, lot := range policy.Lots {
+			if lot.Owner == "SHOULD_OVERRIDE" {
+				lot.Owner = discUrl
+				policy.Lots[i] = lot
+			}
+		}
+
+		// Update the policy in viper
+		policies[policyIndex] = policy
+		viper.Set("Lotman.PolicyDefinitions", policies)
+	} else {
+		// If we're not reading from the embedded yaml, grab the
+		// default configuration. We need _some_ configuration to work.
+		viper.Set("ConfigDir", t.TempDir())
+		config.InitConfig()
+	}
 
 	tmpPathPattern := name + "*"
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
 	require.NoError(t, err)
 
 	viper.Set("Lotman.DbLocation", tmpPath)
-	success := InitLotman()
+	success := InitLotman(nsAds)
 	//reset func
 	return success, func() {
 		server_utils.ResetTestState()
@@ -80,20 +115,20 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 
 // Create a mock discovery host that returns the servers URL as the value for each pelican-configuration key
 func getMockDiscoveryHost() *httptest.Server {
-    return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        if r.URL.Path == "/.well-known/pelican-configuration" {
-            w.Header().Set("Content-Type", "application/json")
-            serverURL := r.Host
-            response := fmt.Sprintf(`{
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/pelican-configuration" {
+			w.Header().Set("Content-Type", "application/json")
+			serverURL := r.Host
+			response := fmt.Sprintf(`{
   "director_endpoint": "https://%s/osdf-director.osg-htc.org",
   "namespace_registration_endpoint": "https://%s/osdf-registry.osg-htc.org",
   "jwks_uri": "https://%s/osdf/public_signing_key.jwks"
 }`, serverURL, serverURL, serverURL)
-            w.Write([]byte(response))
-        } else {
-            http.NotFound(w, r)
-        }
-    }))
+			w.Write([]byte(response))
+		} else {
+			http.NotFound(w, r)
+		}
+	}))
 }
 
 // Test the library initializer. NOTE: this also tests CreateLot, which is a part of initialization.
@@ -102,7 +137,7 @@ func TestLotmanInit(t *testing.T) {
 
 	t.Run("TestBadInit", func(t *testing.T) {
 		// We haven't set various bits needed to create the lots, like discovery URL
-		success, cleanup := setupLotmanFromConf(t, false, "LotmanBadInit", "")
+		success, cleanup := setupLotmanFromConf(t, false, "LotmanBadInit", "", nil)
 		defer cleanup()
 		require.False(t, success)
 	})
@@ -114,7 +149,7 @@ func TestLotmanInit(t *testing.T) {
 		// Lotman uses the discovered URLs/keys to determine some aspects of lot ownership
 		viper.Set("Federation.DiscoveryUrl", server.URL)
 
-		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit", server.URL)
+		success, cleanup := setupLotmanFromConf(t, false, "LotmanGoodInit", server.URL, nil)
 		defer cleanup()
 		require.True(t, success)
 
@@ -159,7 +194,7 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	viper.Set("Federation.DiscoveryUrl", server.URL)
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -180,8 +215,6 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	require.Equal(t, "default", defaultLot.LotName)
 	require.Equal(t, server.URL, defaultLot.Owner)
 	require.Equal(t, "default", defaultLot.Parents[0])
-	require.Equal(t, 100.0, *(defaultLot.MPA.DedicatedGB))
-	require.Equal(t, int64(1000), (defaultLot.MPA.MaxNumObjects.Value))
 
 	// Now root
 	rootOutput := make([]byte, 4096)
@@ -197,8 +230,6 @@ func TestLotmanInitFromConfig(t *testing.T) {
 	require.Equal(t, "root", rootLot.LotName)
 	require.Equal(t, server.URL, rootLot.Owner)
 	require.Equal(t, "root", rootLot.Parents[0])
-	require.Equal(t, 1.0, *(rootLot.MPA.DedicatedGB))
-	require.Equal(t, int64(10), rootLot.MPA.MaxNumObjects.Value)
 	require.Equal(t, "/", rootLot.Paths[0].Path)
 	require.False(t, rootLot.Paths[0].Recursive)
 
@@ -260,7 +291,7 @@ func TestGetAuthzCallers(t *testing.T) {
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	viper.Set("Federation.DiscoveryUrl", server.URL)
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetAuthzCalleres", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetAuthzCalleres", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -281,7 +312,7 @@ func TestGetLot(t *testing.T) {
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	viper.Set("Federation.DiscoveryUrl", server.URL)
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetLot", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanGetLot", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -306,7 +337,7 @@ func TestUpdateLot(t *testing.T) {
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	viper.Set("Federation.DiscoveryUrl", server.URL)
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -346,7 +377,7 @@ func TestDeleteLotsRec(t *testing.T) {
 	server_utils.ResetTestState()
 	server := getMockDiscoveryHost()
 	viper.Set("Federation.DiscoveryUrl", server.URL)
-	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
 	defer cleanup()
 	require.True(t, success)
 
@@ -362,4 +393,603 @@ func TestDeleteLotsRec(t *testing.T) {
 	lot, err = GetLot("test-2", false)
 	require.Error(t, err, "Expected error for non-existent lot")
 	require.Nil(t, lot)
+}
+
+// In any case where two MPA values are both set, the value in MPA1 should win.
+func TestMergeMPAs(t *testing.T) {
+	dedicatedGB1 := 10.0
+	maxNumObjects1 := Int64FromFloat{Value: 50}
+	creationTime1 := Int64FromFloat{Value: 200}
+	deletionTime1 := Int64FromFloat{Value: 400}
+
+	dedicatedGB2 := 20.0
+	opportunisticGB2 := 30.0
+	maxNumObjects2 := Int64FromFloat{Value: 100}
+	expirationTime2 := Int64FromFloat{Value: 300}
+
+	mpa1 := &MPA{
+		DedicatedGB:   &dedicatedGB1,
+		MaxNumObjects: &maxNumObjects1,
+		CreationTime:  &creationTime1,
+		DeletionTime:  &deletionTime1,
+	}
+
+	mpa2 := &MPA{
+		DedicatedGB:     &dedicatedGB2,
+		OpportunisticGB: &opportunisticGB2,
+		MaxNumObjects:   &maxNumObjects2,
+		ExpirationTime:  &expirationTime2,
+	}
+
+	expectedMPA := &MPA{
+		DedicatedGB:     &dedicatedGB1,
+		OpportunisticGB: &opportunisticGB2,
+		MaxNumObjects:   &maxNumObjects1,
+		CreationTime:    &creationTime1,
+		ExpirationTime:  &expirationTime2,
+		DeletionTime:    &deletionTime1,
+	}
+
+	mergedMPA := mergeMPAs(mpa1, mpa2)
+	require.Equal(t, expectedMPA, mergedMPA)
+}
+
+func TestLotMerging(t *testing.T) {
+	// Owner should be set to lot1 owner
+	owner1 := "owner1"
+	owner2 := "owner2"
+
+	// Parents should be the union of lot1 and lot2 parents
+	parent1 := "parent1"
+	parent2 := "parent2"
+	parent3 := "parent3"
+
+	// MPA should be the MPA of lot1, unless no value is set
+	dedicatedGB1 := 10.0
+	dedicatedGB2 := 20.0
+	opportunisticGB2 := 30.0
+
+	lot1 := Lot{
+		LotName: "some-lot",
+		Owner:   owner1,
+		Parents: []string{parent1, parent2},
+		MPA: &MPA{
+			DedicatedGB: &dedicatedGB1,
+		},
+	}
+
+	lot2 := Lot{
+		LotName: "some-lot",
+		Owner:   owner2,
+		Parents: []string{parent2, parent3},
+		MPA: &MPA{
+			DedicatedGB:     &dedicatedGB2,
+			OpportunisticGB: &opportunisticGB2,
+		},
+	}
+
+	expectedMergedLot := Lot{
+		LotName: "some-lot",
+		Owner:   owner1,
+		Parents: []string{parent1, parent2, parent3},
+		MPA: &MPA{
+			DedicatedGB:     &dedicatedGB1,
+			OpportunisticGB: &opportunisticGB2,
+		},
+	}
+
+	mergedLot, err := mergeLots(lot1, lot2)
+	require.NoError(t, err)
+	require.Equal(t, expectedMergedLot.LotName, mergedLot.LotName)
+	require.Equal(t, expectedMergedLot.Owner, mergedLot.Owner)
+	require.ElementsMatch(t, expectedMergedLot.Parents, mergedLot.Parents)
+	require.Equal(t, expectedMergedLot.MPA.DedicatedGB, mergedLot.MPA.DedicatedGB)
+	require.Equal(t, expectedMergedLot.MPA.OpportunisticGB, mergedLot.MPA.OpportunisticGB)
+
+	// Now test with no MPA set in lot1
+	lot1.MPA = nil
+	expectedMergedLot.MPA.DedicatedGB = &dedicatedGB2
+	mergedLot, err = mergeLots(lot1, lot2)
+	require.NoError(t, err)
+	require.Equal(t, expectedMergedLot.MPA.DedicatedGB, mergedLot.MPA.DedicatedGB)
+
+	// Make sure we can't merge lots with different names
+	lot2.LotName = "different-lot"
+	mergedLot, err = mergeLots(lot1, lot2)
+	require.Error(t, err)
+
+	// Test merging lot maps -- reset lot2's name so we can merge them
+	// Here we intentionally assign lot2 to the lot1 key to test that the merge works
+	// while also adding lot2 as its own key to test that the merge works with multiple lots
+	lot2.LotName = "some-lot"
+	lotMap1 := map[string]Lot{
+		"lot1": lot1,
+	}
+	lotMap2 := map[string]Lot{
+		"lot1": lot2,
+		"lot2": lot2,
+	}
+	mergedMaps, err := mergeLotMaps(lotMap1, lotMap2)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(mergedMaps))
+	require.Equal(t, "some-lot", mergedMaps["lot1"].LotName)
+	require.Equal(t, expectedMergedLot.Owner, mergedMaps["lot1"].Owner)
+	require.ElementsMatch(t, expectedMergedLot.Parents, mergedMaps["lot1"].Parents)
+	require.Equal(t, expectedMergedLot.MPA.DedicatedGB, mergedMaps["lot1"].MPA.DedicatedGB)
+	require.Equal(t, expectedMergedLot.MPA.OpportunisticGB, mergedMaps["lot1"].MPA.OpportunisticGB)
+}
+
+// Read the mockup yaml and make sure we grab the list of policy definitions as expected
+func TestGetPolicyMap(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	viper.SetConfigType("yaml")
+	err := viper.ReadConfig(strings.NewReader(yamlMockup))
+	if err != nil {
+		t.Fatalf("Error reading config: %v", err)
+	}
+
+	policyMap, err := getPolicyMap()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(policyMap))
+	require.Contains(t, policyMap, "different-policy")
+	require.Equal(t, "different-policy", viper.GetString("Lotman.EnabledPolicy"))
+}
+
+func TestByteConversions(t *testing.T) {
+	bytes := uint64(120530000000) // 120.53 GB
+
+	// forward pass
+	gb := bytesToGigabytes(bytes)
+	require.Equal(t, 120.53, gb)
+
+	// reverse pass
+	bytes = gigabytesToBytes(gb)
+	require.Equal(t, uint64(120530000000), bytes)
+}
+
+// Valid lot configuration not only requires that all fields are present, but also that the sum of all lots' dedicatedGB values
+// does not exceed the high watermark.
+func TestLotValidation(t *testing.T) {
+	type testCase struct {
+		name            string
+		lots            []Lot
+		hwm             string
+		totalDiskSpaceB uint64
+		errorStrings    []string
+	}
+
+	createValidLot := func(name string, owner string, parent string, path string, dedicatedGB float64) Lot {
+		return Lot{
+			LotName: name,
+			Owner:   owner,
+			Parents: []string{parent},
+			Paths: []LotPath{
+				{
+					Path:      path,
+					Recursive: false,
+				},
+			},
+			MPA: &MPA{
+				DedicatedGB:     &dedicatedGB,
+				OpportunisticGB: &dedicatedGB,
+				CreationTime:    &Int64FromFloat{Value: 1},
+				ExpirationTime:  &Int64FromFloat{Value: 2},
+				DeletionTime:    &Int64FromFloat{Value: 3},
+			},
+		}
+	}
+
+	testCases := []testCase{
+		{
+			name: "Valid lots",
+			lots: []Lot{
+				createValidLot("lot1", "owner1", "root", "/foo/bar", 10.0),
+				createValidLot("lot2", "owner2", "root", "/foo/baz", 20.0),
+			},
+			hwm:             "30g",
+			totalDiskSpaceB: gigabytesToBytes(40.0),
+			errorStrings:    nil,
+		},
+		{
+			name: "Missing lot name",
+			lots: []Lot{
+				createValidLot("", "owner1", "root", "/foo/bar", 10.0),
+			},
+			hwm:             "30g",
+			totalDiskSpaceB: gigabytesToBytes(40.0),
+			errorStrings:    []string{"detected a lot with no name"},
+		},
+		{
+			name: "Missing lot owner",
+			lots: []Lot{
+				createValidLot("lot1", "", "root", "/foo/bar", 10.0),
+			},
+			hwm:             "30g",
+			totalDiskSpaceB: gigabytesToBytes(40.0),
+			errorStrings:    []string{"the lot 'lot1' is missing required values", "Owner"},
+		},
+		{
+			name: "Missing lot parent",
+			lots: []Lot{
+				createValidLot("lot1", "owner", "", "/foo/bar", 10.0),
+			},
+			hwm:             "30g",
+			totalDiskSpaceB: gigabytesToBytes(40.0),
+			errorStrings:    []string{"the lot 'lot1' is missing required values", "Parents"},
+		},
+		{
+			name: "Missing lot path",
+			lots: []Lot{
+				createValidLot("lot1", "owner", "root", "", 10.0),
+			},
+			hwm:             "30g",
+			totalDiskSpaceB: gigabytesToBytes(40.0),
+			errorStrings:    []string{"the lot 'lot1' is missing required values", "Paths.Path"},
+		},
+		{
+			name: "Missing lot MPA",
+			lots: []Lot{
+				{
+					LotName: "lot1",
+					Owner:   "owner1",
+					Parents: []string{"root"},
+					Paths: []LotPath{
+						{
+							Path:      "/foo/bar",
+							Recursive: false,
+						},
+					},
+				},
+			},
+			hwm:             "30g",
+			totalDiskSpaceB: gigabytesToBytes(40.0),
+			errorStrings:    []string{"the lot 'lot1' is missing required values", "ManagementPolicyAttrs"},
+		},
+		{
+			name: "Missing lot MPA subfield",
+			lots: []Lot{
+				{
+					LotName: "lot1",
+					Owner:   "owner1",
+					Parents: []string{"root"},
+					Paths: []LotPath{
+						{
+							Path:      "/foo/bar",
+							Recursive: false,
+						},
+					},
+					MPA: &MPA{},
+				},
+			},
+			hwm:             "30g",
+			totalDiskSpaceB: gigabytesToBytes(40.0),
+			errorStrings:    []string{"the lot 'lot1' is missing required values", "ManagementPolicyAttrs.DedicatedGB"},
+		},
+		{
+			name: "Invalid dedGB sum",
+			lots: []Lot{
+				createValidLot("lot1", "owner1", "root", "/foo/bar", 10.0),
+				createValidLot("lot2", "owner2", "root", "/foo/baz", 20.0),
+			},
+			hwm:             "20g", // sum of dedGB should not be greater than hwm
+			totalDiskSpaceB: gigabytesToBytes(40.0),
+			errorStrings:    []string{"the sum of all lots' dedicatedGB values exceeds the high watermark of 20g."},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server_utils.ResetTestState()
+			defer server_utils.ResetTestState()
+			viper.Set("Cache.HighWaterMark", tc.hwm)
+			err := validateLotsConfig(tc.lots, tc.totalDiskSpaceB)
+			if len(tc.errorStrings) > 0 {
+				require.Error(t, err)
+				for _, errStr := range tc.errorStrings {
+					require.Contains(t, err.Error(), errStr)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// Make sure we handle various suffixes and non-suffixed percentages correctly
+func TestConvertWatermarkToBytes(t *testing.T) {
+	type testCase struct {
+		Name          string
+		Watermark     string
+		Expected      uint64
+		ErrorExpected bool
+	}
+
+	totDisk := uint64(1000000000000) // 1TB
+	testCases := []testCase{
+		{
+			Name:          "Valid 'k' suffix",
+			Watermark:     "100k",
+			Expected:      uint64(100000), // 100KB
+			ErrorExpected: false,
+		},
+		{
+			Name:          "Valid 'm' suffix",
+			Watermark:     "100m",
+			Expected:      uint64(100000000), // 100MB
+			ErrorExpected: false,
+		},
+		{
+			Name:          "Valid 'g' suffix",
+			Watermark:     "100g",
+			Expected:      uint64(100000000000), // 100GB
+			ErrorExpected: false,
+		},
+		{
+			Name:          "Valid 't' suffix",
+			Watermark:     "100t",
+			Expected:      uint64(100000000000000), // 100TB
+			ErrorExpected: false,
+		},
+		{
+			Name:          "No suffix is percentage",
+			Watermark:     "50",
+			Expected:      uint64(500000000000), // 500GB
+			ErrorExpected: false,
+		},
+		{
+			Name:          "Invalid suffix",
+			Watermark:     "100z",
+			Expected:      uint64(0),
+			ErrorExpected: true,
+		},
+		{
+			Name:          "Invalid value",
+			Watermark:     "foo",
+			Expected:      uint64(0),
+			ErrorExpected: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			result, err := convertWatermarkToBytes(tc.Watermark, totDisk)
+			if tc.ErrorExpected {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, fmt.Sprintf("%d", tc.Expected), fmt.Sprintf("%d", result))
+			}
+		})
+	}
+}
+
+// If so configured, we'll divide unallocated space between lot's dedicated GB and
+// opportunistict GB values. This test ensures the calculations are correct and that
+// hardcoded configuration isn't modified.
+// I don't test for errors here because the internal functions capable of generating
+// errors are tested elsewhere (e.g. convertWatermarkToBytes)
+func TestDivideRemainingSpace(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	dedGB := float64(10.0)
+	oppGB := float64(1.5)
+	lotMap := map[string]Lot{
+		"lot1": {
+			LotName: "lot1",
+			MPA: &MPA{
+				DedicatedGB:     &dedGB,
+				OpportunisticGB: &oppGB,
+			},
+		},
+		"lot2": {
+			LotName: "lot2",
+			MPA:     &MPA{},
+		},
+		"lot3": {
+			LotName: "lot3",
+			MPA: &MPA{
+				DedicatedGB: &dedGB,
+			},
+		},
+		"lot4": {
+			LotName: "lot4",
+			MPA: &MPA{
+				OpportunisticGB: &oppGB, // hardcoded values should be respected
+			},
+		},
+	}
+
+	totalDiskSpaceB := uint64(30000000000) // 30GB
+	viper.Set("Cache.HighWaterMark", "25g")
+	err := divideRemainingSpace(&lotMap, totalDiskSpaceB)
+	require.NoError(t, err)
+	// dedGB divisions should sum to HWM
+	require.Equal(t, 10.0, *lotMap["lot1"].MPA.DedicatedGB)
+	require.Equal(t, 2.5, *lotMap["lot2"].MPA.DedicatedGB)
+	require.Equal(t, 10.0, *lotMap["lot3"].MPA.DedicatedGB)
+	require.Equal(t, 2.5, *lotMap["lot4"].MPA.DedicatedGB)
+	// oppGB should be HWM - dedGB unless hardcoded
+	require.Equal(t, 1.5, *lotMap["lot1"].MPA.OpportunisticGB)
+	require.Equal(t, 22.5, *lotMap["lot2"].MPA.OpportunisticGB)
+	require.Equal(t, 15.0, *lotMap["lot3"].MPA.OpportunisticGB)
+	require.Equal(t, 1.5, *lotMap["lot4"].MPA.OpportunisticGB)
+}
+
+// Pretty straightforward -- tests should make sure we can grab viper config and use it when
+// setting lot timestamps if they're not pre-configured.
+func TestConfigLotTimestamps(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	now := time.Now().UnixMilli()
+	viper.Set("Lotman.DefaultLotExpirationLifetime", "24h")
+	viper.Set("Lotman.DefaultLotDeletionLifetime", "48h")
+
+	defaultExpiration := now + 24*60*60*1000 // 24 hours in milliseconds
+	defaultDeletion := now + 48*60*60*1000   // 48 hours in milliseconds
+
+	// Helper function to create a lot with optional timestamps
+	createLot := func(creationTime, expirationTime, deletionTime *Int64FromFloat) Lot {
+		return Lot{
+			MPA: &MPA{
+				CreationTime:   creationTime,
+				ExpirationTime: expirationTime,
+				DeletionTime:   deletionTime,
+			},
+		}
+	}
+
+	// Define the test cases
+	testCases := []struct {
+		name           string
+		lotMap         map[string]Lot
+		expectedLotMap map[string]Lot
+	}{
+		{
+			name: "Lots with missing timestamps",
+			lotMap: map[string]Lot{
+				"lot1": createLot(nil, nil, nil),
+				"lot2": createLot(&Int64FromFloat{Value: 0}, &Int64FromFloat{Value: 0}, &Int64FromFloat{Value: 0}),
+			},
+			expectedLotMap: map[string]Lot{
+				"lot1": createLot(&Int64FromFloat{Value: now}, &Int64FromFloat{Value: defaultExpiration}, &Int64FromFloat{Value: defaultDeletion}),
+				"lot2": createLot(&Int64FromFloat{Value: now}, &Int64FromFloat{Value: defaultExpiration}, &Int64FromFloat{Value: defaultDeletion}),
+			},
+		},
+		{
+			name: "Lots with existing timestamps",
+			lotMap: map[string]Lot{
+				"lot1": createLot(&Int64FromFloat{Value: 1000}, &Int64FromFloat{Value: 2000}, &Int64FromFloat{Value: 3000}),
+			},
+			expectedLotMap: map[string]Lot{
+				"lot1": createLot(&Int64FromFloat{Value: 1000}, &Int64FromFloat{Value: 2000}, &Int64FromFloat{Value: 3000}),
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			configLotTimestamps(&tc.lotMap)
+			assert.Equal(t, tc.expectedLotMap, tc.lotMap)
+		})
+	}
+}
+
+func TestConfigLotsFromFedPrefixes(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Most of these aren't actually used by the test, but to prevent auto discovery
+	// and needing to spin up a separate mock discovery server, set them all.
+	fed := pelican_url.FederationDiscovery{
+		DiscoveryEndpoint: "https://dne-discovery.com",
+		DirectorEndpoint:  "https://dne-director.com",
+		RegistryEndpoint:  "https://dne-registry.com",
+		JwksUri:           "https://dne-jwks.com",
+		BrokerEndpoint:    "https://dne-broker.com",
+	}
+	config.SetFederation(fed)
+
+	issuer1Str := "https://issuer1.com"
+	issuer1, _ := url.Parse(issuer1Str)
+	issuer2Str := "https://issuer2.com"
+	issuer2, _ := url.Parse(issuer2Str)
+	testCases := []struct {
+		name                string
+		nsAds               []server_structs.NamespaceAdV2
+		federationIssuerErr error
+		expectedLotMap      map[string]Lot
+		expectedError       string
+	}{
+		{
+			name: "Valid namespaces",
+			nsAds: []server_structs.NamespaceAdV2{
+				{
+					Path: "/namespace1",
+					Issuer: []server_structs.TokenIssuer{
+						{IssuerUrl: *issuer1},
+					},
+				},
+				{
+					Path: "/namespace2",
+					Issuer: []server_structs.TokenIssuer{
+						{IssuerUrl: *issuer2},
+					},
+				},
+			},
+			expectedLotMap: map[string]Lot{
+				"/namespace1": {
+					LotName: "/namespace1",
+					Owner:   issuer1Str,
+					Parents: []string{"root"},
+					Paths: []LotPath{
+						{
+							Path:      "/namespace1",
+							Recursive: true,
+						},
+					},
+				},
+				"/namespace2": {
+					LotName: "/namespace2",
+					Owner:   issuer2Str,
+					Parents: []string{"root"},
+					Paths: []LotPath{
+						{
+							Path:      "/namespace2",
+							Recursive: true,
+						},
+					},
+				},
+			},
+			expectedError: "",
+		},
+		{
+			name: "Skip monitoring namespaces",
+			nsAds: []server_structs.NamespaceAdV2{
+				{
+					Path: "/pelican/monitoring/namespace1",
+					Issuer: []server_structs.TokenIssuer{
+						{IssuerUrl: *issuer1},
+					},
+				},
+				{
+					Path: "/namespace2",
+					Issuer: []server_structs.TokenIssuer{
+						{IssuerUrl: *issuer2},
+					},
+				},
+			},
+			expectedLotMap: map[string]Lot{
+				"/namespace2": {
+					LotName: "/namespace2",
+					Owner:   issuer2Str,
+					Parents: []string{"root"},
+					Paths: []LotPath{
+						{
+							Path:      "/namespace2",
+							Recursive: true,
+						},
+					},
+				},
+			},
+			expectedError: "",
+		},
+	}
+
+	// Run the test cases
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Call the function
+			lotMap, err := configLotsFromFedPrefixes(tc.nsAds)
+
+			// Check the result
+			if tc.expectedError == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectedError)
+			}
+			assert.Equal(t, tc.expectedLotMap, lotMap)
+		})
+	}
 }
