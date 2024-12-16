@@ -1786,6 +1786,20 @@ components: ["registry"]
 ############################
 #   Server-level configs   #
 ############################
+name: Server.TLSCertificate
+description: |+
+  A filepath to a file containing an X.509 host certificate to use for TLS
+  authentication when running server components of Pelican.
+
+  If you override this filepath, you need to provide the matched-pair private key
+  via Server.TLSKey and a Certificate Authority (CA) certificate via Server.TLSCACertificateFile.
+type: filename
+root_default: /etc/pelican/certificates/tls.crt
+default: "$ConfigBase/certificates/tls.crt"
+deprecated: true
+replacedby: "Server.TLSCertificateChain"
+components: ["origin", "registry", "director"]
+---
 name: Server.TLSCertificateChain
 description: |+
   A filepath to a file containing the full X.509 certificate chain, including the host certificate followed
