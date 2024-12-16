@@ -25,6 +25,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -179,6 +180,108 @@ func TestInitConfig(t *testing.T) {
 	InitConfig()
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
 }
+
+// Helper function to set and reset the environment variable HOME/USERPROFILE
+func setHomeDirEnv(t *testing.T, mockHomeDir string) func() {
+	// Save the original environment variables for restoration
+	originalHome := os.Getenv("HOME")
+	originalUserProfile := os.Getenv("USERPROFILE")
+
+	// Set the appropriate environment variable based on the platform
+	switch runtime.GOOS {
+	case "windows":
+		if err := os.Setenv("USERPROFILE", mockHomeDir); err != nil {
+			t.Fatalf("Failed to set USERPROFILE: %v", err)
+		}
+	case "darwin", "linux":
+		if err := os.Setenv("HOME", mockHomeDir); err != nil {
+			t.Fatalf("Failed to set HOME: %v", err)
+		}
+	}
+
+	// Return a function to restore the environment variables
+	return func() {
+		if runtime.GOOS == "windows" {
+			// Restore USERPROFILE
+			if originalUserProfile != "" {
+				os.Setenv("USERPROFILE", originalUserProfile)
+			} else {
+				os.Unsetenv("USERPROFILE")
+			}
+		} else {
+			// Restore HOME
+			if originalHome != "" {
+				os.Setenv("HOME", originalHome)
+			} else {
+				os.Unsetenv("HOME")
+			}
+		}
+	}
+}
+
+func TestHomeDir(t *testing.T) {
+	mockHomeDir := filepath.Join("/test", "configDir")
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
+
+	// Save the original environment variables
+	oldConfigRoot := isRootExec
+	resetEnv := setHomeDirEnv(t, mockHomeDir)
+
+	defer func() {
+		resetEnv()
+		isRootExec = oldConfigRoot
+	}()
+
+	t.Run("RootUserNoConfigDir", func(t *testing.T) {
+		isRootExec = true
+
+		InitConfigDir(viper.GetViper())
+
+		cDir := viper.GetString("ConfigDir")
+		require.Equal(t, "/etc/pelican", cDir)
+	})
+
+	t.Run("WithConfigDir", func(t *testing.T) {
+		viper.Set("ConfigDir", "/test/configDir")
+
+		InitConfigDir(viper.GetViper())
+
+		cDir := viper.GetString("ConfigDir")
+		require.Equal(t, "/test/configDir", cDir)
+	})
+
+	t.Run("NonRootNoConfigDirWithHomeSet", func(t *testing.T) {
+		isRootExec = false
+		viper.Reset()
+
+		InitConfigDir(viper.GetViper())
+
+		cDir := viper.GetString("ConfigDir")
+		require.Equal(t, "/test/configDir/.config/pelican", cDir)
+	})
+
+	t.Run("NonRootNoConfigDirWithNoHome", func(t *testing.T) {
+		isRootExec = false
+		viper.Reset()
+		os.Unsetenv("HOME")
+		os.Unsetenv("USERPROFILE")
+
+		InitConfigDir(viper.GetViper())
+
+		cDir := viper.GetString("ConfigDir")
+		require.Equal(t, "/etc/pelican", cDir)
+	})
+
+}
+
+// HOME directory test
+// Root and set
+// Root and unset
+// Non root and set
+// Non root and unset
 
 // Helper func for TestExtraCfg
 //
@@ -603,9 +706,8 @@ func TestInitServerUrl(t *testing.T) {
 		ResetConfig()
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mockNon443Port)
-		err := InitConfigDir(viper.GetViper())
-		require.NoError(t, err)
-		err = InitServer(context.Background(), 0)
+		InitConfigDir(viper.GetViper())
+		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWNon443Port, param.Server_ExternalWebUrl.GetString())
 	})
@@ -614,9 +716,8 @@ func TestInitServerUrl(t *testing.T) {
 		ResetConfig()
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mock443Port)
-		err := InitConfigDir(viper.GetViper())
-		require.NoError(t, err)
-		err = InitServer(context.Background(), 0)
+		InitConfigDir(viper.GetViper())
+		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
 	})
@@ -625,9 +726,8 @@ func TestInitServerUrl(t *testing.T) {
 		// We respect the URL value set directly by others. Won't remove 443 port
 		ResetConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
-		err := InitConfigDir(viper.GetViper())
-		require.NoError(t, err)
-		err = InitServer(context.Background(), 0)
+		InitConfigDir(viper.GetViper())
+		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
 	})

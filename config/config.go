@@ -502,6 +502,7 @@ func getConfigBase() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
+		return filepath.Join("/etc", "pelican")
 	}
 
 	return filepath.Join(home, ".config", "pelican")
@@ -789,7 +790,7 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 }
 
 // For the given Viper instance, set the default config directory.
-func InitConfigDir(v *viper.Viper) error {
+func InitConfigDir(v *viper.Viper) {
 
 	configDir := v.GetString("ConfigDir")
 	if configDir == "" {
@@ -802,7 +803,6 @@ func InitConfigDir(v *viper.Viper) error {
 		v.SetDefault("ConfigDir", configDir)
 	}
 	v.SetConfigName("pelican")
-	return nil
 }
 
 // InitConfig sets up the global Viper instance by loading defaults and
@@ -815,9 +815,7 @@ func InitConfig() {
 	// Set default values in the global Viper instance
 	SetBaseDefaultsInConfig(viper.GetViper())
 
-	if err := InitConfigDir(viper.GetViper()); err != nil {
-		cobra.CheckErr(fmt.Errorf("failed to initialize the config directory: %v", err))
-	}
+	InitConfigDir(viper.GetViper())
 
 	if configFile := viper.GetString("config"); configFile != "" {
 		viper.SetConfigFile(configFile)
