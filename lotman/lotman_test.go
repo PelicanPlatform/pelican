@@ -47,6 +47,9 @@ import (
 //go:embed resources/lots-config.yaml
 var yamlMockup string
 
+//go:embed resources/malformed-lots-config.yaml
+var badYamlMockup string
+
 // Helper function for determining policy index from lot config yaml
 func findPolicyIndex(policyName string, policies []PurgePolicy) int {
 	for i, policy := range policies {
@@ -523,18 +526,48 @@ func TestLotMerging(t *testing.T) {
 func TestGetPolicyMap(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	viper.SetConfigType("yaml")
-	err := viper.ReadConfig(strings.NewReader(yamlMockup))
-	if err != nil {
-		t.Fatalf("Error reading config: %v", err)
+
+	testCases := []struct {
+		name       string
+		yamlConfig string
+		expectErr  bool
+		expectedPolicies []string
+	}{
+		{
+			name:       "ValidConfig",
+			yamlConfig: yamlMockup,
+			expectErr:  false,
+			expectedPolicies: []string{"different-policy", "another policy"},
+		},
+		{
+			name:       "InvalidConfig",
+			yamlConfig: badYamlMockup,
+			expectErr:  true,
+			expectedPolicies: nil,
+		},
 	}
 
-	policyMap, err := getPolicyMap()
-	require.NoError(t, err)
-	require.Equal(t, 2, len(policyMap))
-	require.Contains(t, policyMap, "different-policy")
-	require.Contains(t, policyMap, "another policy")
-	require.Equal(t, "different-policy", viper.GetString("Lotman.EnabledPolicy"))
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			viper.SetConfigType("yaml")
+			err := viper.ReadConfig(strings.NewReader(tc.yamlConfig))
+			if err != nil {
+				t.Fatalf("Error reading config: %v", err)
+			}
+
+			policyMap, err := getPolicyMap()
+			if tc.expectErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, len(tc.expectedPolicies), len(policyMap))
+				for _, policy := range tc.expectedPolicies {
+					require.Contains(t, policyMap, policy)
+				}
+				require.Equal(t, "different-policy", viper.GetString("Lotman.EnabledPolicy"))
+			}
+		})
+	}
 }
 
 func TestByteConversions(t *testing.T) {

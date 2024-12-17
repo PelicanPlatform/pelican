@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -37,6 +38,7 @@ import (
 	"unsafe"
 
 	"github.com/ebitengine/purego"
+	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -77,7 +79,7 @@ var (
 
 type (
 	Int64FromFloat struct {
-		Value int64
+		Value int64 `mapstructure:"Value"`
 	}
 
 	LotPath struct {
@@ -170,12 +172,12 @@ type (
 	}
 
 	PurgePolicy struct {
-		PurgeOrder               []string `json:"purge_order"`
-		PolicyName               string   `json:"policy_name"`
-		DiscoverPrefixes         bool     `json:"discover_prefixes"`
-		MergeLocalWithDiscovered bool     `json:"merge_local_with_discovered"`
-		DivideUnallocated        bool	  `json:"divide_unallocated"`
-		Lots                     []Lot    `json:"lots"`
+		PurgeOrder               []string `mapstructure:"PurgeOrder"`
+		PolicyName               string   `mapstructure:"PolicyName"`
+		DiscoverPrefixes         bool     `mapstructure:"DiscoverPrefixes"`
+		MergeLocalWithDiscovered bool     `mapstructure:"MergeLocalWithDiscovered"`
+		DivideUnallocated        bool     `mapstructure:"DivideUnallocated"`
+		Lots                     []Lot    `mapstructure:"Lots"`
 	}
 )
 
@@ -428,13 +430,40 @@ func mergeLotMaps(map1, map2 map[string]Lot) (map[string]Lot, error) {
     return result, nil
 }
 
+// A hook function for mapstructure that validates that all fields in the map are present in the struct.
+// Used to verify the user's input for PolicyDefinitions, since these aren't top-level fields in parameters.yaml
+func validateFieldsHook() mapstructure.DecodeHookFunc {
+    return func(from reflect.Type, to reflect.Type, data interface{}) (interface{}, error) {
+        if from.Kind() != reflect.Map || to.Kind() != reflect.Struct {
+            return data, nil
+        }
+
+        mapKeys := reflect.ValueOf(data).MapKeys()
+        structFields := make(map[string]struct{})
+        for i := 0; i < to.NumField(); i++ {
+            field := to.Field(i)
+            // Normalize the field name to lowercase
+            structFields[strings.ToLower(field.Tag.Get("mapstructure"))] = struct{}{}
+        }
+
+        // Check for unknown fields
+        for _, key := range mapKeys {
+            if _, ok := structFields[strings.ToLower(key.String())]; !ok {
+                return nil, fmt.Errorf("unknown configuration field in Lotman policy definitions: %s", key.String())
+            }
+        }
+
+        return data, nil
+    }
+}
+
 // Grab a map of policy definitions from the config file, where the policy
 // name is the key and its attributes comprise the value.
 func getPolicyMap() (map[string]PurgePolicy, error) {
 	policyMap := make(map[string]PurgePolicy)
 	var policies []PurgePolicy
-	err := viper.UnmarshalKey("Lotman.PolicyDefinitions", &policies)
-	if err != nil {
+	// Use custom decoder hook to validate fields. This validates all the way down to the bottom of the lot object.
+	if err := viper.UnmarshalKey(param.Lotman_PolicyDefinitions.GetName(), &policies, viper.DecodeHook(validateFieldsHook())); err != nil {
 		return policyMap, errors.Wrap(err, "error unmarshaling Lotman policy definitions")
 	}
 
