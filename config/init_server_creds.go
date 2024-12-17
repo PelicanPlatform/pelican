@@ -717,8 +717,7 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 	return mostRecentKey, nil
 }
 
-// Create a new .pem file and add its key to issuerPrivateKeys
-// In other words, it combines GeneratePrivateKey and LoadPrivateKey functions
+// Create a new .pem file (combining GeneratePrivateKey and LoadPrivateKey functions)
 func GeneratePEM(dir string) (jwk.Key, error) {
 	filename := fmt.Sprintf("pelican_generated_%d_%s.pem",
 		time.Now().UnixNano(),
@@ -734,11 +733,6 @@ func GeneratePEM(dir string) (jwk.Key, error) {
 		log.Warnf("Failed to load key %s: %v", keyPath, err)
 	}
 
-	// Save this new key in the in-memory map for all private keys
-	keysCopy := getIssuerPrivateKeysCopy()
-	keysCopy[key.KeyID()] = key
-	issuerPrivateKeys.Store(&keysCopy)
-
 	log.Debugf("Generated private key %s", key.KeyID())
 	return key, nil
 }
@@ -750,7 +744,13 @@ func GeneratePEMandSetActiveKey(dir string) (jwk.Key, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create a new .pem file to save private key")
 	}
+
+	// Save this new key in the in-memory map for all private keys
+	keysCopy := getIssuerPrivateKeysCopy()
+	keysCopy[newKey.KeyID()] = newKey
+	issuerPrivateKeys.Store(&keysCopy)
 	SetActiveKey(newKey)
+
 	return newKey, nil
 }
 

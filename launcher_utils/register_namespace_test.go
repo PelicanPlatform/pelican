@@ -168,7 +168,7 @@ func TestRegistration(t *testing.T) {
 
 	// Redo the namespace prep, ensure that isRegistered is true
 	prefix = param.Origin_FederationPrefix.GetString()
-	key, registerURL, isRegistered, err = registerNamespacePrep(ctx, prefix)
+	_, registerURL, isRegistered, err = registerNamespacePrep(ctx, prefix)
 	assert.True(t, isRegistered)
 	assert.Equal(t, svr.URL+"/api/v1.0/registry", registerURL)
 	assert.NoError(t, err)
@@ -315,7 +315,7 @@ func TestMultiKeysRegistration(t *testing.T) {
 
 	// Redo the namespace prep, ensure that isRegistered is true
 	prefix = param.Origin_FederationPrefix.GetString()
-	key, registerURL, isRegistered, err = registerNamespacePrep(ctx, prefix)
+	_, registerURL, isRegistered, err = registerNamespacePrep(ctx, prefix)
 	require.NoError(t, err)
 	assert.True(t, isRegistered)
 	assert.Equal(t, svr.URL+"/api/v1.0/registry", registerURL)
