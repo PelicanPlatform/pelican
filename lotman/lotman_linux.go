@@ -896,15 +896,15 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 	// Set up lot timestamps (creation, expiration, deletion) if needed
 	configLotTimestamps(&lotMap)
 
-	internalLots, err = topoSort(lotMap)
-	if err != nil {
-		return internalLots, errors.Wrap(err, "error sorting lots prior to instantiation")
-	}
-
 	log.Tracef("Internal lot configuration: %+v", internalLots)
 	err = validateLotsConfig(internalLots, totalDiskSpaceB)
 	if err != nil {
 		return internalLots, errors.Wrap(err, "error validating deduced lot configuration")
+	}
+
+	internalLots, err = topoSort(lotMap)
+	if err != nil {
+		return internalLots, errors.Wrap(err, "error sorting lots prior to instantiation")
 	}
 
 	return internalLots, nil
