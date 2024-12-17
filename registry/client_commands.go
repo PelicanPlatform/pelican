@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -317,5 +318,151 @@ func NamespaceDelete(endpoint string, prefix string) error {
 		return errors.Wrap(err, "Failed to make request")
 	}
 	fmt.Println(string(respData))
+	return nil
+}
+
+func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName string, namespacePubKeyUpdateEndpoint string) error {
+	publicKey, err := privateKey.PublicKey()
+	if err != nil {
+		return errors.Wrapf(err, "failed to generate public key for namespace registration")
+	}
+	err = jwk.AssignKeyID(publicKey)
+	if err != nil {
+		return errors.Wrap(err, "failed to assign key ID to public key")
+	}
+	if err = publicKey.Set("alg", "ES256"); err != nil {
+		return errors.Wrap(err, "failed to assign signature algorithm to public key")
+	}
+	keySet := jwk.NewSet()
+	if err = keySet.AddKey(publicKey); err != nil {
+		return errors.Wrap(err, "failed to add public key to new JWKS")
+	}
+
+	if log.IsLevelEnabled(log.DebugLevel) {
+		// Let's check that we can convert to JSON and get the right thing...
+		jsonbuf, err := json.Marshal(keySet)
+		if err != nil {
+			return errors.Wrap(err, "failed to marshal the public key into JWKS JSON")
+		}
+		log.Debugln("Constructed JWKS from loading public key:", string(jsonbuf))
+	}
+
+	clientNonce, err := generateNonce()
+	if err != nil {
+		return errors.Wrap(err, "failed to generate client nonce")
+	}
+
+	data := map[string]interface{}{
+		"client_nonce": clientNonce,
+		"pubkey":       keySet,
+	}
+
+	tr := config.GetTransport()
+	resp, err := utils.MakeRequest(context.Background(), tr, namespacePubKeyUpdateEndpoint, "POST", data, nil)
+
+	var respData clientResponseData
+	// Handle case where there was an error encoded in the body
+	if err != nil {
+		if strings.Contains(err.Error(), "status code 404") {
+			log.Warnf("Registered namespace public key update endpoint returned 404 Not Found: %s. This endpoint is available in Pelican v7.12 or later.", namespacePubKeyUpdateEndpoint)
+			return nil
+		}
+		if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil {
+			return errors.Wrapf(err, "Server responded with an error: %s. %s", respData.Message, respData.Error)
+		}
+		return errors.Wrapf(err, "Server responded with an error and failed to parse JSON response from the server. Raw server response is %s", resp)
+	}
+
+	// No error
+	if err = json.Unmarshal(resp, &respData); err != nil {
+		return errors.Wrapf(err, "Failure when parsing JSON response from the server with a success request. Raw server response is %s", resp)
+	}
+
+	// Create client payload by concatenating client_nonce and server_nonce
+	clientPayload := clientNonce + respData.ServerNonce
+
+	// Sign the payload
+	privateKeyRaw := &ecdsa.PrivateKey{}
+	if err = privateKey.Raw(privateKeyRaw); err != nil {
+		return errors.Wrap(err, "failed to get an ECDSA private key")
+	}
+	signature, err := signPayload([]byte(clientPayload), privateKeyRaw)
+	if err != nil {
+		return errors.Wrap(err, "failed to sign payload")
+	}
+	// Also sign the payload with the previous private key
+	prevPrivateKey := config.GetPreviousIssuerPrivateJWK()
+
+	var prevSignature []byte
+	if prevPrivateKey != nil {
+		prevPrivateKeyRaw := &ecdsa.PrivateKey{}
+		if err = prevPrivateKey.Raw(prevPrivateKeyRaw); err != nil {
+			return errors.Wrap(err, "failed to get previous raw private key in ECDSA")
+		}
+		prevSignature, err = signPayload([]byte(clientPayload), prevPrivateKeyRaw)
+		if err != nil {
+			return errors.Wrapf(err, "failed to sign payload with previous private key, previous signature is '%s'", prevSignature)
+		}
+	}
+
+	// Send origins all public keys in another key set
+	privateKeys := config.GetIssuerPrivateKeys()
+	if len(privateKeys) == 0 {
+		return errors.Wrap(err, "The server doesn't have any private key in memory")
+	}
+	allKeysSet := jwk.NewSet()
+	for _, privKey := range privateKeys {
+		pubKey, err := privKey.PublicKey()
+		if err != nil {
+			return errors.Wrapf(err, "failed to get the public key of a private key")
+		}
+		if err = allKeysSet.AddKey(pubKey); err != nil {
+			return errors.Wrap(err, "failed to add public key to all keys JWKS")
+		}
+	}
+
+	// Create data for the second POST request
+	unidentifiedPayload := map[string]interface{}{
+		"pubkey":           keySet,
+		"all_pubkeys":      allKeysSet,
+		"prefixes":         prefixes,
+		"site_name":        siteName,
+		"client_nonce":     clientNonce,
+		"server_nonce":     respData.ServerNonce,
+		"client_payload":   clientPayload,
+		"client_signature": hex.EncodeToString(signature),
+		"client_prev_signature": func() string {
+			if prevSignature == nil {
+				return ""
+			}
+			return hex.EncodeToString(prevSignature)
+		}(),
+		"server_payload":   respData.ServerPayload,
+		"server_signature": respData.ServerSignature,
+	}
+
+	// Send the second POST request
+	resp, err = utils.MakeRequest(context.Background(), tr, namespacePubKeyUpdateEndpoint, "POST", unidentifiedPayload, nil)
+
+	// Handle case where there was an error encoded in the body
+	if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil {
+		if err != nil {
+			if strings.Contains(err.Error(), "status code 404") {
+				log.Warnf("Registered namespace public key update endpoint returned 404 Not Found: %s. This endpoint is available in Pelican v7.12 or later.", namespacePubKeyUpdateEndpoint)
+				return nil
+			}
+			log.Errorf("Server responded with an error: %v. %s. %s", respData.Message, respData.Error, err)
+			return errors.Wrapf(err, "Server responded with an error: %s. %s", respData.Message, respData.Error)
+		}
+		if respData.Message != "" {
+			log.Debugf("Server responded to registration confirmation successfully with message: %s", respData.Message)
+		}
+	} else { // Error decoding JSON
+		if err != nil {
+			return errors.Wrapf(err, "Server responded with an error and failed to parse JSON response from the server. Raw response is %s", resp)
+		}
+		return errors.Wrapf(unmarshalErr, "Failure when parsing JSON response from the server with a success request. Raw server response is %s", resp)
+	}
+
 	return nil
 }

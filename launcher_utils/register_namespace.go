@@ -40,7 +40,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 type (
@@ -284,49 +283,4 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 		}
 	})
 	return nil
-}
-
-// Check the issuer key directory containing .pem files every 5 minutes, load new private key(s)
-// if new file(s) are detected, then register the new public key
-func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group) {
-	egrp.Go(func() error {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				log.Debugln("Stopping periodic check for private keys directory.")
-				return nil
-			case <-ticker.C:
-				// Refresh the disk to pick up any new private key
-				config.UpdatePreviousIssuerPrivateJWK()
-				key, err := config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
-				if err != nil {
-					return err
-				}
-				log.Debugln("Private keys directory refreshed successfully. The active (latest) private key is", key.KeyID())
-				log.Debugln("Previous private key is", config.GetPreviousIssuerPrivateJWK().KeyID())
-
-				// Update public key in registry db with the new active private key
-				extUrlStr := param.Server_ExternalWebUrl.GetString()
-				extUrl, _ := url.Parse(extUrlStr)
-				namespace := server_structs.GetOriginNs(extUrl.Host)
-				if err := RegisterNamespaceWithRetry(ctx, egrp, namespace); err != nil {
-					log.Errorf("Error registering updated private key: %v", err)
-				}
-
-				originExports, err := server_utils.GetOriginExports()
-				if err != nil {
-					return err
-				}
-				for _, export := range originExports {
-					if err := RegisterNamespaceWithRetry(ctx, egrp, export.FederationPrefix); err != nil {
-						return err
-					}
-				}
-
-			}
-		}
-	})
 }

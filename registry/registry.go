@@ -1297,6 +1297,7 @@ func RegisterRegistryAPI(router *gin.RouterGroup) {
 		registryAPI.GET("/*wildcard", wildcardHandler)
 		registryAPI.POST("/checkNamespaceExists", checkNamespaceExistsHandler)
 		registryAPI.POST("/checkNamespaceStatus", checkApprovalHandler)
+		registryAPI.POST("/updateNamespacesPubKey", updateNamespacesPubKey)
 
 		registryAPI.DELETE("/*wildcard", deleteNamespaceHandler)
 	}
