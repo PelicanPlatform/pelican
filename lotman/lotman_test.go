@@ -880,17 +880,6 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	// Most of these aren't actually used by the test, but to prevent auto discovery
-	// and needing to spin up a separate mock discovery server, set them all.
-	fed := pelican_url.FederationDiscovery{
-		DiscoveryEndpoint: "https://dne-discovery.com",
-		DirectorEndpoint:  "https://dne-director.com",
-		RegistryEndpoint:  "https://dne-registry.com",
-		JwksUri:           "https://dne-jwks.com",
-		BrokerEndpoint:    "https://dne-broker.com",
-	}
-	config.SetFederation(fed)
-
 	issuer1Str := "https://issuer1.com"
 	issuer1, _ := url.Parse(issuer1Str)
 	issuer2Str := "https://issuer2.com"
@@ -898,7 +887,8 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 	testCases := []struct {
 		name                string
 		nsAds               []server_structs.NamespaceAdV2
-		federationIssuerErr error
+		federationIssuer    string
+		directorUrl 	    string
 		expectedLotMap      map[string]Lot
 		expectedError       string
 	}{
@@ -918,6 +908,8 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 					},
 				},
 			},
+			federationIssuer: "https://dne-discovery.com",
+			directorUrl: "https://dne-director.com",
 			expectedLotMap: map[string]Lot{
 				"/namespace1": {
 					LotName: "/namespace1",
@@ -960,6 +952,8 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 					},
 				},
 			},
+			federationIssuer: "https://dne-discovery.com",
+			directorUrl: "https://dne-director.com",
 			expectedLotMap: map[string]Lot{
 				"/namespace2": {
 					LotName: "/namespace2",
@@ -975,15 +969,60 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 			},
 			expectedError: "",
 		},
+		{
+			name: "Fallback to Director URL as issuer",
+			nsAds: []server_structs.NamespaceAdV2{
+				{
+					Path: "/namespace1",
+				},
+			},
+			federationIssuer: "",
+			directorUrl: "https://dne-director.com",
+			expectedLotMap: map[string]Lot{
+				"/namespace1": {
+					LotName: "/namespace1",
+					Owner:   "https://dne-director.com",
+					Parents: []string{"root"},
+					Paths: []LotPath{
+						{
+							Path:      "/namespace1",
+							Recursive: true,
+						},
+					},
+				},
+			},
+			expectedError: "",
+		},
+		{
+			name: "Unresolvable issuer triggers error",
+			nsAds: []server_structs.NamespaceAdV2{
+				{
+					Path: "/namespace1",
+				},
+			},
+			federationIssuer: "",
+			directorUrl: "",
+			expectedLotMap: map[string]Lot{},
+			expectedError: "The detected federation issuer, which is needed by Lotman to determine lot/namespace ownership, is empty",
+		},
 	}
 
 	// Run the test cases
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Call the function
-			lotMap, err := configLotsFromFedPrefixes(tc.nsAds)
+			config.ResetFederationForTest()
+			fed := pelican_url.FederationDiscovery{
+				// Most of these aren't actually used by the test, but to prevent auto discovery
+				// and needing to spin up a separate mock discovery server, set them all.
+				DiscoveryEndpoint: tc.federationIssuer,
+				DirectorEndpoint:  tc.directorUrl,
+				RegistryEndpoint: "https://dne-registry.com",
+				JwksUri:     "https://dne-jwks.com",
+				BrokerEndpoint:   "https://dne-broker.com",
+			}
+			config.SetFederation(fed)
 
-			// Check the result
+			lotMap, err := configLotsFromFedPrefixes(tc.nsAds)
 			if tc.expectedError == "" {
 				require.NoError(t, err)
 			} else {
