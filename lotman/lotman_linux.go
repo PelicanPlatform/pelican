@@ -837,7 +837,7 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 		// Handle potential need to merge discovered namespaces with provided configuration
 		if shouldMerge {
 			log.Debug("Merging lot configuration from discovered namespaces with configured lots")
-			lotMap, err = mergeLotMaps(directorLotMap, policyLotMap)
+			lotMap, err = mergeLotMaps(policyLotMap, directorLotMap)
 			if err != nil {
 				return internalLots, errors.Wrap(err, "error merging discovered namespaces with configured lots")
 			}
