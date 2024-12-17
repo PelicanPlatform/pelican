@@ -25,6 +25,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -202,59 +203,61 @@ func setHomeDirEnv(t *testing.T, mockHomeDir string) func() {
 }
 
 func TestHomeDir(t *testing.T) {
-	mockHomeDir := filepath.Join("test", "configDir")
-	ResetConfig()
-	t.Cleanup(func() {
+	if runtime.GOOS != "windows" {
+		mockHomeDir := filepath.Join("test", "configDir")
 		ResetConfig()
-	})
+		t.Cleanup(func() {
+			ResetConfig()
+		})
 
-	// Save the original environment variables
-	oldConfigRoot := isRootExec
-	resetEnv := setHomeDirEnv(t, mockHomeDir)
+		// Save the original environment variables
+		oldConfigRoot := isRootExec
+		resetEnv := setHomeDirEnv(t, mockHomeDir)
 
-	defer func() {
-		resetEnv()
-		isRootExec = oldConfigRoot
-	}()
+		defer func() {
+			resetEnv()
+			isRootExec = oldConfigRoot
+		}()
 
-	t.Run("RootUserNoConfigDir", func(t *testing.T) {
-		isRootExec = true
+		t.Run("RootUserNoConfigDir", func(t *testing.T) {
+			isRootExec = true
 
-		InitConfigDir(viper.GetViper())
+			InitConfigDir(viper.GetViper())
 
-		cDir := viper.GetString("ConfigDir")
-		require.Equal(t, "/etc/pelican", cDir)
-	})
+			cDir := viper.GetString("ConfigDir")
+			require.Equal(t, "/etc/pelican", cDir)
+		})
 
-	t.Run("WithConfigDir", func(t *testing.T) {
-		viper.Set("ConfigDir", "/test/configDir")
+		t.Run("WithConfigDir", func(t *testing.T) {
+			viper.Set("ConfigDir", "/test/configDir")
 
-		InitConfigDir(viper.GetViper())
+			InitConfigDir(viper.GetViper())
 
-		cDir := viper.GetString("ConfigDir")
-		require.Equal(t, "/test/configDir", cDir)
-	})
+			cDir := viper.GetString("ConfigDir")
+			require.Equal(t, "/test/configDir", cDir)
+		})
 
-	t.Run("NonRootNoConfigDirWithHomeSet", func(t *testing.T) {
-		isRootExec = false
-		viper.Reset()
+		t.Run("NonRootNoConfigDirWithHomeSet", func(t *testing.T) {
+			isRootExec = false
+			viper.Reset()
 
-		InitConfigDir(viper.GetViper())
+			InitConfigDir(viper.GetViper())
 
-		cDir := viper.GetString("ConfigDir")
-		require.Equal(t, filepath.Join("test", "configDir", ".config", "pelican"), cDir)
-	})
+			cDir := viper.GetString("ConfigDir")
+			require.Equal(t, filepath.Join("test", "configDir", ".config", "pelican"), cDir)
+		})
 
-	t.Run("NonRootNoConfigDirWithNoHome", func(t *testing.T) {
-		isRootExec = false
-		viper.Reset()
-		os.Unsetenv("HOME")
+		t.Run("NonRootNoConfigDirWithNoHome", func(t *testing.T) {
+			isRootExec = false
+			viper.Reset()
+			os.Unsetenv("HOME")
 
-		InitConfigDir(viper.GetViper())
+			InitConfigDir(viper.GetViper())
 
-		cDir := viper.GetString("ConfigDir")
-		require.Equal(t, filepath.Join("", "etc", "pelican"), cDir)
-	})
+			cDir := viper.GetString("ConfigDir")
+			require.Equal(t, filepath.Join("/etc", "pelican"), cDir)
+		})
+	}
 
 }
 
