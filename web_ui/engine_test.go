@@ -160,7 +160,7 @@ func TestUpdateCert(t *testing.T) {
 	// First, compare the current fingerprint against that on disk
 	currentFingerprint := getCurrentFingerprint()
 
-	certFile := param.Server_TLSCertificate.GetString()
+	certFile := param.Server_TLSCertificateChain.GetString()
 	keyFile := param.Server_TLSKey.GetString()
 	getDiskFingerprint := func() [sha256.Size]byte {
 		diskCert, err := tls.LoadX509KeyPair(certFile, keyFile)

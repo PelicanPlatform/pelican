@@ -619,7 +619,7 @@ func RunEngineRoutineWithListener(ctx context.Context, engine *gin.Engine, egrp 
 // This was split out from RunEngine to allow unit tests to provide a Unix domain socket'
 // as a listener.
 func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Engine, egrp *errgroup.Group) error {
-	certFile := param.Server_TLSCertificate.GetString()
+	certFile := param.Server_TLSCertificateChain.GetString()
 	keyFile := param.Server_TLSKey.GetString()
 
 	port := param.Server_WebPort.GetInt()
@@ -635,7 +635,7 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 
 	server_utils.LaunchWatcherMaintenance(
 		ctx,
-		[]string{filepath.Dir(param.Server_TLSCertificate.GetString())},
+		[]string{filepath.Dir(param.Server_TLSCertificateChain.GetString())},
 		"server TLS maintenance",
 		2*time.Minute,
 		func(notifyEvent bool) error {

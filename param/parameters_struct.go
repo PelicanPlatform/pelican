@@ -265,6 +265,7 @@ type Config struct {
 		TLSCACertificateFile string `mapstructure:"tlscacertificatefile" yaml:"TLSCACertificateFile"`
 		TLSCAKey string `mapstructure:"tlscakey" yaml:"TLSCAKey"`
 		TLSCertificate string `mapstructure:"tlscertificate" yaml:"TLSCertificate"`
+		TLSCertificateChain string `mapstructure:"tlscertificatechain" yaml:"TLSCertificateChain"`
 		TLSKey string `mapstructure:"tlskey" yaml:"TLSKey"`
 		UIActivationCodeFile string `mapstructure:"uiactivationcodefile" yaml:"UIActivationCodeFile"`
 		UIAdminUsers []string `mapstructure:"uiadminusers" yaml:"UIAdminUsers"`
@@ -573,6 +574,7 @@ type configWithType struct {
 		TLSCACertificateFile struct { Type string; Value string }
 		TLSCAKey struct { Type string; Value string }
 		TLSCertificate struct { Type string; Value string }
+		TLSCertificateChain struct { Type string; Value string }
 		TLSKey struct { Type string; Value string }
 		UIActivationCodeFile struct { Type string; Value string }
 		UIAdminUsers struct { Type string; Value []string }

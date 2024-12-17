@@ -93,15 +93,15 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
     wrap_in_directory: '{{ .ProjectName }}-server-{{ trimsuffix .Version "-next" }}'
 checksum:
-  name_template: 'checksums.txt'
+  name_template: "checksums.txt"
 snapshot:
   name_template: "{{ .Version }}"
 changelog:
   sort: asc
   filters:
     exclude:
-      - '^docs:'
-      - '^test:'
+      - "^docs:"
+      - "^test:"
       - Merge pull request
       - Merge branch
 

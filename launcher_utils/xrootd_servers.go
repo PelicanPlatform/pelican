@@ -45,7 +45,7 @@ func checkConfigFileReadable(fileName string, errMsg string) error {
 }
 
 func CheckDefaults(server server_structs.XRootDServer) error {
-	requiredConfigs := []param.StringParam{param.Server_TLSCertificate, param.Server_TLSKey, param.Xrootd_RobotsTxtFile}
+	requiredConfigs := []param.StringParam{param.Server_TLSCertificateChain, param.Server_TLSKey, param.Xrootd_RobotsTxtFile}
 	for _, configName := range requiredConfigs {
 		mgr := configName.GetString()
 		if mgr == "" {
@@ -75,7 +75,7 @@ func CheckDefaults(server server_structs.XRootDServer) error {
 	}
 
 	// TODO: Could upgrade this to a check for a cert in the file...
-	if err := checkConfigFileReadable(param.Server_TLSCertificate.GetString(),
+	if err := checkConfigFileReadable(param.Server_TLSCertificateChain.GetString(),
 		"A TLS certificate is required to serve HTTPS"); err != nil {
 		return err
 	}

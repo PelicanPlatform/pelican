@@ -142,7 +142,7 @@ type (
 	}
 
 	ServerConfig struct {
-		TLSCertificate            string
+		TLSCertificateChain       string
 		TLSKey                    string
 		TLSCACertificateDirectory string
 		TLSCACertificateFile      string
@@ -519,7 +519,7 @@ func CopyXrootdCertificates(server server_structs.XRootDServer) error {
 		return errors.Wrap(err, "Unable to copy certificates to xrootd runtime directory; failed xrootd user lookup")
 	}
 
-	certFile := param.Server_TLSCertificate.GetString()
+	certFile := param.Server_TLSCertificateChain.GetString()
 	certKey := param.Server_TLSKey.GetString()
 	if _, err = tls.LoadX509KeyPair(certFile, certKey); err != nil {
 		return builtin_errors.Join(err, errBadKeyPair)
@@ -540,7 +540,7 @@ func CopyXrootdCertificates(server server_structs.XRootDServer) error {
 		return errors.Wrap(err, "Failure when chown'ing certificate key pair file for xrootd")
 	}
 
-	srcFile, err := os.Open(param.Server_TLSCertificate.GetString())
+	srcFile, err := os.Open(param.Server_TLSCertificateChain.GetString())
 	if err != nil {
 		return errors.Wrap(err, "Failure when opening source certificate for xrootd")
 	}
@@ -577,7 +577,7 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 	server_utils.LaunchWatcherMaintenance(
 		ctx,
 		[]string{
-			filepath.Dir(param.Server_TLSCertificate.GetString()),
+			filepath.Dir(param.Server_TLSCertificateChain.GetString()),
 			filepath.Dir(param.Xrootd_Authfile.GetString()),
 			filepath.Dir(param.Xrootd_ScitokensConfig.GetString()),
 		},

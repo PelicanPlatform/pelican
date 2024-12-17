@@ -1023,7 +1023,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetConfigType("yaml")
 
 	v.SetDefault(param.Server_WebConfigFile.GetName(), filepath.Join(configDir, "web-config.yaml"))
-	v.SetDefault(param.Server_TLSCertificate.GetName(), filepath.Join(configDir, "certificates", "tls.crt"))
+	v.SetDefault(param.Server_TLSCertificateChain.GetName(), filepath.Join(configDir, "certificates", "tls.crt"))
 	v.SetDefault(param.Server_TLSKey.GetName(), filepath.Join(configDir, "certificates", "tls.key"))
 	v.SetDefault(param.Server_TLSCAKey.GetName(), filepath.Join(configDir, "certificates", "tlsca.key"))
 	v.SetDefault(param.Server_SessionSecretFile.GetName(), filepath.Join(configDir, "session-secret"))

@@ -975,31 +975,31 @@ components: ["origin"]
 ---
 name: Origin.XRootServiceUrl
 description: |+
- When the origin is configured to export another XRootD storage backend by setting `Origin.StorageType = xroot`, the `XRootServiceUrl`
- is used as the base for `root` protocol requests and should point at the upstream XRootD server.
+  When the origin is configured to export another XRootD storage backend by setting `Origin.StorageType = xroot`, the `XRootServiceUrl`
+  is used as the base for `root` protocol requests and should point at the upstream XRootD server.
 type: string
 default: none
 components: ["origin"]
 ---
 name: Origin.GlobusCollectionID
 description: |+
- **Note**: This value is only for setting up an origin that exports **one** Globus collection. For multiple exports, use `Origin.Exports`
+  **Note**: This value is only for setting up an origin that exports **one** Globus collection. For multiple exports, use `Origin.Exports`
 
- Required if `Origin.StorageType == "globus"` AND `Origin.Exports` is not set.
+  Required if `Origin.StorageType == "globus"` AND `Origin.Exports` is not set.
 
- Globus stores objects in [Collections](https://docs.globus.org/guides/overviews/collections-and-endpoints/#collection).
- The unique identifier of a Collection is the Collection UUID.
- You can find the Collection UUID at the bottom of your Collection's overview page.
+  Globus stores objects in [Collections](https://docs.globus.org/guides/overviews/collections-and-endpoints/#collection).
+  The unique identifier of a Collection is the Collection UUID.
+  You can find the Collection UUID at the bottom of your Collection's overview page.
 type: string
 default: none
 components: ["origin"]
 ---
 name: Origin.GlobusCollectionName
 description: |+
- **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+  **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
 
- An optional human-readable name to describe the Collection. This should set to the "Display Name" of your Collection in Globus.
- It is recommended to set this name; otherwise the UUID will be used as the Collection name.
+  An optional human-readable name to describe the Collection. This should set to the "Display Name" of your Collection in Globus.
+  It is recommended to set this name; otherwise the UUID will be used as the Collection name.
 type: string
 default: none
 components: ["origin"]
@@ -1149,7 +1149,7 @@ description: |+
   WARNING: It's important that any values for `Cache.DataLocations` and `Cache.MetaLocations` are NOT subdirectories of `Cache.NamespaceLocation`,
   as this will make the raw data/meta files accessible through the cache's namespace structure, which is undefined behavior.
 type: string
-default:  ${Cache.StorageLocation}/namespace
+default: ${Cache.StorageLocation}/namespace
 
 components: ["cache"]
 ---
@@ -1796,6 +1796,20 @@ description: |+
 type: filename
 root_default: /etc/pelican/certificates/tls.crt
 default: "$ConfigBase/certificates/tls.crt"
+deprecated: true
+replacedby: "Server.TLSCertificateChain"
+components: ["origin", "registry", "director"]
+---
+name: Server.TLSCertificateChain
+description: |+
+  A filepath to a file containing the full X.509 certificate chain, including the host certificate followed
+  by any intermediate certificates, to use for TLS authentication when running server components of Pelican.
+
+  If you override this filepath, you need to provide the matched-pair private key
+  via Server.TLSKey and a Certificate Authority (CA) certificate via Server.TLSCACertificateFile.
+type: filename
+root_default: /etc/pelican/certificates/tls.crt
+default: "$ConfigBase/certificates/tls.crt"
 components: ["origin", "registry", "director"]
 ---
 name: Server.TLSCACertificateFile
@@ -1831,7 +1845,8 @@ components: ["origin", "registry", "director"]
 ---
 name: Server.TLSKey
 description: |+
-  The name of a file containing a private key corresponding to the TLSCertificate.
+  The name of a file containing the private key corresponding to the host certificate
+  in the TLSCertificateChain.
   Used when running server components of Pelican.
 type: filename
 root_default: /etc/pelican/certificates/tls.key
@@ -1970,7 +1985,7 @@ description: |+
   The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
 type: stringSlice
 default: []
-components: ["registry","origin","cache"]
+components: ["registry", "origin", "cache"]
 ---
 name: Server.StartupTimeout
 description: |+

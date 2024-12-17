@@ -65,6 +65,7 @@ func GetDeprecated() map[string][]string {
         "Origin.NamespacePrefix": {"Origin.FederationPrefix"},
         "Origin.S3ServiceName": {"none"},
         "Registry.AdminUsers": {"Server.UIAdminUsers"},
+        "Server.TLSCertificate": {"Server.TLSCertificateChain"},
         "Xrootd.Port": {"Origin.Port", "Cache.Port"},
         "Xrootd.RunLocation": {"Cache.RunLocation", "Origin.RunLocation"},
     }
@@ -248,6 +249,7 @@ var (
 	Server_TLSCACertificateFile = StringParam{"Server.TLSCACertificateFile"}
 	Server_TLSCAKey = StringParam{"Server.TLSCAKey"}
 	Server_TLSCertificate = StringParam{"Server.TLSCertificate"}
+	Server_TLSCertificateChain = StringParam{"Server.TLSCertificateChain"}
 	Server_TLSKey = StringParam{"Server.TLSKey"}
 	Server_UIActivationCodeFile = StringParam{"Server.UIActivationCodeFile"}
 	Server_UIPasswordFile = StringParam{"Server.UIPasswordFile"}
