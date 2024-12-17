@@ -624,7 +624,13 @@ func divideRemainingSpace(lotMap *map[string]Lot, totalDiskSpaceB uint64) error 
 			continue
 		}
 		if lot.MPA != nil && lot.MPA.DedicatedGB != nil  {
-			remainingToHwmB -= gigabytesToBytes(*lot.MPA.DedicatedGB)
+			dedicatedGBBytes := gigabytesToBytes(*lot.MPA.DedicatedGB)
+			// While we check that lot config is valid later, we can't finish dividing space if
+			// remainintToHwmB dips negative. Can't check for < 0 after subraction because the uint64 will wrap
+			if remainingToHwmB < dedicatedGBBytes {
+				return errors.New(fmt.Sprintf("the sum of all lots' dedicatedGB values exceeds the high watermark of %s. This would allow the cache to purge namespaces using less than their dedicated quota", hwmStr))
+			}
+			remainingToHwmB -= dedicatedGBBytes
 			if lot.MPA.OpportunisticGB == nil {
 				oGb := bytesToGigabytes(hwm) - *lot.MPA.DedicatedGB
 				lot.MPA.OpportunisticGB = &oGb

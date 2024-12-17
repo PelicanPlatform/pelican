@@ -775,32 +775,36 @@ func TestDivideRemainingSpace(t *testing.T) {
 	defer server_utils.ResetTestState()
 	dedGB := float64(10.0)
 	oppGB := float64(1.5)
-	lotMap := map[string]Lot{
-		"lot1": {
-			LotName: "lot1",
-			MPA: &MPA{
-				DedicatedGB:     &dedGB,
-				OpportunisticGB: &oppGB,
-			},
-		},
-		"lot2": {
-			LotName: "lot2",
-			MPA:     &MPA{},
-		},
-		"lot3": {
-			LotName: "lot3",
-			MPA: &MPA{
-				DedicatedGB: &dedGB,
-			},
-		},
-		"lot4": {
-			LotName: "lot4",
-			MPA: &MPA{
-				OpportunisticGB: &oppGB, // hardcoded values should be respected
-			},
-		},
-	}
 
+	createLotMap := func() map[string]Lot {
+        return map[string]Lot{
+            "lot1": {
+                LotName: "lot1",
+                MPA: &MPA{
+                    DedicatedGB:     &dedGB,
+                    OpportunisticGB: &oppGB,
+                },
+            },
+            "lot2": {
+                LotName: "lot2",
+                MPA:     &MPA{},
+            },
+            "lot3": {
+                LotName: "lot3",
+                MPA: &MPA{
+                    DedicatedGB: &dedGB,
+                },
+            },
+            "lot4": {
+                LotName: "lot4",
+                MPA: &MPA{
+                    OpportunisticGB: &oppGB, // hardcoded values should be respected
+                },
+            },
+        }
+    }
+
+	lotMap := createLotMap()
 	totalDiskSpaceB := uint64(30000000000) // 30GB
 	viper.Set("Cache.HighWaterMark", "25g")
 	err := divideRemainingSpace(&lotMap, totalDiskSpaceB)
@@ -815,6 +819,12 @@ func TestDivideRemainingSpace(t *testing.T) {
 	require.Equal(t, 22.5, *lotMap["lot2"].MPA.OpportunisticGB)
 	require.Equal(t, 15.0, *lotMap["lot3"].MPA.OpportunisticGB)
 	require.Equal(t, 1.5, *lotMap["lot4"].MPA.OpportunisticGB)
+
+	// Now make sure we this allocation fails if sum of dedGB is lower than HWM
+	viper.Set("Cache.HighWaterMark", "1g")
+	lotMap = createLotMap()
+	err = divideRemainingSpace(&lotMap, totalDiskSpaceB)
+	require.Error(t, err)
 }
 
 // Pretty straightforward -- tests should make sure we can grab viper config and use it when
