@@ -819,10 +819,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	generateXAuthHeader(ginCtx, namespaceAd)
 	generateXTokenGenHeader(ginCtx, namespaceAd)
 
-	// If we are doing a PUT, check to see if any origins are writeable
-	if ginCtx.Request.Method == "PUT" {
+	// If we are doing a PUT or DELETE, check to see if any origins are writeable
+	if ginCtx.Request.Method == http.MethodPut || ginCtx.Request.Method == http.MethodDelete {
 		for idx, ad := range availableAds {
-			if ad.Caps.Writes {
+			if ad.Caps.Writes && namespaceAd.Caps.Writes {
 				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.Caps.PublicReads)
 				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())

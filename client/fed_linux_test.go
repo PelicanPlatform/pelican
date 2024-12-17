@@ -1095,6 +1095,6 @@ func TestObjectDelete(t *testing.T) {
 		err := client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
 
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "403")
+		require.Contains(t, err.Error(), "405")
 	})
 }
