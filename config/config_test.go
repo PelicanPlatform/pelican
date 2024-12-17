@@ -182,82 +182,84 @@ func TestInitConfig(t *testing.T) {
 }
 
 func TestHomeDir(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		tempDir := t.TempDir()
-		mockHomeDir := filepath.Join(tempDir, "test", "configDir")
-		confDir := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows, as it's not expected to work")
+	}
+
+	tempDir := t.TempDir()
+	mockHomeDir := filepath.Join(tempDir, "test", "configDir")
+	confDir := t.TempDir()
+	ResetConfig()
+	t.Cleanup(func() {
 		ResetConfig()
-		t.Cleanup(func() {
-			ResetConfig()
+	})
+
+	// Save the original environment variables
+	oldConfigRoot := isRootExec
+
+	defer func() {
+		isRootExec = oldConfigRoot
+	}()
+
+	t.Setenv("HOME", mockHomeDir)
+
+	type testCase struct {
+		name        string
+		isRootExec  bool
+		configDir   string
+		homeEnv     bool
+		expectedDir string
+	}
+
+	testCases := []testCase{
+		{
+			name:        "RootUserNoConfigDir",
+			isRootExec:  true,
+			configDir:   "",
+			homeEnv:     true,
+			expectedDir: "/etc/pelican",
+		},
+		{
+			name:        "NonRootWithConfigDir",
+			isRootExec:  false,
+			configDir:   filepath.Join(confDir),
+			homeEnv:     true,
+			expectedDir: filepath.Join(confDir),
+		},
+		{
+			name:        "NonRootNoConfigDirWithHome",
+			isRootExec:  false,
+			configDir:   "",
+			homeEnv:     true,
+			expectedDir: filepath.Join(mockHomeDir, ".config", "pelican"),
+		},
+		{
+			name:        "NonRootNoConfigDirNoHome",
+			isRootExec:  false,
+			configDir:   "",
+			homeEnv:     false,
+			expectedDir: filepath.Join("/etc", "pelican"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			isRootExec = tc.isRootExec
+			viper.Reset()
+
+			if tc.configDir != "" {
+				viper.Set("ConfigDir", tc.configDir)
+			}
+
+			if !tc.homeEnv {
+				os.Unsetenv("HOME")
+			}
+
+			InitConfigDir(viper.GetViper())
+
+			cDir := viper.GetString("ConfigDir")
+			require.Equal(t, tc.expectedDir, cDir)
 		})
-
-		// Save the original environment variables
-		oldConfigRoot := isRootExec
-
-		defer func() {
-			isRootExec = oldConfigRoot
-		}()
-
-		t.Setenv("HOME", mockHomeDir)
-
-		type testCase struct {
-			name        string
-			isRootExec  bool
-			configDir   string
-			homeEnv     bool
-			expectedDir string
-		}
-
-		testCases := []testCase{
-			{
-				name:        "RootUserNoConfigDir",
-				isRootExec:  true,
-				configDir:   "",
-				homeEnv:     true,
-				expectedDir: "/etc/pelican",
-			},
-			{
-				name:        "NonRootWithConfigDir",
-				isRootExec:  false,
-				configDir:   filepath.Join(confDir),
-				homeEnv:     true,
-				expectedDir: filepath.Join(confDir),
-			},
-			{
-				name:        "NonRootNoConfigDirWithHome",
-				isRootExec:  false,
-				configDir:   "",
-				homeEnv:     true,
-				expectedDir: filepath.Join(mockHomeDir, ".config", "pelican"),
-			},
-			{
-				name:        "NonRootNoConfigDirNoHome",
-				isRootExec:  false,
-				configDir:   "",
-				homeEnv:     false,
-				expectedDir: filepath.Join("/etc", "pelican"),
-			},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				isRootExec = tc.isRootExec
-				viper.Reset()
-
-				if tc.configDir != "" {
-					viper.Set("ConfigDir", tc.configDir)
-				}
-
-				if !tc.homeEnv {
-					os.Unsetenv("HOME")
-				}
-
-				InitConfigDir(viper.GetViper())
-
-				cDir := viper.GetString("ConfigDir")
-				require.Equal(t, tc.expectedDir, cDir)
-			})
-		}
 	}
 }
 
