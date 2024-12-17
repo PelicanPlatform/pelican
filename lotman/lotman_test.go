@@ -531,8 +531,9 @@ func TestGetPolicyMap(t *testing.T) {
 
 	policyMap, err := getPolicyMap()
 	require.NoError(t, err)
-	require.Equal(t, 1, len(policyMap))
+	require.Equal(t, 2, len(policyMap))
 	require.Contains(t, policyMap, "different-policy")
+	require.Contains(t, policyMap, "another policy")
 	require.Equal(t, "different-policy", viper.GetString("Lotman.EnabledPolicy"))
 }
 

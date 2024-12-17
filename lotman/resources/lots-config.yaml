@@ -65,3 +65,7 @@ Lotman:
               Value: 12345
             DeletionTime:
               Value: 123456
+    - PolicyName: "another policy"
+      DivideUnallocated: true
+      PurgeOrder: ["ded", "opp", "exp", "del"]
+      DiscoverPrefixes: true
