@@ -25,7 +25,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -185,42 +184,25 @@ func TestInitConfig(t *testing.T) {
 func setHomeDirEnv(t *testing.T, mockHomeDir string) func() {
 	// Save the original environment variables for restoration
 	originalHome := os.Getenv("HOME")
-	originalUserProfile := os.Getenv("USERPROFILE")
 
 	// Set the appropriate environment variable based on the platform
-	switch runtime.GOOS {
-	case "windows":
-		if err := os.Setenv("USERPROFILE", mockHomeDir); err != nil {
-			t.Fatalf("Failed to set USERPROFILE: %v", err)
-		}
-	case "darwin", "linux":
-		if err := os.Setenv("HOME", mockHomeDir); err != nil {
-			t.Fatalf("Failed to set HOME: %v", err)
-		}
+	if err := os.Setenv("HOME", mockHomeDir); err != nil {
+		t.Fatalf("Failed to set HOME: %v", err)
 	}
 
 	// Return a function to restore the environment variables
 	return func() {
-		if runtime.GOOS == "windows" {
-			// Restore USERPROFILE
-			if originalUserProfile != "" {
-				os.Setenv("USERPROFILE", originalUserProfile)
-			} else {
-				os.Unsetenv("USERPROFILE")
-			}
+		// Restore HOME
+		if originalHome != "" {
+			os.Setenv("HOME", originalHome)
 		} else {
-			// Restore HOME
-			if originalHome != "" {
-				os.Setenv("HOME", originalHome)
-			} else {
-				os.Unsetenv("HOME")
-			}
+			os.Unsetenv("HOME")
 		}
 	}
 }
 
 func TestHomeDir(t *testing.T) {
-	mockHomeDir := filepath.Join("/test", "configDir")
+	mockHomeDir := filepath.Join("test", "configDir")
 	ResetConfig()
 	t.Cleanup(func() {
 		ResetConfig()
@@ -260,19 +242,18 @@ func TestHomeDir(t *testing.T) {
 		InitConfigDir(viper.GetViper())
 
 		cDir := viper.GetString("ConfigDir")
-		require.Equal(t, "/test/configDir/.config/pelican", cDir)
+		require.Equal(t, filepath.Join("test", "configDir", ".config", "pelican"), cDir)
 	})
 
 	t.Run("NonRootNoConfigDirWithNoHome", func(t *testing.T) {
 		isRootExec = false
 		viper.Reset()
 		os.Unsetenv("HOME")
-		os.Unsetenv("USERPROFILE")
 
 		InitConfigDir(viper.GetViper())
 
 		cDir := viper.GetString("ConfigDir")
-		require.Equal(t, "/etc/pelican", cDir)
+		require.Equal(t, filepath.Join("", "etc", "pelican"), cDir)
 	})
 
 }
