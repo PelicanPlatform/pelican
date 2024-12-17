@@ -181,30 +181,11 @@ func TestInitConfig(t *testing.T) {
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
 }
 
-// Helper function to set and reset the environment variable HOME/USERPROFILE
-func setHomeDirEnv(t *testing.T, mockHomeDir string) func() {
-	// Save the original environment variables for restoration
-	originalHome := os.Getenv("HOME")
-
-	// Set the appropriate environment variable based on the platform
-	if err := os.Setenv("HOME", mockHomeDir); err != nil {
-		t.Fatalf("Failed to set HOME: %v", err)
-	}
-
-	// Return a function to restore the environment variables
-	return func() {
-		// Restore HOME
-		if originalHome != "" {
-			os.Setenv("HOME", originalHome)
-		} else {
-			os.Unsetenv("HOME")
-		}
-	}
-}
-
 func TestHomeDir(t *testing.T) {
 	if runtime.GOOS != "windows" {
-		mockHomeDir := filepath.Join("test", "configDir")
+		tempDir := t.TempDir()
+		mockHomeDir := filepath.Join(tempDir, "test", "configDir")
+		confDir := t.TempDir()
 		ResetConfig()
 		t.Cleanup(func() {
 			ResetConfig()
@@ -212,60 +193,73 @@ func TestHomeDir(t *testing.T) {
 
 		// Save the original environment variables
 		oldConfigRoot := isRootExec
-		resetEnv := setHomeDirEnv(t, mockHomeDir)
 
 		defer func() {
-			resetEnv()
 			isRootExec = oldConfigRoot
 		}()
 
-		t.Run("RootUserNoConfigDir", func(t *testing.T) {
-			isRootExec = true
+		t.Setenv("HOME", mockHomeDir)
 
-			InitConfigDir(viper.GetViper())
+		type testCase struct {
+			name        string
+			isRootExec  bool
+			configDir   string
+			homeEnv     bool
+			expectedDir string
+		}
 
-			cDir := viper.GetString("ConfigDir")
-			require.Equal(t, "/etc/pelican", cDir)
-		})
+		testCases := []testCase{
+			{
+				name:        "RootUserNoConfigDir",
+				isRootExec:  true,
+				configDir:   "",
+				homeEnv:     true,
+				expectedDir: "/etc/pelican",
+			},
+			{
+				name:        "NonRootWithConfigDir",
+				isRootExec:  false,
+				configDir:   filepath.Join(confDir),
+				homeEnv:     true,
+				expectedDir: filepath.Join(confDir),
+			},
+			{
+				name:        "NonRootNoConfigDirWithHome",
+				isRootExec:  false,
+				configDir:   "",
+				homeEnv:     true,
+				expectedDir: filepath.Join(mockHomeDir, ".config", "pelican"),
+			},
+			{
+				name:        "NonRootNoConfigDirNoHome",
+				isRootExec:  false,
+				configDir:   "",
+				homeEnv:     false,
+				expectedDir: filepath.Join("/etc", "pelican"),
+			},
+		}
 
-		t.Run("WithConfigDir", func(t *testing.T) {
-			viper.Set("ConfigDir", "/test/configDir")
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				isRootExec = tc.isRootExec
+				viper.Reset()
 
-			InitConfigDir(viper.GetViper())
+				if tc.configDir != "" {
+					viper.Set("ConfigDir", tc.configDir)
+				}
 
-			cDir := viper.GetString("ConfigDir")
-			require.Equal(t, "/test/configDir", cDir)
-		})
+				if !tc.homeEnv {
+					os.Unsetenv("HOME")
+				}
 
-		t.Run("NonRootNoConfigDirWithHomeSet", func(t *testing.T) {
-			isRootExec = false
-			viper.Reset()
+				InitConfigDir(viper.GetViper())
 
-			InitConfigDir(viper.GetViper())
-
-			cDir := viper.GetString("ConfigDir")
-			require.Equal(t, filepath.Join("test", "configDir", ".config", "pelican"), cDir)
-		})
-
-		t.Run("NonRootNoConfigDirWithNoHome", func(t *testing.T) {
-			isRootExec = false
-			viper.Reset()
-			os.Unsetenv("HOME")
-
-			InitConfigDir(viper.GetViper())
-
-			cDir := viper.GetString("ConfigDir")
-			require.Equal(t, filepath.Join("/etc", "pelican"), cDir)
-		})
+				cDir := viper.GetString("ConfigDir")
+				require.Equal(t, tc.expectedDir, cDir)
+			})
+		}
 	}
-
 }
-
-// HOME directory test
-// Root and set
-// Root and unset
-// Non root and set
-// Non root and unset
 
 // Helper func for TestExtraCfg
 //
