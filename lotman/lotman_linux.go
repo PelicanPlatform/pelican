@@ -735,36 +735,36 @@ func configLotsFromFedPrefixes(nsAds []server_structs.NamespaceAdV2) (map[string
 // this means we have to sort our lots topologically to ensure that we create them in the correct order.
 // Failure to do so appears to result in a segfault in Lotman.
 func topoSort(lotMap map[string]Lot) ([]Lot, error) {
-    sorted := make([]Lot, 0, len(lotMap))
-    visited := make(map[string]bool)
+	sorted := make([]Lot, 0, len(lotMap))
+	visited := make(map[string]bool)
 
 	// Recursively visit each lot and its parents, DFS-style
 	var visit func(string) error
-    visit = func(name string) error {
-        if visited[name] {
-            return nil
-        }
-        visited[name] = true
+	visit = func(name string) error {
+		if visited[name] {
+			return nil
+		}
+		visited[name] = true
 
-        // Visit all parents first
-        for _, parent := range lotMap[name].Parents {
-            if err := visit(parent); err != nil {
-                return err
-            }
-        }
+		// Visit all parents first
+		for _, parent := range lotMap[name].Parents {
+			if err := visit(parent); err != nil {
+				return err
+			}
+		}
 		// Adding the leaves of the DFS parent tree to the sorted list
 		// guarantees that we'll add the parents before the children
-        sorted = append(sorted, lotMap[name])
-        return nil
-    }
+		sorted = append(sorted, lotMap[name])
+		return nil
+	}
 
-    for name := range lotMap {
-        if err := visit(name); err != nil {
-            return nil, err
-        }
-    }
+	for name := range lotMap {
+		if err := visit(name); err != nil {
+			return nil, err
+		}
+	}
 
-    return sorted, nil
+	return sorted, nil
 }
 
 
