@@ -290,17 +290,38 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 		return errors.Wrapf(err, "Unable to create the cache's storage directory '%s'", storageLocation)
 	}
 
+	// Validate configured data and meta locations. In particular, make sure we don't export
+	// data under our namespace directory, and that data locations are not nested (they're meant to be
+	// separate disks)
 	dataPaths := param.Cache_DataLocations.GetStringSlice()
-	for _, dPath := range dataPaths {
-		dataPath := filepath.Clean(dPath)
-		// Data locations should never be below the namespace location
+	cleanedDataPaths := make([]string, len(dataPaths))
+	for i, dPath := range dataPaths {
+		cleanedDataPaths[i] = filepath.Clean(dPath)
+	}
+
+	// Make sure there's no nesting between data locations
+	for i, dPath1 := range cleanedDataPaths {
+		for j, dPath2 := range cleanedDataPaths {
+			if i != j {
+				relPath, err := filepath.Rel(dPath1, dPath2)
+				if err != nil {
+					return errors.Wrapf(err, "Unable to determine relative path between %s and %s", dPath1, dPath2)
+				}
+				if relPath == "." || !strings.HasPrefix(relPath, "..") {
+					return errors.Errorf("Data location '%s' is a subdirectory or parent directory of '%s'. Please ensure these directories are not nested.", dPath1, dPath2)
+				}
+			}
+		}
+	}
+
+	// Check for subdirectory relationships with namespaceLocation
+	for _, dPath := range cleanedDataPaths {
 		if strings.HasPrefix(dPath, namespaceLocation) {
 			return errors.Errorf("A configured data location '%s' is a subdirectory of the namespace location '%s'. Please ensure these directories are not nested.", dPath, namespaceLocation)
 		}
 
-		if err := config.MkdirAll(dataPath, 0775, uid, gid); err != nil {
-			return errors.Wrapf(err, "Unable to create data directory %v",
-				filepath.Dir(dataPath))
+		if err := config.MkdirAll(dPath, 0775, uid, gid); err != nil {
+			return errors.Wrapf(err, "Unable to create data directory %v", filepath.Dir(dPath))
 		}
 	}
 
