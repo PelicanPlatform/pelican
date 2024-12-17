@@ -83,7 +83,7 @@ type (
 	LotPath struct {
 		Path      string `json:"path" mapstructure:"Path"`
 		Recursive bool   `json:"recursive" mapstructure:"Recursive"`
-		LotName   string `json:"lot_name,omitempty"` // Not used when creating lots, but some queries will populate
+		LotName   string `json:"lot_name,omitempty"` // Not used when creating lots, but some queries will populate the field
 	}
 
 	LotValueMapInt struct {
@@ -845,7 +845,7 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 	// without allowing discovered lots to gain rootly status.
 	federationIssuer, err := getFederationIssuer()
 	if err != nil {
-		return internalLots, errors.Wrap(err, "Unable to determine federation issuer which is needed by Lotman to determine lot ownership")
+		return internalLots, errors.Wrap(err, "Unable to determine the federation's issuer, which is needed by Lotman to determine lot ownership")
 	}
 	if federationIssuer == "" {
 		return internalLots, errors.New("The detected federation issuer, which is needed by Lotman to determine lot/namespace ownership, is empty")
