@@ -739,7 +739,7 @@ func GeneratePEM(dir string) (jwk.Key, error) {
 	keysCopy[key.KeyID()] = key
 	issuerPrivateKeys.Store(&keysCopy)
 
-	log.Debugf("Loaded the private key (key id: %s) into issuerPrivateKeys and set as active key", key.KeyID())
+	log.Debugf("Generated private key %s", key.KeyID())
 	return key, nil
 }
 

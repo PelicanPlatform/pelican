@@ -109,8 +109,9 @@ func TestRegistration(t *testing.T) {
 
 	// Test registration succeeds
 	prefix := param.Origin_FederationPrefix.GetString()
-	key, registerURL, err := registerNamespacePrep(ctx, prefix)
+	key, registerURL, isRegistered, err := registerNamespacePrep(ctx, prefix)
 	require.NoError(t, err)
+	assert.False(t, isRegistered)
 	assert.Equal(t, registerURL, svr.URL+"/api/v1.0/registry")
 	err = registerNamespaceImpl(key, prefix, "mock_site_name", registerURL)
 	require.NoError(t, err)
@@ -165,9 +166,10 @@ func TestRegistration(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, keyStatus, noKeyPresent)
 
-	// Redo the namespace prep, ensure that isPresent is true
+	// Redo the namespace prep, ensure that isRegistered is true
 	prefix = param.Origin_FederationPrefix.GetString()
-	_, registerURL, err = registerNamespacePrep(ctx, prefix)
+	key, registerURL, isRegistered, err = registerNamespacePrep(ctx, prefix)
+	assert.True(t, isRegistered)
 	assert.Equal(t, svr.URL+"/api/v1.0/registry", registerURL)
 	assert.NoError(t, err)
 }
@@ -254,8 +256,9 @@ func TestMultiKeysRegistration(t *testing.T) {
 
 	// Test registration succeeds
 	prefix := param.Origin_FederationPrefix.GetString()
-	key, registerURL, err := registerNamespacePrep(ctx, prefix)
+	key, registerURL, isRegistered, err := registerNamespacePrep(ctx, prefix)
 	require.NoError(t, err)
+	assert.False(t, isRegistered)
 	assert.Equal(t, registerURL, svr.URL+"/api/v1.0/registry")
 	err = registerNamespaceImpl(key, prefix, "mock_site_name", registerURL)
 	require.NoError(t, err)
@@ -305,14 +308,15 @@ func TestMultiKeysRegistration(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, keyStatus, keyMismatch)
 
-	// Verify that no key is present for an alternate prefix
+	// Verify that no key is registered for an alternate prefix
 	keyStatus, err = keyIsRegistered(key, svr.URL, "test456")
 	assert.NoError(t, err)
 	assert.Equal(t, keyStatus, noKeyPresent)
 
-	// Redo the namespace prep, ensure that isPresent is true
+	// Redo the namespace prep, ensure that isRegistered is true
 	prefix = param.Origin_FederationPrefix.GetString()
-	_, registerURL, err = registerNamespacePrep(ctx, prefix)
+	key, registerURL, isRegistered, err = registerNamespacePrep(ctx, prefix)
+	require.NoError(t, err)
+	assert.True(t, isRegistered)
 	assert.Equal(t, svr.URL+"/api/v1.0/registry", registerURL)
-	assert.NoError(t, err)
 }
