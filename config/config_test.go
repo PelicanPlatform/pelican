@@ -25,6 +25,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -178,6 +179,88 @@ func TestInitConfig(t *testing.T) {
 	}
 	InitConfig()
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
+}
+
+func TestHomeDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows, as it's not expected to work")
+	}
+
+	tempDir := t.TempDir()
+	mockHomeDir := filepath.Join(tempDir, "test", "configDir")
+	confDir := t.TempDir()
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
+
+	// Save the original environment variables
+	oldConfigRoot := isRootExec
+
+	defer func() {
+		isRootExec = oldConfigRoot
+	}()
+
+	t.Setenv("HOME", mockHomeDir)
+
+	type testCase struct {
+		name        string
+		isRootExec  bool
+		configDir   string
+		homeEnv     bool
+		expectedDir string
+	}
+
+	testCases := []testCase{
+		{
+			name:        "RootUserNoConfigDir",
+			isRootExec:  true,
+			configDir:   "",
+			homeEnv:     true,
+			expectedDir: "/etc/pelican",
+		},
+		{
+			name:        "NonRootWithConfigDir",
+			isRootExec:  false,
+			configDir:   filepath.Join(confDir),
+			homeEnv:     true,
+			expectedDir: filepath.Join(confDir),
+		},
+		{
+			name:        "NonRootNoConfigDirWithHome",
+			isRootExec:  false,
+			configDir:   "",
+			homeEnv:     true,
+			expectedDir: filepath.Join(mockHomeDir, ".config", "pelican"),
+		},
+		{
+			name:        "NonRootNoConfigDirNoHome",
+			isRootExec:  false,
+			configDir:   "",
+			homeEnv:     false,
+			expectedDir: filepath.Join("/etc", "pelican"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			isRootExec = tc.isRootExec
+			viper.Reset()
+
+			if tc.configDir != "" {
+				viper.Set("ConfigDir", tc.configDir)
+			}
+
+			if !tc.homeEnv {
+				os.Unsetenv("HOME")
+			}
+
+			InitConfigDir(viper.GetViper())
+
+			cDir := viper.GetString("ConfigDir")
+			require.Equal(t, tc.expectedDir, cDir)
+		})
+	}
 }
 
 // Helper func for TestExtraCfg
@@ -603,9 +686,8 @@ func TestInitServerUrl(t *testing.T) {
 		ResetConfig()
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mockNon443Port)
-		err := InitConfigDir(viper.GetViper())
-		require.NoError(t, err)
-		err = InitServer(context.Background(), 0)
+		InitConfigDir(viper.GetViper())
+		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWNon443Port, param.Server_ExternalWebUrl.GetString())
 	})
@@ -614,9 +696,8 @@ func TestInitServerUrl(t *testing.T) {
 		ResetConfig()
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mock443Port)
-		err := InitConfigDir(viper.GetViper())
-		require.NoError(t, err)
-		err = InitServer(context.Background(), 0)
+		InitConfigDir(viper.GetViper())
+		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
 	})
@@ -625,9 +706,8 @@ func TestInitServerUrl(t *testing.T) {
 		// We respect the URL value set directly by others. Won't remove 443 port
 		ResetConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
-		err := InitConfigDir(viper.GetViper())
-		require.NoError(t, err)
-		err = InitServer(context.Background(), 0)
+		InitConfigDir(viper.GetViper())
+		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
 	})

@@ -498,13 +498,16 @@ func CleanupTempResources() (err error) {
 	return
 }
 
-func getConfigBase() (string, error) {
+func getConfigBase() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		// We currently don't handle this case in Windows (and it may not even occur)
+		// This will be revisited in the future
 		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
+		return filepath.Join("/etc", "pelican")
 	}
 
-	return filepath.Join(home, ".config", "pelican"), nil
+	return filepath.Join(home, ".config", "pelican")
 }
 
 func setupTransport() {
@@ -789,23 +792,18 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 }
 
 // For the given Viper instance, set the default config directory.
-func InitConfigDir(v *viper.Viper) error {
+func InitConfigDir(v *viper.Viper) {
 
 	configDir := v.GetString("ConfigDir")
 	if configDir == "" {
 		if IsRootExecution() {
-			configDir = "/etc/pelican"
+			configDir = "/etc/pelican" // We currently don't handle this case in windows, will be revisted in the future
 		} else {
-			configTmp, err := getConfigBase()
-			if err != nil {
-				return err
-			}
-			configDir = configTmp
+			configDir = getConfigBase()
 		}
 		v.SetDefault("ConfigDir", configDir)
 	}
 	v.SetConfigName("pelican")
-	return nil
 }
 
 // InitConfig sets up the global Viper instance by loading defaults and
@@ -818,10 +816,7 @@ func InitConfig() {
 	// Set default values in the global Viper instance
 	SetBaseDefaultsInConfig(viper.GetViper())
 
-	if err := InitConfigDir(viper.GetViper()); err != nil {
-		log.Errorf("Failed to initialize the config directory, Error: %v", err)
-		os.Exit(1)
-	}
+	InitConfigDir(viper.GetViper())
 
 	if configFile := viper.GetString("config"); configFile != "" {
 		viper.SetConfigFile(configFile)
