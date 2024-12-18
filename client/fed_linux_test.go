@@ -978,7 +978,7 @@ func TestObjectDelete(t *testing.T) {
 
 	// Note: Even though os.Mkdir is called with permissions, it may create directories
 	// with 0755 permissions due to internal behavior. To ensure the directory has the desired
-	// permissions permissions, we explicitly call os.Chmod after creating the directory.
+	// permissions, we explicitly call os.Chmod after creating the directory.
 	//
 	// We need to set 0777 permissions on the directory to enable deletion of its contents by non-owners.
 	err = os.Chmod(complexCollection, 0777)
