@@ -94,7 +94,7 @@ jobs:
         id: latest_version
         run: |
           git fetch --tags
-          tags=$(git tag -l 'v*.*.*' | sort -V)
+          tags=$(git tag -l 'v*.*.*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
           highest_tag=$(echo "${tags}" | tail -n1)
           echo "Highest version tag is ${highest_tag}"
           if [[ "${GITHUB_REF##*/}" == "${highest_tag}" ]]; then
