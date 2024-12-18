@@ -1,3 +1,21 @@
+/***************************************************************
+ *
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
 package registry
 
 import (
@@ -133,6 +151,16 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 					return false, nil, errors.Wrap(err, "Invalid existing namespace public key format")
 				}
 
+				// Get client's previous signature from payload
+				prevKeyVerified := false
+				if data.ClientPrevSignature == "" {
+					prevKeyVerified = true
+				}
+				clientPrevSignature, err := hex.DecodeString(data.ClientPrevSignature)
+				if err != nil {
+					return false, nil, errors.Wrap(err, "Failed to decode the client's previous signature")
+				}
+
 				// Check if any key in `clientKeySet` matches a key in `existingKeySet`
 				existingKeysIter := existingKeySet.Keys(ctx)
 				clientKeysIter := clientKeySet.Keys(ctx)
@@ -163,15 +191,8 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 							if err := existingKey.Raw(&prevRawkey); err != nil {
 								return false, nil, errors.Wrap(err, "failed to generate raw pubkey from client's previous pubkey")
 							}
-							// Get client's previous signature from payload
-							var prevKeyVerified bool
-							if data.ClientPrevSignature == "" {
-								prevKeyVerified = true
-							} else {
-								clientPrevSignature, err := hex.DecodeString(data.ClientPrevSignature)
-								if err != nil {
-									return false, nil, errors.Wrap(err, "Failed to decode the client's previous signature")
-								}
+
+							if data.ClientPrevSignature != "" {
 								prevKeyVerified = verifySignature(clientPayload, clientPrevSignature, (prevRawkey).(*ecdsa.PublicKey))
 							}
 

@@ -1,3 +1,21 @@
+/***************************************************************
+ *
+ * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you
+ * may not use this file except in compliance with the License.  You may
+ * obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ***************************************************************/
+
 package launcher_utils
 
 import (
@@ -85,14 +103,20 @@ func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group) {
 			case <-ticker.C:
 				// Refresh the disk to pick up any new private key
 				config.UpdatePreviousIssuerPrivateJWK()
-				key, err := config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
+				newKey, err := config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
 				if err != nil {
 					return err
 				}
-				log.Debugln("Private keys directory refreshed successfully. The active (latest) private key is", key.KeyID())
-				log.Debugln("Previous private key is", config.GetPreviousIssuerPrivateJWK().KeyID())
+				prevKeyID := config.GetPreviousIssuerPrivateJWK().KeyID()
+				newKeyID := newKey.KeyID()
 
-				// Update public key in registry db with the new active private key
+				log.Debugf("Private keys directory refreshed successfully. Previous key: %s, New key: %s", prevKeyID, newKeyID)
+				if newKeyID == prevKeyID {
+					// Skip this iteration since the active key has not changed
+					log.Debugf("Active private key has not changed. Skipping update of namespaces' public keys in the registry database.")
+					continue
+				}
+				// Update public key in registry db when there new active private key
 				extUrlStr := param.Server_ExternalWebUrl.GetString()
 				extUrl, _ := url.Parse(extUrlStr)
 				namespace := server_structs.GetOriginNs(extUrl.Host)

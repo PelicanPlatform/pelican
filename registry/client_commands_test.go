@@ -133,10 +133,10 @@ func TestServeNamespaceRegistry(t *testing.T) {
 
 		// Imitate LaunchIssuerKeysDirRefresh function
 		config.UpdatePreviousIssuerPrivateJWK()
-		config.GeneratePEM(param.IssuerKeysDirectory.GetString())
+		_, err = config.GeneratePEM(param.IssuerKeysDirectory.GetString())
+		require.NoError(t, err)
 		privKey2, err = config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
 		require.NoError(t, err)
-
 		err = NamespacesPubKeyUpdate(privKey2, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
 		require.NoError(t, err)
 	})

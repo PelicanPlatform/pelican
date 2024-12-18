@@ -300,14 +300,12 @@ func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName stri
 		return errors.Wrap(err, "failed to add public key to new JWKS")
 	}
 
-	if log.IsLevelEnabled(log.DebugLevel) {
-		// Let's check that we can convert to JSON and get the right thing...
-		jsonbuf, err := json.Marshal(keySet)
-		if err != nil {
-			return errors.Wrap(err, "failed to marshal the public key into JWKS JSON")
-		}
-		log.Debugln("Constructed JWKS from loading public key:", string(jsonbuf))
+	// Let's check that we can convert to JSON and get the right thing...
+	jsonbuf, err := json.Marshal(keySet)
+	if err != nil {
+		return errors.Wrap(err, "failed to marshal the public key into JWKS JSON")
 	}
+	log.Debugln("Constructed JWKS from loading public key:", string(jsonbuf))
 
 	clientNonce, err := generateNonce()
 	if err != nil {
@@ -337,7 +335,7 @@ func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName stri
 
 	// No error
 	if err = json.Unmarshal(resp, &respData); err != nil {
-		return errors.Wrapf(err, "Failure when parsing JSON response from the server with a success request. Raw server response is %s", resp)
+		return errors.Wrapf(err, "Failure when parsing JSON response from the server with a successful request. Raw server response is %s", resp)
 	}
 
 	// Create client payload by concatenating client_nonce and server_nonce
@@ -423,7 +421,7 @@ func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName stri
 		if err != nil {
 			return errors.Wrapf(err, "Server responded with an error and failed to parse JSON response from the server. Raw response is %s", resp)
 		}
-		return errors.Wrapf(unmarshalErr, "Failure when parsing JSON response from the server with a success request. Raw server response is %s", resp)
+		return errors.Wrapf(unmarshalErr, "Failure when parsing JSON response from the server with a successful request. Raw server response is %s", resp)
 	}
 
 	return nil
