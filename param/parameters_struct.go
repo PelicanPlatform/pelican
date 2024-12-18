@@ -153,9 +153,12 @@ type Config struct {
 	} `mapstructure:"logging" yaml:"Logging"`
 	Lotman struct {
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
+		DefaultLotDeletionLifetime time.Duration `mapstructure:"defaultlotdeletionlifetime" yaml:"DefaultLotDeletionLifetime"`
+		DefaultLotExpirationLifetime time.Duration `mapstructure:"defaultlotexpirationlifetime" yaml:"DefaultLotExpirationLifetime"`
 		EnableAPI bool `mapstructure:"enableapi" yaml:"EnableAPI"`
+		EnabledPolicy string `mapstructure:"enabledpolicy" yaml:"EnabledPolicy"`
 		LibLocation string `mapstructure:"liblocation" yaml:"LibLocation"`
-		Lots interface{} `mapstructure:"lots" yaml:"Lots"`
+		PolicyDefinitions interface{} `mapstructure:"policydefinitions" yaml:"PolicyDefinitions"`
 	} `mapstructure:"lotman" yaml:"Lotman"`
 	MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
 	Monitoring struct {
@@ -462,9 +465,12 @@ type configWithType struct {
 	}
 	Lotman struct {
 		DbLocation struct { Type string; Value string }
+		DefaultLotDeletionLifetime struct { Type string; Value time.Duration }
+		DefaultLotExpirationLifetime struct { Type string; Value time.Duration }
 		EnableAPI struct { Type string; Value bool }
+		EnabledPolicy struct { Type string; Value string }
 		LibLocation struct { Type string; Value string }
-		Lots struct { Type string; Value interface{} }
+		PolicyDefinitions struct { Type string; Value interface{} }
 	}
 	MinimumDownloadSpeed struct { Type string; Value int }
 	Monitoring struct {
