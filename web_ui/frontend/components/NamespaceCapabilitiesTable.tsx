@@ -41,14 +41,14 @@ export const NamespaceCapabilitiesTable = ({
           borderRadius={1}
         >
           <Grid container spacing={1}>
-            <Grid item xs={3}>
+            <Grid item xs={12} md={3}>
               <Box display={'flex'} height={'100%'}>
                 <Typography variant={'body2'} my={'auto'}>
                   Namespace Capabilities
                 </Typography>
               </Box>
             </Grid>
-            <Grid item xs={9}>
+            <Grid item xs={12} md={9}>
               <CapabilitiesRow capabilities={namespace.capabilities} />
             </Grid>
           </Grid>
@@ -61,7 +61,7 @@ export const NamespaceCapabilitiesTable = ({
             <Grid key={server.name} item xs={12}>
               <Box display={'flex'} px={1} borderRadius={1}>
                 <Grid container spacing={1}>
-                  <Grid item xs={3}>
+                  <Grid item xs={12} md={3}>
                     <Box display={'flex'} height={'100%'}>
                       <Typography
                         variant={'body2'}
@@ -80,7 +80,7 @@ export const NamespaceCapabilitiesTable = ({
                       </Typography>
                     </Box>
                   </Grid>
-                  <Grid item xs={9}>
+                  <Grid item xs={12} md={9}>
                     <CapabilitiesRow
                       capabilities={server.capabilities}
                       parentCapabilities={namespace.capabilities}

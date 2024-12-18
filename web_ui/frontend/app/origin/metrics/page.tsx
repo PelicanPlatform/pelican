@@ -17,7 +17,7 @@ import { StorageGraph } from '@/app/origin/metrics/components/StorageGraph';
 const Page = () => {
   return (
     <Grid container spacing={1} direction={'row'}>
-      <Grid item xs={4} display={'flex'}>
+      <Grid item xs={12} md={4} display={'flex'}>
         <Grid
           container
           spacing={1}
@@ -46,7 +46,7 @@ const Page = () => {
           ))}
         </Grid>
       </Grid>
-      <Grid item xs={8}>
+      <Grid item xs={12} md={8}>
         <Grid
           container
           spacing={1}
@@ -74,9 +74,9 @@ const Page = () => {
         <Paper>
           <Box p={1} bgcolor={grey[200]} borderRadius={1}>
             <Grid container>
-              <Grid item xs={6}>
+              <Grid item xs={12} md={6}>
                 <Grid container>
-                  <Grid item xs={4}>
+                  <Grid item xs={12} md={4}>
                     <BigMetric
                       title={'Pelican Threads'}
                       finalType={'last'}
@@ -84,7 +84,7 @@ const Page = () => {
                       color={green[300]}
                     />
                   </Grid>
-                  <Grid item xs={4}>
+                  <Grid item xs={12} md={4}>
                     <BigMetric
                       title={'XRootD Running Threads'}
                       finalType={'last'}
@@ -92,7 +92,7 @@ const Page = () => {
                       color={blue[200]}
                     />
                   </Grid>
-                  <Grid item xs={4}>
+                  <Grid item xs={12} md={4}>
                     <BigMetric
                       title={'XRootD Idle Threads'}
                       metric={'xrootd_sched_thread_count{state="idle"}'}
@@ -102,9 +102,9 @@ const Page = () => {
                   </Grid>
                 </Grid>
               </Grid>
-              <Grid item xs={6}>
+              <Grid item xs={12} md={6}>
                 <Grid container>
-                  <Grid item xs={4}>
+                  <Grid item xs={12} md={4}>
                     <BigBytesMetric
                       metric={'xrootd_transfer_bytes{type="read"}'}
                       title={'Bytes `read`'}
@@ -112,7 +112,7 @@ const Page = () => {
                       color={green[300]}
                     />
                   </Grid>
-                  <Grid item xs={4}>
+                  <Grid item xs={12} md={4}>
                     <BigBytesMetric
                       metric={'xrootd_transfer_bytes{type="readv"}'}
                       title={'Bytes `readv'}
@@ -120,7 +120,7 @@ const Page = () => {
                       color={green[300]}
                     />
                   </Grid>
-                  <Grid item xs={4}>
+                  <Grid item xs={12} md={4}>
                     <BigBytesMetric
                       metric={'xrootd_transfer_bytes{type="write"}'}
                       title={'Bytes `write`'}

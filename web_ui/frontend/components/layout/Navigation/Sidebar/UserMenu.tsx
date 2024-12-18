@@ -3,7 +3,7 @@
 import useSWR from 'swr';
 import { useRouter } from 'next/navigation';
 import React, { useContext, useState } from 'react';
-import { IconButton, Menu, MenuItem, Tooltip } from '@mui/material';
+import { IconButton, Menu, MenuItem, MenuProps, Tooltip } from '@mui/material';
 import {
   Login,
   AccountCircle,
@@ -14,7 +14,7 @@ import StatusSnackBar from '@/components/StatusSnackBar';
 import { getUser } from '@/helpers/login';
 import { getErrorMessage } from '@/helpers/util';
 
-const UserMenu = () => {
+const UserMenu = ({ menuOptions }: { menuOptions?: Partial<MenuProps> }) => {
   const userMenuRef = React.useRef(null);
 
   const {
@@ -100,11 +100,14 @@ const UserMenu = () => {
         anchorOrigin={{
           vertical: 'center',
           horizontal: 'right',
+          ...menuOptions?.anchorOrigin,
         }}
         transformOrigin={{
           vertical: 'center',
           horizontal: 'left',
+          ...menuOptions?.transformOrigin,
         }}
+        {...menuOptions}
       >
         {user.role === 'admin' ? (
           <MenuItem disabled={true}>Admin User</MenuItem>

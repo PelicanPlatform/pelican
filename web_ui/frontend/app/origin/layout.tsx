@@ -18,8 +18,9 @@
 
 import { Box } from '@mui/material';
 import Main from '@/components/layout/Main';
-import { OriginSidebar } from '@/components/layout/OriginSidebar';
 import { PaddedContent } from '@/components/layout';
+import { Navigation } from '@/components/layout/Navigation';
+import NavigationConfiguration from '@/app/navigation';
 
 export const metadata = {
   title: 'Pelican Origin',
@@ -32,11 +33,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <Box display={'flex'} flexDirection={'row'}>
-      <OriginSidebar />
+    <Navigation config={NavigationConfiguration['origin']}>
       <Main>
         <PaddedContent>{children}</PaddedContent>
       </Main>
-    </Box>
+    </Navigation>
   );
 }

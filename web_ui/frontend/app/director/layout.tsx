@@ -17,11 +17,9 @@
  ***************************************************************/
 
 import { Box } from '@mui/material';
-import { ButtonLink, Sidebar } from '@/components/layout/Sidebar';
-import BuildIcon from '@mui/icons-material/Build';
 import Main from '@/components/layout/Main';
-import { Block, Dashboard, Equalizer, MapOutlined } from '@mui/icons-material';
-import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
+import { Navigation } from '@/components/layout/Navigation';
+import NavigationConfiguration from '@/app/navigation';
 
 export const metadata = {
   title: 'Pelican Director',
@@ -34,26 +32,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <Box display={'flex'} flexDirection={'row'}>
-      <Sidebar>
-        <ButtonLink title={'Dashboard'} href={'/director/'}>
-          <Dashboard />
-        </ButtonLink>
-        <ButtonLink title={'Map'} href={'/director/map/'}>
-          <MapOutlined />
-        </ButtonLink>
-        <AuthenticatedContent allowedRoles={['admin']}>
-          <ButtonLink title={'Metrics'} href={'/director/metrics/'}>
-            <Equalizer />
-          </ButtonLink>
-        </AuthenticatedContent>
-        <AuthenticatedContent allowedRoles={['admin']}>
-          <ButtonLink title={'Config'} href={'/config/'}>
-            <BuildIcon />
-          </ButtonLink>
-        </AuthenticatedContent>
-      </Sidebar>
+    <Navigation config={NavigationConfiguration['director']}>
       <Main>{children}</Main>
-    </Box>
+    </Navigation>
   );
 }

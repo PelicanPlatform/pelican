@@ -16,30 +16,15 @@
  *
  ***************************************************************/
 
-import { Box, Tooltip } from '@mui/material';
-import Link from 'next/link';
-import {
-  Build,
-  FolderOpen,
-  TripOrigin,
-  Storage,
-  Block,
-  Dashboard,
-} from '@mui/icons-material';
-
-import { ButtonLink, Sidebar } from '@/components/layout/Sidebar';
-import IconButton from '@mui/material/IconButton';
+import { Box } from '@mui/material';
 import { Main } from '@/components/layout/Main';
-import SpeedDial, {
-  SpeedButtonControlledProps,
-} from '@/components/layout/SidebarSpeedDial';
-import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { PaddedContent } from '@/components/layout';
-import BuildIcon from '@mui/icons-material/Build';
+import { Navigation } from '@/components/layout/Navigation';
+import NavigationConfiguration from '@/app/navigation';
 
 export const metadata = {
   title: 'Pelican Registry',
-  description: 'Software designed to make data distribution easy',
+  description: 'Register your service with this Federation',
 };
 
 export default function RootLayout({
@@ -47,50 +32,11 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const actions: SpeedButtonControlledProps[] = [
-    {
-      href: '/registry/namespace/register/',
-      icon: <FolderOpen />,
-      text: 'Namespace',
-      title: 'Register a new Namespace',
-    },
-    {
-      href: '/registry/origin/register/',
-      icon: <TripOrigin />,
-      text: 'Origin',
-      title: 'Register a new Origin',
-    },
-    {
-      href: '/registry/cache/register/',
-      icon: <Storage />,
-      text: 'Cache',
-      title: 'Register a new Cache',
-    },
-  ];
-
   return (
-    <Box display={'flex'} flexDirection={'row'}>
-      <Sidebar>
-        <ButtonLink title={'Dashboard'} href={'/registry/'}>
-          <Dashboard />
-        </ButtonLink>
-        <Box pt={1}>
-          <SpeedDial actions={actions} />
-        </Box>
-        <AuthenticatedContent>
-          <ButtonLink title={'Denied Namespaces'} href={'/registry/denied/'}>
-            <Block />
-          </ButtonLink>
-        </AuthenticatedContent>
-        <AuthenticatedContent allowedRoles={['admin']}>
-          <ButtonLink title={'Config'} href={'/config/'}>
-            <BuildIcon />
-          </ButtonLink>
-        </AuthenticatedContent>
-      </Sidebar>
+    <Navigation config={NavigationConfiguration['registry']}>
       <Main>
         <PaddedContent>{children}</PaddedContent>
       </Main>
-    </Box>
+    </Navigation>
   );
 }

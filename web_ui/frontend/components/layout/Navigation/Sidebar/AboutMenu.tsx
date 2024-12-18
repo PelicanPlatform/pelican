@@ -21,8 +21,7 @@ import {
 } from '@mui/icons-material';
 import useSWR from 'swr';
 
-import { evaluateOrReturn, getEnabledServers } from '@/helpers/util';
-import { ServerType } from '@/index';
+import { evaluateOrReturn } from '@/helpers/util';
 
 const AboutMenu = () => {
   const [open, setOpen] = useState(false);
@@ -177,7 +176,7 @@ const actions: MenuItemProps[] = [
 ];
 
 export const getVersionNumber = () => {
-  const { version } = require('../../../package.json');
+  const { version } = require('../../../../package.json');
   return version;
 };
 

@@ -51,16 +51,14 @@ export default function PasswordInput({
   };
 
   return (
-    <FormControl
-      sx={{ mt: 1, width: '50ch' }}
-      variant='outlined'
-      {...FormControlProps}
-    >
+    <FormControl sx={{ mt: 1 }} variant='outlined' {...FormControlProps}>
       <TextField
-        label='Password'
+        label='Admin Password'
         id='outlined-start-adornment'
         size={'small'}
-        sx={{ m: 1, width: '50ch' }}
+        sx={{ m: 1 }}
+        autoComplete={'current-password'}
+        name={'password'}
         type={showPassword ? 'text' : 'password'}
         {...TextFieldProps}
         InputProps={{

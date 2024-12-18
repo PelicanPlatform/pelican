@@ -32,14 +32,14 @@ export const ServerCapabilitiesTable = ({
           borderRadius={1}
         >
           <Grid container spacing={1}>
-            <Grid item xs={3}>
+            <Grid item xs={12} md={3}>
               <Box display={'flex'} height={'100%'}>
                 <Typography variant={'body2'} my={'auto'}>
                   {server.type}&apos;s Namespace Capabilities
                 </Typography>
               </Box>
             </Grid>
-            <Grid item xs={9}>
+            <Grid item xs={12} md={9}>
               <CapabilitiesRow capabilities={server.capabilities} />
             </Grid>
           </Grid>
@@ -52,14 +52,14 @@ export const ServerCapabilitiesTable = ({
             <Grid key={namespace.path} item xs={12}>
               <Box display={'flex'} px={1} borderRadius={1}>
                 <Grid container spacing={1}>
-                  <Grid item xs={3}>
+                  <Grid item xs={12} md={3}>
                     <Box display={'flex'} height={'100%'}>
                       <Typography variant={'body2'} my={'auto'}>
                         {namespace.path}
                       </Typography>
                     </Box>
                   </Grid>
-                  <Grid item xs={9}>
+                  <Grid item xs={12} md={9}>
                     <CapabilitiesRow
                       capabilities={namespace.capabilities}
                       parentCapabilities={server.capabilities}

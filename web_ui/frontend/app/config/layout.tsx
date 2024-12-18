@@ -17,6 +17,8 @@
  ***************************************************************/
 
 import { Box } from '@mui/material';
+import { PaddedContent, Main } from '@/components/layout';
+import { Navigation } from '@/components/layout/Navigation';
 
 export const metadata = {
   title: 'Pelican Configuration',
@@ -29,8 +31,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <Box display={'flex'} flexDirection={'row'}>
-      {children}
-    </Box>
+    <Navigation sharedPage={true}>
+      <Main>
+        <PaddedContent>{children}</PaddedContent>
+      </Main>
+    </Navigation>
   );
 }

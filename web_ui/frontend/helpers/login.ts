@@ -96,8 +96,8 @@ export const getUser = async (): Promise<User> => {
     // If authenticated, store status and csrf token
     const user = {
       authenticated: json['authenticated'],
-      user: json['user'] == '' ? undefined : json['user'],
-      role: json['role'] == '' ? undefined : json['role'],
+      user: json['user'] == '' ? null : json['user'],
+      role: json['role'] == '' ? null : json['role'],
       csrf_token: response.headers.get('X-CSRF-Token'),
     };
 
