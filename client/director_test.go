@@ -161,7 +161,7 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 		name          string
 		resourcePath  string
 		directorUrl   string
-		isPut         bool
+		httpMethod    string
 		query         string
 		expectedError string
 	}{
@@ -169,7 +169,7 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 			name:          "No director URL",
 			resourcePath:  "/test",
 			directorUrl:   "",
-			isPut:         false,
+			httpMethod:    http.MethodGet,
 			query:         "",
 			expectedError: "unable to retrieve information from a Director for object /test because none was found in pelican URL metadata.",
 		},
@@ -177,7 +177,7 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 			name:          "Successful GET request",
 			resourcePath:  "/test",
 			directorUrl:   ts.URL,
-			isPut:         false,
+			httpMethod:    http.MethodGet,
 			query:         "",
 			expectedError: "",
 		},
@@ -185,15 +185,15 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 			name:          "PUT request changes verb", // also generates 405, although this is a feauture of the director
 			resourcePath:  "/test",
 			directorUrl:   ts.URL,
-			isPut:         true,
+			httpMethod:    http.MethodPut,
 			query:         "",
-			expectedError: "error 405: No writeable origins were found",
+			expectedError: "the director returned status code 405",
 		},
 		{
 			name:          "Queries are propagated", // also generates 405, although this is a feauture of the director
 			resourcePath:  "/test",
 			directorUrl:   ts.URL,
-			isPut:         false,
+			httpMethod:    http.MethodGet,
 			query:         "directread",
 			expectedError: "200: {\"status\": \"direct read\"}",
 		},
@@ -212,7 +212,7 @@ func TestGetDirectorInfoForPath(t *testing.T) {
 
 			pUrl.FedInfo.DirectorEndpoint = tt.directorUrl
 
-			_, err = GetDirectorInfoForPath(ctx, pUrl, tt.isPut, "")
+			_, err = GetDirectorInfoForPath(ctx, pUrl, tt.httpMethod, "")
 			if tt.expectedError != "" {
 				assert.Error(t, err)
 				assert.Contains(t, err.Error(), tt.expectedError)

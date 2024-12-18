@@ -20,6 +20,7 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -133,11 +134,12 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 		Args:  cobra.ExactArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
 
-			isWrite := false
+			httpMethod := http.MethodGet
 			switch args[0] {
 			case "read":
 			case "write":
-				isWrite = true
+				httpMethod = http.MethodPut
+
 			default:
 				fmt.Fprintln(os.Stderr, "Unknown value for operation type (must be 'read' or 'write')", args[0])
 				os.Exit(1)
@@ -152,14 +154,14 @@ func addTokenSubcommands(tokenCmd *cobra.Command) {
 				fmt.Fprintln(os.Stderr, "Failed to parse URL:", err)
 				os.Exit(1)
 			}
-			dirResp, err := client.GetDirectorInfoForPath(cmd.Context(), pUrl, isWrite, "")
+			dirResp, err := client.GetDirectorInfoForPath(cmd.Context(), pUrl, httpMethod, "")
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Failed to get director info for path:", err)
 				os.Exit(1)
 			}
 
 			opts := config.TokenGenerationOpts{Operation: config.TokenRead}
-			if isWrite {
+			if httpMethod == http.MethodPut {
 				opts.Operation = config.TokenWrite
 			}
 			token, err := client.AcquireToken(pUrl.GetRawUrl(), dirResp, opts)

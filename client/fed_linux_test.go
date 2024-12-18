@@ -918,8 +918,183 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 		if err := te.Shutdown(); err != nil {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
-		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
-		server_utils.ResetTestState()
+	})
+}
 
+// TestObjectDelete verifies the expected behavior of the object delete command.
+// It covers scenarios such as:
+// - Failing to delete if the origin does not have write capability enabled.
+// - Failing to delete a non-empty directory when the recursive flag is not set.
+// - Ensuring the proper error messages are displayed for various failure cases.
+func TestObjectDelete(t *testing.T) {
+	server_utils.ResetTestState()
+	fed := fed_test_utils.NewFedTest(t, originConfigWithAndWithoutWrite)
+	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
+
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+
+	tokenConfig := token.NewWLCGToken()
+	tokenConfig.Lifetime = time.Minute
+	tokenConfig.Issuer = issuer
+	tokenConfig.Subject = "origin"
+	tokenConfig.AddAudienceAny()
+	tokenConfig.AddResourceScopes(
+		token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"),
+	)
+	token, err := tokenConfig.CreateToken()
+	require.NoError(t, err)
+
+	tempToken, err := os.CreateTemp(t.TempDir(), "token")
+	require.NoError(t, err)
+
+	_, err = tempToken.WriteString(token)
+	require.NoError(t, err)
+	tempToken.Close()
+
+	viper.Set("Logging.DisableProgressBars", true)
+
+	storagePrefix := fed.Exports[0].StoragePrefix
+
+	// Create an object to be deleted
+	objectToBeDeleted := filepath.Join(storagePrefix, "objecttobedeleted.txt")
+	object, err := os.Create(objectToBeDeleted)
+	require.NoError(t, err, "Error creating object to be deleted")
+	_, err = object.WriteString("This object will be deleted.")
+	require.NoError(t, err, "Error writing to object to be deleted")
+	defer object.Close()
+
+	// Create an empty collection to be deleted
+	emptyCollectionToBeDeleted := filepath.Join(storagePrefix, "emptycollectiontobedeleted")
+	err = os.Mkdir(emptyCollectionToBeDeleted, 0777)
+	require.NoError(t, err)
+
+	// Create a complex collection structure with subcollections and objects
+	complexCollection := filepath.Join(storagePrefix, "complexcollection")
+	err = os.Mkdir(complexCollection, 0777)
+	require.NoError(t, err)
+
+	// Note: Even though os.Mkdir is called with permissions, it may create directories
+	// with 0755 permissions due to internal behavior. To ensure the directory has the desired
+	// permissions, we explicitly call os.Chmod after creating the directory.
+	//
+	// We need to set 0777 permissions on the directory to enable deletion of its contents by non-owners.
+	err = os.Chmod(complexCollection, 0777)
+	require.NoError(t, err)
+
+	nestedObject1Path := filepath.Join(complexCollection, "nestedobject1.txt")
+	nestedObject1, err := os.Create(nestedObject1Path)
+	require.NoError(t, err)
+	_, err = nestedObject1.WriteString("This is nested object 1.")
+	require.NoError(t, err)
+	err = nestedObject1.Close()
+	require.NoError(t, err)
+
+	nestedCollection1 := filepath.Join(complexCollection, "subcollection1")
+	nestedCollection2 := filepath.Join(complexCollection, "subcollection2")
+
+	err = os.MkdirAll(nestedCollection1, 0777)
+	require.NoError(t, err)
+	err = os.Chmod(nestedCollection1, 0777)
+	require.NoError(t, err)
+
+	err = os.MkdirAll(nestedCollection2, 0777)
+	require.NoError(t, err)
+	err = os.Chmod(nestedCollection2, 0777)
+	require.NoError(t, err)
+
+	nestedObject2Path := filepath.Join(nestedCollection1, "nestedobject2.txt")
+	nestedObject2, err := os.Create(nestedObject2Path)
+	require.NoError(t, err)
+	_, err = nestedObject2.WriteString("This is nested object 2.")
+	require.NoError(t, err)
+	err = nestedObject2.Close()
+	require.NoError(t, err)
+
+	nestedObject3Path := filepath.Join(nestedCollection2, "nestedobject3.txt")
+	nestedObject3, err := os.Create(nestedObject3Path)
+	require.NoError(t, err)
+	_, err = nestedObject3.WriteString("This is nested object 3.")
+	require.NoError(t, err)
+	err = nestedObject3.Close()
+	require.NoError(t, err)
+
+	// Create an object in the prefix without writes capability
+	objectNonWritableNs := filepath.Join(fed.Exports[1].StoragePrefix, "objectnonwritablenamespace.txt")
+	object, err = os.Create(objectNonWritableNs)
+	require.NoError(t, err)
+	_, err = object.WriteString(fmt.Sprintf("This is the content of %s.", objectNonWritableNs))
+	require.NoError(t, err)
+	defer object.Close()
+
+	// Test deleting a non-existent object.
+	// The operation should fail with a 404 error indicating that the object does not exist.
+	t.Run("testDeleteNonExistentObject", func(t *testing.T) {
+		doesNotExistPath := fmt.Sprintf("pelican://%s%s/doesNotExist", discoveryUrl.Host, "/with-write")
+		err := client.DoDelete(fed.Ctx, doesNotExistPath, false, client.WithTokenLocation(tempToken.Name()))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "404")
+	})
+
+	// Test deleting an existing object.
+	// The operation should succeed, and the object should no longer be accessible.
+	t.Run("testDeleteObject", func(t *testing.T) {
+		objectToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(objectToBeDeleted))
+		err = client.DoDelete(fed.Ctx, objectToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+
+		_, err = os.Stat(objectToBeDeleted)
+
+		require.Error(t, err, "Expected an error, but none occurred")
+		require.True(t, os.IsNotExist(err), fmt.Sprintf("Expected the error to indicate the object does not exist, but got: %v", err))
+	})
+
+	// Test deleting an empty collection.
+	// The operation should succeed, and the collection should no longer be accessible.
+	t.Run("testDeleteEmptyCollection", func(t *testing.T) {
+		emptyCollectionPelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(emptyCollectionToBeDeleted))
+		err := client.DoDelete(fed.Ctx, emptyCollectionPelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		_, err = os.Stat(emptyCollectionToBeDeleted)
+
+		require.Error(t, err, "Expected an error, but none occurred")
+		require.True(t, os.IsNotExist(err), fmt.Sprintf("Expected the error to indicate the collection does not exist, but got: %v", err))
+	})
+
+	// Test deleting a non-empty collection without the recursive flag.
+	// The operation should fail with an error indicating that the collection cannot be deleted because it is not empty, and the collection should still exist.
+	t.Run("testDeleteNonEmptyCollectionWithoutRecursive", func(t *testing.T) {
+		collectionToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(complexCollection))
+		err := client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "is a non-empty collection, use recursive flag or recursive query in the url to delete it")
+
+		info, err := os.Stat(complexCollection)
+		require.NoError(t, err, "Error checking Collection existence")
+		require.True(t, info.IsDir(), "Collection should exist but does not")
+	})
+
+	// Test deleting a non-empty collection with the recursive flag.
+	// The operation should succeed, and the collection and its contents should no longer be accessible.
+	t.Run("testDeleteNonEmptyCollectionWithRecursive", func(t *testing.T) {
+		collectionToDeletePelicanUrl := fmt.Sprintf("pelican://%s/with-write/%s", discoveryUrl.Host, filepath.Base(complexCollection))
+		err = client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, true, client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		_, err = os.Stat(complexCollection)
+
+		require.Error(t, err, "Expected an error, but none occurred")
+		require.True(t, os.IsNotExist(err), fmt.Sprintf("Expected the error to indicate the collection does not exist, but got: %v", err))
+	})
+
+	// Test attempting to delete an object in a prefix without writes capability.
+	// The operation should fail with a 403 permission error.
+	t.Run("testDeleteForNonWritableNamespace", func(t *testing.T) {
+		collectionToDeletePelicanUrl := fmt.Sprintf("pelican://%s/without-write/%s", discoveryUrl.Host, filepath.Base(objectNonWritableNs))
+		err := client.DoDelete(fed.Ctx, collectionToDeletePelicanUrl, false, client.WithTokenLocation(tempToken.Name()))
+
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "405")
 	})
 }

@@ -109,6 +109,16 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		// This is a director >7.9 proxy the PROPFIND response instead of redirect to the origin
 		return
 	} else if resp.StatusCode != 307 {
+		// Attempt to query the director using the PUT HTTP method instead of DELETE,
+		// as older versions of the director may not support the DELETE endpoint.
+		if resp.StatusCode == http.StatusNotFound && verb == http.MethodDelete {
+			bodyString := string(body)
+
+			if strings.Contains(strings.ToLower(bodyString), "page not found") {
+				log.Warningf("Failed to query the DELETE endpoint; the director appears to be an older version, attempting with the PUT method")
+				return queryDirector(ctx, http.MethodPut, pUrl, token)
+			}
+		}
 		return resp, errors.Errorf("%d: %s", resp.StatusCode, errMsg)
 	}
 
@@ -173,23 +183,19 @@ func parseServersFromDirectorResponse(resp *http.Response) (servers []*url.URL, 
 }
 
 // Retrieve federation namespace information for a given URL.
-func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, isPut bool, token string) (parsedResponse server_structs.DirectorResponse, err error) {
+func GetDirectorInfoForPath(ctx context.Context, pUrl *pelican_url.PelicanURL, httpMethod string, token string) (parsedResponse server_structs.DirectorResponse, err error) {
 	if pUrl.FedInfo.DirectorEndpoint == "" {
 		return server_structs.DirectorResponse{},
 			errors.Errorf("unable to retrieve information from a Director for object %s because none was found in pelican URL metadata.", pUrl.Path)
 	}
 
 	log.Debugln("Will query director at", pUrl.FedInfo.DirectorEndpoint, "for object", pUrl.Path)
-	verb := "GET"
-	if isPut {
-		verb = "PUT"
-	}
 
 	var dirResp *http.Response
-	dirResp, err = queryDirector(ctx, verb, pUrl, token)
+	dirResp, err = queryDirector(ctx, httpMethod, pUrl, token)
 	if err != nil {
-		if isPut && dirResp != nil && dirResp.StatusCode == 405 {
-			err = errors.New("error 405: No writeable origins were found")
+		if (httpMethod == http.MethodPut || httpMethod == http.MethodDelete) && dirResp != nil && dirResp.StatusCode == 405 {
+			err = errors.Errorf("the director returned status code 405, indicating it understood the request but could not find an origin that supports PUT/DELETE operations for object: %s.", pUrl.Path)
 			return
 		} else {
 			err = errors.Wrapf(err, "error while querying the director at %s", pUrl.FedInfo.DirectorEndpoint)
