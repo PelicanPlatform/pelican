@@ -65,7 +65,7 @@ components: ["origin", "registry", "director"]
 name: IssuerKey
 description: |+
   [Deprecated] Use IssuerKeysDirectory instead. The key file set by this parameter will automatically move to IssuerKeysDirectory.
-  
+
   A filepath to the file containing a PEM-encoded ecdsa private key which later will be parsed
   into a JWK and serves as the private key to sign various JWTs issued by this server.
 
