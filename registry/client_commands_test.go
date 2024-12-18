@@ -29,11 +29,13 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -43,8 +45,8 @@ func registryMockup(ctx context.Context, t *testing.T, testName string) *httptes
 
 	issuerTempDir := filepath.Join(t.TempDir(), testName)
 
-	ikey := filepath.Join(issuerTempDir, "issuer.jwk")
-	viper.Set("IssuerKey", ikey)
+	ikey := filepath.Join(issuerTempDir, "issuer-keys")
+	viper.Set("IssuerKeysDirectory", ikey)
 	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
 	viper.Set("Server.WebPort", 8444)
 	err := config.InitConfigDir(viper.GetViper())
@@ -90,6 +92,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 	//Test functionality of registering a namespace (without identity)
 	err = NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/foo/bar", "mock_site_name")
 	require.NoError(t, err)
+	var privKey2 jwk.Key
 
 	//Test we can list the namespace without an error
 	t.Run("Test namespace list", func(t *testing.T) {
@@ -121,6 +124,43 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		err = json.Unmarshal(data, &ns)
 		require.NoError(t, err)
 		assert.Equal(t, ns.AdminMetadata.SiteName, "mock_site_name")
+	})
+
+	t.Run("test-registered-namespace-pubkey-update-with-new-active-key", func(t *testing.T) {
+		activeKey, err := config.GetIssuerPrivateJWK()
+		require.NoError(t, err)
+		require.Equal(t, privKey.KeyID(), activeKey.KeyID())
+
+		// Imitate LaunchIssuerKeysDirRefresh function
+		config.UpdatePreviousIssuerPrivateJWK()
+		config.GeneratePEM(param.IssuerKeysDirectory.GetString())
+		privKey2, err = config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
+		require.NoError(t, err)
+
+		err = NamespacesPubKeyUpdate(privKey2, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
+		require.NoError(t, err)
+	})
+
+	t.Run("test-registered-namespace-pubkey-update-with-nonsense-key", func(t *testing.T) {
+		tempDir := filepath.Join(t.TempDir(), "in_the_middle_of_nowhere")
+		privKey3, err := config.GeneratePEM(tempDir)
+		require.NoError(t, err)
+		err = NamespacesPubKeyUpdate(privKey3, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
+		require.ErrorContains(t, err, "it doesn't contain any public key matching the existing namespace's public key in db")
+	})
+
+	t.Run("test-registered-namespace-pubkey-update-with-imposter-key", func(t *testing.T) {
+		privKey4, err := config.GeneratePEMandSetActiveKey(param.IssuerKeysDirectory.GetString())
+		require.NoError(t, err)
+		config.UpdatePreviousIssuerPrivateJWK()
+		// Both active key and previous key are set to privKey4
+		err = NamespacesPubKeyUpdate(privKey4, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
+		require.ErrorContains(t, err, "it fails to pass the proof of possession verification")
+
+		// Revert the active key changes happened in this subtest
+		config.SetActiveKey(privKey)
+		config.UpdatePreviousIssuerPrivateJWK()
+		config.SetActiveKey(privKey2)
 	})
 
 	t.Run("Test namespace delete", func(t *testing.T) {
@@ -201,7 +241,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	assert.Contains(t, err.Error(), "A superspace or subspace of this namespace /topo/foo already exists in the OSDF topology: /topo/foo. To register a Pelican equivalence, you need to present your identity.")
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
-	viper.Set("IssuerKey", t.TempDir()+"/keychaining")
+	viper.Set("IssuerKeysDirectory", t.TempDir()+"/keychaining")
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err = config.InitServer(ctx, server_structs.RegistryType)
@@ -273,7 +313,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 	require.NoError(t, err)
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
-	viper.Set("IssuerKey", t.TempDir()+"/keychaining")
+	viper.Set("IssuerKeysDirectory", t.TempDir()+"/keychaining")
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err = config.InitServer(ctx, server_structs.RegistryType)

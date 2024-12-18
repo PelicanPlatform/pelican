@@ -27,7 +27,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -51,12 +50,7 @@ func TestRegistration(t *testing.T) {
 		config.ResetIssuerJWKPtr()
 		config.ResetIssuerPrivateKeys()
 	})
-	// Use a temp os directory to better control the deletion of the directory.
-	// Fixes issue on Windows where we are trying to delete a file in use so this
-	// better waits for the file/process to be shut down before deletion
-	tempConfigDir, err := os.MkdirTemp("", "test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempConfigDir)
+	tempConfigDir := t.TempDir()
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -69,7 +63,7 @@ func TestRegistration(t *testing.T) {
 
 	config.InitConfig()
 	viper.Set("Registry.DbLocation", filepath.Join(tempConfigDir, "test.sql"))
-	err = config.InitServer(ctx, server_structs.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	err = registry.InitializeDB()
@@ -180,12 +174,7 @@ func TestMultiKeysRegistration(t *testing.T) {
 		config.ResetIssuerJWKPtr()
 		config.ResetIssuerPrivateKeys()
 	})
-	// Use a temp os directory to better control the deletion of the directory.
-	// Fixes issue on Windows where we are trying to delete a file in use so this
-	// better waits for the file/process to be shut down before deletion
-	tempConfigDir, err := os.MkdirTemp("", "test")
-	assert.NoError(t, err)
-	defer os.RemoveAll(tempConfigDir)
+	tempConfigDir := t.TempDir()
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
@@ -198,7 +187,7 @@ func TestMultiKeysRegistration(t *testing.T) {
 
 	config.InitConfig()
 	viper.Set("Registry.DbLocation", filepath.Join(tempConfigDir, "test.sql"))
-	err = config.InitServer(ctx, server_structs.OriginType)
+	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	err = registry.InitializeDB()
