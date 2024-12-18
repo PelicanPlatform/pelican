@@ -51,7 +51,7 @@ export type ParameterValue =
   | IPMapping[]
   | GeoIPOverride[]
   | Export[]
-  | Lot[];
+  | PolicyDefinition[];
 
 export type ParameterValueRecord = { [key: string]: ParameterValue };
 
@@ -168,6 +168,17 @@ export interface Lot {
   owner: string;
   paths: Path[];
   managementpolicyattrs: ManagementPolicyAttrs;
+}
+
+export type PurgeType = 'del' | 'exp' | 'opp' | 'ded';
+
+export interface PolicyDefinition {
+  policyname: string;
+  purgeorder: [PurgeType, PurgeType, PurgeType, PurgeType];
+  discoverprefixes: boolean;
+  mergelocalwithdiscovered: boolean;
+  divideunallocated: boolean;
+  lots: Lot[];
 }
 
 export type Config = {

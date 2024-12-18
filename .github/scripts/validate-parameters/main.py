@@ -16,7 +16,7 @@ VERIFIED_OBJECT_STRUCTURES = [
     "AuthorizationTemplates",
     "IPMapping",
     "Exports",
-    "Lots"
+    "PolicyDefinitions",
 ]
 
 
