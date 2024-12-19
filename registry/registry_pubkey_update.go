@@ -105,38 +105,38 @@ func updateNsKeySignChallengeInit(data *RegisteredPrefixUpdate) (map[string]inte
 }
 
 // Update the public key of registered prefix(es) if the http request passed client and server verification for nonce.
-// It returns whether registration is created, the response data, and an error if any
-func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpdate) (bool, map[string]interface{}, error) {
+// It returns the response data, and an error if any
+func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpdate) (map[string]interface{}, error) {
 	// Validate the client's jwks as a set here
 	key, err := validateJwks(string(data.Pubkey))
 	if err != nil {
-		return false, nil, badRequestError{Message: err.Error()}
+		return nil, badRequestError{Message: err.Error()}
 	}
 	var rawkey interface{} // This is the raw key, like *rsa.PrivateKey or *ecdsa.PrivateKey
 	if err := key.Raw(&rawkey); err != nil {
-		return false, nil, errors.Wrap(err, "failed to generate raw pubkey from jwks")
+		return nil, errors.Wrap(err, "failed to generate raw pubkey from jwks")
 	}
 
 	// Verify the Proof of Possession of the client and server's active private keys
 	clientPayload := []byte(data.ClientNonce + data.ServerNonce)
 	clientSignature, err := hex.DecodeString(data.ClientSignature)
 	if err != nil {
-		return false, nil, errors.Wrap(err, "Failed to decode the client's signature")
+		return nil, errors.Wrap(err, "Failed to decode the client's signature")
 	}
 	clientVerified := verifySignature(clientPayload, clientSignature, (rawkey).(*ecdsa.PublicKey))
 	serverPayload, err := hex.DecodeString(data.ServerPayload)
 	if err != nil {
-		return false, nil, errors.Wrap(err, "Failed to decode the server's payload")
+		return nil, errors.Wrap(err, "Failed to decode the server's payload")
 	}
 
 	serverSignature, err := hex.DecodeString(data.ServerSignature)
 	if err != nil {
-		return false, nil, errors.Wrap(err, "Failed to decode the server's signature")
+		return nil, errors.Wrap(err, "Failed to decode the server's signature")
 	}
 
 	serverPrivateKey, err := loadServerKeys()
 	if err != nil {
-		return false, nil, errors.Wrap(err, "Failed to decode the server's private key")
+		return nil, errors.Wrap(err, "Failed to decode the server's private key")
 	}
 	serverPubkey := serverPrivateKey.PublicKey
 	serverVerified := verifySignature(serverPayload, serverSignature, &serverPubkey)
@@ -149,14 +149,14 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 			exists, err := namespaceExistsByPrefix(prefix)
 			if err != nil {
 				log.Errorf("Failed to check if namespace already exists: %v", err)
-				return false, nil, errors.Wrap(err, "Server encountered an error checking if namespace already exists")
+				return nil, errors.Wrap(err, "Server encountered an error checking if namespace already exists")
 			}
 			if exists {
 				// Update the namespace's public key with the latest one when authorized origin provides a new key
 				existingNs, err := getNamespaceByPrefix(prefix)
 				if err != nil {
 					log.Errorf("Failed to get existing namespace to update: %v", err)
-					return false, nil, errors.Wrap(err, "Server encountered an error getting existing namespace to update")
+					return nil, errors.Wrap(err, "Server encountered an error getting existing namespace to update")
 				}
 
 				// Check the origin is authorized to update (possessing the public key used for prefix initial registration)
@@ -169,14 +169,14 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 				}
 				if err != nil {
 					log.Errorf("Failed to parse in-memory public keys of the client: %v", err)
-					return false, nil, errors.Wrapf(err, "Invalid in-memory public keys format of the client")
+					return nil, errors.Wrapf(err, "Invalid in-memory public keys format of the client")
 				}
 				// Parse `existingNs.Pubkey` as a JWKS
 				registryDbKeySet := jwk.NewSet()
 				err = json.Unmarshal([]byte(existingNs.Pubkey), &registryDbKeySet)
 				if err != nil {
 					log.Errorf("Failed to parse existing namespace public key as JWKS: %v", err)
-					return false, nil, errors.Wrap(err, "Invalid existing namespace public key format")
+					return nil, errors.Wrap(err, "Invalid existing namespace public key format")
 				}
 
 				// Get client's previous signature from payload
@@ -186,7 +186,7 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 				}
 				clientPrevSignature, err := hex.DecodeString(data.ClientPrevSignature)
 				if err != nil {
-					return false, nil, errors.Wrap(err, "Failed to decode the client's previous signature")
+					return nil, errors.Wrap(err, "Failed to decode the client's previous signature")
 				}
 
 				// Check if any key in `clientKeySet` matches a key in `registryDbKeySet`
@@ -217,7 +217,7 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 							// Get client's previous public key recorded in db
 							var prevRawkey interface{}
 							if err := registryDbKey.Raw(&prevRawkey); err != nil {
-								return false, nil, errors.Wrap(err, "failed to generate raw pubkey from client's previous pubkey")
+								return nil, errors.Wrap(err, "failed to generate raw pubkey from client's previous pubkey")
 							}
 
 							if data.ClientPrevSignature != "" {
@@ -239,7 +239,7 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 				}
 
 				if !matchFound {
-					return false, nil, permissionDeniedError{
+					return nil, permissionDeniedError{
 						Message: fmt.Sprintf("The client that tries to prefix '%s' cannot be authorized: either it doesn't contain any public key matching the existing namespace's public key in db, or it fails to pass the proof of possession verification", prefix),
 					}
 				}
@@ -249,7 +249,7 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 				// Process origin's new public key
 				pubkeyData, err := json.Marshal(data.Pubkey)
 				if err != nil {
-					return false, nil, errors.Wrapf(err, "Failed to convert public key from json to string format for the prefix %s", prefix)
+					return nil, errors.Wrapf(err, "Failed to convert public key from json to string format for the prefix %s", prefix)
 				}
 				clientPubkeyString := string(pubkeyData)
 
@@ -257,64 +257,64 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 				prevKey, _ := validateJwks(string(data.PrevPubkey))
 				err = constructUpdatedKeySet(registryDbKeySet, prevKey.KeyID(), key)
 				if err != nil {
-					return false, nil, errors.Wrap(err, "Failed to construct the updated JWKS to be stored in registry db")
+					return nil, errors.Wrap(err, "failed to construct the updated JWKS to be stored in registry db")
 				}
 				registryDbKeySetJson, err := json.Marshal(registryDbKeySet)
 				if err != nil {
-					return false, nil, errors.Wrap(err, "failed to marshal registryDbKeySet to JSON")
+					return nil, errors.Wrap(err, "failed to marshal registryDbKeySet to JSON")
 				}
 
 				// Perform the update action when origin provides a new key
 				if clientPubkeyString != existingNs.Pubkey {
-					err = updateNamespacePubKey(prefix, string(registryDbKeySetJson))
+					err = setNamespacePubKey(prefix, string(registryDbKeySetJson))
 					if err != nil {
 						log.Errorf("Failed to update the public key of namespace %s: %v", prefix, err)
-						return false, nil, errors.Wrap(err, "Server encountered an error updating the public key of an existing namespace")
+						return nil, errors.Wrap(err, "Server encountered an error updating the public key of an existing namespace")
 					}
 					returnMsg := map[string]interface{}{
 						"message": fmt.Sprintf("Updated the public key of namespace %s:", prefix),
 					}
 					log.Infof("Updated the public key of namespace %s:", prefix)
-					return false, returnMsg, nil
+					return returnMsg, nil
 				} else {
 					returnMsg := map[string]interface{}{
 						"message": fmt.Sprintf("The public key of prefix %s hasn't changed -- nothing to update!", prefix),
 					}
 					log.Infof("The public key of prefix %s hasn't changed -- nothing to update!", prefix)
-					return false, returnMsg, nil
+					return returnMsg, nil
 				}
 			} else {
 				log.Errorf("Prefix %s is not registered", prefix)
-				return false, nil, errors.Errorf("Prefix %s is not registered", prefix)
+				return nil, errors.Errorf("Prefix %s is not registered", prefix)
 			}
 		}
 	}
 
-	return false, nil, errors.Errorf("Unable to verify the client's public key, or an encountered an error with its own: "+
+	return nil, errors.Errorf("Unable to verify the client's public key, or an encountered an error with its own: "+
 		"server verified:%t, client verified:%t", serverVerified, clientVerified)
 
 }
 
 // Handle the registered namespace public key update with nonce generation and verifcation, regardless of
 // using OIDC Authorization or not
-func updateNsKeySignChallenge(ctx *gin.Context, data *RegisteredPrefixUpdate) (bool, map[string]interface{}, error) {
+func updateNsKeySignChallenge(ctx *gin.Context, data *RegisteredPrefixUpdate) (map[string]interface{}, error) {
 	if data.ClientNonce != "" && data.ClientPayload != "" && data.ClientSignature != "" &&
 		data.ServerNonce != "" && data.ServerPayload != "" && data.ServerSignature != "" {
-		created, res, err := updateNsKeySignChallengeCommit(ctx, data)
+		res, err := updateNsKeySignChallengeCommit(ctx, data)
 		if err != nil {
-			return false, nil, err
+			return nil, err
 		} else {
-			return created, res, nil
+			return res, nil
 		}
 	} else if data.ClientNonce != "" {
 		res, err := updateNsKeySignChallengeInit(data)
 		if err != nil {
-			return false, nil, err
+			return nil, err
 		} else {
-			return false, res, nil
+			return res, nil
 		}
 	} else {
-		return false, nil, badRequestError{Message: "Key sign challenge is missing parameters"}
+		return nil, badRequestError{Message: "Key sign challenge is missing parameters"}
 	}
 }
 
@@ -329,7 +329,7 @@ func updateNamespacesPubKey(ctx *gin.Context) {
 		return
 	}
 
-	created, res, err := updateNsKeySignChallenge(ctx, &reqData)
+	res, err := updateNsKeySignChallenge(ctx, &reqData)
 	if err != nil {
 		if errors.As(err, &permissionDeniedError{}) {
 			ctx.JSON(http.StatusForbidden,
@@ -350,10 +350,6 @@ func updateNamespacesPubKey(ctx *gin.Context) {
 			log.Warningf("Failed to complete key sign challenge without identity requirement: %v", err)
 		}
 	} else {
-		if created {
-			ctx.JSON(http.StatusCreated, res)
-		} else {
-			ctx.JSON(http.StatusOK, res)
-		}
+		ctx.JSON(http.StatusOK, res)
 	}
 }

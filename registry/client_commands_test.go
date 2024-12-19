@@ -266,7 +266,7 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 	jwksStr := string(jwksBytes)
 
 	// Test functionality of a namespace registered with multi public keys [p2,p4]
-	err = updateNamespacePubKey(prefix, jwksStr) // set the registered public keys to [p2,p4]
+	err = setNamespacePubKey(prefix, jwksStr) // set the registered public keys to [p2,p4]
 	require.NoError(t, err)
 	ns, err := getNamespaceByPrefix(prefix)
 	require.NoError(t, err)
