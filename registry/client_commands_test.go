@@ -68,12 +68,11 @@ func registryMockup(ctx context.Context, t *testing.T, testName string) *httptes
 	return svr
 }
 
-func getSortedKids(jsonStr string) ([]string, error) {
+func getSortedKids(ctx context.Context, jsonStr string) ([]string, error) {
 	set, err := jwk.Parse([]byte(jsonStr))
 	if err != nil {
 		return nil, err
 	}
-	ctx := context.Background()
 	var kids []string
 	keysIter := set.Keys(ctx)
 	for keysIter.Next(ctx) {
@@ -296,17 +295,22 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 	require.NoError(t, err)
 	expectedJwksStr := string(expectedJwksBytes)
 
-	expectedKids, err := getSortedKids(expectedJwksStr)
+	expectedKids, err := getSortedKids(ctx, expectedJwksStr)
 	require.NoError(t, err)
-	actualKids, err := getSortedKids(ns.Pubkey)
+	actualKids, err := getSortedKids(ctx, ns.Pubkey)
 	require.NoError(t, err)
 	require.Equal(t, expectedKids, actualKids)
 }
 
 func TestRegistryKeyChainingOSDF(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
+	t.Cleanup(func() {
+		func() { require.NoError(t, egrp.Wait()) }()
+		cancel()
+		config.ResetIssuerJWKPtr()
+		config.ResetIssuerPrivateKeys()
+		server_utils.ResetTestState()
+	})
 
 	server_utils.ResetTestState()
 	_, err := config.SetPreferredPrefix(config.OsdfPrefix)
