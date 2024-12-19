@@ -190,14 +190,14 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 				}
 
 				// Check if any key in `clientKeySet` matches a key in `registryDbKeySet`
-				existingKeysIter := registryDbKeySet.Keys(ctx)
+				registryDbKeysIter := registryDbKeySet.Keys(ctx)
 				clientKeysIter := clientKeySet.Keys(ctx)
 				matchFound := false
 
-				for existingKeysIter.Next(ctx) {
-					existingKey := existingKeysIter.Pair().Value.(jwk.Key)
+				for registryDbKeysIter.Next(ctx) {
+					registryDbKey := registryDbKeysIter.Pair().Value.(jwk.Key)
 
-					existingKid, ok := existingKey.Get("kid")
+					registryDbKid, ok := registryDbKey.Get("kid")
 					if !ok {
 						log.Warnf("Skipping registry db existing key without 'kid'")
 						continue
@@ -212,11 +212,11 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 							continue
 						}
 
-						if existingKid == clientKid {
+						if registryDbKid == clientKid {
 							// Verify the Proof of Possession of client's previous active private key
 							// Get client's previous public key recorded in db
 							var prevRawkey interface{}
-							if err := existingKey.Raw(&prevRawkey); err != nil {
+							if err := registryDbKey.Raw(&prevRawkey); err != nil {
 								return false, nil, errors.Wrap(err, "failed to generate raw pubkey from client's previous pubkey")
 							}
 
@@ -228,7 +228,7 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 								matchFound = true
 								break
 							} else {
-								log.Debugf("Client cannot prove that it possesses the key it claims, key id: %s", existingKid)
+								log.Debugf("This key is not client's previous active key that it wants to rotate out, or client lacks proof of possession of claimed previous active key (kid: %s)", registryDbKid)
 							}
 						}
 					}
@@ -283,6 +283,9 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 					log.Infof("The public key of prefix %s hasn't changed -- nothing to update!", prefix)
 					return false, returnMsg, nil
 				}
+			} else {
+				log.Errorf("Prefix %s is not registered", prefix)
+				return false, nil, errors.Errorf("Prefix %s is not registered", prefix)
 			}
 		}
 	}
