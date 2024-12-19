@@ -44,8 +44,36 @@ type RegisteredPrefixUpdate struct {
 	ServerSignature string `json:"server_signature"`
 
 	Pubkey     json.RawMessage `json:"pubkey"`
+	PrevPubkey json.RawMessage `json:"prev_pubkey"`
 	AllPubkeys json.RawMessage `json:"all_pubkeys"`
 	Prefixes   []string        `json:"prefixes"`
+}
+
+func getKeyByKid(keySet jwk.Set, kidToFind string) (jwk.Key, error) {
+	for i := 0; i < keySet.Len(); i++ {
+		key, _ := keySet.Key(i)
+		kid, ok := key.Get("kid")
+		if ok && kid == kidToFind {
+			return key, nil
+		}
+	}
+	return nil, fmt.Errorf("key with kid %s not found in the set", kidToFind)
+}
+
+func constructUpdatedKeySet(keySet jwk.Set, kidToRemove string, keyToAdd jwk.Key) error {
+	keyToRemove, err := getKeyByKid(keySet, kidToRemove)
+	if err != nil {
+		log.Warnf("Key %s not found in the key set, skipping removal: %v", kidToRemove, err)
+	} else {
+		// Remove the key only if it exists
+		if err := keySet.RemoveKey(keyToRemove); err != nil {
+			return errors.Wrap(err, "failed to remove key from set")
+		}
+	}
+	if err := keySet.AddKey(keyToAdd); err != nil {
+		return errors.Wrap(err, "failed to add key to the key set")
+	}
+	return nil
 }
 
 // Generate server nonce for key-sign challenge when updating the public key of registered namespace(s)
@@ -144,8 +172,8 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 					return false, nil, errors.Wrapf(err, "Invalid in-memory public keys format of the client")
 				}
 				// Parse `existingNs.Pubkey` as a JWKS
-				existingKeySet := jwk.NewSet()
-				err = json.Unmarshal([]byte(existingNs.Pubkey), &existingKeySet)
+				registryDbKeySet := jwk.NewSet()
+				err = json.Unmarshal([]byte(existingNs.Pubkey), &registryDbKeySet)
 				if err != nil {
 					log.Errorf("Failed to parse existing namespace public key as JWKS: %v", err)
 					return false, nil, errors.Wrap(err, "Invalid existing namespace public key format")
@@ -161,8 +189,8 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 					return false, nil, errors.Wrap(err, "Failed to decode the client's previous signature")
 				}
 
-				// Check if any key in `clientKeySet` matches a key in `existingKeySet`
-				existingKeysIter := existingKeySet.Keys(ctx)
+				// Check if any key in `clientKeySet` matches a key in `registryDbKeySet`
+				existingKeysIter := registryDbKeySet.Keys(ctx)
 				clientKeysIter := clientKeySet.Keys(ctx)
 				matchFound := false
 
@@ -223,11 +251,22 @@ func updateNsKeySignChallengeCommit(ctx *gin.Context, data *RegisteredPrefixUpda
 				if err != nil {
 					return false, nil, errors.Wrapf(err, "Failed to convert public key from json to string format for the prefix %s", prefix)
 				}
-				pubkeyDbString := string(pubkeyData)
+				clientPubkeyString := string(pubkeyData)
+
+				// Construct the updated JWKS to be stored in registry db
+				prevKey, _ := validateJwks(string(data.PrevPubkey))
+				err = constructUpdatedKeySet(registryDbKeySet, prevKey.KeyID(), key)
+				if err != nil {
+					return false, nil, errors.Wrap(err, "Failed to construct the updated JWKS to be stored in registry db")
+				}
+				registryDbKeySetJson, err := json.Marshal(registryDbKeySet)
+				if err != nil {
+					return false, nil, errors.Wrap(err, "failed to marshal registryDbKeySet to JSON")
+				}
 
 				// Perform the update action when origin provides a new key
-				if pubkeyDbString != existingNs.Pubkey {
-					err = updateNamespacePubKey(prefix, pubkeyDbString)
+				if clientPubkeyString != existingNs.Pubkey {
+					err = updateNamespacePubKey(prefix, string(registryDbKeySetJson))
 					if err != nil {
 						log.Errorf("Failed to update the public key of namespace %s: %v", prefix, err)
 						return false, nil, errors.Wrap(err, "Server encountered an error updating the public key of an existing namespace")

@@ -365,7 +365,13 @@ func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName stri
 		}
 	}
 
-	// Send origins all public keys in another key set
+	// Send origins previous public key and all public keys in another key set
+	prevKey := config.GetPreviousIssuerPrivateJWK()
+	prevKeySet := jwk.NewSet()
+	if err = prevKeySet.AddKey(prevKey); err != nil {
+		return errors.Wrap(err, "failed to add previous public key to new JWKS")
+	}
+
 	privateKeys := config.GetIssuerPrivateKeys()
 	if len(privateKeys) == 0 {
 		return errors.Wrap(err, "The server doesn't have any private key in memory")
@@ -384,6 +390,7 @@ func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName stri
 	// Create data for the second POST request
 	unidentifiedPayload := map[string]interface{}{
 		"pubkey":           keySet,
+		"prev_pubkey":      prevKeySet,
 		"all_pubkeys":      allKeysSet,
 		"prefixes":         prefixes,
 		"site_name":        siteName,
