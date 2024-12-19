@@ -76,6 +76,10 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		origin.LaunchGlobusTokenRefresh(ctx, egrp)
 	}
 
+	// Start a routine to periodically refresh the private key directory.
+	// This ensures that new or updated private keys are automatically loaded and registered
+	launcher_utils.LaunchIssuerKeysDirRefresh(ctx, egrp)
+
 	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
 	if err = origin.RegisterOriginAPI(engine, ctx, egrp); err != nil {
 		return nil, err

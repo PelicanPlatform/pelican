@@ -37,8 +37,8 @@ func TestGetSecret(t *testing.T) {
 	})
 	t.Run("generate-32B-hash", func(t *testing.T) {
 		tmp := t.TempDir()
-		keyName := filepath.Join(tmp, "issuer.key")
-		viper.Set(param.IssuerKey.GetName(), keyName)
+		keyDir := filepath.Join(tmp, "issuer-keys")
+		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
 
 		get, err := GetSecret()
 		require.NoError(t, err)
@@ -55,8 +55,8 @@ func TestEncryptString(t *testing.T) {
 
 	t.Run("encrypt-without-err", func(t *testing.T) {
 		tmp := t.TempDir()
-		keyName := filepath.Join(tmp, "issuer.key")
-		viper.Set(param.IssuerKey.GetName(), keyName)
+		keyDir := filepath.Join(tmp, "issuer-keys")
+		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
 
 		get, err := EncryptString("Some secret to encrypt")
 		require.NoError(t, err)
@@ -72,8 +72,8 @@ func TestDecryptString(t *testing.T) {
 	})
 	t.Run("decrypt-without-err", func(t *testing.T) {
 		tmp := t.TempDir()
-		keyName := filepath.Join(tmp, "issuer.key")
-		viper.Set(param.IssuerKey.GetName(), keyName)
+		keyDir := filepath.Join(tmp, "issuer-keys")
+		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
 
 		secret := "Some secret to encrypt"
 
@@ -88,8 +88,8 @@ func TestDecryptString(t *testing.T) {
 
 	t.Run("diff-secrets-yield-diff-result", func(t *testing.T) {
 		tmp := t.TempDir()
-		keyName := filepath.Join(tmp, "issuer.key")
-		viper.Set(param.IssuerKey.GetName(), keyName)
+		keyDir := filepath.Join(tmp, "issuer-keys")
+		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
 
 		secret := "Some secret to encrypt"
 
@@ -97,8 +97,8 @@ func TestDecryptString(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, getEncrypt)
 
-		newKeyName := filepath.Join(tmp, "new-issuer.key")
-		viper.Set(param.IssuerKey.GetName(), newKeyName)
+		newKeyDir := filepath.Join(tmp, "new-issuer-keys")
+		viper.Set(param.IssuerKeysDirectory.GetName(), newKeyDir)
 
 		getDecrypt, err := DecryptString(getEncrypt)
 		require.NoError(t, err)

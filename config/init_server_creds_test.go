@@ -28,10 +28,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // encrypt should be ecdsa|rsa
@@ -148,5 +152,46 @@ func TestLoadPrivateKey(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "RSA type private key in PKCS #8 form is not allowed for")
 		require.Nil(t, privateKey)
+	})
+}
+
+func TestMultiPrivateKey(t *testing.T) {
+	t.Run("generate-and-load-single-key", func(t *testing.T) {
+		ResetConfig()
+		defer ResetConfig()
+		tempDir := t.TempDir()
+		issuerKeysDir := filepath.Join(tempDir, "issuer-keys")
+
+		key, err := LoadIssuerPrivateKey(issuerKeysDir)
+		require.NoError(t, err)
+		require.NotNil(t, key)
+	})
+
+	// This test also imitates the origin API endpoint "/newIssuerKey"
+	t.Run("second-private-key", func(t *testing.T) {
+		ResetConfig()
+		defer ResetConfig()
+		tempDir := t.TempDir()
+		issuerKeysDir := filepath.Join(tempDir, "issuer-keys")
+
+		key, err := LoadIssuerPrivateKey(issuerKeysDir)
+		require.NoError(t, err)
+		require.NotNil(t, key)
+
+		// Wait for 1 second to avoid duplicated private key filenames
+		// because they are named after unix epoch timestamp
+		time.Sleep(1 * time.Second)
+
+		// Create another private key
+		secondKey, err := GeneratePEMandSetActiveKey(issuerKeysDir)
+		require.NoError(t, err)
+		require.NotNil(t, secondKey)
+		assert.NotEqual(t, key.KeyID(), secondKey.KeyID())
+
+		// Check if the active private key points to the latest key
+		viper.Set(param.IssuerKeysDirectory.GetName(), issuerKeysDir)
+		latestKey, err := GetIssuerPrivateJWK()
+		require.NoError(t, err)
+		assert.Equal(t, secondKey.KeyID(), latestKey.KeyID())
 	})
 }
