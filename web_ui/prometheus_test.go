@@ -63,9 +63,9 @@ func TestPrometheusUnprotected(t *testing.T) {
 
 	// Create temp dir for the origin key file
 	tDir := t.TempDir()
-	kfile := filepath.Join(tDir, "testKey")
+	kDir := filepath.Join(tDir, "testKeyDir")
 	//Setup a private key
-	viper.Set("IssuerKey", kfile)
+	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -109,9 +109,9 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 
 	// Create temp dir for the origin key file
 	tDir := t.TempDir()
-	kfile := filepath.Join(tDir, "testKey")
-	//Setup a private key
-	viper.Set("IssuerKey", kfile)
+	kDir := filepath.Join(tDir, "testKeyDir")
+	// Setup a private key directory
+	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
