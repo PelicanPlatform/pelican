@@ -71,6 +71,8 @@ description: |+
 
   A public JWK will be derived from this private key and used as the key for token verification.
 type: filename
+deprecated: true
+replacedby: none
 root_default: /etc/pelican/issuer.jwk
 default: $ConfigBase/issuer.jwk
 components: ["origin", "cache", "registry", "director"]
