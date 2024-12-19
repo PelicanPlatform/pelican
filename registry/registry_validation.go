@@ -293,7 +293,7 @@ func validateCustomFields(customFields map[string]interface{}) (bool, error) {
 
 					// Check the provided option is in the list of available options
 					if len(options) == 0 {
-						return false, fmt.Errorf("Bad configuration, the custom field %q has empty options", regField.DisplayedName)
+						return false, fmt.Errorf("bad configuration, the custom field %q has empty options", regField.DisplayedName)
 					}
 					inOpt := false
 					for _, item := range options {

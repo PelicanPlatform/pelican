@@ -223,6 +223,9 @@ func TestAdvertiseOSDF(t *testing.T) {
 		require.NotNil(t, foundServer.NamespaceAds)
 		assert.True(t, foundServer.NamespaceAds[0].FromTopology)
 
+		// Override the check for prohibited caches
+		prohibitedCachesLastSetTimestamp.Store(time.Now().Unix())
+
 		// Test a few values. If they're correct, it indicates the whole process likely succeeded
 		nsAd, oAds, cAds := getAdsForPath("/my/server/path/to/file")
 		assert.Equal(t, "/my/server", nsAd.Path)

@@ -59,6 +59,7 @@ Director:
   AssumePresenceAtSingleOrigin: true
   CachePresenceTTL: 1m
   CachePresenceCapacity: 10000
+  ProhibitedCachesRefreshInterval: 1m
 Cache:
   DefaultCacheTimeout: "9.5s"
   Port: 8442

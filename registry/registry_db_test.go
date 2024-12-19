@@ -180,6 +180,8 @@ var (
 		"key2": 2,
 		"key3": true,
 	}
+
+	mockProhibitedCaches = []string{"hostname1", "hostname2"}
 )
 
 func TestGetNamespaceById(t *testing.T) {
@@ -203,6 +205,7 @@ func TestGetNamespaceById(t *testing.T) {
 		defer resetNamespaceDB(t)
 		mockNs := mockNamespace("/test", "", "", server_structs.AdminMetadata{UserID: "foo"})
 		mockNs.CustomFields = mockCustomFields
+		mockNs.ProhibitedCaches = mockProhibitedCaches
 		err := insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
 		nss, err := getAllNamespaces()
@@ -317,6 +320,7 @@ func TestAddNamespace(t *testing.T) {
 				SecurityContactUserID: "security-001",
 			})
 		mockNs.CustomFields = mockCustomFields
+		mockNs.ProhibitedCaches = mockProhibitedCaches
 		err := AddNamespace(&mockNs)
 		require.NoError(t, err)
 		got, err := getAllNamespaces()
@@ -329,6 +333,8 @@ func TestAddNamespace(t *testing.T) {
 		assert.Equal(t, mockNs.AdminMetadata.SiteName, got[0].AdminMetadata.SiteName)
 		assert.Equal(t, mockNs.AdminMetadata.SecurityContactUserID, got[0].AdminMetadata.SecurityContactUserID)
 		assert.Equal(t, mockCustomFields, got[0].CustomFields)
+		assert.Equal(t, mockProhibitedCaches, got[0].ProhibitedCaches)
+
 	})
 }
 

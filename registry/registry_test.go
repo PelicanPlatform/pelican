@@ -190,6 +190,26 @@ func TestHandleWildcard(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("match-output-of-prohibited-caches-endpoint", func(t *testing.T) {
+		setupMockRegistryDB(t)
+		defer teardownMockNamespaceDB(t)
+
+		err := insertMockDBData([]server_structs.Namespace{{Prefix: "/foo/bar", ProhibitedCaches: []string{"hostname1", "hostname2"}}})
+		require.NoError(t, err)
+
+		req, _ := http.NewRequest("GET", "/registry/namespaces/prohibitedCaches", nil)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		expectedJSON := `{
+			"/foo/bar": ["hostname1", "hostname2"]
+		}`
+
+		assert.JSONEq(t, expectedJSON, w.Body.String(), "Response JSON does not match the expected output")
+	})
 }
 
 func TestCheckNamespaceCompleteHandler(t *testing.T) {
