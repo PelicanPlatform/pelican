@@ -988,31 +988,31 @@ components: ["origin"]
 ---
 name: Origin.XRootServiceUrl
 description: |+
- When the origin is configured to export another XRootD storage backend by setting `Origin.StorageType = xroot`, the `XRootServiceUrl`
- is used as the base for `root` protocol requests and should point at the upstream XRootD server.
+  When the origin is configured to export another XRootD storage backend by setting `Origin.StorageType = xroot`, the `XRootServiceUrl`
+  is used as the base for `root` protocol requests and should point at the upstream XRootD server.
 type: string
 default: none
 components: ["origin"]
 ---
 name: Origin.GlobusCollectionID
 description: |+
- **Note**: This value is only for setting up an origin that exports **one** Globus collection. For multiple exports, use `Origin.Exports`
+  **Note**: This value is only for setting up an origin that exports **one** Globus collection. For multiple exports, use `Origin.Exports`
 
- Required if `Origin.StorageType == "globus"` AND `Origin.Exports` is not set.
+  Required if `Origin.StorageType == "globus"` AND `Origin.Exports` is not set.
 
- Globus stores objects in [Collections](https://docs.globus.org/guides/overviews/collections-and-endpoints/#collection).
- The unique identifier of a Collection is the Collection UUID.
- You can find the Collection UUID at the bottom of your Collection's overview page.
+  Globus stores objects in [Collections](https://docs.globus.org/guides/overviews/collections-and-endpoints/#collection).
+  The unique identifier of a Collection is the Collection UUID.
+  You can find the Collection UUID at the bottom of your Collection's overview page.
 type: string
 default: none
 components: ["origin"]
 ---
 name: Origin.GlobusCollectionName
 description: |+
- **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
+  **Note**: This value is only for setting up an origin that exports **one** storage prefix. For multiple exports, use `Origin.Exports`
 
- An optional human-readable name to describe the Collection. This should set to the "Display Name" of your Collection in Globus.
- It is recommended to set this name; otherwise the UUID will be used as the Collection name.
+  An optional human-readable name to describe the Collection. This should set to the "Display Name" of your Collection in Globus.
+  It is recommended to set this name; otherwise the UUID will be used as the Collection name.
 type: string
 default: none
 components: ["origin"]
@@ -1162,7 +1162,7 @@ description: |+
   WARNING: It's important that any values for `Cache.DataLocations` and `Cache.MetaLocations` are NOT subdirectories of `Cache.NamespaceLocation`,
   as this will make the raw data/meta files accessible through the cache's namespace structure, which is undefined behavior.
 type: string
-default:  ${Cache.StorageLocation}/namespace
+default: ${Cache.StorageLocation}/namespace
 
 components: ["cache"]
 ---
@@ -1809,6 +1809,20 @@ description: |+
 type: filename
 root_default: /etc/pelican/certificates/tls.crt
 default: "$ConfigBase/certificates/tls.crt"
+deprecated: true
+replacedby: "Server.TLSCertificateChain"
+components: ["origin", "registry", "director"]
+---
+name: Server.TLSCertificateChain
+description: |+
+  A filepath to a file containing the full X.509 certificate chain, including the host certificate followed
+  by any intermediate certificates, to use for TLS authentication when running server components of Pelican.
+
+  If you override this filepath, you need to provide the matched-pair private key
+  via Server.TLSKey and a Certificate Authority (CA) certificate via Server.TLSCACertificateFile.
+type: filename
+root_default: /etc/pelican/certificates/tls.crt
+default: "$ConfigBase/certificates/tls.crt"
 components: ["origin", "registry", "director"]
 ---
 name: Server.TLSCACertificateFile
@@ -1844,7 +1858,8 @@ components: ["origin", "registry", "director"]
 ---
 name: Server.TLSKey
 description: |+
-  The name of a file containing a private key corresponding to the TLSCertificate.
+  The name of a file containing the private key corresponding to the host certificate
+  in the TLSCertificateChain.
   Used when running server components of Pelican.
 type: filename
 root_default: /etc/pelican/certificates/tls.key
@@ -1983,7 +1998,7 @@ description: |+
   The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
 type: stringSlice
 default: []
-components: ["registry","origin","cache"]
+components: ["registry", "origin", "cache"]
 ---
 name: Server.StartupTimeout
 description: |+
@@ -2735,34 +2750,126 @@ type: bool
 default: false
 components: ["cache"]
 ---
-name: Lotman.Lots
+name: Lotman.PolicyDefinitions
 description: |+
-  Declarative configuration for LotMan.  This is a list of objects, each of which describes a "lot". Every lot
-  can be defined with the following:
+  A list of named Lotman purge policy definitions that may be enabled by the cache administrator through setting the `Lotman.EnabledPolicy`
+  configuration. Each policy definition is an object with the following fields:
+  - `PolicyName`: The name of the policy. This is used to identify the policy in the `Lotman.EnabledPolicy` configuration.
+  - `PurgeOrder`: An ordered list of strings indicating the order in which lots should be purged. The strings should be one of the following:
+    - `del`: Purge lots that have passed their deletion time.
+    - `exp`: Purge lots that have passed their expiration time.
+    - `opp`: Purge lots that have passed their opportunistic storage quota.
+    - `ded`: Purge lots that have passed their dedicated storage quota.
+  - `DiscoverPrefixes`: A boolean indicating whether Lotman should automatically discover prefixes from the Director. If true, Lotman will
+    attempt to create lots for all discovered federation prefixes. Locally-defined lots will take precedence over discovered lots if the two have
+    the same name.
+  - `MergeLocalWithDiscovered`: A boolean indicating whether Lotman should merge locally-defined lot configurations with discovered namespaces.
+    Most Lot configuration fields will take precedence from local configuration, but the `Paths` and `Parents` fields are additive.
+  - `DivideUnallocated`: A boolean indicating whether Lotman should attempt to make intelligent decisions regarding management policy attributes
+    for lots that have not provided explicit values. These decisions are based on the cache's total storage capacity and the number of lots
+    that have been explicitly configured, and are intended to maximize potential cache utilization. This should be set to "true" in most cases.
+  - `Lots`: A list of lot objects, each of which describes a "lot". Every lot can be defined with the following:
+    - `LotName`: REQUIRED. The name of the lot.  This is used to identify the lot in the LotMan database.
+    - `Owner`: REQUIRED. A string identifying the owner of the lot's data (as opposed to someone who can modify the lot itself).
+      The Owner field should generally be set to the issue for the lot's namespace path. For example, if the lot
+      tracks namespace `/foo/bar`, the owner might be set to `https://registry.com/api/v1.0/registry/foo/bar`.
+    - `Paths`: OPTIONAL. A list of path objects, each of which describes a path that should be managed by the lot.
+        - `Path`: REQUIRED. The path to be managed by the lot.
+        - `Recursive`: REQUIRED. A boolean indicating whether the path should be managed recursively. If true, the lot will
+          manage all files and directories under the specified path.
+    - `ManagementPolicyAttrs`: REQUIRED. The lot's management policy attributes object. This contains information about resources the lot should
+      be allocated, and how it should be managed.
+        - `DedicatedGB`: REQUIRED. The amount of storage, in GB, that should be dedicated to the lot. This means the lot can assume it
+          always has access to this quantity.
+        - `OpportunisticGB`: REQUIRED. The amount of opportunistic storage, in GB, the lot should have access to, when storage is available.
+        - `MaxNumObjects`: REQUIRED. The maximum number of objects a lot is allowed to store.
+        - `CreationTime`: REQUIRED. A unix timestamp indicating when the lot should begin being considered valid. Times in the future indicate
+          the lot should not be considered valid until that time.
+        - `ExpirationTime`: REQUIRED. A unix timestamp indicating when the lot expires. Lots may continue to function after expiration, but lot
+          data owners should recognize the storage is at-will and may be pre-empted at any time.
+        - `DeletionTime`: REQUIRED. A unix timestamp indicating when the lot and its associated data should be deleted.
 
-  - `LotName`: REQUIRED. The name of the lot.  This is used to identify the lot in the LotMan database.
-  - `Owner`: REQUIRED. A string identifying the owner of the lot's data (as opposed to someone who can modify the lot itself).
-    The Owner field should generally be set to the issue for the lot's namespace path. For example, if the lot
-    tracks namespace `/foo/bar`, the owner might be set to `https://registry.com/api/v1.0/registry/foo/bar`.
-  - `Paths`: OPTIONAL. A list of path objects, each of which describes a path that should be managed by the lot.
-      - `Path`: REQUIRED. The path to be managed by the lot.
-      - `Recursive`: REQUIRED. A boolean indicating whether the path should be managed recursively. If true, the lot will
-        manage all files and directories under the specified path.
-  - `ManagementPolicyAttrs`: REQUIRED. The lot's management policy attributes object. This contains information about resources the lot should
-    be allocated, and how it should be managed.
-      - `DedicatedGB`: REQUIRED. The amount of storage, in GB, that should be dedicated to the lot. This means the lot can assume it
-        always has access to this quantity.
-      - `OpportunisticGB`: REQUIRED. The amount of opportunistic storage, in GB, the lot should have access to, when storage is available.
-      - `MaxNumObjects`: REQUIRED. The maximum number of objects a lot is allowed to store.
-      - `CreationTime`: REQUIRED. A unix timestamp indicating when the lot should begin being considered valid. Times in the future indicate
-        the lot should not be considered valid until that time.
-      - `ExpirationTime`: REQUIRED. A unix timestamp indicating when the lot expires. Lots may continue to function after expiration, but lot
-        data owners should recognize the storage is at-will and may be pre-empted at any time.
-      - `DeletionTime`: REQUIRED. A unix timestamp indicating when the lot and its associated data should be deleted.
+  For example, Lotman could be configured with the "my-policy" policy with the following:
+  ```yaml
+  Lotman:
+    EnabledPolicy: "my-policy"
+    PolicyDefinitions:
+    - PolicyName: "my-policy"
+      DivideUnallocated: true
+      PurgeOrder: ["del", "exp", "opp", "ded"]
+      DiscoverPrefixes: true
+      MergeLocalWithDiscovered: true
+      Lots:
+      - LotName: "/foo/bar"
+        Owner: "https://registry.com/api/v1.0/registry/foo/bar"
+        Paths:
+          Path: "/foo/bar"
+          Recursive: true
+        ManagementPolicyAttrs:
+          DedicatedGB: 100
+          OpportunisticGB: 100
+          MaxNumObjects: 1000
+          CreationTime: 1614556800
+          ExpirationTime: 1614556800
+          DeletionTime: 1614556800
+      - LotName ... <additional lots>
+  ```
 
-  Note that example configurations can be found in lotman/resources/lots-config.yaml
+  Additional example configurations can be found in lotman/resources/lots-config.yaml
   For more information about LotMan configuration, see:
   [https://github.com/pelicanplatform/lotman](https://github.com/pelicanplatform/lotman)
 type: object
 default: none
+components: ["cache"]
+---
+name: Lotman.EnabledPolicy
+description: |+
+  The name of the policy to use with Lotman's purge logic. Policy names are defined in the Lotman.PolicyDefinitions list object.
+  If unset, the "fairshare" policy is used, which evenly divides the cache's space amongst all top-level namespaces discoverable
+  through the Director and purges data according in order of lots past deletion, lots past expiration, lots past opportunistic
+  storage, and lots past dedicated storage. The "fairshare" policy is defined as follows:
+  ```yaml
+  Lotman:
+    EnabledPolicy: "fairshare"
+    DefaultLotExpirationLifetime: "2016h"
+    DefaultLotDeletionLifetime: "4032h"
+    PolicyDefinitions:
+    - PolicyName: "fairshare"
+      DivideUnallocated: true
+      PurgeOrder: ["del", "exp", "opp", "ded"]
+      DiscoverPrefixes: true
+      MergeLocalWithDiscovered: false
+  ```
+type: string
+default: "fairshare"
+components: ["cache"]
+---
+name: Lotman.DefaultLotExpirationLifetime
+description: |+
+  The default expiration lifetime for lots that have not provided an explicit expiration time. Valid time units are:
+    - ns for nanoseconds
+    - us (or µs) for microseconds
+    - ms for milliseconds
+    - s for seconds
+    - m for minutes
+    - h for hours
+
+  This value is fed to Lotman as a unix timestamp in microseconds, adjusted from the current time.
+type: duration
+default: 2016h
+components: ["cache"]
+---
+name: Lotman.DefaultLotDeletionLifetime
+description: |+
+  The default deletion lifetime for lots that have not provided an explicit deletion time. Valid time units are:
+    - ns for nanoseconds
+    - us (or µs) for microseconds
+    - ms for milliseconds
+    - s for seconds
+    - m for minutes
+    - h for hours
+
+  This value is fed to Lotman as a unix timestamp in microseconds, adjusted from the current time.
+type: duration
+default: 4032h
 components: ["cache"]

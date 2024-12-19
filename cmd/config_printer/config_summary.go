@@ -21,7 +21,6 @@ package config_printer
 import (
 	"reflect"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -32,9 +31,7 @@ func configSummary(cmd *cobra.Command, args []string) {
 	defaultConfig := viper.New()
 	config.SetBaseDefaultsInConfig(defaultConfig)
 
-	if err := config.InitConfigDir(defaultConfig); err != nil {
-		log.Errorf("Error initializing config directory: %v", err)
-	}
+	config.InitConfigDir(defaultConfig)
 
 	defaultConfigMap := initClientAndServerConfig(defaultConfig)
 	currentConfigMap := initClientAndServerConfig(viper.GetViper())

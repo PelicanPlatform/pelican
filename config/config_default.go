@@ -32,7 +32,7 @@ import (
 func InitServerOSDefaults(v *viper.Viper) error {
 	// Windows / Mac don't have a default set of CAs installed at
 	// a well-known location as is expected by XRootD. We want to always generate our own CA
-	// if Server_TLSCertificate (host certificate) is not explicitly set so that
+	// if Server_TLSCertificateChain (host certificate chain) is not explicitly set so that
 	// we can sign our host cert by our CA instead of self-signing
 	tlscaFile := filepath.Join(v.GetString("ConfigDir"), "certificates", "tlsca.pem")
 	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), tlscaFile)

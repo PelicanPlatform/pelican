@@ -9,6 +9,7 @@ import ExportForm from './ExportForm';
 import LotForm from './LotForm';
 import PathForm from './PathForm';
 import AuthorizationTemplateForm from './AuthorizationTemplateForm';
+import PolicyDefinitionForm from './PolicyDefinitionForm';
 
 export {
   AuthorizationTemplateForm,
@@ -21,4 +22,5 @@ export {
   ExportForm,
   LotForm,
   PathForm,
+  PolicyDefinitionForm,
 };

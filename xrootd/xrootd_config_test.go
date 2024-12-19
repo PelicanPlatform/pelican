@@ -735,7 +735,7 @@ func TestCopyCertificates(t *testing.T) {
 
 	keyPairContents, err := os.ReadFile(destKeyPairName)
 	require.NoError(t, err)
-	certName := param.Server_TLSCertificate.GetString()
+	certName := param.Server_TLSCertificateChain.GetString()
 	firstCertContents, err := os.ReadFile(certName)
 	require.NoError(t, err)
 	keyName := param.Server_TLSKey.GetString()

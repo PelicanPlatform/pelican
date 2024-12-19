@@ -29,13 +29,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 func RegisterLotman(ctx context.Context, router *gin.RouterGroup) {
 	log.Warningln("LotMan is not supported on this platform. Skipping...")
 }
 
-func InitLotman() bool {
+func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	log.Warningln("LotMan is not supported on this platform. Skipping...")
 	return false
 }

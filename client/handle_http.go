@@ -1056,8 +1056,13 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		}
 	}
 
+	httpMethod := http.MethodGet
+	if upload {
+		httpMethod = http.MethodPut
+	}
+
 	tj.directorUrl = copyUrl.FedInfo.DirectorEndpoint
-	dirResp, err := GetDirectorInfoForPath(tj.ctx, &copyUrl, upload, "")
+	dirResp, err := GetDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, "")
 	if err != nil {
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", pUrl.String())
@@ -1074,7 +1079,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 
 		// The director response may change if it's given a token; let's repeat the query.
 		if contents != "" {
-			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyUrl, upload, contents)
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, contents)
 			if err != nil {
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", copyUrl.String())
@@ -2652,6 +2657,105 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 		fileInfos = append(fileInfos, file)
 	}
 	return fileInfos, nil
+}
+
+// deleteHttp takes the collection URL from the director response to perform the delete operation.
+// If the recursive flag is set, it recursively deletes a collection by iterating over the collection tree
+// and deleting each leaf object one by one.
+//
+// Note: The current implementation of recursive collection deletion is inefficient and does not use concurrency.
+// This limitation exists because the object delete command is not openly supported and is intended to remain hidden.
+// Adding concurrency would require integrating the delete command into the transfer engine logic,
+// which would involve significant and complex changes. As the command is not fully supported, concurrency is deferred.
+func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp server_structs.DirectorResponse, token *tokenGenerator) (err error) {
+	log.Debugln("Attempting to delete:", remoteUrl.Path)
+	project := searchJobAd(projectName)
+
+	if dirResp.XPelNsHdr.CollectionsUrl == nil || dirResp.XPelNsHdr.CollectionsUrl.String() == "" {
+		log.Info("Collections URL not received in director response, attempting to delete directly using HTTP DELETE.")
+
+		client := grab.NewClient()
+		client.UserAgent = getUserAgent(project)
+
+		transport := config.GetTransport()
+		httpClient, ok := client.HTTPClient.(*http.Client)
+		if !ok {
+			return errors.New("internal error: implementation is not a http.Client type")
+		}
+		httpClient.Transport = transport
+
+		// Object deletion command only works for a single origin in a prefix setup.
+		serverUrl := dirResp.ObjectServers[0].String()
+		req, err := http.NewRequest("DELETE", serverUrl, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create HTTP DELETE request: %w", err)
+		}
+		tokenContents, err := token.get()
+		if err != nil || tokenContents == "" {
+			return errors.Wrap(err, "failed to get token for transfer")
+		}
+		req.Header.Set("Authorization", "Bearer "+tokenContents)
+		req.Header.Set("X-Transfer-Status", "true")
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("HTTP DELETE request failed: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+			return fmt.Errorf("HTTP DELETE request returned unexpected status: %s", resp.Status)
+		}
+
+		log.Debugln("Successfully deleted:", remoteUrl.Path)
+		return nil
+
+	}
+
+	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
+	client := createWebDavClient(collectionsUrl, token, project)
+	remotePath := remoteUrl.Path
+
+	info, err := client.Stat(remotePath)
+	if err != nil {
+		if gowebdav.IsErrNotFound(err) {
+			return errors.Wrapf(err, "cannot remove remote path %s: no such object or collection", remotePath)
+		}
+		return errors.Wrap(err, "failed to check object existence")
+	}
+
+	if info.IsDir() {
+		children, err := client.ReadDir(remotePath)
+		if err != nil {
+			return errors.Wrapf(err, "failed to read contents of collection %s", remotePath)
+
+		}
+		if !recursive && len(children) > 0 {
+			return errors.Errorf("%s is a non-empty collection, use recursive flag or recursive query in the url to delete it", remotePath)
+		}
+		if recursive {
+			for _, child := range children {
+				childPath := remotePath + "/" + child.Name()
+				err = deleteHttp(&pelican_url.PelicanURL{Path: childPath}, recursive, dirResp, token)
+				if err != nil {
+					return errors.Wrapf(err, "failed to delete child object %s", childPath)
+				}
+			}
+		}
+	}
+
+	err = client.Remove(remotePath)
+	if err != nil {
+		if gowebdav.IsErrCode(err, http.StatusMethodNotAllowed) {
+			return errors.Wrap(err, "method not allowed on the remote object, deletion is not permitted")
+		}
+		if gowebdav.IsErrCode(err, http.StatusInternalServerError) {
+			return errors.Wrap(err, "internal server error occurred while attempting to delete the remote object")
+		}
+		return errors.Wrap(err, "failed to delete remote object")
+	}
+	log.Debugln("Origin reported successful deletion of:", remoteUrl.Path)
+	return nil
 }
 
 // Invoke a stat request against a remote URL that accepts WebDAV protocol,

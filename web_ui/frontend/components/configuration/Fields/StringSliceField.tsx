@@ -17,7 +17,13 @@ import {
   Edit,
   Close,
 } from '@mui/icons-material';
-import React, { useMemo, useCallback, ChangeEvent, KeyboardEvent } from 'react';
+import React, {
+  useMemo,
+  useCallback,
+  ChangeEvent,
+  KeyboardEvent,
+  useEffect,
+} from 'react';
 
 import { createId, buildPatch, stringSort } from '../util';
 
@@ -26,6 +32,7 @@ export type StringSliceFieldProps = {
   value: string[];
   focused?: boolean;
   onChange: (value: string[]) => void;
+  verify?: (value: string[]) => string | undefined;
 };
 
 const StringSliceField = ({
@@ -33,10 +40,15 @@ const StringSliceField = ({
   name,
   value,
   focused,
+  verify,
 }: StringSliceFieldProps) => {
   const id = useMemo(() => createId(name), [name]);
 
-  const transformedValue = useMemo(() => (value == null ? [] : value), [value]);
+  // Hold a buffer value so that you can type freely without saving an invalid state
+  const [bufferValue, setBufferValue] = React.useState(value || []);
+  useEffect(() => {
+    setBufferValue(value || []);
+  }, [value]);
 
   const [inputValue, setInputValue] = React.useState<string>('');
 
@@ -52,15 +64,34 @@ const StringSliceField = ({
         event.target.value != ''
       ) {
         const newValue = [
-          ...new Set<string>([...transformedValue, event.target.value]),
-        ].sort(stringSort);
+          ...new Set<string>([event.target.value, ...bufferValue]),
+        ];
+
+        setBufferValue(newValue);
+        setInputValue('');
+
+        if (verify && verify(newValue) !== undefined) {
+          return;
+        }
 
         onChange(newValue);
-        setInputValue('');
       }
     },
     [onChange, inputValue]
   );
+
+  const error = useMemo(
+    () => (verify ? verify(bufferValue) : undefined),
+    [bufferValue]
+  );
+
+  const helperText = useMemo(() => {
+    if (error) {
+      return error;
+    } else if (inputValue != '') {
+      return 'Press enter to add';
+    }
+  }, [error, inputValue]);
 
   return (
     <>
@@ -72,12 +103,13 @@ const StringSliceField = ({
         variant={'outlined'}
         value={inputValue}
         focused={focused}
-        helperText={inputValue == '' ? undefined : 'Press enter to add'}
+        helperText={helperText}
         onChange={(e) => setInputValue(e.target.value)}
         InputProps={{ onKeyDown: handleKeyDown }}
+        error={error !== undefined}
       />
       <Box>
-        {transformedValue.length > 0 && (
+        {bufferValue.length > 0 && (
           <Box
             sx={{
               display: 'flex',
@@ -112,7 +144,7 @@ const StringSliceField = ({
               </Tooltip>
               <Box ml={1} display={'inline'}>
                 <Typography variant={'caption'}>
-                  {transformedValue.length} Items
+                  {bufferValue.length} Items
                 </Typography>
               </Box>
             </Box>
@@ -123,20 +155,42 @@ const StringSliceField = ({
             maxHeight: dropdownHeight,
             overflowY: 'scroll',
             borderBottom:
-              transformedValue.length == 0 || dropdownHeight == '0px'
+              bufferValue.length == 0 || dropdownHeight == '0px'
                 ? undefined
                 : 'black 1px solid',
           }}
         >
-          {transformedValue.map((val) => {
+          {bufferValue.map((val) => {
             return (
               <StringSliceCard
                 key={val}
                 value={val}
-                onClick={() => {
-                  const newValue = transformedValue.filter((v) => v != val);
+                onDelete={() => {
+                  const newValue = bufferValue.filter((v) => v != val);
                   onChange(newValue);
                   setInputValue(val);
+                }}
+                onMoveUp={() => {
+                  const index = bufferValue.indexOf(val);
+                  if (index > 0) {
+                    const newValue = [...bufferValue];
+                    [newValue[index - 1], newValue[index]] = [
+                      newValue[index],
+                      newValue[index - 1],
+                    ];
+                    onChange(newValue);
+                  }
+                }}
+                onMoveDown={() => {
+                  const index = bufferValue.indexOf(val);
+                  if (index < bufferValue.length - 1) {
+                    const newValue = [...bufferValue];
+                    [newValue[index + 1], newValue[index]] = [
+                      newValue[index],
+                      newValue[index + 1],
+                    ];
+                    onChange(newValue);
+                  }
                 }}
               />
             );
@@ -149,10 +203,17 @@ const StringSliceField = ({
 
 interface StringSliceCardProps {
   value: string;
-  onClick: () => void;
+  onDelete: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
 }
 
-const StringSliceCard = ({ value, onClick }: StringSliceCardProps) => {
+const StringSliceCard = ({
+  value,
+  onDelete,
+  onMoveDown,
+  onMoveUp,
+}: StringSliceCardProps) => {
   return (
     <Box
       sx={{
@@ -169,7 +230,6 @@ const StringSliceCard = ({ value, onClick }: StringSliceCardProps) => {
           borderColor: 'primary.light',
         },
       }}
-      onClick={onClick}
     >
       <Box
         sx={{
@@ -179,9 +239,21 @@ const StringSliceCard = ({ value, onClick }: StringSliceCardProps) => {
       >
         {value}
       </Box>
-      <IconButton size={'small'}>
-        <Close />
-      </IconButton>
+      <Box>
+        <Tooltip title={'Move Up'} onClick={onMoveUp}>
+          <IconButton size={'small'}>
+            <KeyboardArrowUp />
+          </IconButton>
+        </Tooltip>
+        <Tooltip title={'Move Down'}>
+          <IconButton size={'small'} onClick={onMoveDown}>
+            <KeyboardArrowDown />
+          </IconButton>
+        </Tooltip>
+        <IconButton size={'small'} onClick={onDelete}>
+          <Close />
+        </IconButton>
+      </Box>
     </Box>
   );
 };

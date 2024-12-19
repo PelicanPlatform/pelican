@@ -66,7 +66,7 @@ popd
 
 git clone --recurse-submodules --branch v0.1.7 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
-git checkout v0.1.7
+git checkout v0.1.8
 mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir

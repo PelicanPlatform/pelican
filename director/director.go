@@ -819,10 +819,10 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	generateXAuthHeader(ginCtx, namespaceAd)
 	generateXTokenGenHeader(ginCtx, namespaceAd)
 
-	// If we are doing a PUT, check to see if any origins are writeable
-	if ginCtx.Request.Method == "PUT" {
+	// If we are doing a PUT or DELETE, check to see if any origins are writeable
+	if ginCtx.Request.Method == http.MethodPut || ginCtx.Request.Method == http.MethodDelete {
 		for idx, ad := range availableAds {
-			if ad.Caps.Writes {
+			if ad.Caps.Writes && namespaceAd.Caps.Writes {
 				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.Caps.PublicReads)
 				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
 					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
@@ -894,8 +894,8 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		// Regardless of the remainder of the settings, we currently handle a PUT as a query to the origin endpoint
-		if c.Request.Method == "PUT" {
+		// Regardless of the remainder of the settings, we currently handle PUT or DELETE as a query to the origin endpoint
+		if c.Request.Method == http.MethodPut || c.Request.Method == http.MethodDelete {
 			c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
 			redirectToOrigin(c)
 			c.Abort()
@@ -916,7 +916,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 
 		// If we are doing a PROPFIND, we should always redirect to the origin
 		if c.Request.Method == "PROPFIND" {
-			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "PROPFIND" || c.Request.Method == "HEAD") {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "PROPFIND" || c.Request.Method == http.MethodHead) {
 				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
 				redirectToOrigin(c)
 				c.Abort()
@@ -936,7 +936,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 		// If we're configured for cache mode or we haven't set the flag,
 		// we should use cache middleware
 		if defaultResponse == "cache" {
-			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "GET" || c.Request.Method == "HEAD") {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
 				c.Request.URL.Path = "/api/v1.0/director/object" + c.Request.URL.Path
 				redirectToCache(c)
 				c.Abort()
@@ -946,7 +946,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			// If the path starts with the correct prefix, continue with the next handler
 			c.Next()
 		} else if defaultResponse == "origin" {
-			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == "GET" || c.Request.Method == "HEAD") {
+			if !strings.HasPrefix(c.Request.URL.Path, "/api/v1.0/director/") && (c.Request.Method == http.MethodGet || c.Request.Method == http.MethodHead) {
 				c.Request.URL.Path = "/api/v1.0/director/origin" + c.Request.URL.Path
 				redirectToOrigin(c)
 				c.Abort()
@@ -1412,6 +1412,7 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/origin/*any", redirectToOrigin)
 		directorAPIV1.HEAD("/origin/*any", redirectToOrigin)
 		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
+		directorAPIV1.DELETE("/origin/*any", redirectToOrigin)
 		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
 		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)

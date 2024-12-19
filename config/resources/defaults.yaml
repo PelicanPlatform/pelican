@@ -67,6 +67,16 @@ Cache:
   LowWatermark: 90
   HighWaterMark: 95
   BlocksToPrefetch: 0
+Lotman:
+  EnabledPolicy: "fairshare"
+  DefaultLotExpirationLifetime: "2016h"
+  DefaultLotDeletionLifetime: "4032h"
+  PolicyDefinitions:
+    - PolicyName: "fairshare"
+      DivideUnallocated: true
+      PurgeOrder: ["del", "exp", "opp", "ded"]
+      DiscoverPrefixes: true
+      MergeLocalWithDiscovered: false
 LocalCache:
   HighWaterMarkPercentage: 95
   LowWaterMarkPercentage: 85

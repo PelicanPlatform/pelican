@@ -25,6 +25,8 @@ import {
   LotForm,
   IPMappingForm,
   AuthorizationTemplateForm,
+  PolicyDefinitionForm,
+  PolicyDefinition,
 } from '@/components/configuration';
 import { buildPatch } from '@/components/configuration/util';
 import { LoadingField } from '@/components/configuration/Fields/LoadingField';
@@ -190,15 +192,15 @@ const Field = ({
               keyGetter={(v) => v.federationprefix}
             />
           );
-        case 'Lots':
+        case 'PolicyDefinitions':
           return (
             <ObjectField
               focused={focused}
-              onChange={handleChange<Lot[]>}
+              onChange={handleChange<PolicyDefinition[]>}
               name={name}
-              value={value as Lot[]}
-              Form={LotForm}
-              keyGetter={(v) => v.lotname}
+              value={value as PolicyDefinition[]}
+              Form={PolicyDefinitionForm}
+              keyGetter={(v) => v.policyname}
             />
           );
         default:
