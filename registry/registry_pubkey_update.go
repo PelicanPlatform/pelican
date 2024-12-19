@@ -337,19 +337,23 @@ func updateNamespacesPubKey(ctx *gin.Context) {
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("You don't have permission to update the registered public key of the prefix: %v", err),
 				})
+			return
 		} else if errors.As(err, &badRequestError{}) {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    fmt.Sprintf("Bad request for key-sign challenge: %v", err),
 			})
+			return
 		} else {
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    fmt.Sprintf("Server encountered an error during key-sign challenge: %v", err),
 			})
 			log.Warningf("Failed to complete key sign challenge without identity requirement: %v", err)
+			return
 		}
 	} else {
 		ctx.JSON(http.StatusOK, res)
+		return
 	}
 }
