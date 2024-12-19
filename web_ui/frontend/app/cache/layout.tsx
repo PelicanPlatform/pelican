@@ -26,7 +26,7 @@ import IconButton from '@mui/material/IconButton';
 import BuildIcon from '@mui/icons-material/Build';
 import Main from '@/components/layout/Main';
 import { PaddedContent } from '@/components/layout';
-import { Dashboard, MapOutlined } from '@mui/icons-material';
+import { Dashboard, Equalizer, MapOutlined } from '@mui/icons-material';
 
 export const metadata = {
   title: 'Pelican Cache',
@@ -43,6 +43,9 @@ export default function RootLayout({
       <Sidebar>
         <ButtonLink title={'Cache'} href={'/cache/'}>
           <Dashboard />
+        </ButtonLink>
+        <ButtonLink title={'Metrics'} href={'/cache/metrics/'}>
+          <Equalizer />
         </ButtonLink>
         <ButtonLink title={'Config'} href={'/config/'}>
           <BuildIcon />

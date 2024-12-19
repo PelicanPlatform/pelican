@@ -1,8 +1,11 @@
 import { Grid, Paper } from '@mui/material';
 import { green } from '@mui/material/colors';
 
-import { ProjectTable } from '@/app/origin/metrics/components';
-import { BigBytesMetric } from '@/app/origin/metrics/components/BigNumber';
+import {
+  ProjectTable,
+  BigBytesMetric
+} from '@/components/metrics';
+
 import {
   BytesMetricBoxPlot,
   MetricBoxPlot,
