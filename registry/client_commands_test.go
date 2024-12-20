@@ -303,6 +303,8 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 }
 
 func TestRegistryKeyChainingOSDF(t *testing.T) {
+	config.ResetIssuerJWKPtr()
+	config.ResetIssuerPrivateKeys()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		func() { require.NoError(t, egrp.Wait()) }()
@@ -311,12 +313,15 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 		config.ResetIssuerPrivateKeys()
 		server_utils.ResetTestState()
 	})
-	config.ResetIssuerJWKPtr()
-	config.ResetIssuerPrivateKeys()
-	server_utils.ResetTestState()
 
+	server_utils.ResetTestState()
 	_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 	assert.NoError(t, err)
+	viper.Set("Federation.DirectorUrl", "https://osdf-director.osg-htc.org")
+	viper.Set("Federation.RegistryUrl", "https://osdf-registry.osg-htc.org")
+	viper.Set("Federation.JwkUrl", "https://osg-htc.org/osdf/public_signing_key.jwks")
+	viper.Set("Federation.BrokerUrl", "https://osdf-director.osg-htc.org")
+
 	// On by default, but just to make things explicit
 	viper.Set("Registry.RequireKeyChaining", true)
 
