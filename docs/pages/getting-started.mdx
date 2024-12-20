@@ -1,0 +1,39 @@
+# Getting Started
+
+This page is intended to help users and administrators find the right documentation to accomplish what they need to. Each section header describes the
+type of actions that section is intended to help with.
+
+## Getting Existing Data From An Existing Federation
+
+Objects are referenced in Pelican using `pelican://`-schemed URLs, which help Pelican clients identify the correct federation and routing information
+they need to find the source of any object. Whether you know the `pelican://`-url name of your object or not, you can find a quick tutorial for interacting
+with data using the Pelican command line client at [Accessing Data](./getting-started/accessing-data.mdx).
+
+For more complete walkthrough of Pelican's clients, see [Getting Data with Pelican](./getting-data-with-pelican.mdx), which discusses each of Pelican's
+clients and explains how to find detailed documentation for each.
+
+## Adding Your Data To an Existing Federation
+
+Integrating your data with a Pelican federation starts by serving an Origin in front of whatever service already holds the data. Origins are a critical
+component in Pelican federations because they act as the adapter plug that lets a broad variety of storage technologies (posix, S3, HTTP, Globus, etc) 
+interact with Pelican's clients and caching infrastructure.
+
+For a more complete discussion of Origins and how you can run your own, see [Federating Your Data](./federating-your-data.mdx).
+
+## Sharing Your Storage Resources
+
+Pelican federations are built from the ground up with distributed object caching in mind. This lets well-established federations like the [OSDF](https://osdf.osg-htc.org/),
+where there are many highly-performant cache machines plugged directly into network backbones like ESNet and Internet2, operate much more efficiently.
+
+If you or your campus have a storage allocation through something like the NSF's [CC*](https://new.nsf.gov/funding/opportunities/cc-campus-cyberinfrastructure) program, or
+you're otherwise interested in establish a cache for your institution or the broader OSDF, see our documentation titled [Cache](./operating-a-federation/cache.mdx) for more
+information.
+
+## Starting Your Own Federation
+
+The process of running/managing a Pelican data federation involves setting up two primary services: a Registry and a Director.
+These services are called the federation's "Central Services", and together they handle the registration/verification of Caches and Origins (Registry),
+and maintaining an understanding of where clients should be sent to interact with data (Director).
+
+For information on serving a Director, see the section titled [Director](./operating-a-federation/director.mdx). For information on serving a Registry, see
+the section titled [Registry](./operating-a-federation/registry.mdx).

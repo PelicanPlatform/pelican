@@ -1,6 +1,6 @@
 {
   "index": "About Pelican",
-  "core-concepts": "Core Concepts",
+  "core-concepts": "Core Concepts & Terminology",
   "install": "Installing Pelican",
   "parameters": "Configuration",
   "getting-started": "Getting Started",
@@ -9,5 +9,6 @@
   "operating-a-federation":"Operating a Federation",
   "monitoring-pelican-services": "Monitoring Pelican Services",
   "advanced-usage": "Advanced Usage",
+  "faq": "FAQ",
   "api-docs": "API Documentation"
 }
