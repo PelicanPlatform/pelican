@@ -84,6 +84,10 @@ func UpdatePreviousIssuerPrivateJWK() {
 	}
 }
 
+func ResetPreviousIssuerPrivateJWK() {
+	previousIssuerPrivateJWK.Store(nil)
+}
+
 // Set a private key as the active private key in use
 func SetActiveKey(key jwk.Key) {
 	issuerPrivateJWK.Store(&key)
@@ -122,6 +126,10 @@ func getCurrentIssuerKeysDir() string {
 
 func setCurrentIssuerKeysDir(dir string) {
 	currentIssuerKeysDir.Store(dir)
+}
+
+func ResetCurrentIssuerKeysDir() {
+	currentIssuerKeysDir.Store(nil)
 }
 
 // Helper function to generate random string

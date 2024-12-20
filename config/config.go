@@ -1641,6 +1641,10 @@ func ResetConfig() {
 	globalFedErr = nil
 
 	ResetIssuerJWKPtr()
+	ResetIssuerPrivateKeys()
+	ResetPreviousIssuerPrivateJWK()
+	ResetCurrentIssuerKeysDir()
+
 	ResetClientInitialized()
 
 	// other than what's above, resetting Origin exports will be done by ResetTestState() in server_utils pkg
