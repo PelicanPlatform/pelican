@@ -424,9 +424,9 @@ func TestRegistryKeyChaining(t *testing.T) {
 		registrySvr.Close()
 	}()
 
-	_, err := config.GetIssuerPublicJWKS()
-	require.NoError(t, err)
 	privKey, err := config.GetIssuerPrivateJWK()
+	require.NoError(t, err)
+	_, err = config.GetIssuerPublicJWKS()
 	require.NoError(t, err)
 
 	// Start by registering /foo/bar with the default key
