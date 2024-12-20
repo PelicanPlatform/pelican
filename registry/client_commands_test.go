@@ -45,8 +45,6 @@ import (
 func registryMockup(ctx context.Context, t *testing.T, testName string) *httptest.Server {
 	issuerTempDir := filepath.Join(t.TempDir(), testName)
 
-	ikey := filepath.Join(issuerTempDir, "issuer.jwk")
-	viper.Set("IssuerKey", ikey)
 	ikeyDir := filepath.Join(issuerTempDir, "issuer-keys")
 	viper.Set("IssuerKeysDirectory", ikeyDir)
 	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
@@ -368,6 +366,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	assert.Contains(t, err.Error(), "A superspace or subspace of this namespace /topo/foo already exists in the OSDF topology: /topo/foo. To register a Pelican equivalence, you need to present your identity.")
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
+	viper.Set("IssuerKey", t.TempDir()+"/keychaining.jwk")
 	viper.Set("IssuerKeysDirectory", t.TempDir()+"/keychaining")
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
@@ -440,6 +439,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 	require.NoError(t, err)
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
+	viper.Set("IssuerKey", t.TempDir()+"/keychaining.jwk")
 	viper.Set("IssuerKeysDirectory", t.TempDir()+"/keychaining")
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
