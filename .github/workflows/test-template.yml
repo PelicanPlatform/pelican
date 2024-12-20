@@ -42,7 +42,7 @@ jobs:
     - name: Test
       run: |
         make web-build
-        go test -tags=${{ inputs.tags }} -timeout 15m -coverpkg=./... -coverprofile=${{ inputs.coverprofile }} -covermode=count ./registry/registry_db_test.go ./registry/client_commands_test.go
+        go test -tags=${{ inputs.tags }} -timeout 5m -coverpkg=./... -coverprofile=${{ inputs.coverprofile }} -covermode=count ./registry/registry_db_test.go ./registry/client_commands_test.go
     - name: Get total code coverage
       if: github.event_name == 'pull_request'
       id: cc
@@ -67,7 +67,7 @@ jobs:
         git reset --hard ${{ github.event.pull_request.base.sha }}
         make web-build
         go generate ./...
-        go test -tags=${{ inputs.tags }} -timeout 15m -coverpkg=./... -coverprofile=base_coverage.out -covermode=count ./registry/registry_db_test.go ./registry/client_commands_test.go
+        go test -tags=${{ inputs.tags }} -timeout 5m -coverpkg=./... -coverprofile=base_coverage.out -covermode=count ./registry/registry_db_test.go ./registry/client_commands_test.go
         go tool cover -func=base_coverage.out > unit-base.txt
         git reset --hard $HEAD
     - name: Get base code coverage value
