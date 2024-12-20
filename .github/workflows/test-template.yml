@@ -42,7 +42,7 @@ jobs:
     - name: Test
       run: |
         make web-build
-        go test -tags=${{ inputs.tags }} -timeout 15m -coverpkg=./... -coverprofile=${{ inputs.coverprofile }} -covermode=count ./...
+        go test -tags=${{ inputs.tags }} -timeout 5m -coverpkg=./... -coverprofile=${{ inputs.coverprofile }} -covermode=count ./...
     - name: Get total code coverage
       if: github.event_name == 'pull_request'
       id: cc
