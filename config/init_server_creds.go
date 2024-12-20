@@ -129,7 +129,7 @@ func setCurrentIssuerKeysDir(dir string) {
 }
 
 func ResetCurrentIssuerKeysDir() {
-	currentIssuerKeysDir.Store(nil)
+	currentIssuerKeysDir.Store("")
 }
 
 // Helper function to generate random string
