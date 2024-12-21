@@ -300,8 +300,8 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
-		func() { assert.NoError(t, egrp.Wait()) }()
 		cancel()
+		assert.NoError(t, egrp.Wait())
 		server_utils.ResetTestState()
 	})
 
@@ -398,8 +398,8 @@ func TestRegistryKeyChaining(t *testing.T) {
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
-		func() { assert.NoError(t, egrp.Wait()) }()
 		cancel()
+		assert.NoError(t, egrp.Wait())
 		server_utils.ResetTestState()
 	})
 
