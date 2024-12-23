@@ -36,6 +36,12 @@ func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int
 	return context.Background(), -1, errors.New("launching daemons is not supported on Windows")
 }
 
+func (launcher DaemonLauncher) KillFunc() func(pid int, sig int) error {
+	return func(pid int, sig int) error {
+		return errors.New("killing daemons is not supported on Windows")
+	}
+}
+
 func ForwardCommandToLogger(ctx context.Context, daemonName string, cmdStdout io.ReadCloser, cmdStderr io.ReadCloser) {
 	return
 }

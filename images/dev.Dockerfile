@@ -67,7 +67,7 @@ ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xroot
 
 # Define packages and install them. Note that they have to be installed in the same yum command to avoid
 # unresolvable dependencies.
-ENV PACKAGES="xrootd xrootd-libs xrootd-devel xrootd-server xrootd-server-devel xrootd-server-libs xrootd-client xrootd-client-libs xrootd-client-devel xrootd-scitokens xrootd-voms xrdcl-http"
+ENV PACKAGES="xrootd xrootd-libs xrootd-devel xrootd-server xrootd-server-devel xrootd-server-libs xrootd-client xrootd-client-libs xrootd-private-devel xrootd-client-devel xrootd-scitokens xrootd-voms xrdcl-http"
 RUN <<EOT
 set -ex
 package_urls=()
@@ -126,6 +126,19 @@ RUN \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
+
+# Similarly, install the XrdHttp plugin for Pelican
+RUN \
+    git clone https://github.com/PelicanPlatform/xrdhttp-pelican.git && \
+    cd xrdhttp-pelican && \
+    git checkout v0.0.2 && \
+    mkdir build && cd build && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    make install
+
+ADD https://api.github.com/repos/nlohmann/json/git/refs/heads/master /tmp/hash-json
+ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/heads/master /tmp/hash-json
+ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/heads/main /tmp/hash-json
 
 # LotMan Installation
 # First install dependencies
