@@ -895,7 +895,7 @@ func wildcardHandler(ctx *gin.Context) {
 
 		ctx.JSON(http.StatusOK, nsCfg)
 		return
-	} else if strings.HasSuffix(path, "/caches/allowed-prefixes") {
+	} else if strings.HasSuffix(path, "/caches/allowedPrefixes") {
 		getAllowedPrefixesForCachesHandler(ctx)
 		return
 	} else {
