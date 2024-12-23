@@ -36,23 +36,36 @@ import (
 )
 
 var (
-	// allowedPrefixesForCaches maps cahce hostnames to a list of prefixes the caches are allowed to serve.
-	allowedPrefixesForCaches atomic.Pointer[map[string][]string]
+	// allowedPrefixesForCaches maps cache hostnames to a set of prefixes the caches are allowed to serve.
+	allowedPrefixesForCaches atomic.Pointer[map[string]map[string]struct{}]
 	// allowedPrefixesForCachesLastSetTimestamp tracks when allowedPrefixesForCaches was last explicitly set.
 	allowedPrefixesForCachesLastSetTimestamp atomic.Int64
 )
 
 func init() {
-	emptyMap := make(map[string][]string)
+	emptyMap := make(map[string]map[string]struct{})
 	allowedPrefixesForCaches.Store(&emptyMap)
 
 	// Initialize allowedPrefixesForCachesLastSetTimestamp to 0 (indicating never set)
 	allowedPrefixesForCachesLastSetTimestamp.Store(0)
 }
 
+// convertListToSet converts a map of string to list of strings into a map of string to set of strings.
+func convertListToSet(input map[string][]string) map[string]map[string]struct{} {
+	result := make(map[string]map[string]struct{})
+	for key, list := range input {
+		set := make(map[string]struct{})
+		for _, item := range list {
+			set[item] = struct{}{}
+		}
+		result[key] = set
+	}
+	return result
+}
+
 // fetchAllowedPrefixesForCaches makes a request to the registry endpoint to retrieve
-// information about allowed prefixes for caches and returns the result.
-func fetchAllowedPrefixesForCaches(ctx context.Context) (map[string][]string, error) {
+// information about allowed prefixes for caches and returns the result as a map with sets.
+func fetchAllowedPrefixesForCaches(ctx context.Context) (map[string]map[string]struct{}, error) {
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
 		return nil, err
@@ -88,12 +101,11 @@ func fetchAllowedPrefixesForCaches(ctx context.Context) (map[string][]string, er
 		return nil, err
 	}
 
-	return result, nil
+	return convertListToSet(result), nil
 }
 
 // LaunchRegistryPeriodicQuery starts a new goroutine that periodically refreshes
 // the allowed prefixes for cache data maintained by the director in memory.
-// This can later be extended to include any registry data the director wants to maintain in memory.
 func LaunchRegistryPeriodicQuery(ctx context.Context, egrp *errgroup.Group) {
 	refreshInterval := param.Director_RegistryQueryInterval.GetDuration()
 
@@ -108,7 +120,7 @@ func LaunchRegistryPeriodicQuery(ctx context.Context, egrp *errgroup.Group) {
 
 	data, err := fetchAllowedPrefixesForCaches(ctx)
 	if err != nil {
-		ticker.Reset(1 * time.Second) // Higher frequency (10s)
+		ticker.Reset(1 * time.Second) // Higher frequency (1s)
 		log.Warningf("Error fetching allowed prefixes for caches data on first attempt: %v", err)
 		log.Debug("Switching to higher frequency (1s) for allowed prefixes for caches data fetch")
 	} else {

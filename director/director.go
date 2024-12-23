@@ -1033,15 +1033,8 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 					continue
 				}
 
-				allowed := false
-				for _, prefix := range prefixes {
-					if namespace.Path == prefix {
-						allowed = true
-						break
-					}
-				}
-
-				if allowed {
+				// Check if the namespace path exists in the allowed set
+				if _, allowed := prefixes[namespace.Path]; allowed {
 					filteredNamespaces = append(filteredNamespaces, namespace)
 				} else {
 					log.Warnf("Rejected namespace: cache hostname=%s, namespace path=%s", cacheHostname, namespace.Path)
