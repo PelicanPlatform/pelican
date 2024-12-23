@@ -21,11 +21,9 @@ package registry
 import (
 	"context"
 	"encoding/json"
-	"io"
-	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -67,149 +65,29 @@ func registryMockup(ctx context.Context, t *testing.T, testName string) *httptes
 	return svr
 }
 
-// func getSortedKids(ctx context.Context, jsonStr string) ([]string, error) {
-// 	set, err := jwk.Parse([]byte(jsonStr))
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	var kids []string
-// 	keysIter := set.Keys(ctx)
-// 	for keysIter.Next(ctx) {
-// 		key := keysIter.Pair().Value.(jwk.Key)
+func getSortedKids(ctx context.Context, jsonStr string) ([]string, error) {
+	set, err := jwk.Parse([]byte(jsonStr))
+	if err != nil {
+		return nil, err
+	}
+	var kids []string
+	keysIter := set.Keys(ctx)
+	for keysIter.Next(ctx) {
+		key := keysIter.Pair().Value.(jwk.Key)
 
-// 		kid, ok := key.Get("kid")
-// 		if !ok {
-// 			continue
-// 		}
-// 		kids = append(kids, kid.(string))
-// 	}
-// 	sort.Strings(kids)
+		kid, ok := key.Get("kid")
+		if !ok {
+			continue
+		}
+		kids = append(kids, kid.(string))
+	}
+	sort.Strings(kids)
 
-// 	return kids, nil
-// }
-
-func TestServeNamespaceRegistry(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	t.Cleanup(func() {
-		func() { require.NoError(t, egrp.Wait()) }()
-		cancel()
-		config.ResetIssuerJWKPtr()
-		config.ResetIssuerPrivateKeys()
-		server_utils.ResetTestState()
-	})
-	server_utils.ResetTestState()
-
-	svr := registryMockup(ctx, t, "serveregistry")
-	defer func() {
-		err := ShutdownRegistryDB()
-		assert.NoError(t, err)
-		svr.CloseClientConnections()
-		svr.Close()
-	}()
-
-	_, err := config.GetIssuerPublicJWKS()
-	require.NoError(t, err)
-	privKey, err := config.GetIssuerPrivateJWK()
-	require.NoError(t, err)
-
-	//Test functionality of registering a namespace (without identity)
-	err = NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/foo/bar", "mock_site_name")
-	require.NoError(t, err)
-	var privKey2 jwk.Key
-
-	//Test we can list the namespace without an error
-	t.Run("Test namespace list", func(t *testing.T) {
-		//Set up a buffer to capture stdout
-		var stdoutCapture string
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-
-		//List the namespaces
-		err = NamespaceList(svr.URL + "/api/v1.0/registry")
-		require.NoError(t, err)
-		w.Close()
-		os.Stdout = oldStdout
-
-		capturedOutput := make([]byte, 1024)
-		n, _ := r.Read(capturedOutput)
-		stdoutCapture = string(capturedOutput[:n])
-		assert.Contains(t, stdoutCapture, `"prefix":"/foo/bar"`)
-	})
-
-	t.Run("Test register namespace with sitename", func(t *testing.T) {
-		res, err := http.Get(svr.URL + "/api/v1.0/registry/foo/bar")
-		require.NoError(t, err)
-		require.Equal(t, http.StatusOK, res.StatusCode)
-		data, err := io.ReadAll(res.Body)
-		require.NoError(t, err)
-		ns := server_structs.Namespace{}
-		err = json.Unmarshal(data, &ns)
-		require.NoError(t, err)
-		assert.Equal(t, ns.AdminMetadata.SiteName, "mock_site_name")
-	})
-
-	t.Run("test-registered-namespace-pubkey-update-with-new-active-key", func(t *testing.T) {
-		activeKey, err := config.GetIssuerPrivateJWK()
-		require.NoError(t, err)
-		require.Equal(t, privKey.KeyID(), activeKey.KeyID())
-
-		// Imitate LaunchIssuerKeysDirRefresh function
-		config.UpdatePreviousIssuerPrivateJWK()
-		_, err = config.GeneratePEM(param.IssuerKeysDirectory.GetString())
-		require.NoError(t, err)
-		privKey2, err = config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
-		require.NoError(t, err)
-		err = NamespacesPubKeyUpdate(privKey2, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
-		require.NoError(t, err)
-	})
-
-	t.Run("test-registered-namespace-pubkey-update-with-nonsense-key", func(t *testing.T) {
-		tempDir := filepath.Join(t.TempDir(), "in_the_middle_of_nowhere")
-		privKey3, err := config.GeneratePEM(tempDir)
-		require.NoError(t, err)
-		err = NamespacesPubKeyUpdate(privKey3, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
-		require.ErrorContains(t, err, "it doesn't contain any public key matching the existing namespace's public key in db")
-	})
-
-	t.Run("test-registered-namespace-pubkey-update-with-imposter-key", func(t *testing.T) {
-		privKey4, err := config.GeneratePEMandSetActiveKey(param.IssuerKeysDirectory.GetString())
-		require.NoError(t, err)
-		config.UpdatePreviousIssuerPrivateJWK()
-		// Both active key and previous key are set to privKey4
-		err = NamespacesPubKeyUpdate(privKey4, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
-		require.ErrorContains(t, err, "it fails to pass the proof of possession verification")
-
-		// Revert the active key changes happened in this subtest
-		config.SetActiveKey(privKey)
-		config.UpdatePreviousIssuerPrivateJWK()
-		config.SetActiveKey(privKey2)
-	})
-
-	t.Run("Test namespace delete", func(t *testing.T) {
-		//Test functionality of namespace delete
-		err = NamespaceDelete(svr.URL+"/api/v1.0/registry/foo/bar", "/foo/bar")
-		require.NoError(t, err)
-		var stdoutCapture string
-		oldStdout := os.Stdout
-		r, w, _ := os.Pipe()
-		os.Stdout = w
-		err = NamespaceGet(svr.URL + "/api/v1.0/registry")
-		require.NoError(t, err)
-		w.Close()
-		os.Stdout = oldStdout
-
-		capturedOutput := make([]byte, 1024)
-		n, _ := r.Read(capturedOutput)
-		stdoutCapture = string(capturedOutput[:n])
-		assert.Equal(t, "[]\n", stdoutCapture)
-	})
-	server_utils.ResetTestState()
+	return kids, nil
 }
 
-// func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
+// func TestServeNamespaceRegistry(t *testing.T) {
 // 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-// 	server_utils.ResetTestState()
 // 	t.Cleanup(func() {
 // 		func() { require.NoError(t, egrp.Wait()) }()
 // 		cancel()
@@ -217,8 +95,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 // 		config.ResetIssuerPrivateKeys()
 // 		server_utils.ResetTestState()
 // 	})
-
-// 	tDir := t.TempDir()
+// 	server_utils.ResetTestState()
 
 // 	svr := registryMockup(ctx, t, "serveregistry")
 // 	defer func() {
@@ -228,78 +105,199 @@ func TestServeNamespaceRegistry(t *testing.T) {
 // 		svr.Close()
 // 	}()
 
-// 	config.ResetIssuerJWKPtr()
-// 	config.ResetIssuerPrivateKeys()
-// 	privKeys := config.GetIssuerPrivateKeys()
-// 	require.Len(t, privKeys, 0)
-
-// 	// Construct a client that has [p1,p2,p3] and p3 is the active private key
-// 	privKey1, err := config.GeneratePEMandSetActiveKey(param.IssuerKeysDirectory.GetString())
-// 	require.NotEmpty(t, privKey1)
+// 	_, err := config.GetIssuerPublicJWKS()
 // 	require.NoError(t, err)
-// 	privKey2, err := config.GeneratePEMandSetActiveKey(param.IssuerKeysDirectory.GetString())
+// 	privKey, err := config.GetIssuerPrivateJWK()
 // 	require.NoError(t, err)
 
-// 	prefix := "/mascot/bucky"
-// 	err = NamespaceRegister(privKey2, svr.URL+"/api/v1.0/registry", "", prefix, "mock_site_name")
+// 	//Test functionality of registering a namespace (without identity)
+// 	err = NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/foo/bar", "mock_site_name")
 // 	require.NoError(t, err)
+// 	var privKey2 jwk.Key
 
-// 	config.UpdatePreviousIssuerPrivateJWK()
-// 	privKey3, err := config.GeneratePEMandSetActiveKey(param.IssuerKeysDirectory.GetString())
-// 	require.NoError(t, err)
+// 	//Test we can list the namespace without an error
+// 	t.Run("Test namespace list", func(t *testing.T) {
+// 		//Set up a buffer to capture stdout
+// 		var stdoutCapture string
+// 		oldStdout := os.Stdout
+// 		r, w, _ := os.Pipe()
+// 		os.Stdout = w
 
-// 	// Construct a public keys JWKS [p2,p4] to save in registry DB, imitating admin manually adding p4
-// 	registryDbJwks := jwk.NewSet()
-// 	pubKey2, err := jwk.PublicKeyOf(privKey2)
-// 	require.NoError(t, err)
-// 	err = registryDbJwks.AddKey(pubKey2)
-// 	require.NoError(t, err)
-// 	privKey4, err := config.GeneratePEM(filepath.Join(tDir, "elsewhere"))
-// 	require.NoError(t, err)
-// 	pubKey4, err := jwk.PublicKeyOf(privKey4)
-// 	require.NoError(t, err)
-// 	err = registryDbJwks.AddKey(pubKey4)
-// 	require.NoError(t, err)
-// 	jwksBytes, err := json.Marshal(registryDbJwks)
-// 	require.NoError(t, err)
-// 	jwksStr := string(jwksBytes)
+// 		//List the namespaces
+// 		err = NamespaceList(svr.URL + "/api/v1.0/registry")
+// 		require.NoError(t, err)
+// 		w.Close()
+// 		os.Stdout = oldStdout
 
-// 	// Test functionality of a namespace registered with multi public keys [p2,p4]
-// 	err = setNamespacePubKey(prefix, jwksStr) // set the registered public keys to [p2,p4]
-// 	require.NoError(t, err)
-// 	ns, err := getNamespaceByPrefix(prefix)
-// 	require.NoError(t, err)
-// 	require.Equal(t, jwksStr, ns.Pubkey)
+// 		capturedOutput := make([]byte, 1024)
+// 		n, _ := r.Read(capturedOutput)
+// 		stdoutCapture = string(capturedOutput[:n])
+// 		assert.Contains(t, stdoutCapture, `"prefix":"/foo/bar"`)
+// 	})
 
-// 	prevKey := config.GetPreviousIssuerPrivateJWK()
-// 	require.Equal(t, privKey2.KeyID(), prevKey.KeyID())
-// 	privKeys = config.GetIssuerPrivateKeys()
-// 	require.Len(t, privKeys, 3)
+// 	t.Run("Test register namespace with sitename", func(t *testing.T) {
+// 		res, err := http.Get(svr.URL + "/api/v1.0/registry/foo/bar")
+// 		require.NoError(t, err)
+// 		require.Equal(t, http.StatusOK, res.StatusCode)
+// 		data, err := io.ReadAll(res.Body)
+// 		require.NoError(t, err)
+// 		ns := server_structs.Namespace{}
+// 		err = json.Unmarshal(data, &ns)
+// 		require.NoError(t, err)
+// 		assert.Equal(t, ns.AdminMetadata.SiteName, "mock_site_name")
+// 	})
 
-// 	// Client allKeys:[p1,p2,p3] prevKey:p2 activeKey:p3 ---UPDATE--> Registry [p2,p4]
-// 	// => should update Registry to [p3,p4] (rotate out prevKey:p2, rotate in activeKey:p3)
-// 	err = NamespacesPubKeyUpdate(privKey3, []string{prefix}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
-// 	require.NoError(t, err)
-// 	ns, err = getNamespaceByPrefix(prefix)
-// 	require.NoError(t, err)
+// 	t.Run("test-registered-namespace-pubkey-update-with-new-active-key", func(t *testing.T) {
+// 		activeKey, err := config.GetIssuerPrivateJWK()
+// 		require.NoError(t, err)
+// 		require.Equal(t, privKey.KeyID(), activeKey.KeyID())
 
-// 	expectedJwks := jwk.NewSet()
-// 	pubKey3, err := jwk.PublicKeyOf(privKey3)
-// 	require.NoError(t, err)
-// 	err = expectedJwks.AddKey(pubKey3)
-// 	require.NoError(t, err)
-// 	err = expectedJwks.AddKey(pubKey4)
-// 	require.NoError(t, err)
-// 	expectedJwksBytes, err := json.Marshal(expectedJwks)
-// 	require.NoError(t, err)
-// 	expectedJwksStr := string(expectedJwksBytes)
+// 		// Imitate LaunchIssuerKeysDirRefresh function
+// 		config.UpdatePreviousIssuerPrivateJWK()
+// 		_, err = config.GeneratePEM(param.IssuerKeysDirectory.GetString())
+// 		require.NoError(t, err)
+// 		privKey2, err = config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
+// 		require.NoError(t, err)
+// 		err = NamespacesPubKeyUpdate(privKey2, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
+// 		require.NoError(t, err)
+// 	})
 
-// 	expectedKids, err := getSortedKids(ctx, expectedJwksStr)
-// 	require.NoError(t, err)
-// 	actualKids, err := getSortedKids(ctx, ns.Pubkey)
-// 	require.NoError(t, err)
-// 	require.Equal(t, expectedKids, actualKids)
+// 	t.Run("test-registered-namespace-pubkey-update-with-nonsense-key", func(t *testing.T) {
+// 		tempDir := filepath.Join(t.TempDir(), "in_the_middle_of_nowhere")
+// 		privKey3, err := config.GeneratePEM(tempDir)
+// 		require.NoError(t, err)
+// 		err = NamespacesPubKeyUpdate(privKey3, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
+// 		require.ErrorContains(t, err, "it doesn't contain any public key matching the existing namespace's public key in db")
+// 	})
+
+// 	t.Run("test-registered-namespace-pubkey-update-with-imposter-key", func(t *testing.T) {
+// 		privKey4, err := config.GeneratePEMandSetActiveKey(param.IssuerKeysDirectory.GetString())
+// 		require.NoError(t, err)
+// 		config.UpdatePreviousIssuerPrivateJWK()
+// 		// Both active key and previous key are set to privKey4
+// 		err = NamespacesPubKeyUpdate(privKey4, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
+// 		require.ErrorContains(t, err, "it fails to pass the proof of possession verification")
+
+// 		// Revert the active key changes happened in this subtest
+// 		config.SetActiveKey(privKey)
+// 		config.UpdatePreviousIssuerPrivateJWK()
+// 		config.SetActiveKey(privKey2)
+// 	})
+
+// 	t.Run("Test namespace delete", func(t *testing.T) {
+// 		//Test functionality of namespace delete
+// 		err = NamespaceDelete(svr.URL+"/api/v1.0/registry/foo/bar", "/foo/bar")
+// 		require.NoError(t, err)
+// 		var stdoutCapture string
+// 		oldStdout := os.Stdout
+// 		r, w, _ := os.Pipe()
+// 		os.Stdout = w
+// 		err = NamespaceGet(svr.URL + "/api/v1.0/registry")
+// 		require.NoError(t, err)
+// 		w.Close()
+// 		os.Stdout = oldStdout
+
+// 		capturedOutput := make([]byte, 1024)
+// 		n, _ := r.Read(capturedOutput)
+// 		stdoutCapture = string(capturedOutput[:n])
+// 		assert.Equal(t, "[]\n", stdoutCapture)
+// 	})
+// 	server_utils.ResetTestState()
 // }
+
+func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	server_utils.ResetTestState()
+	t.Cleanup(func() {
+		func() { require.NoError(t, egrp.Wait()) }()
+		cancel()
+		config.ResetIssuerJWKPtr()
+		config.ResetIssuerPrivateKeys()
+		server_utils.ResetTestState()
+	})
+
+	tDir := t.TempDir()
+
+	svr := registryMockup(ctx, t, "serveregistry")
+	defer func() {
+		err := ShutdownRegistryDB()
+		assert.NoError(t, err)
+		svr.CloseClientConnections()
+		svr.Close()
+	}()
+
+	config.ResetIssuerJWKPtr()
+	config.ResetIssuerPrivateKeys()
+	privKeys := config.GetIssuerPrivateKeys()
+	require.Len(t, privKeys, 0)
+
+	// Construct a client that has [p1,p2,p3] and p3 is the active private key
+	privKey1, err := config.GeneratePEMandSetActiveKey(param.IssuerKeysDirectory.GetString())
+	require.NotEmpty(t, privKey1)
+	require.NoError(t, err)
+	privKey2, err := config.GeneratePEMandSetActiveKey(param.IssuerKeysDirectory.GetString())
+	require.NoError(t, err)
+
+	prefix := "/mascot/bucky"
+	err = NamespaceRegister(privKey2, svr.URL+"/api/v1.0/registry", "", prefix, "mock_site_name")
+	require.NoError(t, err)
+
+	config.UpdatePreviousIssuerPrivateJWK()
+	privKey3, err := config.GeneratePEMandSetActiveKey(param.IssuerKeysDirectory.GetString())
+	require.NoError(t, err)
+
+	// Construct a public keys JWKS [p2,p4] to save in registry DB, imitating admin manually adding p4
+	registryDbJwks := jwk.NewSet()
+	pubKey2, err := jwk.PublicKeyOf(privKey2)
+	require.NoError(t, err)
+	err = registryDbJwks.AddKey(pubKey2)
+	require.NoError(t, err)
+	privKey4, err := config.GeneratePEM(filepath.Join(tDir, "elsewhere"))
+	require.NoError(t, err)
+	pubKey4, err := jwk.PublicKeyOf(privKey4)
+	require.NoError(t, err)
+	err = registryDbJwks.AddKey(pubKey4)
+	require.NoError(t, err)
+	jwksBytes, err := json.Marshal(registryDbJwks)
+	require.NoError(t, err)
+	jwksStr := string(jwksBytes)
+
+	// Test functionality of a namespace registered with multi public keys [p2,p4]
+	err = setNamespacePubKey(prefix, jwksStr) // set the registered public keys to [p2,p4]
+	require.NoError(t, err)
+	ns, err := getNamespaceByPrefix(prefix)
+	require.NoError(t, err)
+	require.Equal(t, jwksStr, ns.Pubkey)
+
+	prevKey := config.GetPreviousIssuerPrivateJWK()
+	require.Equal(t, privKey2.KeyID(), prevKey.KeyID())
+	privKeys = config.GetIssuerPrivateKeys()
+	require.Len(t, privKeys, 3)
+
+	// Client allKeys:[p1,p2,p3] prevKey:p2 activeKey:p3 ---UPDATE--> Registry [p2,p4]
+	// => should update Registry to [p3,p4] (rotate out prevKey:p2, rotate in activeKey:p3)
+	err = NamespacesPubKeyUpdate(privKey3, []string{prefix}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
+	require.NoError(t, err)
+	ns, err = getNamespaceByPrefix(prefix)
+	require.NoError(t, err)
+
+	expectedJwks := jwk.NewSet()
+	pubKey3, err := jwk.PublicKeyOf(privKey3)
+	require.NoError(t, err)
+	err = expectedJwks.AddKey(pubKey3)
+	require.NoError(t, err)
+	err = expectedJwks.AddKey(pubKey4)
+	require.NoError(t, err)
+	expectedJwksBytes, err := json.Marshal(expectedJwks)
+	require.NoError(t, err)
+	expectedJwksStr := string(expectedJwksBytes)
+
+	expectedKids, err := getSortedKids(ctx, expectedJwksStr)
+	require.NoError(t, err)
+	actualKids, err := getSortedKids(ctx, ns.Pubkey)
+	require.NoError(t, err)
+	require.Equal(t, expectedKids, actualKids)
+}
 
 func TestRegistryKeyChainingOSDF(t *testing.T) {
 	server_utils.ResetTestState()
