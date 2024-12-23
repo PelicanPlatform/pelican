@@ -24,7 +24,9 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 )
 
@@ -40,8 +42,11 @@ type User struct {
 var (
 	isRootExec bool
 
-	xrootdUser User
-	oa4mpUser  User
+	xrootdUser  User
+	oa4mpUser   User
+	pelicanUser User
+
+	pelicanOnce sync.Once
 )
 
 func init() {
@@ -50,16 +55,20 @@ func init() {
 
 	xrootdUser = newUser()
 	oa4mpUser = newUser()
+	pelicanUser = newUser()
 
 	if isRootExec {
 		xrootdUser = initUserObject("xrootd", nil)
 		oa4mpUser = initUserObject("tomcat", nil)
+		pelicanUser = initUserObject("root", nil)
 	} else if err != nil {
 		xrootdUser.err = err
 		oa4mpUser.err = err
+		pelicanUser.err = err
 	} else {
 		xrootdUser = initUserObject(userObj.Username, userObj)
 		oa4mpUser = initUserObject(userObj.Username, userObj)
+		pelicanUser = initUserObject(userObj.Username, userObj)
 	}
 }
 
@@ -176,4 +185,13 @@ func GetDaemonGroup() (string, error) {
 
 func GetOA4MPUser() (User, error) {
 	return oa4mpUser, oa4mpUser.err
+}
+
+func GetPelicanUser() (User, error) {
+	pelicanOnce.Do(func() {
+		if param.Server_DropPrivileges.GetBool() {
+			pelicanUser = initUserObject(param.Server_UnprivilegedUser.GetString(), nil)
+		}
+	})
+	return pelicanUser, pelicanUser.err
 }

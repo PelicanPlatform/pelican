@@ -21,6 +21,7 @@ package config
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"syscall"
 
@@ -98,6 +99,89 @@ func MkdirAll(path string, perm os.FileMode, uid int, gid int) error {
 			return errors.Wrapf(err, "Failed to chown directory %v to groupname %v",
 				path, groupname)
 		}
+	}
+	return nil
+}
+
+func setFileAndDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, uid int, gid int, recursive bool) error {
+	dirs := map[string]bool{}
+	for _, path := range paths {
+		dir := filepath.Dir(path)
+		err := MkdirAll(dir, dirPerm, uid, gid)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to create directory %v", dir)
+		}
+		err = os.Chmod(dir, dirPerm)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to set permissions on directory %v", dir)
+		}
+		if err = os.Chown(dir, uid, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown directory %v", dir)
+		}
+		if recursive {
+			dirs[dir] = true
+		}
+		if err = os.Chmod(path, perm); err != nil {
+			return errors.Wrapf(err, "Failed to set permissions on file %v", path)
+		}
+		if err = os.Chown(path, uid, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown file %v", path)
+		}
+	}
+	for dir := range dirs {
+		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			itemPerm := perm
+			if d.IsDir() {
+				itemPerm = dirPerm
+			}
+			if err = os.Chmod(path, itemPerm); err != nil {
+				return errors.Wrapf(err, "Failed to set permissions on directory %v", path)
+			}
+			if err = os.Chown(path, uid, gid); err != nil {
+				return errors.Wrapf(err, "Failed to chown directory %v", path)
+			}
+			return nil
+		})
+	}
+	return nil
+}
+
+func setDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, uid int, gid int, recursive bool) error {
+	dirs := map[string]bool{}
+	for _, path := range paths {
+		dirs[path] = true
+	}
+	for dir := range dirs {
+		err := MkdirAll(dir, dirPerm, uid, gid)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to create directory %v", dir)
+		}
+		err = os.Chmod(dir, dirPerm)
+		if err != nil {
+			return errors.Wrapf(err, "Failed to set permissions on directory %v", dir)
+		}
+		if err = os.Chown(dir, uid, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown directory %v", dir)
+		}
+		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			itemPerm := perm
+			if d.IsDir() {
+				itemPerm = dirPerm
+			}
+			if err = os.Chmod(path, itemPerm); err != nil {
+				return errors.Wrapf(err, "Failed to set permissions on directory %v", path)
+			}
+			if err = os.Chown(path, uid, gid); err != nil {
+				return errors.Wrapf(err, "Failed to chown directory %v", path)
+			}
+			return nil
+		})
 	}
 	return nil
 }
