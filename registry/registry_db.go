@@ -292,7 +292,7 @@ func getAllowedPrefixesForCaches() (map[string][]string, error) {
 
 	for _, namespace := range namespaces {
 		// Remove "/caches" from the beginning of the Prefix
-		cacheHostname := strings.TrimPrefix(namespace.Prefix, "/caches")
+		cacheHostname := strings.TrimPrefix(namespace.Prefix, "/caches/")
 
 		allowedPrefixesRaw, exists := namespace.CustomFields["AllowedPrefixes"]
 		if !exists {

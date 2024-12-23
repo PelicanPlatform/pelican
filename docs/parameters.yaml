@@ -1633,6 +1633,14 @@ default: 10000
 hidden: true
 components: ["director"]
 ---
+name: Director.RegistryQueryInterval
+description: |+
+  Defines the interval at which the director queries the registry to refresh its in-memory cache.
+type: duration
+hidden: true
+default: 1m
+components: ["director"]
+---
 ############################
 #  Registry-level configs  #
 ############################

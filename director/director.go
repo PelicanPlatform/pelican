@@ -998,6 +998,67 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		adV2 = server_structs.ConvertOriginAdV1ToV2(ad)
 	}
 
+	// FilterAdvertisedNamespaces filters the advertised namespaces based on the
+	// allowed prefixes for cache data retrieved from the registry.
+	if sType == server_structs.CacheType {
+		// Parse URL to extract hostname
+		parsedURL, err := url.Parse(adV2.DataURL)
+		if err != nil {
+			log.Warnf("Invalid URL: %s, error: %v", adV2.DataURL, err)
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Invalid %s registration: %s", sType, err.Error()),
+			})
+			return
+		}
+		cacheHostname := parsedURL.Hostname()
+
+		currentPrefixesMap := allowedPrefixesForCaches.Load()
+		if currentPrefixesMap == nil {
+			log.Warn("Allowed prefixes for caches data is not initialized")
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Allowed prefixes for caches data is not initialized for %s", sType),
+			})
+			return
+		}
+
+		if prefixes, exists := (*currentPrefixesMap)[cacheHostname]; exists {
+			filteredNamespaces := []server_structs.NamespaceAdV2{}
+
+			for _, namespace := range adV2.Namespaces {
+				// Default allow for paths starting with "/pelican/"
+				if strings.HasPrefix(namespace.Path, "/pelican/") {
+					filteredNamespaces = append(filteredNamespaces, namespace)
+					continue
+				}
+
+				allowed := false
+				for _, prefix := range prefixes {
+					if namespace.Path == prefix {
+						allowed = true
+						break
+					}
+				}
+
+				if allowed {
+					filteredNamespaces = append(filteredNamespaces, namespace)
+				} else {
+					log.Warnf("Rejected namespace: cache hostname=%s, namespace path=%s", cacheHostname, namespace.Path)
+				}
+			}
+
+			adV2.Namespaces = filteredNamespaces
+		} else {
+			log.Warnf("Cache hostname not found in AllowedPrefixesForCaches: %s", cacheHostname)
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Cache hostname not found in AllowedPrefixesForCaches: %s", cacheHostname),
+			})
+			return
+		}
+	}
+
 	// Set to ctx for metrics handler downstream
 	ctx.Set("serverName", adV2.Name)
 	ctx.Set("serverWebUrl", adV2.WebURL)
