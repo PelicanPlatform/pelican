@@ -2002,6 +2002,21 @@ type: bool
 default: false
 components: ["*"]
 ---
+name: Server.DropPrivileges
+description: |+
+  If the server has been started with root privileges, drop down to an unprivileged user.
+type: bool
+default: false
+components: ["*"]
+---
+name: Server.UnprivilegedUser
+description: |+
+  The user to run as after dropping root privileges.
+  This is only relevant if `Server.DropPrivileges` is set to true
+type: string
+default: pelican
+components: ["*"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################
