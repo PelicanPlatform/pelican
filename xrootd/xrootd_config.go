@@ -146,6 +146,7 @@ type (
 		TLSKey                    string
 		TLSCACertificateDirectory string
 		TLSCACertificateFile      string
+		DropPrivileges            bool
 	}
 
 	LoggingConfig struct {
@@ -463,7 +464,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 		}
 	}
 
-	if err = CopyXrootdCertificates(server); err != nil {
+	if err = copyXrootdCertificates(server); err != nil {
 		return err
 	}
 
@@ -529,12 +530,40 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	return nil
 }
 
+func writeX509Credentials(fp *os.File) error {
+	srcFile, err := os.Open(param.Server_TLSCertificateChain.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Failure when opening source certificate for xrootd")
+	}
+	defer srcFile.Close()
+
+	if _, err = io.Copy(fp, srcFile); err != nil {
+		return errors.Wrapf(err, "Failure when copying source certificate for xrootd")
+	}
+
+	if _, err = fp.Write([]byte{'\n', '\n'}); err != nil {
+		return errors.Wrap(err, "Failure when writing into copied key pair for xrootd")
+	}
+
+	srcKeyFile, err := os.Open(param.Server_TLSKey.GetString())
+	if err != nil {
+		return errors.Wrap(err, "Failure when opening source key for xrootd")
+	}
+	defer srcKeyFile.Close()
+
+	if _, err = io.Copy(fp, srcKeyFile); err != nil {
+		return errors.Wrapf(err, "Failure when copying source key for xrootd")
+	}
+
+	return nil
+}
+
 // Copies the server certificate/key files into the XRootD runtime
 // directory.  Combines the two files into a single one so the new
 // certificate shows up atomically from XRootD's perspective.
 // Adjusts the ownership and mode to match that expected
 // by the XRootD framework.
-func CopyXrootdCertificates(server server_structs.XRootDServer) error {
+func copyXrootdCertificates(server server_structs.XRootDServer) error {
 	user, err := config.GetDaemonUserInfo()
 	if err != nil {
 		return errors.Wrap(err, "Unable to copy certificates to xrootd runtime directory; failed xrootd user lookup")
@@ -561,32 +590,54 @@ func CopyXrootdCertificates(server server_structs.XRootDServer) error {
 		return errors.Wrap(err, "Failure when chown'ing certificate key pair file for xrootd")
 	}
 
-	srcFile, err := os.Open(param.Server_TLSCertificateChain.GetString())
-	if err != nil {
-		return errors.Wrap(err, "Failure when opening source certificate for xrootd")
-	}
-	defer srcFile.Close()
-
-	if _, err = io.Copy(destFile, srcFile); err != nil {
-		return errors.Wrapf(err, "Failure when copying source certificate for xrootd")
-	}
-
-	if _, err = destFile.Write([]byte{'\n', '\n'}); err != nil {
-		return errors.Wrap(err, "Failure when writing into copied key pair for xrootd")
-	}
-
-	srcKeyFile, err := os.Open(param.Server_TLSKey.GetString())
-	if err != nil {
-		return errors.Wrap(err, "Failure when opening source key for xrootd")
-	}
-	defer srcKeyFile.Close()
-
-	if _, err = io.Copy(destFile, srcKeyFile); err != nil {
-		return errors.Wrapf(err, "Failure when copying source key for xrootd")
+	if err = writeX509Credentials(destFile); err != nil {
+		return err
 	}
 
 	if err = os.Rename(tmpName, destination); err != nil {
 		return errors.Wrapf(err, "Failure when moving key pair for xrootd")
+	}
+
+	return nil
+}
+
+// After privileges have been dropped, copy the server certificates
+// to the xrootd process.
+func dropPrivilegeCopy(server server_structs.XRootDServer) error {
+
+	certFile := param.Server_TLSCertificateChain.GetString()
+	certKey := param.Server_TLSKey.GetString()
+	if _, err := tls.LoadX509KeyPair(certFile, certKey); err != nil {
+		return builtin_errors.Join(err, errBadKeyPair)
+	}
+
+	destination := filepath.Join(param.Origin_RunLocation.GetString(), "pelican")
+	if server.GetServerType().IsEnabled(server_structs.CacheType) {
+		destination = filepath.Join(param.Cache_RunLocation.GetString(), "pelican")
+	}
+	destination = filepath.Join(destination, "copied-tls-creds.crt")
+	destFile, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(0400))
+	if err != nil {
+		return errors.Wrap(err, "Failure when opening certificate key pair file to pass to xrootd")
+	}
+	defer destFile.Close()
+
+	if err = writeX509Credentials(destFile); err != nil {
+		return err
+	}
+
+	for idx := 0; idx < 2; idx++ {
+		rdDestFile, err := os.OpenFile(destination, os.O_RDONLY, fs.FileMode(0400))
+		if err != nil {
+			return errors.Wrap(err, "Failed to re-open the copied certificate key pair file as read-only")
+		}
+		isOrigin := true
+		if idx == 1 {
+			isOrigin = false
+		}
+		if err = sendChildFD(isOrigin, 2, rdDestFile); err != nil {
+			return errors.Wrap(err, "Failed to send the copied certificate key pair file to xrootd")
+		}
 	}
 
 	return nil
@@ -605,7 +656,12 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 		"xrootd maintenance",
 		sleepTime,
 		func(notifyEvent bool) error {
-			err := CopyXrootdCertificates(server)
+			var err error
+			if param.Server_DropPrivileges.GetBool() {
+				err = dropPrivilegeCopy(server)
+			} else {
+				err = copyXrootdCertificates(server)
+			}
 			if notifyEvent && errors.Is(err, errBadKeyPair) {
 				log.Debugln("Bad keypair encountered when doing xrootd certificate maintenance:", err)
 				return nil
@@ -792,10 +848,25 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		return "", err
 	}
 
-	runtimeCAs := filepath.Join(param.Origin_RunLocation.GetString(), "ca-bundle.crt")
+	// Set up the runtime CA bundle
+	runtimeCAs := filepath.Join(param.Origin_RunLocation.GetString())
 	if !isOrigin {
-		runtimeCAs = filepath.Join(param.Cache_RunLocation.GetString(), "ca-bundle.crt")
+		runtimeCAs = filepath.Join(param.Cache_RunLocation.GetString())
 	}
+	// If we plan to drop privileges, we'll write the CA bundle to a location that is owned
+	// by the pelican daemon.  Since it's going to be marked as world-readable, we don't need
+	// to periodically update it as the xrootd user like we do for the host key.
+	if param.Server_DropPrivileges.GetBool() {
+		runtimeCAs = filepath.Join(runtimeCAs, "pelican")
+		puser, err := config.GetPelicanUser()
+		if err != nil {
+			return "", err
+		}
+		if err = config.MkdirAll(runtimeCAs, 0755, puser.Uid, puser.Gid); err != nil {
+			return "", errors.Wrapf(err, "Unable to create runtime directory %v", runtimeCAs)
+		}
+	}
+	runtimeCAs = filepath.Join(runtimeCAs, "ca-bundle.crt")
 	egrpKey := string(config.EgrpKey)
 	caCount, err := utils.LaunchPeriodicWriteCABundle(ctx, egrpKey, runtimeCAs, 2*time.Minute)
 	if err != nil {

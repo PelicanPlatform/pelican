@@ -90,10 +90,23 @@ func (plauncher PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.C
 	if err != nil {
 		return ctx, -1, err
 	}
-	launcher := cap.NewLauncher(executable, []string{plauncher.Name(), "-f", "-s", pidFile, "-c", plauncher.configPath}, nil)
+
+	var env []string = nil
+	if plauncher.fds[1] != -1 {
+		env = []string{"XRDHTTP_PELICAN_INFO_FD=3"}
+	}
+
+	launcher := cap.NewLauncher(executable, []string{plauncher.Name(), "-f", "-s", pidFile, "-c", plauncher.configPath}, env)
 	launcher.Callback(func(attrs *syscall.ProcAttr, _ interface{}) error {
 		attrs.Files[1] = writeStdout.Fd()
 		attrs.Files[2] = writeStderr.Fd()
+		if plauncher.fds[1] != -1 {
+			if len(attrs.Files) < 3 {
+				attrs.Files = append(attrs.Files, uintptr(plauncher.fds[1]))
+			} else {
+				attrs.Files[3] = uintptr(plauncher.fds[1])
+			}
+		}
 		return nil
 	})
 	iab := cap.NewIAB()
