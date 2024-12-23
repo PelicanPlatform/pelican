@@ -280,6 +280,48 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 	return &ns, nil
 }
 
+func getAllowedPrefixesForCaches() (map[string][]string, error) {
+	var namespaces []server_structs.Namespace
+
+	err := db.Where("prefix LIKE ?", "/caches/%").Find(&namespaces).Error
+	if err != nil {
+		return nil, err
+	}
+
+	AllowedPrefixesForCachesMap := make(map[string][]string)
+
+	for _, namespace := range namespaces {
+		// Remove "/caches" from the beginning of the Prefix
+		cacheHostname := strings.TrimPrefix(namespace.Prefix, "/caches")
+
+		allowedPrefixesRaw, exists := namespace.CustomFields["AllowedPrefixes"]
+		if !exists {
+			continue // Skip if "AllowedPrefixes" key does not exist
+		}
+
+		allowedPrefixesInterface, ok := allowedPrefixesRaw.([]interface{})
+		if !ok {
+			continue
+		}
+
+		allowedPrefixes := make([]string, 0, len(allowedPrefixesInterface))
+		for _, prefix := range allowedPrefixesInterface {
+			strPrefix, ok := prefix.(string)
+			if ok {
+				allowedPrefixes = append(allowedPrefixes, strPrefix)
+			}
+		}
+
+		if len(allowedPrefixes) == 1 && allowedPrefixes[0] == "*" {
+			continue // Skip if the only value is "*"
+		}
+
+		AllowedPrefixesForCachesMap[cacheHostname] = allowedPrefixes
+	}
+
+	return AllowedPrefixesForCachesMap, nil
+}
+
 // Get a collection of namespaces by filtering against various non-default namespace fields
 // excluding Namespace.ID, Namespace.Identity, Namespace.Pubkey, and various dates
 //
