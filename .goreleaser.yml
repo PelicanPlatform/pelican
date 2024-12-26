@@ -239,6 +239,8 @@ nfpms:
               mode: 0755
               owner: pelican
               group: pelican
+        scripts:
+          preinstall: "scripts/preinstall-alpine.sh"
   # end package pelican
 
   - package_name: pelican-osdf-compat
