@@ -607,6 +607,8 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
+		allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
+
 		setupRequest(c, r, jsonad, token, server_structs.CacheType)
 
 		r.ServeHTTP(w, c.Request)
@@ -631,10 +633,11 @@ func TestDirectorRegistration(t *testing.T) {
 		// Define allowed prefixes
 		allowedPrefixes := map[string]map[string]struct{}{
 			"data-url.org": {
-				"/foo/bazz": {},
+				"/foo/baz": {},
 			},
 		}
 		allowedPrefixesForCaches.Store(&allowedPrefixes)
+		allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
 
 		// Create advertisement with namespaces
 		ad := server_structs.OriginAdvertiseV2{
@@ -648,7 +651,7 @@ func TestDirectorRegistration(t *testing.T) {
 					Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 				},
 				{
-					Path:   "/foo/bazz",
+					Path:   "/foo/baz",
 					Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 				},
 			},
@@ -675,19 +678,19 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.NotNil(t, namespaceAds, "NamespaceAds should not be nil")
 
 		foundFooBar := false
-		foundFooBazz := false
+		foundFooBaz := false
 
 		for _, ns := range namespaceAds {
 			if ns.Path == "/foo/bar" {
 				foundFooBar = true
 			}
-			if ns.Path == "/foo/bazz" {
-				foundFooBazz = true
+			if ns.Path == "/foo/baz" {
+				foundFooBaz = true
 			}
 		}
 
 		assert.False(t, foundFooBar, "Namespace with path /foo/bar should not be registered")
-		assert.True(t, foundFooBazz, "Namespace with path /foo/bazz should be registered")
+		assert.True(t, foundFooBaz, "Namespace with path /foo/baz should be registered")
 
 		teardown()
 	})

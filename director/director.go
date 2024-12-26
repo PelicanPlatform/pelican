@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -977,6 +978,29 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 			Msg:    "Incompatible versions detected: " + fmt.Sprintf("%v", err),
 		})
 		return
+	}
+
+	if sType == server_structs.CacheType {
+		if allowedPrefixesForCachesLastSetTimestamp.Load() == 0 {
+			log.Warning("Allowed prefixes for caches data is not set, waiting for it to be set before continuing with processing cache server ad.")
+			start := time.Now()
+			// Wait until last set timestamp is updated
+			for allowedPrefixesForCachesLastSetTimestamp.Load() == 0 {
+				if time.Since(start) >= 3*time.Second {
+					log.Error("Allowed prefixes for caches data was not set within the 3-second timeout")
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+		if time.Since(time.Unix(allowedPrefixesForCachesLastSetTimestamp.Load(), 0)) >= 15*time.Minute {
+			log.Error("Allowed prefixes for caches data is outdated, rejecting cache server ad.")
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Allowed prefixes for caches data is outdated",
+			})
+			return
+		}
 	}
 
 	ad := server_structs.OriginAdvertiseV1{}
