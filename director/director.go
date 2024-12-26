@@ -1042,13 +1042,6 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 			}
 
 			adV2.Namespaces = filteredNamespaces
-		} else {
-			log.Warnf("Cache hostname not found in AllowedPrefixesForCaches: %s", cacheHostname)
-			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Cache hostname not found in AllowedPrefixesForCaches: %s", cacheHostname),
-			})
-			return
 		}
 	}
 

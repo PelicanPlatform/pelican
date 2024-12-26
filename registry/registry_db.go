@@ -288,7 +288,7 @@ func getAllowedPrefixesForCaches() (map[string][]string, error) {
 		return nil, err
 	}
 
-	AllowedPrefixesForCachesMap := make(map[string][]string)
+	allowedPrefixesForCachesMap := make(map[string][]string)
 
 	for _, namespace := range namespaces {
 		// Remove "/caches" from the beginning of the Prefix
@@ -316,10 +316,10 @@ func getAllowedPrefixesForCaches() (map[string][]string, error) {
 			continue // Skip if the only value is "*"
 		}
 
-		AllowedPrefixesForCachesMap[cacheHostname] = allowedPrefixes
+		allowedPrefixesForCachesMap[cacheHostname] = allowedPrefixes
 	}
 
-	return AllowedPrefixesForCachesMap, nil
+	return allowedPrefixesForCachesMap, nil
 }
 
 // Get a collection of namespaces by filtering against various non-default namespace fields

@@ -748,6 +748,44 @@ func TestGetNamespacesByFilter(t *testing.T) {
 	})
 }
 
+func TestGetAllowedPrefixesForCaches(t *testing.T) {
+	setupMockRegistryDB(t)
+	defer teardownMockNamespaceDB(t)
+
+	mockCache1 := mockNamespace("/caches/cache1", "pubkey", "identity", server_structs.AdminMetadata{})
+	err := insertMockDBData([]server_structs.Namespace{mockCache1})
+	assert.NoError(t, err)
+
+	mockCache2 := mockNamespace("/caches/cache2", "pubkey", "identity", server_structs.AdminMetadata{})
+	cache2CustomFields := map[string]interface{}{
+		"AllowedPrefixes": []string{"*"},
+	}
+	mockCache2.CustomFields = cache2CustomFields
+	err = insertMockDBData([]server_structs.Namespace{mockCache2})
+	assert.NoError(t, err)
+
+	mockCache3 := mockNamespace("/caches/cache3", "pubkey", "identity", server_structs.AdminMetadata{})
+	cache3CustomFields := map[string]interface{}{
+		"AllowedPrefixes": []string{"/ns1", "/ns2/ns3"},
+	}
+	mockCache3.CustomFields = cache3CustomFields
+	err = insertMockDBData([]server_structs.Namespace{mockCache3})
+	assert.NoError(t, err)
+
+	allowedPrefixesForCachesMap, err := getAllowedPrefixesForCaches()
+	require.NoError(t, err)
+
+	_, exists := allowedPrefixesForCachesMap["cache1"]
+	assert.False(t, exists)
+
+	_, exists = allowedPrefixesForCachesMap["cache2"]
+	assert.False(t, exists)
+
+	actualPrefixes, exists := allowedPrefixesForCachesMap["cache3"]
+	assert.True(t, exists)
+	assert.ElementsMatch(t, cache3CustomFields["AllowedPrefixes"], actualPrefixes)
+}
+
 func TestGetNamespaceJwksByPrefix(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)

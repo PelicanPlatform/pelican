@@ -51,7 +51,7 @@ func init() {
 }
 
 // convertListToSet converts a map of string to list of strings into a map of string to set of strings.
-func convertListToSet(input map[string][]string) map[string]map[string]struct{} {
+func convertMapOfListToMapOfSet(input map[string][]string) map[string]map[string]struct{} {
 	result := make(map[string]map[string]struct{})
 	for key, list := range input {
 		set := make(map[string]struct{})
@@ -101,7 +101,7 @@ func fetchAllowedPrefixesForCaches(ctx context.Context) (map[string]map[string]s
 		return nil, err
 	}
 
-	return convertListToSet(result), nil
+	return convertMapOfListToMapOfSet(result), nil
 }
 
 // LaunchRegistryPeriodicQuery starts a new goroutine that periodically refreshes

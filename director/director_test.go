@@ -617,6 +617,81 @@ func TestDirectorRegistration(t *testing.T) {
 		teardown()
 	})
 
+	t.Run("cache-with-not-allowed-prefix-in-ad", func(t *testing.T) {
+		// Setup context and dependencies
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/caches/test", publicKey)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		// Define allowed prefixes
+		allowedPrefixes := map[string]map[string]struct{}{
+			"data-url.org": {
+				"/foo/bazz": {},
+			},
+		}
+		allowedPrefixesForCaches.Store(&allowedPrefixes)
+
+		// Create advertisement with namespaces
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name", // For web UI display
+			RegistryPrefix: "/caches/test",        // For registry lookup
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{
+				{
+					Path:   "/foo/bar",
+					Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+				},
+				{
+					Path:   "/foo/bazz",
+					Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+				},
+			},
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		// Initialize serverAds cache
+		serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
+
+		// Setup request and serve
+		setupRequest(c, r, jsonad, token, server_structs.CacheType)
+		r.ServeHTTP(w, c.Request)
+
+		// Validate response
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+
+		// Validate serverAds cache entry
+		adEntry := serverAds.Get("https://data-url.org")
+		assert.NotNil(t, adEntry, "Cache failed to register at serverAds")
+
+		namespaceAds := adEntry.Value().NamespaceAds
+		assert.NotNil(t, namespaceAds, "NamespaceAds should not be nil")
+
+		foundFooBar := false
+		foundFooBazz := false
+
+		for _, ns := range namespaceAds {
+			if ns.Path == "/foo/bar" {
+				foundFooBar = true
+			}
+			if ns.Path == "/foo/bazz" {
+				foundFooBazz = true
+			}
+		}
+
+		assert.False(t, foundFooBar, "Namespace with path /foo/bar should not be registered")
+		assert.True(t, foundFooBazz, "Namespace with path /foo/bazz should be registered")
+
+		teardown()
+	})
+
 	t.Run("origin-with-registryname", func(t *testing.T) {
 		c, r, w := setupContext()
 		pKey, token, _ := generateToken()
