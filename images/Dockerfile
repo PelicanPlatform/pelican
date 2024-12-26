@@ -64,15 +64,9 @@ RUN  yum install -y --enablerepo=osg-testing xrootd-devel xrootd-server-devel xr
 # the image
 ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/main /tmp/hash-xrdcl-pelican
 
-# Install xrdcl-pelican plugin and replace the xrdcl-http plugin
-# Ping the xrdcl-pelican plugin at a specific commit
+# Install xrdcl-pelican plugin
 RUN \
-    git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
-    cd xrdcl-pelican && \
-    git checkout v0.9.4 && \
-    mkdir build && cd build && \
-    cmake -DLIB_INSTALL_DIR=/usr/lib64 -DCMAKE_BUILD_TYPE=RelWithDebInfo .. && \
-    make && make install
+    yum install -y --enablerepo=osg-testing xrdcl-pelican
 
 ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/main /tmp/hash-xrootd-s3-http
 
@@ -179,7 +173,7 @@ ENV JAVA_HOME=/usr/lib/jvm/jre \
     PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
 
 # Copy xrdcl-pelican plugin config
-COPY --from=xrootd-plugin-builder /usr/local/etc/xrootd/client.plugins.d/pelican-plugin.conf /etc/xrootd/client.plugins.d/pelican-plugin.conf
+COPY --from=xrootd-plugin-builder /etc/xrootd/client.plugins.d/pelican-plugin.conf /etc/xrootd/client.plugins.d/pelican-plugin.conf
 # Remove http plugin to use pelican plugin
 RUN rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
 
