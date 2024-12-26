@@ -51,7 +51,7 @@ builds:
       - goos: darwin
         goarch: ppc64le
   # Set things up to build a second server binary that enables Lotman. Eventually
-  # we'll also use this to filter which moduels are built into the binary.
+  # we'll also use this to filter which modules are built into the binary.
   - env:
       - CGO_ENABLED=0
     goos:

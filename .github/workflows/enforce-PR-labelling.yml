@@ -30,7 +30,7 @@ jobs:
           REPO_NAME=$(jq -r '.repository.name' $GITHUB_EVENT_PATH)
           TIMELINE_JSON=$(curl -s "https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/issues/$PR_NUMBER/timeline")
 
-          # Count the number of times the timeline sees a "connected" event and subract the number of "disconnected" events
+          # Count the number of times the timeline sees a "connected" event and subtract the number of "disconnected" events
           # We might also consider using the "cross-referenced" event in the future if actual connecting/disconnecting is too heavy-handed
           LINKED_ISSUES=$(echo "$TIMELINE_JSON" | jq '
             reduce .[] as $event (

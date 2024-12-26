@@ -201,7 +201,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 	// and cut out a lot of this cruft
 
 	// Get the namespace by querying the director and checking the headers
-	errMsgPrefix := "the provided token is acceptible, but no owner could be determined because "
+	errMsgPrefix := "the provided token is acceptable, but no owner could be determined because "
 
 	fedInfo, err := config.GetFederation(context.Background())
 	if err != nil {

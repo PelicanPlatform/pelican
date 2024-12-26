@@ -5,8 +5,11 @@
 extend-ignore-identifiers-re = [
     ## Ignore TLAs. Two and three letter acronyms are not worth fixing.
     "^[A-Za-z]{2,3}$",
-    ## Ignore the 'dne' identifiers in server_utils/origin_test.go.
-    "(.*)_dne$",
+    ## Ignore lotman's use of 'ded' for 'dedicated'.
+    "^ded[A-Z]",
+    "^[a-z]+Ded",
+    ## Ignore server_utils's use of 'dne' for 'does not exist'.
+    "_dne$",
 ]
 
 [default.extend-identifiers]

@@ -797,7 +797,7 @@ func InitConfigDir(v *viper.Viper) {
 	configDir := v.GetString("ConfigDir")
 	if configDir == "" {
 		if IsRootExecution() {
-			configDir = "/etc/pelican" // We currently don't handle this case in windows, will be revisted in the future
+			configDir = "/etc/pelican" // We currently don't handle this case in windows, will be revisited in the future
 		} else {
 			configDir = getConfigBase()
 		}

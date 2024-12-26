@@ -2773,7 +2773,7 @@ description: |+
         - `CreationTime`: REQUIRED. A unix timestamp indicating when the lot should begin being considered valid. Times in the future indicate
           the lot should not be considered valid until that time.
         - `ExpirationTime`: REQUIRED. A unix timestamp indicating when the lot expires. Lots may continue to function after expiration, but lot
-          data owners should recognize the storage is at-will and may be pre-empted at any time.
+          data owners should recognize the storage is at-will and may be preempted at any time.
         - `DeletionTime`: REQUIRED. A unix timestamp indicating when the lot and its associated data should be deleted.
 
   For example, Lotman could be configured with the "my-policy" policy with the following:
