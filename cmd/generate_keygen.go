@@ -70,7 +70,7 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 
 	viper.Set(param.IssuerKeysDirectory.GetName(), privateKeyPath)
 
-	// GetIssuerPublicJWKS will generate the private key at IssuerKey if it does not exist
+	// GetIssuerPublicJWKS will generate the private key in IssuerKeysDirectory if it does not exist
 	// and parse the private key and generate the corresponding public key for us
 	pubkey, err := config.GetIssuerPublicJWKS()
 	if err != nil {

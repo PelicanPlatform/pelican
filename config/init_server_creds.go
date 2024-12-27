@@ -28,8 +28,8 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
-	mathrand "math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,6 +61,9 @@ var (
 
 	// Used to ensure initialization func init() is only called once
 	initOnce sync.Once
+
+	// Prevent race condition in issuer's private key update
+	updateKeyMutex sync.Mutex
 )
 
 // Reset the atomic pointer to issuer private jwk
@@ -68,6 +71,7 @@ func ResetIssuerJWKPtr() {
 	issuerPrivateJWK.Store(nil)
 }
 
+// Get issuer's previous active private key
 func GetPreviousIssuerPrivateJWK() jwk.Key {
 	previousKey := previousIssuerPrivateJWK.Load()
 	if previousKey == nil {
@@ -76,7 +80,13 @@ func GetPreviousIssuerPrivateJWK() jwk.Key {
 	return *previousKey
 }
 
+// Transfer the current issuer's private key to the previous one. This is called before updating
+// the current key to maintain a reference to the previous key for previous public key validation.
 func UpdatePreviousIssuerPrivateJWK() {
+	// ensure previousIssuerPrivateJWK isn't being updated concurrently
+	updateKeyMutex.Lock()
+	defer updateKeyMutex.Unlock()
+
 	// Save the current key to previousIssuerPrivateJWK
 	currentKey := issuerPrivateJWK.Load()
 	if currentKey != nil {
@@ -84,6 +94,7 @@ func UpdatePreviousIssuerPrivateJWK() {
 	}
 }
 
+// Reset the atomic pointer to issuer's private key
 func ResetPreviousIssuerPrivateJWK() {
 	previousIssuerPrivateJWK.Store(nil)
 }
@@ -117,6 +128,8 @@ func GetIssuerPrivateKeys() map[string]jwk.Key {
 	return *keysPtr
 }
 
+// Get the current directory that stores issuer's all private keys
+// We record this value to handle runtime changes to the issuer keys directory
 func getCurrentIssuerKeysDir() string {
 	if val := currentIssuerKeysDir.Load(); val != nil {
 		return val.(string)
@@ -124,22 +137,14 @@ func getCurrentIssuerKeysDir() string {
 	return ""
 }
 
+// Set the current directory that stores issuer's all private keys
 func setCurrentIssuerKeysDir(dir string) {
 	currentIssuerKeysDir.Store(dir)
 }
 
+// Reset the current directory that stores issuer's all private keys
 func ResetCurrentIssuerKeysDir() {
 	currentIssuerKeysDir.Store("")
-}
-
-// Helper function to generate random string
-func createRandomString(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[mathrand.Intn(len(charset))]
-	}
-	return string(b)
 }
 
 // Return a pointer to an ECDSA private key or RSA private key read from keyLocation.
@@ -590,7 +595,7 @@ func GenerateCert() error {
 	return nil
 }
 
-// Helper function to move the existing single key file to new directory
+// Helper function to copy the existing single key file to new directory
 func migratePrivateKey(newDir string) error {
 	legacyPrivateKeyFile := param.IssuerKey.GetString()
 	if _, err := os.Stat(legacyPrivateKeyFile); os.IsNotExist(err) {
@@ -602,29 +607,42 @@ func migratePrivateKey(newDir string) error {
 		return errors.Wrapf(err, "failed to create destination directory %s", newDir)
 	}
 
-	// Get the key id of the existing key
-	key, err := loadSinglePEM(legacyPrivateKeyFile)
+	// Verify there is a valid key in the legacyPrivateKeyFile
+	_, err := loadSinglePEM(legacyPrivateKeyFile)
 	if err != nil {
-		log.Warnf("Failed to load key %s: %v", key.KeyID(), err)
+		log.Warnf("Failed to load the key at %s: %v", legacyPrivateKeyFile, err)
 		return err
 	}
 
-	// Rename the existing private key file and set destination path
-	fileName := fmt.Sprintf("migrated_%d_%s.pem",
-		time.Now().UnixNano(),
-		createRandomString(4))
-	destPath := filepath.Join(newDir, fileName)
+	// Generate a unique filename using mkstemp logic for migration destination
+	fileNamePattern := fmt.Sprintf("migrated_%d_*.pem",
+		time.Now().UnixNano())
 
-	// Check if a file with the same name already exists in the destination
-	if _, err := os.Stat(destPath); err == nil {
-		return errors.Errorf("destination file already exists: %s", destPath)
+	destFile, err := os.CreateTemp(newDir, fileNamePattern)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create migration destination file in %s", newDir)
+	}
+	defer destFile.Close()
+
+	// Copy the file contents
+	srcFile, err := os.Open(legacyPrivateKeyFile)
+	if err != nil {
+		return errors.Wrapf(err, "failed to open source file %s", legacyPrivateKeyFile)
+	}
+	defer srcFile.Close()
+
+	if _, err := io.Copy(destFile, srcFile); err != nil {
+		return errors.Wrapf(err, "failed to copy file contents")
 	}
 
-	// Move the file
-	if err := os.Rename(legacyPrivateKeyFile, destPath); err != nil {
-		return errors.Wrapf(err, "failed to move %s to %s", legacyPrivateKeyFile, destPath)
+	// Preserve file permissions
+	sourceInfo, err := srcFile.Stat()
+	if err != nil {
+		return errors.Wrap(err, "failed to get source file info")
 	}
-
+	if err := os.Chmod(destFile.Name(), sourceInfo.Mode()); err != nil {
+		return errors.Wrapf(err, "failed to set permissions on %s", destFile.Name())
+	}
 	return nil
 }
 
@@ -727,18 +745,37 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 
 // Create a new .pem file (combining GeneratePrivateKey and LoadPrivateKey functions)
 func GeneratePEM(dir string) (jwk.Key, error) {
-	filename := fmt.Sprintf("pelican_generated_%d_%s.pem",
-		time.Now().UnixNano(),
-		createRandomString(4))
+	// Generate a unique filename using a POSIX mkstemp-like logic
+	// Create a temp file, store its filename, then immediately delete this temp file
+	filenamePattern := fmt.Sprintf("pelican_generated_%d_*.pem",
+		time.Now().UnixNano())
+	gid, err := GetDaemonGID()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get deamon gid")
+	}
+	if err := MkdirAll(dir, 0750, -1, gid); err != nil {
+		return nil, errors.Wrapf(err, "failed to set the permission of %s", dir)
+	}
+	tempFile, err := os.CreateTemp(dir, filenamePattern)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to remove temp file")
+	}
+	keyPath := tempFile.Name()
+	if err := tempFile.Close(); err != nil {
+		return nil, errors.Wrap(err, "failed to close temp file")
+	}
+	if err := os.Remove(keyPath); err != nil {
+		return nil, errors.Wrap(err, "failed to remove temp file")
+	}
 
-	keyPath := filepath.Join(dir, filename)
 	if err := GeneratePrivateKey(keyPath, elliptic.P256(), false); err != nil {
-		return nil, errors.Wrap(err, "failed to generate new private key")
+		return nil, errors.Wrapf(err, "failed to generate new private key at %s", keyPath)
 	}
 
 	key, err := loadSinglePEM(keyPath)
 	if err != nil {
-		log.Warnf("Failed to load key %s: %v", keyPath, err)
+		log.Errorf("Failed to load key %s: %v", keyPath, err)
+		return nil, errors.Wrapf(err, "failed to load key from %s", keyPath)
 	}
 
 	log.Debugf("Generated private key %s", key.KeyID())
