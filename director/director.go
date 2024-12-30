@@ -981,10 +981,10 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	}
 
 	// Check if the allowed prefixes for caches data from the registry
-	// have been initialized in the director
+	// has been initialized in the director
 	if sType == server_structs.CacheType {
 		// If the allowed prefix for caches data is not initialized,
-		// wait for it to be initialized within 3 seconds.
+		// wait for it to be initialized for 3 seconds.
 		if allowedPrefixesForCachesLastSetTimestamp.Load() == 0 {
 			log.Warning("Allowed prefixes for caches data is not initialized. Waiting for initialization before continuing with processing cache server advertisement.")
 			start := time.Now()
@@ -1004,7 +1004,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 			log.Error("Allowed prefixes for caches data is outdated, rejecting cache server ad.")
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "Allowed prefixes for caches data is outdated",
+				Msg:    "Something is wrong with the director or registry. Allowed prefixes for caches data is outdated.",
 			})
 			return
 		}
@@ -1029,8 +1029,8 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		adV2 = server_structs.ConvertOriginAdV1ToV2(ad)
 	}
 
-	// Filter the advertised prefixes in the cache server advertisement
-	// based on the allowed prefix for caches data.
+	// Filter the advertised prefixes in the cache server ad
+	// based on the allowed prefixes for caches data.
 	if sType == server_structs.CacheType {
 		// Parse URL to extract hostname
 		parsedURL, err := url.Parse(adV2.DataURL)
@@ -1057,7 +1057,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		// filter the advertised prefixes. If the cache hostname is not present,
 		// do nothing. This is the default behavior where all prefixes are allowed.
 		//
-		// `prefixes` is a set of prefixes that the given cache is allowed to serve.
+		// Variable `prefixes` is a set of prefixes that the given cache is allowed to serve.
 		if prefixes, exists := (*allowedPrefixesMap)[cacheHostname]; exists {
 			filteredNamespaces := []server_structs.NamespaceAdV2{}
 

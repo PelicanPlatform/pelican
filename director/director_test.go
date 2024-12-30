@@ -642,8 +642,8 @@ func TestDirectorRegistration(t *testing.T) {
 		allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
 
 		ad := server_structs.OriginAdvertiseV2{
-			Name:           "Human-readable name", // For web UI display
-			RegistryPrefix: "/caches/test",        // For registry lookup
+			Name:           "Human-readable name",
+			RegistryPrefix: "/caches/test",
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
 			Namespaces: []server_structs.NamespaceAdV2{

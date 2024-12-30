@@ -105,7 +105,11 @@ func fetchAllowedPrefixesForCaches(ctx context.Context) (map[string]map[string]s
 }
 
 // LaunchRegistryPeriodicQuery starts a new goroutine that periodically refreshes
-// the allowed prefixes for cache data maintained by the director in memory.
+// the allowed prefixes for caches data maintained by the director in memory.
+// It queries the registry at the interval specified by the config parameter
+// Director.RegistryQueryInterval. If the data is stale (older than 15 minutes)
+// or uninitialized, it queries the registry at a shorter interval of 1 second
+// and switches back to the regular interval upon successful retrieval of the information.
 func LaunchRegistryPeriodicQuery(ctx context.Context, egrp *errgroup.Group) {
 	refreshInterval := param.Director_RegistryQueryInterval.GetDuration()
 
