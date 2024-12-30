@@ -748,6 +748,9 @@ func TestGetNamespacesByFilter(t *testing.T) {
 	})
 }
 
+// TestGetAllowedPrefixesForCaches verifies if the function
+// getAllowedPrefixesForCaches correctly constructs the mapping
+// from cache hostnames to allowed prefixes.
 func TestGetAllowedPrefixesForCaches(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockNamespaceDB(t)

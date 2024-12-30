@@ -1157,18 +1157,20 @@ func checkStatusHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, server_structs.CheckNamespaceCompleteRes{Results: results})
 }
 
+// getAllowedPrefixesForCachesHandler is the handler function for the
+// /caches/allowedPrefixes endpoint.
 func getAllowedPrefixesForCachesHandler(ctx *gin.Context) {
-	caches, err := getAllowedPrefixesForCaches()
+	allowedPrefixesForCachesData, err := getAllowedPrefixesForCaches()
 
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Error fetching prohibited caches: %s", err.Error()),
+			Msg:    fmt.Sprintf("Error fetching allowed prefixes for caches data: %s", err.Error()),
 		})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, caches)
+	ctx.JSON(http.StatusOK, allowedPrefixesForCachesData)
 }
 
 func RegisterRegistryAPI(router *gin.RouterGroup) {

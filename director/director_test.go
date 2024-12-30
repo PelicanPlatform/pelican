@@ -607,6 +607,7 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
+		// Reset the timestamp so the cache server ad is not rejected.
 		allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
 
 		setupRequest(c, r, jsonad, token, server_structs.CacheType)
@@ -619,8 +620,9 @@ func TestDirectorRegistration(t *testing.T) {
 		teardown()
 	})
 
+	// Verify if the prefixes in the cache server ad are correctly filtered
+	// based on the allowed prefix for caches data.
 	t.Run("cache-with-not-allowed-prefix-in-ad", func(t *testing.T) {
-		// Setup context and dependencies
 		c, r, w := setupContext()
 		pKey, token, _ := generateToken()
 		publicKey, err := jwk.PublicKeyOf(pKey)
@@ -639,7 +641,6 @@ func TestDirectorRegistration(t *testing.T) {
 		allowedPrefixesForCaches.Store(&allowedPrefixes)
 		allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
 
-		// Create advertisement with namespaces
 		ad := server_structs.OriginAdvertiseV2{
 			Name:           "Human-readable name", // For web UI display
 			RegistryPrefix: "/caches/test",        // For registry lookup
@@ -660,17 +661,11 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
-		// Initialize serverAds cache
-		serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
-
-		// Setup request and serve
 		setupRequest(c, r, jsonad, token, server_structs.CacheType)
 		r.ServeHTTP(w, c.Request)
 
-		// Validate response
-		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+		assert.Equal(t, 200, w.Result().StatusCode)
 
-		// Validate serverAds cache entry
 		adEntry := serverAds.Get("https://data-url.org")
 		assert.NotNil(t, adEntry, "Cache failed to register at serverAds")
 
@@ -689,8 +684,8 @@ func TestDirectorRegistration(t *testing.T) {
 			}
 		}
 
-		assert.False(t, foundFooBar, "Namespace with path /foo/bar should not be registered")
-		assert.True(t, foundFooBaz, "Namespace with path /foo/baz should be registered")
+		assert.False(t, foundFooBar, "Prefix /foo/bar should not have been registered")
+		assert.True(t, foundFooBaz, "Prefix /foo/baz should have been registered")
 
 		teardown()
 	})

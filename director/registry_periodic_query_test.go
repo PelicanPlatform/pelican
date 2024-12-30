@@ -35,6 +35,8 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 )
 
+// TestLaunchRegistryPeriodicQuery verifies if the director correctly maintains
+// in its memory the allowed prefixes for caches data from the registry.
 func TestLaunchRegistryPeriodicQuery(t *testing.T) {
 	config.ResetConfig()
 	defer config.ResetConfig()

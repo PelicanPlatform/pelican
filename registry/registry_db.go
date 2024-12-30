@@ -280,6 +280,10 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 	return &ns, nil
 }
 
+// getAllowedPrefixesForCaches queries the database to create a map of cache
+// hostnames to a list of prefixes that each cache is allowed to serve.
+// If a cache hostname key is not present in the resultant map, it implies the
+// default behavior where the cache is allowed to serve all prefixes.
 func getAllowedPrefixesForCaches() (map[string][]string, error) {
 	var namespaces []server_structs.Namespace
 
@@ -291,7 +295,7 @@ func getAllowedPrefixesForCaches() (map[string][]string, error) {
 	allowedPrefixesForCachesMap := make(map[string][]string)
 
 	for _, namespace := range namespaces {
-		// Remove "/caches" from the beginning of the Prefix
+		// Remove "/caches/" from the beginning of the Prefix
 		cacheHostname := strings.TrimPrefix(namespace.Prefix, "/caches/")
 
 		allowedPrefixesRaw, exists := namespace.CustomFields["AllowedPrefixes"]

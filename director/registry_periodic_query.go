@@ -36,9 +36,9 @@ import (
 )
 
 var (
-	// allowedPrefixesForCaches maps cache hostnames to a set of prefixes the caches are allowed to serve.
+	// allowedPrefixesForCaches maps cache hostnames to a set of prefixes the caches are allowed to serve
 	allowedPrefixesForCaches atomic.Pointer[map[string]map[string]struct{}]
-	// allowedPrefixesForCachesLastSetTimestamp tracks when allowedPrefixesForCaches was last explicitly set.
+	// allowedPrefixesForCachesLastSetTimestamp tracks when allowedPrefixesForCaches was last set
 	allowedPrefixesForCachesLastSetTimestamp atomic.Int64
 )
 
@@ -150,7 +150,7 @@ func LaunchRegistryPeriodicQuery(ctx context.Context, egrp *errgroup.Group) {
 				allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
 				log.Debug("Allowed prefixes for caches data updated successfully")
 			case <-ctx.Done():
-				log.Debug("Periodic fetch terminated")
+				log.Debug("Periodic fetch fopr allowed prefixes for caches data terminated")
 				return nil
 			}
 		}
