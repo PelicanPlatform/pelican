@@ -94,10 +94,12 @@ func getSortedKids(ctx context.Context, jsonStr string) ([]string, error) {
 func TestServeNamespaceRegistry(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
-		func() { require.NoError(t, egrp.Wait()) }()
+		if r := recover(); r != nil {
+			t.Errorf("Test panicked: %v", r)
+		}
+
 		cancel()
-		config.ResetIssuerJWKPtr()
-		config.ResetIssuerPrivateKeys()
+		assert.NoError(t, egrp.Wait())
 		server_utils.ResetTestState()
 	})
 	server_utils.ResetTestState()
@@ -214,16 +216,18 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	server_utils.ResetTestState()
 	t.Cleanup(func() {
-		func() { require.NoError(t, egrp.Wait()) }()
+		if r := recover(); r != nil {
+			t.Errorf("Test panicked: %v", r)
+		}
+
 		cancel()
-		config.ResetIssuerJWKPtr()
-		config.ResetIssuerPrivateKeys()
+		assert.NoError(t, egrp.Wait())
 		server_utils.ResetTestState()
 	})
 
 	tDir := t.TempDir()
 
-	svr := registryMockup(ctx, t, "serveregistry")
+	svr := registryMockup(ctx, t, "MultiPubKeysRegisteredOnNamespace")
 	defer func() {
 		err := ShutdownRegistryDB()
 		assert.NoError(t, err)
@@ -309,6 +313,10 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
+		if r := recover(); r != nil {
+			t.Errorf("Test panicked: %v", r)
+		}
+
 		cancel()
 		assert.NoError(t, egrp.Wait())
 		server_utils.ResetTestState()
@@ -410,6 +418,10 @@ func TestRegistryKeyChaining(t *testing.T) {
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
+		if r := recover(); r != nil {
+			t.Errorf("Test panicked: %v", r)
+		}
+
 		cancel()
 		assert.NoError(t, egrp.Wait())
 		server_utils.ResetTestState()
