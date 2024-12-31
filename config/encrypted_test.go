@@ -97,6 +97,7 @@ func TestDecryptString(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, getEncrypt)
 
+		ResetConfig()
 		newKeyDir := filepath.Join(tmp, "new-issuer-keys")
 		viper.Set(param.IssuerKeysDirectory.GetName(), newKeyDir)
 

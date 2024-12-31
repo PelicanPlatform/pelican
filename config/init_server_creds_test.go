@@ -28,14 +28,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/pkg/errors"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/pelicanplatform/pelican/param"
 )
 
 // encrypt should be ecdsa|rsa
@@ -178,10 +174,6 @@ func TestMultiPrivateKey(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, key)
 
-		// Wait for 1 second to avoid duplicated private key filenames
-		// because they are named after unix epoch timestamp
-		time.Sleep(1 * time.Second)
-
 		// Create another private key
 		secondKey, err := GeneratePEMandSetActiveKey(issuerKeysDir)
 		require.NoError(t, err)
@@ -189,7 +181,6 @@ func TestMultiPrivateKey(t *testing.T) {
 		assert.NotEqual(t, key.KeyID(), secondKey.KeyID())
 
 		// Check if the active private key points to the latest key
-		viper.Set(param.IssuerKeysDirectory.GetName(), issuerKeysDir)
 		latestKey, err := GetIssuerPrivateJWK()
 		require.NoError(t, err)
 		assert.Equal(t, secondKey.KeyID(), latestKey.KeyID())

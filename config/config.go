@@ -1643,7 +1643,6 @@ func ResetConfig() {
 	ResetIssuerJWKPtr()
 	ResetIssuerPrivateKeys()
 	ResetPreviousIssuerPrivateJWK()
-	ResetCurrentIssuerKeysDir()
 
 	ResetClientInitialized()
 

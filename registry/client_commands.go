@@ -288,8 +288,7 @@ func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName stri
 	if err != nil {
 		return errors.Wrapf(err, "failed to generate public key for namespace registration")
 	}
-	err = jwk.AssignKeyID(publicKey)
-	if err != nil {
+	if err = jwk.AssignKeyID(publicKey); err != nil {
 		return errors.Wrap(err, "failed to assign key ID to public key")
 	}
 	if err = publicKey.Set("alg", "ES256"); err != nil {
