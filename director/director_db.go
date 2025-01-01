@@ -23,12 +23,23 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
+
+type GrafanaApiKey struct {
+	// Salted and Hashed API Key
+	Key         string `gorm:"primaryKey"`
+	Name        string `gorm:"not null"`
+	Description string `gorm:"not null"`
+	ExpiresAt   time.Time
+	Creator     string
+	CreatedAt   time.Time
+}
 
 type ServerDowntime struct {
 	UUID       string     `gorm:"primaryKey"`
@@ -66,6 +77,33 @@ func InitializeDB() error {
 // Shut down the Director's sqlite database
 func shutdownDirectorDB() error {
 	return server_utils.ShutdownDB(db)
+}
+
+func createGrafanaApiKey(description string) (string, error) {
+	uuid, err := uuid.NewRandom()
+	if err != nil {
+		return "", errors.Wrap(err, "unable to create new UUID for new entry in Grafana API key table")
+	}
+
+	bytes, err := uuid.MarshalBinary()
+	if err != nil {
+		return "", errors.Wrap(err, "unable to marshal UUID to binary")
+	}
+
+	bcryptHash, err := bcrypt.GenerateFromPassword(bytes, bcrypt.DefaultCost)
+	if err != nil {
+		return "", errors.Wrap(err, "unable to hash UUID")
+	}
+
+	apiKey := GrafanaApiKey{
+		Key:         string(bcryptHash),
+		Description: description,
+		CreatedAt:   time.Now(),
+	}
+	if err := db.Create(apiKey).Error; err != nil {
+		return "", errors.Wrap(err, "unable to create Grafana API key table")
+	}
+	return uuid.String(), nil
 }
 
 // Create a new db entry representing the downtime info of a server
