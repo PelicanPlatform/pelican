@@ -80,6 +80,10 @@ type (
 
 	// Context key for the project name
 	ProjectContextKey struct{}
+
+	CreateGrafanaTokenReq struct {
+		Description string `json:"description" binding:"required"`
+	}
 )
 
 const (
@@ -1410,6 +1414,37 @@ func listNamespacesV2(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, namespacesAdsV2)
 }
 
+func createGrafanaToken(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		log.Warningf("Cannot verify token: %v", err)
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+	// marshall body into struct
+	var req CreateGrafanaTokenReq
+	err = ctx.ShouldBindJSON(&req)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid request body",
+		})
+		return
+	}
+
+	grafanaToken, _ := createGrafanaApiKey(req.Description)
+	ctx.JSON(http.StatusOK, grafanaToken)
+}
+
 func getPrefixByPath(ctx *gin.Context) {
 	pathParam := ctx.Param("path")
 	if pathParam == "" || pathParam == "/" {
@@ -1628,6 +1663,8 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		// so that director can be our point of contact for collecting system-level metrics.
 		// Rename the endpoint to reflect such plan.
 		directorAPIV1.GET("/discoverServers", discoverOriginCache)
+
+		directorAPIV1.POST("/createGrafanaToken", createGrafanaToken)
 	}
 
 	directorAPIV2 := router.Group("/api/v2.0/director", web_ui.ServerHeaderMiddleware)
