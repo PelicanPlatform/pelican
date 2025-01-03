@@ -18,7 +18,11 @@
 package director
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,13 +36,13 @@ import (
 )
 
 type GrafanaApiKey struct {
-	// Salted and Hashed API Key
-	Key         string `gorm:"primaryKey"`
-	Name        string `gorm:"not null"`
-	Description string `gorm:"not null"`
+	ID          string `gorm:"primaryKey;column:id;type:text;not null"`
+	Name        string `gorm:"column:name;type:text"`
+	HashedValue string `gorm:"column:hashed_value;type:text;not null"`
+	Scopes      string `gorm:"column:scopes;type:text"`
 	ExpiresAt   time.Time
-	Creator     string
 	CreatedAt   time.Time
+	CreatedBy   string `gorm:"column:created_by;type:text"`
 }
 
 type ServerDowntime struct {
@@ -79,31 +83,55 @@ func shutdownDirectorDB() error {
 	return server_utils.ShutdownDB(db)
 }
 
-func createGrafanaApiKey(description string) (string, error) {
-	uuid, err := uuid.NewRandom()
+func generateSecret(length int) (string, error) {
+	bytes := make([]byte, length)
+	_, err := rand.Read(bytes)
 	if err != nil {
-		return "", errors.Wrap(err, "unable to create new UUID for new entry in Grafana API key table")
+		return "", err
 	}
+	return hex.EncodeToString(bytes), nil
+}
 
-	bytes, err := uuid.MarshalBinary()
-	if err != nil {
-		return "", errors.Wrap(err, "unable to marshal UUID to binary")
-	}
+func generateTokenID(secret string) string {
+	hash := sha256.Sum256([]byte(secret))
+	return hex.EncodeToString(hash[:])[:5]
+}
 
-	bcryptHash, err := bcrypt.GenerateFromPassword(bytes, bcrypt.DefaultCost)
-	if err != nil {
-		return "", errors.Wrap(err, "unable to hash UUID")
-	}
+func createGrafanaApiKey(name, createdBy, scopes string) (string, error) {
+	expiresAt := time.Now().Add(time.Hour * 24 * 30) // 30 days
+	for {
+		secret, err := generateSecret(32)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to generate a secret")
+		}
 
-	apiKey := GrafanaApiKey{
-		Key:         string(bcryptHash),
-		Description: description,
-		CreatedAt:   time.Now(),
+		id := generateTokenID(secret)
+
+		hashedValue, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+		if err != nil {
+			return "", errors.Wrap(err, "failed to hash the secret")
+		}
+
+		apiKey := GrafanaApiKey{
+			ID:          id,
+			Name:        name,
+			HashedValue: string(hashedValue),
+			Scopes:      scopes,
+			ExpiresAt:   expiresAt,
+			CreatedAt:   time.Now(),
+			CreatedBy:   createdBy,
+		}
+		result := db.Create(apiKey)
+		if result.Error != nil {
+			isConstraintError := result.Error.Error() == "UNIQUE constraint failed: tokens.id"
+			if !isConstraintError {
+				return "", errors.Wrap(result.Error, "failed to create a new Grafana API key")
+			}
+			// If the ID is already taken, try again
+			continue
+		}
+		return fmt.Sprintf("%s.%s", id, secret), nil
 	}
-	if err := db.Create(apiKey).Error; err != nil {
-		return "", errors.Wrap(err, "unable to create Grafana API key table")
-	}
-	return uuid.String(), nil
 }
 
 // Create a new db entry representing the downtime info of a server

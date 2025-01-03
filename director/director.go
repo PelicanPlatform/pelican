@@ -82,7 +82,9 @@ type (
 	ProjectContextKey struct{}
 
 	CreateGrafanaTokenReq struct {
-		Description string `json:"description" binding:"required"`
+		Name      string `json:"name"`
+		CreatedBy string `json:"created_by"`
+		Scopes    string `json:"scopes"`
 	}
 )
 
@@ -1415,8 +1417,9 @@ func listNamespacesV2(ctx *gin.Context) {
 }
 
 func createGrafanaToken(ctx *gin.Context) {
+	fmt.Println("CREATING GRAFANA TOKEN")
 	authOption := token.AuthOption{
-		Sources: []token.TokenSource{token.Header},
+		Sources: []token.TokenSource{token.Cookie},
 		Issuers: []token.TokenIssuer{token.LocalIssuer},
 		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
 	}
@@ -1436,13 +1439,22 @@ func createGrafanaToken(ctx *gin.Context) {
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Invalid request body",
+			Msg:    fmt.Sprintf("Invalid request body: %v", err),
 		})
 		return
 	}
 
-	grafanaToken, _ := createGrafanaApiKey(req.Description)
-	ctx.JSON(http.StatusOK, grafanaToken)
+	token, err := createGrafanaApiKey(req.Name, req.CreatedBy, req.Scopes)
+	if err != nil {
+		log.Warning("Failed to create Grafana API key: ", err)
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"token": token})
 }
 
 func getPrefixByPath(ctx *gin.Context) {
