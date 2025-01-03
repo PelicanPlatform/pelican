@@ -23,9 +23,11 @@ import (
 	"embed"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -59,8 +61,11 @@ var db *gorm.DB
 //go:embed migrations/*.sql
 var embedMigrations embed.FS
 
+var verifiedKeysCache *ttlcache.Cache[string, GrafanaApiKey] = ttlcache.New[string, GrafanaApiKey]()
+
 // Initialize the Director's sqlite database, which is used to persist information about server downtimes
 func InitializeDB() error {
+	go verifiedKeysCache.Start()
 	dbPath := param.Director_DbLocation.GetString()
 	tdb, err := server_utils.InitSQLiteDB(dbPath)
 	if err != nil {
@@ -132,6 +137,49 @@ func createGrafanaApiKey(name, createdBy, scopes string) (string, error) {
 		}
 		return fmt.Sprintf("%s.%s", id, secret), nil
 	}
+}
+
+// REMOVE THIS
+//
+//nolint:golint,unused
+func verifyGrafanaApiKey(apiKey string) (bool, error) {
+	parts := strings.Split(apiKey, ".")
+	if len(parts) != 2 {
+		return false, errors.New("invalid API key format")
+	}
+	id := parts[0]
+	secret := parts[1]
+
+	item := verifiedKeysCache.Get(id)
+	if item != nil {
+		cachedToken := item.Value()
+		beforeExpiration := time.Now().Before(cachedToken.ExpiresAt)
+		matches := bcrypt.CompareHashAndPassword([]byte(cachedToken.HashedValue), []byte(secret)) == nil
+		if beforeExpiration && matches {
+			return true, nil
+		}
+	}
+
+	var token GrafanaApiKey
+	result := db.First(&token, "id = ?", id)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return false, nil // token not found
+		}
+		return false, errors.Wrap(result.Error, "failed to retrieve the Grafana API key")
+	}
+
+	if time.Now().After(token.ExpiresAt) {
+		return false, nil
+	}
+
+	err := bcrypt.CompareHashAndPassword([]byte(token.HashedValue), []byte(secret))
+	if err != nil {
+		return false, nil
+	}
+
+	verifiedKeysCache.Set(id, token, ttlcache.DefaultTTL)
+	return true, nil
 }
 
 // Create a new db entry representing the downtime info of a server
