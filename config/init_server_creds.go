@@ -50,17 +50,11 @@ var (
 	// This is the private JWK for the server to sign tokens
 	issuerPrivateJWK atomic.Pointer[jwk.Key]
 
-	// This is the previous private JWK for the server to sign tokens (before current one)
-	previousIssuerPrivateJWK atomic.Pointer[jwk.Key]
-
-	// Representing private keys (from all .pem files) in the directory cache
+	// Representing all valid private keys (from .pem files in IssuerKeyDirectory)
 	issuerPrivateKeys atomic.Pointer[map[string]jwk.Key]
 
 	// Used to ensure initialization func init() is only called once
 	initOnce sync.Once
-
-	// Prevent race condition in issuer's private key update
-	updateKeyMutex sync.Mutex
 )
 
 // Reset the atomic pointer to issuer private jwk
@@ -68,37 +62,13 @@ func ResetIssuerJWKPtr() {
 	issuerPrivateJWK.Store(nil)
 }
 
-// Get issuer's previous active private key
-func GetPreviousIssuerPrivateJWK() jwk.Key {
-	previousKey := previousIssuerPrivateJWK.Load()
-	if previousKey == nil {
-		return nil
-	}
-	return *previousKey
-}
-
-// Transfer the current issuer's private key to the previous one. This is called before updating
-// the current key to maintain a reference to the previous key for previous public key validation.
-func UpdatePreviousIssuerPrivateJWK() {
-	// ensure previousIssuerPrivateJWK isn't being updated concurrently
-	updateKeyMutex.Lock()
-	defer updateKeyMutex.Unlock()
-
-	// Save the current key to previousIssuerPrivateJWK
-	currentKey := issuerPrivateJWK.Load()
-	if currentKey != nil {
-		previousIssuerPrivateJWK.Store(currentKey)
-	}
-}
-
-// Reset the atomic pointer to issuer's private key
-func ResetPreviousIssuerPrivateJWK() {
-	previousIssuerPrivateJWK.Store(nil)
-}
-
-// Set a private key as the active private key in use
-func SetActiveKey(key jwk.Key) {
+// Set a private key as the issuer key
+func SetIssuerKey(key jwk.Key) {
 	issuerPrivateJWK.Store(&key)
+	// Save this new key in the in-memory map for all private keys
+	keysCopy := getIssuerPrivateKeysCopy()
+	keysCopy[key.KeyID()] = key
+	issuerPrivateKeys.Store(&keysCopy)
 }
 
 // Clear all entries from the issuerPrivateKeys
@@ -677,20 +647,20 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 		return nil, errors.Wrapf(err, "failed to traverse directory %s that stores private keys", dir)
 	}
 
-	// Create a new private key and set as active when neither legacy private key at IssuerKey
+	// Create a new private key and set as issuer key when neither legacy private key at IssuerKey
 	// nor any .pem file at IssuerKeysDirectory exists
 	if len(latestKeys) == 0 || mostRecentKey == nil {
-		newKey, err := GeneratePEMandSetActiveKey(dir)
+		newKey, err := GeneratePEMandSetIssuerKey(dir)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create a new .pem file to save private key")
 		}
 		return newKey, nil
 	}
 
-	// Save up-to-date private keys and the active key in memory
+	// Save up-to-date all valid private keys and the issuer key in memory
 	issuerPrivateKeys.Store(&latestKeys)
-	SetActiveKey(mostRecentKey)
-	log.Debugf("Set private key %s as active", mostRecentKey.KeyID())
+	issuerPrivateJWK.Store(&mostRecentKey)
+	log.Debugf("Set private key %s as the issuer key", mostRecentKey.KeyID())
 
 	return mostRecentKey, nil
 }
@@ -730,23 +700,19 @@ func GeneratePEM(dir string) (jwk.Key, error) {
 	return key, nil
 }
 
-// Generate a new .pem file and then set the private key it contains as the active one
-func GeneratePEMandSetActiveKey(dir string) (jwk.Key, error) {
+// Generate a new .pem file and then set the private key it contains as the issuer key
+func GeneratePEMandSetIssuerKey(dir string) (jwk.Key, error) {
 	newKey, err := GeneratePEM(dir)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create a new .pem file to save private key")
 	}
 
-	// Save this new key in the in-memory map for all private keys
-	keysCopy := getIssuerPrivateKeysCopy()
-	keysCopy[newKey.KeyID()] = newKey
-	issuerPrivateKeys.Store(&keysCopy)
-	SetActiveKey(newKey)
+	SetIssuerKey(newKey)
 
 	return newKey, nil
 }
 
-// Re-scan the disk to load the issuer/server's private keys, return the active key to sign tokens it issues
+// Re-scan the disk to load the issuer/server's private keys, return the issuer key to sign tokens it issues
 func LoadIssuerPrivateKey(issuerKeysDir string) (jwk.Key, error) {
 	// Ensure initKeysMap is only called once across the program’s runtime
 	var initErr error
@@ -757,12 +723,12 @@ func LoadIssuerPrivateKey(issuerKeysDir string) (jwk.Key, error) {
 		return nil, errors.Wrap(initErr, "failed to initialize and/or migrate existing private key file")
 	}
 
-	activeKey, err := loadPEMFiles(issuerKeysDir)
+	issuerKey, err := loadPEMFiles(issuerKeysDir)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to re-scan %s to load .pem files and set the key in the most recent modified file as active private key", issuerKeysDir)
+		return nil, errors.Wrapf(err, "failed to re-scan %s to load .pem files and set the key file with the highest lexicographical order as the issuer key", issuerKeysDir)
 	}
 
-	return activeKey, err
+	return issuerKey, err
 }
 
 // Helper function to load the issuer/server's public key for other servers
@@ -798,12 +764,12 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string) (jwk.Set, e
 	return jwks, nil
 }
 
-// Return the private JWK for the server to sign tokens
+// Return the private JWK for the server to sign tokens and payloads
 func GetIssuerPrivateJWK() (jwk.Key, error) {
 	key := issuerPrivateJWK.Load()
 	issuerKeysDir := param.IssuerKeysDirectory.GetString()
 
-	// Re-scan the private keys dir when no active private key in memory
+	// Re-scan the private keys dir when no issuer key in memory
 	if key == nil {
 		newKey, err := LoadIssuerPrivateKey(issuerKeysDir)
 		if err != nil {

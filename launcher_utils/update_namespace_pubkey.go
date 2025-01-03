@@ -65,10 +65,10 @@ func updateNamespacesPubKeyPrep(ctx context.Context, prefixes []string) (jwk.Key
 		return nil, "", err
 	}
 
-	// Obtain server's active private key
+	// Obtain server's issuer private key
 	key, err := config.GetIssuerPrivateJWK()
 	if err != nil {
-		err = errors.Wrap(err, "Failed to obtain server's active private key")
+		err = errors.Wrap(err, "Failed to obtain server's issuer private key")
 		return nil, "", err
 	}
 
@@ -102,20 +102,18 @@ func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group) {
 				return nil
 			case <-ticker.C:
 				// Refresh the disk to pick up any new private key
-				config.UpdatePreviousIssuerPrivateJWK()
-				newKey, err := config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
+				_, err := config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
 				if err != nil {
 					return err
 				}
-				prevKeyID := config.GetPreviousIssuerPrivateJWK().KeyID()
-				newKeyID := newKey.KeyID()
 
-				log.Debugf("Private keys directory refreshed successfully. Previous key: %s, New key: %s", prevKeyID, newKeyID)
-				if newKeyID == prevKeyID {
-					// Skip this iteration since the active key has not changed
-					log.Debugf("Active private key has not changed. Skipping update of namespaces' public keys in the registry database.")
-					continue
-				}
+				log.Debugf("Private keys directory refreshed successfully")
+				// TODO: for origin, compare old and new jwks, if they are not equal, trigger namespace registered public keys update
+				// if newKeyID == prevKeyID {
+				// 	// Skip this iteration since the active key has not changed
+				// 	log.Debugf("Active private key has not changed. Skipping update of namespaces' public keys in the registry database.")
+				// 	continue
+				// }
 				// Update public key in registry db when there new active private key
 				extUrlStr := param.Server_ExternalWebUrl.GetString()
 				extUrl, _ := url.Parse(extUrlStr)

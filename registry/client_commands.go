@@ -41,15 +41,16 @@ import (
 )
 
 type clientResponseData struct {
-	VerificationURL string `json:"verification_url"`
-	DeviceCode      string `json:"device_code"`
-	Status          string `json:"status"`
-	AccessToken     string `json:"access_token"`
-	ServerNonce     string `json:"server_nonce"`
-	ServerPayload   string `json:"server_payload"`
-	ServerSignature string `json:"server_signature"`
-	Message         string `json:"msg"`
-	Error           string `json:"error"`
+	VerificationURL string            `json:"verification_url"`
+	DeviceCode      string            `json:"device_code"`
+	Status          string            `json:"status"`
+	AccessToken     string            `json:"access_token"`
+	ServerNonce     string            `json:"server_nonce"`
+	ServerPayload   string            `json:"server_payload"`
+	ServerSignature string            `json:"server_signature"`
+	RegisteredKeys  map[string]string `json:"registered_keys"`
+	Message         string            `json:"msg"`
+	Error           string            `json:"error"`
 }
 
 func NamespaceRegisterWithIdentity(privateKey jwk.Key, namespaceRegistryEndpoint string, prefix string, siteName string) error {
@@ -283,7 +284,7 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	return nil
 }
 
-func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName string, namespacePubKeyUpdateEndpoint string) error {
+func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName string, namespacePubKeyEndUpdatepoint string) error {
 	publicKey, err := privateKey.PublicKey()
 	if err != nil {
 		return errors.Wrapf(err, "failed to generate public key for namespace registration")
@@ -314,16 +315,17 @@ func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName stri
 	data := map[string]interface{}{
 		"client_nonce": clientNonce,
 		"pubkey":       keySet,
+		"prefixes":     prefixes,
 	}
 
 	tr := config.GetTransport()
-	resp, err := utils.MakeRequest(context.Background(), tr, namespacePubKeyUpdateEndpoint, "POST", data, nil)
+	resp, err := utils.MakeRequest(context.Background(), tr, namespacePubKeyEndUpdatepoint, "POST", data, nil)
 
 	var respData clientResponseData
 	// Handle case where there was an error encoded in the body
 	if err != nil {
 		if strings.Contains(err.Error(), "status code 404") {
-			log.Warnf("Registered namespace public key update endpoint returned 404 Not Found: %s. This endpoint is available in Pelican v7.12 or later.", namespacePubKeyUpdateEndpoint)
+			log.Warnf("Registered namespace public key  enUpdatedpoint returned 404 Not Found: %s. This endpoint is available in Pelican v7.12 or later.", namespacePubKeyEndUpdatepoint)
 			return nil
 		}
 		if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil {
@@ -349,72 +351,83 @@ func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName stri
 	if err != nil {
 		return errors.Wrap(err, "failed to sign payload")
 	}
-	// Also sign the payload with the previous private key
-	prevPrivateKey := config.GetPreviousIssuerPrivateJWK()
-
-	var prevSignature []byte
-	if prevPrivateKey != nil {
-		prevPrivateKeyRaw := &ecdsa.PrivateKey{}
-		if err = prevPrivateKey.Raw(prevPrivateKeyRaw); err != nil {
-			return errors.Wrap(err, "failed to get previous raw private key in ECDSA")
-		}
-		prevSignature, err = signPayload([]byte(clientPayload), prevPrivateKeyRaw)
-		if err != nil {
-			return errors.Wrapf(err, "failed to sign payload with previous private key, previous signature is '%s'", prevSignature)
-		}
-	}
-
-	// Send origins previous public key and all public keys in another key set
-	prevKey := config.GetPreviousIssuerPrivateJWK()
-	prevKeySet := jwk.NewSet()
-	if err = prevKeySet.AddKey(prevKey); err != nil {
-		return errors.Wrap(err, "failed to add previous public key to new JWKS")
-	}
 
 	privateKeys := config.GetIssuerPrivateKeys()
 	if len(privateKeys) == 0 {
-		return errors.Wrap(err, "The server doesn't have any private key in memory")
+		return errors.Errorf("The server doesn't have any private key in memory")
 	}
-	allKeysSet := jwk.NewSet()
+	issuerPubKeysSet := jwk.NewSet()
 	for _, privKey := range privateKeys {
 		pubKey, err := privKey.PublicKey()
 		if err != nil {
 			return errors.Wrapf(err, "failed to get the public key of a private key")
 		}
-		if err = allKeysSet.AddKey(pubKey); err != nil {
+		if err = issuerPubKeysSet.AddKey(pubKey); err != nil {
 			return errors.Wrap(err, "failed to add public key to all keys JWKS")
 		}
 	}
 
+	var matchedKeyId string
+	var keyUpdateAuthzSignature []byte
+	for _, prefix := range prefixes {
+		// Parse the public key(s) of the registered prefix
+		registeredKeys := respData.RegisteredKeys[prefix]
+		registryDbKeySet, err := jwk.ParseString(registeredKeys)
+		if err != nil {
+			log.Errorf("Failed to parse public key as JWKS of registered namespace %s: %v", prefix, err)
+			return errors.Wrapf(err, "Invalid public key format of registered namespace %s", prefix)
+		}
+		for i := 0; i < registryDbKeySet.Len(); i++ {
+			registeredPubKey, ok := registryDbKeySet.Key(i)
+			if !ok {
+				continue
+			}
+			// Look for the issuer public key this origin previously registered the namespace with
+			issuerPubKey, found := issuerPubKeysSet.LookupKeyID(registeredPubKey.KeyID())
+			if !found {
+				continue
+			}
+			// Sign the payload with the issuer private key matched with the registered public key
+			issuerPrivKey := privateKeys[issuerPubKey.KeyID()]
+			rawkey := &ecdsa.PrivateKey{}
+			if err := issuerPrivKey.Raw(rawkey); err != nil {
+				return errors.Wrap(err, "failed to generate raw private key from the issuer private key matched with the registered public key")
+			}
+			if keyUpdateAuthzSignature, err = signPayload([]byte(clientPayload), rawkey); err != nil {
+				return errors.Wrap(err, "failed to sign the payload with the issuer private key matched with the registered public key")
+			}
+			matchedKeyId = issuerPubKey.KeyID()
+			break
+		}
+	}
+	if keyUpdateAuthzSignature == nil || matchedKeyId == "" {
+		return errors.Errorf("Origin does not possess valid key to update public keys of registered namespace(s)")
+	}
+
 	// Create data for the second POST request
 	unidentifiedPayload := map[string]interface{}{
-		"pubkey":           keySet,
-		"prev_pubkey":      prevKeySet,
-		"all_pubkeys":      allKeysSet,
-		"prefixes":         prefixes,
-		"site_name":        siteName,
-		"client_nonce":     clientNonce,
-		"server_nonce":     respData.ServerNonce,
-		"client_payload":   clientPayload,
-		"client_signature": hex.EncodeToString(signature),
-		"client_prev_signature": func() string {
-			if prevSignature == nil {
-				return ""
-			}
-			return hex.EncodeToString(prevSignature)
-		}(),
-		"server_payload":   respData.ServerPayload,
-		"server_signature": respData.ServerSignature,
+		"pubkey":                     keySet,
+		"all_pubkeys":                issuerPubKeysSet,
+		"prefixes":                   prefixes,
+		"site_name":                  siteName,
+		"client_nonce":               clientNonce,
+		"server_nonce":               respData.ServerNonce,
+		"client_payload":             clientPayload,
+		"client_signature":           hex.EncodeToString(signature),
+		"key_update_authz_signature": hex.EncodeToString(keyUpdateAuthzSignature),
+		"matched_key_id":             matchedKeyId,
+		"server_payload":             respData.ServerPayload,
+		"server_signature":           respData.ServerSignature,
 	}
 
 	// Send the second POST request
-	resp, err = utils.MakeRequest(context.Background(), tr, namespacePubKeyUpdateEndpoint, "POST", unidentifiedPayload, nil)
+	resp, err = utils.MakeRequest(context.Background(), tr, namespacePubKeyEndUpdatepoint, "POST", unidentifiedPayload, nil)
 
 	// Handle case where there was an error encoded in the body
 	if unmarshalErr := json.Unmarshal(resp, &respData); unmarshalErr == nil {
 		if err != nil {
 			if strings.Contains(err.Error(), "status code 404") {
-				log.Warnf("Registered namespace public key update endpoint returned 404 Not Found: %s. This endpoint is available in Pelican v7.12 or later.", namespacePubKeyUpdateEndpoint)
+				log.Warnf("Registered namespace public key  enUpdatedpoint returned 404 Not Found: %s. This endpoint is available in Pelican v7.12 or later.", namespacePubKeyEndUpdatepoint)
 				return nil
 			}
 			log.Errorf("Server responded with an error: %v. %s. %s", respData.Message, respData.Error, err)

@@ -175,7 +175,7 @@ func TestMultiPrivateKey(t *testing.T) {
 		require.NotNil(t, key)
 
 		// Create another private key
-		secondKey, err := GeneratePEMandSetActiveKey(issuerKeysDir)
+		secondKey, err := GeneratePEMandSetIssuerKey(issuerKeysDir)
 		require.NoError(t, err)
 		require.NotNil(t, secondKey)
 		assert.NotEqual(t, key.KeyID(), secondKey.KeyID())
