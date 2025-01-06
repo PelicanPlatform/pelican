@@ -8,8 +8,8 @@ In "Romeo & Juliet", William Shakespeare writes:
 > By any other name would smell as sweet.
 
 Unfortunately for us, Shakespeare's wisdom doesn't hold true in environments where names carry relational information or otherwise convey information about the named entity.
-That's why picking a good federation prefix for Pelican is so important -- it's the data owner's opportunity to _say_ something about the data and to frame the way data
-consumers will think about the data when they access it.
+That's why picking a good federation prefix for Pelican is so important -- it's the data owner's opportunity to _say something_ about their data and to frame the way data
+consumers will think about the objects they access.
 
 The process of organizing and naming data can be difficult. Even the Dewey Decimal System has gone through 23 major revisions over ~150 years and now comprises two entire
 volumes<sup><a href="https://en.wikipedia.org/wiki/Dewey_Decimal_Classification">[1]</a></sup>. Luckily, there are some best practices that can lead to reasonable choices in
@@ -40,15 +40,15 @@ If a user understands how to find one object under this namespace, they'll likel
 by changing predictable keywords like ocean names, years and months.
 
 Choosing these keywords is often unique to each project and highly dependent on the underlying data. However, one common technique to discover reasonable choices for keywords
-is to think about the terms you'd use to Google for certain objects or collections of your objects. In the previous example, one might imagine the user Googling for something
+is to think about the terms you'd use to Google for certain objects or collections of your objects. In the previous example, one might imagine the user Googling something
 similar to:
 > whale sightings over time in the atlantic and pacific
 
 This expresses some of the relationships inherent between individual objects in this data repository -- data relates to whale sitings and is split over time and by ocean.
 
-It's also important to note that this example includes information highlighting the data's _provenance_ or where it came from and who's responsible for it. More often then not,
+It's also important to note that this example includes information highlighting the data's _provenance_ or where it came from and who's responsible for it. More often than not,
 it's a good idea that your namespace starts with something signifying your organization, group, or project. This is especially useful because Pelican namespaces are hierarchical
-and can be further subdivided (see the section on [Namespace Subdivision](#namespace-subdivision) below for more information).
+and can be further subdivided (see the section on [namespace delegation](#prefixes-as-a-means-of-delegated-management) below for more information).
 
 In the previous example, a namespace beginning with `/CoolScienceOrg/WhaleProject` lets users quickly attribute any data coming from this section of the federation to your
 organization and project. If data consumers have questions about some object, this namespace prefix is likely enough for them to figure out who to ask for more information.
