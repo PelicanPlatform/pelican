@@ -1,0 +1,106 @@
+# Frequently Asked Questions & Troubleshooting
+
+## Why do `osdf:///` URLs use 3 slashes instead of two slashes like regular URLs?
+
+URLs, or **Uniform Resource Locators**, play a crucial role in the way computers are able to discover, locate and access digital resources. Since
+their broad adoption in the mid 1990s, their structure has become a well-defined internet standard<sup>[1](#triple-slash-fn1)</sup>. To quote their
+definition:
+> "Uniform Resource Locators" (URLs), in addition to identifying
+  a resource, provide a means of locating the resource by describing its
+  primary access mechanism (e.g., its network "location").<sup>[2](#triple-slash-fn2)</sup>
+
+Whether you're trying to access a remote PDF or watch your favorite playlist of YouTube cats, the URL you give your browser conveys important
+information about _what_ it's supposed to find, _where_ it can look, and _how_ it should be accessed.
+
+Understanding a URLs basic components will help answer why `osdf:///` URLs typically require triple slashes.
+
+For our intents and pursposes, URLs contain three main parts -- a _scheme_, a _hostname_ and a _path_, where these pieces can be loosely defined as follows
+<sup>[3](#triple-slash-fn3)</sup>:
+1. **scheme**: A URL's _scheme_ tells the computer _how_ something should be accessed. In most cases, this specifies a protocol like `https`, `ftp`,
+or in our case `pelican` and `osdf`. Essentially, this tells your computer what "language" it needs to speak to interact with the resource.
+2. **hostname**: The URL's _hostname_ gives the computer information about who/what remote resource might be able to fulfill your request. 
+3. **path**: The _path_ component of a URL specifies the name of a requested resource from the requested hostname. Typically this is something like
+a specific web page or file.
+
+These components are stitched together in a predictable fashion:
+```
+<scheme>://<hostname>/<path>
+```
+
+For example, when you visit `https://docs.pelicanplatform.org/parameters`, you've defined the URL scheme as `https`, the hostname as
+`docs.pelicanplatform.org` and the path as `parameters`. Together, these pieces tell your computer to use HTTPS to access the `parameters` page from
+Pelican's `docs.pelicanplatform.org` documentation website.
+
+The `pelican`-schemed URLs you use to access objects from Pelican federations follow the same setup, leading to URLs like:
+```
+pelican://osg-htc.org/some/object
+```
+Here, you've indicated you want to use the `pelican` protocol to interact with `some/object` from the `osg-htc.org` federation.
+
+However, some URL schemes are inherent to a specific location and don't need a hostname. If you've ever used a browser to open a PDF on your personal
+computer, you've likely seen a URL like `file:///some/path/to/file.pdf`. The triple slash after the `file` scheme happens because `file` already pre-supposes
+that the browser needs to get a file from the local machine, so the hostname information isn't needed. It is equally valid to use the URL
+`file://localhost/some/path/to/file.pdf`, but that's more to type! Instead, we wind up cutting out the redundant information to yield
+> file://~~localhost~~/some/path/to/file.pdf --> file:///some/path/to/file.pdf
+
+Similarly, the `osdf` URL scheme already encodes two pieces of information -- that you're speaking Pelican _and_ you're talking to the OSDF, whose
+hostname is `osg-htc.org`. By using `osdf` URLs, you've indicated the object you're interacting with is part of a specific networked system that should
+already be understood.
+
+The hostname in the previous `pelican`-schemed URL matches the OSDF's hostname, so it can be rewritten using an `osdf` url:
+> pelican://osg-htc.org/some/object --> osdf://~~osg-htc.org~~/some/object = osdf:///some/object
+
+On the other hand, construction of a URL like `osdf://some/object` has the potential to confuse many clients, because now part of the object's name "`some`"
+will be interpreted as the federation's hostname.
+
+More information about `pelican` and `osdf` URLs can be found in our [client usage docs](./getting-data-with-pelican/client#the-different-pelican-url-schemes).
+
+> <a id="triple-slash-fn1">**1**</a>: For more information about the structure of URLs, see [RFC 1738](https://www.rfc-editor.org/rfc/rfc1738).<br />
+  <a id="triple-slash-fn2">**2**</a>: For more information on the difference between URIs, URLs and URNs, see [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986#section-1.1.3).<br />
+  <a id="triple-slash-fn3">**3**</a>: URLs can also contain things like ports, query parameters and "fragments," and while Pelican makes use of these, they aren't as crucial to understanding
+  the question at hand.
+
+## Why isn't Pelican using the closest cache(s) when I download objects?
+Whenever a Pelican client tries to download an object, one of its first steps is to talk to the appropriate federation's Director, where the Directors job is to
+match the client's request to some service(s) that can best fulfill the request. This usually means giving the client an ordered list of caches that the Director
+thinks either have the object or that are capable of delivering the object quickly.
+
+By default, Directors order this list by trying to determine the physical distance between the client and any caches in the federation with closer caches
+being assigned higher priority<sup>[1](#geoloc-fn1)</sup>. This troubleshooting guide assumes the Director is configured for distance-based sorting.
+There are several ways this process can break.
+
+#### Client Resolution
+First, the Director uses the IP address of the incoming client request to generate a lat/long pair and confidence range for the client. It does this by running
+the client's IP address through a local database<sup>[2](#geoloc-fn2)</sup>. Issues that can occur at this stage include:
+- The IP address reported by the client is invalid, or in a private range (e.g. 192.168.0.12 for IPv4)
+- The IP address is valid, but the database doesn't have an entry for it
+- The IP address is valid and has an entry, but the database reports a confidence range greater than 900km.
+In any of these cases, the Director will decide it can't reasonably determine where the client is, and it will assign a temporary lat/long pair by picking
+a coordinate somewhere in the continental US. This coordinate is cached for a short time (~20 minutes), so subsequent requests from the same client will resolve to the
+same spot.
+
+If the list of caches you see being tried look like they have a geographic center, but not the _correct_ geographic center, you might try determining the IP
+address the Director sees when the client contacts it. This can be done by running:
+```bash
+curl ifconfig.me
+```
+and running the resulting IP address through [MaxMind's GeoLite City demo](https://www.maxmind.com/en/geoip-demo). If the location it determines is incorrect,
+has a large accuracy radius, or appears to be otherwise invalide, that's likely causing a problem.
+> **NOTE**: The database used by this demo is not exactly the same database used by the Director. If you see a problem here, there's definitely an issue, but if
+this step yields the expected results, there may still be issues with the Director's database. If the list of caches tried by your client(s) appear to have a
+geographic center that's incorrect, contact your federation administrators to ask if they can create a manual override for your IP range.
+
+#### Cache/Origin Resolution
+Alternatively, the client's location may be known by the Director, but locations for some caches (or even origins) in the list can't be determined. While the
+Director can use a client's IP address directly for geo-location, it uses a DNS lookup against cache/origin hostnames to determine IP addresses. Failure to produce
+an IP address in this step means something more fundamental is wrong with the cache/origin, and that it should be fixed before receiving any requests. However,
+it's still possible that the resolved IP address is incorrect, or has the same types of issues client IPs might have with the MaxMind database. When this happens,
+the server should be sorted to the end of the potential list of servers.
+
+Errors can compound if both of these issues (client _and_ cache/origin geo-location failures) occur. If the cache list you see from the Director has no discernable
+geographic center, you should contact your federation administrators for help debugging.
+
+> <a id="geoloc-fn1">**1**</a>: Directors may implement more intelligent cache selection schemes. For a full list of options, see the documentation for the 
+  Director's [`Director.CacheSortMethod`](./parameters.mdx#Director-CacheSortMethod) config parameter.<br />
+  <a id="geoloc-fn2">**2**</a>: In particular, the Director uses the [MaxMind GeoLite City database](https://www.maxmind.com/en/geolite-free-ip-geolocation-data), which it
+  updates twice weekly on Wednesdays and Fridays (shortly after the databases are updated upstream by MaxMind).<br />
