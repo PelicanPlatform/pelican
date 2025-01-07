@@ -27,7 +27,7 @@ interface ProjectData {
   bytesAccessed: string;
 }
 
-export const ProjectTable = () => {
+const ProjectTable = () => {
   const { rate, time, range, resolution } = useContext(GraphContext);
 
   const { data: projectData, error: projectError } = useSWR(
@@ -91,3 +91,5 @@ const getProjectData = async (
 
   return projectData;
 };
+
+export { ProjectTable };
