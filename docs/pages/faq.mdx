@@ -14,7 +14,7 @@ information about _what_ it's supposed to find, _where_ it can look, and _how_ i
 
 Understanding a URLs basic components will help answer why `osdf:///` URLs typically require triple slashes.
 
-For our intents and pursposes, URLs contain three main parts -- a _scheme_, a _hostname_ and a _path_, where these pieces can be loosely defined as follows
+For our intents and purposes, URLs contain three main parts -- a _scheme_, a _hostname_ and a _path_, where these pieces can be loosely defined as follows
 <sup>[3](#triple-slash-fn3)</sup>:
 1. **scheme**: A URL's _scheme_ tells the computer _how_ something should be accessed. In most cases, this specifies a protocol like `https`, `ftp`,
 or in our case `pelican` and `osdf`. Essentially, this tells your computer what "language" it needs to speak to interact with the resource.
@@ -85,7 +85,7 @@ address the Director sees when the client contacts it. This can be done by runni
 curl ifconfig.me
 ```
 and running the resulting IP address through [MaxMind's GeoLite City demo](https://www.maxmind.com/en/geoip-demo). If the location it determines is incorrect,
-has a large accuracy radius, or appears to be otherwise invalide, that's likely causing a problem.
+has a large accuracy radius, or appears to be otherwise invalid, that's likely causing a problem.
 > **NOTE**: The database used by this demo is not exactly the same database used by the Director. If you see a problem here, there's definitely an issue, but if
 this step yields the expected results, there may still be issues with the Director's database. If the list of caches tried by your client(s) appear to have a
 geographic center that's incorrect, contact your federation administrators to ask if they can create a manual override for your IP range.

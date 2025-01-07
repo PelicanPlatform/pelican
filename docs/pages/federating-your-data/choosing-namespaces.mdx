@@ -15,7 +15,7 @@ The process of organizing and naming data can be difficult. Even the Dewey Decim
 volumes<sup><a href="https://en.wikipedia.org/wiki/Dewey_Decimal_Classification">[1]</a></sup>. Luckily, there are some best practices that can lead to reasonable choices in
 picking a namespace.
 
-The following sections contain advice about our best practicies for organizing your data in Pelican, and understanding each section will help you pick namespaces that maximize
+The following sections contain advice about our best practices for organizing your data in Pelican, and understanding each section will help you pick namespaces that maximize
 the FAIR principles of your data.
 
 ## Data Provenance and Taxonomy
@@ -44,7 +44,7 @@ is to think about the terms you'd use to Google for certain objects or collectio
 similar to:
 > whale sightings over time in the atlantic and pacific
 
-This expresses some of the relationships inherent between individual objects in this data repository -- data relates to whale sitings and is split over time and by ocean.
+This expresses some of the relationships inherent between individual objects in this data repository -- data relates to whale sightings and is split over time and by ocean.
 
 It's also important to note that this example includes information highlighting the data's _provenance_ or where it came from and who's responsible for it. More often than not,
 it's a good idea that your namespace starts with something signifying your organization, group, or project. This is especially useful because Pelican namespaces are hierarchical
@@ -62,11 +62,11 @@ The full "name" of any Pelican object comes from its Pelican URL, e.g.
 
 which tells Pelican clients what federation to work with and how to find the actual object.
 
-Because Origins map namespace/federation prefixes to sections of the underlying data repository, it can be confusing to understand where the namespace ends and the object begins
-in a path like `/this/is/an/object`. Information about how to determine this split given a Pelican URL can be found in
-[Core Concepts](../about-pelican/core-concepts.mdx#differentiating-namespace-prefixes-and-object-names). However, this presents a unique challenge to Origin administrators, because they have to
-decide which parts of a Pelican object's name should come from the federation prefix, and which should come from the underlying object name as understood by the storage resource.
-Consider a posix filesystem with the following directory tree:
+Because Origins map namespace/federation prefixes to sections of the underlying data repository, it can be confusing to understand where the namespace ends and the
+object begins in a path like `/this/is/an/object`. Information about how to determine this split given a Pelican URL can be found in
+[Core Concepts](../about-pelican/core-concepts.mdx#differentiating-namespace-prefixes-and-object-names). However, this presents a unique challenge to Origin
+administrators, because they have to decide which parts of a Pelican object's name should come from the federation prefix, and which should come from the underlying
+object name as understood by the storage resource. Consider a posix filesystem with the following directory tree:
 ```
 physics/
 ├── detector1/
@@ -126,7 +126,7 @@ registered, then the origin exporting `/project-xyz/jhonson-lab` will not be abl
 ### Prefixes as a Means of Aggregating Disparate Repositories
 One additional benefit of namespaces and the fact that they can be exported by multiple Origins is that they may allow data owners to aggregate data from multiple sources under
 a common name. For example, consider a case where you have two telescopes taking snapshots of the night sky. Due to each telescope's technology, one saves its images in S3 and the
-other stores its images in posix. Namespacing allows the data owner to elide this fact from data consumers by exporting both the S3 bucket and the posix filesystm under the same
+other stores its images in posix. Namespacing allows the data owner to elide this fact from data consumers by exporting both the S3 bucket and the posix filesystem under the same
 namespace:
 
 <ExportedImage width={750} height={575000} src={"/pelican/aggregated-objects.png"} alt={"Objects from multiple storage types being accessed under the same namespace"} />
