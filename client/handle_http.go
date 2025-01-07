@@ -116,7 +116,7 @@ type (
 		err         error
 	}
 
-	// StatusCodeError is a wrapper around grab.StatusCodeErorr that indicates the server returned
+	// StatusCodeError is a wrapper around grab.StatusCodeError that indicates the server returned
 	// a non-200 code.
 	//
 	// The wrapper is done to provide a Pelican-based error hierarchy in case we ever decide to have
@@ -1119,7 +1119,7 @@ func (tj *TransferJob) GetLookupStatus() (ok bool, err error) {
 // Submit the transfer job to the client for processing
 func (tc *TransferClient) Submit(tj *TransferJob) error {
 	// Ensure that a tj.Wait() immediately after Submit will always block.
-	log.Debugln("Submiting transfer job", tj.uuid.String())
+	log.Debugln("Submitting transfer job", tj.uuid.String())
 	select {
 	case <-tc.ctx.Done():
 		return tc.ctx.Err()
@@ -1878,7 +1878,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		if ageSec, err := strconv.Atoi(ageStr); err == nil {
 			cacheAge = time.Duration(ageSec) * time.Second
 		} else {
-			log.WithFields(fields).Debugf("Server at %s gave unparseable Age header (%s) in response: %s", transfer.Url.Host, ageStr, err.Error())
+			log.WithFields(fields).Debugf("Server at %s gave unparsable Age header (%s) in response: %s", transfer.Url.Host, ageStr, err.Error())
 		}
 	}
 	if cacheAge == 0 {
@@ -1917,7 +1917,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		callback(dest, 0, totalSize, false)
 	}
 
-	stoppedTransferTimeout := compatToDuration(param.Client_StoppedTransferTimeout.GetDuration(), "Client.StoppedTranferTimeout")
+	stoppedTransferTimeout := compatToDuration(param.Client_StoppedTransferTimeout.GetDuration(), "Client.StoppedTransferTimeout")
 	slowTransferRampupTime := compatToDuration(param.Client_SlowTransferRampupTime.GetDuration(), "Client.SlowTransferRampupTime")
 	slowTransferWindow := compatToDuration(param.Client_SlowTransferWindow.GetDuration(), "Client.SlowTransferWindow")
 	stoppedTransferDebugLine.Do(func() {
@@ -2096,7 +2096,7 @@ func (pr *ProgressReader) Read(p []byte) (n int, err error) {
 	return n, err
 }
 
-// Close implments the close function of io.Closer
+// Close implements the close function of io.Closer
 func (pr *ProgressReader) Close() error {
 	err := pr.reader.Close()
 	// Also, send the closed channel a message

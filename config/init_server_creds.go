@@ -313,10 +313,10 @@ func GenerateCACert() error {
 	return nil
 }
 
-// Read a PEM-encoded TLS certficate file, parse and return the first
+// Read a PEM-encoded TLS certificate file, parse and return the first
 // certificate appeared in the chain. Return error if there's no cert
 // present in the file
-func LoadCertficate(certFile string) (*x509.Certificate, error) {
+func LoadCertificate(certFile string) (*x509.Certificate, error) {
 	rest, err := os.ReadFile(certFile)
 	if err != nil {
 		return nil, err
@@ -343,7 +343,7 @@ func LoadCertficate(certFile string) (*x509.Certificate, error) {
 }
 
 // Generate a TLS certificate (host certificate) and its private key
-// for non-production environment if the requied TLS files are not present
+// for non-production environment if the required TLS files are not present
 func GenerateCert() error {
 	gid, err := GetDaemonGID()
 	if err != nil {
@@ -373,7 +373,7 @@ func GenerateCert() error {
 			if _, err := os.Open(caCert); err == nil {
 				file.Close()
 				// Check that the CA is a valid CA
-				if _, err := LoadCertficate(caCert); err != nil {
+				if _, err := LoadCertificate(caCert); err != nil {
 					return errors.Wrap(err, "Failed to load CA cert")
 				} else {
 					// TODO: Check that the private key is a pair of the server cert
@@ -399,7 +399,7 @@ func GenerateCert() error {
 	if err := GenerateCACert(); err != nil {
 		return err
 	}
-	caCert, err := LoadCertficate(param.Server_TLSCACertificateFile.GetString())
+	caCert, err := LoadCertificate(param.Server_TLSCACertificateFile.GetString())
 	if err != nil {
 		return err
 	}
@@ -407,7 +407,7 @@ func GenerateCert() error {
 	// However, if only CA is missing but TLS cert and private key are present, we simply
 	// generate the CA and return
 	if tlsCertPrivateKeyExists {
-		log.Debug("TLS Certficiate and its private key are present. Generated a CA and returns.")
+		log.Debug("TLS Certificate and its private key are present. Generated a CA and returns.")
 		return nil
 	}
 

@@ -78,7 +78,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		// Until https://github.com/PelicanPlatform/lotman/issues/24 is closed, we can only really logic over
 		// top-level prefixes because enumerating all object "directories" under a given federation prefix is
 		// infeasible, but is currently the only way to nest namespaces in Lotman such that a sub namespace
-		// can be assosciated with a top-level prefix.
+		// can be associated with a top-level prefix.
 		// To that end, we need to filter out any nested namespaces from the cache server's namespace ads.
 		uniqueTopPrefixes := server_utils.FilterTopLevelPrefixes(cacheServer.GetNamespaceAds())
 

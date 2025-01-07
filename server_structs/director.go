@@ -327,7 +327,7 @@ func (ad *Advertisement) GetIOLoad() float64 {
 func ConvertNamespaceAdsV2ToV1(nsV2 []NamespaceAdV2) []NamespaceAdV1 {
 	// Converts a list of V2 namespace ads to a list of V1 namespace ads.
 	// This is for backwards compatibility in the case an old version of a client calls
-	// out to a newer verion of the director
+	// out to a newer version of the director
 	nsV1 := []NamespaceAdV1{}
 
 	for _, nsAd := range nsV2 {
@@ -360,7 +360,7 @@ func ConvertNamespaceAdsV2ToV1(nsV2 []NamespaceAdV2) []NamespaceAdV1 {
 
 func ConvertNamespaceAdsV1ToV2(nsAdsV1 []NamespaceAdV1, oAd *OriginAdvertiseV1) []NamespaceAdV2 {
 	//Convert a list of V1 namespace ads to a list of V2 namespace ads, note that this
-	//isn't the most efficient way of doing so (an interative search as opposed to some sort
+	//isn't the most efficient way of doing so (an interactive search as opposed to some sort
 	//of index or hash based search)
 
 	var wr bool

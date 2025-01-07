@@ -15,10 +15,10 @@
 # limitations under the License.
 #
 
-# This test the functionaliy of the x509 defer check
+# This test the functionality of the x509 defer check
 # Some prefixes allow for x509 authentication rather than using tokens, this tests
-# that a file that requires authorization is retreivable when using either x509 authentication or a token
-# and also tests that files that aren't allowed to use x509 authentication are not retreivable
+# that a file that requires authorization is retrievable when using either x509 authentication or a token
+# and also tests that files that aren't allowed to use x509 authentication are not retrievable
 
 mkdir -p x509/config
 chmod 777 x509/config
@@ -167,7 +167,7 @@ else
     exit 1
 fi
 
-# Run a curl with an x509 value on a non defered namespace prefix
+# Run a curl with an x509 value on a non deferred namespace prefix
 curl -v -k -L https://localhost:8444/test/input.txt --tlsv1.3 --cert x509/config/certificates/tls.crt --key x509/config/certificates/tls.key &> x509/badCurlX509Output.txt
 
 # Check output of command

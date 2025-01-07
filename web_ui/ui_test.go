@@ -177,8 +177,8 @@ func TestHandleWebUIAuth(t *testing.T) {
 		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
 	})
 
-	t.Run("no-redirect-to-login-with-db-initialzied", func(t *testing.T) {
-		// We let the frontend to handle unauthorized user (if the password is initialzied)
+	t.Run("no-redirect-to-login-with-db-initialized", func(t *testing.T) {
+		// We let the frontend to handle unauthorized user (if the password is initialized)
 		setupTestAuthDB(t)
 		t.Cleanup(cleanupAuthDB)
 
@@ -210,7 +210,7 @@ func TestHandleWebUIAuth(t *testing.T) {
 
 	t.Run("403-for-logged-in-non-admin-user", func(t *testing.T) {
 		server_utils.ResetTestState()
-		// We let the frontend to handle unauthorized user (if the password is initialzied)
+		// We let the frontend to handle unauthorized user (if the password is initialized)
 		setupTestAuthDB(t)
 		t.Cleanup(func() {
 			cleanupAuthDB()

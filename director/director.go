@@ -264,9 +264,9 @@ func generateXNamespaceHeader(ginCtx *gin.Context, namespaceAd server_structs.Na
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{xPelicanNamespace}
 }
 
-func getFinalRedirectURL(rurl url.URL, requstParams url.Values) string {
+func getFinalRedirectURL(rurl url.URL, requestParams url.Values) string {
 	rQuery := rurl.Query()
-	for key, vals := range requstParams {
+	for key, vals := range requestParams {
 		for _, val := range vals {
 			rQuery.Add(key, val)
 		}
@@ -924,7 +924,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 			}
 		}
 
-		// Check for the DirectRead query paramater and redirect to the origin if it's set if the origin allows DirectReads
+		// Check for the DirectRead query parameter and redirect to the origin if it's set if the origin allows DirectReads
 		if c.Request.URL.Query().Has(pelican_url.QueryDirectRead) {
 			log.Debugln("directread query parameter detected, redirecting to origin")
 			// We'll redirect to origin here and the origin will decide if it can serve the request (if direct reads are enabled)
@@ -1194,7 +1194,7 @@ func serverAdMetricMiddleware(ctx *gin.Context) {
 		if len(namespacePath) == 0 {
 			continue
 		}
-		metrics.PelicanDirectorAdvertisementsRecievedTotal.With(
+		metrics.PelicanDirectorAdvertisementsReceivedTotal.With(
 			prometheus.Labels{
 				"server_name":      serverName,
 				"server_web_url":   serverWebUrl,
@@ -1370,9 +1370,9 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 		fmt.Sprintf("%d", versionSegments[1]),
 	}
 
-	shortendVersion := strings.Join(strSegments, ".")
+	shortenedVersion := strings.Join(strSegments, ".")
 
-	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": shortendVersion, "service": service}).Inc()
+	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": shortenedVersion, "service": service}).Inc()
 }
 
 func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {

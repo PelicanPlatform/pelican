@@ -85,7 +85,7 @@ var (
 
 // Constants for the director sorting algorithm
 const (
-	souceServerAdsLimit      = 6    // Number of servers under consideration
+	sourceServerAdsLimit     = 6    // Number of servers under consideration
 	distanceHalvingThreshold = 10   // Threshold where the distance havling factor kicks in, in miles
 	distanceHalvingFactor    = 200  // Halving distance for the GeoIP weight, in miles
 	objAvailabilityFactor    = 2    // Multiplier for knowing whether an object is present

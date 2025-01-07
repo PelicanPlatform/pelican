@@ -126,7 +126,7 @@ components: ["client", "registry", "origin"]
 name: GeoIPOverrides
 description: |+
   A list of IP addresses whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects
-  both server ads (for determining the location of origins and caches) and incoming client requests (for determing where a client request is
+  both server ads (for determining the location of origins and caches) and incoming client requests (for determining where a client request is
   coming from).
 
   Configuration takes an IP address (both regular and CIDR) and a Coordinate made up of a lat/long pair in decimal format. For example:
@@ -1349,9 +1349,9 @@ components: ["cache"]
 ---
 name: Cache.BlocksToPrefetch
 description: |+
-  The number of 128 kilobyte blocks the cache will read ahead when recieving requests. This will put the data in the cache
+  The number of 128 kilobyte blocks the cache will read ahead when receiving requests. This will put the data in the cache
   potentially before it is needed and reduce the latency to the client when a request is made. However, it can also cause
-  many extra requests to an origin and potentially overload it when unnessesary. As such, this is turned off by default.
+  many extra requests to an origin and potentially overload it when unnecessary. As such, this is turned off by default.
 type: int
 default: 0
 components: ["cache"]
@@ -1407,7 +1407,7 @@ components: ["director"]
 ---
 name: Director.CacheSortMethod
 description: |+
-  When the director recieves a client request that needs to be redirected to a cache, it will use this method to
+  When the director receives a client request that needs to be redirected to a cache, it will use this method to
   determine the ordering of the caches. The default method is "distance", which sorts caches by their spherical distance
   from the client.
 
@@ -1708,7 +1708,7 @@ description: |+
 
   - `name` must be snake case with underline connecting words, i.e. department_name.
     The name displayed in the registration table will be converted from this field
-    into a human-readble, space-separated name with the first letter(s) capitalized. i.e. department_name -> Department Name
+    into a human-readable, space-separated name with the first letter(s) capitalized. i.e. department_name -> Department Name
   - `type` must be one of `string`, `int`, `bool`, `datetime` (Unix time in seconds), or `enum`.
   - `options` must be a non-empty yaml array for field with type `enum`. `optionsUrl` will be ignored if `options` is set.
 
@@ -2586,7 +2586,7 @@ name: Shoveler.StompCert
 description: |+
   For stomp only.
 
-  A filepath to the location of the TLS certifcate.
+  A filepath to the location of the TLS certificate.
 type: filename
 default: none
 components: ["origin", "cache"]
@@ -2773,7 +2773,7 @@ description: |+
         - `CreationTime`: REQUIRED. A unix timestamp indicating when the lot should begin being considered valid. Times in the future indicate
           the lot should not be considered valid until that time.
         - `ExpirationTime`: REQUIRED. A unix timestamp indicating when the lot expires. Lots may continue to function after expiration, but lot
-          data owners should recognize the storage is at-will and may be pre-empted at any time.
+          data owners should recognize the storage is at-will and may be preempted at any time.
         - `DeletionTime`: REQUIRED. A unix timestamp indicating when the lot and its associated data should be deleted.
 
   For example, Lotman could be configured with the "my-policy" policy with the following:

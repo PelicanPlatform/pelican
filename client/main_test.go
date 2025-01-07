@@ -105,7 +105,7 @@ func TestGenerateSortedObjectServers(t *testing.T) {
 	})
 
 	// Test our prepend works with multiple preferred caches
-	t.Run("testMutliPreferredCachesPrepend", func(t *testing.T) {
+	t.Run("testMultiPreferredCachesPrepend", func(t *testing.T) {
 		preferredOServers := []*url.URL{
 			{Scheme: "https", Host: "preferred1.com", Path: "/foo"},
 			{Scheme: "https", Host: "preferred2.com", Path: "/foo"},
