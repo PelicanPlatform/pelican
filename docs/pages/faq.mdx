@@ -18,7 +18,7 @@ For our intents and purposes, URLs contain three main parts -- a _scheme_, a _ho
 <sup>[3](#triple-slash-fn3)</sup>:
 1. **scheme**: A URL's _scheme_ tells the computer _how_ something should be accessed. In most cases, this specifies a protocol like `https`, `ftp`,
 or in our case `pelican` and `osdf`. Essentially, this tells your computer what "language" it needs to speak to interact with the resource.
-2. **hostname**: The URL's _hostname_ gives the computer information about who/what remote resource might be able to fulfill your request. 
+2. **hostname**: The URL's _hostname_ gives the computer information about who/what remote resource might be able to fulfill your request.
 3. **path**: The _path_ component of a URL specifies the name of a requested resource from the requested hostname. Typically this is something like
 a specific web page or file.
 
@@ -108,7 +108,7 @@ pelican object get -c https://my-chosen-cache:8443 pelican://osg-htc.org/some/ob
 > **NOTE**: Specifying caches in this manner should only be done if you're positive the Director is having sorting troubles -- the Director's sorting algorithms
 are no longer tied explicitly to geo-location, and it may be trying to make better decisions based on object availability and the detected load of various caches.
 
-> <a id="geoloc-fn1">**1**</a>: Directors may implement more intelligent cache selection schemes. For a full list of options, see the documentation for the 
+> <a id="geoloc-fn1">**1**</a>: Directors may implement more intelligent cache selection schemes. For a full list of options, see the documentation for the
   Director's [`Director.CacheSortMethod`](./parameters.mdx#Director-CacheSortMethod) config parameter.<br />
   <a id="geoloc-fn2">**2**</a>: In particular, the Director uses the [MaxMind GeoLite City database](https://www.maxmind.com/en/geolite-free-ip-geolocation-data), which it
   updates twice weekly on Wednesdays and Fridays (shortly after the databases are updated upstream by MaxMind).<br />
@@ -120,7 +120,7 @@ Pelican is built on HTTP, so any client that speaks HTTP can determine this. The
 3. Creating the correct curl command
 4. Interpreting the Director's response headers
 
-If you don't have a working understanding of how Pelican finds and uses Directors in a federation, see 
+If you don't have a working understanding of how Pelican finds and uses Directors in a federation, see
 [About Pelican/A First Look Under The Hood ](./about-pelican.mdx#making-bytes-accessible-and-moving-them----a-first-look-under-the-hood) for a quick recap.
 
 ### Discovering your Director

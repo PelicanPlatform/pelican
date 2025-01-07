@@ -46,10 +46,10 @@ pelican://osg-htc.org/demo/testfile.txt
 
 In this example, the full object name encodes the federation (osg-htc.org), and some path within that federation -- `/demo/testfile.txt`. When new Pelican object
 servers are added to a federation (called Origins), they act on behalf of some subpath within the federation, called a namespace or federation prefix. In the above
-example, the origin providing access to the object likely acts on behalf of `/demo` namespace. 
+example, the origin providing access to the object likely acts on behalf of `/demo` namespace.
 
 These namespace prefixes are a way for data owners to carve out sections of a federation in a way that ties namespace ownership/management to a public-private keypair.
-In this way, the group that owns the `/demo` namespace can make decisions on its behalf, including the creation of further sub namespaces and the ability to make decisions 
+In this way, the group that owns the `/demo` namespace can make decisions on its behalf, including the creation of further sub namespaces and the ability to make decisions
 about the read/write permissions of the namespace's underlying objects. Using the "directory permissions" analogy, the owner of the `/demo` directory gets complete control
 over what happens in the directory, including the ability to delegate the creation of further subdirectories to other users who have access to `/demo`.
 
@@ -79,8 +79,8 @@ $ curl -v https://osdf-director.osg-htc.org/ospool/uc-shared/public/OSG-Staff/va
 > Host: osdf-director.osg-htc.org
 > user-agent: curl/7.76.1
 > accept: */*
-> 
-< HTTP/2 307 
+>
+< HTTP/2 307
 < content-type: text/html; charset=utf-8
 < date: Thu, 19 Dec 2024 21:12:35 GMT
 < link: <https://osdf-uw-cache.svc.osg-htc.org:8443/ospool/uc-shared/public/OSG-Staff/validation/test.txt>; rel="duplicate"; pri=1; depth=3
@@ -89,7 +89,7 @@ $ curl -v https://osdf-director.osg-htc.org/ospool/uc-shared/public/OSG-Staff/va
 < x-pelican-namespace: namespace=/ospool/uc-shared/public, require-token=false, collections-url=https://pelican-osdf-public.tempest.uchicago.edu:8443
 < x-pelican-token-generation: issuer=https://osg-htc.org/ospool, max-scope-depth=3, strategy=OAuth2, base-path=/ospool/uc-shared/public
 < content-length: 132
-< 
+<
 <a href="https://osdf-uw-cache.svc.osg-htc.org:8443/ospool/uc-shared/public/OSG-Staff/validation/test.txt">Temporary Redirect</a>.
 ```
 

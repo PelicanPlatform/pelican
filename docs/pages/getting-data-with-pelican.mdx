@@ -3,7 +3,7 @@
 Pelican is built on top of HTTP and uses the most common [HTTP verbs](https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods) to interact with data:
 downloading objects happen with an HTTP "GET", uploading an object is an HTTP "PUT", discovering data uses HTTP's "HEAD" and WebDav's "PROPFIND". This architecture
 means any tool that already speaks HTTP _can_ integrate with Pelican. However, Pelican's official clients -- any of our tools
-designed for interacting with remote objects -- make intelligent use of special information provided by federation services like the Director to 
+designed for interacting with remote objects -- make intelligent use of special information provided by federation services like the Director to
 deliver the best experience. They also have built-in optimizations that help interact with data more efficiently, like multi-worker object streaming,
 automatic retry policies, and tools for packing/unpacking objects while they're in flight.
 
