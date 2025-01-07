@@ -100,6 +100,14 @@ the server should be sorted to the end of the potential list of servers.
 Errors can compound if both of these issues (client _and_ cache/origin geo-location failures) occur. If the cache list you see from the Director has no discernable
 geographic center, you should contact your federation administrators for help debugging.
 
+Finally, some Pelican clients may allow you to select a cache manually if you have a strong preference for which cache to use.
+For example, the Pelican CLI lets you do this by specifying the cache's hostname/port with the `-c` flag:
+```bash
+pelican object get -c https://my-chosen-cache:8443 pelican://osg-htc.org/some/object
+```
+> **NOTE**: Specifying caches in this manner should only be done if you're positive the Director is having sorting troubles -- the Director's sorting algorithms
+are no longer tied explicitly to geo-location, and it may be trying to make better decisions based on object availability and the detected load of various caches.
+
 > <a id="geoloc-fn1">**1**</a>: Directors may implement more intelligent cache selection schemes. For a full list of options, see the documentation for the 
   Director's [`Director.CacheSortMethod`](./parameters.mdx#Director-CacheSortMethod) config parameter.<br />
   <a id="geoloc-fn2">**2**</a>: In particular, the Director uses the [MaxMind GeoLite City database](https://www.maxmind.com/en/geolite-free-ip-geolocation-data), which it
