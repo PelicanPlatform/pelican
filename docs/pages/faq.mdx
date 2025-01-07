@@ -112,3 +112,67 @@ are no longer tied explicitly to geo-location, and it may be trying to make bett
   Director's [`Director.CacheSortMethod`](./parameters.mdx#Director-CacheSortMethod) config parameter.<br />
   <a id="geoloc-fn2">**2**</a>: In particular, the Director uses the [MaxMind GeoLite City database](https://www.maxmind.com/en/geolite-free-ip-geolocation-data), which it
   updates twice weekly on Wednesdays and Fridays (shortly after the databases are updated upstream by MaxMind).<br />
+
+## How can I tell what services my Pelican client will talk to _before_ I try to get/put objects?
+Pelican is built on HTTP, so any client that speaks HTTP can determine this. These instructions are for using `curl` on the command line. Broadly speaking, they require:
+1. Finding the hostname of your federation's Director
+2. Determining whether you want the Director to provide a list of caches or origins
+3. Creating the correct curl command
+4. Interpreting the Director's response headers
+
+If you don't have a working understanding of how Pelican finds and uses Directors in a federation, see 
+[About Pelican/A First Look Under The Hood ](./about-pelican.mdx#making-bytes-accessible-and-moving-them----a-first-look-under-the-hood) for a quick recap.
+
+### Discovering your Director
+If you have a `pelican`-schemed URL and a terminal with `curl`, you have everything you need to get started.
+First, get the federation discovery URL from your `pelican` url, e.g. `pelican://osg-htc.org/some/object` results in the discovery URL of `osg-htc.org`
+
+Next, curl the discovery URL at the `/.well-known/pelican-configuration` path:
+```bash
+$ curl https://osg-htc.org/.well-known/pelican-configuration
+{
+  "director_endpoint": "https://osdf-director.osg-htc.org",
+  "namespace_registration_endpoint": "https://osdf-registry.osg-htc.org",
+  "jwks_uri": "https://osg-htc.org/osdf/public_signing_key.jwks"
+}
+```
+If successful, this should return a JSON. Your federation's Director is the URL provided by the `director_endpoint` key, e.g. `https://osdf-director.osg-htc.org`
+
+### Deciding Whether to Ask About Caches or Origins
+Next, you should determine whether you expect your client to talk to a cache or an origin. In most cases, the answer is a cache, but "direct read" flags/URL query parameters,
+or PUT operations would indicate to your client that it should be talking to an origin.
+
+The following steps are very similar in both cases, but require minor adjustments in the way you interact with the Director.
+
+#### Discovering Caches
+If you're expecting your client to manipulate objects through a cache, you'll point `curl` at the Director's "object" discovery API, which uses the path
+`/api/v1.0/director/object/<your namespace & object>` path prefix.
+
+For the previous `pelican` URL of `pelican://osg-htc.org/some/object`, you'd then construct the following curl command pointed at the Director with the correct path:
+```bash
+$ curl -v https://osdf-director.osg-htc.org/api/v1.0/director/object/some/object
+```
+
+If successful, the Director's response will be a series of HTTP headers with information you can use to answer a variety of questions. In particular, the list of caches
+you can expect your client to try are included in the `link` header, which will look something like:
+```
+link: <https://osdf-uw-cache.svc.osg-htc.org:8443/some/object>; rel="duplicate"; pri=1; depth=2, <https://sc-cache.chtc.wisc.edu:8443/some/object>;
+rel="duplicate"; pri=2; depth=2, <https://dtn-pas.cinc.nrp.internet2.edu:8443/some/object>; rel="duplicate"; pri=3; depth=2,
+<https://osg-kansas-city-stashcache.nrp.internet2.edu:8443/some/object>; rel="duplicate"; pri=4; depth=2, <https://its-condor-xrootd1.syr.edu:8443/some/object>;
+rel="duplicate"; pri=5; depth=2, <https://osg-gftp2.pace.gatech.edu:8443/some/object>; rel="duplicate"; pri=6; depth=2
+```
+
+#### Discovering Origins
+If you're expecting your client to manipulate objects through an origin, you'll point `curl` at the Director's "origin" discovery API, which uses the path
+`/api/v1.0/director/origin/<your namespace & object>` path prefix.
+
+Using the previous `pelican`-schemed URL, you'd then construct the following `curl` command:
+```bash
+$ curl -v https://osdf-director.osg-htc.org/api/v1.0/director/origin/some/object
+```
+
+Once again, the `link` header will include an ordered list of Origins that your client expects to try when looking for `/some/object`:
+```
+< link: <https://chtc-osdf-origin.chtc.wisc.edu:8443/some/object>; rel="duplicate"; pri=1; depth=1
+```
+This list is usually much shorter and likely contains a single Origin.
