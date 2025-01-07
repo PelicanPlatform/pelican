@@ -46,60 +46,65 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
-var (
-	// This is the private JWK for the server to sign tokens and payloads.
-	// It represents the private key with the highest lexicographical filename
-	// among the legacy key file at IssuerKey (if exists) and all .pem files in IssuerKeyDirectory
-	issuerPrivateJWK atomic.Pointer[jwk.Key]
+type IssuerKeys struct {
+	// CurrentKey is the private key used to sign tokens and payloads. It corresponds to the
+	// private key with the highest lexicographical filename among the legacy key file
+	// (if present) and all .pem files in IssuerKeyDirectory.
+	CurrentKey jwk.Key
 
-	// A map [keyID:key] holds all valid private keys, including .pem files in IssuerKeyDirectory and
-	// legacy key file at IssuerKey (if exists), enabling verification of tokens and payload signatures against one of them.
-	// The token/signature should be valid if any of the keys in issuerPrivateKeys could have produced it
-	issuerPrivateKeys atomic.Pointer[map[string]jwk.Key]
+	// AllKeys holds all valid private keys as a [keyID:key] map, including those from .pem files
+	// in IssuerKeyDirectory and legacy key file at IssuerKey (if exists). A token or
+	// payload signature is considered valid if any of these keys could have produced it.
+	AllKeys map[string]jwk.Key
+}
+
+var (
+	issuerKeys atomic.Pointer[IssuerKeys]
 
 	// Used to ensure initialization func init() is only called once
 	initOnce sync.Once
 )
 
-// Reset the atomic pointer to issuer private jwk
-func ResetIssuerJWKPtr() {
-	issuerPrivateJWK.Store(nil)
-}
-
 // Set a private key as the issuer key
 func setIssuerKey(key jwk.Key) {
-	issuerPrivateJWK.Store(&key)
-	// Save this new key in the in-memory map for all private keys
-	keysCopy := getIssuerPrivateKeysCopy()
-	keysCopy[key.KeyID()] = key
-	issuerPrivateKeys.Store(&keysCopy)
+	newKeys := IssuerKeys{
+		CurrentKey: key,
+		AllKeys:    getIssuerPrivateKeysCopy(), // Get a copy of the existing keys
+	}
+	newKeys.AllKeys[key.KeyID()] = key // Add the new key to the copy
+	issuerKeys.Store(&newKeys)
 }
 
-// Clear all entries from the issuerPrivateKeys
+// Resets the entire keys struct, including current and all keys. CurrentKey is implicitly set to nil
 func ResetIssuerPrivateKeys() {
-	emptyMap := make(map[string]jwk.Key)
-	issuerPrivateKeys.Store(&emptyMap)
+	issuerKeys.Store(&IssuerKeys{
+		AllKeys: make(map[string]jwk.Key),
+	})
 }
 
 // Safely load the current map and create a copy for modification
 func getIssuerPrivateKeysCopy() map[string]jwk.Key {
-	currentKeys := issuerPrivateKeys.Load()
-	newMap := make(map[string]jwk.Key)
-	if currentKeys != nil {
-		for k, v := range *currentKeys {
-			newMap[k] = v
-		}
+	currentKeysPtr := issuerKeys.Load()
+	if currentKeysPtr == nil {
+		return make(map[string]jwk.Key)
+	}
+
+	currentKeys := *currentKeysPtr
+	newMap := make(map[string]jwk.Key, len(currentKeys.AllKeys))
+	for k, v := range currentKeys.AllKeys {
+		newMap[k] = v
 	}
 	return newMap
 }
 
 // Read the current map
 func GetIssuerPrivateKeys() map[string]jwk.Key {
-	keysPtr := issuerPrivateKeys.Load()
+	keysPtr := issuerKeys.Load()
 	if keysPtr == nil {
 		return make(map[string]jwk.Key)
 	}
-	return *keysPtr
+
+	return (*keysPtr).AllKeys
 }
 
 // Helper function to create a directory and set proper permissions to save private keys
@@ -563,11 +568,11 @@ func GenerateCert() error {
 }
 
 // Helper function to initialize the in-memory map to save all private keys
-func initKeysMap() error {
+func initKeysMap() {
 	initialMap := make(map[string]jwk.Key)
-	issuerPrivateKeys.Store(&initialMap)
-
-	return nil
+	issuerKeys.Store(&IssuerKeys{
+		AllKeys: initialMap,
+	})
 }
 
 // Helper function to load one .pem file from specified filename
@@ -664,9 +669,12 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 		return newKey, nil
 	}
 
-	// Save up-to-date all valid private keys and the issuer key in memory
-	issuerPrivateKeys.Store(&latestKeys)
-	issuerPrivateJWK.Store(&mostRecentKey)
+	// Save current key and all up-to-date valid private keys and the in-memory issuerKeys
+	newKeys := IssuerKeys{
+		CurrentKey: mostRecentKey,
+		AllKeys:    latestKeys,
+	}
+	issuerKeys.Store(&newKeys)
 	log.Debugf("Set private key %s as the issuer key", mostRecentKey.KeyID())
 
 	return mostRecentKey, nil
@@ -723,17 +731,14 @@ func generatePEMandSetIssuerKey(dir string) (jwk.Key, error) {
 // The issuer key is the key with the highest lexicographical filename
 func loadIssuerPrivateKey(issuerKeysDir string) (jwk.Key, error) {
 	// Ensure initKeysMap is only called once across the program’s runtime
-	var initErr error
 	initOnce.Do(func() {
-		initErr = initKeysMap()
+		initKeysMap()
 	})
-	if initErr != nil {
-		return nil, errors.Wrap(initErr, "failed to initialize and/or migrate existing private key file")
-	}
 
 	issuerKey, err := loadPEMFiles(issuerKeysDir)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to re-scan %s to load .pem files and set the key file with the highest lexicographical order as the issuer key", issuerKeysDir)
+		return nil, errors.Wrapf(err, `failed to re-scan %s to load .pem files and set the key file with the
+		highest lexicographical order as the current issuer key`, issuerKeysDir)
 	}
 
 	return issuerKey, err
@@ -778,18 +783,25 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string) (jwk.Set, e
 
 // Return the private JWK for the server to sign tokens and payloads
 func GetIssuerPrivateJWK() (jwk.Key, error) {
-	key := issuerPrivateJWK.Load()
+	keysPtr := issuerKeys.Load()
 	issuerKeysDir := param.IssuerKeysDirectory.GetString()
 
 	// Re-scan the private keys dir when no issuer key in memory
-	if key == nil {
+	if keysPtr == nil || keysPtr.CurrentKey == nil {
 		newKey, err := loadIssuerPrivateKey(issuerKeysDir)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to load issuer private key")
 		}
-		key = &newKey
+		newKeys := IssuerKeys{
+			CurrentKey: newKey,
+			AllKeys:    map[string]jwk.Key{newKey.KeyID(): newKey},
+		}
+
+		issuerKeys.Store(&newKeys)
+
+		keysPtr = issuerKeys.Load() // Reload after store
 	}
-	return *key, nil
+	return (*keysPtr).CurrentKey, nil
 }
 
 // Check if a valid JWKS file exists at Server_IssuerJwks, return that file if so;

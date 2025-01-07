@@ -1429,8 +1429,8 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		return err
 	}
 
-	// Reset issuerPrivateJWK to ensure test cases can use their own temp IssuerKey
-	ResetIssuerJWKPtr()
+	// Reset IssuerKeys to ensure test cases can use their own temp IssuerKeysDirectory
+	ResetIssuerPrivateKeys()
 
 	// As necessary, generate private keys, JWKS and corresponding certs
 
@@ -1640,7 +1640,6 @@ func ResetConfig() {
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
 
-	ResetIssuerJWKPtr()
 	ResetIssuerPrivateKeys()
 
 	ResetClientInitialized()

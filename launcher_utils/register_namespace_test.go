@@ -48,8 +48,6 @@ import (
 func TestRegistration(t *testing.T) {
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
-		config.ResetIssuerJWKPtr()
-		config.ResetIssuerPrivateKeys()
 	})
 	// Use a temp os directory to better control the deletion of the directory.
 	// Fixes issue on Windows where we are trying to delete a file in use so this
@@ -177,8 +175,6 @@ func TestRegistration(t *testing.T) {
 func TestMultiKeysRegistration(t *testing.T) {
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
-		config.ResetIssuerJWKPtr()
-		config.ResetIssuerPrivateKeys()
 	})
 	// Use a temp os directory to better control the deletion of the directory.
 	// Fixes issue on Windows where we are trying to delete a file in use so this

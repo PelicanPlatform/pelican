@@ -245,7 +245,6 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		token := createToken("monitoring.query", issuerUrl)
 
 		// Re-init the config again, this time pointing at the original key
-		config.ResetIssuerJWKPtr()
 		config.ResetIssuerPrivateKeys()
 		viper.Set("IssuerKeysDirectory", keysDir)
 		err = config.InitServer(ctx, server_structs.OriginType)

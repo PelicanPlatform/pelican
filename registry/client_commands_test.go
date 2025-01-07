@@ -234,7 +234,6 @@ func TestNamespaceRegisteredPubKeyUpdate(t *testing.T) {
 
 	t.Run("test-namespace-pubkey-update-with-unregistered-key", func(t *testing.T) {
 		// Delete all private keys previously added to disk and memory
-		config.ResetIssuerJWKPtr()
 		config.ResetIssuerPrivateKeys()
 		issuerKeysDir := param.IssuerKeysDirectory.GetString()
 		err = os.RemoveAll(issuerKeysDir)
@@ -275,7 +274,6 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 	}()
 
 	issuerKeysDir := param.IssuerKeysDirectory.GetString()
-	config.ResetIssuerJWKPtr()
 	config.ResetIssuerPrivateKeys()
 	os.RemoveAll(issuerKeysDir)
 	privKeys := config.GetIssuerPrivateKeys()
@@ -422,7 +420,6 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	assert.Contains(t, err.Error(), "A superspace or subspace of this namespace /topo/foo already exists in the OSDF topology: /topo/foo. To register a Pelican equivalence, you need to present your identity.")
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
-	config.ResetIssuerJWKPtr()
 	config.ResetIssuerPrivateKeys()
 	tDir2 := t.TempDir()
 	viper.Set("IssuerKeysDirectory", tDir2+"/keychaining2")
