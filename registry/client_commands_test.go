@@ -204,27 +204,47 @@ func TestNamespaceRegisteredPubKeyUpdate(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("test-registered-namespace-pubkey-update-with-new-active-key", func(t *testing.T) {
-		activeKey, err := config.GetIssuerPrivateJWK()
-		require.NoError(t, err)
-		require.Equal(t, privKey.KeyID(), activeKey.KeyID())
-
 		// Imitate LaunchIssuerKeysDirRefresh function
-		_, err = config.GeneratePEMandSetIssuerKey(param.IssuerKeysDirectory.GetString())
+		newKey, err := config.GeneratePEM(param.IssuerKeysDirectory.GetString())
 		require.NoError(t, err)
-		privKey2, err := config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
+		keysChange, err := config.RefreshKeys()
+		require.True(t, keysChange)
 		require.NoError(t, err)
+		privKey2, err := config.GetIssuerPrivateJWK()
+		require.NoError(t, err)
+		require.Equal(t, newKey.KeyID(), privKey2.KeyID())
 		err = NamespacesPubKeyUpdate(privKey2, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
 		require.NoError(t, err)
 	})
 
+	t.Run("test-namespace-pubkey-update-using-new-key-with-previous-registered-key", func(t *testing.T) {
+		// The origin currently holds two private keys (privKey, privKey2), whose
+		// corresponding public keys are registered in the registry database.
+		tempDir := filepath.Join(t.TempDir(), "somewhere")
+		privKeyX, err := config.GeneratePEM(tempDir)
+		require.NoError(t, err)
+		allkeys := config.GetIssuerPrivateKeys()
+		require.Len(t, allkeys, 2)
+
+		// Even though privKeyX is not in the origin's IssuerKeysDirectory, NamespacesPubKeyUpdate should succeed.
+		// This is because the origin holds (privKey, privKey2), satisfying the requirement of having at least one previously registered key
+		err = NamespacesPubKeyUpdate(privKeyX, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
+		require.NoError(t, err)
+	})
+
 	t.Run("test-namespace-pubkey-update-with-unregistered-key", func(t *testing.T) {
+		// Delete all private keys previously added to disk and memory
 		config.ResetIssuerJWKPtr()
 		config.ResetIssuerPrivateKeys()
+		issuerKeysDir := param.IssuerKeysDirectory.GetString()
+		err = os.RemoveAll(issuerKeysDir)
 
-		// privKey3 is the active key of the origin, but it cannot be used to update registry db because it is not previously registered
-		tempDir := filepath.Join(t.TempDir(), "somewhere")
-		privKey3, err := config.GeneratePEMandSetIssuerKey(tempDir)
+		privKey3, err := config.GeneratePEM(issuerKeysDir)
 		require.NoError(t, err)
+		keysChange, err := config.RefreshKeys()
+		require.True(t, keysChange)
+		require.NoError(t, err)
+		// privKey3 is the active issuer key of the origin, but it cannot be used to update registry db because it is not previously registered
 		err = NamespacesPubKeyUpdate(privKey3, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
 		require.ErrorContains(t, err, "Origin does not possess valid key to update public keys of registered namespace(s)")
 	})
@@ -254,23 +274,32 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 		svr.Close()
 	}()
 
+	issuerKeysDir := param.IssuerKeysDirectory.GetString()
 	config.ResetIssuerJWKPtr()
 	config.ResetIssuerPrivateKeys()
+	os.RemoveAll(issuerKeysDir)
 	privKeys := config.GetIssuerPrivateKeys()
 	require.Len(t, privKeys, 0)
 
-	// Construct a client that has [p1,p2,p3] and p3 is the active private key
-	privKey1, err := config.GeneratePEMandSetIssuerKey(param.IssuerKeysDirectory.GetString())
-	require.NotEmpty(t, privKey1)
+	// Construct a client(origin) that has [p1,p2,p3] and p3 is the issuer key
+	privKey1, err := config.GeneratePEM(issuerKeysDir)
 	require.NoError(t, err)
-	privKey2, err := config.GeneratePEMandSetIssuerKey(param.IssuerKeysDirectory.GetString())
+	privKey2, err := config.GeneratePEM(issuerKeysDir)
 	require.NoError(t, err)
+	keysChange, err := config.RefreshKeys()
+	require.True(t, keysChange)
+	require.NoError(t, err)
+	privKeys = config.GetIssuerPrivateKeys()
+	require.Len(t, privKeys, 2)
 
 	prefix := "/mascot/bucky"
 	err = NamespaceRegister(privKey2, svr.URL+"/api/v1.0/registry", "", prefix, "mock_site_name")
 	require.NoError(t, err)
 
-	privKey3, err := config.GeneratePEMandSetIssuerKey(param.IssuerKeysDirectory.GetString())
+	privKey3, err := config.GeneratePEM(issuerKeysDir)
+	require.NoError(t, err)
+	keysChange, err = config.RefreshKeys()
+	require.True(t, keysChange)
 	require.NoError(t, err)
 
 	// Construct a public keys JWKS [p2,p4] to save in registry DB, imitating admin manually adding p4

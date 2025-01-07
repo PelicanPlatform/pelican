@@ -88,9 +88,31 @@ func updateNamespacesPubKey(ctx context.Context, prefixes []string) error {
 	return nil
 }
 
-// Check the issuer key directory containing .pem files every 5 minutes, load new private key(s)
-// if new file(s) are detected, then register the new public key
-func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group) {
+func triggerNamespacesPubKeyUpdate(ctx context.Context) error {
+	extUrlStr := param.Server_ExternalWebUrl.GetString()
+	extUrl, _ := url.Parse(extUrlStr)
+	namespace := server_structs.GetOriginNs(extUrl.Host)
+	if err := updateNamespacesPubKey(ctx, []string{namespace}); err != nil {
+		log.Errorf("Error updating the public key of the registered origin namespace %s: %v", namespace, err)
+	}
+
+	originExports, err := server_utils.GetOriginExports()
+	if err != nil {
+		return err
+	}
+	originExportsNs := make([]string, len(originExports))
+	for i, export := range originExports {
+		originExportsNs[i] = export.FederationPrefix
+	}
+	if err := updateNamespacesPubKey(ctx, originExportsNs); err != nil {
+		log.Errorf("Error updating the public key of origin-exported namespace(s): %v", err)
+	}
+	return nil
+}
+
+// Check the directory containing .pem files regularly, load new private key(s)
+// For origin server, if new file(s) are detected, then register the new public key
+func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group, modules server_structs.ServerType) {
 	egrp.Go(func() error {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -102,38 +124,17 @@ func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group) {
 				return nil
 			case <-ticker.C:
 				// Refresh the disk to pick up any new private key
-				_, err := config.LoadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
+				keysChanged, err := config.RefreshKeys()
 				if err != nil {
-					return err
+					return nil
 				}
 
-				log.Debugf("Private keys directory refreshed successfully")
-				// TODO: for origin, compare old and new jwks, if they are not equal, trigger namespace registered public keys update
-				// if newKeyID == prevKeyID {
-				// 	// Skip this iteration since the active key has not changed
-				// 	log.Debugf("Active private key has not changed. Skipping update of namespaces' public keys in the registry database.")
-				// 	continue
-				// }
-				// Update public key in registry db when there new active private key
-				extUrlStr := param.Server_ExternalWebUrl.GetString()
-				extUrl, _ := url.Parse(extUrlStr)
-				namespace := server_structs.GetOriginNs(extUrl.Host)
-				if err := updateNamespacesPubKey(ctx, []string{namespace}); err != nil {
-					log.Errorf("Error updating the public key of the registered origin namespace %s: %v", namespace, err)
+				// Update public key registered with namespace in registry db when the private key(s) changed in an origin
+				if modules.IsEnabled(server_structs.OriginType) && keysChanged {
+					if err = triggerNamespacesPubKeyUpdate(ctx); err != nil {
+						return err
+					}
 				}
-
-				originExports, err := server_utils.GetOriginExports()
-				if err != nil {
-					return err
-				}
-				originExportsNs := make([]string, len(originExports))
-				for i, export := range originExports {
-					originExportsNs[i] = export.FederationPrefix
-				}
-				if err := updateNamespacesPubKey(ctx, originExportsNs); err != nil {
-					log.Errorf("Error updating the public key of origin-exported namespace(s): %v", err)
-				}
-
 			}
 		}
 	})

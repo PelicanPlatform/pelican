@@ -158,7 +158,7 @@ func TestMultiPrivateKey(t *testing.T) {
 		tempDir := t.TempDir()
 		issuerKeysDir := filepath.Join(tempDir, "issuer-keys")
 
-		key, err := LoadIssuerPrivateKey(issuerKeysDir)
+		key, err := loadIssuerPrivateKey(issuerKeysDir)
 		require.NoError(t, err)
 		require.NotNil(t, key)
 	})
@@ -170,12 +170,12 @@ func TestMultiPrivateKey(t *testing.T) {
 		tempDir := t.TempDir()
 		issuerKeysDir := filepath.Join(tempDir, "issuer-keys")
 
-		key, err := LoadIssuerPrivateKey(issuerKeysDir)
+		key, err := loadIssuerPrivateKey(issuerKeysDir)
 		require.NoError(t, err)
 		require.NotNil(t, key)
 
 		// Create another private key
-		secondKey, err := GeneratePEMandSetIssuerKey(issuerKeysDir)
+		secondKey, err := generatePEMandSetIssuerKey(issuerKeysDir)
 		require.NoError(t, err)
 		require.NotNil(t, secondKey)
 		assert.NotEqual(t, key.KeyID(), secondKey.KeyID())

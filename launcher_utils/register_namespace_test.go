@@ -225,9 +225,12 @@ func TestMultiKeysRegistration(t *testing.T) {
 	require.Equal(t, 1, len(keysMap))
 
 	// Create a new issuer key and rotate out the old one
-	secondKey, err := config.GeneratePEMandSetIssuerKey(keysDir)
+	secondKey, err := config.GeneratePEM(keysDir)
 	require.NoError(t, err)
 	require.NotEqual(t, privKey.KeyID(), secondKey.KeyID())
+	keysChange, err := config.RefreshKeys()
+	require.True(t, keysChange)
+	require.NoError(t, err)
 	secondPubKey, err := secondKey.PublicKey()
 	require.NoError(t, err)
 	activeKey, err := config.GetIssuerPrivateJWK()

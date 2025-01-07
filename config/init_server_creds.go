@@ -47,10 +47,14 @@ import (
 )
 
 var (
-	// This is the private JWK for the server to sign tokens
+	// This is the private JWK for the server to sign tokens and payloads.
+	// It represents the private key with the highest lexicographical filename
+	// among the legacy key file at IssuerKey (if exists) and all .pem files in IssuerKeyDirectory
 	issuerPrivateJWK atomic.Pointer[jwk.Key]
 
-	// Representing all valid private keys (from .pem files in IssuerKeyDirectory)
+	// A map [keyID:key] holds all valid private keys, including .pem files in IssuerKeyDirectory and
+	// legacy key file at IssuerKey (if exists), enabling verification of tokens and payload signatures against one of them.
+	// The token/signature should be valid if any of the keys in issuerPrivateKeys could have produced it
 	issuerPrivateKeys atomic.Pointer[map[string]jwk.Key]
 
 	// Used to ensure initialization func init() is only called once
@@ -63,7 +67,7 @@ func ResetIssuerJWKPtr() {
 }
 
 // Set a private key as the issuer key
-func SetIssuerKey(key jwk.Key) {
+func setIssuerKey(key jwk.Key) {
 	issuerPrivateJWK.Store(&key)
 	// Save this new key in the in-memory map for all private keys
 	keysCopy := getIssuerPrivateKeysCopy()
@@ -92,6 +96,9 @@ func getIssuerPrivateKeysCopy() map[string]jwk.Key {
 // Read the current map
 func GetIssuerPrivateKeys() map[string]jwk.Key {
 	keysPtr := issuerPrivateKeys.Load()
+	if keysPtr == nil {
+		return make(map[string]jwk.Key)
+	}
 	return *keysPtr
 }
 
@@ -650,7 +657,7 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 	// Create a new private key and set as issuer key when neither legacy private key at IssuerKey
 	// nor any .pem file at IssuerKeysDirectory exists
 	if len(latestKeys) == 0 || mostRecentKey == nil {
-		newKey, err := GeneratePEMandSetIssuerKey(dir)
+		newKey, err := generatePEMandSetIssuerKey(dir)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create a new .pem file to save private key")
 		}
@@ -701,19 +708,20 @@ func GeneratePEM(dir string) (jwk.Key, error) {
 }
 
 // Generate a new .pem file and then set the private key it contains as the issuer key
-func GeneratePEMandSetIssuerKey(dir string) (jwk.Key, error) {
+func generatePEMandSetIssuerKey(dir string) (jwk.Key, error) {
 	newKey, err := GeneratePEM(dir)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to create a new .pem file to save private key")
 	}
 
-	SetIssuerKey(newKey)
+	setIssuerKey(newKey)
 
 	return newKey, nil
 }
 
-// Re-scan the disk to load the issuer/server's private keys, return the issuer key to sign tokens it issues
-func LoadIssuerPrivateKey(issuerKeysDir string) (jwk.Key, error) {
+// Re-scan the disk to load the current valid private keys, return the issuer key to sign tokens it issues
+// The issuer key is the key with the highest lexicographical filename
+func loadIssuerPrivateKey(issuerKeysDir string) (jwk.Key, error) {
 	// Ensure initKeysMap is only called once across the program’s runtime
 	var initErr error
 	initOnce.Do(func() {
@@ -742,24 +750,28 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string) (jwk.Set, e
 			return nil, errors.Wrap(err, "Failed to read issuer JWKS file")
 		}
 	}
-	key := issuerPrivateJWK.Load()
-	if key == nil {
-		// This returns issuerPrivateJWK if it's non-nil, or find and parse private JWK
-		// located at IssuerKeysDirectory if there is one, or generate a new private key
-		loadedKey, err := LoadIssuerPrivateKey(issuerKeysDir)
+	keys := GetIssuerPrivateKeys()
+	if len(keys) == 0 {
+		// Retrieve issuerPrivateKeys if it's non-empty, or find and parse all private key
+		// files on disk, or generate a new private key
+		_, err := loadIssuerPrivateKey(issuerKeysDir)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to load issuer private JWK")
 		}
-		key = &loadedKey
+		// Reload the keys after the key refresh/creation
+		keys = GetIssuerPrivateKeys()
 	}
 
-	pkey, err := jwk.PublicKeyOf(*key)
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to generate public key from file %v", issuerKeysDir)
-	}
+	// Traverse all private keys and add their public keys to the JWKS
+	for _, key := range keys {
+		pkey, err := jwk.PublicKeyOf(key)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to generate public key from key %s", key.KeyID())
+		}
 
-	if err = jwks.AddKey(pkey); err != nil {
-		return nil, errors.Wrap(err, "Failed to add public key to new JWKS")
+		if err = jwks.AddKey(pkey); err != nil {
+			return nil, errors.Wrapf(err, "Failed to add public key %s to new JWKS", key.KeyID())
+		}
 	}
 	return jwks, nil
 }
@@ -771,7 +783,7 @@ func GetIssuerPrivateJWK() (jwk.Key, error) {
 
 	// Re-scan the private keys dir when no issuer key in memory
 	if key == nil {
-		newKey, err := LoadIssuerPrivateKey(issuerKeysDir)
+		newKey, err := loadIssuerPrivateKey(issuerKeysDir)
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to load issuer private key")
 		}
@@ -894,4 +906,37 @@ func LoadSessionSecret() ([]byte, error) {
 		return []byte{}, errors.Wrap(err, "Error reading secret file")
 	}
 	return rest, nil
+}
+
+func areKeysDifferent(a, b map[string]jwk.Key) bool {
+	if len(a) != len(b) {
+		return true
+	}
+
+	for key := range a {
+		if _, exists := b[key]; !exists {
+			return true
+		}
+	}
+
+	for key := range b {
+		if _, exists := a[key]; !exists {
+			return true
+		}
+	}
+
+	return false // All keys are the same
+}
+
+func RefreshKeys() (bool, error) {
+	before := GetIssuerPrivateKeys()
+	_, err := loadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())
+	if err != nil {
+		return false, err
+	}
+	after := GetIssuerPrivateKeys()
+	keysChanged := areKeysDifferent(before, after)
+
+	log.Debugf("Private keys directory refreshed successfully")
+	return keysChanged, nil
 }
