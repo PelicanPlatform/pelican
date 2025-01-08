@@ -610,22 +610,26 @@ func handleDeprecatedConfig() {
 	deprecatedMap := param.GetDeprecated()
 	for deprecated, replacement := range deprecatedMap {
 		if viper.IsSet(deprecated) {
-			if len(replacement) == 1 {
-				if replacement[0] == "none" {
-					log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
-				} else {
-					log.Warningf("Deprecated configuration key %s is set. Please migrate to use %s instead", deprecated, replacement[0])
-					log.Warningf("Will attempt to use the value of %s as default for %s", deprecated, replacement[0])
-					value := viper.Get(deprecated)
-					viper.SetDefault(replacement[0], value)
-				}
+			if replacement[0] == "none" {
+				log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
 			} else {
-				log.Warningf("Deprecated configuration key %s is set. This is being replaced by %s instead", deprecated, replacement)
-				log.Warningf("Setting default values of '%s' to the value of %s.", replacement, deprecated)
-
-				value := viper.Get(deprecated)
 				for _, rep := range replacement {
-					viper.SetDefault(rep, value)
+					log.Warningf("The configuration key '%s' is deprecated. Please use '%s' instead.", deprecated, rep)
+					// value := viper.Get(deprecated)
+					// viper.SetDefault(rep, value)
+
+					// Retrieve current values
+					currentValue := viper.Get(deprecated)
+					previousValue := viper.Get(rep)
+
+					// Set the new value
+					viper.SetDefault(rep, currentValue)
+
+					// Log the event
+					log.Warningf(
+						"Transferred value from deprecated key '%s' to new key '%s'. Deprecated value: '%v'. Previous value of new key: '%v'.",
+						deprecated, rep, currentValue, previousValue,
+					)
 				}
 			}
 		}
@@ -872,9 +876,6 @@ func InitConfig() {
 
 	goose.SetLogger(CustomGooseLogger{})
 
-	// Warn users about deprecated config keys they're using and try to map them to any new equivalent we've defined.
-	handleDeprecatedConfig()
-
 	// Spit out a warning if the user has passed config keys that are not recognized
 	// This should work against both config files and appropriately-prefixed env vars
 	if unknownKeys := validateConfigKeys(); len(unknownKeys) > 0 {
@@ -1043,13 +1044,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	if IsRootExecution() {
 		v.SetDefault(param.Origin_RunLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin"))
 		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "cache"))
-
-		// Several deprecated keys point to Cache.StorageLocation, and by the time we reach this section of code, we should
-		// have already mapped those keys in handleDeprecatedConfig(). To prevent overriding potentially-mapped deprecated keys,
-		// we only re-set he default here if this key is not set.
-		if !v.IsSet(param.Cache_StorageLocation.GetName()) {
-			v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join("/run", "pelican", "cache"))
-		}
+		v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join("/run", "pelican", "cache"))
 		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(param.Cache_StorageLocation.GetString(), "namespace"))
 		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "data")})
 		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "meta")})
@@ -1100,17 +1095,10 @@ func SetServerDefaults(v *viper.Viper) error {
 		}
 
 		v.SetDefault(param.Origin_GlobusConfigLocation.GetName(), filepath.Join(runtimeDir, "xrootd", "origin", "globus"))
-
-		// Several deprecated keys point to Cache.StorageLocation, and by the time we reach this section of code, we should
-		// have already mapped those keys in handleDeprecatedConfig(). To prevent overriding potentially-mapped deprecated keys,
-		// we only re-set he default here if this key is not set.
-		if !viper.IsSet(param.Cache_StorageLocation.GetName()) {
-			viper.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join(runtimeDir, "cache"))
-		}
-		viper.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(param.Cache_StorageLocation.GetString(), "namespace"))
-		viper.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "data")})
-		viper.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "meta")})
-
+		v.SetDefault(param.Cache_StorageLocation.GetName(), filepath.Join(runtimeDir, "cache"))
+		v.SetDefault(param.Cache_NamespaceLocation.GetName(), filepath.Join(param.Cache_StorageLocation.GetString(), "namespace"))
+		v.SetDefault(param.Cache_DataLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "data")})
+		v.SetDefault(param.Cache_MetaLocations.GetName(), []string{filepath.Join(param.Cache_StorageLocation.GetString(), "meta")})
 		v.SetDefault(param.LocalCache_RunLocation.GetName(), filepath.Join(runtimeDir, "cache"))
 		v.SetDefault(param.Origin_Multiuser.GetName(), false)
 	}
@@ -1218,7 +1206,10 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault("Federation_DirectorUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
 	}
 
-	return err
+	// Warn users about deprecated config keys they're using and try to map them to any new equivalent we've defined.
+	handleDeprecatedConfig()
+
+	return nil
 }
 
 // Initialize Pelican server instance. Pass a bit mask of `currentServers` if you want to enable multiple services.
@@ -1585,6 +1576,8 @@ func SetClientDefaults(v *viper.Viper) error {
 		}
 
 	}
+	// Warn users about deprecated config keys they're using and try to map them to any new equivalent we've defined.
+	handleDeprecatedConfig()
 	return nil
 }
 
