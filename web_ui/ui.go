@@ -68,6 +68,15 @@ func ServerHeaderMiddleware(ctx *gin.Context) {
 	ctx.Writer.Header().Add("Server", "pelican/"+config.GetVersion())
 }
 
+// Initialize a hot restart of the server
+func hotRestartServer(ctx *gin.Context) {
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespOK,
+		Msg:    "Server hot restart initiated",
+	})
+	config.RestartFlag <- true
+}
+
 func getConfigValues(ctx *gin.Context) {
 	user := ctx.GetString("User")
 	if user == "" {
@@ -396,6 +405,7 @@ func configureWebResource(engine *gin.Engine) {
 func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/config", AuthHandler, AdminAuthHandler, getConfigValues)
 	engine.PATCH("/api/v1.0/config", AuthHandler, AdminAuthHandler, updateConfigValues)
+	engine.POST("/api/v1.0/hotRestartServer", AuthHandler, AdminAuthHandler, hotRestartServer)
 	engine.GET("/api/v1.0/servers", getEnabledServers)
 	// Health check endpoint for web engine
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
