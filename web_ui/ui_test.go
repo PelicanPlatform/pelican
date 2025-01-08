@@ -22,6 +22,7 @@ package web_ui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -397,5 +398,101 @@ func TestMapPrometheusPath(t *testing.T) {
 
 		get = mapPrometheusPath(c)
 		assert.Equal(t, "/api/v1.0/director/origin/foo/bar/:path", get)
+	})
+}
+
+func TestServerHostRestart(t *testing.T) {
+	route := gin.New()
+	route.POST("/api/v1.0/hotRestartServer", AuthHandler, AdminAuthHandler, hotRestartServer)
+	viper.Set("IssuerKey", filepath.Join(t.TempDir(), "issuer.jwk"))
+
+	t.Run("unauthorized-no-token", func(t *testing.T) {
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("POST", "/api/v1.0/hotRestartServer", nil)
+		require.NoError(t, err)
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusUnauthorized, r.Result().StatusCode)
+	})
+
+	t.Run("forbidden-non-admin-user", func(t *testing.T) {
+		// Create token for regular user
+		tk := token.NewWLCGToken()
+		tk.Issuer = "https://example.com"
+		tk.Subject = "regular-user"
+		tk.Lifetime = 5 * time.Minute
+		tk.AddAudiences("https://example.com")
+		tk.AddScopes(token_scopes.WebUi_Access)
+		tok, err := tk.CreateToken()
+		require.NoError(t, err)
+
+		r := httptest.NewRecorder()
+		req, err := http.NewRequest("POST", "/api/v1.0/hotRestartServer", nil)
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
+		route.ServeHTTP(r, req)
+		assert.Equal(t, http.StatusForbidden, r.Result().StatusCode)
+	})
+
+	t.Run("success-admin-user", func(t *testing.T) {
+		// Create a buffered channel for restart flag
+		config.RestartFlag = make(chan any, 1)
+		// Create token for admin user
+		tk := token.NewWLCGToken()
+		tk.Issuer = "https://example.com"
+		tk.Subject = "admin-user"
+		tk.Lifetime = 5 * time.Minute
+		tk.AddAudiences("https://example.com")
+		tk.AddScopes(token_scopes.WebUi_Access)
+		tok, err := tk.CreateToken()
+		require.NoError(t, err)
+
+		r := httptest.NewRecorder()
+		viper.Set("Server.UIAdminUsers", []string{"admin1", "admin2"})
+		c := gin.CreateTestContextOnly(r, route)
+		c.Set("User", "admin1")
+		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/hotRestartServer", nil)
+		c.Request = req
+		require.NoError(t, err)
+		c.Request.AddCookie(&http.Cookie{Name: "login", Value: tok})
+
+		// Create a done channel to signal when the handler completes
+		done := make(chan struct{})
+		// Start another goroutine to handle the restart flag
+		// Handler goroutine: Sends data to channel config.RestartFlag
+		// Main test goroutine: Receives data from channel config.RestartFlag
+		// This prevents deadlock because both the sender and receiver are
+		// running concurrently instead of sequentially
+		go func() {
+			defer close(done)
+			// Call the handler directly with the context
+			hotRestartServer(c)
+		}()
+
+		// Wait for either the handler to complete or context to timeout
+		select {
+		case <-done:
+			// Handler completed (the done channel is closed)
+		case <-c.Done():
+			t.Fatal("Handler timed out")
+			return
+		}
+
+		// Check response status and body
+		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+		var resp server_structs.SimpleApiResp
+		err = json.NewDecoder(r.Body).Decode(&resp)
+		require.NoError(t, err)
+		assert.Equal(t, server_structs.RespOK, resp.Status)
+		assert.Equal(t, "Server hot restart initiated", resp.Msg)
+
+		// Verify that the restart flag was sent
+		select {
+		case flag := <-config.RestartFlag:
+			assert.Equal(t, true, flag)
+		case <-c.Done():
+			t.Fatal("Context timeout while waiting for restart flag")
+		case <-time.After(time.Second):
+			t.Fatal("Timeout waiting for restart flag")
+		}
 	})
 }
