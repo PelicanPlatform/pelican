@@ -615,21 +615,9 @@ func handleDeprecatedConfig() {
 			} else {
 				for _, rep := range replacement {
 					log.Warningf("The configuration key '%s' is deprecated. Please use '%s' instead.", deprecated, rep)
-					// value := viper.Get(deprecated)
-					// viper.SetDefault(rep, value)
+					value := viper.Get(deprecated)
+					viper.SetDefault(rep, value)
 
-					// Retrieve current values
-					currentValue := viper.Get(deprecated)
-					previousValue := viper.Get(rep)
-
-					// Set the new value
-					viper.SetDefault(rep, currentValue)
-
-					// Log the event
-					log.Warningf(
-						"Transferred value from deprecated key '%s' to new key '%s'. Deprecated value: '%v'. Previous value of new key: '%v'.",
-						deprecated, rep, currentValue, previousValue,
-					)
 				}
 			}
 		}
