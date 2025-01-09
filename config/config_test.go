@@ -19,6 +19,7 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -32,7 +33,6 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -394,41 +394,46 @@ func TestExtraCfg(t *testing.T) {
 	})
 }
 
-func TestDeprecateLogMessage(t *testing.T) {
-	tmpPathPattern := "TestOrigin*"
-	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
+// TestDeprecationHandling verifies that if a deprecated configuration parameter is set,
+// a warning message is displayed. Additionally, the value of the deprecated parameter
+// is used as the default value for its replacement.
+func TestDeprecationHandling(t *testing.T) {
+	tmpConfigPath := "testconfigdir"
+	tmpConfigDirPath, err := os.MkdirTemp("", tmpConfigPath)
 	require.NoError(t, err)
+	defer os.RemoveAll(tmpConfigDirPath)
 
-	// Need to set permissions or the xrootd process we spawn won't be able to write PID/UID files
 	permissions := os.FileMode(0755)
-	err = os.Chmod(tmpPath, permissions)
+	err = os.Chmod(tmpConfigDirPath, permissions)
 	require.NoError(t, err)
 
-	viper.Set("ConfigDir", tmpPath)
+	tlsCertPath := filepath.Join(tmpConfigDirPath, "somerandomfile.txt")
+
 	ResetConfig()
-	t.Run("expect-deprecated-message-if-namespace-is-set", func(t *testing.T) {
-		hook := test.NewGlobal()
-		ResetConfig()
-		defer ResetConfig()
-		// The default value is set to Error, but this is a warning message
-		viper.Set("Logging.Level", "Warning")
-		viper.Set("Origin.NamespacePrefix", "/a/prefix")
-		viper.Set("ConfigDir", tmpPath)
+	defer ResetConfig()
 
-		// NOTE: When we run InitConfig(), which runs handleDeprecatedConfig(), we're making the assumption that our
-		// parameters struct is fully built. Since this doesn't happen when we run tests, we need to manually build
-		// for any updates to get picked up.
-		InitConfig()
+	viper.Set("ConfigDir", tmpConfigDirPath)
+	viper.Set("Logging.Level", "Warning")
 
-		require.Equal(t, 2, len(hook.Entries))
-		assert.Equal(t, logrus.WarnLevel, hook.LastEntry().Level)
-		assert.Equal(t, "Deprecated configuration key Origin.NamespacePrefix is set. Please migrate to use Origin.FederationPrefix instead", hook.Entries[len(hook.Entries)-2].Message)
-		assert.Equal(t, "Will attempt to use the value of Origin.NamespacePrefix as default for Origin.FederationPrefix", hook.LastEntry().Message)
-		// If the deprecated key is set to something that we can map to the new key, that mapping should be handled in InitConfig.
-		// Since Origin.NamespacePrefix maps to Origin.FederationPrefix, check that it succeeded.
-		assert.Equal(t, "/a/prefix", viper.GetString("Origin.FederationPrefix"))
-		hook.Reset()
-	})
+	// Set the deprecated config parameter `Server.TLSCertificate`.
+	// This parameter is replaced by the new `Server.TLSCertificateChain`.
+	viper.Set("Server.TLSCertificate", tlsCertPath)
+
+	var logBuffer bytes.Buffer
+	logrus.SetOutput(&logBuffer)
+	defer logrus.SetOutput(os.Stdout) // Restore stdout after the test
+
+	InitConfig()
+	err = SetServerDefaults(viper.GetViper())
+	require.NoError(t, err)
+
+	logContent := logBuffer.String()
+
+	expectedMessage := "The configuration key 'Server.TLSCertificate' is deprecated. Please use 'Server.TLSCertificateChain' instead."
+
+	require.Contains(t, logContent, expectedMessage, "Expected message not found in the logs")
+
+	assert.Equal(t, tlsCertPath, viper.GetString("Server.TLSCertificateChain"))
 }
 
 func TestEnabledServers(t *testing.T) {
