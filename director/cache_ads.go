@@ -145,12 +145,21 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 		if !ok || statUtil.Errgroup == nil {
 			baseCtx, cancel := context.WithCancel(ctx)
 			concLimit := param.Director_StatConcurrencyLimit.GetInt()
-			// If the value is not set, set to -1 to remove the limit
-			if concLimit == 0 {
-				concLimit = -1
+			// If the value is not set or negative, then we provide a modest default;
+			// we don't want to permit an unbounded number of queries due to potential
+			// memory usage.
+			if concLimit <= 0 {
+				concLimit = 100
 			}
 			statErrGrp := utils.Group{}
 			statErrGrp.SetLimit(concLimit)
+			cap := param.Director_CachePresenceCapacity.GetInt()
+			// Ensure the capacity is a positive integer; zero indicates
+			// "unbounded" (bad) and a negative value gets cast to uint64,
+			// becoming an effectively unbounded number (also bad)
+			if cap <= 0 {
+				cap = 100
+			}
 			newUtil := serverStatUtil{
 				Errgroup: &statErrGrp,
 				Cancel:   cancel,
@@ -158,10 +167,15 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 				ResultCache: ttlcache.New[string, *objectMetadata](
 					ttlcache.WithTTL[string, *objectMetadata](param.Director_CachePresenceTTL.GetDuration()),
 					ttlcache.WithDisableTouchOnHit[string, *objectMetadata](),
-					ttlcache.WithCapacity[string, *objectMetadata](uint64(param.Director_CachePresenceCapacity.GetInt())),
+					ttlcache.WithCapacity[string, *objectMetadata](uint64(cap)),
 				),
+				Generation: int(statUtilsGen.Add(1)),
 			}
-			statUtils[ad.URL.String()] = newUtil
+			log.Debugln("Creating a new stat cache with capacity", cap, "for endpoint ", ad.URL.String())
+			// The result cache TTL is stopped when the `serverAds` struct is evicted.  This  occurs
+			// when the server is cleanly shut down, preventing this goroutine from leaking.
+			go newUtil.ResultCache.Start()
+			statUtils[ad.URL.String()] = &newUtil
 		}
 	}()
 

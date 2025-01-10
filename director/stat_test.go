@@ -57,7 +57,7 @@ func initMockStatUtils() {
 
 	for _, key := range serverAds.Keys() {
 		ctx, cancel := context.WithCancel(context.Background())
-		statUtils[key] = serverStatUtil{
+		statUtils[key] = &serverStatUtil{
 			Context:     ctx,
 			Cancel:      cancel,
 			Errgroup:    &utils.Group{},
@@ -390,7 +390,7 @@ func TestQueryServersForObject(t *testing.T) {
 		mockCacheServer := []server_structs.ServerAd{{Name: "cache-overwrite", URL: url.URL{Host: "cache-overwrites.com", Scheme: "https"}}}
 
 		statUtilsMutex.Lock()
-		statUtils[mockCacheServer[0].URL.String()] = serverStatUtil{
+		statUtils[mockCacheServer[0].URL.String()] = &serverStatUtil{
 			Context:     ctx,
 			Cancel:      cancel,
 			Errgroup:    &utils.Group{},
@@ -425,7 +425,7 @@ func TestQueryServersForObject(t *testing.T) {
 		mockOrigin := []server_structs.ServerAd{{Name: "origin-overwrite", URL: url.URL{Host: "origin-overwrites.com", Scheme: "https"}}}
 
 		statUtilsMutex.Lock()
-		statUtils[mockOrigin[0].URL.String()] = serverStatUtil{
+		statUtils[mockOrigin[0].URL.String()] = &serverStatUtil{
 			Context:     ctx,
 			Cancel:      cancel,
 			Errgroup:    &utils.Group{},

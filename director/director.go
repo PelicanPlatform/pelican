@@ -102,7 +102,7 @@ var (
 	healthTestUtils      = make(map[string]*healthTestUtil) // The utilities for the director file tests. The key is string form of ServerAd.URL
 	healthTestUtilsMutex = sync.RWMutex{}
 
-	statUtils      = make(map[string]serverStatUtil) // The utilities for the stat call. The key is string form of ServerAd.URL
+	statUtils      = make(map[string]*serverStatUtil) // The utilities for the stat call. The key is string form of ServerAd.URL
 	statUtilsMutex = sync.RWMutex{}
 )
 
