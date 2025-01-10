@@ -1635,7 +1635,9 @@ components: ["director"]
 ---
 name: Director.RegistryQueryInterval
 description: |+
-  Defines the interval at which the director queries the registry to refresh its in-memory cache.
+  Defines the interval at which the director queries the registry to refresh its in-memory cache of registry data.
+  Although this parameter is intended for any registry data the director might need to keep in memory, it currently
+  only stores the allowed prefixes for caches data.
 type: duration
 hidden: true
 default: 1m

@@ -28,7 +28,6 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -84,6 +83,7 @@ func fetchAllowedPrefixesForCaches(ctx context.Context) (map[string]map[string]s
 	}
 
 	req.Header.Add("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "pelican-director/"+config.GetVersion())
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -112,13 +112,6 @@ func fetchAllowedPrefixesForCaches(ctx context.Context) (map[string]map[string]s
 // and switches back to the regular interval upon successful retrieval of the information.
 func LaunchRegistryPeriodicQuery(ctx context.Context, egrp *errgroup.Group) {
 	refreshInterval := param.Director_RegistryQueryInterval.GetDuration()
-
-	if refreshInterval < 1*time.Millisecond {
-		log.Warnf("Director.RegistryQueryInterval is set to: %v, which is too low. Falling back to default: 1m", refreshInterval)
-
-		viper.Set("Director.RegistryQueryInterval", "1m")
-		refreshInterval = 1 * time.Minute
-	}
 
 	ticker := time.NewTicker(refreshInterval)
 
@@ -154,7 +147,7 @@ func LaunchRegistryPeriodicQuery(ctx context.Context, egrp *errgroup.Group) {
 				allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
 				log.Debug("Allowed prefixes for caches data updated successfully")
 			case <-ctx.Done():
-				log.Debug("Periodic fetch fopr allowed prefixes for caches data terminated")
+				log.Debug("Periodic fetch for allowed prefixes for caches data terminated")
 				return nil
 			}
 		}

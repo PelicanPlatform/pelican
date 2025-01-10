@@ -1369,6 +1369,15 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if currentServers.IsEnabled(server_structs.DirectorType) {
+		refreshInterval := param.Director_RegistryQueryInterval.GetDuration()
+		if refreshInterval < 1*time.Second {
+			log.Warnf("Director.RegistryQueryInterval is set to: %v, which is too low. Falling back to default: 1m", refreshInterval)
+
+			viper.Set(param.Director_RegistryQueryInterval.GetName(), "1m")
+		}
+	}
+
+	if currentServers.IsEnabled(server_structs.DirectorType) {
 		viper.SetDefault("Federation.DirectorUrl", param.Server_ExternalWebUrl.GetString())
 		minStatRes := param.Director_MinStatResponse.GetInt()
 		maxStatRes := param.Director_MaxStatResponse.GetInt()

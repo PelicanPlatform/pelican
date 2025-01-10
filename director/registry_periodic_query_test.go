@@ -30,9 +30,9 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 // TestLaunchRegistryPeriodicQuery verifies if the director correctly maintains
@@ -69,15 +69,15 @@ func TestLaunchRegistryPeriodicQuery(t *testing.T) {
 	viper.Set("Federation.Registryurl", server.URL)
 	viper.Set("Director.RegistryQueryInterval", "200ms")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	egrp := &errgroup.Group{}
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
 
 	LaunchRegistryPeriodicQuery(ctx, egrp)
 
 	time.Sleep(500 * time.Millisecond)
 
 	currentMapPtr := allowedPrefixesForCaches.Load()
-	assert.NotNil(t, currentMapPtr, "allowedPrefixesForCaches should not be nil")
 
 	assert.Equal(t, convertMapOfListToMapOfSet(mockData), *currentMapPtr, "allowedPrefixesForCaches does not match the expected value")
 
@@ -92,8 +92,6 @@ func TestLaunchRegistryPeriodicQuery(t *testing.T) {
 	assert.NotNil(t, currentMapPtr, "allowedPrefixesForCaches should not be nil")
 
 	assert.Equal(t, convertMapOfListToMapOfSet(mockData), *currentMapPtr, "allowedPrefixesForCaches does not match the expected value")
-
-	cancel()
 
 	require.NoError(t, egrp.Wait(), "Periodic fetch goroutine did not terminate properly")
 }

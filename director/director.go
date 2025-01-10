@@ -991,7 +991,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 			// Wait until last set timestamp is updated
 			for allowedPrefixesForCachesLastSetTimestamp.Load() == 0 {
 				if time.Since(start) >= 3*time.Second {
-					log.Error("Allowed prefix for caches data was initialized within the 3-second timeout")
+					log.Error("Allowed prefix for caches data was not initialized within the 3-second timeout")
 					break
 				}
 				time.Sleep(100 * time.Millisecond)
@@ -1004,7 +1004,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 			log.Error("Allowed prefixes for caches data is outdated, rejecting cache server ad.")
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "Something is wrong with the director or registry. Allowed prefixes for caches data is outdated.",
+				Msg:    "Something is wrong with the director or registry. The Director is unable to fetch required information about this cache's allowed prefixes from the Registry.",
 			})
 			return
 		}
@@ -1037,21 +1037,13 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		if err != nil {
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Invalid data URL %s: %s", adV2.DataURL, err.Error()),
+				Msg:    fmt.Sprintf("Invalid Cache URL %s (config parameter: Cache.Url): %s", adV2.DataURL, err.Error()),
 			})
 			return
 		}
 		cacheHostname := parsedURL.Hostname()
 
 		allowedPrefixesMap := allowedPrefixesForCaches.Load()
-		if allowedPrefixesMap == nil {
-			log.Warn("Allowed prefix for caches data is not initialized, failing server ad registration")
-			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "Something is wrong with the registry or the director",
-			})
-			return
-		}
 
 		// If the cache hostname is present in the allowed prefixes map,
 		// filter the advertised prefixes. If the cache hostname is not present,
@@ -1060,6 +1052,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		// Variable `prefixes` is a set of prefixes that the given cache is allowed to serve.
 		if prefixes, exists := (*allowedPrefixesMap)[cacheHostname]; exists {
 			filteredNamespaces := []server_structs.NamespaceAdV2{}
+			filteredPaths := []string{} // Collect filtered prefixes
 
 			for _, namespace := range adV2.Namespaces {
 				// Default allow for paths starting with "/pelican/"
@@ -1072,8 +1065,13 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				if _, allowed := prefixes[namespace.Path]; allowed {
 					filteredNamespaces = append(filteredNamespaces, namespace)
 				} else {
-					log.Infof("Filtered out prefix: %s in the server ad for cache %s", namespace.Path, cacheHostname)
+					filteredPaths = append(filteredPaths, namespace.Path) // Collect the filtered path
 				}
+			}
+
+			// Log all filtered prefixes at once
+			if len(filteredPaths) > 0 {
+				log.Infof("Filtered out prefixes: %v in the server ad for cache %s", filteredPaths, cacheHostname)
 			}
 
 			adV2.Namespaces = filteredNamespaces
