@@ -50,7 +50,12 @@ Director:
   MinStatResponse: 1
   MaxStatResponse: 1
   StatTimeout: 2000ms
-  StatConcurrencyLimit: 1000
+  # This was decreased from the origin value of `1000` to `100` to
+  # reduce the potential memory use (each service could have up to
+  # `StatConcurrencyLimit` goroutines running in parallel).  It's
+  # unclear whether having more than 100 concurrent queries to the
+  # remote origin/cache is a good idea anyway...
+  StatConcurrencyLimit: 100
   AdvertisementTTL: 15m
   OriginCacheHealthTestInterval: 15s
   EnableBroker: true
@@ -58,7 +63,10 @@ Director:
   CheckCachePresence: true
   AssumePresenceAtSingleOrigin: true
   CachePresenceTTL: 1m
-  CachePresenceCapacity: 10000
+  # This was originally 10k entries; after some informal measurements,
+  # it seems golang uses 500 - 1000 bytes per entry; a reduction to
+  # 2k means there will be around 1-2MB of cached data per server.
+  CachePresenceCapacity: 2000
 Cache:
   DefaultCacheTimeout: "9.5s"
   Port: 8442

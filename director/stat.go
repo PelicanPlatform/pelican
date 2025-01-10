@@ -273,7 +273,7 @@ func getStatUtils(ads []server_structs.ServerAd) map[string]*serverStatUtil {
 		url := ad.URL.String()
 		statUtil, ok := statUtils[url]
 		if ok {
-			result[url] = &statUtil
+			result[url] = statUtil
 		}
 	}
 	return result
@@ -457,7 +457,7 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 				// then we assume this is a "hot" object and we'll benefit from the preemptively refreshing
 				// the ttlcache.  If we can, asynchronously query the service.
 				if time.Until(item.ExpiresAt()) < 10*time.Second {
-					statUtil.Errgroup.TryGo(func() (err error) { _, err = queryFunc(); return })
+					statUtil.Errgroup.TryGo(func() error { queryFunc(); return nil })
 				}
 				totalLabels["cached_result"] = "true"
 				if metadata := item.Value(); metadata != nil {

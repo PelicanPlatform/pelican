@@ -114,6 +114,8 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 				}
 				delete(statUtils, serverUrl)
 				log.Debugf("Stat util for %s server %s is deleted.", string(serverAd.Type), serverAd.Name)
+				statUtil.ResultCache.DeleteAll()
+				statUtil.ResultCache.Stop()
 			} else {
 				log.Debugf("Stat util not found for %s server %s when evicting the serverAd", string(serverAd.Type), serverAd.Name)
 			}
@@ -192,7 +194,20 @@ func LaunchMapMetrics(ctx context.Context, egrp *errgroup.Group) {
 				// Maps
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("filteredServers").Set(float64(len(filteredServers)))
 				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("healthTestUtils").Set(float64(len(healthTestUtils)))
-				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("originStatUtils").Set(float64(len(statUtils)))
+				statUtilsLen := 0
+				statUtilsEntries := 0
+				func() {
+					statUtilsMutex.RLock()
+					defer statUtilsMutex.RUnlock()
+					// Note we must call len(statUtils) with the read-lock held to ensure
+					// a consistent value.
+					statUtilsLen = len(statUtils)
+					for _, info := range statUtils {
+						statUtilsEntries += info.ResultCache.Len()
+					}
+				}()
+				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("serverStatUtils").Set(float64(statUtilsLen))
+				metrics.PelicanDirectorMapItemsTotal.WithLabelValues("serverStatEntries").Set(float64(statUtilsEntries))
 			}
 		}
 	})
@@ -220,6 +235,30 @@ func hookServerAdsCache() {
 			"server_type":   string(serverAd.Type),
 			"from_topology": strconv.FormatBool(serverAd.FromTopology),
 		}).Dec()
+
+		// If the server has gone, it's safe to drop the cache.
+		serverUrl := ad.Key()
+		serverType := serverAd.Type
+		statUtilsMutex.Lock()
+		statUtilsEntry, ok := statUtils[ad.Key()]
+		if ok {
+			delete(statUtils, ad.Key())
+		}
+		statUtilsMutex.Unlock()
+		if ok {
+			// Since the `OnEviction` method is called with a mutex, launch the
+			// statUtils cleanup in a separate goroutine to avoid holding the mutex
+			// for longer than necessary
+			go func() {
+				// Note we don't call statUtilsEntry.Cancel() here; instead, let any running
+				// query go to completion to prevent disrupting any last-ditch stat's.
+				if err := statUtilsEntry.Errgroup.Wait(); err != nil {
+					log.Infoln("Error happened when stopping", serverType, serverUrl, "stat routines:", err)
+				}
+				statUtilsEntry.ResultCache.DeleteAll()
+				statUtilsEntry.ResultCache.Stop()
+			}()
+		}
 	})
 }
 

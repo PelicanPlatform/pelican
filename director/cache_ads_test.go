@@ -438,7 +438,7 @@ func TestRecordAd(t *testing.T) {
 			defer statUtilsMutex.Unlock()
 			defer healthTestUtilsMutex.Unlock()
 			healthTestUtils = make(map[string]*healthTestUtil)
-			statUtils = make(map[string]serverStatUtil)
+			statUtils = make(map[string]*serverStatUtil)
 
 			serverAds.DeleteAll()
 			geoNetOverrides = nil
@@ -452,7 +452,7 @@ func TestRecordAd(t *testing.T) {
 			defer statUtilsMutex.Unlock()
 			defer healthTestUtilsMutex.Unlock()
 			healthTestUtils = make(map[string]*healthTestUtil)
-			statUtils = make(map[string]serverStatUtil)
+			statUtils = make(map[string]*serverStatUtil)
 
 			serverAds.DeleteAll()
 		}()
