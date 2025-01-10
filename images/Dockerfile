@@ -20,19 +20,47 @@ ARG BASE_YUM_REPO=release
 ARG BASE_OSG_SERIES=23
 ARG BASE_OS=el9
 
-FROM goreleaser/goreleaser:v1.21.0 AS pelican-build
+###########################
+# Pelican Build container #
+###########################
+# Building Pelican requires go, goreleaser, and packages for the web build
+FROM almalinux:9 AS pelican-build
 ARG IS_NONRELEASE_BUILD="true"
 
-RUN apk add --update nodejs-current npm
-
 WORKDIR /pelican
-
 COPY . .
 
+# Set the go environment variables, also picked up go goreleaser and used in the build
+# for constructing the directory binaries are built in (i.e. /pelican/dist/$GOOS_$GOARCH/pelican_$GOOS_$GOARCH_v1)
 ENV GOOS="linux"
 ENV GOARCH="amd64"
 
-RUN\
+# Install go
+RUN curl https://dl.google.com/go/go1.21.6.linux-$GOARCH.tar.gz -o go1.21.6.linux-$GOARCH.tar.gz && \
+    rm -rf /usr/local/go && tar -C /usr/local -xzf go1.21.6.linux-$GOARCH.tar.gz
+ENV PATH="/usr/local/go/bin:${PATH}"
+
+# Make goreleaser installable with dnf by adding its repo
+# This is a bash-ism but on almalinux:9, /bin/sh _is_ bash so we don't need to change SHELL
+RUN echo $'[goreleaser] \n\
+name=GoReleaser \n\
+baseurl=https://repo.goreleaser.com/yum/ \n\
+enabled=1 \n\
+gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
+
+RUN dnf update -y && \
+    dnf install -y npm goreleaser
+
+# Use npm to install node
+RUN npm install -g n
+ENV PATH="${PATH}:/usr/lib/node_modules/npm/bin"
+
+# Ensure the correct version of Node.js is used
+RUN n 20 && \
+    npm install -g npm@latest && \
+    n prune
+
+RUN \
     if $IS_NONRELEASE_BUILD;\
         then goreleaser build --clean --snapshot --single-target;\
     else goreleaser build --clean --single-target;\
@@ -196,8 +224,8 @@ COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a
 COPY images/entrypoint.sh /entrypoint.sh
 
 # Copy here to reduce dependency on the pelican-build stage in the final-stage and x-base stage
-COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /usr/local/bin/pelican
-COPY --from=pelican-build /pelican/dist/pelican_linux_amd64_v1/pelican /usr/local/bin/osdf
+COPY --from=pelican-build /pelican/dist/linux_amd64/pelican_linux_amd64_v1/pelican /usr/local/bin/pelican
+COPY --from=pelican-build /pelican/dist/linux_amd64/pelican_linux_amd64_v1/pelican /usr/local/bin/osdf
 RUN    chmod +x /usr/local/bin/pelican \
     && chmod +x /usr/local/bin/osdf \
     && chmod +x /entrypoint.sh
@@ -221,8 +249,8 @@ RUN rm -f /usr/local/bin/pelican
 ####################
 
 FROM pelican-base AS cache
-RUN rm -f /usr/local/bin/pelican
-COPY --from=pelican-build /pelican/dist/pelican-server_linux_amd64_v1/pelican-server /usr/local/sbin/pelican-server
+RUN rm -f /usr/local/bin/pelican /usr/local/bin/osdf
+COPY --from=pelican-build /pelican/dist/linux_amd64/pelican-server_linux_amd64_v1/pelican-server /usr/local/sbin/pelican-server
 RUN chmod +x /usr/local/sbin/pelican-server
 # For now, we're only using pelican-server in the cache, but eventually we'll use it in all servers
 ENTRYPOINT [ "/entrypoint.sh", "pelican-server", "cache"]
@@ -264,8 +292,8 @@ CMD [ "serve" ]
 ####################
 
 FROM osdf-base AS osdf-cache
-RUN rm -rf /pelican/osdf
-COPY --from=pelican-build /pelican/dist/pelican-server_linux_amd64_v1/pelican-server /usr/local/sbin/osdf-server
+RUN rm -f /usr/local/bin/pelican /usr/local/bin/osdf
+COPY --from=pelican-build /pelican/dist/linux_amd64/pelican-server_linux_amd64_v1/pelican-server /usr/local/sbin/osdf-server
 RUN chmod +x /usr/local/sbin/osdf-server
 ENTRYPOINT [ "/entrypoint.sh" ,"osdf-server", "cache"]
 CMD [ "serve" ]
