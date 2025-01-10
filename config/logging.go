@@ -172,5 +172,29 @@ func SetLogging(logLevel log.Level) {
 	// and provide our check. Note that when calling SetLogging, io.Out hasn't been changed yet.
 	textFormatter.ForceColors = term.IsTerminal(log.StandardLogger().Out)
 	log.SetFormatter(&textFormatter)
-	log.SetLevel(logLevel)
+
+	// Note: don't call log.SetLevel directly here as we filter at the transform
+	// hook, not at the logrus level.
+	if addedGlobalFilters {
+		log.SetLevel(log.DebugLevel)
+		hookLevel := make([]log.Level, 0, len(log.AllLevels))
+		hooks := log.StandardLogger().Hooks
+		for _, lvl := range log.AllLevels {
+			originalHooks := hooks[lvl]
+			hooks[lvl] = make([]log.Hook, 0, len(originalHooks))
+			for _, hook := range originalHooks {
+				if hook != &globalFilters && hook != globalTransform {
+					hooks[lvl] = append(hooks[lvl], hook)
+				}
+			}
+			if lvl <= logLevel {
+				hookLevel = append(hookLevel, lvl)
+			}
+		}
+		globalTransform.hook.LogLevels = hookLevel
+		log.AddHook(&globalFilters)
+		log.AddHook(globalTransform)
+	} else {
+		log.SetLevel(logLevel)
+	}
 }
