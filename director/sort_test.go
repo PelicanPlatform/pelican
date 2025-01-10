@@ -54,9 +54,13 @@ func TestCheckOverrides(t *testing.T) {
 
 	// We'll also check that our logging feature responsibly reports
 	// what Pelican is telling the user.
+	origOutput := log.StandardLogger().Out
 	logOutput := &(bytes.Buffer{})
 	log.SetOutput(logOutput)
 	log.SetLevel(log.DebugLevel)
+	t.Cleanup(func() {
+		log.SetOutput(origOutput)
+	})
 
 	viper.SetConfigType("yaml")
 	err := viper.ReadConfig(strings.NewReader(yamlMockup))
@@ -462,9 +466,13 @@ func TestGetClientLatLong(t *testing.T) {
 	clientIpCache.DeleteAll()
 	t.Run("invalid-ip", func(t *testing.T) {
 		// Capture the log and check that the correct error is logged
+		origOutput := log.StandardLogger().Out
 		logOutput := &(bytes.Buffer{})
 		log.SetOutput(logOutput)
 		log.SetLevel(log.DebugLevel)
+		defer func() {
+			log.SetOutput(origOutput)
+		}()
 
 		clientIp := netip.Addr{}
 		assert.False(t, clientIpCache.Has(clientIp))
@@ -485,8 +493,12 @@ func TestGetClientLatLong(t *testing.T) {
 
 	t.Run("valid-ip-no-geoip-match", func(t *testing.T) {
 		logOutput := &(bytes.Buffer{})
+		origOutput := log.StandardLogger().Out
 		log.SetOutput(logOutput)
 		log.SetLevel(log.DebugLevel)
+		defer func() {
+			log.SetOutput(origOutput)
+		}()
 
 		clientIp := netip.MustParseAddr("192.168.0.1")
 		assert.False(t, clientIpCache.Has(clientIp))
