@@ -89,7 +89,7 @@ func promQueryEngineAuthHandler(av1 *route.Router) gin.HandlerFunc {
 			authOption := token.AuthOption{
 				// Cookie for web user access and header for external service like Grafana to access
 				Sources: []token.TokenSource{token.Cookie, token.Header},
-				Issuers: []token.TokenIssuer{token.LocalIssuer},
+				Issuers: []token.TokenIssuer{token.LocalIssuer, token.GrafanaTokenIssuer},
 				Scopes:  []token_scopes.TokenScope{token_scopes.Monitoring_Query}}
 
 			status, ok, err := token.Verify(c, authOption)
