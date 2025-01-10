@@ -62,8 +62,9 @@ const (
 )
 
 const (
-	FederationIssuer TokenIssuer = "FederationIssuer"
-	LocalIssuer      TokenIssuer = "LocalIssuer"
+	FederationIssuer   TokenIssuer = "FederationIssuer"
+	LocalIssuer        TokenIssuer = "LocalIssuer"
+	GrafanaTokenIssuer TokenIssuer = "GrafanaTokenIssuer"
 )
 
 var (
