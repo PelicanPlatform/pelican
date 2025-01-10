@@ -920,7 +920,7 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		results := make(chan *classads.ClassAd, 5)
 		err = runPluginWorker(fed.Ctx, false, workChan, results)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Failed to create new transfer job: no collections URL found in director response")
+		assert.Regexp(t, "Failed to create new transfer job: error while querying the director at https://[A-Za-z0-9:.-]+: server returned 404 Not Found", err.Error())
 	})
 }
 

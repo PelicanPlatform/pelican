@@ -780,13 +780,13 @@ func TestCache(t *testing.T) {
 		qResult := stat.queryServersForObject(ctx, "/foo/notfound.txt", server_structs.CacheType, 1, 1)
 		assert.Equal(t, queryFailed, qResult.Status)
 		assert.Len(t, qResult.Objects, 0)
-		assert.Equal(t, queryInsufficientResErr, qResult.ErrorType)
+		assert.Equal(t, queryNoSourcesErr, qResult.ErrorType)
 		require.Equal(t, startCtr+1, reqCounter)
 
 		qResult = stat.queryServersForObject(ctx, "/foo/notfound.txt", server_structs.CacheType, 1, 1)
 		assert.Equal(t, queryFailed, qResult.Status)
 		assert.Len(t, qResult.Objects, 0)
-		assert.Equal(t, queryInsufficientResErr, qResult.ErrorType)
+		assert.Equal(t, queryNoSourcesErr, qResult.ErrorType)
 		require.Equal(t, startCtr+1, reqCounter)
 	})
 }

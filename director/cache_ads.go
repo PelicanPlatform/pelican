@@ -169,7 +169,6 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 					ttlcache.WithDisableTouchOnHit[string, *objectMetadata](),
 					ttlcache.WithCapacity[string, *objectMetadata](uint64(cap)),
 				),
-				Generation: int(statUtilsGen.Add(1)),
 			}
 			log.Debugln("Creating a new stat cache with capacity", cap, "for endpoint ", ad.URL.String())
 			// The result cache TTL is stopped when the `serverAds` struct is evicted.  This  occurs
