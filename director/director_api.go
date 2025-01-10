@@ -96,6 +96,7 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	// Start automatic expired item deletion
 	go serverAds.Start()
 	go namespaceKeys.Start()
+	go clientIpCache.Start()
 
 	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *server_structs.Advertisement]) {
 		serverAd := i.Value().ServerAd
@@ -158,6 +159,8 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		serverAds.Stop()
 		namespaceKeys.DeleteAll()
 		namespaceKeys.Stop()
+		clientIpCache.DeleteAll()
+		clientIpCache.Stop()
 		log.Info("Director TTL cache eviction has been stopped")
 		return nil
 	})
