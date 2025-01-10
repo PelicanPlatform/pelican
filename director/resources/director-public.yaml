@@ -1,0 +1,23 @@
+
+Server:
+  EnablePprof: true
+
+Logging:
+  Level: debug
+
+Director:
+  # For the director stress unit test, we want to force the pelican
+  # process to perform the stat and cache the result; this is more likely
+  # to trigger any memory hoarding issues.
+  #AssumePresenceAtSingleOrigin: false
+  CachePresenceCapacity: 100
+
+Origin:
+  # Things that configure the origin itself
+  StorageType: "posix"
+  EnableDirectReads: true
+  # The actual namespaces we export
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /first/namespace
+      Capabilities: ["PublicReads", "DirectReads", "Listings"]
