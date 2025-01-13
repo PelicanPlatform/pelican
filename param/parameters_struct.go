@@ -165,10 +165,14 @@ type Config struct {
 		AggregatePrefixes []string `mapstructure:"aggregateprefixes" yaml:"AggregatePrefixes"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataRetention time.Duration `mapstructure:"dataretention" yaml:"DataRetention"`
+		LabelLimit int `mapstructure:"labellimit" yaml:"LabelLimit"`
+		LabelNameLengthLimit int `mapstructure:"labelnamelengthlimit" yaml:"LabelNameLengthLimit"`
+		LabelValueLengthLimit int `mapstructure:"labelvaluelengthlimit" yaml:"LabelValueLengthLimit"`
 		MetricAuthorization bool `mapstructure:"metricauthorization" yaml:"MetricAuthorization"`
 		PortHigher int `mapstructure:"porthigher" yaml:"PortHigher"`
 		PortLower int `mapstructure:"portlower" yaml:"PortLower"`
 		PromQLAuthorization bool `mapstructure:"promqlauthorization" yaml:"PromQLAuthorization"`
+		SampleLimit int `mapstructure:"samplelimit" yaml:"SampleLimit"`
 		TokenExpiresIn time.Duration `mapstructure:"tokenexpiresin" yaml:"TokenExpiresIn"`
 		TokenRefreshInterval time.Duration `mapstructure:"tokenrefreshinterval" yaml:"TokenRefreshInterval"`
 	} `mapstructure:"monitoring" yaml:"Monitoring"`
@@ -477,10 +481,14 @@ type configWithType struct {
 		AggregatePrefixes struct { Type string; Value []string }
 		DataLocation struct { Type string; Value string }
 		DataRetention struct { Type string; Value time.Duration }
+		LabelLimit struct { Type string; Value int }
+		LabelNameLengthLimit struct { Type string; Value int }
+		LabelValueLengthLimit struct { Type string; Value int }
 		MetricAuthorization struct { Type string; Value bool }
 		PortHigher struct { Type string; Value int }
 		PortLower struct { Type string; Value int }
 		PromQLAuthorization struct { Type string; Value bool }
+		SampleLimit struct { Type string; Value int }
 		TokenExpiresIn struct { Type string; Value time.Duration }
 		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}

@@ -2496,6 +2496,36 @@ type: duration
 default: 360h
 components: ["origin", "cache", "director", "registry"]
 ---
+name: Monitoring.LabelLimit
+description: |+
+  The maximum number of labels that can be attached to a single metric. 0 means no limit.
+type: int
+default: 64
+components: ["origin", "cache", "director", "registry"]
+---
+name: Monitoring.LabelNameLengthLimit
+description: |+
+  The maximum length of a label name. 0 means no limit. The default value is 128 bytes, which allows for up to 32 characters.
+type: int
+default: 128
+components: ["origin", "cache", "director", "registry"]
+---
+name: Monitoring.LabelValueLengthLimit
+description: |+
+  The maximum length of a label value. 0 means no limit. The default value is 2048 bytes, which allows for up to 512 characters.
+type: int
+default: 2048
+components: ["origin", "cache", "director", "registry"]
+---
+name: Monitoring.SampleLimit
+description: |+
+  Per-scrape limit on the number of scraped samples that will be accepted.
+  If more than this number of samples are present after metric relabeling
+  the entire scrape will be treated as failed. 0 means no limit.
+type: int
+default: 200
+components: ["origin", "cache", "director", "registry"]
+---
 ############################
 #   Shoveler-level configs   #
 ############################

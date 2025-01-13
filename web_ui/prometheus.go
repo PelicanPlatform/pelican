@@ -228,6 +228,13 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 		RefreshInterval:  model.Duration(15 * time.Second),
 		HTTPClientConfig: sdHttpClientConfig,
 	}
+
+	// Cardinality limits for Prometheus, configured via Pelican configuration file
+	scrapeConfig.LabelLimit = uint(param.Monitoring_LabelLimit.GetInt())
+	scrapeConfig.LabelNameLengthLimit = uint(param.Monitoring_LabelNameLengthLimit.GetInt())
+	scrapeConfig.LabelValueLengthLimit = uint(param.Monitoring_LabelValueLengthLimit.GetInt())
+	scrapeConfig.SampleLimit = uint(param.Monitoring_SampleLimit.GetInt())
+
 	return &scrapeConfig, nil
 }
 
@@ -396,6 +403,13 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 			}},
 		},
 	}
+
+	// Cardinality limits for Prometheus, configured via Pelican configuration file
+	scrapeConfig.LabelLimit = uint(param.Monitoring_LabelLimit.GetInt())
+	scrapeConfig.LabelNameLengthLimit = uint(param.Monitoring_LabelNameLengthLimit.GetInt())
+	scrapeConfig.LabelValueLengthLimit = uint(param.Monitoring_LabelValueLengthLimit.GetInt())
+	scrapeConfig.SampleLimit = uint(param.Monitoring_SampleLimit.GetInt())
+
 	promCfg.ScrapeConfigs[0] = &scrapeConfig
 
 	// Add origins/caches monitoring to director's prometheus instance
@@ -737,6 +751,11 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 								if err != nil {
 									return fmt.Errorf("Failed to generate token for director scraper when refresh it: %v", err)
 								}
+								// Cardinality limits for Prometheus, configured via Pelican configuration file
+								storageServerScrapeCfg.LabelLimit = uint(param.Monitoring_LabelLimit.GetInt())
+								storageServerScrapeCfg.LabelNameLengthLimit = uint(param.Monitoring_LabelNameLengthLimit.GetInt())
+								storageServerScrapeCfg.LabelValueLengthLimit = uint(param.Monitoring_LabelValueLengthLimit.GetInt())
+								storageServerScrapeCfg.SampleLimit = uint(param.Monitoring_SampleLimit.GetInt())
 
 								// Idx 0 is the config for server's onboard scraper
 								// Idx 1 is the config for director scraper at origins/caches
