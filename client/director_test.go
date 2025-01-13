@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	log "github.com/sirupsen/logrus"
@@ -173,7 +174,7 @@ func TestQueryDirector(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var logBuffer bytes.Buffer
 			log.SetOutput(&logBuffer)
-			defer log.SetOutput(nil) // Restore the default log output
+			defer log.SetOutput(os.Stdout) // Restore stdout after the test
 
 			retryCount := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
