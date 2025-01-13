@@ -486,10 +486,10 @@ hidden: true
 ---
 name: Client.AssumeDirectorServerHeader
 description: |+
-  Assume the director service always sets the `Server` header to `pelican`.
+  Assume whether a Director response is actually coming from the Director.
 
-  If enabled and a director response is missing this header, then we assume the response is suspect
-  (may be a default response from a SSL termination server, like Traefik, while pelican is restarting).
+  When true, the client assumes all responses come from the Director (and not a response from some SSL termination server, like Traefik,
+  while pelican is restarting) and will neglect to check for an appropriate Server header.
 type: bool
 default: false
 components: ["client"]
