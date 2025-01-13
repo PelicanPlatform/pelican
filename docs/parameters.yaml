@@ -429,6 +429,27 @@ type: bool
 default: false
 components: ["client"]
 ---
+name: Client.IsPlugin
+description: |+
+  A bool indicating whether the client is being run in "plugin" mode. Some client actions may use alternative logic
+  when the plugin is detected, such as more aggressive retries, because we often assume failure is more costly for the
+  plugin
+type: bool
+default: false
+hidden: true
+components: ["client"]
+---
+name: Client.DirectorRetries
+description: |+
+  An integer indicating the number of retries a client should attempt when contacting a non-responsive Director. Each retry will
+  happen after a delay of 3*(1 + retries attempted) to give the Director time to recover. Some randomness is also added to this interval
+  to avoid the potential for thundering herd problems.
+
+  Plugin clients will retry twice the configured value because plugin failure is considered more "costly".
+type: int
+default: 5
+components: ["client"]
+---
 name: DisableProxyFallback
 description: |+
   [Deprecated] A legacy configuration for disabling the client's proxy fallback. See Client.DisableProxyFallback for new config.

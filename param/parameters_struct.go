@@ -51,8 +51,10 @@ type Config struct {
 	} `mapstructure:"cache" yaml:"Cache"`
 	Client struct {
 		AssumeDirectorServerHeader bool `mapstructure:"assumedirectorserverheader" yaml:"AssumeDirectorServerHeader"`
+		DirectorRetries int `mapstructure:"directorretries" yaml:"DirectorRetries"`
 		DisableHttpProxy bool `mapstructure:"disablehttpproxy" yaml:"DisableHttpProxy"`
 		DisableProxyFallback bool `mapstructure:"disableproxyfallback" yaml:"DisableProxyFallback"`
+		IsPlugin bool `mapstructure:"isplugin" yaml:"IsPlugin"`
 		MaximumDownloadSpeed int `mapstructure:"maximumdownloadspeed" yaml:"MaximumDownloadSpeed"`
 		MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
 		SlowTransferRampupTime time.Duration `mapstructure:"slowtransferrampuptime" yaml:"SlowTransferRampupTime"`
@@ -364,8 +366,10 @@ type configWithType struct {
 	}
 	Client struct {
 		AssumeDirectorServerHeader struct { Type string; Value bool }
+		DirectorRetries struct { Type string; Value int }
 		DisableHttpProxy struct { Type string; Value bool }
 		DisableProxyFallback struct { Type string; Value bool }
+		IsPlugin struct { Type string; Value bool }
 		MaximumDownloadSpeed struct { Type string; Value int }
 		MinimumDownloadSpeed struct { Type string; Value int }
 		SlowTransferRampupTime struct { Type string; Value time.Duration }
