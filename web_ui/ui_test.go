@@ -403,12 +403,12 @@ func TestMapPrometheusPath(t *testing.T) {
 
 func TestServerHostRestart(t *testing.T) {
 	route := gin.New()
-	route.POST("/api/v1.0/hotRestartServer", AuthHandler, AdminAuthHandler, hotRestartServer)
+	route.POST("/api/v1.0/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
 	viper.Set("IssuerKey", filepath.Join(t.TempDir(), "issuer.jwk"))
 
 	t.Run("unauthorized-no-token", func(t *testing.T) {
 		r := httptest.NewRecorder()
-		req, err := http.NewRequest("POST", "/api/v1.0/hotRestartServer", nil)
+		req, err := http.NewRequest("POST", "/api/v1.0/restart", nil)
 		require.NoError(t, err)
 		route.ServeHTTP(r, req)
 		assert.Equal(t, http.StatusUnauthorized, r.Result().StatusCode)
@@ -426,7 +426,7 @@ func TestServerHostRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRecorder()
-		req, err := http.NewRequest("POST", "/api/v1.0/hotRestartServer", nil)
+		req, err := http.NewRequest("POST", "/api/v1.0/restart", nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
 		route.ServeHTTP(r, req)
@@ -450,7 +450,7 @@ func TestServerHostRestart(t *testing.T) {
 		viper.Set("Server.UIAdminUsers", []string{"admin1", "admin2"})
 		c := gin.CreateTestContextOnly(r, route)
 		c.Set("User", "admin1")
-		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/hotRestartServer", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1.0/restart", nil)
 		c.Request = req
 		require.NoError(t, err)
 		c.Request.AddCookie(&http.Cookie{Name: "login", Value: tok})
