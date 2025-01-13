@@ -105,6 +105,11 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		if err != nil {
 			log.Errorln("Failed to get response from the director:", err)
 			return
+		} else if resp == nil {
+			// This is a strange edge case I've only seen in Windows unit testing. I don't understand how both "resp" and
+			// "err" can be nil, but when they are there's clearly an issue. Rather than let it devolve into a panic,
+			// we should handle it properly.
+			return resp, errors.New("The Director returned no error, but it's response was empty.")
 		}
 
 		defer resp.Body.Close()

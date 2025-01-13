@@ -113,6 +113,12 @@ func init() {
 	hookServerAdsCache()
 }
 
+// Used for testing, where the Director has pretty much _always_ been started in the
+// last 5 minutes.
+func SetStartupTime(t time.Time) {
+	startupTime = t
+}
+
 func inStartupSequence() bool {
 	return time.Since(startupTime) <= 5*time.Minute
 }

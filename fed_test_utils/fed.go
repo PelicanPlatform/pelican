@@ -39,6 +39,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -148,6 +149,11 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set("Registry.RequireCacheApproval", false)
 	viper.Set("Director.CacheSortMethod", "distance")
 	viper.Set("Director.DbLocation", filepath.Join(t.TempDir(), "director.sqlite"))
+
+	// Set the Director's start time to 6 minutes ago. This prevents it from sending an HTTP 429 for
+	// unknown prefixes.
+	directorStartTime := time.Now().Add(-6 * time.Minute)
+	director.SetStartupTime(directorStartTime)
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
