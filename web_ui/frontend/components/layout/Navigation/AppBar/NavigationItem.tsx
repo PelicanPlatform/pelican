@@ -31,7 +31,7 @@ export const NavigationItem = ({
   config,
   onClose,
 }: { onClose: () => void } & NavigationItemProps) => {
-  // If the role or export has yet to propogate, show a skeleton
+  // If the role or export has yet to propagate, show a skeleton
   if (
     (config?.allowedRoles && role === undefined) ||
     (config?.allowedExportTypes && exportType === undefined)
