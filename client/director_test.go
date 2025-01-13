@@ -27,6 +27,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/pelicanplatform/pelican/pelican_url"
@@ -94,37 +95,119 @@ func TestParseDirectorInfo(t *testing.T) {
 	assert.Equal(t, "https://get-your-tokens2.org", issuer)
 }
 
+// Tests for client logic when the Director is being queried. In particular,
+// we check that various types of retries are triggered.
 func TestQueryDirector(t *testing.T) {
-	// Construct a local server that we can poke with QueryDirector
-	expectedLocation := "http://redirect.com"
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Location", expectedLocation)
-		w.WriteHeader(http.StatusTemporaryRedirect)
+	type testCase struct {
+		name             string
+		handler          http.HandlerFunc
+		expectedLocation string
+		expectedStatus   int
+		expectedRetries  int
+		expectedLog      string
+		expectedError    bool
 	}
-	server := httptest.NewServer(http.HandlerFunc(handler))
-	defer server.Close()
 
-	pUrl := pelican_url.PelicanURL{
-		FedInfo: pelican_url.FederationDiscovery{
-			DirectorEndpoint: server.URL,
+	testCases := []testCase{
+		{
+			name: "Basic test case with expected values",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Location", "http://redirect.com")
+				w.WriteHeader(http.StatusTemporaryRedirect)
+			},
+			expectedLocation: "http://redirect.com",
+			expectedStatus:   http.StatusTemporaryRedirect,
+			expectedRetries:  0,
+			expectedLog:      "",
+			expectedError:    false,
 		},
-		Path: "/foo/bar",
-	}
-	// Call QueryDirector with the test server URL and a source path
-	actualResp, err := queryDirector(context.Background(), "GET", &pUrl, "")
-	if err != nil {
-		t.Fatal(err)
+		{
+			name: "Error with no Server header should retry",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Retry-Count") == "2" {
+					w.Header().Set("Location", "http://redirect.com")
+					w.WriteHeader(http.StatusTemporaryRedirect)
+				} else {
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			},
+			expectedLocation: "http://redirect.com",
+			expectedStatus:   http.StatusTemporaryRedirect,
+			expectedRetries:  2,
+			expectedLog:      "Response not from a Pelican process, the Director may be rebooting",
+			expectedError:    false,
+		},
+		{
+			name: "429 with correct Server header should retry",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Retry-Count") == "2" {
+					w.Header().Set("Location", "http://redirect.com")
+					w.WriteHeader(http.StatusTemporaryRedirect)
+				} else {
+					w.Header().Set("Server", "pelican/7.8.0")
+					w.WriteHeader(http.StatusTooManyRequests)
+				}
+			},
+			expectedLocation: "http://redirect.com",
+			expectedStatus:   http.StatusTemporaryRedirect,
+			expectedRetries:  2,
+			expectedLog:      "The Director indicates it has just rebooted and is still discovering federation services.",
+			expectedError:    false,
+		},
+		{
+			name: "No retries for 404 from server that populates Server: pelican/ header",
+
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Server", "pelican/7.8.0")
+				w.WriteHeader(http.StatusNotFound)
+			},
+			expectedLocation: "",
+			expectedStatus:   http.StatusNotFound,
+			expectedRetries:  0,
+			expectedLog:      "",
+			expectedError:    true,
+		},
 	}
 
-	// Check the Location header
-	actualLocation := actualResp.Header.Get("Location")
-	if actualLocation != expectedLocation {
-		t.Errorf("Expected Location header %q, but got %q", expectedLocation, actualLocation)
-	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var logBuffer bytes.Buffer
+			log.SetOutput(&logBuffer)
+			defer log.SetOutput(nil) // Restore the default log output
 
-	// Check the HTTP status code
-	if actualResp.StatusCode != http.StatusTemporaryRedirect {
-		t.Errorf("Expected HTTP status code %d, but got %d", http.StatusFound, actualResp.StatusCode)
+			retryCount := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Header.Set("Retry-Count", fmt.Sprintf("%d", retryCount))
+				tc.handler(w, r)
+				retryCount++
+			}))
+			defer server.Close()
+
+			pUrl := pelican_url.PelicanURL{
+				FedInfo: pelican_url.FederationDiscovery{
+					DirectorEndpoint: server.URL,
+				},
+				Path: "/foo/bar",
+			}
+
+			actualResp, err := queryDirector(context.Background(), "GET", &pUrl, "")
+			if tc.expectedError {
+				assert.Error(t, err)
+				return
+			} else {
+				assert.NoError(t, err)
+			}
+
+			actualLocation := actualResp.Header.Get("Location")
+			assert.Equal(t, tc.expectedLocation, actualLocation, "Expected Location header %q, but got %q", tc.expectedLocation, actualLocation)
+			assert.Equal(t, tc.expectedStatus, actualResp.StatusCode, "Expected HTTP status code %d, but got %d", tc.expectedStatus, actualResp.StatusCode)
+			assert.Equal(t, tc.expectedRetries, retryCount-1, "Expected %d retries, but got %d", tc.expectedRetries, retryCount-1)
+
+			if tc.expectedLog != "" {
+				logOutput := logBuffer.String()
+				assert.Contains(t, logOutput, tc.expectedLog)
+			}
+		})
 	}
 }
 
