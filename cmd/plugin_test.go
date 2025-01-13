@@ -1177,3 +1177,64 @@ func TestParseDestination(t *testing.T) {
 		})
 	}
 }
+
+func TestWriteTransferErrorMessage(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	currentDir, err := os.Getwd()
+	require.NoError(t, err)
+
+	tmpFile := currentDir + "/.machine.ad"
+
+	testCases := []struct {
+		name          string
+		content       string
+		resultMessage string
+	}{
+		{
+			name: "TestTransferErrorMsgSiteAndHost",
+			content: "GLIDEIN_ResourceName = \"TestResourceName\"" + "\n" +
+				"GLIDEIN_Site = \"TestResourceSite\"" + "\n" +
+				"GPUs = 0" + "\n" +
+				"K8SNamespace = \"TestNamespaceName\"" + "\n" +
+				"K8SPhysicalHostName = \"TestHostName\"" + "\n" +
+				"K8SPodName = \"osg-direct-67854503-000001-xbr5r\"",
+			resultMessage: "; Site: TestResourceSite; Hostname: TestHostName)",
+		},
+		{
+			name: "TestTransferErrorMsgSite",
+			content: "GLIDEIN_ResourceName = \"TestResourceName\"" + "\n" +
+				"GLIDEIN_Site = \"TestResourceSite\"" + "\n" +
+				"GPUs = 0",
+			resultMessage: "; Site: TestResourceSite)",
+		},
+		{
+			name: "TestTransferErrorMsgHost",
+			content: "K8SNamespace = \"TestNamespaceName\"" + "\n" +
+				"K8SPhysicalHostName = \"TestHostName\"" + "\n" +
+				"K8SPodName = \"osg-direct-67854503-000001-xbr5r\"",
+			resultMessage: "; Hostname: TestHostName)",
+		},
+		{
+			name: "TestTransferErrorMsgNoSiteOrHost",
+			content: "GLIDEIN_ResourceName = \"TestResourceName\"" + "\n" +
+				"GPUs = 0" + "\n" +
+				"K8SNamespace = \"TestNamespaceName\"" + "\n" +
+				"K8SPodName = \"osg-direct-67854503-000001-xbr5r\"",
+			resultMessage: ")",
+		},
+	}
+
+	for _, test := range testCases {
+		t.Run(test.name, func(t *testing.T) {
+			err := os.WriteFile(tmpFile, []byte(test.content), 0644)
+			require.NoError(t, err)
+			defer os.Remove(tmpFile)
+
+			errMsg := writeTransferErrorMessage("Test Error Message", "")
+			baseResultMessage := fmt.Sprintf("Pelican Client Error: Test Error Message (Version: %s", config.GetVersion())
+			require.Equal(t, errMsg, fmt.Sprintf("%s%s", baseResultMessage, test.resultMessage))
+		})
+	}
+}
