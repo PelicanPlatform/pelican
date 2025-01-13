@@ -40,9 +40,16 @@ import (
 	"github.com/pelicanplatform/pelican/utils"
 )
 
-func assumePelican(resp *http.Response) bool {
-	if !param.Client_AssumeDirectorServerHeader.GetBool() {
-		return false
+// Check whether an HTTP response is actually a response from a Pelican service, as
+// indicated by the "Server" header pointing to a pelican process.
+//
+// We use this to handle retries in the event that the Director is down, but some ingress proxy in
+// front of it is still answering requests with errant 404s, 500s, 502s, etc.
+func fromPelican(resp *http.Response) bool {
+	if param.Client_AssumeDirectorServerHeader.GetBool() {
+		log.Debugln("Will assume response is from Director instead of checking for matching Server header. To change this behavior,",
+			"set the 'Client.AssumeDirectorServerHeader' configuration option to false.")
+		return true
 	}
 	return strings.HasPrefix(resp.Header.Get("Server"), "pelican/")
 }
@@ -72,7 +79,10 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 
 	var errMsg string
 	var body []byte
-	for idx := 0; idx < 10; idx++ {
+	// In case the director is momentarily down, we will retry a few times using a backoff
+	// strategy.
+	numRetries := param.Client_DirectorRetries.GetInt()
+	for idx := 0; idx < numRetries; idx++ {
 		var req *http.Request
 		req, err = http.NewRequestWithContext(ctx, verb, resourceUrl.String(), nil)
 		if err != nil {
@@ -107,11 +117,27 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		}
 		errMsg = string(body)
 
-		// If this isn't a Pelican process and we got an error, then sleep and retry
-		if (assumePelican(resp) && (resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusInternalServerError)) ||
-			(resp.StatusCode == http.StatusTooManyRequests) {
-			log.Warnln("Director response not from a Pelican process; sleeping for", 3*idx+3, "seconds and retrying")
-			time.Sleep(time.Duration(3*idx+3)*time.Second + time.Duration(rand.Float32()*1000)*time.Millisecond)
+		// If this isn't a Pelican process _and_ we got an error, sleep then retry. We may be talking
+		// to something like a Traefik ingress controller that's waiting for the Director to come
+		// back online.
+		fromDirector := fromPelican(resp)
+		if !fromDirector && (resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusInternalServerError) {
+			if idx == 0 {
+				log.Warnf("Response not from a Pelican process, the Director may be rebooting; will retry a total of %d times.", numRetries)
+			}
+			sleepFor := 3*idx + 3
+			log.Warningln("Sleeping for", sleepFor, "seconds before retrying.")
+			// backoff+randomness to avoid thundering herd
+			time.Sleep(time.Duration(sleepFor)*time.Second + time.Duration(rand.Float32()*1000)*time.Millisecond)
+		} else if fromDirector && resp.StatusCode == http.StatusTooManyRequests {
+			// We just hit the Director after a reboot, but potentially before it's repopulated its
+			// cache of server adds. Retry until we stop getting the 429 or we hit our limit.
+			if idx == 0 {
+				log.Warnf("The Director indicates it has just rebooted and is still discovering federation services.")
+			}
+			sleepFor := 3*idx + 3
+			log.Warningln("Sleeping for", sleepFor, "seconds before retrying.")
+			time.Sleep(time.Duration(sleepFor)*time.Second + time.Duration(rand.Float32()*1000)*time.Millisecond)
 		} else {
 			break
 		}
