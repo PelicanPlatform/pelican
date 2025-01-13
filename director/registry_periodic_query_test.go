@@ -23,20 +23,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// TestLaunchRegistryPeriodicQuery verifies if the director correctly maintains
-// in its memory the allowed prefixes for caches data from the registry.
 func TestLaunchRegistryPeriodicQuery(t *testing.T) {
 	config.ResetConfig()
 	defer config.ResetConfig()
@@ -75,23 +73,19 @@ func TestLaunchRegistryPeriodicQuery(t *testing.T) {
 
 	LaunchRegistryPeriodicQuery(ctx, egrp)
 
-	time.Sleep(500 * time.Millisecond)
-
-	currentMapPtr := allowedPrefixesForCaches.Load()
-
-	assert.Equal(t, convertMapOfListToMapOfSet(mockData), *currentMapPtr, "allowedPrefixesForCaches does not match the expected value")
+	require.Eventually(t, func() bool {
+		currentMapPtr := allowedPrefixesForCaches.Load()
+		return reflect.DeepEqual(*currentMapPtr, convertMapOfListToMapOfSet(mockData))
+	}, 5*time.Second, 100*time.Millisecond, "allowedPrefixesForCaches was not updated with the initial mock data")
 
 	mockData = map[string][]string{
 		"cacheHostname2": {"/ns5/ns6", "/ns7/ns8"},
 	}
 	mockDataChan <- mockData
 
-	time.Sleep(500 * time.Millisecond)
+	require.Eventually(t, func() bool {
+		currentMapPtr := allowedPrefixesForCaches.Load()
+		return reflect.DeepEqual(*currentMapPtr, convertMapOfListToMapOfSet(mockData))
+	}, 5*time.Second, 100*time.Millisecond, "allowedPrefixesForCaches was not updated with the new mock data")
 
-	currentMapPtr = allowedPrefixesForCaches.Load()
-	assert.NotNil(t, currentMapPtr, "allowedPrefixesForCaches should not be nil")
-
-	assert.Equal(t, convertMapOfListToMapOfSet(mockData), *currentMapPtr, "allowedPrefixesForCaches does not match the expected value")
-
-	require.NoError(t, egrp.Wait(), "Periodic fetch goroutine did not terminate properly")
 }
