@@ -7,16 +7,15 @@ import { alertOnError } from '@/helpers/util';
 import { restartServer } from '@/helpers/api';
 
 export const RestartBox = () => {
-
   const dispatch = useContext(AlertDispatchContext);
 
   return (
     <Button
-      variant="outlined"
+      variant='outlined'
       endIcon={<Replay />}
-      onClick={() => alertOnError(restartServer, "Restart Server", dispatch)}
+      onClick={() => alertOnError(restartServer, 'Restart Server', dispatch)}
     >
       Restart Server
     </Button>
-  )
-}
+  );
+};

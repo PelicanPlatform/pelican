@@ -60,7 +60,11 @@ import { ServerType } from '@/index';
 import { alertOnError, getEnabledServers } from '@/helpers/util';
 import DownloadButton from '@/components/DownloadButton';
 import { PaddedContent } from '@/components/layout';
-import { ConfigDisplay, TableOfContents, RestartBox } from '@/app/config/components';
+import {
+  ConfigDisplay,
+  TableOfContents,
+  RestartBox,
+} from '@/app/config/components';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { getConfig } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
