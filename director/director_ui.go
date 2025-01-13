@@ -463,7 +463,7 @@ func handleFilterServer(ctx *gin.Context) {
 	if filtered {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprint("Can't filter a server that already has been fitlered with type ", filterType),
+			Msg:    fmt.Sprint("Can't filter a server that already has been filtered with type ", filterType),
 		})
 		return
 	}

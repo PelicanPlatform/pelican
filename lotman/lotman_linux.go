@@ -64,7 +64,7 @@ var (
 	LotmanUpdateLot           func(updateJSON string, errMsg *[]byte) int32
 	LotmanDeleteLotsRecursive func(lotName string, errMsg *[]byte) int32
 
-	// Auxilliary functions
+	// Auxiliary functions
 	LotmanLotExists     func(lotName string, errMsg *[]byte) int32
 	LotmanSetContextStr func(contextKey string, contextValue string, errMsg *[]byte) int32
 	LotmanGetContextStr func(key string, output *[]byte, errMsg *[]byte) int32
@@ -464,7 +464,7 @@ func getPolicyMap() (map[string]PurgePolicy, error) {
 	var policies []PurgePolicy
 	// Use custom decoder hook to validate fields. This validates all the way down to the bottom of the lot object.
 	if err := viper.UnmarshalKey(param.Lotman_PolicyDefinitions.GetName(), &policies, viper.DecodeHook(validateFieldsHook())); err != nil {
-		return policyMap, errors.Wrap(err, "error unmarshaling Lotman policy definitions")
+		return policyMap, errors.Wrap(err, "error unmarshalling Lotman policy definitions")
 	}
 
 	for _, policy := range policies {
@@ -655,7 +655,7 @@ func divideRemainingSpace(lotMap *map[string]Lot, totalDiskSpaceB uint64) error 
 		if lot.MPA != nil && lot.MPA.DedicatedGB != nil  {
 			dedicatedGBBytes := gigabytesToBytes(*lot.MPA.DedicatedGB)
 			// While we check that lot config is valid later, we can't finish dividing space if
-			// remainintToHwmB dips negative. Can't check for < 0 after subraction because the uint64 will wrap
+			// remainintToHwmB dips negative. Can't check for < 0 after subtraction because the uint64 will wrap
 			if remainingToHwmB < dedicatedGBBytes {
 				return errors.New(fmt.Sprintf("the sum of all lots' dedicatedGB values exceeds the high watermark of %s. This would allow the cache to purge namespaces using less than their dedicated quota", hwmStr))
 			}
@@ -962,7 +962,7 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	// D
 	purego.RegisterLibFunc(&LotmanDeleteLotsRecursive, lotmanLib, "lotman_remove_lots_recursive")
 
-	// Auxilliary functions
+	// Auxiliary functions
 	purego.RegisterLibFunc(&LotmanLotExists, lotmanLib, "lotman_lot_exists")
 	purego.RegisterLibFunc(&LotmanSetContextStr, lotmanLib, "lotman_set_context_str")
 	purego.RegisterLibFunc(&LotmanGetContextStr, lotmanLib, "lotman_get_context_str")
@@ -1168,7 +1168,7 @@ func CreateLot(newLot *Lot, caller string) error {
 // Given a lot name, get the lot from the lot database. If recursive is true, we'll also
 // determine all hierarchical restrictions on the lot. For example, if the lot "foo" has
 // dedicated_GB = 2.0 but its parent lot "bar" has dedicated_GB = 1.0, then calling this
-// with recusrive = true will indicate the restricting value and the lot it comes from.
+// with recursive = true will indicate the restricting value and the lot it comes from.
 func GetLot(lotName string, recursive bool) (*Lot, error) {
 	// Haven't given much thought to these buff sizes yet
 	outputBuf := make([]byte, 4096)

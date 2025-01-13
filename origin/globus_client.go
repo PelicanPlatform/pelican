@@ -437,7 +437,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 		return
 	}
 
-	// We have all the data in place, let's create/update related data strcutures:
+	// We have all the data in place, let's create/update related data structures:
 	// 1. Pesist access token to disk for XRootD to read
 	// 2.	Update in-memory globusExports struct with the OAuth token (both access and refresh token),
 	//    	HttpsServer, and display name (from Globus API)

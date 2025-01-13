@@ -64,7 +64,7 @@ func NewServerType() ServerType {
 }
 
 // Get the string representation of a ServerType instance. This is intended
-// for getting the string form of a single ServerType contant, such as CacheType
+// for getting the string form of a single ServerType constant, such as CacheType
 // OriginType, etc. To get a string slice of enabled servers, use EnabledServerString()
 func (sType ServerType) String() string {
 	switch sType {

@@ -118,7 +118,7 @@ func stagePluginMain(cmd *cobra.Command, args []string) {
 	var sources, extraSources []string
 	var exitCode int
 
-	// If not a condor hook, our souces come from our args
+	// If not a condor hook, our sources come from our args
 	if !isHook {
 		log.Debugln("Len of source:", len(args))
 		if len(args) < 1 {

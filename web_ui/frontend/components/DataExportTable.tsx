@@ -37,7 +37,7 @@ type ExportResCommon = {
   editUrl: string;
 };
 
-type ExportRes = ExportResCommon &
+export type ExportRes = ExportResCommon &
   (
     | { type: 's3'; exports: S3ExportEntry[] }
     | { type: 'posix'; exports: PosixExportEntry[] }
@@ -169,7 +169,7 @@ export const PosixDataExportCard = ({ entry }: { entry: PosixExportEntry }) => {
     <Paper elevation={1}>
       {entry.status != 'Completed' && <DataExportStatus {...entry} />}
       <Grid container p={1}>
-        <Grid item xs={9}>
+        <Grid item xs={12} md={9}>
           <ValueLabel
             value={entry.federationPrefix}
             label={'Federation Prefix'}
@@ -180,7 +180,7 @@ export const PosixDataExportCard = ({ entry }: { entry: PosixExportEntry }) => {
             label={'Sentinel Location'}
           />
         </Grid>
-        <Grid item xs={3}>
+        <Grid item xs={12} md={3}>
           <CapabilitiesDisplay {...entry} />
         </Grid>
       </Grid>
@@ -193,14 +193,14 @@ export const S3DataExportCard = ({ entry }: { entry: S3ExportEntry }) => {
     <Paper elevation={1}>
       {entry.status != 'Completed' && <DataExportStatus {...entry} />}
       <Grid container pt={1}>
-        <Grid item xs={9}>
+        <Grid item xs={12} md={9}>
           <ValueLabel
             value={entry.federationPrefix}
             label={'Federation Prefix'}
           />
           <ValueLabel value={entry.s3Bucket} label={'S3 Bucket'} />
         </Grid>
-        <Grid item xs={3}>
+        <Grid item xs={12} md={9}>
           <CapabilitiesDisplay {...entry} />
         </Grid>
       </Grid>
@@ -217,7 +217,7 @@ export const GlobusDataExportCard = ({
     <Paper elevation={1}>
       {entry.status != 'Completed' && <DataExportStatus {...entry} />}
       <Grid container pt={1}>
-        <Grid item xs={9}>
+        <Grid item xs={12} md={9}>
           <ValueLabel
             value={entry.federationPrefix}
             label={'Federation Prefix'}

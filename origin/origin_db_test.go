@@ -65,7 +65,7 @@ func setupMockOriginDB(t *testing.T) {
 	keyName := filepath.Join(tmp, "issuer.key")
 	viper.Set(param.IssuerKey.GetName(), keyName)
 
-	// Also update the refresh token to be encrpted
+	// Also update the refresh token to be encrypted
 	for idx := range mockGC {
 		encrypted, err := config.EncryptString(mockGC[idx].RefreshToken)
 		require.NoError(t, err)

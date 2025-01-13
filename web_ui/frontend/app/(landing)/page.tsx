@@ -19,32 +19,20 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Box, Container, Grid, Skeleton, Typography } from '@mui/material';
+import {
+  Box,
+  Container,
+  Grid,
+  List,
+  ListItemButton,
+  ListItemText,
+  Skeleton,
+  Typography,
+} from '@mui/material';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { getEnabledServers } from '@/helpers/util';
 import { ServerType } from '@/index';
-
-function TextCenteredBox({ text }: { text: string }) {
-  return (
-    <Box
-      sx={{
-        aspectRatio: 1,
-        width: '100%',
-        display: 'flex',
-        textTransform: 'capitalize',
-        bgcolor: 'primary.light',
-        borderRadius: '1rem',
-      }}
-    >
-      <Box m={'auto'}>
-        <Typography variant={'h4'} align={'center'}>
-          {text}
-        </Typography>
-      </Box>
-    </Box>
-  );
-}
 
 export default function Home() {
   const { data: enabledServers, isLoading } = useSWR<ServerType[]>(
@@ -56,30 +44,26 @@ export default function Home() {
     <Box width={'100%'} pt={5}>
       <Container maxWidth={'xl'}>
         <Typography pb={5} textAlign={'center'} variant={'h3'}>
-          Pelican Services
+          Active Pelican Services
         </Typography>
-        <Grid container justifyContent={'center'} spacing={2}>
-          {isLoading && (
-            <Grid item xs={2}>
-              <Skeleton
-                variant={'rectangular'}
-                width={150}
-                height={150}
-                sx={{ borderRadius: 2 }}
-              />
-            </Grid>
-          )}
+        <List>
           {enabledServers &&
             enabledServers.map((service) => {
               return (
-                <Grid key={service} item xs={2}>
-                  <Link href={`./${service}/`}>
-                    <TextCenteredBox text={service} />
-                  </Link>
-                </Grid>
+                <ListItemButton
+                  key={service}
+                  component={Link}
+                  href={`./${service}/`}
+                  sx={{ p: 0 }}
+                >
+                  <ListItemText
+                    primary={service}
+                    sx={{ textAlign: 'center', textTransform: 'capitalize' }}
+                  />
+                </ListItemButton>
               );
             })}
-        </Grid>
+        </List>
       </Container>
     </Box>
   );

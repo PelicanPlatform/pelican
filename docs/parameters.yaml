@@ -60,7 +60,7 @@ description: |+
   When set to true, Pelican will skip TLS verification. This allows a "man in the middle" attack on the connection but can simplify testing.  Intended for developers.
 type: bool
 default: false
-components: ["origin", "registry", "director"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: IssuerKey
 description: |+
@@ -126,7 +126,7 @@ components: ["client", "registry", "origin"]
 name: GeoIPOverrides
 description: |+
   A list of IP addresses whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects
-  both server ads (for determining the location of origins and caches) and incoming client requests (for determing where a client request is
+  both server ads (for determining the location of origins and caches) and incoming client requests (for determining where a client request is
   coming from).
 
   Configuration takes an IP address (both regular and CIDR) and a Coordinate made up of a lat/long pair in decimal format. For example:
@@ -1349,9 +1349,9 @@ components: ["cache"]
 ---
 name: Cache.BlocksToPrefetch
 description: |+
-  The number of 128 kilobyte blocks the cache will read ahead when recieving requests. This will put the data in the cache
+  The number of 128 kilobyte blocks the cache will read ahead when receiving requests. This will put the data in the cache
   potentially before it is needed and reduce the latency to the client when a request is made. However, it can also cause
-  many extra requests to an origin and potentially overload it when unnessesary. As such, this is turned off by default.
+  many extra requests to an origin and potentially overload it when unnecessary. As such, this is turned off by default.
 type: int
 default: 0
 components: ["cache"]
@@ -1407,7 +1407,7 @@ components: ["director"]
 ---
 name: Director.CacheSortMethod
 description: |+
-  When the director recieves a client request that needs to be redirected to a cache, it will use this method to
+  When the director receives a client request that needs to be redirected to a cache, it will use this method to
   determine the ordering of the caches. The default method is "distance", which sorts caches by their spherical distance
   from the client.
 
@@ -1708,7 +1708,7 @@ description: |+
 
   - `name` must be snake case with underline connecting words, i.e. department_name.
     The name displayed in the registration table will be converted from this field
-    into a human-readble, space-separated name with the first letter(s) capitalized. i.e. department_name -> Department Name
+    into a human-readable, space-separated name with the first letter(s) capitalized. i.e. department_name -> Department Name
   - `type` must be one of `string`, `int`, `bool`, `datetime` (Unix time in seconds), or `enum`.
   - `options` must be a non-empty yaml array for field with type `enum`. `optionsUrl` will be ignored if `options` is set.
 
@@ -1788,7 +1788,7 @@ components: ["registry"]
 ############################
 name: Server.TLSCertificate
 description: |+
-  A filepath to a file containing an X.509 host certificate to use for TLS
+  [Deprecated] A filepath to a file containing an X.509 host certificate to use for TLS
   authentication when running server components of Pelican.
 
   If you override this filepath, you need to provide the matched-pair private key
@@ -1798,7 +1798,7 @@ root_default: /etc/pelican/certificates/tls.crt
 default: "$ConfigBase/certificates/tls.crt"
 deprecated: true
 replacedby: "Server.TLSCertificateChain"
-components: ["origin", "registry", "director"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.TLSCertificateChain
 description: |+
@@ -1810,7 +1810,7 @@ description: |+
 type: filename
 root_default: /etc/pelican/certificates/tls.crt
 default: "$ConfigBase/certificates/tls.crt"
-components: ["origin", "registry", "director"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.TLSCACertificateFile
 description: |+
@@ -1821,7 +1821,7 @@ description: |+
 type: filename
 root_default: /etc/pelican/certificates/tlsca.pem
 default: "$ConfigBase/certificates/tlsca.pem"
-components: ["origin", "registry", "director"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.TLSCACertificateDirectory
 description: |+
@@ -1832,7 +1832,7 @@ description: |+
   over Server.TLSCACertificateFile.
 type: string
 default: none
-components: ["origin", "registry", "director"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.TLSCAKey
 description: |+
@@ -1841,7 +1841,7 @@ description: |+
 type: filename
 root_default: /etc/pelican/certificates/tlsca.key
 default: "$ConfigBase/certificates/tlsca.key"
-components: ["origin", "registry", "director"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.TLSKey
 description: |+
@@ -1851,7 +1851,7 @@ description: |+
 type: filename
 root_default: /etc/pelican/certificates/tls.key
 default: "$ConfigBase/certificates/tls.key"
-components: ["origin", "registry", "director"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.EnableUI
 description: |+
@@ -1865,14 +1865,14 @@ description: |+
   The port number the Pelican web interface and internal web APIs will be bound to.
 type: int
 default: 8444
-components: ["origin", "director", "registry"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.WebHost
 description: |+
   A string-encoded IP address that the Pelican web engine is configured to listen on.
 type: string
 default: "0.0.0.0"
-components: ["origin", "director", "registry"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.ExternalWebUrl
 description: |+
@@ -1881,14 +1881,14 @@ description: |+
   Port number will be stripped if it's 443, from `Server.WebPort` or directly set through `Server.ExternalWebUrl`.
 type: url
 default: https://${Server.Hostname}:${Server.WebPort} (for ${Server.WebPort} != 443)
-components: ["origin", "director", "registry"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.Hostname
 description: |+
   The server's hostname, by default it's os.Hostname().
 type: string
 default: none
-components: ["origin", "director", "registry"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.IssuerUrl
 description: |+
@@ -1896,7 +1896,7 @@ description: |+
 type: string
 # Setting default to none for now because it changes based on server type and server mode.
 default: none
-components: ["origin", "director", "registry"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.IssuerHostname
 description: |+
@@ -1904,7 +1904,7 @@ description: |+
 type: string
 # Setting default to none for now because it changes based on server type and server mode.
 default: none
-components: ["origin", "director", "registry"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.IssuerPort
 description: |+
@@ -1912,14 +1912,14 @@ description: |+
 type: int
 # Setting default to none for now because it changes based on server type and server mode.
 default: none
-components: ["origin", "director", "registry"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.IssuerJwks
 description: |+
   A filepath indicating where the server's public JSON web keyset can be found.
 type: filename
 default: none
-components: ["origin", "director", "registry"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.Modules
 description: |+
@@ -2586,7 +2586,7 @@ name: Shoveler.StompCert
 description: |+
   For stomp only.
 
-  A filepath to the location of the TLS certifcate.
+  A filepath to the location of the TLS certificate.
 type: filename
 default: none
 components: ["origin", "cache"]
@@ -2773,7 +2773,7 @@ description: |+
         - `CreationTime`: REQUIRED. A unix timestamp indicating when the lot should begin being considered valid. Times in the future indicate
           the lot should not be considered valid until that time.
         - `ExpirationTime`: REQUIRED. A unix timestamp indicating when the lot expires. Lots may continue to function after expiration, but lot
-          data owners should recognize the storage is at-will and may be pre-empted at any time.
+          data owners should recognize the storage is at-will and may be preempted at any time.
         - `DeletionTime`: REQUIRED. A unix timestamp indicating when the lot and its associated data should be deleted.
 
   For example, Lotman could be configured with the "my-policy" policy with the following:

@@ -1,4 +1,4 @@
-TLSSkipVerify: true # Turn off the TLS check for developmetn
+TLSSkipVerify: true # Turn off the TLS check for development
 Logging:
   Level: "debug" # Debug level will log more verbose messages
 Federation:

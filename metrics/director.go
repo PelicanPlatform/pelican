@@ -33,12 +33,12 @@ const (
 	MetricSucceeded MetricSimpleStatus = "Succeeded"
 	MetricFailed    MetricSimpleStatus = "Failed"
 
-	StatSucceeded DirectorStatResult = "Succeeded"
-	StatNotFound  DirectorStatResult = "NotFound"
-	StatTimeout   DirectorStatResult = "Timeout"
-	StatCancelled DirectorStatResult = "Cancelled"
-	StatForbidden DirectorStatResult = "Forbidden"
-	StatUnkownErr DirectorStatResult = "UnknownErr"
+	StatSucceeded  DirectorStatResult = "Succeeded"
+	StatNotFound   DirectorStatResult = "NotFound"
+	StatTimeout    DirectorStatResult = "Timeout"
+	StatCancelled  DirectorStatResult = "Cancelled"
+	StatForbidden  DirectorStatResult = "Forbidden"
+	StatUnknownErr DirectorStatResult = "UnknownErr"
 )
 
 var (
@@ -54,10 +54,10 @@ var (
 
 	PelicanDirectorFileTransferTestsRuns = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_total_ftx_test_runs",
-		Help: "The number of file transfer test runs the director issued. A test run is a cycle of upload/download/delete test file, which is executed per 15s per origin (by defult)",
+		Help: "The number of file transfer test runs the director issued. A test run is a cycle of upload/download/delete test file, which is executed per 15s per origin (by default)",
 	}, []string{"server_name", "server_web_url", "server_type", "status", "report_status"})
 
-	PelicanDirectorAdvertisementsRecievedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	PelicanDirectorAdvertisementsReceivedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_advertisements_received_total",
 		Help: "The total number of advertisement the director received from the origin and cache servers. Labelled by status_code, server_name, serve_type: Origin|Cache, server_web_url",
 	}, []string{"server_name", "server_web_url", "server_type", "status_code", "namespace_prefix"})

@@ -98,7 +98,7 @@ async function getData(
   datasetOptions:
     | Partial<ChartDataset<'line'>>
     | Partial<ChartDataset<'line'>>[],
-  datasetTranform?: (x: ChartDataset<'line'>) => ChartDataset<'line'>
+  datasetTransform?: (x: ChartDataset<'line'>) => ChartDataset<'line'>
 ) {
   let chartData: ChartData<'line', any, any> = {
     datasets: await Promise.all(
@@ -131,8 +131,8 @@ async function getData(
           ...datasetOption,
         };
 
-        if (datasetTranform) {
-          return datasetTranform(dataset);
+        if (datasetTransform) {
+          return datasetTransform(dataset);
         }
 
         return dataset;
