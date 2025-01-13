@@ -189,7 +189,7 @@ description: |+
   Trace level of scitokens debug output within XRootD configuration. This entails token management
   and security credentials within XRootD. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
-default: error
+default: fatal
 components: ["origin"]
 ---
 name: Logging.Origin.Xrd
@@ -273,7 +273,7 @@ description: |+
   Trace level of scitokens debug output within XRootD configuration. This entails token management
   and security credentials within XRootD. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 type: string
-default: error
+default: fatal
 components: ["cache"]
 ---
 name: Logging.Cache.Xrd
@@ -388,7 +388,7 @@ name: Client.SlowTransferRampupTime
 description: |+
   A duration indicating the ramp up period for a slow transfer.
 type: duration
-default: 30s
+default: 100s
 components: ["client"]
 ---
 name: Client.SlowTransferWindow
@@ -2239,7 +2239,7 @@ description: |+
   For CILogon, it's https://cilogon.org
   For Globus, it's https://auth.globus.org
 type: url
-default: none
+default: https://cilogon.org
 components: ["registry", "origin", "cache", "director"]
 ---
 name: OIDC.ClientRedirectHostname
@@ -2806,7 +2806,12 @@ description: |+
   For more information about LotMan configuration, see:
   [https://github.com/pelicanplatform/lotman](https://github.com/pelicanplatform/lotman)
 type: object
-default: none
+default:
+  - PolicyName: "fairshare"
+    DivideUnallocated: true
+    PurgeOrder: ["del", "exp", "opp", "ded"]
+    DiscoverPrefixes: true
+    MergeLocalWithDiscovered: false
 components: ["cache"]
 ---
 name: Lotman.EnabledPolicy

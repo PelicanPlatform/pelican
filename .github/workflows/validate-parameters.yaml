@@ -16,3 +16,6 @@ jobs:
 
       - name: Validate parameters
         run: python .github/scripts/validate-parameters/main.py
+
+      - name: Validate default parameters
+        run: python .github/scripts/validate-defaults/main.py
