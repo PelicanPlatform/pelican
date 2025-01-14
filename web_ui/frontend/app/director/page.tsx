@@ -21,7 +21,7 @@
 import { Box, Grid, Skeleton, Typography } from '@mui/material';
 import { useContext, useMemo } from 'react';
 import useSWR from 'swr';
-import { DirectorCardList } from './components';
+import { DirectorCardList, GeoIpErrorTable } from './components';
 import { getUser } from '@/helpers/login';
 import FederationOverview from '@/components/FederationOverview';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
@@ -122,6 +122,11 @@ export default function Page() {
                 <Skeleton variant='rectangular' height={118} />
               </Box>
             )}
+          </Grid>
+          <Grid item xs={12} lg={8} xl={6}>
+            <AuthenticatedContent>
+              <GeoIpErrorTable />
+            </AuthenticatedContent>
           </Grid>
           <Grid item xs={12} lg={8} xl={6}>
             <AuthenticatedContent>

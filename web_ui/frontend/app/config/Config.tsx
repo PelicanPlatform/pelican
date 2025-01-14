@@ -76,7 +76,8 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
   const { data, mutate, error } = useSWR<ParameterValueRecord | undefined>(
     'getConfig',
     async () =>
-      await alertOnError(getConfigJson, 'Could not get config', dispatch)
+      await alertOnError(
+        async () => (await getConfig()).json(), 'Could not get config', dispatch)
   );
 
   const serverConfig = useMemo(() => {
@@ -180,12 +181,5 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
     </AuthenticatedContent>
   );
 }
-
-const getConfigJson = async (): Promise<ParameterValueRecord | undefined> => {
-  const response = await getConfig();
-  if (response) {
-    return await response.json();
-  }
-};
 
 export default Config;
