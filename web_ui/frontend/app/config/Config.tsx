@@ -60,7 +60,11 @@ import { ServerType } from '@/index';
 import { alertOnError, getEnabledServers } from '@/helpers/util';
 import DownloadButton from '@/components/DownloadButton';
 import { PaddedContent } from '@/components/layout';
-import { ConfigDisplay, TableOfContents } from '@/app/config/components';
+import {
+  ConfigDisplay,
+  TableOfContents,
+  RestartBox,
+} from '@/app/config/components';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { getConfig } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
@@ -116,6 +120,11 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
           )}
         </Typography>
       </Box>
+      <Grid container>
+        <Grid item>
+          <RestartBox />
+        </Grid>
+      </Grid>
       <Grid container spacing={2} sx={{ mt: -5 }}>
         <Grid item xs={12} md={8} lg={6}>
           <Box>

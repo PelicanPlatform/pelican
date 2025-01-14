@@ -41,6 +41,15 @@ export async function fetchApi(
 }
 
 /**
+ * Restart the server
+ */
+export const restartServer = async (): Promise<Response> => {
+  return fetchApi(
+    async () => await secureFetch('/api/v1.0/restart', { method: 'POST' })
+  );
+};
+
+/**
  * Get config
  */
 export const getConfig = async (): Promise<Response> => {

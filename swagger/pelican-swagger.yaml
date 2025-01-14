@@ -708,6 +708,19 @@ paths:
               message:
                 type: string
                 example: "Web Engine Running. Time: 2024-01-10 22:32:59.637471175 +0000 UTC m=+35.515010725"
+  /restart:
+    post:
+      tags:
+        - "common"
+      summary: Restart the server
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: "Restart the web server"
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModelV2"
   /config:
     get:
       tags:
