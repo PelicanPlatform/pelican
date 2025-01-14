@@ -72,7 +72,7 @@ var (
 )
 
 // InitGlobusBackend does the following things to initialize Globus-related logic
-//  1. It initializes the global map strcuture globusExports to store collection information in-memory
+//  1. It initializes the global map structure globusExports to store collection information in-memory
 //  2. It checks and setup location for Globus access tokens after user activates the collection
 //  3. It loads the Globus OAuth client for OAuth-based authorization to access collection data
 //  4. It populates the global map by the exported Origin prefixes/collections. It reads the persisted credentials

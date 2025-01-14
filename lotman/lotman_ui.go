@@ -201,7 +201,7 @@ func VerifyNewLotToken(lot *Lot, strToken string) (bool, error) {
 	// and cut out a lot of this cruft
 
 	// Get the namespace by querying the director and checking the headers
-	errMsgPrefix := "the provided token is acceptible, but no owner could be determined because "
+	errMsgPrefix := "the provided token is acceptable, but no owner could be determined because "
 
 	fedInfo, err := config.GetFederation(context.Background())
 	if err != nil {
@@ -343,7 +343,7 @@ func uiCreateLot(ctx *gin.Context) {
 		extraInfo += "NOTE: New lot owner fields are ignored. The owner will be set to the issuer of the token used to create the lot. "
 	}
 	if len(lot.Parents) > 0 {
-		extraInfo += "NOTE: New lot parent fields are ignored. The parent will be determined by the namespace heirarchy associated with the lot's path. "
+		extraInfo += "NOTE: New lot parent fields are ignored. The parent will be determined by the namespace hierarchy associated with the lot's path. "
 	}
 
 	// TODO: Figure out the best way to inform the user that we ignore any owner or parent they set, because we handle that internally.
@@ -478,7 +478,7 @@ func uiUpdateLot(ctx *gin.Context) {
 	// because LotMan assumes a path can be held by only one lot (hierarchical ownership not withstanding).
 	// 2: The new path is not tied to another lot. In this case, what we should really do is create a new lot for that namespace, assuming
 	// one exists. But then why not create a new lot?
-	// Thus, until we've sorted out multi-path lots, we should probably just error out in both of these cases. An adminstrator at the cache
+	// Thus, until we've sorted out multi-path lots, we should probably just error out in both of these cases. An administrator at the cache
 	// can get access to the system and update things however they choose anyway (albeit that means writing C to do it).
 	if lotUpdate.Paths != nil {
 		extraInfo += "NOTE: Lot update path fields are ignored. Pelican does not yet support this feature. "

@@ -96,7 +96,7 @@ func gatedHalvingMultiplier(val float64, threshold float64, halvingFactor float6
 	}
 }
 
-// Given a SwapMaps struct, stochasticlly sort the weights based on the folliwng procedure:
+// Given a SwapMaps struct, stochasticlly sort the weights based on the following procedure:
 //
 //  1. Create ranges [0, weight_1), [weight_1, weight_1 + weight_2), ... for each weight.
 //

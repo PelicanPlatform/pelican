@@ -86,7 +86,7 @@ func TestWaitUntilWorking(t *testing.T) {
 	})
 
 	t.Run("server-returns-unexpected-status-code-json-body", func(t *testing.T) {
-		jsonRes := map[string]string{"error": "bad reqeust"}
+		jsonRes := map[string]string{"error": "bad request"}
 		jsonBytes, err := json.Marshal(jsonRes)
 		require.NoError(t, err)
 

@@ -65,7 +65,7 @@ var registrationsStatus = ttlcache.New(
 	ttlcache.WithDisableTouchOnHit[string, RegistrationStatus](),
 )
 
-var RegistryNotImplErr = errors.New("the running version of the registry didn't implmenet this function")
+var RegistryNotImplErr = errors.New("the running version of the registry didn't implement this function")
 
 const (
 	RegStatusNotSupported regStatusEnum = "Not Supported"      // Registry does not support this function

@@ -16,17 +16,12 @@
  *
  ***************************************************************/
 
-import { Box, Tooltip } from '@mui/material';
+import { Box } from '@mui/material';
 
-import { ButtonLink, Sidebar } from '@/components/layout/Sidebar';
-import Link from 'next/link';
-import Image from 'next/image';
-import PelicanLogo from '@/public/static/images/PelicanPlatformLogo_Icon.png';
-import IconButton from '@mui/material/IconButton';
-import BuildIcon from '@mui/icons-material/Build';
 import Main from '@/components/layout/Main';
 import { PaddedContent } from '@/components/layout';
-import { Dashboard, MapOutlined } from '@mui/icons-material';
+import { Navigation } from '@/components/layout/Navigation';
+import NavigationConfiguration from '@/app/navigation';
 
 export const metadata = {
   title: 'Pelican Cache',
@@ -39,18 +34,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <Box display={'flex'} flexDirection={'row'}>
-      <Sidebar>
-        <ButtonLink title={'Cache'} href={'/cache/'}>
-          <Dashboard />
-        </ButtonLink>
-        <ButtonLink title={'Config'} href={'/config/'}>
-          <BuildIcon />
-        </ButtonLink>
-      </Sidebar>
+    <Navigation config={NavigationConfiguration['cache']}>
       <Main>
         <PaddedContent>{children}</PaddedContent>
       </Main>
-    </Box>
+    </Navigation>
   );
 }

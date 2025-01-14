@@ -18,7 +18,7 @@
 
 import { Box } from '@mui/material';
 
-import styles from '../../../app/page.module.css';
+import styles from '../../../../app/page.module.css';
 import React, { ReactNode } from 'react';
 
 import UserMenu from './UserMenu';
@@ -26,8 +26,11 @@ import { default as NextLink } from 'next/link';
 import Image from 'next/image';
 import PelicanLogo from '@/public/static/images/PelicanPlatformLogo_Icon.png';
 import AboutMenu from './AboutMenu';
+import { NavigationItem } from '@/components/layout/Navigation/Sidebar/NavigationItem';
+import { NavigationProps } from '@/components/layout/Navigation';
+import { evaluateOrReturn } from '@/helpers/util';
 
-export const Sidebar = ({ children }: { children: ReactNode }) => {
+export const Sidebar = ({ config, exportType, role }: NavigationProps) => {
   return (
     <Box>
       <Box
@@ -61,7 +64,16 @@ export const Sidebar = ({ children }: { children: ReactNode }) => {
                   loading={'eager'}
                 />
               </NextLink>
-              {children}
+              {config.map((navItem) => {
+                return (
+                  <NavigationItem
+                    key={evaluateOrReturn(navItem.title)}
+                    config={navItem}
+                    role={role}
+                    exportType={exportType}
+                  />
+                );
+              })}
             </Box>
             <Box
               display={'flex'}

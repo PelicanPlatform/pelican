@@ -51,7 +51,7 @@ builds:
       - goos: darwin
         goarch: ppc64le
   # Set things up to build a second server binary that enables Lotman. Eventually
-  # we'll also use this to filter which moduels are built into the binary.
+  # we'll also use this to filter which modules are built into the binary.
   - env:
       - CGO_ENABLED=0
     goos:
@@ -128,6 +128,8 @@ nfpms:
     release: 1
     section: default
     priority: extra
+    scripts:
+      preinstall: "scripts/preinstall.sh"
     overrides:
       rpm:
         contents:
@@ -147,6 +149,24 @@ nfpms:
               mode: 0755
               owner: root
               group: root
+          - dst: "/var/lib/pelican"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: pelican
+              group: pelican
+          - dst: "/var/lib/pelican/monitoring"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: pelican
+              group: pelican
+          - dst: "/var/spool/pelican"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: pelican
+              group: pelican
       deb:
         contents:
           - src: LICENSE
@@ -165,6 +185,24 @@ nfpms:
               mode: 0755
               owner: root
               group: root
+          - dst: "/var/lib/pelican"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: pelican
+              group: pelican
+          - dst: "/var/lib/pelican/monitoring"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: pelican
+              group: pelican
+          - dst: "/var/spool/pelican"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: pelican
+              group: pelican
       apk:
         contents:
           - src: LICENSE
@@ -183,6 +221,26 @@ nfpms:
               mode: 0755
               owner: root
               group: root
+          - dst: "/var/lib/pelican"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: pelican
+              group: pelican
+          - dst: "/var/lib/pelican/monitoring"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: pelican
+              group: pelican
+          - dst: "/var/spool/pelican"
+            type: dir
+            file_info:
+              mode: 0755
+              owner: pelican
+              group: pelican
+        scripts:
+          preinstall: "scripts/preinstall-alpine.sh"
   # end package pelican
 
   - package_name: pelican-osdf-compat

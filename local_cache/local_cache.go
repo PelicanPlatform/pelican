@@ -656,7 +656,7 @@ func (lc *LocalCache) purge() (err error) {
 
 // Given a URL, return a reader from the disk cache
 //
-// If there is no sentinal $NAME.DONE file, then returns nil
+// If there is no sentinel $NAME.DONE file, then returns nil
 func (sc *LocalCache) getFromDisk(localPath string) *os.File {
 	localPath = filepath.Join(sc.basePath, path.Clean(localPath))
 	fp, err := os.Open(localPath + ".DONE")

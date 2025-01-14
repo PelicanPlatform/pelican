@@ -38,6 +38,7 @@ fi
 plugin_output=$(./stash_plugin osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt query1)
 rm query1
 
+# shellcheck disable=SC2076
 if ! [[ $plugin_output =~ "TransferUrl = \"osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt\"" ]]; then
   echo "TransferUrl not in plugin output"
   to_exit=1
@@ -73,7 +74,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for idx in {1..20}; do
+for _idx in {1..20}; do
   if [ -e "$SOCKET_DIR/socket" ]; then
     break
   fi
