@@ -20,16 +20,15 @@ const LatitudeLongitudePicker = ({
   longitude,
   setLatitude,
   setLongitude,
-  zoom
+  zoom,
 }: LatitudeLongitudePickerProps) => {
-
   const updateLatLng = useCallback((lngLat: LngLat) => {
     setLatitude(parseFloat(lngLat.lat.toFixed(5)));
     setLongitude(parseFloat(lngLat.lng.toFixed(5)));
   }, []);
 
-  const tempLongitude = Number.isNaN(longitude) ? 0 : longitude
-  const tempLatitude = Number.isNaN(latitude) ? 0 : latitude
+  const tempLongitude = Number.isNaN(longitude) ? 0 : longitude;
+  const tempLatitude = Number.isNaN(latitude) ? 0 : latitude;
 
   return (
     <DefaultMap
@@ -54,6 +53,6 @@ const LatitudeLongitudePicker = ({
       </Marker>
     </DefaultMap>
   );
-}
+};
 
-export default LatitudeLongitudePicker
+export default LatitudeLongitudePicker;
