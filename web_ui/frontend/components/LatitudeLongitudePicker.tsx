@@ -25,7 +25,7 @@ const LatitudeLongitudePicker = ({
       <label>
         Latitude:
         <input
-          type="number"
+          type='number'
           value={latitude}
           onChange={(e) => setLatitude(parseFloat(e.target.value))}
         />
@@ -33,13 +33,13 @@ const LatitudeLongitudePicker = ({
       <label>
         Longitude:
         <input
-          type="number"
+          type='number'
           value={longitude}
           onChange={(e) => setLongitude(parseFloat(e.target.value))}
         />
       </label>
     </div>
   );
-}
+};
 
-export default LatitudeLongitudePicker
+export default LatitudeLongitudePicker;
