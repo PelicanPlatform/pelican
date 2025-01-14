@@ -1,8 +1,8 @@
 # Getting Data With Pelican
 
 Pelican is built on top of HTTP and uses the most common [HTTP verbs](https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods) to interact with data:
-downloading objects happen with an HTTP "GET", uploading an object is an HTTP "PUT", discovering data uses HTTP's "HEAD" and WebDav's "PROPFIND". This architecture
-means any tool that already speaks HTTP _can_ integrate with Pelican. However, Pelican's official clients -- any of our tools
+downloading objects happen with an HTTP "GET", uploading an object is an HTTP "PUT", and discovering data uses a combination of HTTP's "HEAD" and WebDav's "PROPFIND".
+This architecture means any tool that already speaks HTTP _can_ integrate with Pelican. However, Pelican's official clients -- any of our tools
 designed for interacting with remote objects -- make intelligent use of special information provided by federation services like the Director to
 deliver the best experience. They also have built-in optimizations that help interact with data more efficiently, like multi-worker object streaming,
 automatic retry policies, and tools for packing/unpacking objects while they're in flight.
@@ -18,7 +18,7 @@ Picking a client starts with understanding what you want to accomplish and where
 ### Pelican's Command Line Client
 Pelican's command line client (also referred to as the Pelican CLI) excels at broad object manipulation and management tasks, including writing/reading large
 collections of objects, syncing data between local and remote resources, and discovering data that's accessible through a given namespace/federation prefix.
-For extra detail about Pelican's CLI, see [Getting Data With Pelican/Command Line Client](./getting-data-with-pelican/client.mdx).
+For details about Pelican's CLI, see [Getting Data With Pelican/Command Line Client](./getting-data-with-pelican/client.mdx).
 
 ### Pelican's Python Filesystem Specification
 If your goal is to integrate Pelican with Python, you're looking for our [Pelican Filesystem Specification](https://github.com/PelicanPlatform/pelicanfs), or "FSSpec" for short.
@@ -27,5 +27,11 @@ and [PyTorch data loaders](https://github.com/PelicanPlatform/pelicanfs/tree/mai
 
 
 ### Pelican's HTCondor Plugin
-Pelican creates a plugin that acts as the preferred transfer tool for [HTCondor](https://htcondor.org/), a tool for establishing distributed/clustered compute federations.
-For more information on HTCondor's Pelican plugin, see [HTCondor's documentation](https://htcondor.readthedocs.io/en/latest/users-manual/file-transfer.html#file-transfer-using-a-url).
+Pelican maintains a plugin that acts as the preferred transfer tool for [HTCondor](https://htcondor.org/), a software suite used in many distributed/clustered
+compute federations, such as the [OSPool](https://osg-htc.org/services/open_science_pool.html).
+
+This plugin leverages HTCondor's existing plugin architecture, enabling HTCondor to manage all `pelican://` and `osdf://` file transfers as part of
+distributed, high-throughput computing workflows.
+
+For more information on how file transfer plugins work in HTCondor, see
+[HTCondor's documentation](https://htcondor.readthedocs.io/en/latest/users-manual/file-transfer.html#file-transfer-using-a-url).

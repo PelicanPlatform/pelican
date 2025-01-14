@@ -55,8 +55,8 @@ already be understood.
 The hostname in the previous `pelican`-schemed URL matches the OSDF's hostname, so it can be rewritten using an `osdf` url:
 > pelican://osg-htc.org/some/object --> osdf://~~osg-htc.org~~/some/object = osdf:///some/object
 
-On the other hand, construction of a URL like `osdf://some/object` has the potential to confuse many clients, because now part of the object's name "`some`"
-will be interpreted as the federation's hostname.
+On the other hand, construction of a URL like `osdf://some/object` has the potential to confuse many clients that aren't aware of the `osdf://` protocol.
+That is because now there is part of the object's name ("`some`") where such clients might be expecting the federation's hostname.
 
 More information about `pelican` and `osdf` URLs can be found in our [client usage docs](./getting-data-with-pelican/client#the-different-pelican-url-schemes).
 
@@ -119,7 +119,9 @@ are no longer tied explicitly to geo-location, and it may be trying to make bett
   updates twice weekly on Wednesdays and Fridays (shortly after the databases are updated upstream by MaxMind).<br />
 
 ## How can I tell what services my Pelican client will talk to _before_ I try to get/put objects?
-Pelican is built on HTTP, so any client that speaks HTTP can determine this. These instructions are for using `curl` on the command line. Broadly speaking, they require:
+Pelican is built on HTTP, so any client that speaks HTTP can determine this. For more information about Pelican's use of HTTP verbs, see
+[Getting Data With Pelican](./getting-data-with-pelican.mdx#getting-data-with-pelican)
+These instructions are for using `curl` on the command line. Broadly speaking, they require:
 1. Finding the hostname of your federation's Director
 2. Determining whether you want the Director to provide a list of caches or origins
 3. Creating the correct curl command
@@ -144,8 +146,10 @@ $ curl https://osg-htc.org/.well-known/pelican-configuration
 If successful, this should return a JSON. Your federation's Director is the URL provided by the `director_endpoint` key, e.g. `https://osdf-director.osg-htc.org`
 
 ### Deciding Whether to Ask About Caches or Origins
-Next, you should determine whether you expect your client to talk to a cache or an origin. In most cases, the answer is a cache, but "direct read" flags/URL query parameters,
-or PUT operations would indicate to your client that it should be talking to an origin.
+Next, you should determine whether you expect your client to talk to a cache or an origin.
+The answer is usually a cache unless you are trying to run<br />
+a) GET operation using the "direct read" flags/URL query parameters, or<br />
+b) PUT operation to write an object via the origin.
 
 The following steps are very similar in both cases, but require minor adjustments in the way you interact with the Director.
 
@@ -161,10 +165,13 @@ $ curl -v https://osdf-director.osg-htc.org/api/v1.0/director/object/some/object
 If successful, the Director's response will be a series of HTTP headers with information you can use to answer a variety of questions. In particular, the list of caches
 you can expect your client to try are included in the `link` header, which will look something like:
 ```
-link: <https://osdf-uw-cache.svc.osg-htc.org:8443/some/object>; rel="duplicate"; pri=1; depth=2, <https://sc-cache.chtc.wisc.edu:8443/some/object>;
-rel="duplicate"; pri=2; depth=2, <https://dtn-pas.cinc.nrp.internet2.edu:8443/some/object>; rel="duplicate"; pri=3; depth=2,
-<https://osg-kansas-city-stashcache.nrp.internet2.edu:8443/some/object>; rel="duplicate"; pri=4; depth=2, <https://its-condor-xrootd1.syr.edu:8443/some/object>;
-rel="duplicate"; pri=5; depth=2, <https://osg-gftp2.pace.gatech.edu:8443/some/object>; rel="duplicate"; pri=6; depth=2
+link:
+<https://osdf-uw-cache.svc.osg-htc.org:8443/some/object>; rel="duplicate"; pri=1; depth=2,
+<https://sc-cache.chtc.wisc.edu:8443/some/object>; rel="duplicate"; pri=2; depth=2,
+<https://dtn-pas.cinc.nrp.internet2.edu:8443/some/object>; rel="duplicate"; pri=3; depth=2,
+<https://osg-kansas-city-stashcache.nrp.internet2.edu:8443/some/object>; rel="duplicate"; pri=4; depth=2,
+<https://its-condor-xrootd1.syr.edu:8443/some/object>; rel="duplicate"; pri=5; depth=2,
+<https://osg-gftp2.pace.gatech.edu:8443/some/object>; rel="duplicate"; pri=6; depth=2
 ```
 
 #### Discovering Origins

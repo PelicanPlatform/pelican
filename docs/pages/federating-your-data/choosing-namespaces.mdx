@@ -121,12 +121,12 @@ Johnson may then use his/her ownership of the sub-namespace to create further su
 the namespace without having control over the parent namespaces.
 
 > **Warning**: One caveat here is that matching a namespace prefix will take precedence over any potential object names. That is, if the prefix `/project-xyz/johnson-lab/foo` is
-registered, then the origin exporting `/project-xyz/jhonson-lab` will not be able to export objects that begin with `foo/`.
+registered, then the origin exporting `/project-xyz/johnson-lab` will not be able to export objects that begin with `foo/`.
 
 ### Prefixes as a Means of Aggregating Disparate Repositories
 One additional benefit of namespaces and the fact that they can be exported by multiple Origins is that they may allow data owners to aggregate data from multiple sources under
 a common name. For example, consider a case where you have two telescopes taking snapshots of the night sky. Due to each telescope's technology, one saves its images in S3 and the
-other stores its images in posix. Namespacing allows the data owner to elide this fact from data consumers by exporting both the S3 bucket and the posix filesystem under the same
+other stores its images in posix. Namespacing allows the data owner to hide this fact from data consumers by exporting both the S3 bucket and the posix filesystem under the same
 namespace:
 
 <ExportedImage width={750} height={575000} src={"/pelican/aggregated-objects.png"} alt={"Objects from multiple storage types being accessed under the same namespace"} />
