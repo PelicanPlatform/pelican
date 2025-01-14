@@ -2,6 +2,11 @@
 
 ## Why do `osdf:///` URLs use 3 slashes instead of two slashes like regular URLs?
 
+>**TL;DR:** `osdf:///` URLs use three slashes because the `osdf` scheme inherently specifies the networked system, making the federation hostname redundant.
+This is similar to how `file:///` URLs work, where the triple slash indicates the resource is on the local machine, eliminating the need for a hostname.
+Most Pelican clients should detect and handle `osdf://`-schemed URLs if they're missing the third slash, but this is technically an abuse of the well-defined
+URL structure.
+
 URLs, or **Uniform Resource Locators**, play a crucial role in the way computers are able to discover, locate and access digital resources. Since
 their broad adoption in the mid 1990s, their structure has become a well-defined internet standard<sup>[1](#triple-slash-fn1)</sup>. To quote their
 definition:
