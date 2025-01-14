@@ -54,20 +54,31 @@ const GeoIPOverrideForm = ({ onSubmit, value }: FormProps<GeoIPOverride>) => {
 
   const setLatitude = useCallback((latitude: number) => {
     setGeoIP((geoIP) => {
-      return { ...geoIP, coordinate: { ...geoIP?.coordinate, lat: latitude.toString() } }
-    })
+      return {
+        ...geoIP,
+        coordinate: { ...geoIP?.coordinate, lat: latitude.toString() },
+      };
+    });
   }, []);
 
   const setLongitude = useCallback((longitude: number) => {
     setGeoIP((geoIP) => {
-      return { ...geoIP, coordinate: { ...geoIP?.coordinate, long: longitude.toString() } }
+      return {
+        ...geoIP,
+        coordinate: { ...geoIP?.coordinate, long: longitude.toString() },
+      };
     });
   }, []);
 
   return (
     <>
-      <Box height={"200px"} width={"400px"} maxWidth={"100%"}>
-        <UpdateSinglePoint latitude={lat} longitude={long} setLatitude={setLatitude} setLongitude={setLongitude} />
+      <Box height={'200px'} width={'400px'} maxWidth={'100%'}>
+        <UpdateSinglePoint
+          latitude={lat}
+          longitude={long}
+          setLatitude={setLatitude}
+          setLongitude={setLongitude}
+        />
       </Box>
       <Box my={2}>
         <StringField

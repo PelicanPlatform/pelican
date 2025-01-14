@@ -77,7 +77,10 @@ function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
     'getConfig',
     async () =>
       await alertOnError(
-        async () => (await getConfig()).json(), 'Could not get config', dispatch)
+        async () => (await getConfig()).json(),
+        'Could not get config',
+        dispatch
+      )
   );
 
   const serverConfig = useMemo(() => {
