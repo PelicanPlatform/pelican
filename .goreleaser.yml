@@ -430,7 +430,7 @@ nfpms:
           - "pelican-registry = 7"
           - "pelican-director = 7"
         dependencies:
-          - "pelican >= 7.4.0"
+          - "pelican >= 7.11.0"
           - "xrootd-server >= 1:5.7.0"
           - "xrootd-scitokens"
           - "xrootd-voms"
@@ -441,7 +441,7 @@ nfpms:
           - "pelican-registry (= 7)"
           - "pelican-director (= 7)"
         dependencies:
-          - "pelican (>= 7.4.0)"
+          - "pelican (>= 7.11.0)"
           - "xrootd-server (>= 5.7.0)"
           - "xrootd-scitokens-plugins"
           - "xrootd-voms-plugins"
