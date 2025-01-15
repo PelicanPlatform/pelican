@@ -2,7 +2,7 @@ import ExportedImage from "next-image-export-optimizer";
 
 # Serving a Pelican Director
 
-The Pelican [*Director*](../core-concepts.mdx#director-service) handles data distribution in a Pelican federation. It directs object requests from Pelican Clients to the proper object provider (which can be an Origin or a Cache). It also maintains a collection of actively running Origin/Cache servers in the federation.
+The Pelican [*Director*](../about-pelican/core-concepts.mdx#director-service) handles data distribution in a Pelican federation. It directs object requests from Pelican Clients to the proper object provider (which can be an Origin or a Cache). It also maintains a collection of actively running Origin/Cache servers in the federation.
 
 ## Before Starting
 
@@ -76,11 +76,11 @@ There are a couple of configuration parameters you could use to customize the be
 
 ### `Director.DefaultResponse`
 
-A Pelican director by default redirects object request from clients to the geospatially nearest cache in the federation to improve data transfer efficiency. If a director is hosted at https://director.com, then a `GET` request to https://director.com/foo/bar.txt will be redirected to the nearest cache for namespace `/foo`. You may change the default response type of a redirect for director by setting `Director.DefaultResponse`. It can be either `cache` or `origin`. If set to `origin`, director will redirect the request to the origin, bypassing caches.
+A Pelican director by default redirects object request from clients to the geo-spatially nearest cache in the federation to improve data transfer efficiency. If a director is hosted at https://director.com, then a `GET` request to https://director.com/foo/bar.txt will be redirected to the nearest cache for namespace `/foo`. You may change the default response type of a redirect for director by setting `Director.DefaultResponse`. It can be either `cache` or `origin`. If set to `origin`, director will redirect the request to the origin, bypassing caches.
 
 ### `GeoIPOverrides`
 
-The MaxMind database may fail to return a valid longitute/latitute pair given a server IP. For example, the database does not support IPV6 addresses. In such cases, you may pass a list of IP addresses to `GeoIPOverrides` parameter whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects both server ads (for determining the location of origins and caches) and incoming client requests (for determining where a client request is coming from).
+The MaxMind database may fail to return a valid longitude/latitude pair given a server IP. For example, the database does not support IPV6 addresses. In such cases, you may pass a list of IP addresses to `GeoIPOverrides` parameter whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects both server ads (for determining the location of origins and caches) and incoming client requests (for determining where a client request is coming from).
 
 ### `Director.CacheResponseHostnames` and `Director.OriginResponseHostnames`
 

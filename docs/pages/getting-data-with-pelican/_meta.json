@@ -1,3 +1,4 @@
 {
-  "client": "Pelican Client"
+  "client": "Command Line Client",
+  "fsspec": "Python FSSpec"
 }
