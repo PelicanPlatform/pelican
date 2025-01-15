@@ -348,18 +348,20 @@ nfpms:
   # end package pelican-osdf-compet
 
   - package_name: pelican-server
-    builds: []
+    builds:
+      - pelican-server
     file_name_template: "{{ .ConventionalFileName }}"
     id: pelican-server
     vendor: OSG Consortium
     homepage: https://pelicanplatform.org
     maintainer: Pelican Team <help@pelicanplatform.org>
-    description: SystemD files and configs for Pelican services
+    description: Server binary, SystemD files and configs for Pelican services
     license: ASL 2.0
-    meta: true
+    meta: false
     formats:
       - deb
       - rpm
+    bindir: /usr/bin
     release: 1
     section: default
     priority: extra
