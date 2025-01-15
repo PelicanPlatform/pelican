@@ -113,8 +113,7 @@ func TestQueryDirector(t *testing.T) {
 		{
 			name: "Basic test case with expected values",
 			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Location", "http://redirect.com")
-				w.WriteHeader(http.StatusTemporaryRedirect)
+				http.Redirect(w, r, "http://redirect.com", http.StatusTemporaryRedirect)
 			},
 			expectedLocation: "http://redirect.com",
 			expectedStatus:   http.StatusTemporaryRedirect,
@@ -126,8 +125,7 @@ func TestQueryDirector(t *testing.T) {
 			name: "Error with no Server header should retry",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				if r.Header.Get("Retry-Count") == "2" {
-					w.Header().Set("Location", "http://redirect.com")
-					w.WriteHeader(http.StatusTemporaryRedirect)
+					http.Redirect(w, r, "http://redirect.com", http.StatusTemporaryRedirect)
 				} else {
 					w.WriteHeader(http.StatusInternalServerError)
 				}
@@ -142,8 +140,7 @@ func TestQueryDirector(t *testing.T) {
 			name: "429 with correct Server header should retry",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				if r.Header.Get("Retry-Count") == "2" {
-					w.Header().Set("Location", "http://redirect.com")
-					w.WriteHeader(http.StatusTemporaryRedirect)
+					http.Redirect(w, r, "http://redirect.com", http.StatusTemporaryRedirect)
 				} else {
 					w.Header().Set("Server", "pelican/7.8.0")
 					w.WriteHeader(http.StatusTooManyRequests)
@@ -157,7 +154,6 @@ func TestQueryDirector(t *testing.T) {
 		},
 		{
 			name: "No retries for 404 from server that populates Server: pelican/ header",
-
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Server", "pelican/7.8.0")
 				w.WriteHeader(http.StatusNotFound)

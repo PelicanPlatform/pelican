@@ -19,6 +19,8 @@
 package client
 
 import (
+	"fmt"
+
 	"context"
 	"encoding/json"
 	"io"
@@ -82,6 +84,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 	// In case the director is momentarily down, we will retry a few times using a backoff
 	// strategy.
 	numRetries := param.Client_DirectorRetries.GetInt()
+	fmt.Printf("\n\n\nConfigured num retries: %d\n\n\n", numRetries)
 	for idx := 0; idx < numRetries; idx++ {
 		var req *http.Request
 		req, err = http.NewRequestWithContext(ctx, verb, resourceUrl.String(), nil)
@@ -105,12 +108,16 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		if err != nil {
 			log.Errorln("Failed to get response from the director:", err)
 			return
-		} else if resp == nil {
+		}
+
+		if resp == nil {
 			// This is a strange edge case I've only seen in Windows unit testing. I don't understand how both "resp" and
 			// "err" can be nil, but when they are there's clearly an issue. Rather than let it devolve into a panic,
 			// we should handle it properly.
 			return resp, errors.New("The Director returned no error, but it's response was empty.")
 		}
+
+		fmt.Printf("\n\n\nDirector Response right after query: %v\n\n\n", resp)
 
 		defer resp.Body.Close()
 		log.Tracef("Director's response: %#v\n", resp)
