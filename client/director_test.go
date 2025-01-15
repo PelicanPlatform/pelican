@@ -105,6 +105,7 @@ func TestQueryDirector(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	viper.Set(param.Client_DirectorRetries.GetName(), 3)
+
 	type testCase struct {
 		name             string
 		handler          http.HandlerFunc
@@ -215,6 +216,10 @@ func TestQueryDirector(t *testing.T) {
 }
 
 func TestGetDirectorInfoForPath(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	viper.Set(param.Client_DirectorRetries.GetName(), 3)
+
 	// Craft the Director's response
 	directorHeaders := make(map[string]string)
 	directorHeaders["Link"] = "<my-cache.edu:8443>; rel=\"duplicate\"; pri=1, <another-cache.edu:8443>; rel=\"duplicate\"; pri=2"

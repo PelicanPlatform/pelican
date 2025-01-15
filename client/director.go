@@ -81,7 +81,13 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 	var body []byte
 	// In case the director is momentarily down, we will retry a few times using a backoff
 	// strategy.
-	numRetries := param.Client_DirectorRetries.GetInt() // I assume this is >=1, which should enforced in config.go
+	// I assume numRetries is >=1, which should enforced in config.go. However, not all tests that hit this code initialize the client.
+	numRetries := param.Client_DirectorRetries.GetInt()
+	if numRetries < 1 {
+		log.Errorf("The config parameter %s is currently set to %d. This should not be possible. Will use fallback of 1 retry",
+			param.Client_DirectorRetries.GetName(), numRetries)
+		numRetries = 1
+	}
 	for idx := 0; idx < numRetries; idx++ {
 		var req *http.Request
 		req, err = http.NewRequestWithContext(ctx, verb, resourceUrl.String(), nil)
