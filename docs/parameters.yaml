@@ -441,7 +441,7 @@ components: ["client"]
 ---
 name: Client.DirectorRetries
 description: |+
-  An integer indicating the number of retries a client should attempt when contacting a non-responsive Director. Each retry will
+  A positive integer indicating the number of retries a client should attempt when contacting a non-responsive Director. Each retry will
   happen after a delay of 3*(1 + retries attempted) to give the Director time to recover. Some randomness is also added to this interval
   to avoid the potential for thundering herd problems.
 

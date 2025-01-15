@@ -29,10 +29,13 @@ import (
 	"testing"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -99,6 +102,9 @@ func TestParseDirectorInfo(t *testing.T) {
 // Tests for client logic when the Director is being queried. In particular,
 // we check that various types of retries are triggered.
 func TestQueryDirector(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	viper.Set(param.Client_DirectorRetries.GetName(), 3)
 	type testCase struct {
 		name             string
 		handler          http.HandlerFunc
