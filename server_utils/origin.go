@@ -159,36 +159,13 @@ func validateFederationPrefix(prefix string) error {
 	if !strings.HasPrefix(prefix, "/") {
 		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s must begin with '/'", prefix)
 	}
-	if strings.Contains(prefix, "//") {
-		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid '//' characters", prefix)
-	}
 
-	if strings.Contains(prefix, "./") {
-		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid './' characters", prefix)
-	}
-
-	if strings.Contains(prefix, "..") {
-		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid '..' characters", prefix)
-	}
-
-	if strings.HasPrefix(prefix, "~") {
-		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains begins with invalid '~' character", prefix)
-	}
-
-	if strings.Contains(prefix, "$") {
-		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid '$' characters", prefix)
-	}
-
-	if strings.Contains(prefix, "*") {
-		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid '*' characters", prefix)
-	}
-
-	if strings.Contains(prefix, `\`) {
-		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid '\\' characters", prefix)
-	}
-
-	if strings.Contains(prefix, "?") {
-		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid '?' characters", prefix)
+	// We're cautious about characters that carry meaning in POSIX filepaths or in URLs
+	illegalChars := []string{"//", "./", "..", "~", "$", "*", `\`, "?", "#", "%"}
+	for _, char := range illegalChars {
+		if strings.Contains(prefix, char) {
+			return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s contains invalid character %s", prefix, char)
+		}
 	}
 
 	if server_structs.IsCacheNS(prefix) || server_structs.IsOriginNS(prefix) {
