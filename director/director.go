@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -979,6 +980,36 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		return
 	}
 
+	// Check if the allowed prefixes for caches data from the registry
+	// has been initialized in the director
+	if sType == server_structs.CacheType {
+		// If the allowed prefix for caches data is not initialized,
+		// wait for it to be initialized for 3 seconds.
+		if allowedPrefixesForCachesLastSetTimestamp.Load() == 0 {
+			log.Warning("Allowed prefixes for caches data is not initialized. Waiting for initialization before continuing with processing cache server advertisement.")
+			start := time.Now()
+			// Wait until last set timestamp is updated
+			for allowedPrefixesForCachesLastSetTimestamp.Load() == 0 {
+				if time.Since(start) >= 3*time.Second {
+					log.Error("Allowed prefix for caches data was not initialized within the 3-second timeout")
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+
+		// If the allowed prefix for caches data is stale (older than 15 minutes),
+		// fail the server registration.
+		if time.Since(time.Unix(allowedPrefixesForCachesLastSetTimestamp.Load(), 0)) >= 15*time.Minute {
+			log.Error("Allowed prefixes for caches data is outdated, rejecting cache server ad.")
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Something is wrong with the director or registry. The Director is unable to fetch required information about this cache's allowed prefixes from the Registry.",
+			})
+			return
+		}
+	}
+
 	ad := server_structs.OriginAdvertiseV1{}
 	adV2 := server_structs.OriginAdvertiseV2{}
 	err = ctx.ShouldBindBodyWith(&ad, binding.JSON)
@@ -996,6 +1027,55 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	} else {
 		// If the OriginAdvertisement is a V1 type, convert to a V2 type
 		adV2 = server_structs.ConvertOriginAdV1ToV2(ad)
+	}
+
+	// Filter the advertised prefixes in the cache server ad
+	// based on the allowed prefixes for caches data.
+	if sType == server_structs.CacheType {
+		// Parse URL to extract hostname
+		parsedURL, err := url.Parse(adV2.DataURL)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Invalid Cache URL %s (config parameter: Cache.Url): %s", adV2.DataURL, err.Error()),
+			})
+			return
+		}
+		cacheHostname := parsedURL.Hostname()
+
+		allowedPrefixesMap := allowedPrefixesForCaches.Load()
+
+		// If the cache hostname is present in the allowed prefixes map,
+		// filter the advertised prefixes. If the cache hostname is not present,
+		// do nothing. This is the default behavior where all prefixes are allowed.
+		//
+		// Variable `prefixes` is a set of prefixes that the given cache is allowed to serve.
+		if prefixes, exists := (*allowedPrefixesMap)[cacheHostname]; exists {
+			filteredNamespaces := []server_structs.NamespaceAdV2{}
+			filteredPaths := []string{} // Collect filtered prefixes
+
+			for _, namespace := range adV2.Namespaces {
+				// Default allow for paths starting with "/pelican/"
+				if strings.HasPrefix(namespace.Path, "/pelican/") {
+					filteredNamespaces = append(filteredNamespaces, namespace)
+					continue
+				}
+
+				// Check if the namespace path exists in the allowed set
+				if _, allowed := prefixes[namespace.Path]; allowed {
+					filteredNamespaces = append(filteredNamespaces, namespace)
+				} else {
+					filteredPaths = append(filteredPaths, namespace.Path) // Collect the filtered path
+				}
+			}
+
+			// Log all filtered prefixes at once
+			if len(filteredPaths) > 0 {
+				log.Infof("Filtered out prefixes: %v in the server ad for cache %s", filteredPaths, cacheHostname)
+			}
+
+			adV2.Namespaces = filteredNamespaces
+		}
 	}
 
 	// Set to ctx for metrics handler downstream

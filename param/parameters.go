@@ -392,6 +392,7 @@ var (
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
 	Director_CachePresenceTTL = DurationParam{"Director.CachePresenceTTL"}
 	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
+	Director_RegistryQueryInterval = DurationParam{"Director.RegistryQueryInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}
 	Federation_TopologyReloadInterval = DurationParam{"Federation.TopologyReloadInterval"}
 	Lotman_DefaultLotDeletionLifetime = DurationParam{"Lotman.DefaultLotDeletionLifetime"}

@@ -895,6 +895,9 @@ func wildcardHandler(ctx *gin.Context) {
 
 		ctx.JSON(http.StatusOK, nsCfg)
 		return
+	} else if strings.HasSuffix(path, "/caches/allowedPrefixes") {
+		getAllowedPrefixesForCachesHandler(ctx)
+		return
 	} else {
 		// Default to get the namespace by its prefix
 		getNamespaceHandler(ctx)
@@ -1152,6 +1155,22 @@ func checkStatusHandler(ctx *gin.Context) {
 		}
 	}
 	ctx.JSON(http.StatusOK, server_structs.CheckNamespaceCompleteRes{Results: results})
+}
+
+// getAllowedPrefixesForCachesHandler is the handler function for the
+// /caches/allowedPrefixes endpoint.
+func getAllowedPrefixesForCachesHandler(ctx *gin.Context) {
+	allowedPrefixesForCachesData, err := getAllowedPrefixesForCaches()
+
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Error fetching allowed prefixes for caches data: %s", err.Error()),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, allowedPrefixesForCachesData)
 }
 
 func RegisterRegistryAPI(router *gin.RouterGroup) {
