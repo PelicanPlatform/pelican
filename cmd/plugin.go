@@ -745,9 +745,12 @@ func writeTransferErrorMessage(currentError string, transferUrl string) (errMsg 
 
 	errMsg += (" (Version: " + config.GetVersion())
 
-	siteName := parseMachineAd()
+	siteName, hostName := parseMachineAd()
 	if siteName != "" {
-		errMsg += "; Site: " + siteName + ")"
+		errMsg += "; Site: " + siteName
+	}
+	if hostName != "" {
+		errMsg += "; Hostname: " + hostName + ")"
 	} else {
 		errMsg += ")"
 	}
@@ -757,13 +760,13 @@ func writeTransferErrorMessage(currentError string, transferUrl string) (errMsg 
 
 // This function parses the machine ad present with a condor job to get the site name.
 // Only really needed on the ospool, otherwise this will return ""
-func parseMachineAd() string {
+func parseMachineAd() (string, string) {
 	var filename string
 	//Parse the .job.ad file for the Owner (username) and ProjectName of the callee.
 	if _, err := os.Stat(".machine.ad"); err == nil {
 		filename = ".machine.ad"
 	} else {
-		return ""
+		return "", ""
 	}
 
 	// https://stackoverflow.com/questions/28574609/how-to-apply-regexp-to-content-in-file-go
@@ -771,7 +774,7 @@ func parseMachineAd() string {
 	b, err := os.ReadFile(filename)
 	if err != nil {
 		log.Warningln("Can not read .machine.ad file", err)
-		return ""
+		return "", ""
 	}
 
 	// Get all matches from file
@@ -781,6 +784,7 @@ func parseMachineAd() string {
 		log.Fatal(e)
 	}
 
+	siteMatchValue := ""
 	matches := classadRegex.FindAll(b, -1)
 	for _, match := range matches {
 		matchString := strings.TrimSpace(string(match))
@@ -789,11 +793,32 @@ func parseMachineAd() string {
 			matchParts := strings.Split(strings.TrimSpace(matchString), "=")
 
 			if len(matchParts) == 2 { // just confirm we get 2 parts of the string
-				matchValue := strings.TrimSpace(matchParts[1])
-				matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
-				return matchValue
+				siteMatchValue = strings.TrimSpace(matchParts[1])
+				siteMatchValue = strings.Trim(siteMatchValue, "\"") //trim any "" around the match if present
+				break
 			}
 		}
 	}
-	return ""
+
+	classadRegex, e = regexp.Compile(`^*\s*(K8SPhysicalHostName)\s=\s"(.*)"`)
+	if e != nil {
+		log.Fatal(e)
+	}
+
+	hostMatchValue := ""
+	matches = classadRegex.FindAll(b, -1)
+	for _, match := range matches {
+		matchString := strings.TrimSpace(string(match))
+
+		if strings.HasPrefix(matchString, "K8SPhysicalHostName") {
+			matchParts := strings.Split(strings.TrimSpace(matchString), "=")
+
+			if len(matchParts) == 2 { // just confirm we get 2 parts of the string
+				hostMatchValue = strings.TrimSpace(matchParts[1])
+				hostMatchValue = strings.Trim(hostMatchValue, "\"") //trim any "" around the match if present
+				break
+			}
+		}
+	}
+	return siteMatchValue, hostMatchValue
 }
