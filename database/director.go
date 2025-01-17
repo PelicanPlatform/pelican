@@ -118,3 +118,11 @@ func CreateGrafanaApiKey(name, createdBy, scopes string) (string, error) {
 		return fmt.Sprintf("%s.%s", id, secret), nil
 	}
 }
+
+func DeleteGrafanaApiKey(id string) error {
+	result := DirectorDB.Delete(&GrafanaApiKey{}, "id = ?", id)
+	if result.Error != nil {
+		return errors.Wrap(result.Error, "failed to delete the Grafana API key")
+	}
+	return nil
+}
