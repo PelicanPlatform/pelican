@@ -45,10 +45,9 @@ popd
 
 # Build XRootD from source
 # Add patches to xrootd source code if needed
-git clone https://github.com/xrootd/xrootd.git
+git clone https://github.com/PelicanPlatform/xrootd.git
 pushd xrootd
-git checkout tags/v5.7.1
-patch -p1 < $scriptdir/pelican_protocol.patch
+git checkout v5.7.2-pelican
 mkdir xrootd_build
 cd xrootd_build
 cmake .. -GNinja
@@ -56,7 +55,7 @@ ninja
 ninja install
 popd
 
-git clone --branch v0.9.4 https://github.com/PelicanPlatform/xrdcl-pelican.git
+git clone --branch v1.0.2 https://github.com/PelicanPlatform/xrdcl-pelican.git
 pushd xrdcl-pelican
 mkdir build
 cd build
@@ -66,7 +65,7 @@ sudo mkdir -p /etc/xrootd/client.plugins.d/
 sudo cp release_dir/etc/xrootd/client.plugins.d/pelican-plugin.conf /etc/xrootd/client.plugins.d/
 popd
 
-git clone --recurse-submodules --branch v0.1.7 https://github.com/PelicanPlatform/xrootd-s3-http.git
+git clone --recurse-submodules --branch v0.1.8 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
 git checkout v0.1.8
 mkdir build
