@@ -21,8 +21,6 @@ set -ex
 # Mac OS X instance in GitHub.
 #
 
-scriptdir=$PWD/`dirname $0`
-
 brew install minio ninja coreutils
 
 # The new macos-latest runner has some issues with /usr/local/<lib/include>. Adjust perms ahead of time
@@ -38,9 +36,9 @@ pushd scitokens-cpp
 mkdir build
 cd build
 export SCITOKENS_CPP_DIR=$PWD/release_dir
-cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
+cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"
 ninja install
-sudo ln -s $PWD/release_dir/lib/libSciTokens*.dylib /usr/local/lib
+sudo ln -s "$PWD"/release_dir/lib/libSciTokens*.dylib /usr/local/lib
 popd
 
 # Build XRootD from source
@@ -59,7 +57,7 @@ git clone --branch v1.0.2 https://github.com/PelicanPlatform/xrdcl-pelican.git
 pushd xrdcl-pelican
 mkdir build
 cd build
-cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
+cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"
 ninja install
 sudo mkdir -p /etc/xrootd/client.plugins.d/
 sudo cp release_dir/etc/xrootd/client.plugins.d/pelican-plugin.conf /etc/xrootd/client.plugins.d/
@@ -70,13 +68,13 @@ pushd xrootd-s3-http
 git checkout v0.1.8
 mkdir build
 cd build
-cmake .. -GNinja -DCMAKE_INSTALL_PREFIX=$PWD/release_dir
+cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"
 ninja install
 xrootd_libdir=$(grealpath "$(dirname "$(grealpath "$(which xrootd)")")"/../lib/)
 echo "Will install into: $xrootd_libdir"
-sudo mkdir -p $xrootd_libdir
-sudo ln -s $PWD/release_dir/lib/libXrdHTTPServer-5.so $xrootd_libdir
-sudo ln -s $PWD/release_dir/lib/libXrdS3-5.so $xrootd_libdir
+sudo mkdir -p "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdHTTPServer-5.so" "$xrootd_libdir"
+sudo ln -s "$PWD/release_dir/lib/libXrdS3-5.so" "$xrootd_libdir"
 popd
 
 popd
