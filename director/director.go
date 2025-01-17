@@ -85,7 +85,6 @@ type (
 	CreateGrafanaTokenReq struct {
 		Name      string `json:"name"`
 		CreatedBy string `json:"created_by"`
-		Scopes    string `json:"scopes"`
 	}
 )
 
@@ -1444,7 +1443,8 @@ func createGrafanaToken(ctx *gin.Context) {
 		return
 	}
 
-	token, err := database.CreateGrafanaApiKey(req.Name, req.CreatedBy, req.Scopes)
+	scopes := fmt.Sprintf("%s,%s", token_scopes.Monitoring_Query.String(), token_scopes.Monitoring_Scrape.String())
+	token, err := database.CreateGrafanaApiKey(req.Name, req.CreatedBy, scopes)
 	if err != nil {
 		log.Warning("Failed to create Grafana API key: ", err)
 		ctx.JSON(status, server_structs.SimpleApiResp{
