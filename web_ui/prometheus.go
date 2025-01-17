@@ -84,6 +84,28 @@ func init() {
 	prometheus.MustRegister(version.NewCollector(strings.ReplaceAll(appName, "-", "_")))
 }
 
+const (
+	MaxLabelLimit            = 10
+	MaxLabelNameLengthLimit  = 256
+	MaxLabelValueLengthLimit = 4096
+	MaxSampleLimit           = 800
+)
+
+func setCardinalityLimits(cfg *config.ScrapeConfig) {
+	if param.Monitoring_LabelLimit.GetInt() > 0 && param.Monitoring_LabelLimit.GetInt() < MaxLabelLimit {
+		cfg.LabelLimit = uint(param.Monitoring_LabelLimit.GetInt())
+	}
+	if param.Monitoring_LabelNameLengthLimit.GetInt() > 0 && param.Monitoring_LabelNameLengthLimit.GetInt() < MaxLabelNameLengthLimit {
+		cfg.LabelNameLengthLimit = uint(param.Monitoring_LabelNameLengthLimit.GetInt())
+	}
+	if param.Monitoring_LabelValueLengthLimit.GetInt() > 0 && param.Monitoring_LabelValueLengthLimit.GetInt() < MaxLabelValueLengthLimit {
+		cfg.LabelValueLengthLimit = uint(param.Monitoring_LabelValueLengthLimit.GetInt())
+	}
+	if param.Monitoring_SampleLimit.GetInt() > 0 && param.Monitoring_SampleLimit.GetInt() < MaxSampleLimit {
+		cfg.SampleLimit = uint(param.Monitoring_SampleLimit.GetInt())
+	}
+}
+
 type flagConfig struct {
 	serverStoragePath   string
 	forGracePeriod      model.Duration
@@ -230,10 +252,7 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 	}
 
 	// Cardinality limits for Prometheus, configured via Pelican configuration file
-	scrapeConfig.LabelLimit = uint(param.Monitoring_LabelLimit.GetInt())
-	scrapeConfig.LabelNameLengthLimit = uint(param.Monitoring_LabelNameLengthLimit.GetInt())
-	scrapeConfig.LabelValueLengthLimit = uint(param.Monitoring_LabelValueLengthLimit.GetInt())
-	scrapeConfig.SampleLimit = uint(param.Monitoring_SampleLimit.GetInt())
+	setCardinalityLimits(&scrapeConfig)
 
 	return &scrapeConfig, nil
 }
@@ -405,10 +424,7 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 	}
 
 	// Cardinality limits for Prometheus, configured via Pelican configuration file
-	scrapeConfig.LabelLimit = uint(param.Monitoring_LabelLimit.GetInt())
-	scrapeConfig.LabelNameLengthLimit = uint(param.Monitoring_LabelNameLengthLimit.GetInt())
-	scrapeConfig.LabelValueLengthLimit = uint(param.Monitoring_LabelValueLengthLimit.GetInt())
-	scrapeConfig.SampleLimit = uint(param.Monitoring_SampleLimit.GetInt())
+	setCardinalityLimits(&scrapeConfig)
 
 	promCfg.ScrapeConfigs[0] = &scrapeConfig
 
@@ -752,10 +768,7 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 									return fmt.Errorf("Failed to generate token for director scraper when refresh it: %v", err)
 								}
 								// Cardinality limits for Prometheus, configured via Pelican configuration file
-								storageServerScrapeCfg.LabelLimit = uint(param.Monitoring_LabelLimit.GetInt())
-								storageServerScrapeCfg.LabelNameLengthLimit = uint(param.Monitoring_LabelNameLengthLimit.GetInt())
-								storageServerScrapeCfg.LabelValueLengthLimit = uint(param.Monitoring_LabelValueLengthLimit.GetInt())
-								storageServerScrapeCfg.SampleLimit = uint(param.Monitoring_SampleLimit.GetInt())
+								setCardinalityLimits(storageServerScrapeCfg)
 
 								// Idx 0 is the config for server's onboard scraper
 								// Idx 1 is the config for director scraper at origins/caches

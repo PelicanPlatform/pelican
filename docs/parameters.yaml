@@ -2506,6 +2506,16 @@ components: ["origin", "cache", "director", "registry"]
 name: Monitoring.LabelNameLengthLimit
 description: |+
   The maximum length of a label name. 0 means no limit. The default value is 128 bytes, which allows for up to 32 characters.
+  For an example where the LabelNameLengthLimit is set to 24, meaning the label name can only be 6 characters long (This is very unrealistic).
+  ```
+  metric{name="Alice"} -> OK
+
+  other_metric{very_long_label_name="Alice"} -> Error
+  ```
+
+  It is worth noting that the picking sensible values is really important. The Prometheus server will reject any metrics that exceed the limit,
+  meaning that the metrics will not be scraped and will not be available for querying. If it is too large we could exceed the memory limits of Prometheus.
+  Be wary of modify this value. Similar considerations should be made for modifying Monitoring.LabelValueLengthLimit, Monitoring.LabelLimit, and Monitoring.SampleLimit.
 type: int
 default: 128
 components: ["origin", "cache", "director", "registry"]
