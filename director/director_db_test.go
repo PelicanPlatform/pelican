@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -22,9 +23,9 @@ var (
 
 func SetupMockDirectorDB(t *testing.T) {
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	db = mockDB
+	database.DirectorDB = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
-	err = db.AutoMigrate(&ServerDowntime{})
+	err = database.DirectorDB.AutoMigrate(&ServerDowntime{})
 	require.NoError(t, err, "Failed to migrate DB for Globus table")
 }
 
@@ -34,7 +35,7 @@ func TeardownMockDirectorDB(t *testing.T) {
 }
 
 func insertMockDBData(ss []ServerDowntime) error {
-	return db.Create(&ss).Error
+	return database.DirectorDB.Create(&ss).Error
 }
 
 func TestDirectorDBBasics(t *testing.T) {
