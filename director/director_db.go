@@ -33,6 +33,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
@@ -57,7 +58,6 @@ type ServerDowntime struct {
 }
 
 var verifiedKeysCache *ttlcache.Cache[string, GrafanaApiKey] = ttlcache.New[string, GrafanaApiKey]()
-var db *gorm.DB
 
 func VerifyGrafanaApiKey(apiKey string) (bool, error) {
 	parts := strings.Split(apiKey, ".")
@@ -78,7 +78,8 @@ func VerifyGrafanaApiKey(apiKey string) (bool, error) {
 	}
 
 	var token GrafanaApiKey
-	result := db.First(&token, "id = ?", id)
+	//	result := db.First(&token, "id = ?", id)
+	result := database.DirectorDB.First(&token, "id = ?", id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return false, nil // token not found
@@ -109,8 +110,8 @@ func InitializeDB() error {
 	if err != nil {
 		return errors.Wrap(err, "failed to initialize the Director's sqlite database")
 	}
-	db = tdb
-	sqldb, err := db.DB()
+	database.DirectorDB = tdb
+	sqldb, err := database.DirectorDB.DB()
 	if err != nil {
 		return errors.Wrapf(err, "failed to get sql.DB from gorm DB: %s", dbPath)
 	}
@@ -123,7 +124,7 @@ func InitializeDB() error {
 
 // Shut down the Director's sqlite database
 func shutdownDirectorDB() error {
-	return server_utils.ShutdownDB(db)
+	return server_utils.ShutdownDB(database.DirectorDB)
 }
 
 func generateSecret(length int) (string, error) {
@@ -164,7 +165,7 @@ func createGrafanaApiKey(name, createdBy, scopes string) (string, error) {
 			CreatedAt:   time.Now(),
 			CreatedBy:   createdBy,
 		}
-		result := db.Create(apiKey)
+		result := database.DirectorDB.Create(apiKey)
 		if result.Error != nil {
 			isConstraintError := result.Error.Error() == "UNIQUE constraint failed: tokens.id"
 			if !isConstraintError {
@@ -191,7 +192,7 @@ func createServerDowntime(serverName string, filterType filterType) error {
 		UpdatedAt:  time.Now(),
 	}
 
-	if err := db.Create(serverDowntime).Error; err != nil {
+	if err := database.DirectorDB.Create(serverDowntime).Error; err != nil {
 		return errors.Wrap(err, "unable to create server downtime table")
 	}
 	return nil
@@ -200,7 +201,7 @@ func createServerDowntime(serverName string, filterType filterType) error {
 // Retrieve the downtime info of a given server (filter applied to the server)
 func getServerDowntime(serverName string) (filterType, error) {
 	var serverDowntime ServerDowntime
-	err := db.First(&serverDowntime, "name = ?", serverName).Error
+	err := database.DirectorDB.First(&serverDowntime, "name = ?", serverName).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", errors.Wrapf(err, "%s is not found in the Director db", serverName)
@@ -213,7 +214,7 @@ func getServerDowntime(serverName string) (filterType, error) {
 // Retrieve the downtime info of all servers saved in the Director's sqlite database
 func getAllServerDowntimes() ([]ServerDowntime, error) {
 	var statuses []ServerDowntime
-	result := db.Find(&statuses)
+	result := database.DirectorDB.Find(&statuses)
 
 	if result.Error != nil {
 		return nil, errors.Wrap(result.Error, "unable to get the downtime of all servers")
@@ -225,7 +226,7 @@ func getAllServerDowntimes() ([]ServerDowntime, error) {
 func setServerDowntime(serverName string, filterType filterType) error {
 	var serverDowntime ServerDowntime
 	// silence the logger for this query because there's definitely an ErrRecordNotFound when a new downtime info entry inserted
-	err := db.Session(&gorm.Session{Logger: db.Logger.LogMode(logger.Silent)}).First(&serverDowntime, "name = ?", serverName).Error
+	err := database.DirectorDB.Session(&gorm.Session{Logger: database.DirectorDB.Logger.LogMode(logger.Silent)}).First(&serverDowntime, "name = ?", serverName).Error
 
 	// If the server doesn't exist in director db, create a new entry for it
 	if err != nil {
@@ -239,7 +240,7 @@ func setServerDowntime(serverName string, filterType filterType) error {
 	serverDowntime.FilterType = filterType
 	serverDowntime.UpdatedAt = time.Now()
 
-	if err := db.Save(&serverDowntime).Error; err != nil {
+	if err := database.DirectorDB.Save(&serverDowntime).Error; err != nil {
 		return errors.Wrap(err, "unable to update")
 	}
 	return nil
@@ -253,7 +254,7 @@ var setServerDowntimeFn setServerDowntimeFunc = setServerDowntime
 
 // Delete the downtime info of a given server from the Director's sqlite database
 func deleteServerDowntime(serverName string) error {
-	if err := db.Where("name = ?", serverName).Delete(&ServerDowntime{}).Error; err != nil {
+	if err := database.DirectorDB.Where("name = ?", serverName).Delete(&ServerDowntime{}).Error; err != nil {
 		return errors.Wrap(err, "failed to delete an entry in Server Status table")
 	}
 	return nil
