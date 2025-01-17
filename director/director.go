@@ -1468,6 +1468,24 @@ func createGrafanaToken(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"token": token})
 }
 
+func deleteGrafanaToken(ctx *gin.Context) {
+	id := ctx.Param("id")
+	err := database.DeleteGrafanaApiKey(id)
+	if err != nil {
+		log.Warning("Failed to delete Grafana API key: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespOK,
+		Msg:    "Grafana API key deleted",
+	})
+}
+
 func getPrefixByPath(ctx *gin.Context) {
 	pathParam := ctx.Param("path")
 	if pathParam == "" || pathParam == "/" {
@@ -1620,6 +1638,7 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/discoverServers", discoverOriginCache)
 
 		directorAPIV1.POST("/createGrafanaToken", createGrafanaToken)
+		directorAPIV1.DELETE("/deleteGrafanaToken/:id", deleteGrafanaToken)
 	}
 
 	directorAPIV2 := router.Group("/api/v2.0/director", web_ui.ServerHeaderMiddleware)
