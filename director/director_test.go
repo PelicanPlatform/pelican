@@ -1771,6 +1771,76 @@ func TestRedirects(t *testing.T) {
 		assert.NotContains(t, c.Writer.Header().Get("Link"), "pri=2")
 	})
 
+	t.Run("no-redirect-to-topology-cache-public-reads", func(t *testing.T) {
+		server_utils.ResetTestState()
+		t.Cleanup(func() {
+			server_utils.ResetTestState()
+		})
+
+		viper.Set("Director.CacheSortMethod", "random")
+
+		// Make sure the http cache from topology isn't included in the cache list
+		req, _ := http.NewRequest("GET", "/my/server/3", nil)
+		req.Header.Add("User-Agent", "pelican-client/7.6.1")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+
+		pelCacheAd := server_structs.ServerAd{
+			Name: "pel-cache",
+			URL: url.URL{
+				Scheme: "https",
+				Host:   "pelcache.test.edu",
+			},
+			Type: server_structs.CacheType.String(),
+		}
+
+		nsAd := server_structs.NamespaceAdV2{
+			Caps: server_structs.Capabilities{PublicReads: true},
+			Path: "/my/server/3",
+			Issuer: []server_structs.TokenIssuer{{
+				IssuerUrl: url.URL{
+					Scheme: "https",
+					Host:   "wisc.edu",
+				},
+			},
+			},
+		}
+
+		cSlice := []server_structs.NamespaceAdV2{nsAd}
+		recordAd(context.Background(), pelCacheAd, &cSlice)
+
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = req
+
+		redirectToCache(c)
+
+		assert.Contains(t, c.Writer.Header().Get("Link"), "pelcache.test.edu")
+		assert.NotContains(t, c.Writer.Header().Get("Link"), "http:")
+	})
+
+	t.Run("redirect-to-topology-caches-auth-reads", func(t *testing.T) {
+		server_utils.ResetTestState()
+		t.Cleanup(func() {
+			server_utils.ResetTestState()
+		})
+
+		viper.Set("Director.CacheSortMethod", "random")
+
+		// Make sure the http cache from topology isn't included in the cache list
+		req, _ := http.NewRequest("GET", "/my/server", nil)
+		req.Header.Add("User-Agent", "pelican-client/7.6.1")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = req
+
+		redirectToCache(c)
+
+		assert.Contains(t, c.Writer.Header().Get("Link"), "pri=6")
+		assert.NotContains(t, c.Writer.Header().Get("Link"), "http:")
+	})
+
 	// Make sure collections-url is correctly populated when the ns/origin comes from topology
 	t.Run("collections-url-from-topology", func(t *testing.T) {
 		server_utils.ResetTestState()

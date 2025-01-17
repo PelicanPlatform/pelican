@@ -7,32 +7,32 @@
             },
             {
                 "auth_endpoint": "https://cache2.com",
-                "endpoint": "https://cache2.com",
+                "endpoint": "http://cache2.com",
                 "resource": "CACHE2"
             },
             {
                 "auth_endpoint": "https://cache3.com",
-                "endpoint": "https://cache3.com",
+                "endpoint": "http://cache3.com",
                 "resource": "CACHE3"
             },
             {
                 "auth_endpoint": "https://cache4.com",
-                "endpoint": "https://cache4.com",
+                "endpoint": "http://cache4.com",
                 "resource": "CACHE4"
             },
             {
                 "auth_endpoint": "https://cache5.com",
-                "endpoint": "https://cache5.com",
+                "endpoint": "http://cache5.com",
                 "resource": "CACHE5"
             },
             {
                 "auth_endpoint": "https://cache6.com",
-                "endpoint": "https://cache6.com",
+                "endpoint": "http://cache6.com",
                 "resource": "CACHE6"
             },
             {
                 "auth_endpoint": "https://cache7.com",
-                "endpoint": "https://cache7.com",
+                "endpoint": "http://cache7.com",
                 "resource": "CACHE7"
             }
         ],
@@ -46,32 +46,32 @@
                     },
                     {
                         "auth_endpoint": "https://cache2.com",
-                        "endpoint": "https://cache2.com",
+                        "endpoint": "http://cache2.com",
                         "resource": "CACHE2"
                     },
                     {
                         "auth_endpoint": "https://cache3.com",
-                        "endpoint": "https://cache3.com",
+                        "endpoint": "http://cache3.com",
                         "resource": "CACHE3"
                     },
                     {
                         "auth_endpoint": "https://cache4.com",
-                        "endpoint": "https://cache4.com",
+                        "endpoint": "http://cache4.com",
                         "resource": "CACHE4"
                     },
                     {
                         "auth_endpoint": "https://cache5.com",
-                        "endpoint": "https://cache5.com",
+                        "endpoint": "http://cache5.com",
                         "resource": "CACHE5"
                     },
                     {
                         "auth_endpoint": "https://cache6.com",
-                        "endpoint": "https://cache6.com",
+                        "endpoint": "http://cache6.com",
                         "resource": "CACHE6"
                     },
                     {
                         "auth_endpoint": "https://cache7.com",
-                        "endpoint": "https://cache7.com",
+                        "endpoint": "http://cache7.com",
                         "resource": "CACHE7"
                     }
                 ],
@@ -125,6 +125,34 @@
                 "readhttps": true,
                 "usetokenonread": false,
                 "writebackhost": null
+            },
+            {
+                "caches": [
+                        {
+                            "auth_endpoint": "https://cache3.com",
+                            "endpoint": "http://cache3.com",
+                            "resource": "CACHE3"
+                        },
+                        {
+                            "auth_endpoint": "https://cache4.com",
+                            "endpoint": "http://cache4.com",
+                            "resource": "CACHE4"
+                        }
+                    ],
+                    "credential_generation": null,
+                    "scitokens": [],
+                    "dirlisthost": null,
+                    "origins": [
+                        {
+                            "auth_endpoint": "https://origin3-auth-endpoint.com",
+                            "endpoint": "http://origin3-endpoint.com",
+                            "resource": "MY_ORIGIN3"
+                        }
+                    ],
+                    "path": "/my/server/3",
+                    "readhttps": true,
+                    "usetokenonread": false,
+                    "writebackhost": null
             }
         ]
     }

@@ -233,7 +233,7 @@ func TestAdvertiseOSDF(t *testing.T) {
 		assert.Equal(t, "/my/server", nsAd.Path)
 		assert.Equal(t, uint(3), nsAd.Generation[0].MaxScopeDepth)
 		assert.Equal(t, "https://origin1-auth-endpoint.com", oAds[0].AuthURL.String())
-		assert.Equal(t, "https://cache2.com", cAds[0].URL.String())
+		assert.Equal(t, "http://cache2.com", cAds[0].URL.String())
 		// Check that various capabilities have survived until this point. Because these are from topology,
 		// origin and namespace caps should be the same
 		assert.True(t, oAds[0].Caps.Writes)
