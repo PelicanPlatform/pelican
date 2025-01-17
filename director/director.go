@@ -1074,7 +1074,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 			if err == adminApprovalErr {
 				log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), adV2.Name)
 				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), ad.Name, approvalErrMsg)})
-				metrics.PelicanDirectorRejectedAdvertisements.Inc()
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 				return
 			} else {
 				log.Warningln("Failed to verify token:", err)
@@ -1082,7 +1082,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
 				})
-				metrics.PelicanDirectorRejectedAdvertisements.Inc()
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 				return
 			}
 		}
@@ -1092,7 +1092,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				Status: server_structs.RespFailed,
 				Msg:    "Authorization token verification failed. Token missing required scope",
 			})
-			metrics.PelicanDirectorRejectedAdvertisements.Inc()
+			metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 			return
 		}
 	}
@@ -1107,7 +1107,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				if err == adminApprovalErr {
 					log.Warningf("Failed to verify advertise token. Namespace %q requires administrator approval", namespace.Path)
 					ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("The namespace %q was not approved by an administrator. %s", namespace.Path, approvalErrMsg)})
-					metrics.PelicanDirectorRejectedAdvertisements.Inc()
+					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 					return
 				} else {
 					log.Warningln("Failed to verify token:", err)
@@ -1115,7 +1115,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 						Status: server_structs.RespFailed,
 						Msg:    fmt.Sprintf("Authorization token verification failed: %v", err),
 					})
-					metrics.PelicanDirectorRejectedAdvertisements.Inc()
+					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 					return
 				}
 			}
@@ -1126,7 +1126,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 					Status: server_structs.RespFailed,
 					Msg:    "Authorization token verification failed. Token missing required scope",
 				})
-				metrics.PelicanDirectorRejectedAdvertisements.Inc()
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 				return
 			}
 		}

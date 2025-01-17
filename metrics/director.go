@@ -102,8 +102,8 @@ var (
 		Help: "The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database",
 	}, []string{"network", "source", "proj"})
 
-	PelicanDirectorRejectedAdvertisements = promauto.NewCounter(prometheus.CounterOpts{
+	PelicanDirectorRejectedAdvertisements = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_rejected_advertisements",
 		Help: "The total number of advertisements rejected by the director",
-	})
+	}, []string{"hostname"})
 )
