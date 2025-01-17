@@ -60,7 +60,6 @@ func VerifyGrafanaApiKey(apiKey string) (bool, error) {
 	}
 
 	var token GrafanaApiKey
-	//	result := db.First(&token, "id = ?", id)
 	result := DirectorDB.First(&token, "id = ?", id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -124,5 +123,7 @@ func DeleteGrafanaApiKey(id string) error {
 	if result.Error != nil {
 		return errors.Wrap(result.Error, "failed to delete the Grafana API key")
 	}
+	// delete from cache so that we don't accidentally allow the deleted key to be used
+	verifiedKeysCache.Delete(id)
 	return nil
 }
