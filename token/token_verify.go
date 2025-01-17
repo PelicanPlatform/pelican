@@ -35,6 +35,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -242,6 +243,16 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 			if err := authChecker.checkLocalIssuer(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
 				errMsg += fmt.Sprintln("Cannot verify token with server issuer: ", err)
 			} else {
+				return http.StatusOK, true, nil
+			}
+		case GrafanaTokenIssuer:
+			fmt.Println("GOT GRAFANA TOKEN")
+			ok, err := database.VerifyGrafanaApiKey(token)
+			if err != nil {
+				fmt.Println("FAILED TO VERIFY GRAFANA TOKEN")
+				errMsg += fmt.Sprintln("Cannot verify token with Grafana issuer: ", err)
+			} else if ok {
+				fmt.Println("GRAFANA TOKEN VERIFIED")
 				return http.StatusOK, true, nil
 			}
 		default:

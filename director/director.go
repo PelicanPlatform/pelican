@@ -41,6 +41,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
@@ -1417,7 +1418,6 @@ func listNamespacesV2(ctx *gin.Context) {
 }
 
 func createGrafanaToken(ctx *gin.Context) {
-	fmt.Println("CREATING GRAFANA TOKEN")
 	authOption := token.AuthOption{
 		Sources: []token.TokenSource{token.Cookie},
 		Issuers: []token.TokenIssuer{token.LocalIssuer},
@@ -1444,7 +1444,7 @@ func createGrafanaToken(ctx *gin.Context) {
 		return
 	}
 
-	token, err := createGrafanaApiKey(req.Name, req.CreatedBy, req.Scopes)
+	token, err := database.CreateGrafanaApiKey(req.Name, req.CreatedBy, req.Scopes)
 	if err != nil {
 		log.Warning("Failed to create Grafana API key: ", err)
 		ctx.JSON(status, server_structs.SimpleApiResp{
