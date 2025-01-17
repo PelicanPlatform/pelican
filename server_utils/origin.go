@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"path/filepath"
 	"reflect"
@@ -65,9 +66,10 @@ type (
 
 var (
 	ErrInvalidOriginConfig        = errors.New("invalid origin configuration")
-	WarnExportVolumes      string = "Passing export volumes via -v at the command line causes Pelican to ignore exports configured via the yaml file. " +
+	WarnExportVolumes      string = "Using ExportVolumes from the command line (-v), from env vars or in your config causes Pelican to ignore exports " +
+		"configured via 'Origin.Exports' configuration. " +
 		"However, namespaces exported this way will inherit the Origin.Enable* settings from your configuration file. " +
-		"For finer-grained control of each export, please configure them in your pelican.yaml file via Origin.Exports"
+		"For finer-grained control of each export, please configure them in your pelican.yaml file via 'Origin.Exports'"
 )
 
 /*
@@ -136,24 +138,101 @@ func StringListToCapsHookFunc() mapstructure.DecodeHookFuncType {
 	}
 }
 
-func validateExportPaths(storagePrefix string, federationPrefix string) error {
-	if storagePrefix == "" || federationPrefix == "" {
-		return errors.Wrap(ErrInvalidOriginConfig, "volume mount/ExportVolume paths cannot be empty")
-	}
-	if err := validateFederationPrefix(federationPrefix); err != nil {
-		return errors.Wrapf(err, "invalid federation prefix %s", federationPrefix)
-	}
-	if err := validateFederationPrefix(storagePrefix); err != nil {
-		return errors.Wrapf(err, "invalid storage prefix %s", storagePrefix)
-	}
-	return nil
+func logDetectedExportVolumes() {
+	log.Infoln("Configuring exports from ExportVolumes passed via command line, via env vars, or via yaml")
+	log.Warningln(WarnExportVolumes)
 }
 
+type exportVolume struct {
+	storagePrefix    string
+	federationPrefix string
+}
+
+type Origin interface {
+	configureExports(Origin) ([]OriginExport, error)
+	validateStoragePrefix(sPrefix string) error
+
+	// Some methods are passed the Origin interface so they can call the appropriate
+	// method on a concrete origin type. This is necessary for overriding the base methods.
+	// The methods taking an Origin interface define common setup that needs to happey for _every_ origin.
+	// The "Extra" methods are used for origin-specific validation, configuration, etc.
+	//
+	// handleVolumeMounts is primarily used for configuring exports from the -v flag
+	handleVolumeMounts(Origin) error
+	handleVolumeMountsExtra() error
+	// handleExportsCfg is used for configuring exports from the Origin.Exports block
+	handleExportsCfg(Origin) error
+	handleExportsExtra() error
+	// handleTopLevelCfg is used for configuring a single export from the top-level Origin.FederationPrefix and Origin.StoragePrefix
+	handleTopLevelCfg(Origin) error
+	handleTopLevelExtra() error
+	// validateExports is used for validating the exports configured in the Origin.Exports block.
+	// Whether or not the export is configured via the Origin.Exports block, we populate a list of OriginExports
+	// internally
+	validateExports(Origin) error
+	// Validate Extra is passed the export and the number of exports so it can do things like
+	// check if a certain field is required for a single export, whether an origin type supports
+	// multiple exports.
+	validateExtra(*OriginExport, int) error
+	// If a single export is configured through non top-level means, we may be able to map some export-specific
+	// fields to top-level config. This is useful for things like S3Bucket, S3AccessKeyfile, etc.
+	mapSingleExtra()
+	Type(Origin) server_structs.OriginStorageType
+}
+
+// Base origin struct that all other origin types will inherit from
+type BaseOrigin struct {
+	Exports []OriginExport
+	oCaps   server_structs.Capabilities
+}
+
+func (b *BaseOrigin) Type(o Origin) server_structs.OriginStorageType {
+	return o.Type(o)
+}
+
+// Populate the origin capabilities from the top-level config
+// We may use these to define the capabilities of each export
+// if they're not set at the export level
+func (b *BaseOrigin) populateOriginCaps() {
+	pubReads := param.Origin_EnablePublicReads.GetBool()
+	b.oCaps = server_structs.Capabilities{
+		PublicReads: pubReads,
+		Writes:      param.Origin_EnableWrites.GetBool(),
+		Listings:    param.Origin_EnableListings.GetBool(),
+		Reads:       param.Origin_EnableReads.GetBool() || pubReads,
+		DirectReads: param.Origin_EnableDirectReads.GetBool(),
+	}
+}
+
+// Each origin may have different requirements for these functions. In the event they do,
+// those functions should be overridden for the origin-specific struct in the corresponding origin file.
+//
+// If a particular doesn't override these, the base origin def will run and return nil.
+// See interface methods for more info.
+func (b *BaseOrigin) validateStoragePrefix(prefix string) error {
+	return nil
+}
+func (b *BaseOrigin) handleVolumeMountsExtra() error {
+	return nil
+}
+func (b *BaseOrigin) handleExportsExtra() error {
+	return nil
+}
+func (b *BaseOrigin) handleTopLevelExtra() error {
+	return nil
+}
+func (b *BaseOrigin) validateExtra(*OriginExport, int) error {
+	return nil
+}
+func (b *BaseOrigin) mapSingleExtra() {}
+
 // Since Federation Prefixes get treated like POSIX filepaths by XRootD and other services, we need to
-// validate them to ensure funky things don't ensue
+// validate them to ensure funky things don't ensue.
+// Note that this isn't a part of the origin interface because it's not meant to be overridden -- _every_ origin
+// should validate federation prefixes the same way because this is a property of the federation.
 func validateFederationPrefix(prefix string) error {
 	if len(prefix) == 0 {
-		return errors.Errorf("prefix %s is empty", prefix)
+		return errors.Errorf("prefix '%s' is empty", prefix)
 	}
 
 	if !strings.HasPrefix(prefix, "/") {
@@ -175,560 +254,254 @@ func validateFederationPrefix(prefix string) error {
 	return nil
 }
 
-// https://docs.aws.amazon.com/AmazonS3/latest/userguide/bucketnamingrules.html
-func validateBucketName(bucket string) error {
-	if len(bucket) == 0 { // We treat 0-length bucket names as a special case
+// Handle volume mounts passed via -v. These types of exports take precedence over
+// any configured via Origin.Exports or Origin.FederationPrefix/Origin.StoragePrefix
+func (b *BaseOrigin) handleVolumeMounts(o Origin) (err error) {
+	// Nothing to do here if there are no configured volume mounts
+	if len(param.Origin_ExportVolumes.GetStringSlice()) == 0 {
+		return
+	}
+
+	logDetectedExportVolumes()
+	volumes := getVolumes()
+	if len(volumes) == 0 {
+		return
+	}
+
+	tmpExports := make([]OriginExport, len(volumes))
+	for idx, v := range volumes {
+		// Volume mounts don't have a way to set individual capabilities,
+		// so we'll use the top-level configs
+		tmpExports[idx] = OriginExport{
+			StoragePrefix:    v.storagePrefix,
+			FederationPrefix: v.federationPrefix,
+			Capabilities:     b.oCaps,
+		}
+	}
+	b.Exports = append(b.Exports, tmpExports...)
+
+	// invoke the incoming origin's handleVolumeMountsExtra method
+	return o.handleVolumeMountsExtra()
+}
+
+// Handle exports configured directly via Origin.FederationPrefix and Origin.StoragePrefix (and others)
+// This takes lowest precedence of the configuration mechanisms
+func (b *BaseOrigin) handleTopLevelCfg(o Origin) (err error) {
+	// If we find an Origin.Exports block or Origin.ExportVolumes, we'll ignore the top-level Origin.FederationPrefix and
+	// Origin.StoragePrefix. In fact, these values may be overridden (if set) in the event len(Origin.Exports) == 1
+	if param.Origin_Exports.IsSet() || len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
 		return nil
-	} else {
-		// However, if there _is_ a bucket name, it must be between 3 and 63 characters
-		if len(bucket) < 3 || len(bucket) > 63 {
-			return errors.Wrapf(ErrInvalidOriginConfig, "Bucket name %s is not between 3 and 63 characters", bucket)
+	}
+
+	log.Infoln("Configuring single-export origin using top-level config from Origin.FederationPrefix and Origin.StoragePrefix")
+
+	sPrefix := param.Origin_StoragePrefix.GetString()
+	fPrefix := param.Origin_FederationPrefix.GetString()
+	e := OriginExport{
+		FederationPrefix: fPrefix,
+		StoragePrefix:    sPrefix,
+		Capabilities:     b.oCaps,
+	}
+
+	b.Exports = append(b.Exports, e)
+
+	// invoke the incoming origin's handleTopLevelExtra methods
+	return o.handleTopLevelExtra()
+}
+
+// Handle exports from the Origin.Exports block. This is the preferred way to do it, and hopefully
+// we can get rid of the others someday!
+func (b *BaseOrigin) handleExportsCfg(o Origin) error {
+	if !param.Origin_Exports.IsSet() || len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
+		return nil
+	}
+
+	log.Infoln("Configuring multi-exports from Origin.Exports block in config file")
+	var tmpExports []OriginExport
+	if err := viper.UnmarshalKey(param.Origin_Exports.GetName(), &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
+		return errors.Wrap(err, "unable to parse the Origin.Exports configuration")
+	}
+	if len(tmpExports) == 0 {
+		return errors.New("Origin.Exports is defined, but no exports were found")
+	}
+
+	b.Exports = append(b.Exports, tmpExports...)
+
+	// invoke the incoming origin's handleExportsExtra method
+	return o.handleExportsExtra()
+}
+
+// Validate the exports in the constructed []OriginExport slice. This is the last step before we
+// return the exports to the caller.
+func (b *BaseOrigin) validateExports(o Origin) (err error) {
+	if len(b.Exports) == 0 {
+		return errors.New("no exports configured")
+	}
+
+	// Note that we assume we've already populated the origin export list
+	for i := range b.Exports { // validateExtra may update some parts of the export, so we need the index.
+		e := &b.Exports[i]
+		// all fed prefixes are validated the same way -- no way to override this one!
+		if err = validateFederationPrefix(e.FederationPrefix); err != nil {
+			return
 		}
-	}
-
-	// Buckets cannot contain ..
-	if strings.Contains(bucket, "..") {
-		return errors.Wrapf(ErrInvalidOriginConfig, "Bucket name %s contains invalid '..'", bucket)
-	}
-
-	// Buckets must only contain letters, numbers, '.' and '-'
-	for _, char := range bucket {
-		if !((char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '.' || char == '-') {
-			return errors.Wrapf(ErrInvalidOriginConfig, "Bucket name %s contains invalid character %c", bucket, char)
+		// validateStoragePrefix may be overridden by each origin type
+		if err = o.validateStoragePrefix(e.StoragePrefix); err != nil {
+			return
 		}
-	}
 
-	// Buckets cannot have capital letters
-	if strings.ToLower(bucket) != bucket {
-		return errors.Wrapf(ErrInvalidOriginConfig, "Bucket name %s contains capital letters", bucket)
-	}
-
-	// Buckets must begin with letter or number and end with letter or number
-	if !((bucket[0] >= 'a' && bucket[0] <= 'z') || (bucket[0] >= '0' && bucket[0] <= '9')) ||
-		!((bucket[len(bucket)-1] >= 'a' && bucket[len(bucket)-1] <= 'z') || (bucket[len(bucket)-1] >= '0' && bucket[len(bucket)-1] <= '9')) {
-		return errors.Wrapf(ErrInvalidOriginConfig, "Bucket name %s must begin and end with a letter or number", bucket)
-	}
-
-	// Buckets cannot begin with sthree- or sthree-configurator or xn--
-	if strings.HasPrefix(bucket, "sthree-") || strings.HasPrefix(bucket, "xn--") {
-		return errors.Wrapf(ErrInvalidOriginConfig, "Bucket name %s cannot begin with 'sthree-' or 'sthree-configurator'", bucket)
-	}
-
-	// Bucket names cannot end in -s3alias or --ol-s3
-	if strings.HasSuffix(bucket, "-s3alias") || strings.HasSuffix(bucket, "--ol-s3") {
-		return errors.Wrapf(ErrInvalidOriginConfig, "Bucket name %s cannot end with '-s3alias' or '--ol-s3'", bucket)
+		// Validate the extra fields for the origin type
+		err = o.validateExtra(e, len(b.Exports))
+		if err != nil {
+			return
+		}
 	}
 
 	return nil
 }
 
-// GetOriginExports is used to parse the config yaml and return a list of OriginExports. It should only touch
+// If we have one export, we may need to set top-level configs (which are mostly deprecated or headed that way), e.g.
+// S3Bucket, S3AccessKeyfile, etc.
+func (b *BaseOrigin) mapSingleExportIfNeeded(o Origin) {
+	if len(b.Exports) != 1 {
+		return
+	}
+
+	export := b.Exports[0]
+
+	// Map prefixes
+	viper.Set(param.Origin_FederationPrefix.GetName(), export.FederationPrefix)
+	viper.Set(param.Origin_StoragePrefix.GetName(), export.StoragePrefix)
+
+	// Map capabilities
+	viper.Set(param.Origin_EnablePublicReads.GetName(), export.Capabilities.PublicReads)
+	viper.Set(param.Origin_EnableReads.GetName(), export.Capabilities.Reads || export.Capabilities.PublicReads)
+	viper.Set(param.Origin_EnableWrites.GetName(), export.Capabilities.Writes)
+	viper.Set(param.Origin_EnableListings.GetName(), export.Capabilities.Listings)
+	viper.Set(param.Origin_EnableDirectReads.GetName(), export.Capabilities.DirectReads)
+
+	// invoke the incoming origin's mapSingleExtra method
+	o.mapSingleExtra()
+}
+
+// configureExports is the main driver for setting up exports for all different origin types.
+// It defines the overall flow and steps required for configuring exports.
+func (b *BaseOrigin) configureExports(o Origin) ([]OriginExport, error) {
+	// Get the top-level origin caps
+	b.populateOriginCaps()
+
+	// Handle any volume mounts passed via -v
+	if err := b.handleVolumeMounts(o); err != nil {
+		return nil, err
+	}
+
+	// Handle anything set top-level in the Origin.XXX config
+	if err := b.handleTopLevelCfg(o); err != nil {
+		return nil, err
+	}
+
+	// Handle exports configured via Origin.Exports
+	if err := b.handleExportsCfg(o); err != nil {
+		return nil, err
+	}
+
+	if err := b.validateExports(o); err != nil {
+		return nil, err
+	}
+
+	if len(b.Exports) == 0 {
+		return nil, errors.New("no exports configured")
+	}
+
+	b.mapSingleExportIfNeeded(o)
+
+	return b.Exports, nil
+}
+
+// GetOriginExports is the one-stop shop for parsing/configuring origin exports. It should only touch
 // the yaml the first time it's called, and then return the in-memory value on subsequent calls.
-// When the configuration is set up using the older single-prefix style of configuration, the function will
-// convert those values (such as Origin.FederationPrefix, Origin.StoragePrefix, etc.) into the OriginExports
-// struct and return a list of one. Otherwise, we'll base things off the list of exports and ignore the single-prefix
-// style of configuration.
 func GetOriginExports() ([]OriginExport, error) {
 	if originExports != nil {
 		return originExports, nil
 	}
 
+	// This default also set in config.go, but duplicating it here makes testing a bit easier.
 	viper.SetDefault("Origin.StorageType", "posix")
-	storageTypeStr := param.Origin_StorageType.GetString()
-
-	storageType, err := server_structs.ParseOriginStorageType(storageTypeStr)
+	storageType, err := server_structs.ParseOriginStorageType(param.Origin_StorageType.GetString())
 	if err != nil {
 		return originExports, err
 	}
 
-	capabilities := server_structs.Capabilities{
-		PublicReads: param.Origin_EnablePublicReads.GetBool(),
-		Writes:      param.Origin_EnableWrites.GetBool(),
-		Listings:    param.Origin_EnableListings.GetBool(),
-		Reads:       param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool(),
-		DirectReads: param.Origin_EnableDirectReads.GetBool(),
-	}
-
-	var originExport OriginExport
+	// Determine origin type and instantiate the appropriate origin struct
+	var origin Origin
 	switch storageType {
 	case server_structs.OriginStoragePosix:
-		// First, we handle any exports passed via Origin.ExportVolumes to which we've bound all -v entries
-		// from the command line. When this option is used for configuration, we'll ignore exports from our
-		// pelican.yaml, but the namespaces will inherit any Origin.Enable* settings there.
-		// Note that we expect ExportVolumes to be of the form /mnt/foo:/bar, where /mnt/foo is the path in the
-		// storage system and /bar is the path in the federation.
-		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
-			log.Infoln("Configuring exports from export volumes passed via command line or via yaml")
-			volumes := param.Origin_ExportVolumes.GetStringSlice()
-			tmpExports := make([]OriginExport, len(volumes))
-			for idx, volume := range volumes {
-				// Perform validation of the namespace
-				storagePrefix := filepath.Clean(volume)
-				federationPrefix := filepath.Clean(volume)
-				volumeMountInfo := strings.SplitN(volume, ":", 2)
-				if len(volumeMountInfo) == 2 {
-					storagePrefix = filepath.Clean(volumeMountInfo[0])
-					federationPrefix = filepath.Clean(volumeMountInfo[1])
-				}
-
-				if err = validateExportPaths(storagePrefix, federationPrefix); err != nil {
-					return nil, err
-				}
-
-				originExport := OriginExport{
-					FederationPrefix: federationPrefix,
-					StoragePrefix:    storagePrefix,
-					Capabilities:     capabilities,
-				}
-				tmpExports[idx] = originExport
-			}
-
-			// If we're only exporting one namespace, we can set the internal Origin.FederationPrefix and Origin.StoragePrefix
-			if len(volumes) == 1 {
-				viper.Set("Origin.FederationPrefix", tmpExports[0].FederationPrefix)
-				viper.Set("Origin.StoragePrefix", tmpExports[0].StoragePrefix)
-				viper.Set("Origin.EnableReads", tmpExports[0].Capabilities.Reads)
-			}
-
-			log.Warningln(WarnExportVolumes)
-			originExports = tmpExports
-			return originExports, nil
-		}
-
-		// Properly configured Origin.Exports block will unmarshal correctly, so don't loop over anything
-		if param.Origin_Exports.IsSet() {
-			log.Infoln("Configuring multi-exports from Origin.Exports block in config file")
-			var tmpExports []OriginExport
-			if err := viper.UnmarshalKey("Origin.Exports", &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
-				return nil, err
-			}
-			if len(tmpExports) == 0 {
-				err := errors.New("Origin.Exports is defined, but no exports were found")
-				return nil, err
-			} else if len(tmpExports) == 1 {
-				// Again, several viper variables might not be set in config. We set them here so that
-				// sections of code assuming a single export can make use of them.
-				capabilities := tmpExports[0].Capabilities
-				reads := capabilities.Reads || capabilities.PublicReads
-				viper.Set("Origin.FederationPrefix", (tmpExports)[0].FederationPrefix)
-				viper.Set("Origin.StoragePrefix", (tmpExports)[0].StoragePrefix)
-				viper.Set("Origin.EnableReads", reads)
-				viper.Set("Origin.EnablePublicReads", capabilities.PublicReads)
-				viper.Set("Origin.EnableWrites", capabilities.Writes)
-				viper.Set("Origin.EnableListings", capabilities.Listings)
-				viper.Set("Origin.EnableDirectReads", capabilities.DirectReads)
-			}
-			for _, export := range tmpExports {
-				if err = validateExportPaths(export.StoragePrefix, export.FederationPrefix); err != nil {
-					return nil, err
-				}
-			}
-			originExports = tmpExports
-			return originExports, nil
-		} else { // we're using the simple Origin.FederationPrefix
-			log.Infoln("Configuring single-export origin")
-
-			originExport = OriginExport{
-				FederationPrefix: param.Origin_FederationPrefix.GetString(),
-				StoragePrefix:    param.Origin_StoragePrefix.GetString(),
-				Capabilities:     capabilities,
-			}
-
-			if err = validateExportPaths(originExport.StoragePrefix, originExport.FederationPrefix); err != nil {
-				return nil, err
-			}
-
-			viper.Set("Origin.EnableReads", capabilities.Reads)
-		}
+		origin = &PosixOrigin{}
 	case server_structs.OriginStorageHTTPS:
-		// clean up the http service URL
-		if strings.HasSuffix(param.Origin_HttpServiceUrl.GetString(), "/") {
-			log.Warningln("Removing trailing '/' from http service URL")
-			viper.Set("Origin.HttpServiceUrl", strings.TrimSuffix(param.Origin_HttpServiceUrl.GetString(), "/"))
-		}
-
-		// Handle exports configured via -v or potentially env vars
-		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
-			log.Infoln("Configuring exports from export volumes passed via command line or via yaml")
-			volumes := param.Origin_ExportVolumes.GetStringSlice()
-			if len(volumes) > 1 {
-				// We don't yet support multiple exports for the HTTPS backend
-				return nil, errors.Errorf("https backend does not yet support multiple exports, but %d were provided: %+v", len(volumes), volumes)
-			}
-
-			volume := volumes[0]
-			// Perform validation of the namespace
-			storagePrefix := filepath.Clean(volume)
-			federationPrefix := filepath.Clean(volume)
-			volumeMountInfo := strings.SplitN(volume, ":", 2)
-			if len(volumeMountInfo) == 2 {
-				storagePrefix = filepath.Clean(volumeMountInfo[0])
-				federationPrefix = filepath.Clean(volumeMountInfo[1])
-			}
-
-			if err = validateExportPaths(storagePrefix, federationPrefix); err != nil {
-				return nil, err
-			}
-
-			// clean up trailing / in the storage prefix
-			if strings.HasSuffix(storagePrefix, "/") {
-				log.Warningln("Removing trailing '/' from storage prefix", storagePrefix)
-				storagePrefix = strings.TrimSuffix(storagePrefix, "/")
-			}
-			originExport := OriginExport{
-				FederationPrefix: federationPrefix,
-				StoragePrefix:    storagePrefix,
-				Capabilities:     capabilities,
-			}
-
-			viper.Set("Origin.FederationPrefix", originExport.FederationPrefix)
-			viper.Set("Origin.StoragePrefix", originExport.StoragePrefix)
-
-			log.Warningln(WarnExportVolumes)
-			originExports := []OriginExport{originExport}
-			return originExports, nil
-		}
-
-		if param.Origin_Exports.IsSet() {
-			var tmpExports []OriginExport
-			if err := viper.UnmarshalKey("Origin.Exports", &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
-				return nil, err
-			}
-			if len(tmpExports) == 0 {
-				err := errors.New("Origin.Exports is defined, but no exports were found")
-				return nil, err
-			} else if len(tmpExports) > 1 {
-				err := errors.New("More than one export found, only one export is currently supported for the https backend")
-				return nil, err
-			}
-
-			// Assume there's only one export
-			export := tmpExports[0]
-
-			// Clean up any path components that might have been added by the user to guarantee the correct
-			// URL is constructed without duplicate or missing slashes
-			if strings.HasSuffix(export.StoragePrefix, "/") {
-				log.Warningln("Removing trailing '/' from storage prefix", export.StoragePrefix)
-				export.StoragePrefix = strings.TrimSuffix(export.StoragePrefix, "/")
-			}
-
-			if err = validateExportPaths(export.StoragePrefix, export.FederationPrefix); err != nil {
-				return nil, err
-			}
-
-			capabilities := export.Capabilities
-			reads := capabilities.Reads || capabilities.PublicReads
-			viper.Set("Origin.FederationPrefix", export.FederationPrefix)
-			viper.Set("Origin.StoragePrefix", export.StoragePrefix)
-			viper.Set("Origin.EnableReads", reads)
-			viper.Set("Origin.EnablePublicReads", capabilities.PublicReads)
-			viper.Set("Origin.EnableWrites", capabilities.Writes)
-			viper.Set("Origin.EnableListings", capabilities.Listings)
-			viper.Set("Origin.EnableDirectReads", capabilities.DirectReads)
-
-			originExports = []OriginExport{export}
-			return originExports, nil
-		} else { // we're using the simple Origin.FederationPrefix
-			log.Infoln("Configuring single-export origin")
-			federationPrefix := param.Origin_FederationPrefix.GetString()
-			storagePrefix := param.Origin_StoragePrefix.GetString()
-			if strings.HasSuffix(storagePrefix, "/") {
-				log.Warningln("Removing trailing '/' from storage prefix", storagePrefix)
-				storagePrefix = strings.TrimSuffix(storagePrefix, "/")
-			}
-			originExport = OriginExport{
-				FederationPrefix: federationPrefix,
-				StoragePrefix:    storagePrefix,
-				Capabilities:     capabilities,
-			}
-
-			if err = validateExportPaths(originExport.StoragePrefix, originExport.FederationPrefix); err != nil {
-				return nil, err
-			}
-		}
+		origin = &HTTPSOrigin{}
 	case server_structs.OriginStorageS3:
-		// Handle exports configured via -v or potentially env vars
-		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
-			log.Infoln("Configuring exports from export volumes passed via command line or via yaml")
-			for _, volume := range param.Origin_ExportVolumes.GetStringSlice() {
-				// Perform validation of the namespace
-				volumeMountInfo := strings.SplitN(volume, ":", 2)
-				if len(volumeMountInfo) != 2 {
-					// We detected more than one `:` in the volume mount
-					return nil, errors.New("Invalid volume mount/ExportVolume format. Each entry must be in the form of my-bucket:/my/prefix")
-				}
-
-				bucket := volumeMountInfo[0]
-				federationPrefix := filepath.Clean(volumeMountInfo[1])
-
-				if err := validateFederationPrefix(federationPrefix); err != nil {
-					return nil, errors.Wrapf(err, "invalid federation prefix for volume %s", volume)
-				}
-				if err := validateBucketName(bucket); err != nil {
-					return nil, errors.Wrapf(err, "invalid bucket name for volume %s", volume)
-				}
-
-				if bucket == "" {
-					log.Warningf(`The volume mount %s does not contain a bucket. Pelican will interpret this as intending to export all buckets
-from S3 service URL. In this configuration, objects can be accessed at /federation/prefix/bucket/object`, volume)
-					log.Warningf(`This feature is only compatible with path-style URLs.`)
-				}
-
-				originExport := OriginExport{
-					FederationPrefix: federationPrefix,
-					StoragePrefix:    "/", // TODO: This is a placeholder for now, eventually we want storage prefix to mean something in S3
-					S3Bucket:         bucket,
-					S3AccessKeyfile:  param.Origin_S3AccessKeyfile.GetString(),
-					S3SecretKeyfile:  param.Origin_S3SecretKeyfile.GetString(),
-					Capabilities:     capabilities,
-				}
-				originExports = append(originExports, originExport)
-			}
-
-			// If we're only exporting one namespace, we can set the internal Origin.FederationPrefix and Origin.StoragePrefix
-			if len(param.Origin_ExportVolumes.GetStringSlice()) == 1 {
-				viper.Set("Origin.FederationPrefix", originExports[0].FederationPrefix)
-				viper.Set("Origin.S3Bucket", originExports[0].S3Bucket)
-				viper.Set("Origin.EnableReads", originExports[0].Capabilities.Reads)
-			}
-
-			log.Warningln(WarnExportVolumes)
-			return originExports, nil
-		}
-
-		if param.Origin_Exports.IsSet() {
-			log.Infoln("Configuring multiple S3 exports from Origin.Exports block in config file")
-			var tmpExports []OriginExport
-			if err := viper.UnmarshalKey("Origin.Exports", &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
-				return nil, errors.Wrap(err, "unable to parse the Origin.Exports configuration")
-			}
-			if len(tmpExports) == 0 {
-				err := errors.New("Origin.Exports is defined, but no exports were found")
-				return nil, err
-			} else if len(tmpExports) == 1 {
-				reads := tmpExports[0].Capabilities.Reads || tmpExports[0].Capabilities.PublicReads
-				viper.Set("Origin.FederationPrefix", tmpExports[0].FederationPrefix)
-				viper.Set("Origin.StoragePrefix", tmpExports[0].StoragePrefix)
-				viper.Set("Origin.S3Bucket", tmpExports[0].S3Bucket)
-				viper.Set("Origin.S3AccessKeyfile", tmpExports[0].S3AccessKeyfile)
-				viper.Set("Origin.S3SecretKeyfile", tmpExports[0].S3SecretKeyfile)
-				viper.Set("Origin.EnableReads", reads)
-				viper.Set("Origin.EnablePublicReads", tmpExports[0].Capabilities.PublicReads)
-				viper.Set("Origin.EnableWrites", tmpExports[0].Capabilities.Writes)
-				viper.Set("Origin.EnableListings", tmpExports[0].Capabilities.Listings)
-				viper.Set("Origin.EnableDirectReads", tmpExports[0].Capabilities.DirectReads)
-			}
-
-			// Validate each bucket name and federation prefix in the exports
-			for _, export := range tmpExports {
-				if err := validateFederationPrefix(export.FederationPrefix); err != nil {
-					return nil, errors.Wrapf(err, "invalid federation prefix for export %s", export.FederationPrefix)
-				}
-				if err := validateBucketName(export.S3Bucket); err != nil {
-					return nil, errors.Wrapf(err, "invalid bucket name for export %s", export.S3Bucket)
-				}
-			}
-			originExports = tmpExports
-			return originExports, nil
-		} else { // we're using the simple Origin.FederationPrefix
-			log.Infoln("Configuring single-export S3 origin")
-
-			// Validate the federation prefix and bucket names
-			if err := validateFederationPrefix(param.Origin_FederationPrefix.GetString()); err != nil {
-				return nil, errors.Wrapf(err, "invalid federation prefix for export %s", param.Origin_FederationPrefix.GetString())
-			}
-			if err := validateBucketName(param.Origin_S3Bucket.GetString()); err != nil {
-				return nil, errors.Wrapf(err, "invalid bucket name for export %s", param.Origin_S3Bucket.GetString())
-			}
-
-			originExport = OriginExport{
-				FederationPrefix: param.Origin_FederationPrefix.GetString(),
-				StoragePrefix:    param.Origin_StoragePrefix.GetString(),
-				S3Bucket:         param.Origin_S3Bucket.GetString(),
-				S3AccessKeyfile:  param.Origin_S3AccessKeyfile.GetString(),
-				S3SecretKeyfile:  param.Origin_S3SecretKeyfile.GetString(),
-				Capabilities:     capabilities,
-			}
-			viper.Set("Origin.EnableReads", capabilities.Reads)
-		}
+		origin = &S3Origin{}
 	case server_structs.OriginStorageGlobus:
-		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
-			return nil, errors.New("Globus backend does not support configuring via Origin.ExportVolumes or -v flag. Use Origin.Exports or single export config instead.")
-		}
-
-		if param.Origin_Exports.IsSet() {
-			log.Infoln("Configuring multiple Globus exports from Origin.Exports block in config file")
-			var tmpExports []OriginExport
-			if err := viper.UnmarshalKey("Origin.Exports", &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
-				return nil, errors.Wrap(err, "unable to parse the Origin.Exports configuration")
-			}
-			if len(tmpExports) == 0 {
-				err := errors.New("Origin.Exports is defined, but no exports were found")
-				return nil, err
-			} else if len(tmpExports) == 1 {
-				if err := validateFederationPrefix(tmpExports[0].FederationPrefix); err != nil {
-					return nil, errors.Wrapf(err, "invalid federation prefix for export %s", tmpExports[0].FederationPrefix)
-				}
-				reads := tmpExports[0].Capabilities.Reads || tmpExports[0].Capabilities.PublicReads
-				viper.Set("Origin.FederationPrefix", tmpExports[0].FederationPrefix)
-				viper.Set("Origin.StoragePrefix", "/") // Globus backend does not support StoragePrefix or partial export
-				viper.Set(param.Origin_GlobusCollectionID.GetName(), tmpExports[0].GlobusCollectionID)
-				viper.Set(param.Origin_GlobusCollectionName.GetName(), tmpExports[0].GlobusCollectionName)
-				viper.Set("Origin.EnableReads", reads)
-				viper.Set("Origin.EnablePublicReads", tmpExports[0].Capabilities.PublicReads)
-				viper.Set("Origin.EnableWrites", tmpExports[0].Capabilities.Writes)
-				viper.Set("Origin.EnableListings", tmpExports[0].Capabilities.Listings)
-				viper.Set("Origin.EnableDirectReads", tmpExports[0].Capabilities.DirectReads)
-			} else { // As of 2024/05/28, we only support one Globus export due to Xrootd restriction
-				return nil, fmt.Errorf("Globus storage backend only supports single collection but Origin.Exports has %d", len(tmpExports))
-			}
-
-			// TODO: once xrootd supports multiple http servers, come back and allow multiple Globus collections
-			// // Multiple exports
-			// // Validate each federation prefix in the exports
-			// for _, export := range tmpExports {
-			// 	if err := validateFederationPrefix(export.FederationPrefix); err != nil {
-			// 		return nil, errors.Wrapf(err, "invalid federation prefix for export %s", export.FederationPrefix)
-			// 	}
-			// 	if export.GlobusCollectionID == "" {
-			// 		return nil, errors.Wrapf(err, "invalid GlobusCollectionID %s for export %s: GlobusCollectionID is required", export.GlobusCollectionID, export.FederationPrefix)
-			// 	}
-			// }
-			originExports = tmpExports
-			return originExports, nil
-		} else { // we're using the simple Origin.FederationPrefix
-			log.Infoln("Configuring single-export Globus origin")
-
-			// Validate the federation prefix and bucket names
-			if err := validateFederationPrefix(param.Origin_FederationPrefix.GetString()); err != nil {
-				return nil, errors.Wrapf(err, "invalid federation prefix for export %s", param.Origin_FederationPrefix.GetString())
-			}
-			if param.Origin_GlobusCollectionID.GetString() == "" {
-				return nil, errors.Wrapf(err, "invalid GlobusCollectionID %s for export %s: GlobusCollectionID is required", param.Origin_GlobusCollectionID.GetString(), param.Origin_FederationPrefix.GetString())
-			}
-
-			originExport = OriginExport{
-				FederationPrefix:     param.Origin_FederationPrefix.GetString(),
-				StoragePrefix:        "/", // Globus backend does not support StoragePrefix or partial export
-				GlobusCollectionID:   param.Origin_GlobusCollectionID.GetString(),
-				GlobusCollectionName: param.Origin_GlobusCollectionName.GetString(),
-				Capabilities:         capabilities,
-			}
-			viper.Set("Origin.EnableReads", capabilities.Reads)
-		}
+		origin = &GlobusOrigin{}
 	case server_structs.OriginStorageXRoot:
-		if len(param.Origin_ExportVolumes.GetStringSlice()) > 0 {
-			log.Infoln("Configuring exports from export volumes passed via command line or via yaml")
-			// This storage backend only works with unauthenticated origins. Check that now.
-			if !capabilities.PublicReads {
-				return nil, errors.Wrap(ErrInvalidOriginConfig, "the xroot backend requires that Origin.EnablePublicReads is true")
-			}
-
-			volumes := param.Origin_ExportVolumes.GetStringSlice()
-			tmpExports := make([]OriginExport, len(volumes))
-			for idx, volume := range volumes {
-				storagePrefix := filepath.Clean(volume)
-				federationPrefix := filepath.Clean(volume)
-				volumeMountInfo := strings.SplitN(volume, ":", 2)
-				if len(volumeMountInfo) == 2 {
-					storagePrefix = filepath.Clean(volumeMountInfo[0])
-					federationPrefix = filepath.Clean(volumeMountInfo[1])
-				}
-
-				if storagePrefix != federationPrefix {
-					return nil, errors.Wrapf(ErrInvalidOriginConfig, "federation and storage prefixes must be the same for xroot backends, but you "+
-						"provided %s and %s", storagePrefix, federationPrefix)
-				}
-
-				if err = validateExportPaths(storagePrefix, federationPrefix); err != nil {
-					return nil, err
-				}
-
-				originExport := OriginExport{
-					FederationPrefix: federationPrefix,
-					StoragePrefix:    storagePrefix,
-					Capabilities:     capabilities,
-				}
-				tmpExports[idx] = originExport
-			}
-
-			// If we're only exporting one namespace, we can set the internal Origin.FederationPrefix and Origin.StoragePrefix
-			if len(volumes) == 1 {
-				viper.Set("Origin.FederationPrefix", tmpExports[0].FederationPrefix)
-				viper.Set("Origin.StoragePrefix", tmpExports[0].StoragePrefix)
-			}
-
-			log.Warningln(WarnExportVolumes)
-			originExports = tmpExports
-
-			return originExports, nil
-		}
-
-		if param.Origin_Exports.IsSet() {
-			log.Infoln("Configuring multi-exports from Origin.Exports block in config file")
-			var tmpExports []OriginExport
-			if err := viper.UnmarshalKey("Origin.Exports", &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
-				return nil, err
-			}
-			if len(tmpExports) == 0 {
-				err := errors.New("Origin.Exports is defined, but no exports were found")
-				return nil, err
-			} else if len(tmpExports) == 1 {
-				// Again, several viper variables might not be set in config. We set them here so that
-				// sections of code assuming a single export can make use of them.
-				capabilities := tmpExports[0].Capabilities
-				reads := capabilities.Reads || capabilities.PublicReads
-				viper.Set("Origin.FederationPrefix", (tmpExports)[0].FederationPrefix)
-				viper.Set("Origin.StoragePrefix", (tmpExports)[0].StoragePrefix)
-				viper.Set("Origin.EnableReads", reads)
-				viper.Set("Origin.EnablePublicReads", capabilities.PublicReads)
-				viper.Set("Origin.EnableWrites", capabilities.Writes)
-				viper.Set("Origin.EnableListings", capabilities.Listings)
-				viper.Set("Origin.EnableDirectReads", capabilities.DirectReads)
-			}
-			for _, export := range tmpExports {
-				if !export.Capabilities.PublicReads {
-					return nil, errors.Wrapf(ErrInvalidOriginConfig, "all exports from an xroot backend must have the PublicReads capability, but the export with FederationPrefix "+
-						"'%s' did not", export.FederationPrefix)
-				}
-				// Paths must be the same for the XRoot backend
-				if export.StoragePrefix != export.FederationPrefix {
-					return nil, errors.Wrapf(ErrInvalidOriginConfig, "federation and storage prefixes must be the same for xroot backends, but you "+
-						"provided %s and %s", export.StoragePrefix, export.FederationPrefix)
-				}
-
-				if err = validateExportPaths(export.StoragePrefix, export.FederationPrefix); err != nil {
-					return nil, err
-				}
-			}
-			originExports = tmpExports
-			return originExports, nil
-		} else {
-			log.Infoln("Configuring single-export origin")
-			if !capabilities.PublicReads {
-				return nil, errors.Wrap(ErrInvalidOriginConfig, "the xroot backend requires the PublicReads capability, but does not have it")
-			}
-
-			originExport = OriginExport{
-				FederationPrefix: param.Origin_FederationPrefix.GetString(),
-				StoragePrefix:    param.Origin_StoragePrefix.GetString(),
-				Capabilities:     capabilities,
-			}
-			if originExport.StoragePrefix != originExport.FederationPrefix {
-				return nil, errors.Wrapf(ErrInvalidOriginConfig, "federation and storage prefixes must be the same for xroot backends, but you "+
-					"provided %s and %s", originExport.StoragePrefix, originExport.FederationPrefix)
-			}
-
-			if err = validateExportPaths(originExport.StoragePrefix, originExport.FederationPrefix); err != nil {
-				return nil, err
-			}
-
-			viper.Set("Origin.EnableReads", capabilities.Reads)
-		}
+		origin = &XRootOrigin{}
+	default:
+		return nil, errors.New("unsupported storage type")
 	}
 
-	originExports = []OriginExport{originExport}
+	// Configure the exports for the deduced origin type
+	originExports, err = origin.configureExports(origin)
+	if err != nil {
+		return nil, errors.Wrap(ErrInvalidOriginConfig, err.Error())
+	}
+
 	return originExports, nil
+}
+
+// Parse the volumes passed via -v flag
+func getVolumes() []exportVolume {
+	volumes := param.Origin_ExportVolumes.GetStringSlice()
+	exportVolumes := make([]exportVolume, len(volumes))
+	for idx, volume := range volumes {
+		// Perform validation of the namespace
+		storagePrefix := filepath.Clean(volume)
+		federationPrefix := filepath.Clean(volume)
+		volumeMountInfo := strings.SplitN(volume, ":", 2)
+		if len(volumeMountInfo) == 2 {
+			storagePrefix = filepath.Clean(volumeMountInfo[0])
+			federationPrefix = filepath.Clean(volumeMountInfo[1])
+		}
+
+		exportVolumes[idx] = exportVolume{
+			storagePrefix:    storagePrefix,
+			federationPrefix: federationPrefix,
+		}
+	}
+	return exportVolumes
+}
+
+// Given a parameter and a file path, validate the file. If the file does not exist
+// or can't be read, return an error.
+func validateFile(fPath string) error {
+	// Check if the file exists
+	info, err := os.Stat(fPath)
+	if os.IsNotExist(err) {
+		return errors.New("file does not exist")
+	}
+
+	// Check if the file is a regular file
+	if !info.Mode().IsRegular() {
+		return errors.New("not a regular file")
+	}
+
+	// Check if the file is readable
+	file, err := os.Open(fPath)
+	if err != nil {
+		return errors.Wrap(err, "unable to open file")
+	}
+	defer file.Close()
+
+	return nil
 }
 
 // Generate a minimally scoped auth token that allows the origin
