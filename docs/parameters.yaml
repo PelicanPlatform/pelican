@@ -1541,6 +1541,16 @@ default: 9.5s
 hidden: true
 components: ["cache"]
 ---
+name: Cache.TLSClientAuth
+description: |+
+  Turns client certificate authentication on or off in xrootd for the HTTPS protocol. When false (default) the
+  HTTPS protocol server will never request a certificate. When true, the HTTPS protocol server will always request
+  a always request a client certificate from the client.
+type: bool
+default: false
+components: ["cache"]
+---
+
 ############################
 #  Director-level configs  #
 ############################

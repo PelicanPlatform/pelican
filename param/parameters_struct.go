@@ -50,6 +50,7 @@ type Config struct {
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
 		SentinelLocation string `mapstructure:"sentinellocation" yaml:"SentinelLocation"`
 		StorageLocation string `mapstructure:"storagelocation" yaml:"StorageLocation"`
+		TLSClientAuth bool `mapstructure:"tlsclientauth" yaml:"TLSClientAuth"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
 	} `mapstructure:"cache" yaml:"Cache"`
@@ -377,6 +378,7 @@ type configWithType struct {
 		SelfTestInterval struct { Type string; Value time.Duration }
 		SentinelLocation struct { Type string; Value string }
 		StorageLocation struct { Type string; Value string }
+		TLSClientAuth struct { Type string; Value bool }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 	}

@@ -133,6 +133,7 @@ type (
 		Concurrency                      int
 		X509ClientAuthenticationPrefixes []string
 		LotmanCfg                        LotmanCfg
+		TLSClientAuth                    bool
 	}
 
 	XrootdOptions struct {
