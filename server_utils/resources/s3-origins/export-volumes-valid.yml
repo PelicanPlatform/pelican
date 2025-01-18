@@ -10,7 +10,9 @@ Origin:
   EnableDirectReads: true
   EnableListings: true
   EnableReads: true
+  S3ServiceUrl: "https://example.com"
   # Omit EnableListings so we can verify it defaults to false
+  S3Bucket: "my-bucket"
   ExportVolumes:
-    - ":/first/namespace"
-    - "my-bucket:/second/namespace"
+    - "/first/namespace"
+    - "some-prefix:/second/namespace"

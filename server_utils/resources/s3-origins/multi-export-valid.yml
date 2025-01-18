@@ -4,6 +4,7 @@ Origin:
   # Things that configure the origin itself
   StorageType: "s3"
   EnableDirectReads: true
+  S3ServiceUrl: "https://example.com"
 
   # The actual namespaces we export
   Exports:
@@ -12,7 +13,7 @@ Origin:
       # Don't set Reads -- it should be toggled true by setting PublicReads
       Capabilities: ["PublicReads", "Writes", "Listings", "DirectReads"]
     - S3Bucket: "second-bucket"
-      S3AccessKeyfile: "/path/to/second/access.key"
-      S3SecretKeyfile: "/path/to/second/secret.key"
+      S3AccessKeyfile: "SHOULD-OVERRIDE-TEMPFILE"
+      S3SecretKeyfile: "SHOULD-OVERRIDE-TEMPFILE"
       FederationPrefix: /second/namespace
       Capabilities: ["Writes"]

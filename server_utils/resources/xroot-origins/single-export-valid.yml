@@ -1,0 +1,7 @@
+Origin:
+  StorageType: "xroot"
+  XRootServiceUrl: "root://foo.bar:1094"
+  Exports:
+    - FederationPrefix: "/foo"
+      StoragePrefix: "/foo"
+      Capabilities: ["PublicReads", "Writes", "DirectReads"]
