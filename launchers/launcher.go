@@ -331,7 +331,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	// Now that we've launched XRootD (which should drop their privileges to the xrootd user), we can drop our own
 	if config.IsRootExecution() && param.Server_DropPrivileges.GetBool() {
-		if err = dropPriveleges(); err != nil {
+		if err = dropPrivileges(); err != nil {
 			return
 		}
 	}

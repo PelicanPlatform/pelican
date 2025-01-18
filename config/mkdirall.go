@@ -129,7 +129,7 @@ func setFileAndDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, u
 		}
 	}
 	for dir := range dirs {
-		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -144,7 +144,9 @@ func setFileAndDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, u
 				return errors.Wrapf(err, "Failed to chown directory %v", path)
 			}
 			return nil
-		})
+		}); err != nil {
+			return errors.Wrapf(err, "Failed to walk directory %v", dir)
+		}
 	}
 	return nil
 }
@@ -166,7 +168,7 @@ func setDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, uid int,
 		if err = os.Chown(dir, uid, gid); err != nil {
 			return errors.Wrapf(err, "Failed to chown directory %v", dir)
 		}
-		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -181,7 +183,9 @@ func setDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, uid int,
 				return errors.Wrapf(err, "Failed to chown directory %v", path)
 			}
 			return nil
-		})
+		}); err != nil {
+			return errors.Wrapf(err, "Failed to walk directory %v", dir)
+		}
 	}
 	return nil
 }

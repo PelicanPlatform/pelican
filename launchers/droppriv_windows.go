@@ -22,6 +22,6 @@ package launchers
 
 import "github.com/pkg/errors"
 
-func dropPriveleges() (err error) {
+func dropPrivileges() (err error) {
 	return errors.New("dropping privileges is not supported on Windows")
 }
