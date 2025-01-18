@@ -1770,6 +1770,28 @@ func TestRedirects(t *testing.T) {
 		assert.NotContains(t, c.Writer.Header().Get("Link"), "pri=2")
 	})
 
+	t.Run("no-redirect-to-http-caches", func(t *testing.T) {
+		server_utils.ResetTestState()
+		t.Cleanup(func() {
+			server_utils.ResetTestState()
+		})
+
+		viper.Set("Director.CacheSortMethod", "random")
+
+		// Make sure the http cache from topology isn't included in the cache list
+		req, _ := http.NewRequest("GET", "/my/server/3", nil)
+		req.Header.Add("User-Agent", "pelican-client/7.6.1")
+		req.Header.Add("X-Real-Ip", "128.104.153.60")
+
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = req
+
+		redirectToCache(c)
+		assert.Contains(t, c.Writer.Header().Get("Link"), "pri=2")
+		assert.NotContains(t, c.Writer.Header().Get("Link"), "pri=3")
+	})
+
 	// Make sure collections-url is correctly populated when the ns/origin comes from topology
 	t.Run("collections-url-from-topology", func(t *testing.T) {
 		server_utils.ResetTestState()

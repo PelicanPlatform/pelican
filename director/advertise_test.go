@@ -243,7 +243,7 @@ func TestAdvertiseOSDF(t *testing.T) {
 		assert.Equal(t, "/my/server/2", nsAd.Path)
 		assert.True(t, nsAd.Caps.PublicReads)
 		assert.Equal(t, "https://origin2-auth-endpoint.com", oAds[0].AuthURL.String())
-		assert.Equal(t, "http://cache-endpoint.com", cAds[0].URL.String())
+		assert.Equal(t, "https://cache-endpoint.com", cAds[0].URL.String())
 	})
 
 	t.Run("multiple-ns-single-origin", func(t *testing.T) {
@@ -290,9 +290,9 @@ func TestAdvertiseOSDF(t *testing.T) {
 		require.NoError(t, err)
 
 		// This cache should serve 2 namespaces
-		found := serverAds.Has("http://dtn-pas.bois.nrp.internet2.edu:8000")
+		found := serverAds.Has("https://dtn-pas.bois.nrp.internet2.edu:8000")
 		require.True(t, found)
-		foundAd := serverAds.Get("http://dtn-pas.bois.nrp.internet2.edu:8000").Value()
+		foundAd := serverAds.Get("https://dtn-pas.bois.nrp.internet2.edu:8000").Value()
 		require.NotNil(t, foundAd)
 		assert.Equal(t, server_structs.CacheType.String(), foundAd.Type)
 		assert.Len(t, foundAd.NamespaceAds, 2)

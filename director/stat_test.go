@@ -709,7 +709,7 @@ func TestCache(t *testing.T) {
 	config.InitConfig()
 	reqCounter := 0
 
-	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		reqCounter += 1
 		log.Debugln("Mock server handling request for ", req.URL.String())
 		if req.Method == "HEAD" && req.URL.String() == "/foo/test.txt" {
@@ -724,6 +724,7 @@ func TestCache(t *testing.T) {
 	}))
 	defer server.Close()
 
+	viper.Set("TLSSkipVerify", true)
 	viper.Set("Server.ExternalWebUrl", server.URL)
 	viper.Set("IssuerUrl", server.URL)
 	realServerUrl, err := url.Parse(server.URL)

@@ -270,13 +270,15 @@ func AdvertiseOSDF(ctx context.Context) error {
 
 		for _, cache := range ns.Caches {
 			cacheAd := parseServerAdFromTopology(cache, server_structs.CacheType, server_structs.Capabilities{})
-			if existingAd, ok := cacheAdMap[cacheAd.URL.String()]; ok {
-				existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
-				consolidatedAd := consolidateDupServerAd(cacheAd, existingAd.ServerAd)
-				existingAd.ServerAd = consolidatedAd
-			} else {
-				// New entry
-				cacheAdMap[cacheAd.URL.String()] = &server_structs.Advertisement{ServerAd: cacheAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+			if cacheAd.URL.Scheme != "http" {
+				if existingAd, ok := cacheAdMap[cacheAd.URL.String()]; ok {
+					existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
+					consolidatedAd := consolidateDupServerAd(cacheAd, existingAd.ServerAd)
+					existingAd.ServerAd = consolidatedAd
+				} else {
+					// New entry
+					cacheAdMap[cacheAd.URL.String()] = &server_structs.Advertisement{ServerAd: cacheAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+				}
 			}
 		}
 	}
