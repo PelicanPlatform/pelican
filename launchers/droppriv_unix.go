@@ -23,13 +23,14 @@ package launchers
 import (
 	"syscall"
 
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 )
 
-func dropPriveleges() (err error) {
+func dropPrivileges() (err error) {
 	log.Info("Dropping privileges to user ", param.Server_UnprivilegedUser.GetString())
 	var puser config.User
 	puser, err = config.GetPelicanUser()

@@ -106,11 +106,13 @@ func MkdirAll(path string, perm os.FileMode, uid int, gid int) error {
 func setFileAndDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, uid int, gid int, recursive bool) error {
 	dirs := map[string]bool{}
 	for _, path := range paths {
+		// Create the parent directory if it doesn't exist
 		dir := filepath.Dir(path)
 		err := MkdirAll(dir, dirPerm, uid, gid)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to create directory %v", dir)
 		}
+		// Set the permissions on the parent directory
 		err = os.Chmod(dir, dirPerm)
 		if err != nil {
 			return errors.Wrapf(err, "Failed to set permissions on directory %v", dir)
@@ -121,6 +123,11 @@ func setFileAndDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, u
 		if recursive {
 			dirs[dir] = true
 		}
+		// Skip the file if it doesn't exist
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			continue
+		}
+		// Set the permissions on the file
 		if err = os.Chmod(path, perm); err != nil {
 			return errors.Wrapf(err, "Failed to set permissions on file %v", path)
 		}
@@ -128,8 +135,9 @@ func setFileAndDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, u
 			return errors.Wrapf(err, "Failed to chown file %v", path)
 		}
 	}
+	// Set the permissions on all sub-directories, when recursive is set to true
 	for dir := range dirs {
-		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -144,7 +152,9 @@ func setFileAndDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, u
 				return errors.Wrapf(err, "Failed to chown directory %v", path)
 			}
 			return nil
-		})
+		}); err != nil {
+			return errors.Wrapf(err, "Failed to walk directory %v", dir)
+		}
 	}
 	return nil
 }
@@ -152,6 +162,9 @@ func setFileAndDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, u
 func setDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, uid int, gid int, recursive bool) error {
 	dirs := map[string]bool{}
 	for _, path := range paths {
+		if path == "" {
+			continue
+		}
 		dirs[path] = true
 	}
 	for dir := range dirs {
@@ -166,7 +179,7 @@ func setDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, uid int,
 		if err = os.Chown(dir, uid, gid); err != nil {
 			return errors.Wrapf(err, "Failed to chown directory %v", dir)
 		}
-		filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -181,7 +194,9 @@ func setDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, uid int,
 				return errors.Wrapf(err, "Failed to chown directory %v", path)
 			}
 			return nil
-		})
+		}); err != nil {
+			return errors.Wrapf(err, "Failed to walk directory %v", dir)
+		}
 	}
 	return nil
 }

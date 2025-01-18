@@ -26,8 +26,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pkg/errors"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 type User struct {

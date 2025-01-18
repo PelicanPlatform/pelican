@@ -28,12 +28,13 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/spf13/viper"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
-	"github.com/spf13/viper"
-	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -179,7 +180,10 @@ func TestDropPrivilegeSignaling(t *testing.T) {
 	isOrigin := true
 	// Start mock XRootD (sets up the IPC)
 	ready := startMockXrootdProcess(t, isOrigin)
-	defer closeChildSocket(isOrigin)
+	defer func() {
+		err := closeChildSocket(isOrigin)
+		require.NoError(t, err, "Failed to close child socket")
+	}()
 
 	// The ready channel signals to the test function that the mock XRootD process is ready to receive data (the command byte)
 	<-ready

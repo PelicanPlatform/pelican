@@ -1254,33 +1254,33 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	} else if param.Server_DropPrivileges.GetBool() {
 		puser, err := GetPelicanUser()
 		if err != nil {
-			return errors.Wrapf(err, "set to drop privileges but no target OS username found for %s", param.Server_UnprivilegedUser.GetName())
+			return errors.Wrapf(err, "set to drop privileges but no target OS username found for %s", param.Server_UnprivilegedUser.GetString())
 		}
 		// Set up the directories for the server to run as a non-root user;
 		// for the most part, we need to recursively chown and chmod the directory
 		// so either root or pelican can access it.
 		pelicanLocations := []string{
-			param.Registry_DbLocation.GetName(),
-			param.Origin_DbLocation.GetName(),
-			param.Director_GeoIPLocation.GetName(),
-			param.Registry_DbLocation.GetName(),
-			param.Director_DbLocation.GetName(),
+			param.Registry_DbLocation.GetString(),
+			param.Origin_DbLocation.GetString(),
+			param.Director_GeoIPLocation.GetString(),
+			param.Director_DbLocation.GetString(),
 		}
 		if err = setFileAndDirPerms(pelicanLocations, 0750, 0640, puser.Uid, 0, true); err != nil {
 			return errors.Wrap(err, "failure when setting up the file permissions for pelican")
 		}
 		pelicanLocationsNoRecursive := []string{
-			param.Shoveler_AMQPTokenLocation.GetName(),
+			param.Shoveler_AMQPTokenLocation.GetString(),
 		}
 		if err = setFileAndDirPerms(pelicanLocationsNoRecursive, 0750, 0640, puser.Uid, 0, false); err != nil {
 			return errors.Wrap(err, "failure when setting up the file permissions for pelican")
 		}
 		pelicanDirs := []string{
-			param.LocalCache_RunLocation.GetName(),
-			param.Lotman_DbLocation.GetName(),
-			param.Monitoring_DataLocation.GetName(),
-			param.Shoveler_QueueDirectory.GetName(),
-			param.Origin_GlobusConfigLocation.GetName(),
+			param.LocalCache_RunLocation.GetString(),
+			param.Lotman_DbLocation.GetString(),
+			param.Lotman_LotHome.GetString(),
+			param.Monitoring_DataLocation.GetString(),
+			param.Shoveler_QueueDirectory.GetString(),
+			param.Origin_GlobusConfigLocation.GetString(),
 		}
 		if err = setDirPerms(pelicanDirs, 0750, 0640, puser.Uid, puser.Gid, true); err != nil {
 			return errors.Wrap(err, "failure when setting up the directory permissions for pelican")
