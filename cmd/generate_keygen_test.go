@@ -33,7 +33,7 @@ import (
 
 // Create tmpdir, change cwd, and setup clean up functions
 func setupTestRun(t *testing.T) string {
-	config.ResetIssuerJWKPtr()
+	config.ResetIssuerPrivateKeys()
 	wd, err := os.Getwd()
 	require.NoError(t, err)
 
@@ -45,13 +45,12 @@ func setupTestRun(t *testing.T) string {
 		err := os.Chdir(wd)
 		require.NoError(t, err)
 		server_utils.ResetTestState()
-		config.ResetIssuerJWKPtr()
 	})
 	return tmpDir
 }
 
-func checkKeys(t *testing.T, privateKey, publicKey string) {
-	_, err := config.LoadPrivateKey(privateKey, false)
+func checkKeys(t *testing.T, publicKey string) {
+	_, err := config.GetIssuerPrivateJWK()
 	require.NoError(t, err)
 
 	jwks, err := jwk.ReadFile(publicKey)
@@ -64,11 +63,10 @@ func checkKeys(t *testing.T, privateKey, publicKey string) {
 }
 
 func TestKeygenMain(t *testing.T) {
-	config.ResetIssuerJWKPtr()
+	config.ResetIssuerPrivateKeys()
 
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
-		config.ResetIssuerJWKPtr()
 	})
 
 	t.Run("no-args-gen-to-wd", func(t *testing.T) {
@@ -81,7 +79,6 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
-			filepath.Join(tempDir, "issuer.jwk"),
 			filepath.Join(tempDir, "issuer-pub.jwks"),
 		)
 	})
@@ -97,7 +94,6 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
-			privateKeyPath,
 			filepath.Join(tempWd, "issuer-pub.jwks"),
 		)
 	})
@@ -113,7 +109,6 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
-			filepath.Join(tempWd, "issuer.jwk"),
 			publicKeyPath,
 		)
 	})
@@ -130,7 +125,6 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
-			privateKeyPath,
 			filepath.Join(tempWd, "issuer-pub.jwks"),
 		)
 	})
@@ -147,7 +141,6 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
-			filepath.Join(tempWd, "issuer.jwk"),
 			publicKeyPath,
 		)
 	})

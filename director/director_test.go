@@ -45,6 +45,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -1345,8 +1346,8 @@ func TestDiscoverOriginCache(t *testing.T) {
 	viper.Set("Server.ExternalWebUrl", mockDirectorUrl)
 
 	tDir := t.TempDir()
-	kfile := filepath.Join(tDir, "testKey")
-	viper.Set("IssuerKey", kfile)
+	kDir := filepath.Join(tDir, "testKeyDir")
+	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
