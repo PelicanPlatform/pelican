@@ -39,6 +39,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
@@ -77,6 +78,11 @@ type (
 
 	// Context key for the project name
 	ProjectContextKey struct{}
+
+	CreateGrafanaTokenReq struct {
+		Name      string `json:"name"`
+		CreatedBy string `json:"created_by"`
+	}
 )
 
 const (
@@ -1366,6 +1372,65 @@ func listNamespacesV2(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, namespacesAdsV2)
 }
 
+func createGrafanaToken(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie},
+		Issuers: []token.TokenIssuer{token.LocalIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		log.Warningf("Cannot verify token: %v", err)
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+	// marshall body into struct
+	var req CreateGrafanaTokenReq
+	err = ctx.ShouldBindJSON(&req)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid request body: %v", err),
+		})
+		return
+	}
+
+	scopes := fmt.Sprintf("%s,%s", token_scopes.Monitoring_Query.String(), token_scopes.Monitoring_Scrape.String())
+	token, err := database.CreateGrafanaApiKey(req.Name, req.CreatedBy, scopes)
+	if err != nil {
+		log.Warning("Failed to create Grafana API key: ", err)
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"token": token})
+}
+
+func deleteGrafanaToken(ctx *gin.Context) {
+	id := ctx.Param("id")
+	err := database.DeleteGrafanaApiKey(id)
+	if err != nil {
+		log.Warning("Failed to delete Grafana API key: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespOK,
+		Msg:    "Grafana API key deleted",
+	})
+}
+
 func getPrefixByPath(ctx *gin.Context) {
 	pathParam := ctx.Param("path")
 	if pathParam == "" || pathParam == "/" {
@@ -1516,6 +1581,9 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		// so that director can be our point of contact for collecting system-level metrics.
 		// Rename the endpoint to reflect such plan.
 		directorAPIV1.GET("/discoverServers", discoverOriginCache)
+
+		directorAPIV1.POST("/createGrafanaToken", createGrafanaToken)
+		directorAPIV1.DELETE("/deleteGrafanaToken/:id", deleteGrafanaToken)
 	}
 
 	directorAPIV2 := router.Group("/api/v2.0/director")
