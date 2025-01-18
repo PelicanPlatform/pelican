@@ -123,6 +123,9 @@ func DeleteGrafanaApiKey(id string) error {
 	if result.Error != nil {
 		return errors.Wrap(result.Error, "failed to delete the Grafana API key")
 	}
+	if result.RowsAffected == 0 {
+		return errors.New("API key not found")
+	}
 	// delete from cache so that we don't accidentally allow the deleted key to be used
 	verifiedKeysCache.Delete(id)
 	return nil
