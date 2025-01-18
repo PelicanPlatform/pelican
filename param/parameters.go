@@ -316,8 +316,12 @@ var (
 	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
+	Monitoring_LabelLimit = IntParam{"Monitoring.LabelLimit"}
+	Monitoring_LabelNameLengthLimit = IntParam{"Monitoring.LabelNameLengthLimit"}
+	Monitoring_LabelValueLengthLimit = IntParam{"Monitoring.LabelValueLengthLimit"}
 	Monitoring_PortHigher = IntParam{"Monitoring.PortHigher"}
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
+	Monitoring_SampleLimit = IntParam{"Monitoring.SampleLimit"}
 	Origin_Port = IntParam{"Origin.Port"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
