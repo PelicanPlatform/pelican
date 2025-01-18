@@ -23,10 +23,12 @@ package xrootd
 import (
 	"context"
 	_ "embed"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/pkg/errors"
@@ -42,16 +44,54 @@ type (
 	PrivilegedXrootdLauncher struct {
 		daemonName string
 		configPath string
+		fds        [2]int
 	}
 
 	UnprivilegedXrootdLauncher struct {
 		daemon.DaemonLauncher
 		isCache bool
+		fds     [2]int
 	}
 )
 
 func (launcher PrivilegedXrootdLauncher) Name() string {
 	return launcher.daemonName
+}
+
+func (launcher PrivilegedXrootdLauncher) KillFunc() func(pid int, sig int) error {
+	if param.Server_DropPrivileges.GetBool() {
+		return func(pid int, sig int) error {
+			buff := make([]byte, 5)
+			buff[0] = 0x03
+			binary.BigEndian.PutUint32(buff[1:], uint32(sig))
+			if err := syscall.Sendmsg(launcher.fds[1], buff, nil, nil, 0); err != nil {
+				return errors.Wrap(err, "failed to signal xrootd process")
+			}
+			return nil
+		}
+	} else {
+		return func(pid int, sig int) error {
+			return syscall.Kill(pid, syscall.Signal(sig))
+		}
+	}
+}
+
+func (launcher UnprivilegedXrootdLauncher) KillFunc() func(pid int, sig int) error {
+	if param.Server_DropPrivileges.GetBool() {
+		return func(pid int, sig int) error {
+			buff := make([]byte, 5)
+			buff[0] = 0x03
+			binary.BigEndian.PutUint32(buff[1:], uint32(sig))
+			if err := syscall.Sendmsg(launcher.fds[1], buff, nil, nil, 0); err != nil {
+				return errors.Wrap(err, "failed to signal xrootd process")
+			}
+			return nil
+		}
+	} else {
+		return func(pid int, sig int) error {
+			return syscall.Kill(pid, syscall.Signal(sig))
+		}
+	}
 }
 
 func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCache bool) (result UnprivilegedXrootdLauncher, err error) {
@@ -62,6 +102,15 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 	result.Uid = -1
 	result.Gid = -1
 	result.isCache = isCache
+	result.fds, err = syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		return
+	}
+	if isCache {
+		setCacheFds(result.fds)
+	} else {
+		setOriginFds(result.fds)
+	}
 	xrootdRun := param.Origin_RunLocation.GetString()
 	if isCache {
 		xrootdRun = param.Cache_RunLocation.GetString()
@@ -94,14 +143,32 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 		result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANFEDERATIONMETADATATIMEOUT="+param.Cache_DefaultCacheTimeout.GetDuration().String())
 		result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANDEFAULTHEADERTIMEOUT="+param.Cache_DefaultCacheTimeout.GetDuration().String())
 	}
+	if param.Server_DropPrivileges.GetBool() {
+		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CA_FILE="+filepath.Join(xrootdRun, "ca-bundle.crt"))
+		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CERT_FILE="+filepath.Join(xrootdRun, "copied-tls-creds.crt"))
+		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_INFO_FD="+strconv.Itoa(result.fds[1]))
+	}
 	return
 }
 
 func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool, enableCache bool) (launchers []daemon.Launcher, err error) {
 	if privileged {
-		launchers = append(launchers, PrivilegedXrootdLauncher{"xrootd", configPath})
+		fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create socket pair for xrootd")
+		}
+		launchers = append(launchers, PrivilegedXrootdLauncher{"xrootd", configPath, fds})
+		if enableCache {
+			setCacheFds(fds)
+		} else {
+			setOriginFds(fds)
+		}
 		if useCMSD {
-			launchers = append(launchers, PrivilegedXrootdLauncher{"cmsd", configPath})
+			cmsdFds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+			if err != nil {
+				return nil, errors.Wrap(err, "failed to create socket pair for xrootd")
+			}
+			launchers = append(launchers, PrivilegedXrootdLauncher{"cmsd", configPath, cmsdFds})
 		}
 	} else {
 		var result UnprivilegedXrootdLauncher

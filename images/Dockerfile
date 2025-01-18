@@ -85,7 +85,7 @@ RUN yum -y update \
 ####
 FROM dependency-build AS xrootd-plugin-builder
 # Install necessary build dependencies
-RUN  yum install -y --enablerepo=osg-testing xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
+RUN  yum install -y --enablerepo=osg-testing xrootd-devel xrootd-server-devel xrootd-client-devel xrootd-private-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
 
 # The ADD command with a api.github.com URL in the next couple of sections
 # are for cache-hashing of the external repository that we rely on to build
@@ -124,8 +124,8 @@ RUN git clone https://github.com/pboettch/json-schema-validator.git && \
     cd json-schema-validator && mkdir build && \
     cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j`nproc` install
-#Finally LotMan proper. For now we do this from source until we can sort out the RPMs.
-#Ping LotMan at a specific commit
+# LotMan proper. For now we do this from source until we can sort out the RPMs.
+# Pin LotMan at a specific commit
 RUN \
     git clone https://github.com/PelicanPlatform/lotman.git && \
     cd lotman && \
@@ -133,6 +133,15 @@ RUN \
     mkdir build && cd build && \
     # LotMan CMakeLists.txt needs to be updated to use -DLIB_INSTALL_DIR. Issue #6
     cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
+    make -j`nproc` install
+
+# XrdHttp plugin for Pelican.  Provides a control channel for shutdown and updating TLS files
+RUN \
+    git clone https://github.com/PelicanPlatform/xrdhttp-pelican.git && \
+    cd /xrdhttp-pelican && \
+    git checkout v0.0.2 && \
+    mkdir build && cd build && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make -j`nproc` install
 
 FROM dependency-build AS final-stage
@@ -207,7 +216,7 @@ COPY --from=xrootd-plugin-builder /etc/xrootd/client.plugins.d/pelican-plugin.co
 RUN rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
 
 # Copy built s3 plugin library and xrdcl-pelican plugin library from build
-COPY --from=xrootd-plugin-builder /usr/lib64/libXrdS3-5.so /usr/lib64/libXrdHTTPServer-5.so /usr/lib64/libXrdClPelican-5.so \
+COPY --from=xrootd-plugin-builder /usr/lib64/libXrdHttpPelican-5.so /usr/lib64/libXrdS3-5.so /usr/lib64/libXrdHTTPServer-5.so /usr/lib64/libXrdClPelican-5.so \
     /usr/lib64/libLotMan.so /usr/lib64/
 
 # Copy the nlohmann json headers

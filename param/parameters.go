@@ -254,6 +254,7 @@ var (
 	Server_TLSKey = StringParam{"Server.TLSKey"}
 	Server_UIActivationCodeFile = StringParam{"Server.UIActivationCodeFile"}
 	Server_UIPasswordFile = StringParam{"Server.UIPasswordFile"}
+	Server_UnprivilegedUser = StringParam{"Server.UnprivilegedUser"}
 	Server_WebConfigFile = StringParam{"Server.WebConfigFile"}
 	Server_WebHost = StringParam{"Server.WebHost"}
 	Shoveler_AMQPExchange = StringParam{"Shoveler.AMQPExchange"}
@@ -375,6 +376,7 @@ var (
 	Registry_RequireCacheApproval = BoolParam{"Registry.RequireCacheApproval"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
+	Server_DropPrivileges = BoolParam{"Server.DropPrivileges"}
 	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	Shoveler_Enable = BoolParam{"Shoveler.Enable"}

@@ -325,6 +325,13 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	}
 
+	// Now that we've launched XRootD (which should drop their privileges to the xrootd user), we can drop our own
+	if config.IsRootExecution() && param.Server_DropPrivileges.GetBool() {
+		if err = dropPriveleges(); err != nil {
+			return
+		}
+	}
+
 	if modules.IsEnabled(server_structs.OriginType) || modules.IsEnabled(server_structs.CacheType) {
 		log.Debug("Launching periodic advertise of origin/cache server to the director")
 		if err = launcher_utils.LaunchPeriodicAdvertise(ctx, egrp, servers); err != nil {

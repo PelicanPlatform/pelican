@@ -1246,13 +1246,51 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		if !param.Cache_RunLocation.IsSet() && !param.Origin_RunLocation.IsSet() && param.Xrootd_RunLocation.IsSet() {
 			return errors.New("Xrootd.RunLocation is set, but both modules are enabled. Please set Cache.RunLocation and Origin.RunLocation or disable Xrootd.RunLocation so the default location can be used.")
 		}
+	} else if param.Server_DropPrivileges.GetBool() {
+		puser, err := GetPelicanUser()
+		if err != nil {
+			return errors.Wrapf(err, "set to drop privileges but no target OS username found for %s", param.Server_UnprivilegedUser.GetName())
+		}
+		// Set up the directories for the server to run as a non-root user;
+		// for the most part, we need to recursively chown and chmod the directory
+		// so either root or pelican can access it.
+		pelicanLocations := []string{
+			param.Registry_DbLocation.GetName(),
+			param.Origin_DbLocation.GetName(),
+			param.Director_GeoIPLocation.GetName(),
+			param.Registry_DbLocation.GetName(),
+			param.Director_DbLocation.GetName(),
+		}
+		if err = setFileAndDirPerms(pelicanLocations, 0750, 0640, puser.Uid, 0, true); err != nil {
+			return errors.Wrap(err, "failure when setting up the file permissions for pelican")
+		}
+		pelicanLocationsNoRecursive := []string{
+			param.Shoveler_AMQPTokenLocation.GetName(),
+		}
+		if err = setFileAndDirPerms(pelicanLocationsNoRecursive, 0750, 0640, puser.Uid, 0, false); err != nil {
+			return errors.Wrap(err, "failure when setting up the file permissions for pelican")
+		}
+		pelicanDirs := []string{
+			param.LocalCache_RunLocation.GetName(),
+			param.Lotman_DbLocation.GetName(),
+			param.Monitoring_DataLocation.GetName(),
+			param.Shoveler_QueueDirectory.GetName(),
+			param.Origin_GlobusConfigLocation.GetName(),
+		}
+		if err = setDirPerms(pelicanDirs, 0750, 0640, puser.Uid, puser.Gid, true); err != nil {
+			return errors.Wrap(err, "failure when setting up the directory permissions for pelican")
+		}
 	}
 
-	if err := os.MkdirAll(param.Monitoring_DataLocation.GetString(), 0750); err != nil {
+	user, err := GetPelicanUser()
+	if err != nil {
+		return errors.Wrap(err, "no OS user found for pelican")
+	}
+	if err := MkdirAll(param.Monitoring_DataLocation.GetString(), 0750, user.Uid, user.Gid); err != nil {
 		return errors.Wrapf(err, "failure when creating a directory for the monitoring data")
 	}
 
-	if err := os.MkdirAll(param.Shoveler_QueueDirectory.GetString(), 0750); err != nil {
+	if err := MkdirAll(param.Shoveler_QueueDirectory.GetString(), 0750, user.Uid, user.Gid); err != nil {
 		return errors.Wrapf(err, "failure when creating a directory for the shoveler on-disk queue")
 	}
 	if currentServers.IsEnabled(server_structs.OriginType) {

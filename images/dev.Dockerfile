@@ -52,7 +52,7 @@ enabled=1 \n\
 gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 
 # Install goreleaser and various other packages we need
-RUN yum install -y --enablerepo=osg-testing goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens xrootd-voms \
+RUN yum install -y --enablerepo=osg-testing goreleaser npm xrootd-devel xrootd-server-devel xrootd-private-devel xrootd-client-devel nano xrootd-scitokens xrootd-voms \
     xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel libcap-devel sssd-client \
     xrootd-multiuser \
     zlib-devel \
@@ -84,6 +84,15 @@ RUN \
     cd xrootd-s3-http && \
     git checkout v0.1.8 && \
     git submodule update --init --recursive && \
+    mkdir build && cd build && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    make install
+
+# Similarly, install the XrdHttp plugin for Pelican
+RUN \
+    git clone https://github.com/PelicanPlatform/xrdhttp-pelican.git && \
+    cd xrdhttp-pelican && \
+    git checkout v0.0.2 && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install

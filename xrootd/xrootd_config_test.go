@@ -721,14 +721,14 @@ func TestCopyCertificates(t *testing.T) {
 	config.InitConfig()
 
 	// First, invoke CopyXrootdCertificates directly, ensure it works.
-	err := CopyXrootdCertificates(&origin.OriginServer{})
+	err := copyXrootdCertificates(&origin.OriginServer{})
 	assert.ErrorIs(t, err, errBadKeyPair)
 
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	err = config.MkdirAll(path.Dir(param.Xrootd_Authfile.GetString()), 0755, -1, -1)
 	require.NoError(t, err)
-	err = CopyXrootdCertificates(&origin.OriginServer{})
+	err = copyXrootdCertificates(&origin.OriginServer{})
 	require.NoError(t, err)
 	destKeyPairName := filepath.Join(param.Origin_RunLocation.GetString(), "copied-tls-creds.crt")
 	assert.FileExists(t, destKeyPairName)
@@ -748,7 +748,7 @@ func TestCopyCertificates(t *testing.T) {
 	err = os.Rename(certName, certName+".orig")
 	require.NoError(t, err)
 
-	err = CopyXrootdCertificates(&origin.OriginServer{})
+	err = copyXrootdCertificates(&origin.OriginServer{})
 	assert.ErrorIs(t, err, errBadKeyPair)
 
 	err = os.Rename(keyName, keyName+".orig")
@@ -757,7 +757,7 @@ func TestCopyCertificates(t *testing.T) {
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
-	err = CopyXrootdCertificates(&origin.OriginServer{})
+	err = copyXrootdCertificates(&origin.OriginServer{})
 	require.NoError(t, err)
 
 	secondKeyPairContents, err := os.ReadFile(destKeyPairName)
