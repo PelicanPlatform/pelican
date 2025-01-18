@@ -837,7 +837,7 @@ func TestObjectList(t *testing.T) {
 
 		_, err := client.DoList(fed.Ctx, listURL, nil, client.WithTokenLocation(tempToken.Name()))
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "404: No namespace found for path. Either it doesn't exist, or the Director is experiencing problems")
+		require.Contains(t, err.Error(), "404: No namespace found for prefix. Either it doesn't exist, or the Director is experiencing problems")
 	})
 }
 
