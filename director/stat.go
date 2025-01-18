@@ -116,6 +116,7 @@ const (
 	queryParameterErr       queryErrorType = "ParameterError"
 	queryNoPrefixMatchErr   queryErrorType = "NoPrefixMatchError"
 	queryInsufficientResErr queryErrorType = "InsufficientResError"
+	queryNoSourcesErr       queryErrorType = "NoSources"
 	queryCancelledErr       queryErrorType = "CancelledError"
 )
 
@@ -125,6 +126,11 @@ func (e *headReqTimeoutErr) Error() string {
 
 func (e *headReqNotFoundErr) Error() string {
 	return e.Message
+}
+
+func (*headReqNotFoundErr) Is(target error) bool {
+	_, ok := target.(*headReqNotFoundErr)
+	return ok
 }
 
 func (e *headReqForbiddenErr) Error() string {
@@ -273,7 +279,7 @@ func getStatUtils(ads []server_structs.ServerAd) map[string]*serverStatUtil {
 		url := ad.URL.String()
 		statUtil, ok := statUtils[url]
 		if ok {
-			result[url] = &statUtil
+			result[url] = statUtil
 		}
 	}
 	return result
@@ -334,6 +340,8 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 	// Cancel the rest of the requests when requests received >= max required
 	maxCancelCtx, maxCancel := context.WithCancel(ctx)
 	numTotalReq := 0
+	// Track the number of responses we got received indicating "file not found"
+	numFileNotFound := 0
 	successResult := make([]*objectMetadata, 0)
 	deniedResult := make([]*headReqForbiddenErr, 0)
 
@@ -457,7 +465,7 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 				// then we assume this is a "hot" object and we'll benefit from the preemptively refreshing
 				// the ttlcache.  If we can, asynchronously query the service.
 				if time.Until(item.ExpiresAt()) < 10*time.Second {
-					statUtil.Errgroup.TryGo(func() (err error) { _, err = queryFunc(); return })
+					statUtil.Errgroup.TryGo(func() error { _, _ = queryFunc(); return nil })
 				}
 				totalLabels["cached_result"] = "true"
 				if metadata := item.Value(); metadata != nil {
@@ -482,7 +490,10 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 		case deErr := <-deniedReqChan:
 			numTotalReq += 1
 			deniedResult = append(deniedResult, deErr)
-		case <-negativeReqChan:
+		case negErr := <-negativeReqChan:
+			if errors.Is(negErr, &headReqNotFoundErr{}) {
+				numFileNotFound += 1
+			}
 			numTotalReq += 1
 		case metaRes := <-positiveReqChan:
 			numTotalReq += 1
@@ -505,7 +516,14 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 			// All requests finished
 			if numTotalReq == len(ads) {
 				maxCancel()
-				if len(successResult) < minReq {
+				if len(successResult) == 0 && numFileNotFound > 0 && numFileNotFound >= minReq && numTotalReq == numFileNotFound {
+					// In this case, we had a quorum of origins indicating this object didn't exist, no servers
+					// showing an unknown status (HTTP 500, HTTP 403, etc).  We're fairly sure the object doesn't exist.
+					qResult.Status = queryFailed
+					qResult.ErrorType = queryNoSourcesErr
+					qResult.Msg = "Object does not exist."
+					return
+				} else if len(successResult) < minReq {
 					qResult.Status = queryFailed
 					qResult.ErrorType = queryInsufficientResErr
 					qResult.Msg = fmt.Sprintf("Number of success response: %d is less than MinStatResponse (%d) required.", len(successResult), minReq)

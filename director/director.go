@@ -102,7 +102,7 @@ var (
 	healthTestUtils      = make(map[string]*healthTestUtil) // The utilities for the director file tests. The key is string form of ServerAd.URL
 	healthTestUtilsMutex = sync.RWMutex{}
 
-	statUtils      = make(map[string]serverStatUtil) // The utilities for the stat call. The key is string form of ServerAd.URL
+	statUtils      = make(map[string]*serverStatUtil) // The utilities for the stat call. The key is string form of ServerAd.URL
 	statUtilsMutex = sync.RWMutex{}
 )
 
@@ -424,7 +424,7 @@ func redirectToCache(ginCtx *gin.Context) {
 		maxRes := len(cacheAds) + len(originAds)
 		qr := q.Query(context.Background(), reqPath, st, 1, maxRes,
 			withOriginAds(originAds), withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
-		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
+		log.Debugf("Cache stat result for %s: %s", reqPath, qr.String())
 
 		// For successful response, we got a list of URLs to access the object.
 		// We will use the host of the object url to match the URL field in originAds and cacheAds
@@ -443,7 +443,13 @@ func redirectToCache(ginCtx *gin.Context) {
 				}
 			}
 		} else if qr.Status == queryFailed {
-			if qr.ErrorType != queryInsufficientResErr {
+			if qr.ErrorType == queryNoSourcesErr {
+				ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Object not found at any cache",
+				})
+				return
+			} else if qr.ErrorType != queryInsufficientResErr {
 				ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg),
@@ -626,7 +632,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		q = NewObjectStat()
 		qr := q.Query(context.Background(), reqPath, server_structs.OriginType, 1, 3,
 			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.Caps.PublicReads))
-		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
+		log.Debugf("Origin stat result for %s: %s", reqPath, qr.String())
 
 		// For a successful response, we got a list of object URLs.
 		// We then use the host of the object url to match the URL field in originAds
@@ -642,7 +648,12 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				}
 			}
 		} else if qr.Status == queryFailed {
-			if qr.ErrorType != queryInsufficientResErr {
+			if qr.ErrorType == queryNoSourcesErr {
+				ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "All sources report object was not found",
+				})
+			} else if qr.ErrorType != queryInsufficientResErr {
 				ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg),

@@ -594,7 +594,7 @@ func TestSyncUpload(t *testing.T) {
 		require.NoError(t, err, "Error writing to new test file")
 
 		dirName := filepath.Base(tempDir)
-		uploadUrl := fmt.Sprintf("pelican://%s/first/namespace/sync_upload_none/%s/%s", discoveryUrl.Host, dirName, "test_single_upload")
+		uploadUrl := fmt.Sprintf("pelican://%s/first/namespace/sync_upload_file/%s/%s", discoveryUrl.Host, dirName, "test_single_upload")
 
 		// Upload the file
 		transferDetailsUpload, err := client.DoPut(fed.Ctx, newTestFile.Name(), uploadUrl, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
@@ -635,7 +635,7 @@ func TestSyncUpload(t *testing.T) {
 		require.Equal(t, smallTestFileContent, string(contentBytes))
 
 		// Change the upload url to a collection
-		uploadUrl = fmt.Sprintf("pelican://%s/first/namespace/sync_upload_none/%s", discoveryUrl.Host, dirName)
+		uploadUrl = fmt.Sprintf("pelican://%s/first/namespace/sync_upload_file/%s", discoveryUrl.Host, dirName)
 
 		// Attempt to sync an upload of a single file to a collection, should fail
 		_, err = client.DoPut(fed.Ctx, smallTestFile.Name(), uploadUrl, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
