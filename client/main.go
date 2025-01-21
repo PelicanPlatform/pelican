@@ -181,14 +181,7 @@ func DoCacheInfo(ctx context.Context, destination string, options ...TransferOpt
 		}
 	}()
 
-	destUri, err := url.Parse(destination)
-	if err != nil {
-		log.Errorln("Failed to parse destination URL")
-		return
-	}
-
-	// Check if we understand the found url scheme
-	err = schemeUnderstood(destUri.Scheme)
+	pUrl, err := ParseRemoteAsPUrl(ctx, destination)
 	if err != nil {
 		return
 	}
@@ -208,7 +201,7 @@ func DoCacheInfo(ctx context.Context, destination string, options ...TransferOpt
 	if err != nil {
 		return
 	}
-	return tc.CacheInfo(ctx, destUri)
+	return tc.CacheInfo(ctx, pUrl.GetRawUrl())
 }
 
 func GetObjectServerHostnames(ctx context.Context, testFile string) (urls []string, err error) {
@@ -359,7 +352,6 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 		}
 		dirResp.XPelNsHdr.CollectionsUrl = collectionsOverrideUrl
 	}
-
 	fileInfos, err = listHttp(pUrl, dirResp, token)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to perform list request")

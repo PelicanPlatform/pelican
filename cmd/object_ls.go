@@ -45,8 +45,8 @@ var (
 func init() {
 	flagSet := lsCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
-	flagSet.StringP("collections-url", "", "", "URL to use for collection listing, overriding the director's response")
 	flagSet.BoolP("long", "l", false, "Include extended information")
+	flagSet.StringP("collections-url", "", "", "URL to use for collection listing, overriding the director's response")
 	flagSet.BoolP("collection-only", "C", false, "List collections only")
 	flagSet.BoolP("object-only", "O", false, "List objects only")
 	flagSet.BoolP("json", "j", false, "Print results in JSON format")

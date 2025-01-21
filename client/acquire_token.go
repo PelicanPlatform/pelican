@@ -134,19 +134,6 @@ func (tg *tokenGenerator) Copy() *tokenGenerator {
 	}
 }
 
-// Determine the token name if it is embedded in the scheme, Condor-style
-func getTokenName(destination *url.URL) (scheme, tokenName string) {
-	schemePieces := strings.Split(destination.Scheme, "+")
-	tokenName = ""
-	// Scheme is always the last piece
-	scheme = schemePieces[len(schemePieces)-1]
-	// If there are 2 or more pieces, token name is everything but the last item, joined with a +
-	if len(schemePieces) > 1 {
-		tokenName = strings.Join(schemePieces[:len(schemePieces)-1], "+")
-	}
-	return
-}
-
 // Read a token from a file; ensure
 func getTokenFromFile(tokenLocation string) (string, error) {
 	//Read in the JSON

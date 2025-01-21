@@ -35,6 +35,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -306,8 +307,10 @@ func TestStashPluginMain(t *testing.T) {
 	output := strings.Replace(stderr.String(), "\\\\", "\\", -1)
 
 	// Check captured output for successful download
-	expectedOutput := "Downloading object from pelican:///test/test.txt to " + tempDir
-	assert.Contains(t, output, expectedOutput)
+	expectedPattern := `Downloading object from pelican://[^/]+/test/test.txt to ` + regexp.QuoteMeta(tempDir)
+	matched, err := regexp.MatchString(expectedPattern, output)
+	assert.NoError(t, err)
+	assert.True(t, matched, "Output does not match expected pattern")
 	successfulDownloadMsg := "HTTP Transfer was successful"
 	assert.Contains(t, output, successfulDownloadMsg)
 	amountDownloaded := "Downloaded bytes: 17"
