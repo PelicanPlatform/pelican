@@ -105,6 +105,10 @@ Monitoring:
   PromQLAuthorization: true
   AggregatePrefixes: ["/*"]
   DataRetention: 360h
+  LabelLimit: 64
+  LabelNameLengthLimit: 128
+  LabelValueLengthLimit: 2048
+  SampleLimit: 200
 Shoveler:
   MessageQueueProtocol: amqp
   PortLower: 9930
