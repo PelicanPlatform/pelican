@@ -59,9 +59,9 @@ func LaunchPeriodicDirectorTimeout(ctx context.Context, egrp *errgroup.Group, nC
 		return
 	}
 	directorTimeoutTicker := time.NewTicker(directorTimeoutDuration)
-	defer directorTimeoutTicker.Stop()
 
 	egrp.Go(func() error {
+		defer directorTimeoutTicker.Stop()
 		for {
 			select {
 			case <-directorTimeoutTicker.C:
