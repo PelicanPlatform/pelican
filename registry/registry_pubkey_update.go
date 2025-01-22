@@ -236,7 +236,7 @@ func updateNsKeySignChallengeCommit(data *RegisteredPrefixUpdate) (map[string]in
 
 }
 
-// Handle the registered namespace public key update with nonce generation and verifcation
+// Handle the registered namespace public key update with nonce generation and verification
 func updateNsKeySignChallenge(data *RegisteredPrefixUpdate) (map[string]interface{}, error) {
 	if data.ClientNonce != "" && data.ClientPayload != "" && data.ClientSignature != "" &&
 		data.ServerNonce != "" && data.ServerPayload != "" && data.ServerSignature != "" {
