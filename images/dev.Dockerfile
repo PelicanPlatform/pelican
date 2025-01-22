@@ -23,7 +23,14 @@ FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-ser
 FROM almalinux:9
 
 # https://docs.docker.com/engine/reference/builder/#automatic-platform-args-in-the-global-scope
+# Note -- will match arm64 or amd64, so adjust accordingly if you're expecting x86_64 or aarch64. Unfortunately,
+# it appears that Docker makes it intentionally hard to derive an ENV without being passed an explicit ARG at build
+# time, so there's no clean way to use TARGETARCH to populate a second ARCH var with these alternatives
 ARG TARGETARCH
+
+ARG BASE_YUM_REPO=release
+ARG BASE_OSG_SERIES=23
+ARG BASE_OS=el9
 
 # Doing it caused bugs, so we're not doing it; More info here: https://pkg.go.dev/cmd/go
 ENV GOFLAGS="-buildvcs=false"
@@ -52,29 +59,61 @@ enabled=1 \n\
 gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
 
 # Install goreleaser and various other packages we need
-RUN yum install -y --enablerepo=osg-testing goreleaser npm xrootd-devel xrootd-server-devel xrootd-client-devel nano xrootd-scitokens xrootd-voms \
-    xrdcl-http jq procps docker make curl-devel java-17-openjdk-headless git cmake3 gcc-c++ openssl-devel sqlite-devel libcap-devel sssd-client \
-    xrootd-multiuser \
-    zlib-devel \
-    vim valgrind gdb gtest-devel \
+# Pin XRootD installs to RPMs from Koji -- this is intended to be a temporary measure until
+# all our patches are ingested upstream in the OSG repos
+ARG XROOTD_VERSION="5.7.2"
+ARG XROOTD_RELEASE="1.4.purge.osg${BASE_OSG_SERIES}.${BASE_OS}"
+ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VERSION}/${XROOTD_RELEASE}"
+
+# Define packages and install them. Note that they have to be installed in the same yum command to avoid
+# unresolvable dependencies.
+ENV PACKAGES="xrootd xrootd-libs xrootd-devel xrootd-server xrootd-server-devel xrootd-server-libs xrootd-client xrootd-client-libs xrootd-client-devel xrootd-scitokens xrootd-voms xrdcl-http"
+RUN <<EOT
+set -ex
+package_urls=()
+if [ "$TARGETARCH" = "amd64" ]; then
+    for package in $PACKAGES; do
+        package_urls+=(${KOJIHUB_BASE_URL}/x86_64/${package}-${XROOTD_VERSION}-${XROOTD_RELEASE}.x86_64.rpm)
+    done
+elif [ "$TARGETARCH" = "arm64" ]; then
+    for package in $PACKAGES; do
+        package_urls+=(${KOJIHUB_BASE_URL}/aarch64/${package}-${XROOTD_VERSION}-${XROOTD_RELEASE}.aarch64.rpm)
+    done
+fi
+package_urls+=(${KOJIHUB_BASE_URL}/noarch/xrootd-selinux-${XROOTD_VERSION}-${XROOTD_RELEASE}.noarch.rpm)
+yum install -y "${package_urls[@]}"
+EOT
+
+RUN yum install -y --enablerepo=osg-testing xrootd-multiuser goreleaser npm jq procps docker make curl-devel java-17-openjdk-headless \
+    git cmake3 gcc-c++ openssl-devel sqlite-devel libcap-devel sssd-client zlib-devel vim valgrind gdb gtest-devel \
     && yum clean all
 
-# The ADD command with a api.github.com URL in the next couple of sections
+# The ADD command with an api.github.com URL in the next couple of sections
 # are for cache-hashing of the external repository that we rely on to build
 # the image
-ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/main /tmp/hash-xrdcl-pelican
+ENV XRDCL_PELICAN_VERSION="v0.9.4" \
+    XROOTD_S3_HTTP_VERSION="v0.1.8" \
+    JSON_VERSION="v3.11.3" \
+    JSON_SCHEMA_VALIDATOR_VERSION="2.3.0" \
+    LOTMAN_VERSION="v0.0.4" \
+    XROOTD_LOTMAN_VERSION="v0.0.2"
+
+ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/tags/${XRDCL_PELICAN_VERSION} /tmp/hash-xrdcl-pelican
+ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/tags/${XROOTD_S3_HTTP_VERSION} /tmp/hash-xrootd-s3-http
+ADD https://api.github.com/repos/nlohmann/json/git/refs/tags/${JSON_VERSION} /tmp/hash-json
+ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/tags/${JSON_SCHEMA_VALIDATOR_VERSION} /tmp/hash-json
+ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/tags/${LOTMAN_VERSION} /tmp/hash-json
+ADD https://api.github.com/repos/PelicanPlatform/xrootd-lotman/git/refs/tags/${XROOTD_LOTMAN_VERSION} /tmp/hash-json
 
 # Install xrdcl-pelican plugin and replace the xrdcl-http plugin
 # Ping the xrdcl-pelican plugin at a specific commit
 RUN \
     git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
     cd xrdcl-pelican && \
-    git checkout v0.9.4 && \
+    git checkout ${XRDCL_PELICAN_VERSION} && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 -DCMAKE_BUILD_TYPE=RelWithDebInfo .. && \
     make && make install
-
-ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/main /tmp/hash-xrootd-s3-http
 
 # Install the S3 and HTTP server plugins for XRootD. For now we do this from source
 # until we can sort out the RPMs.
@@ -82,34 +121,43 @@ ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/m
 RUN \
     git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
     cd xrootd-s3-http && \
-    git checkout v0.1.8 && \
+    git checkout ${XROOTD_S3_HTTP_VERSION} && \
     git submodule update --init --recursive && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
 
-ADD https://api.github.com/repos/nlohmann/json/git/refs/heads/master /tmp/hash-json
-ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/heads/master /tmp/hash-json
-ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/heads/main /tmp/hash-json
-
 # LotMan Installation
 # First install dependencies
 RUN git clone https://github.com/nlohmann/json.git && \
-    cd json && mkdir build && \
-    cd build && cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    cd json && \
+    git checkout ${JSON_VERSION} && \
+    mkdir build && cd build && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make -j`nproc` install
 RUN git clone https://github.com/pboettch/json-schema-validator.git && \
-    cd json-schema-validator && mkdir build && \
-    cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
+    cd json-schema-validator && \
+    git checkout ${JSON_SCHEMA_VALIDATOR_VERSION} && \
+    mkdir build && cd build && \
+    cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j`nproc` install
 #Finally LotMan proper. For now we do this from source until we can sort out the RPMs.
 #Ping LotMan at a specific commit
 RUN \
     git clone https://github.com/PelicanPlatform/lotman.git && \
     cd lotman && \
-    git reset 2dd3738 --hard && \
+    git checkout ${LOTMAN_VERSION} && \
     mkdir build && cd build && \
     # LotMan CMakeLists.txt needs to be updated to use -DLIB_INSTALL_DIR. Issue #6
+    cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
+    make -j`nproc` install
+
+# XRootD LotMan purge plugin installation
+RUN \
+    git clone https://github.com/PelicanPlatform/xrootd-lotman.git && \
+    cd xrootd-lotman && \
+    git checkout ${XROOTD_LOTMAN_VERSION} && \
+    mkdir build && cd build && \
     cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j`nproc` install
 
