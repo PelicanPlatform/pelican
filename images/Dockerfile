@@ -20,9 +20,9 @@ ARG BASE_YUM_REPO=release
 ARG BASE_OSG_SERIES=23
 ARG BASE_OS=el9
 
-###########################
-# Pelican Build container #
-###########################
+#######################
+# Begin Pelican Build #
+#######################
 # Building Pelican requires go, goreleaser, and packages for the web build
 FROM almalinux:9 AS pelican-build
 ARG IS_NONRELEASE_BUILD="true"
@@ -65,10 +65,27 @@ RUN \
         then goreleaser build --clean --snapshot --single-target;\
     else goreleaser build --clean --single-target;\
     fi
+#####################
+# End Pelican Build #
+#####################
 
+###################
+# Begin Scitokens #
+###################
 FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
+#################
+# End Scitokens #
+#################
 
+##########################
+# Begin Dependency Build #
+##########################
 FROM --platform=linux/amd64 opensciencegrid/software-base:$BASE_OSG_SERIES-$BASE_OS-$BASE_YUM_REPO AS dependency-build
+
+# Re-reference these args from the base image -- args are otherwise scoped by build stage.
+ARG BASE_YUM_REPO
+ARG BASE_OSG_SERIES
+ARG BASE_OS
 
 # Create the xrootd user with a fixed GID/UID
 RUN groupadd -o -g 10940 xrootd
@@ -76,27 +93,78 @@ RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
 RUN yum -y update \
-    && yum -y --allowerasing --enablerepo osg-testing install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms xrootd-multiuser curl java-17-openjdk-headless \
+    && yum -y --allowerasing --enablerepo osg-testing install tini curl java-17-openjdk-headless \
     && yum clean all \
     && rm -rf /var/cache/yum/
 
-####
-# Start building xrootd plugins (xrdcl-pelican and s3)
-####
+# Pin XRootD installs to RPMs from Koji -- this is intended to be a temporary measure until
+# all our patches are ingested upstream in the OSG repos
+ARG XROOTD_VERSION="5.7.2"
+ARG XROOTD_ARCH="x86_64"
+ARG XROOTD_RELEASE="1.4.purge.osg${BASE_OSG_SERIES}.${BASE_OS}"
+ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VERSION}/${XROOTD_RELEASE}"
+
+# Define packages and install them. Note that they have to be installed in the same yum command to avoid
+# unresolvable dependencies.
+ENV PACKAGES="xrootd xrootd-libs xrootd-client xrootd-client-libs xrdcl-http xrootd-server xrootd-server-libs xrootd-scitokens xrootd-voms xrootd-selinux"
+RUN <<EOT
+set -ex
+package_urls=()
+for package in $PACKAGES; do
+  if [ "$package" = "xrootd-selinux" ]; then
+    package_urls+=(${KOJIHUB_BASE_URL}/noarch/${package}-${XROOTD_VERSION}-${XROOTD_RELEASE}.noarch.rpm)
+  else
+    package_urls+=(${KOJIHUB_BASE_URL}/${XROOTD_ARCH}/${package}-${XROOTD_VERSION}-${XROOTD_RELEASE}.${XROOTD_ARCH}.rpm)
+  fi
+done
+
+yum install -y "${package_urls[@]}"
+EOT
+
+# Koji won't have the xrootd-multiuser package, so that still gets installed from the OSG repos
+RUN yum install -y --enablerepo=osg-testing xrootd-multiuser
+########################
+# End Dependency Build #
+########################
+
+###############################
+# Begin XRootD Plugin Builder #
+###############################
 FROM dependency-build AS xrootd-plugin-builder
 # Install necessary build dependencies
-RUN  yum install -y --enablerepo=osg-testing xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
+RUN  yum install -y --enablerepo=osg-testing curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
+ARG XROOTD_VERSION
+ARG XROOTD_ARCH
+ARG XROOTD_RELEASE
+ARG KOJIHUB_BASE_URL
 
-# The ADD command with a api.github.com URL in the next couple of sections
-# are for cache-hashing of the external repository that we rely on to build
-# the image
-ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/main /tmp/hash-xrdcl-pelican
+ENV PACKAGES="xrootd-devel xrootd-server-devel xrootd-client-devel"
+RUN <<EOT
+set -ex
+package_urls=()
+for package in $PACKAGES; do
+  package_urls+=(${KOJIHUB_BASE_URL}/${XROOTD_ARCH}/${package}-${XROOTD_VERSION}-${XROOTD_RELEASE}.${XROOTD_ARCH}.rpm)
+done
+
+yum install -y "${package_urls[@]}"
+EOT
 
 # Install xrdcl-pelican plugin
 RUN \
     yum install -y --enablerepo=osg-testing xrdcl-pelican
 
-ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/main /tmp/hash-xrootd-s3-http
+# The ADD command with a api.github.com URL in the next couple of sections
+# are for cache-hashing of the external repository that we rely on to build
+# the image
+ENV XROOTD_S3_HTTP_VERSION="v0.1.8" \
+    JSON_VERSION="v3.11.3" \
+    JSON_SCHEMA_VALIDATOR_VERSION="2.3.0" \
+    LOTMAN_VERSION="v0.0.4"
+
+ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/tags/${XROOTD_S3_HTTP_VERSION} /tmp/hash-xrootd-s3-http
+ADD https://api.github.com/repos/nlohmann/json/git/refs/tags/${JSON_VERSION} /tmp/hash-json
+ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/tags/${JSON_SCHEMA_VALIDATOR_VERSION} /tmp/hash-json
+ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/tags/${LOTMAN_VERSION} /tmp/hash-json
 
 # Install the S3 and HTTP server plugins for XRootD. For now we do this from source
 # until we can sort out the RPMs.
@@ -104,43 +172,50 @@ ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/m
 RUN \
     git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
     cd xrootd-s3-http && \
-    git checkout v0.1.8 && \
+    git checkout ${XROOTD_S3_HTTP_VERSION} && \
     git submodule update --init --recursive && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make install
 
-ADD https://api.github.com/repos/nlohmann/json/git/refs/heads/master /tmp/hash-json
-ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/heads/master /tmp/hash-json
-ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/heads/main /tmp/hash-json
-
 # LotMan Installation
 # First install dependencies
 RUN git clone https://github.com/nlohmann/json.git && \
-    cd json && mkdir build && \
-    cd build && cmake .. && \
+    cd json && \
+    git checkout ${JSON_VERSION} && \
+    mkdir build && cd build && \
+    cmake .. && \
     make -j`nproc` install
 RUN git clone https://github.com/pboettch/json-schema-validator.git && \
-    cd json-schema-validator && mkdir build && \
-    cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
+    cd json-schema-validator && \
+    git checkout ${JSON_SCHEMA_VALIDATOR_VERSION} && \
+    mkdir build && cd build && \
+    cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j`nproc` install
 #Finally LotMan proper. For now we do this from source until we can sort out the RPMs.
 #Ping LotMan at a specific commit
 RUN \
     git clone https://github.com/PelicanPlatform/lotman.git && \
     cd lotman && \
-    git reset 2dd3738 --hard && \
+    git checkout ${LOTMAN_VERSION} && \
     mkdir build && cd build && \
     # LotMan CMakeLists.txt needs to be updated to use -DLIB_INSTALL_DIR. Issue #6
     cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j`nproc` install
+#############################
+# End XRootD Plugin Builder #
+#############################
 
+#############################
+# Begin Pelican Final Stage #
+#############################
 FROM dependency-build AS final-stage
 
 # Any other yum-installable dependencies that need to be present in the final container
 # should go here. Installation in a previous section will result in the packages being
 # installed only in the intermediate builder containers!
 RUN yum install -y --enablerepo=osg-testing sssd-client
+RUN yum install -y --enablerepo=osg-contrib xrootd-lotman
 
 WORKDIR /pelican
 
@@ -223,6 +298,9 @@ COPY --from=pelican-build /pelican/dist/linux_amd64/pelican_linux_amd64_v1/pelic
 RUN    chmod +x /usr/local/bin/pelican \
     && chmod +x /usr/local/bin/osdf \
     && chmod +x /entrypoint.sh
+###########################
+# End Pelican Final Stage #
+###########################
 
 ######################
 # Pelican base stage #
