@@ -19,6 +19,7 @@ package web_ui
 import (
 	"context"
 	"fmt"
+	pelican_log "log"
 	"math"
 	"net/http"
 	"net/url"
@@ -85,24 +86,31 @@ func init() {
 }
 
 const (
-	MaxLabelLimit            = 10
+	MaxLabelLimit            = 128
 	MaxLabelNameLengthLimit  = 256
 	MaxLabelValueLengthLimit = 4096
 	MaxSampleLimit           = 800
 )
 
 func setCardinalityLimits(cfg *config.ScrapeConfig) {
-	if param.Monitoring_LabelLimit.GetInt() > 0 && param.Monitoring_LabelLimit.GetInt() < MaxLabelLimit {
-		cfg.LabelLimit = uint(param.Monitoring_LabelLimit.GetInt())
+	if !(param.Monitoring_LabelLimit.GetInt() > 0 && param.Monitoring_LabelLimit.GetInt() < MaxLabelLimit) {
+		pelican_log.Printf("Provided Monitoring.LabelLimit value: %d is either negative or greater than the maximum of %d. Defaulting to %d\n",
+			param.Monitoring_LabelLimit.GetInt(), MaxLabelLimit, 64)
+		cfg.LabelLimit = 64
 	}
-	if param.Monitoring_LabelNameLengthLimit.GetInt() > 0 && param.Monitoring_LabelNameLengthLimit.GetInt() < MaxLabelNameLengthLimit {
-		cfg.LabelNameLengthLimit = uint(param.Monitoring_LabelNameLengthLimit.GetInt())
+	if !(param.Monitoring_LabelNameLengthLimit.GetInt() > 0 && param.Monitoring_LabelNameLengthLimit.GetInt() < MaxLabelNameLengthLimit) {
+		pelican_log.Printf("Provided Monitoring.LabelNameLengthLimit value: %d is either negative or greater than the maximum of %d. Defaulting to %d\n",
+			param.Monitoring_LabelNameLengthLimit.GetInt(), MaxLabelNameLengthLimit, 128)
+		cfg.LabelNameLengthLimit = 128
 	}
-	if param.Monitoring_LabelValueLengthLimit.GetInt() > 0 && param.Monitoring_LabelValueLengthLimit.GetInt() < MaxLabelValueLengthLimit {
-		cfg.LabelValueLengthLimit = uint(param.Monitoring_LabelValueLengthLimit.GetInt())
+	if !(param.Monitoring_LabelValueLengthLimit.GetInt() > 0 && param.Monitoring_LabelValueLengthLimit.GetInt() < MaxLabelValueLengthLimit) {
+		pelican_log.Printf("Provided Monitoring.LabelValueLengthLimit value: %d is either negative or greater than the maximum of %d. Defaulting to %d\n", param.Monitoring_LabelValueLengthLimit.GetInt(), 4096, 2048)
+		cfg.LabelValueLengthLimit = 2048
 	}
-	if param.Monitoring_SampleLimit.GetInt() > 0 && param.Monitoring_SampleLimit.GetInt() < MaxSampleLimit {
-		cfg.SampleLimit = uint(param.Monitoring_SampleLimit.GetInt())
+	if !(param.Monitoring_SampleLimit.GetInt() > 0 && param.Monitoring_SampleLimit.GetInt() < MaxSampleLimit) {
+		pelican_log.Printf("Provided Monitoring.SampleLimit value: %d is either negative or greater than the maximum of %d. Defaulting to %d\n",
+			param.Monitoring_SampleLimit.GetInt(), MaxSampleLimit, 200)
+		cfg.SampleLimit = 200
 	}
 }
 
