@@ -63,9 +63,9 @@ func TestPrometheusUnprotected(t *testing.T) {
 
 	// Create temp dir for the origin key file
 	tDir := t.TempDir()
-	kfile := filepath.Join(tDir, "testKey")
+	kDir := filepath.Join(tDir, "testKeyDir")
 	//Setup a private key
-	viper.Set("IssuerKey", kfile)
+	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -109,9 +109,9 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 
 	// Create temp dir for the origin key file
 	tDir := t.TempDir()
-	kfile := filepath.Join(tDir, "testKey")
-	//Setup a private key
-	viper.Set("IssuerKey", kfile)
+	kDir := filepath.Join(tDir, "testKeyDir")
+	// Setup a private key directory
+	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
@@ -170,10 +170,10 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 
 	// Create temp dir for the origin key file
 	tDir := t.TempDir()
-	kfile := filepath.Join(tDir, "testKey")
+	keysDir := filepath.Join(tDir, "testKeys")
 
 	//Setup a private key and a token
-	viper.Set("IssuerKey", kfile)
+	viper.Set("IssuerKeysDirectory", keysDir)
 
 	// Setting the ConfigDir to t.TempDir() causes issues with this test on Windows because
 	// the process tries to clean up the directory before the test is done with it.
@@ -237,15 +237,16 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		}
 
 		// Create a new private key by re-initializing config to point at a new temp dir
-		k2file := filepath.Join(tDir, "testKey2")
-		viper.Set("IssuerKey", k2file)
+		k2dir := filepath.Join(tDir, "whatever", "testDir2")
+		viper.Set("IssuerKeysDirectory", k2dir)
 		err = config.InitServer(ctx, server_structs.OriginType)
 		require.NoError(t, err)
 
 		token := createToken("monitoring.query", issuerUrl)
 
 		// Re-init the config again, this time pointing at the original key
-		viper.Set("IssuerKey", kfile)
+		config.ResetIssuerPrivateKeys()
+		viper.Set("IssuerKeysDirectory", keysDir)
 		err = config.InitServer(ctx, server_structs.OriginType)
 		require.NoError(t, err)
 

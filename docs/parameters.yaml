@@ -64,14 +64,29 @@ components: ["cache", "director", "origin", "registry"]
 ---
 name: IssuerKey
 description: |+
+  [Deprecated] Use IssuerKeysDirectory instead. The key file set by this parameter will automatically move to IssuerKeysDirectory.
+
   A filepath to the file containing a PEM-encoded ecdsa private key which later will be parsed
   into a JWK and serves as the private key to sign various JWTs issued by this server.
 
   A public JWK will be derived from this private key and used as the key for token verification.
 type: filename
+deprecated: true
+replacedby: none
 root_default: /etc/pelican/issuer.jwk
 default: $ConfigBase/issuer.jwk
-components: ["client", "registry", "director"]
+components: ["origin", "cache", "registry", "director"]
+---
+name: IssuerKeysDirectory
+description: |+
+  A filepath to the directory used for storing one or multiple PEM-encoded ecdsa private keys. The most recent modified
+  private key will be parsed into a JWK and serves as the active private key to sign various JWTs issued by this server.
+
+  A public JWK will be derived from this private key and used as the key for token verification.
+type: filename
+root_default: /etc/pelican/issuer-keys
+default: $ConfigBase/issuer-keys
+components: ["origin", "cache", "registry", "director"]
 ---
 name: Transport.DialerTimeout
 description: |+

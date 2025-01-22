@@ -196,6 +196,13 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		lc.Register(ctx, rootGroup)
 	}
 
+	// Start a routine to periodically refresh the private key directory
+	// This ensures that new or updated private keys are automatically loaded and registered
+	if modules.IsEnabled(server_structs.RegistryType) || modules.IsEnabled(server_structs.OriginType) ||
+		modules.IsEnabled(server_structs.CacheType) || modules.IsEnabled(server_structs.DirectorType) {
+		launcher_utils.LaunchIssuerKeysDirRefresh(ctx, egrp, modules)
+	}
+
 	log.Info("Starting web engine...")
 	lnReference = nil
 	egrp.Go(func() error {

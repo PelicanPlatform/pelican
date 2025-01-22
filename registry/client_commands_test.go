@@ -26,28 +26,32 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func registryMockup(ctx context.Context, t *testing.T, testName string) *httptest.Server {
+	tDir := t.TempDir()
+	issuerTempDir := filepath.Join(tDir, testName)
 
-	issuerTempDir := filepath.Join(t.TempDir(), testName)
-
-	ikey := filepath.Join(issuerTempDir, "issuer.jwk")
-	viper.Set("IssuerKey", ikey)
+	ikeyDir := filepath.Join(issuerTempDir, "issuer-keys")
+	viper.Set("IssuerKeysDirectory", ikeyDir)
 	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
 	viper.Set("Server.WebPort", 8444)
-	config.InitConfigDir(viper.GetViper())
+	viper.Set("ConfigDir", tDir)
+	config.InitConfig()
 
 	err := config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
@@ -66,11 +70,38 @@ func registryMockup(ctx context.Context, t *testing.T, testName string) *httptes
 	return svr
 }
 
+func getSortedKids(ctx context.Context, jsonStr string) ([]string, error) {
+	set, err := jwk.Parse([]byte(jsonStr))
+	if err != nil {
+		return nil, err
+	}
+	var kids []string
+	keysIter := set.Keys(ctx)
+	for keysIter.Next(ctx) {
+		key := keysIter.Pair().Value.(jwk.Key)
+
+		kid, ok := key.Get("kid")
+		if !ok {
+			continue
+		}
+		kids = append(kids, kid.(string))
+	}
+	sort.Strings(kids)
+
+	return kids, nil
+}
+
 func TestServeNamespaceRegistry(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
+	t.Cleanup(func() {
+		if r := recover(); r != nil {
+			t.Errorf("Test panicked: %v", r)
+		}
 
+		cancel()
+		assert.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
+	})
 	server_utils.ResetTestState()
 
 	svr := registryMockup(ctx, t, "serveregistry")
@@ -140,21 +171,210 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		stdoutCapture = string(capturedOutput[:n])
 		assert.Equal(t, "[]\n", stdoutCapture)
 	})
+}
+
+func TestNamespaceRegisteredPubKeyUpdate(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	t.Cleanup(func() {
+		if r := recover(); r != nil {
+			t.Errorf("Test panicked: %v", r)
+		}
+
+		cancel()
+		assert.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
+	})
 	server_utils.ResetTestState()
+
+	svr := registryMockup(ctx, t, "pub-key-update")
+	defer func() {
+		err := ShutdownRegistryDB()
+		assert.NoError(t, err)
+		svr.CloseClientConnections()
+		svr.Close()
+	}()
+
+	_, err := config.GetIssuerPublicJWKS()
+	require.NoError(t, err)
+	privKey, err := config.GetIssuerPrivateJWK()
+	require.NoError(t, err)
+
+	//Test functionality of registering a namespace (without identity)
+	err = NamespaceRegister(privKey, svr.URL+"/api/v1.0/registry", "", "/foo/bar", "mock_site_name")
+	require.NoError(t, err)
+
+	t.Run("test-registered-namespace-pubkey-update-with-new-active-key", func(t *testing.T) {
+		// Imitate LaunchIssuerKeysDirRefresh function
+		newKey, err := config.GeneratePEM(param.IssuerKeysDirectory.GetString())
+		require.NoError(t, err)
+		keysChange, err := config.RefreshKeys()
+		require.True(t, keysChange)
+		require.NoError(t, err)
+		privKey2, err := config.GetIssuerPrivateJWK()
+		require.NoError(t, err)
+		require.Equal(t, newKey.KeyID(), privKey2.KeyID())
+		err = NamespacesPubKeyUpdate(privKey2, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
+		require.NoError(t, err)
+	})
+
+	t.Run("test-namespace-pubkey-update-using-new-key-with-previous-registered-key", func(t *testing.T) {
+		// The origin currently holds two private keys (privKey, privKey2), whose
+		// corresponding public keys are registered in the registry database.
+		tempDir := filepath.Join(t.TempDir(), "somewhere")
+		privKeyX, err := config.GeneratePEM(tempDir)
+		require.NoError(t, err)
+		allkeys := config.GetIssuerPrivateKeys()
+		require.Len(t, allkeys, 2)
+
+		// Even though privKeyX is not in the origin's IssuerKeysDirectory, NamespacesPubKeyUpdate should succeed.
+		// This is because the origin holds (privKey, privKey2), satisfying the requirement of having at least one previously registered key
+		err = NamespacesPubKeyUpdate(privKeyX, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
+		require.NoError(t, err)
+	})
+
+	t.Run("test-namespace-pubkey-update-with-unregistered-key", func(t *testing.T) {
+		// Delete all private keys previously added to disk and memory
+		config.ResetIssuerPrivateKeys()
+		issuerKeysDir := param.IssuerKeysDirectory.GetString()
+		err = os.RemoveAll(issuerKeysDir)
+
+		privKey3, err := config.GeneratePEM(issuerKeysDir)
+		require.NoError(t, err)
+		keysChange, err := config.RefreshKeys()
+		require.True(t, keysChange)
+		require.NoError(t, err)
+		// privKey3 is the active issuer key of the origin, but it cannot be used to update registry db because it is not previously registered
+		err = NamespacesPubKeyUpdate(privKey3, []string{"/foo/bar"}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
+		require.ErrorContains(t, err, "Origin does not possess valid key to update public keys of registered namespace(s)")
+	})
+
+}
+
+func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	server_utils.ResetTestState()
+	t.Cleanup(func() {
+		if r := recover(); r != nil {
+			t.Errorf("Test panicked: %v", r)
+		}
+
+		cancel()
+		assert.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
+	})
+
+	tDir := t.TempDir()
+
+	svr := registryMockup(ctx, t, "MultiPubKeysRegisteredOnNamespace")
+	defer func() {
+		err := ShutdownRegistryDB()
+		assert.NoError(t, err)
+		svr.CloseClientConnections()
+		svr.Close()
+	}()
+
+	issuerKeysDir := param.IssuerKeysDirectory.GetString()
+	config.ResetIssuerPrivateKeys()
+	os.RemoveAll(issuerKeysDir)
+	privKeys := config.GetIssuerPrivateKeys()
+	require.Len(t, privKeys, 0)
+
+	// Construct a client(origin) that has [p1,p2,p3] and p3 is the issuer key
+	privKey1, err := config.GeneratePEM(issuerKeysDir)
+	require.NoError(t, err)
+	privKey2, err := config.GeneratePEM(issuerKeysDir)
+	require.NoError(t, err)
+	keysChange, err := config.RefreshKeys()
+	require.True(t, keysChange)
+	require.NoError(t, err)
+	privKeys = config.GetIssuerPrivateKeys()
+	require.Len(t, privKeys, 2)
+
+	prefix := "/mascot/bucky"
+	err = NamespaceRegister(privKey2, svr.URL+"/api/v1.0/registry", "", prefix, "mock_site_name")
+	require.NoError(t, err)
+
+	privKey3, err := config.GeneratePEM(issuerKeysDir)
+	require.NoError(t, err)
+	keysChange, err = config.RefreshKeys()
+	require.True(t, keysChange)
+	require.NoError(t, err)
+
+	// Construct a public keys JWKS [p2,p4] to save in registry DB, imitating admin manually adding p4
+	registryDbJwks := jwk.NewSet()
+	pubKey2, err := jwk.PublicKeyOf(privKey2)
+	require.NoError(t, err)
+	err = registryDbJwks.AddKey(pubKey2)
+	require.NoError(t, err)
+	privKey4, err := config.GeneratePEM(filepath.Join(tDir, "elsewhere"))
+	require.NoError(t, err)
+	pubKey4, err := jwk.PublicKeyOf(privKey4)
+	require.NoError(t, err)
+	err = registryDbJwks.AddKey(pubKey4)
+	require.NoError(t, err)
+	jwksBytes, err := json.Marshal(registryDbJwks)
+	require.NoError(t, err)
+	jwksStr := string(jwksBytes)
+
+	// Test functionality of a namespace registered with multi public keys [p2,p4]
+	err = setNamespacePubKey(prefix, jwksStr) // set the registered public keys to [p2,p4]
+	require.NoError(t, err)
+	ns, err := getNamespaceByPrefix(prefix)
+	require.NoError(t, err)
+	require.Equal(t, jwksStr, ns.Pubkey)
+
+	privKeys = config.GetIssuerPrivateKeys()
+	require.Len(t, privKeys, 3)
+
+	// Client allValidKeys:[p1,p2,p3] (issuerKey:p3) ---UPDATE--> Registry [p2,p4]
+	// => should update Registry to [p1,p2,p3] (complete overwrite)
+	err = NamespacesPubKeyUpdate(privKey3, []string{prefix}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
+	require.NoError(t, err)
+	ns, err = getNamespaceByPrefix(prefix)
+	require.NoError(t, err)
+
+	expectedJwks := jwk.NewSet()
+
+	pubKey1, err := jwk.PublicKeyOf(privKey1)
+	require.NoError(t, err)
+	err = expectedJwks.AddKey(pubKey1)
+	require.NoError(t, err)
+
+	err = expectedJwks.AddKey(pubKey2)
+	require.NoError(t, err)
+
+	pubKey3, err := jwk.PublicKeyOf(privKey3)
+	require.NoError(t, err)
+	err = expectedJwks.AddKey(pubKey3)
+	require.NoError(t, err)
+
+	expectedJwksBytes, err := json.Marshal(expectedJwks)
+	require.NoError(t, err)
+	expectedJwksStr := string(expectedJwksBytes)
+
+	expectedKids, err := getSortedKids(ctx, expectedJwksStr)
+	require.NoError(t, err)
+	actualKids, err := getSortedKids(ctx, ns.Pubkey)
+	require.NoError(t, err)
+	require.Equal(t, expectedKids, actualKids)
 }
 
 func TestRegistryKeyChainingOSDF(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
 	server_utils.ResetTestState()
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	t.Cleanup(func() {
+		if r := recover(); r != nil {
+			t.Errorf("Test panicked: %v", r)
+		}
+
+		cancel()
+		assert.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
+	})
+
 	_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 	assert.NoError(t, err)
-	viper.Set("Federation.DirectorUrl", "https://osdf-director.osg-htc.org")
-	viper.Set("Federation.RegistryUrl", "https://osdf-registry.osg-htc.org")
-	viper.Set("Federation.JwkUrl", "https://osg-htc.org/osdf/public_signing_key.jwks")
-	viper.Set("Federation.BrokerUrl", "https://osdf-director.osg-htc.org")
 
 	// On by default, but just to make things explicit
 	viper.Set("Registry.RequireKeyChaining", true)
@@ -176,9 +396,9 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 		topoSvr.Close()
 	}()
 
-	_, err = config.GetIssuerPublicJWKS()
-	require.NoError(t, err)
 	privKey, err := config.GetIssuerPrivateJWK()
+	require.NoError(t, err)
+	_, err = config.GetIssuerPublicJWKS()
 	require.NoError(t, err)
 
 	// Start by registering /foo/bar with the default key
@@ -200,15 +420,17 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	assert.Contains(t, err.Error(), "A superspace or subspace of this namespace /topo/foo already exists in the OSDF topology: /topo/foo. To register a Pelican equivalence, you need to present your identity.")
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
-	viper.Set("IssuerKey", t.TempDir()+"/keychaining")
-	viper.Set("ConfigDir", t.TempDir())
+	config.ResetIssuerPrivateKeys()
+	tDir2 := t.TempDir()
+	viper.Set("IssuerKeysDirectory", tDir2+"/keychaining2")
+	viper.Set("ConfigDir", tDir2)
 	config.InitConfig()
 	err = config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
 
-	_, err = config.GetIssuerPublicJWKS()
-	require.NoError(t, err)
 	privKey, err = config.GetIssuerPrivateJWK()
+	require.NoError(t, err)
+	_, err = config.GetIssuerPublicJWKS()
 	require.NoError(t, err)
 
 	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar/baz", "")
@@ -242,11 +464,19 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 }
 
 func TestRegistryKeyChaining(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
 	server_utils.ResetTestState()
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	t.Cleanup(func() {
+		if r := recover(); r != nil {
+			t.Errorf("Test panicked: %v", r)
+		}
+
+		cancel()
+		assert.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
+	})
+
 	// On by default, but just to make things explicit
 	viper.Set("Registry.RequireKeyChaining", true)
 
@@ -258,9 +488,9 @@ func TestRegistryKeyChaining(t *testing.T) {
 		registrySvr.Close()
 	}()
 
-	_, err := config.GetIssuerPublicJWKS()
-	require.NoError(t, err)
 	privKey, err := config.GetIssuerPrivateJWK()
+	require.NoError(t, err)
+	_, err = config.GetIssuerPublicJWKS()
 	require.NoError(t, err)
 
 	// Start by registering /foo/bar with the default key
@@ -272,15 +502,15 @@ func TestRegistryKeyChaining(t *testing.T) {
 	require.NoError(t, err)
 
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
-	viper.Set("IssuerKey", t.TempDir()+"/keychaining")
+	viper.Set("IssuerKeysDirectory", t.TempDir()+"/keychaining2")
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
 	err = config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
 
-	_, err = config.GetIssuerPublicJWKS()
-	require.NoError(t, err)
 	privKey, err = config.GetIssuerPrivateJWK()
+	require.NoError(t, err)
+	_, err = config.GetIssuerPublicJWKS()
 	require.NoError(t, err)
 
 	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo/bar/baz", "")
@@ -296,6 +526,4 @@ func TestRegistryKeyChaining(t *testing.T) {
 
 	err = NamespaceRegister(privKey, registrySvr.URL+"/api/v1.0/registry", "", "/foo", "")
 	require.NoError(t, err)
-
-	server_utils.ResetTestState()
 }

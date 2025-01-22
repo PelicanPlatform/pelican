@@ -22,7 +22,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ed25519"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -42,8 +41,6 @@ import (
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
-
-	"github.com/pelicanplatform/pelican/param"
 )
 
 // If we prompted the user for a new password while setting up the file,
@@ -380,17 +377,18 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 // Take a hash, and use the hash's bytes as the secret.
 func GetSecret() (string, error) {
 	// Use issuer private key as the source to generate the secret
-	issuerKeyFile := param.IssuerKey.GetString()
-	err := GeneratePrivateKey(issuerKeyFile, elliptic.P256(), false)
-	if err != nil {
-		return "", err
-	}
-	privateKey, err := LoadPrivateKey(issuerKeyFile, false)
+	privateKey, err := GetIssuerPrivateJWK()
 	if err != nil {
 		return "", err
 	}
 
-	derPrivateKey, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	// Extract the underlying ECDSA private key in native Go crypto key type
+	var rawKey interface{}
+	if err := privateKey.Raw(&rawKey); err != nil {
+		return "", err
+	}
+
+	derPrivateKey, err := x509.MarshalPKCS8PrivateKey(rawKey)
 
 	if err != nil {
 		return "", err

@@ -121,6 +121,7 @@ type Config struct {
 		UserStripDomain bool `mapstructure:"userstripdomain" yaml:"UserStripDomain"`
 	} `mapstructure:"issuer" yaml:"Issuer"`
 	IssuerKey string `mapstructure:"issuerkey" yaml:"IssuerKey"`
+	IssuerKeysDirectory string `mapstructure:"issuerkeysdirectory" yaml:"IssuerKeysDirectory"`
 	LocalCache struct {
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		HighWaterMarkPercentage int `mapstructure:"highwatermarkpercentage" yaml:"HighWaterMarkPercentage"`
@@ -434,6 +435,7 @@ type configWithType struct {
 		UserStripDomain struct { Type string; Value bool }
 	}
 	IssuerKey struct { Type string; Value string }
+	IssuerKeysDirectory struct { Type string; Value string }
 	LocalCache struct {
 		DataLocation struct { Type string; Value string }
 		HighWaterMarkPercentage struct { Type string; Value int }

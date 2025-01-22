@@ -428,7 +428,6 @@ func AddNamespace(ns *server_structs.Namespace) error {
 	if ns.AdminMetadata.Status == "" {
 		ns.AdminMetadata.Status = server_structs.RegPending
 	}
-
 	return db.Save(&ns).Error
 }
 
@@ -483,6 +482,17 @@ func updateNamespaceStatusById(id int, status server_structs.RegistrationStatus,
 	}
 
 	return db.Model(ns).Where("id = ?", id).Update("admin_metadata", string(adminMetadataByte)).Error
+}
+
+func setNamespacePubKey(prefix string, pubkeyDbString string) error {
+	if prefix == "" {
+		return errors.New("invalid prefix. Prefix must not be empty")
+	}
+	if pubkeyDbString == "" {
+		return errors.New("invalid pubkeyDbString. pubkeyDbString must not be empty")
+	}
+	ns := server_structs.Namespace{}
+	return db.Model(ns).Where("prefix = ? ", prefix).Update("pubkey", pubkeyDbString).Error
 }
 
 func deleteNamespaceByID(id int) error {

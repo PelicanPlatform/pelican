@@ -150,3 +150,39 @@ func TestLoadPrivateKey(t *testing.T) {
 		require.Nil(t, privateKey)
 	})
 }
+
+func TestMultiPrivateKey(t *testing.T) {
+	t.Run("generate-and-load-single-key", func(t *testing.T) {
+		ResetConfig()
+		defer ResetConfig()
+		tempDir := t.TempDir()
+		issuerKeysDir := filepath.Join(tempDir, "issuer-keys")
+
+		key, err := loadIssuerPrivateKey(issuerKeysDir)
+		require.NoError(t, err)
+		require.NotNil(t, key)
+	})
+
+	// This test also imitates the origin API endpoint "/newIssuerKey"
+	t.Run("second-private-key", func(t *testing.T) {
+		ResetConfig()
+		defer ResetConfig()
+		tempDir := t.TempDir()
+		issuerKeysDir := filepath.Join(tempDir, "issuer-keys")
+
+		key, err := loadIssuerPrivateKey(issuerKeysDir)
+		require.NoError(t, err)
+		require.NotNil(t, key)
+
+		// Create another private key
+		secondKey, err := generatePEMandSetIssuerKey(issuerKeysDir)
+		require.NoError(t, err)
+		require.NotNil(t, secondKey)
+		assert.NotEqual(t, key.KeyID(), secondKey.KeyID())
+
+		// Check if the active private key points to the latest key
+		latestKey, err := GetIssuerPrivateJWK()
+		require.NoError(t, err)
+		assert.Equal(t, secondKey.KeyID(), latestKey.KeyID())
+	})
+}

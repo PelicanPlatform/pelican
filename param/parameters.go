@@ -56,6 +56,7 @@ func GetDeprecated() map[string][]string {
         "Director.EnableStat": {"Director.CheckOriginPresence"},
         "DisableHttpProxy": {"Client.DisableHttpProxy"},
         "DisableProxyFallback": {"Client.DisableProxyFallback"},
+        "IssuerKey": {"none"},
         "MinimumDownloadSpeed": {"Client.MinimumDownloadSpeed"},
         "Origin.EnableDirListing": {"Origin.EnableListings"},
         "Origin.EnableFallbackRead": {"Origin.EnableDirectReads"},
@@ -167,6 +168,7 @@ var (
 	Federation_TopologyNamespaceUrl = StringParam{"Federation.TopologyNamespaceUrl"}
 	Federation_TopologyUrl = StringParam{"Federation.TopologyUrl"}
 	IssuerKey = StringParam{"IssuerKey"}
+	IssuerKeysDirectory = StringParam{"IssuerKeysDirectory"}
 	Issuer_AuthenticationSource = StringParam{"Issuer.AuthenticationSource"}
 	Issuer_GroupFile = StringParam{"Issuer.GroupFile"}
 	Issuer_GroupSource = StringParam{"Issuer.GroupSource"}
