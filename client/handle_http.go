@@ -2035,7 +2035,7 @@ Loop:
 		trailer := resp.HTTPResponse.Trailer
 		if errorStatus := trailer.Get("X-Transfer-Status"); errorStatus != "" {
 			statusCode, statusText := parseTransferStatus(errorStatus)
-			if statusCode != 200 {
+			if statusCode != http.StatusOK {
 				log.WithFields(fields).Debugln("Got error from file transfer")
 				err = errors.New("transfer error: " + statusText)
 				return
@@ -2044,7 +2044,7 @@ Loop:
 	}
 	// Valid responses include 200 and 206.  The latter occurs if the download was resumed after a
 	// prior attempt.
-	if resp.HTTPResponse.StatusCode != 200 && resp.HTTPResponse.StatusCode != 206 {
+	if resp.HTTPResponse.StatusCode != http.StatusOK && resp.HTTPResponse.StatusCode != http.StatusPartialContent {
 		log.WithFields(fields).Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
 		return 0, 0, -1, serverVersion, &HttpErrResp{resp.HTTPResponse.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s",
 			resp.HTTPResponse.StatusCode, resp.Err().Error())}
@@ -2271,7 +2271,9 @@ Loop:
 			log.Debugln("File closed")
 		case response := <-responseChan:
 			attempt.ServerVersion = response.Header.Get("Server")
-			if response.StatusCode != 200 {
+			// Note: Accept both 200 and 201 as success codes; the latter is the correct one, but
+			// older versions of XRootD incorrectly use 200.
+			if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 				log.Errorln("Got failure status code:", response.StatusCode)
 				lastError = &HttpErrResp{response.StatusCode, fmt.Sprintf("Request failed (HTTP status %d)",
 					response.StatusCode)}
@@ -2337,7 +2339,10 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 	}
 	dump, _ = httputil.DumpResponse(response, true)
 	log.Debugf("Dumping response: %s", dump)
-	if response.StatusCode != 200 {
+	// Note: XRootD used to always return 200 (OK) on upload, even when it was supposed to turn
+	// HTTP 201 (Created).  Check for both here; in the future we may want to remove the 200 check
+	// if we decide to drop support for the older versions of XRootD.
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 		log.Errorln("Error status code:", response.Status)
 		log.Debugln("From the server:")
 		textResponse, err := io.ReadAll(response.Body)

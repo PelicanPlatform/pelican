@@ -20,6 +20,9 @@ package registry
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -404,5 +407,59 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		assert.True(t, result.Completed)
 		assert.Contains(t, result.EditUrl, "https://registry.org/view/registry/namespace/edit/?id=")
 		assert.Empty(t, result.Msg)
+	})
+}
+
+func TestCompareJwks(t *testing.T) {
+	priv1, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	assert.NoError(t, err)
+	priv2, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	assert.NoError(t, err)
+	assert.False(t, priv1.Equal(priv2))
+
+	pubKey1, err := jwk.FromRaw(priv1.PublicKey)
+	assert.NoError(t, err)
+	pubKey2, err := jwk.FromRaw(priv2.PublicKey)
+	assert.NoError(t, err)
+
+	jwks1 := jwk.NewSet()
+	assert.NoError(t, jwks1.AddKey(pubKey1))
+	jwks2 := jwk.NewSet()
+	assert.NoError(t, jwks2.AddKey(pubKey2))
+	jwks1Alt := jwk.NewSet()
+	assert.NoError(t, jwks1Alt.AddKey(pubKey1))
+
+	jwks2Alt, err := jwks2.Clone()
+	assert.NoError(t, err)
+	key, err := jwk.FromRaw([]byte("01234567890123456789012345678901234567890123456789ABCDEF"))
+	assert.NoError(t, err)
+	assert.NoError(t, jwks2Alt.AddKey(key))
+
+	t.Run("compare-same-jwks", func(t *testing.T) {
+		equal := compareJwks(jwks1, jwks1Alt)
+		assert.True(t, equal, "Expected JWKS sets to be equal")
+	})
+
+	t.Run("compare-different-jwks", func(t *testing.T) {
+		equal := compareJwks(jwks1, jwks2)
+		assert.False(t, equal, "Expected JWKS sets to be different")
+	})
+
+	t.Run("compare-jwks-with-different-keys", func(t *testing.T) {
+		equal := compareJwks(jwks1Alt, jwks2Alt)
+		assert.False(t, equal, "Expected JWKS sets to be different due to new raw key")
+	})
+
+	t.Run("compare-jwks-with-different-key-count", func(t *testing.T) {
+		equal := compareJwks(jwks2, jwks2Alt)
+		assert.False(t, equal, "Expected JWKS sets to be different due to new raw key")
+	})
+
+	t.Run("compare-empty-jwks", func(t *testing.T) {
+		jwks1 := jwk.NewSet()
+		jwks2 := jwk.NewSet()
+
+		equal := compareJwks(jwks1, jwks2)
+		assert.True(t, equal, "Expected empty JWKS sets to be equal")
 	})
 }
