@@ -284,6 +284,13 @@ func NamespaceDelete(endpoint string, prefix string) error {
 	return nil
 }
 
+// Update the set of registered public keys for a given list of prefixes & site name.
+//
+//   - `privateKey`: The private key to use to sign the request (must also be one of the
+//     private keys in the configuration).
+//   - `prefixes`: The list of prefixes to update the public keys for in the registry.
+//   - `siteName`: The name that the server is registered under.
+//   - `namespacePubKeyEndUpdatepoint`: The registry endpoint.
 func NamespacesPubKeyUpdate(privateKey jwk.Key, prefixes []string, siteName string, namespacePubKeyEndUpdatepoint string) error {
 	publicKey, err := privateKey.PublicKey()
 	if err != nil {

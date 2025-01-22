@@ -19,6 +19,7 @@
 package registry
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
@@ -85,6 +86,31 @@ func updateNsKeySignChallengeInit(data *RegisteredPrefixUpdate) (map[string]inte
 		"registered_keys":  registeredKeysOnNs,
 	}
 	return res, nil
+}
+
+// Compare two jwk.Set objects to see if they are the same
+//
+// Similar in spirit to the internal function config.areKeysDifferent.
+func compareJwks(jwks1, jwks2 jwk.Set) bool {
+	if jwks1.Len() != jwks2.Len() {
+		return false
+	}
+	ctx := context.Background()
+	for jwksIter1 := jwks1.Keys(ctx); jwksIter1.Next(ctx); {
+		found := false
+		key1 := jwksIter1.Pair().Value.(jwk.Key)
+		for jwksIter2 := jwks2.Keys(ctx); jwksIter2.Next(ctx); {
+			key2 := jwksIter2.Pair().Value.(jwk.Key)
+			if jwk.Equal(key1, key2) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // Update the public key of registered prefix(es) if the http request passed client and server verification for nonce.
@@ -174,12 +200,21 @@ func updateNsKeySignChallengeCommit(data *RegisteredPrefixUpdate) (map[string]in
 			// Process origin's latest public key(s)
 			allPubkeyData, err := json.Marshal(data.AllPubkeys)
 			if err != nil {
-				return nil, errors.Wrapf(err, "Failed to convert the latest public key(s) from json to string format for the prefix %s", prefix)
+				return nil, errors.Wrapf(err, "Failed to convert the latest public key(s) from JSON to string format for the prefix %s", prefix)
 			}
-			clientPubkeyString := string(allPubkeyData)
+			clientJWKS, err := jwk.Parse(allPubkeyData)
+			if err != nil {
+				return nil, errors.Wrap(err, "Failed to parse the client's public key(s) as JWKS")
+			}
 
 			// Perform the update action when the latest keys in the origin are different from the registered ones
-			if clientPubkeyString != existingNs.Pubkey {
+			if compareJwks(clientJWKS, registryDbKeySet) {
+				returnMsg := map[string]interface{}{
+					"message": fmt.Sprintf("The public key of prefix %s hasn't changed -- nothing to update!", prefix),
+				}
+				log.Infof("The public key of prefix %s hasn't changed -- nothing to update!", prefix)
+				return returnMsg, nil
+			} else {
 				err = setNamespacePubKey(prefix, string(data.AllPubkeys))
 				log.Debugf("New public keys %s just replaced the old ones: %s", string(data.AllPubkeys), existingNs.Pubkey)
 				if err != nil {
@@ -190,12 +225,6 @@ func updateNsKeySignChallengeCommit(data *RegisteredPrefixUpdate) (map[string]in
 					"message": fmt.Sprintf("Updated the public key of namespace %s:", prefix),
 				}
 				log.Infof("Updated the public key of namespace %s:", prefix)
-				return returnMsg, nil
-			} else {
-				returnMsg := map[string]interface{}{
-					"message": fmt.Sprintf("The public key of prefix %s hasn't changed -- nothing to update!", prefix),
-				}
-				log.Infof("The public key of prefix %s hasn't changed -- nothing to update!", prefix)
 				return returnMsg, nil
 			}
 
