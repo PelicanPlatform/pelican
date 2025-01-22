@@ -111,7 +111,7 @@ func GetIssuerPrivateKeys() map[string]jwk.Key {
 func createDirForKeys(dir string) error {
 	gid, err := GetDaemonGID()
 	if err != nil {
-		return errors.Wrap(err, "failed to get deamon gid")
+		return errors.Wrap(err, "failed to get daemon gid")
 	}
 	if err := MkdirAll(dir, 0750, -1, gid); err != nil {
 		return errors.Wrapf(err, "failed to set the permission of %s", dir)
@@ -231,10 +231,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool)
 		return errors.Wrap(err, "Failed to create new private key file at "+keyLocation)
 	}
 	defer file.Close()
-	priv, err := ecdsa.GenerateKey(curve, rand.Reader)
-	if err != nil {
-		return err
-	}
+
 	// Windows does not have "chown", has to work differently
 	currentOS := runtime.GOOS
 	if currentOS == "windows" {
@@ -249,6 +246,16 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool)
 			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
 				keyLocation, groupname)
 		}
+	}
+
+	return generatePrivateKeyToFile(file, curve)
+}
+
+// Write a PEM-encoded private key to an open file
+func generatePrivateKeyToFile(file *os.File, curve elliptic.Curve) error {
+	priv, err := ecdsa.GenerateKey(curve, rand.Reader)
+	if err != nil {
+		return err
 	}
 
 	bytes, err := x509.MarshalPKCS8PrivateKey(priv)
@@ -603,8 +610,8 @@ func loadSinglePEM(path string) (jwk.Key, error) {
 // Helper function to load/refresh all key files from both legacy IssuerKey file and specified directory
 // find the most recent private key based on lexicographical order of their filenames
 func loadPEMFiles(dir string) (jwk.Key, error) {
-	var mostRecentKey jwk.Key
-	var mostRecentFileName string
+	var firstKey jwk.Key
+	var firstFileName string
 	latestKeys := getIssuerPrivateKeysCopy()
 
 	// Load legacy private key if it exists - parsing the file at IssuerKey act as if it is included in IssuerKeysDirectory
@@ -616,52 +623,60 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 				log.Warnf("Failed to load key %s: %v", issuerKeyPath, err)
 			} else {
 				latestKeys[issuerKey.KeyID()] = issuerKey
-				if mostRecentFileName == "" || filepath.Base(issuerKeyPath) > mostRecentFileName {
-					mostRecentFileName = filepath.Base(issuerKeyPath)
-					mostRecentKey = issuerKey
+				if firstFileName == "" || filepath.Base(issuerKeyPath) < firstFileName {
+					firstFileName = filepath.Base(issuerKeyPath)
+					firstKey = issuerKey
 				}
 			}
 		}
 	}
 
-	// Ensure input directory dir exists, if not, create it with proper permissions
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := createDirForKeys(dir); err != nil {
-			return nil, errors.Wrapf(err, "failed to create directory and set permissions: %s", dir)
-		}
+	if dir == "" && issuerKeyPath == "" {
+		return nil, errors.New("no private key file or directory specified")
 	}
-	// Traverse the directory for .pem files in lexical order
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
 
-		if !d.IsDir() && filepath.Ext(d.Name()) == ".pem" {
-			// Parse the private key in this file and add to the in-memory keys map
-			key, err := loadSinglePEM(path)
+	if dir != "" {
+		// Ensure input directory dir exists, if not, create it with proper permissions
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			if err := createDirForKeys(dir); err != nil {
+				return nil, errors.Wrapf(err, "failed to create directory and set permissions: %s", dir)
+			}
+		}
+		// Traverse the directory for .pem files in lexical order
+		err := filepath.WalkDir(dir, func(path string, dirEnt fs.DirEntry, err error) error {
 			if err != nil {
-				log.Warnf("Failed to load key %s: %v", path, err)
-				return nil // Skip this file and continue
+				return err
 			}
-
-			latestKeys[key.KeyID()] = key
-
-			// Update the most recent key based on lexicographical order of filenames
-			if mostRecentFileName == "" || d.Name() > mostRecentFileName {
-				mostRecentFileName = d.Name()
-				mostRecentKey = key
+			// Do not recurse into directories
+			if (path != dir) && dirEnt.IsDir() {
+				return filepath.SkipDir
 			}
+			if dirEnt.Type().IsRegular() && filepath.Ext(dirEnt.Name()) == ".pem" {
+				// Parse the private key in this file and add to the in-memory keys map
+				key, err := loadSinglePEM(path)
+				if err != nil {
+					log.Warnf("Failed to load key %s: %v", path, err)
+					return nil // Skip this file and continue
+				}
+
+				latestKeys[key.KeyID()] = key
+
+				// Update the most recent key based on lexicographical order of filenames
+				if firstFileName == "" || dirEnt.Name() < firstFileName {
+					firstFileName = dirEnt.Name()
+					firstKey = key
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to traverse directory %s that stores private keys", dir)
 		}
-		return nil
-	})
-
-	if err != nil {
-		return nil, errors.Wrapf(err, "failed to traverse directory %s that stores private keys", dir)
 	}
 
 	// Create a new private key and set as issuer key when neither legacy private key at IssuerKey
 	// nor any .pem file at IssuerKeysDirectory exists
-	if len(latestKeys) == 0 || mostRecentKey == nil {
+	if len(latestKeys) == 0 || firstKey == nil {
 		newKey, err := generatePEMandSetIssuerKey(dir)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to create a new .pem file to save private key")
@@ -671,48 +686,63 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 
 	// Save current key and all up-to-date valid private keys and the in-memory issuerKeys
 	newKeys := IssuerKeys{
-		CurrentKey: mostRecentKey,
+		CurrentKey: firstKey,
 		AllKeys:    latestKeys,
 	}
 	issuerKeys.Store(&newKeys)
-	log.Debugf("Set private key %s as the issuer key", mostRecentKey.KeyID())
+	log.Debugf("Set private key %s as the issuer key", firstKey.KeyID())
 
-	return mostRecentKey, nil
+	return firstKey, nil
 }
 
 // Create a new .pem file (combining GeneratePrivateKey and LoadPrivateKey functions)
-func GeneratePEM(dir string) (jwk.Key, error) {
-	// Generate a unique filename using a POSIX mkstemp-like logic
-	// Create a temp file, store its filename, then immediately delete this temp file
-	filenamePattern := fmt.Sprintf("pelican_generated_%d_*.pem",
-		time.Now().UnixNano())
-	if err := createDirForKeys(dir); err != nil {
-		return nil, errors.Wrapf(err, "failed to create directory and set permissions: %s", dir)
+func GeneratePEM(dir string) (key jwk.Key, err error) {
+	var fname string
+	var keyFile *os.File
+	if dir == "" {
+		issuerKeyLocation := param.IssuerKey.GetString()
+		if issuerKeyLocation == "" {
+			err = errors.New("no private key file or directory specified")
+			return
+		}
+		log.Debugln("Generating new private key in the legacy IssuerKey file", issuerKeyLocation)
+		fname = issuerKeyLocation
+		keyFile, err = os.OpenFile(issuerKeyLocation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0400)
+		if err != nil {
+			err = errors.Wrap(err, "failed to open issuer key file")
+			return
+		}
+	} else {
+		// Generate a unique filename using a POSIX mkstemp-like logic
+		// Create a temp file, store its filename, then immediately delete this temp file
+		filenamePattern := fmt.Sprintf("pelican_generated_%d_*.pem",
+			time.Now().UnixNano())
+		if err = createDirForKeys(dir); err != nil {
+			err = errors.Wrapf(err, "failed to create directory and set permissions: %s", dir)
+			return
+		}
+		keyFile, err = os.CreateTemp(dir, filenamePattern)
+		if err != nil {
+			err = errors.Wrap(err, "failed to remove temp file")
+			return
+		}
+		fname = keyFile.Name()
+		log.Debugln("Generating new private key in the IssuerKeys directory at", fname)
 	}
-	tempFile, err := os.CreateTemp(dir, filenamePattern)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to remove temp file")
-	}
-	keyPath := tempFile.Name()
-	if err := tempFile.Close(); err != nil {
-		return nil, errors.Wrap(err, "failed to close temp file")
-	}
-	if err := os.Remove(keyPath); err != nil {
-		return nil, errors.Wrap(err, "failed to remove temp file")
+	defer keyFile.Close()
+
+	if err = generatePrivateKeyToFile(keyFile, elliptic.P256()); err != nil {
+		return nil, errors.Wrapf(err, "failed to generate private key in file %s", fname)
 	}
 
-	if err := GeneratePrivateKey(keyPath, elliptic.P256(), false); err != nil {
-		return nil, errors.Wrapf(err, "failed to generate new private key at %s", keyPath)
+	if key, err = loadSinglePEM(fname); err != nil {
+		log.Errorf("Failed to load key %s: %v", fname, err)
+		err = errors.Wrapf(err, "failed to load key from %s", fname)
+		return
 	}
 
-	key, err := loadSinglePEM(keyPath)
-	if err != nil {
-		log.Errorf("Failed to load key %s: %v", keyPath, err)
-		return nil, errors.Wrapf(err, "failed to load key from %s", keyPath)
-	}
-
-	log.Debugf("Generated private key %s", key.KeyID())
-	return key, nil
+	log.Debugf("Generated private key with key ID %s", key.KeyID())
+	return
 }
 
 // Generate a new .pem file and then set the private key it contains as the issuer key
@@ -920,6 +950,8 @@ func LoadSessionSecret() ([]byte, error) {
 	return rest, nil
 }
 
+// Check to see if two given maps of jwk.Keys are logically
+// equivalent
 func areKeysDifferent(a, b map[string]jwk.Key) bool {
 	if len(a) != len(b) {
 		return true
@@ -940,6 +972,8 @@ func areKeysDifferent(a, b map[string]jwk.Key) bool {
 	return false // All keys are the same
 }
 
+// Refresh the private keys directory and return `true` if the keys have changed
+// since the last refresh
 func RefreshKeys() (bool, error) {
 	before := GetIssuerPrivateKeys()
 	_, err := loadIssuerPrivateKey(param.IssuerKeysDirectory.GetString())

@@ -220,6 +220,11 @@ func TestMultiKeysRegistration(t *testing.T) {
 	keysMap := config.GetIssuerPrivateKeys()
 	require.Equal(t, 1, len(keysMap))
 
+	// Get the key name (so we can delete it later)
+	dirEntries, err := os.ReadDir(keysDir)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(dirEntries))
+
 	// Create a new issuer key and rotate out the old one
 	secondKey, err := config.GeneratePEM(keysDir)
 	require.NoError(t, err)
@@ -231,7 +236,9 @@ func TestMultiKeysRegistration(t *testing.T) {
 	require.NoError(t, err)
 	activeKey, err := config.GetIssuerPrivateJWK()
 	require.NoError(t, err)
-	require.Equal(t, secondKey, activeKey)
+	// Note: late in the development of this work, we switched to
+	// having GetIssuerPrivateJWK return the oldest active key
+	require.Equal(t, privKey, activeKey)
 	keysMap = config.GetIssuerPrivateKeys()
 	require.Equal(t, secondKey, keysMap[secondKey.KeyID()])
 	require.Equal(t, privKey, keysMap[key.KeyID()])
@@ -249,6 +256,9 @@ func TestMultiKeysRegistration(t *testing.T) {
 
 	viper.Set("Federation.RegistryUrl", svr.URL)
 	viper.Set("Origin.FederationPrefix", "/test123")
+
+	// Remove the original key, forcing us to register with the new one
+	require.NoError(t, os.Remove(filepath.Join(keysDir, dirEntries[0].Name())))
 
 	// Re-run the InitServer to reflect the new RegistryUrl set above
 	require.NoError(t, config.InitServer(ctx, server_structs.OriginType))
@@ -286,7 +296,7 @@ func TestMultiKeysRegistration(t *testing.T) {
 	keySet, err := jwk.Parse([]byte(entries[0].Pubkey))
 	require.NoError(t, err)
 	registryKey, isPresent := keySet.LookupKeyID(secondKeyId)
-	assert.True(t, isPresent)
+	require.True(t, isPresent)
 	assert.True(t, jwk.Equal(registryKey, secondPubKey))
 	assert.Equal(t, "mock_site_name", entries[0].AdminMetadata.SiteName)
 
