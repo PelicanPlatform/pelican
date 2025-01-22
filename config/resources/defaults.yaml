@@ -105,7 +105,7 @@ Monitoring:
   PromQLAuthorization: true
   AggregatePrefixes: ["/*"]
   DataRetention: 360h
-  LabelLimt: 64
+  LabelLimit: 64
   LabelNameLengthLimit: 128
   LabelValueLengthLimit: 2048
   SampleLimit: 200
