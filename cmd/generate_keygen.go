@@ -19,19 +19,39 @@
 package main
 
 import (
+	"crypto"
+	"crypto/elliptic"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 )
+
+func createJWKS(privKey crypto.PrivateKey) (jwk.Set, error) {
+	key, err := jwk.FromRaw(privKey)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to generate JWK from private key")
+	}
+	jwks := jwk.NewSet()
+
+	pkey, err := jwk.PublicKeyOf(key)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to generate public key from key %s", key.KeyID())
+	}
+
+	if err = jwks.AddKey(pkey); err != nil {
+		return nil, errors.Wrapf(err, "Failed to add public key %s to new JWKS", key.KeyID())
+	}
+
+	return jwks, nil
+}
 
 func keygenMain(cmd *cobra.Command, args []string) error {
 	wd, err := os.Getwd()
@@ -39,7 +59,7 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to get the current working directory")
 	}
 	if privateKeyPath == "" {
-		privateKeyPath = filepath.Join(wd, "issuer-keys")
+		privateKeyPath = filepath.Join(wd, "issuer.jwk")
 	} else {
 		privateKeyPath = filepath.Clean(strings.TrimSpace(privateKeyPath))
 	}
@@ -68,15 +88,19 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("file exists for public key under %s", publicKeyPath)
 	}
 
-	viper.Set(param.IssuerKeysDirectory.GetName(), privateKeyPath)
+	if err := config.GeneratePrivateKey(privateKeyPath, elliptic.P256(), false); err != nil {
+		return errors.Wrapf(err, "failed to generate new private key at %s", privateKeyPath)
+	}
+	privKey, err := config.LoadPrivateKey(privateKeyPath, false)
+	if err != nil {
+		return errors.Wrapf(err, "failed to load private key from %s", privateKeyPath)
+	}
 
-	// GetIssuerPublicJWKS will generate the private key in IssuerKeysDirectory if it does not exist
-	// and parse the private key and generate the corresponding public key for us
-	pubkey, err := config.GetIssuerPublicJWKS()
+	pubJWKS, err := createJWKS(privKey)
 	if err != nil {
 		return err
 	}
-	bytes, err := json.MarshalIndent(pubkey, "", "	")
+	bytes, err := json.MarshalIndent(pubJWKS, "", "	")
 	if err != nil {
 		return errors.Wrap(err, "failed to generate json from jwks")
 	}

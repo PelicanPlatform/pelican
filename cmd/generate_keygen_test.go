@@ -49,8 +49,8 @@ func setupTestRun(t *testing.T) string {
 	return tmpDir
 }
 
-func checkKeys(t *testing.T, publicKey string) {
-	_, err := config.GetIssuerPrivateJWK()
+func checkKeys(t *testing.T, privateKey, publicKey string) {
+	_, err := config.LoadPrivateKey(privateKey, false)
 	require.NoError(t, err)
 
 	jwks, err := jwk.ReadFile(publicKey)
@@ -79,6 +79,7 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
+			filepath.Join(tempDir, "issuer.jwk"),
 			filepath.Join(tempDir, "issuer-pub.jwks"),
 		)
 	})
@@ -94,6 +95,7 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
+			privateKeyPath,
 			filepath.Join(tempWd, "issuer-pub.jwks"),
 		)
 	})
@@ -109,6 +111,7 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
+			filepath.Join(tempWd, "issuer.jwk"),
 			publicKeyPath,
 		)
 	})
@@ -125,6 +128,7 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
+			privateKeyPath,
 			filepath.Join(tempWd, "issuer-pub.jwks"),
 		)
 	})
@@ -141,6 +145,7 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
+			filepath.Join(tempWd, "issuer.jwk"),
 			publicKeyPath,
 		)
 	})
