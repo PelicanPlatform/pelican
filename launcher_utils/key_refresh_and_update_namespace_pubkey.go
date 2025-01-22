@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -113,29 +113,25 @@ func triggerNamespacesPubKeyUpdate(ctx context.Context) error {
 // Check the directory containing .pem files regularly, load new private key(s)
 // For origin server, if new file(s) are detected, then register the new public key
 func LaunchIssuerKeysDirRefresh(ctx context.Context, egrp *errgroup.Group, modules server_structs.ServerType) {
-	egrp.Go(func() error {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				log.Debugln("Stopping periodic check for private keys directory.")
+	server_utils.LaunchWatcherMaintenance(
+		ctx,
+		[]string{param.IssuerKeysDirectory.GetString()},
+		"private key refresh and registration",
+		time.Minute,
+		func( /*notifyEvent*/ bool) error {
+			// Refresh the disk to pick up any new private key
+			keysChanged, err := config.RefreshKeys()
+			if err != nil {
 				return nil
-			case <-ticker.C:
-				// Refresh the disk to pick up any new private key
-				keysChanged, err := config.RefreshKeys()
-				if err != nil {
-					return nil
-				}
+			}
 
-				// Update public key registered with namespace in registry db when the private key(s) changed in an origin
-				if modules.IsEnabled(server_structs.OriginType) && keysChanged {
-					if err = triggerNamespacesPubKeyUpdate(ctx); err != nil {
-						return err
-					}
+			// Update public key registered with namespace in registry db when the private key(s) changed in an origin
+			if modules.IsEnabled(server_structs.OriginType) && keysChanged {
+				if err = triggerNamespacesPubKeyUpdate(ctx); err != nil {
+					return err
 				}
 			}
-		}
-	})
+			return nil
+		},
+	)
 }
