@@ -803,7 +803,7 @@ func InitConfigDir(v *viper.Viper) {
 
 // InitConfig sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
-func InitConfig() {
+func InitConfig(shouldGenerateLogFile bool) {
 
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
@@ -838,7 +838,7 @@ func InitConfig() {
 		cobra.CheckErr(err)
 	}
 	logLocation := param.Logging_LogLocation.GetString()
-	if logLocation != "" {
+	if logLocation != "" && shouldGenerateLogFile {
 		dir := filepath.Dir(logLocation)
 		if dir != "" {
 			if err := os.MkdirAll(dir, 0640); err != nil {

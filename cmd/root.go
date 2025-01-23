@@ -124,7 +124,26 @@ func restartProgram() error {
 }
 
 func init() {
-	cobra.OnInitialize(config.InitConfig)
+	cobra.OnInitialize(func() {
+		// Extract the downstream command
+		cmd, _, err := rootCmd.Find(os.Args[1:])
+		shouldGenerateLogFile := true // Default to generating the log file
+
+		if err == nil && cmd != nil {
+			// Traverse to the top-level command
+			topLevelCmd := cmd
+			for topLevelCmd.HasParent() && topLevelCmd.Parent() != rootCmd {
+				topLevelCmd = topLevelCmd.Parent()
+			}
+
+			// Skip log file generation for specific top-level commands
+			if topLevelCmd == generateCmd || topLevelCmd == rootConfigCmd || topLevelCmd == namespaceCmd || topLevelCmd == config_printer.ConfigCmd {
+				shouldGenerateLogFile = false
+			}
+		}
+
+		config.InitConfig(shouldGenerateLogFile)
+	})
 	rootCmd.AddCommand(objectCmd)
 	objectCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(directorCmd)

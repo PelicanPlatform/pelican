@@ -66,7 +66,7 @@ func (x *xrootdTest) setup() {
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.StoragePrefix", "/")
 	viper.Set("Origin.FederationPrefix", "/")
-	config.InitConfig()
+	config.InitConfig(false)
 	var cancel context.CancelFunc
 	var egrp *errgroup.Group
 	x.ctx, cancel, egrp = test_utils.TestContext(context.Background(), x.T)
@@ -93,7 +93,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 	viper.Set("Xrootd.RunLocation", dirname)
 	viper.Set("Origin.StoragePrefix", "/")
 	viper.Set("Origin.FederationPrefix", "/")
-	config.InitConfig()
+	config.InitConfig(false)
 	configPath, err := ConfigXrootd(ctx, true)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
@@ -313,7 +313,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 	viper.Set("Cache.RunLocation", dirname)
 	viper.Set("ConfigDir", dirname)
-	config.InitConfig()
+	config.InitConfig(false)
 	configPath, err := ConfigXrootd(ctx, false)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
@@ -630,7 +630,7 @@ func TestUpdateAuth(t *testing.T) {
 	viper.Set("Xrootd.ScitokensConfig", scitokensName)
 	viper.Set("Origin.FederationPrefix", "/test")
 	viper.Set("Origin.StoragePrefix", "/")
-	config.InitConfig()
+	config.InitConfig(false)
 
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
@@ -718,7 +718,7 @@ func TestCopyCertificates(t *testing.T) {
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("Origin.RunLocation", runDirname)
 	viper.Set("ConfigDir", configDirname)
-	config.InitConfig()
+	config.InitConfig(false)
 
 	// First, invoke CopyXrootdCertificates directly, ensure it works.
 	err := CopyXrootdCertificates(&origin.OriginServer{})

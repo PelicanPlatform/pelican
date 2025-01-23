@@ -110,7 +110,7 @@ func stashPluginMain(args []string) {
 	}()
 
 	var isConfigErr = false
-	config.InitConfig()
+	config.InitConfig(true)
 	configErr := config.InitClient()
 	if configErr != nil {
 		log.Errorf("Problem initializing the Pelican client config: %v", configErr)

@@ -96,7 +96,7 @@ func TestSharingUrl(t *testing.T) {
 	viper.Set("ConfigDir", t.TempDir())
 	viper.Set("Logging.Level", "debug")
 	viper.Set("TLSSkipVerify", true)
-	config.InitConfig()
+	config.InitConfig(false)
 
 	os.Setenv("PELICAN_SKIP_TERMINAL_CHECK", "password")
 	defer os.Unsetenv("PELICAN_SKIP_TERMINAL_CHECK")

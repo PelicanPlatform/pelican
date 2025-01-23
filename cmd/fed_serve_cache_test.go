@@ -94,7 +94,7 @@ func TestFedServeCache(t *testing.T) {
 
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
-	config.InitConfig()
+	config.InitConfig(false)
 
 	viper.Set("Origin.StorageType", "posix")
 	// Disable functionality we're not using (and is difficult to make work on Mac)

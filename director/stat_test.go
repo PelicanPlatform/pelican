@@ -710,7 +710,7 @@ func TestCache(t *testing.T) {
 	viper.Reset()
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
+	config.InitConfig(false)
 	var reqCounter atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
@@ -835,7 +835,7 @@ func TestSendHeadReq(t *testing.T) {
 	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
+	config.InitConfig(false)
 
 	t.Run("correct-input-gives-no-error", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
