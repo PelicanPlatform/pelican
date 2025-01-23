@@ -126,8 +126,9 @@ done
 # Run pelican object put
 ./pelican object put ./get_put_tmp/input.txt pelican://$HOSTNAME:8444/test/input.txt -d -t get_put_tmp/test-token.jwt -L get_put_tmp/putOutput.txt
 
-# Check output of command
-if grep -q "Dumping response: HTTP/1.1 200 OK" get_put_tmp/putOutput.txt; then
+# Check output of command.  Note we can accept either
+# 200 (old, incorrect response from XRootD but we accept it) or 201 (Created; correct)
+if grep -q "Dumping response: HTTP/1.1 20" get_put_tmp/putOutput.txt; then
     echo "Uploaded bytes successfully!"
 else
     echo "Did not upload correctly"

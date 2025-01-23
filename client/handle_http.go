@@ -1064,6 +1064,10 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	tj.directorUrl = copyUrl.FedInfo.DirectorEndpoint
 	dirResp, err := GetDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, "")
 	if err != nil {
+		var sce *StatusCodeError
+		if errors.As(err, &sce) {
+			return
+		}
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", pUrl.String())
 		return
@@ -1081,6 +1085,10 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		if contents != "" {
 			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, contents)
 			if err != nil {
+				var sce *StatusCodeError
+				if errors.As(err, &sce) {
+					return nil, err
+				}
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", copyUrl.String())
 				return nil, err

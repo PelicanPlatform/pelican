@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,11 +58,13 @@ func initMockStatUtils() {
 
 	for _, key := range serverAds.Keys() {
 		ctx, cancel := context.WithCancel(context.Background())
-		statUtils[key] = serverStatUtil{
-			Context:     ctx,
-			Cancel:      cancel,
-			Errgroup:    &utils.Group{},
-			ResultCache: ttlcache.New[string, *objectMetadata](),
+		statUtils[key] = &serverStatUtil{
+			Context:  ctx,
+			Cancel:   cancel,
+			Errgroup: &utils.Group{},
+			ResultCache: ttlcache.New[string, *objectMetadata](
+				ttlcache.WithTTL[string, *objectMetadata](300 * time.Minute),
+			),
 		}
 	}
 }
@@ -390,7 +393,7 @@ func TestQueryServersForObject(t *testing.T) {
 		mockCacheServer := []server_structs.ServerAd{{Name: "cache-overwrite", URL: url.URL{Host: "cache-overwrites.com", Scheme: "https"}}}
 
 		statUtilsMutex.Lock()
-		statUtils[mockCacheServer[0].URL.String()] = serverStatUtil{
+		statUtils[mockCacheServer[0].URL.String()] = &serverStatUtil{
 			Context:     ctx,
 			Cancel:      cancel,
 			Errgroup:    &utils.Group{},
@@ -425,7 +428,7 @@ func TestQueryServersForObject(t *testing.T) {
 		mockOrigin := []server_structs.ServerAd{{Name: "origin-overwrite", URL: url.URL{Host: "origin-overwrites.com", Scheme: "https"}}}
 
 		statUtilsMutex.Lock()
-		statUtils[mockOrigin[0].URL.String()] = serverStatUtil{
+		statUtils[mockOrigin[0].URL.String()] = &serverStatUtil{
 			Context:     ctx,
 			Cancel:      cancel,
 			Errgroup:    &utils.Group{},
@@ -708,10 +711,10 @@ func TestCache(t *testing.T) {
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()
-	reqCounter := 0
+	var reqCounter atomic.Int32
 
 	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		reqCounter += 1
+		reqCounter.Add(1)
 		log.Debugln("Mock server handling request for ", req.URL.String())
 		if req.Method == "HEAD" && req.URL.String() == "/foo/test.txt" {
 			rw.Header().Set("Content-Length", "1")
@@ -756,18 +759,18 @@ func TestCache(t *testing.T) {
 
 		stat := NewObjectStat()
 
-		startCtr := reqCounter
+		startCtr := reqCounter.Load()
 		qResult := stat.queryServersForObject(ctx, "/foo/test.txt", server_structs.CacheType, 1, 1)
 		assert.Equal(t, querySuccessful, qResult.Status)
 		require.Len(t, qResult.Objects, 1)
 		assert.Equal(t, 1, qResult.Objects[0].ContentLength)
-		require.Equal(t, startCtr+1, reqCounter)
+		require.Equal(t, startCtr+1, reqCounter.Load())
 
 		qResult = stat.queryServersForObject(ctx, "/foo/test.txt", server_structs.CacheType, 1, 1)
 		assert.Equal(t, querySuccessful, qResult.Status)
 		require.Len(t, qResult.Objects, 1)
 		assert.Equal(t, 1, qResult.Objects[0].ContentLength)
-		require.Equal(t, startCtr+1, reqCounter)
+		require.Equal(t, startCtr+1, reqCounter.Load())
 	})
 
 	t.Run("repeated-cache-access-not-found", func(t *testing.T) {
@@ -776,18 +779,18 @@ func TestCache(t *testing.T) {
 
 		stat := NewObjectStat()
 
-		startCtr := reqCounter
+		startCtr := reqCounter.Load()
 		qResult := stat.queryServersForObject(ctx, "/foo/notfound.txt", server_structs.CacheType, 1, 1)
 		assert.Equal(t, queryFailed, qResult.Status)
 		assert.Len(t, qResult.Objects, 0)
-		assert.Equal(t, queryInsufficientResErr, qResult.ErrorType)
-		require.Equal(t, startCtr+1, reqCounter)
+		assert.Equal(t, queryNoSourcesErr, qResult.ErrorType)
+		require.Equal(t, startCtr+1, reqCounter.Load())
 
 		qResult = stat.queryServersForObject(ctx, "/foo/notfound.txt", server_structs.CacheType, 1, 1)
 		assert.Equal(t, queryFailed, qResult.Status)
 		assert.Len(t, qResult.Objects, 0)
-		assert.Equal(t, queryInsufficientResErr, qResult.ErrorType)
-		require.Equal(t, startCtr+1, reqCounter)
+		assert.Equal(t, queryNoSourcesErr, qResult.ErrorType)
+		require.Equal(t, startCtr+1, reqCounter.Load())
 	})
 }
 

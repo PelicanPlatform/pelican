@@ -1553,7 +1553,7 @@ description: |+
   See [golang.org/x/sync/errgroup](https://pkg.go.dev/golang.org/x/sync@v0.6.0/errgroup#Group.SetLimit)
   for detail
 type: int
-default: 1000
+default: 100
 components: ["director"]
 ---
 name: Director.AdvertisementTTL
@@ -1648,7 +1648,7 @@ description: |+
 
   This parameter controls how many responses, per-service, will be cached.
 type: int
-default: 10000
+default: 2000
 hidden: true
 components: ["director"]
 ---
