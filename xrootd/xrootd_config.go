@@ -47,6 +47,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/lotman"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
@@ -105,6 +106,12 @@ type (
 		Exports      []server_utils.OriginExport
 	}
 
+	LotmanCfg struct {
+		Enabled    bool
+		LotHome    string
+		PurgeOrder []string
+	}
+
 	CacheConfig struct {
 		UseCmsd                          bool
 		EnableVoms                       bool
@@ -120,6 +127,7 @@ type (
 		BlocksToPrefetch                 int
 		Concurrency                      int
 		X509ClientAuthenticationPrefixes []string
+		LotmanCfg                        LotmanCfg
 	}
 
 	XrootdOptions struct {
@@ -719,6 +727,29 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 				xrdConfig.Cache.LowWatermark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
 			}
 		}
+
+		// Set up Lotman config
+		lotmanCfg := LotmanCfg{Enabled: false}
+		if param.Cache_EnableLotman.GetBool() {
+			lotmanCfg.Enabled = true
+			lotmanCfg.LotHome = param.Lotman_DbLocation.GetString()
+			policyMap, err := lotman.GetPolicyMap()
+			if err != nil {
+				return "", errors.Wrap(err, "unable to parse lotman configuration")
+			}
+
+			enabledPolicy := param.Lotman_EnabledPolicy.GetString()
+			if _, exists := policyMap[enabledPolicy]; !exists {
+				return "", errors.Errorf("policy %s is not defined in the lotman configuration", enabledPolicy)
+			}
+
+			purgeOrder := policyMap[enabledPolicy].PurgeOrder
+			if len(purgeOrder) == 0 {
+				return "", errors.Errorf("lotman policy %s has an undefined purge order", enabledPolicy)
+			}
+			lotmanCfg.PurgeOrder = purgeOrder
+		}
+		xrdConfig.Cache.LotmanCfg = lotmanCfg
 	}
 
 	// To make sure we get the correct exports, we overwrite the exports in the xrdConfig struct with the exports

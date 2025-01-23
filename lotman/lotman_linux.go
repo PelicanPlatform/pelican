@@ -459,7 +459,7 @@ func validateFieldsHook() mapstructure.DecodeHookFunc {
 
 // Grab a map of policy definitions from the config file, where the policy
 // name is the key and its attributes comprise the value.
-func getPolicyMap() (map[string]PurgePolicy, error) {
+func GetPolicyMap() (map[string]PurgePolicy, error) {
 	policyMap := make(map[string]PurgePolicy)
 	var policies []PurgePolicy
 	// Use custom decoder hook to validate fields. This validates all the way down to the bottom of the lot object.
@@ -802,7 +802,7 @@ func topoSort(lotMap map[string]Lot) ([]Lot, error) {
 func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 	var internalLots []Lot
 
-	policies, err := getPolicyMap()
+	policies, err := GetPolicyMap()
 	if err != nil {
 		return internalLots, errors.Wrap(err, "unable to parse lotman configuration")
 	}
@@ -1039,6 +1039,7 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 		log.Infof("Created default lot")
 	} else if ret == 1 {
 		log.Infoln("Default lot already exists, skipping creation")
+		defaultInitialized = true
 	}
 
 	rootInitialized := false
@@ -1069,6 +1070,7 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 		log.Infof("Created root lot")
 	} else if ret == 1 {
 		log.Infoln("Root lot already exists, skipping creation")
+		rootInitialized = true
 	}
 
 	if !defaultInitialized || !rootInitialized {

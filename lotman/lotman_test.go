@@ -555,7 +555,7 @@ func TestGetPolicyMap(t *testing.T) {
 				t.Fatalf("Error reading config: %v", err)
 			}
 
-			policyMap, err := getPolicyMap()
+			policyMap, err := GetPolicyMap()
 			if tc.expectErr {
 				require.Error(t, err)
 			} else {
