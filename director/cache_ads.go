@@ -149,6 +149,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 			// we don't want to permit an unbounded number of queries due to potential
 			// memory usage.
 			if concLimit <= 0 {
+				log.Warningln("Concurrency limit 'Director.StatConcurrencyLimit' must be positive; ignoring value", concLimit, "and using 100 instead")
 				concLimit = 100
 			}
 			statErrGrp := utils.Group{}
@@ -158,6 +159,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 			// "unbounded" (bad) and a negative value gets cast to uint64,
 			// becoming an effectively unbounded number (also bad)
 			if cap <= 0 {
+				log.Warningln("Object presence cache limit 'Director.CachePresenceCapacity' must be positive; ignoring value", cap, "and using 100 instead")
 				cap = 100
 			}
 			newUtil := serverStatUtil{
