@@ -125,19 +125,26 @@ func restartProgram() error {
 
 func init() {
 	cobra.OnInitialize(func() {
+		// Define a set of top-level commands for which log file generation should be skipped
+		excludedCommands := map[*cobra.Command]bool{
+			generateCmd:              true,
+			rootConfigCmd:            true,
+			namespaceCmd:             true,
+			config_printer.ConfigCmd: true,
+			objectCmd:                true,
+		}
+
 		// Extract the downstream command
 		cmd, _, err := rootCmd.Find(os.Args[1:])
-		shouldGenerateLogFile := true // Default to generating the log file
+		shouldGenerateLogFile := true
 
 		if err == nil && cmd != nil {
-			// Traverse to the top-level command
 			topLevelCmd := cmd
 			for topLevelCmd.HasParent() && topLevelCmd.Parent() != rootCmd {
 				topLevelCmd = topLevelCmd.Parent()
 			}
 
-			// Skip log file generation for specific top-level commands
-			if topLevelCmd == generateCmd || topLevelCmd == rootConfigCmd || topLevelCmd == namespaceCmd || topLevelCmd == config_printer.ConfigCmd {
+			if excludedCommands[topLevelCmd] {
 				shouldGenerateLogFile = false
 			}
 		}
