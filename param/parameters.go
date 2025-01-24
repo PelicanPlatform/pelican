@@ -383,6 +383,7 @@ var (
 	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
 	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
+	Server_HealthMonitoringPublic = BoolParam{"Server.HealthMonitoringPublic"}
 	Shoveler_Enable = BoolParam{"Shoveler.Enable"}
 	Shoveler_VerifyHeader = BoolParam{"Shoveler.VerifyHeader"}
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}

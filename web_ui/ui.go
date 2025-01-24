@@ -458,10 +458,16 @@ func configureMetrics(engine *gin.Engine) error {
 	prometheusMonitor.ReqCntURLLabelMappingFn = mapPrometheusPath
 	prometheusMonitor.Use(engine)
 
-	engine.GET("/api/v1.0/metrics/health", AuthHandler, AdminAuthHandler, func(ctx *gin.Context) {
+	// Health check endpoint for metrics
+	healthFunc := func(ctx *gin.Context) {
 		healthStatus := metrics.GetHealthStatus()
 		ctx.JSON(http.StatusOK, healthStatus)
-	})
+	}
+	if param.Server_HealthMonitoringPublic.GetBool() {
+		engine.GET("/api/v1.0/metrics/health", healthFunc)
+	} else {
+		engine.GET("/api/v1.0/metrics/health", AuthHandler, AdminAuthHandler, healthFunc)
+	}
 	return nil
 }
 
