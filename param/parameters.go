@@ -147,6 +147,9 @@ func (oP ObjectParam) IsSet() bool {
 var (
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
+	Cache_FilesBaseSize = StringParam{"Cache.FilesBaseSize"}
+	Cache_FilesMaxSize = StringParam{"Cache.FilesMaxSize"}
+	Cache_FilesNominalSize = StringParam{"Cache.FilesNominalSize"}
 	Cache_HighWaterMark = StringParam{"Cache.HighWaterMark"}
 	Cache_LocalRoot = StringParam{"Cache.LocalRoot"}
 	Cache_LowWatermark = StringParam{"Cache.LowWatermark"}

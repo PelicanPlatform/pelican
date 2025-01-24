@@ -606,11 +606,11 @@ func convertWatermarkToBytes(value string, totalDiskSpace uint64) (uint64, error
     if len(value) > 1 {
         suffix := strings.ToLower(string(value[len(value)-1]))
         if multiplier, exists := suffixMultipliers[suffix]; exists {
-            number, err := strconv.ParseUint(value[:len(value)-1], 10, 64)
+            number, err := strconv.ParseFloat(value[:len(value)-1], 64)
             if err != nil {
                 return 0, err
             }
-            return number * multiplier, nil
+            return uint64(number * float64(multiplier)), nil
         }
     }
 
@@ -621,7 +621,6 @@ func convertWatermarkToBytes(value string, totalDiskSpace uint64) (uint64, error
     }
     return uint64((percentage / 100) * float64(totalDiskSpace)), nil
 }
-
 
 // Divide the remaining space among lots' dedicatedGB values -- we don't ever want to
 // dedicate more space than we have available, as indicated by the HWM of the cache. This is because

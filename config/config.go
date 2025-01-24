@@ -33,7 +33,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -55,6 +54,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
@@ -165,7 +165,6 @@ var (
 
 	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 
-	watermarkUnits = []byte{'k', 'm', 'g', 't'}
 	validPrefixes  = map[ConfigPrefix]bool{
 		PelicanPrefix: true,
 		OsdfPrefix:    true,
@@ -623,45 +622,6 @@ func handleDeprecatedConfig() {
 					}
 				}
 			}
-		}
-	}
-}
-
-func checkWatermark(wmStr string) (bool, int64, error) {
-	wmNum, err := strconv.Atoi(wmStr)
-	if err == nil {
-		if wmNum > 100 || wmNum < 0 {
-			return false, 0, errors.Errorf("watermark value %s must be a integer number in range [0, 100]. Refer to parameter page for details: https://docs.pelicanplatform.org/parameters#Cache-HighWatermark", wmStr)
-		}
-		return true, int64(wmNum), nil
-		// Not an integer number, check if it's in form of <int>k|m|g|t
-	} else {
-		if len(wmStr) < 1 {
-			return false, 0, errors.Errorf("watermark value %s is empty.", wmStr)
-		}
-		unit := wmStr[len(wmStr)-1]
-		if slices.Contains(watermarkUnits, unit) {
-			byteNum, err := strconv.Atoi(wmStr[:len(wmStr)-1])
-			// Bytes portion is not an integer
-			if err != nil {
-				return false, 0, errors.Errorf("watermark value %s is neither a percentage integer (e.g. 95) or a valid bytes. Refer to parameter page for details: https://docs.pelicanplatform.org/parameters#Cache-HighWatermark", wmStr)
-			} else {
-				switch unit {
-				case 'k':
-					return true, int64(byteNum) * 1024, nil
-				case 'm':
-					return true, int64(byteNum) * 1024 * 1024, nil
-				case 'g':
-					return true, int64(byteNum) * 1024 * 1024 * 1024, nil
-				case 't':
-					return true, int64(byteNum) * 1024 * 1024 * 1024 * 1024, nil
-				default:
-					return false, 0, errors.Errorf("watermark value %s is neither a percentage integer (e.g. 95) or a valid byte. Bytes representation is missing unit (k|m|g|t). Refer to parameter page for details: https://docs.pelicanplatform.org/parameters#Cache-HighWatermark", wmStr)
-				}
-			}
-		} else {
-			// Doesn't contain k|m|g|t suffix
-			return false, 0, errors.Errorf("watermark value %s is neither a percentage integer (e.g. 95) or a valid byte. Bytes representation is missing unit (k|m|g|t). Refer to parameter page for details: https://docs.pelicanplatform.org/parameters#Cache-HighWatermark", wmStr)
 		}
 	}
 }
@@ -1326,18 +1286,63 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if param.Cache_LowWatermark.IsSet() || param.Cache_HighWaterMark.IsSet() {
-		lowWmStr := param.Cache_LowWatermark.GetString()
-		highWmStr := param.Cache_HighWaterMark.GetString()
-		ok, highWmNum, err := checkWatermark(highWmStr)
-		if !ok && err != nil {
-			return errors.Wrap(err, "invalid Cache.HighWaterMark value")
+		lowWm, lwmIsAbs, err := utils.ValidateWatermark(param.Cache_LowWatermark.GetName(), false)
+		if err != nil {
+			return err
 		}
-		ok, lowWmNum, err := checkWatermark(lowWmStr)
-		if !ok && err != nil {
-			return errors.Wrap(err, "invalid Cache.LowWatermark value")
+		highWm, hwmIsAbs, err := utils.ValidateWatermark(param.Cache_HighWaterMark.GetName(), false)
+		if err != nil {
+			return err
 		}
-		if lowWmNum >= highWmNum {
-			return fmt.Errorf("invalid Cache.HighWaterMark and Cache.LowWatermark values. Cache.HighWaterMark must be greater than Cache.LowWaterMark. Got %s, %s", highWmStr, lowWmStr)
+		if lwmIsAbs == hwmIsAbs && lowWm >= highWm {
+			// Use config strings in error to present the configured values (as opposed to whatever conversion we get from validation)
+			return errors.Errorf("invalid Cache.HighWaterMark/LowWaterMark values. The high watermark must be greater than the low "+
+				"watermark. Got %s (low) and %s (high)", param.Cache_LowWatermark.GetString(), param.Cache_HighWaterMark.GetString())
+		}
+	}
+
+	if param.Cache_FilesBaseSize.IsSet() || param.Cache_FilesNominalSize.IsSet() || param.Cache_FilesMaxSize.IsSet() {
+		// Must have high/low watermarks
+		if !param.Cache_LowWatermark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
+			return errors.New("If any of Cache parameters 'FilesBaseSize', 'FilesNominalSize', or 'FilesMaxSize' is set, then Cache.LowWatermark " +
+				"and Cache.HighWatermark must also be set")
+		}
+
+		// Further, if one is set, all three must be set
+		if !param.Cache_FilesBaseSize.IsSet() || !param.Cache_FilesNominalSize.IsSet() || !param.Cache_FilesMaxSize.IsSet() {
+			return errors.New("If any of Cache parameters 'FilesBaseSize', 'FilesNominalSize', or 'FilesMaxSize' is set, all three must be set")
+		}
+
+		var base, nominal, max float64
+		var err error
+		// Watermark validation will error if these parameters are not absolute, so we can ignore that output
+		if base, _, err = utils.ValidateWatermark(param.Cache_FilesBaseSize.GetName(), true); err != nil {
+			return err
+		}
+		if nominal, _, err = utils.ValidateWatermark(param.Cache_FilesNominalSize.GetName(), true); err != nil {
+			return err
+		}
+		if max, _, err = utils.ValidateWatermark(param.Cache_FilesMaxSize.GetName(), true); err != nil {
+			return err
+		}
+		if base >= nominal || nominal >= max {
+			return errors.Errorf("invalid Cache.FilesBaseSize/FilesNominalSize/FilesMaxSize values. The base size must be less than the "+
+				"nominal size, and the nominal size must be less than the max size. Got %s (base), %s (nominal), and %s (max)",
+				param.Cache_FilesBaseSize.GetString(), param.Cache_FilesNominalSize.GetString(), param.Cache_FilesMaxSize.GetString())
+		}
+
+		// File sizes must also be less than the low watermark, but that's not straightforward to check, especially when the cache spread across
+		// multiple disks and the low watermark is configured as a relative value. If such bad config is passed, xrootd will fail to startup with
+		// a message about what to do, and as much as I'd like to handle that early, I'll leave it to xrootd for now.
+	}
+	if param.Cache_EnableLotman.GetBool() {
+		// pfc.diskusage file directives _must_ be set.
+		// We already validate that one means all three, but I'm duplicating that here to make this safer in the case we switch orders
+		// in the future.
+		if !param.Cache_FilesBaseSize.IsSet() || !param.Cache_FilesNominalSize.IsSet() || !param.Cache_FilesMaxSize.IsSet() ||
+			!param.Cache_LowWatermark.IsSet() || !param.Cache_HighWaterMark.IsSet() {
+			return errors.New("If Cache.EnableLotman is true, the following Cache parameters must also be set: HighWaterMark, LowWaterMark, " +
+				"FilesBaseSize, FilesNominalSize, FilesMaxSize")
 		}
 	}
 

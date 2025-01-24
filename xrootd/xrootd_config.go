@@ -118,6 +118,9 @@ type (
 		CalculatedPort                   string
 		HighWaterMark                    string
 		LowWatermark                     string
+		FilesBaseSize                    string
+		FilesNominalSize                 string
+		FilesMaxSize                     string
 		ExportLocation                   string
 		RunLocation                      string
 		DataLocations                    []string
@@ -715,8 +718,8 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		return "", errors.Wrap(err, "failed to unmarshal xrootd config")
 	}
 
-	// For cache. convert integer percentage value [0,100] to decimal fraction [0.00, 1.00]
 	if !isOrigin {
+		// For cache watermarks, convert integer percentage value [0,100] to decimal fraction [0.00, 1.00]
 		if num, err := strconv.Atoi(xrdConfig.Cache.HighWaterMark); err == nil {
 			if num <= 100 && num > 0 {
 				xrdConfig.Cache.HighWaterMark = strconv.FormatFloat(float64(num)/100, 'f', 2, 64)
