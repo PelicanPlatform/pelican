@@ -83,6 +83,7 @@ enable = true
 type (
 	OriginConfig struct {
 		Multiuser         bool
+		DirectorTest      bool
 		EnableCmsd        bool
 		EnableMacaroons   bool
 		EnableVoms        bool
