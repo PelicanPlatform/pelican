@@ -101,7 +101,7 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 		// If we're not reading from the embedded yaml, grab the
 		// default configuration. We need _some_ configuration to work.
 		viper.Set("ConfigDir", t.TempDir())
-		config.InitConfig()
+		config.InitConfig(false)
 	}
 
 	tmpPathPattern := name + "*"
@@ -528,21 +528,21 @@ func TestGetPolicyMap(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	testCases := []struct {
-		name       string
-		yamlConfig string
-		expectErr  bool
+		name             string
+		yamlConfig       string
+		expectErr        bool
 		expectedPolicies []string
 	}{
 		{
-			name:       "ValidConfig",
-			yamlConfig: yamlMockup,
-			expectErr:  false,
+			name:             "ValidConfig",
+			yamlConfig:       yamlMockup,
+			expectErr:        false,
 			expectedPolicies: []string{"different-policy", "another policy"},
 		},
 		{
-			name:       "InvalidConfig",
-			yamlConfig: badYamlMockup,
-			expectErr:  true,
+			name:             "InvalidConfig",
+			yamlConfig:       badYamlMockup,
+			expectErr:        true,
 			expectedPolicies: nil,
 		},
 	}
@@ -810,32 +810,32 @@ func TestDivideRemainingSpace(t *testing.T) {
 	oppGB := float64(1.5)
 
 	createLotMap := func() map[string]Lot {
-        return map[string]Lot{
-            "lot1": {
-                LotName: "lot1",
-                MPA: &MPA{
-                    DedicatedGB:     &dedGB,
-                    OpportunisticGB: &oppGB,
-                },
-            },
-            "lot2": {
-                LotName: "lot2",
-                MPA:     &MPA{},
-            },
-            "lot3": {
-                LotName: "lot3",
-                MPA: &MPA{
-                    DedicatedGB: &dedGB,
-                },
-            },
-            "lot4": {
-                LotName: "lot4",
-                MPA: &MPA{
-                    OpportunisticGB: &oppGB, // hardcoded values should be respected
-                },
-            },
-        }
-    }
+		return map[string]Lot{
+			"lot1": {
+				LotName: "lot1",
+				MPA: &MPA{
+					DedicatedGB:     &dedGB,
+					OpportunisticGB: &oppGB,
+				},
+			},
+			"lot2": {
+				LotName: "lot2",
+				MPA:     &MPA{},
+			},
+			"lot3": {
+				LotName: "lot3",
+				MPA: &MPA{
+					DedicatedGB: &dedGB,
+				},
+			},
+			"lot4": {
+				LotName: "lot4",
+				MPA: &MPA{
+					OpportunisticGB: &oppGB, // hardcoded values should be respected
+				},
+			},
+		}
+	}
 
 	lotMap := createLotMap()
 	totalDiskSpaceB := uint64(30000000000) // 30GB
@@ -928,12 +928,12 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 	issuer2Str := "https://issuer2.com"
 	issuer2, _ := url.Parse(issuer2Str)
 	testCases := []struct {
-		name                string
-		nsAds               []server_structs.NamespaceAdV2
-		federationIssuer    string
-		directorUrl 	    string
-		expectedLotMap      map[string]Lot
-		expectedError       string
+		name             string
+		nsAds            []server_structs.NamespaceAdV2
+		federationIssuer string
+		directorUrl      string
+		expectedLotMap   map[string]Lot
+		expectedError    string
 	}{
 		{
 			name: "Valid namespaces",
@@ -952,7 +952,7 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 				},
 			},
 			federationIssuer: "https://dne-discovery.com",
-			directorUrl: "https://dne-director.com",
+			directorUrl:      "https://dne-director.com",
 			expectedLotMap: map[string]Lot{
 				"/namespace1": {
 					LotName: "/namespace1",
@@ -996,7 +996,7 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 				},
 			},
 			federationIssuer: "https://dne-discovery.com",
-			directorUrl: "https://dne-director.com",
+			directorUrl:      "https://dne-director.com",
 			expectedLotMap: map[string]Lot{
 				"/namespace2": {
 					LotName: "/namespace2",
@@ -1020,7 +1020,7 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 				},
 			},
 			federationIssuer: "",
-			directorUrl: "https://dne-director.com",
+			directorUrl:      "https://dne-director.com",
 			expectedLotMap: map[string]Lot{
 				"/namespace1": {
 					LotName: "/namespace1",
@@ -1044,9 +1044,9 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 				},
 			},
 			federationIssuer: "",
-			directorUrl: "",
-			expectedLotMap: map[string]Lot{},
-			expectedError: "The detected federation issuer, which is needed by Lotman to determine lot/namespace ownership, is empty",
+			directorUrl:      "",
+			expectedLotMap:   map[string]Lot{},
+			expectedError:    "The detected federation issuer, which is needed by Lotman to determine lot/namespace ownership, is empty",
 		},
 	}
 
@@ -1059,9 +1059,9 @@ func TestConfigLotsFromFedPrefixes(t *testing.T) {
 				// and needing to spin up a separate mock discovery server, set them all.
 				DiscoveryEndpoint: tc.federationIssuer,
 				DirectorEndpoint:  tc.directorUrl,
-				RegistryEndpoint: "https://dne-registry.com",
-				JwksUri:     "https://dne-jwks.com",
-				BrokerEndpoint:   "https://dne-broker.com",
+				RegistryEndpoint:  "https://dne-registry.com",
+				JwksUri:           "https://dne-jwks.com",
+				BrokerEndpoint:    "https://dne-broker.com",
 			}
 			config.SetFederation(fed)
 
