@@ -32,14 +32,12 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 )
 
@@ -109,14 +107,9 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	privateKeyRaw, err := config.LoadPrivateKey(param.IssuerKey.GetString(), false)
+	privateKey, err := config.GetIssuerPrivateJWK()
 	if err != nil {
 		log.Error("Failed to load private key", err)
-		os.Exit(1)
-	}
-	privateKey, err := jwk.FromRaw(privateKeyRaw)
-	if err != nil {
-		log.Error("Failed to create JWK private key", err)
 		os.Exit(1)
 	}
 

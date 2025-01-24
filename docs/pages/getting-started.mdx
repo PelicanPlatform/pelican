@@ -1,0 +1,90 @@
+# Getting Started
+
+This page is intended to help users and administrators find the right documentation to accomplish what they need to. Each section header describes the
+type of actions that section is intended to help with.
+
+## Getting Objects From An Existing Federation
+
+Objects are referenced in Pelican using `pelican://`-schemed URLs, which help Pelican clients identify the correct federation and routing information
+they need to find the source of any object. Whether you know the `pelican://`-url name of your object or not, you can find a quick tutorial for interacting
+with data using the Pelican command line client at [Accessing Data](./getting-started/accessing-data.mdx).
+
+For a more complete walkthrough of Pelican's clients, see [Getting Data with Pelican](./getting-data-with-pelican.mdx), which discusses each of Pelican's
+clients and explains how to find detailed documentation for each.
+
+This page also discusses the general methods for providing authorization to access "protected" objects through a federation.
+
+## Adding Your Data To an Existing Federation
+A goal of Pelican is to make data easily accessible regardless of how it's stored. If you have data and you want to add it to a federation, you have two options:<br />
+**a)** Use a Pelican client to write the data from its existing storage location to a location already federated via a Pelican Origin<br />
+**b)** Connect your own Pelican Origin to the data wherever it's already stored
+
+Choosing the option that's best for you depends on a few factors, like how much data you have and whether you have previous experience administering servers. Pelican
+aims to make the process of running an Origin as simple as setting up a new home wifi router, but until we've realized that goal you may be better off working
+with an existing Origin administrator. If you plan to add this data to the OSDF, you can get help by emailing [support@osg-htc.org](mailto:support@osg-htc.org).
+
+### Use a Pelican Client to Write Data via an Origin
+You can use Pelican clients to write data to a location within an existing federation. Such write (or PUT) actions using a Pelican client require that you provide
+some form of authorization.
+
+For more information on the authorization process, see [Getting Data with Pelican](./getting-data-with-pelican.mdx).
+> **NOTE:** Make sure you use the authorization method required by the maintainer of the namespace within the federation (which may not be the same as the
+maintainer of the federation).
+
+### Serving An Origin
+If you maintain the storage for the data you want to share, you can connect your storage system to an existing federation.
+
+Integrating your data with a Pelican federation starts by serving an Origin in front of whatever service already holds the data. Origins are a critical
+component in Pelican federations because they act as the adapter plug that lets a broad variety of storage technologies (posix, S3, HTTP, Globus, etc)
+interact with Pelican's clients and caching infrastructure.
+
+For a more complete discussion of Origins and how you can run your own, see [Federating Your Data](./federating-your-data.mdx).
+
+> **NOTE:** You should contact the federation maintainer to discuss their requirements/recommendations for setting up an Origin.
+
+## Sharing Your Storage Resources
+
+If you administer storage resources and you want to share them with a Pelican federation, you can do so by:<br />
+**a)** Serving a Cache ([see below](#serving-a-cache)), or<br />
+**b)** [Serving an Origin](#connect-your-data-storage-to-an-existing-federation-through-serving-an-origin)<br />
+
+Both options will benefit data consumers, but which you choose may depend on your particular hardware. For example, Pelican Caches work best when
+they're run with low-latency storage like modern NVMe SSDs and high-bandwidth network connections. Origins, on the other hand, are assumed to be less performant.
+
+In either case, sharing your storage resources will require some coordination with the administrators for your federation of choice. The best place to start is by
+reaching out to them. If you know the hostname of your federation's Director, you can usually find a contact email at:
+`< director hostname >/api/v1.0/director_ui/contact`.
+
+### Sharing your storage resources with the OSDF
+Have storage but don't know any federations to share it with? Consider contributing to the Pelican flagship [Open Science Data Federation
+(OSDF)](https://osdf.osg-htc.org/). This well-established federation is used to distribute data within the
+[OSPool](https://osg-htc.org/services/open_science_pool.html), a national distributed computing system that is accessible to any researcher affiliated with a
+US academic institution. The OSDF is connected directly with network backbones like ESNet and Internet2, enabling researchers across the country to incorporate
+their data in their OSPool workloads.
+
+> **Note:** If you or your campus have a storage allocation granted through something like the NSF's
+[CC*](https://new.nsf.gov/funding/opportunities/cc-campus-cyberinfrastructure) program, contributing storage to the OSDF can help satisfy some grant requirements.
+
+### Serving a Cache
+Pelican federations are built from the ground up to take advantage of distributed object caching. Pelican Caches enable a federation to distribute data -
+especially frequently reused data - even more efficiently.
+
+This means that even if you don't have data to share in a federation, you can help a federation run more efficiently by serving a cache that utilizes your
+existing storage resources.
+
+If you are interested in contributing a cache to an existing federation, see [Operating a Federation/Cache](./operating-a-federation/cache.mdx) for the general
+process.
+
+## Starting Your Own Federation
+
+The Pelican flagship [Open Science Data Federation (OSDF)](https://osdf.osg-htc.org/) is a highly-performant, well-established federation connected directly with network
+backbones like ESNet and Internet2. In the majority of cases, we recommend you join the OSDF to gain access to this infrastructure. However, if the OSDF does not do not
+meet the requirements for your data distribution needs, you can still leverage the power of Pelican by launching and maintaining your own Pelican federation.
+
+The process of running/managing a Pelican object federation involves setting up two primary services: a Registry and a Director.
+These services are called the federation's "Central Services", and together they handle the registration/verification of Caches and Origins (Registry),
+and maintaining an understanding of where clients should be sent to interact with objects (Director).
+
+You can find more information about operating these services in the [Operating a Federation](./operating-a-federation.mdx) section. Information specific to
+Directors can be found in the sub page titled [Director](./operating-a-federation/director.mdx) while information for Registries can be found in the sub page
+titled [Registry](./operating-a-federation/registry.mdx).

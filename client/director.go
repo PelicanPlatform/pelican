@@ -149,6 +149,12 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		}
 	}
 
+	errMsg := string(body)
+
+	// The `directorResponse` variable indicates we think this response came from a director
+	// process, not a proxy / ingress like traefik.
+	directorResponse := false
+
 	// The Content-Type will be alike "application/json; charset=utf-8"
 	if utils.HasContentType(resp, "application/json") {
 		var respErr server_structs.SimpleApiResp
@@ -156,6 +162,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 			log.Errorln("Failed to unmarshal the director's JSON response:", err)
 			return resp, unmarshalErr
 		}
+		directorResponse = true
 		// In case we have old director returning "error": "message content"
 		if respErr.Msg != "" {
 			errMsg = respErr.Msg
@@ -176,7 +183,13 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 				return queryDirector(ctx, http.MethodPut, pUrl, token)
 			}
 		}
-		return resp, errors.Errorf("%d: %s", resp.StatusCode, errMsg)
+		if resp.StatusCode == http.StatusNotFound && directorResponse && (errMsg == "All sources report object was not found" || errMsg == "Object not found at any cache") {
+			sce := StatusCodeError(http.StatusNotFound)
+			err = &sce
+		} else {
+			err = errors.Errorf("%d: %s", resp.StatusCode, errMsg)
+		}
+		return resp, err
 	}
 
 	return

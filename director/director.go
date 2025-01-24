@@ -103,7 +103,7 @@ var (
 	healthTestUtils      = make(map[string]*healthTestUtil) // The utilities for the director file tests. The key is string form of ServerAd.URL
 	healthTestUtilsMutex = sync.RWMutex{}
 
-	statUtils      = make(map[string]serverStatUtil) // The utilities for the stat call. The key is string form of ServerAd.URL
+	statUtils      = make(map[string]*serverStatUtil) // The utilities for the stat call. The key is string form of ServerAd.URL
 	statUtilsMutex = sync.RWMutex{}
 
 	startupTime = time.Now()
@@ -445,7 +445,7 @@ func redirectToCache(ginCtx *gin.Context) {
 		maxRes := len(cacheAds) + len(originAds)
 		qr := q.Query(context.Background(), reqPath, st, 1, maxRes,
 			withOriginAds(originAds), withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
-		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
+		log.Debugf("Cache stat result for %s: %s", reqPath, qr.String())
 
 		// For successful response, we got a list of URLs to access the object.
 		// We will use the host of the object url to match the URL field in originAds and cacheAds
@@ -464,7 +464,13 @@ func redirectToCache(ginCtx *gin.Context) {
 				}
 			}
 		} else if qr.Status == queryFailed {
-			if qr.ErrorType != queryInsufficientResErr {
+			if qr.ErrorType == queryNoSourcesErr {
+				ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Object not found at any cache",
+				})
+				return
+			} else if qr.ErrorType != queryInsufficientResErr {
 				ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg),
@@ -655,7 +661,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		q = NewObjectStat()
 		qr := q.Query(context.Background(), reqPath, server_structs.OriginType, 1, 3,
 			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.Caps.PublicReads))
-		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
+		log.Debugf("Origin stat result for %s: %s", reqPath, qr.String())
 
 		// For a successful response, we got a list of object URLs.
 		// We then use the host of the object url to match the URL field in originAds
@@ -671,7 +677,12 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				}
 			}
 		} else if qr.Status == queryFailed {
-			if qr.ErrorType != queryInsufficientResErr {
+			if qr.ErrorType == queryNoSourcesErr {
+				ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "All sources report object was not found",
+				})
+			} else if qr.ErrorType != queryInsufficientResErr {
 				ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg),
@@ -1011,6 +1022,36 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		return
 	}
 
+	// Check if the allowed prefixes for caches data from the registry
+	// has been initialized in the director
+	if sType == server_structs.CacheType {
+		// If the allowed prefix for caches data is not initialized,
+		// wait for it to be initialized for 3 seconds.
+		if allowedPrefixesForCachesLastSetTimestamp.Load() == 0 {
+			log.Warning("Allowed prefixes for caches data is not initialized. Waiting for initialization before continuing with processing cache server advertisement.")
+			start := time.Now()
+			// Wait until last set timestamp is updated
+			for allowedPrefixesForCachesLastSetTimestamp.Load() == 0 {
+				if time.Since(start) >= 3*time.Second {
+					log.Error("Allowed prefix for caches data was not initialized within the 3-second timeout")
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+
+		// If the allowed prefix for caches data is stale (older than 15 minutes),
+		// fail the server registration.
+		if time.Since(time.Unix(allowedPrefixesForCachesLastSetTimestamp.Load(), 0)) >= 15*time.Minute {
+			log.Error("Allowed prefixes for caches data is outdated, rejecting cache server ad.")
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Something is wrong with the director or registry. The Director is unable to fetch required information about this cache's allowed prefixes from the Registry.",
+			})
+			return
+		}
+	}
+
 	ad := server_structs.OriginAdvertiseV1{}
 	adV2 := server_structs.OriginAdvertiseV2{}
 	err = ctx.ShouldBindBodyWith(&ad, binding.JSON)
@@ -1028,6 +1069,55 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	} else {
 		// If the OriginAdvertisement is a V1 type, convert to a V2 type
 		adV2 = server_structs.ConvertOriginAdV1ToV2(ad)
+	}
+
+	// Filter the advertised prefixes in the cache server ad
+	// based on the allowed prefixes for caches data.
+	if sType == server_structs.CacheType {
+		// Parse URL to extract hostname
+		parsedURL, err := url.Parse(adV2.DataURL)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Invalid Cache URL %s (config parameter: Cache.Url): %s", adV2.DataURL, err.Error()),
+			})
+			return
+		}
+		cacheHostname := parsedURL.Hostname()
+
+		allowedPrefixesMap := allowedPrefixesForCaches.Load()
+
+		// If the cache hostname is present in the allowed prefixes map,
+		// filter the advertised prefixes. If the cache hostname is not present,
+		// do nothing. This is the default behavior where all prefixes are allowed.
+		//
+		// Variable `prefixes` is a set of prefixes that the given cache is allowed to serve.
+		if prefixes, exists := (*allowedPrefixesMap)[cacheHostname]; exists {
+			filteredNamespaces := []server_structs.NamespaceAdV2{}
+			filteredPaths := []string{} // Collect filtered prefixes
+
+			for _, namespace := range adV2.Namespaces {
+				// Default allow for paths starting with "/pelican/"
+				if strings.HasPrefix(namespace.Path, "/pelican/") {
+					filteredNamespaces = append(filteredNamespaces, namespace)
+					continue
+				}
+
+				// Check if the namespace path exists in the allowed set
+				if _, allowed := prefixes[namespace.Path]; allowed {
+					filteredNamespaces = append(filteredNamespaces, namespace)
+				} else {
+					filteredPaths = append(filteredPaths, namespace.Path) // Collect the filtered path
+				}
+			}
+
+			// Log all filtered prefixes at once
+			if len(filteredPaths) > 0 {
+				log.Infof("Filtered out prefixes: %v in the server ad for cache %s", filteredPaths, cacheHostname)
+			}
+
+			adV2.Namespaces = filteredNamespaces
+		}
 	}
 
 	// Set to ctx for metrics handler downstream
@@ -1106,6 +1196,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 			if err == adminApprovalErr {
 				log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), adV2.Name)
 				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), ad.Name, approvalErrMsg)})
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 				return
 			} else {
 				log.Warningln("Failed to verify token:", err)
@@ -1113,6 +1204,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
 				})
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 				return
 			}
 		}
@@ -1122,6 +1214,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				Status: server_structs.RespFailed,
 				Msg:    "Authorization token verification failed. Token missing required scope",
 			})
+			metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 			return
 		}
 	}
@@ -1136,6 +1229,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				if err == adminApprovalErr {
 					log.Warningf("Failed to verify advertise token. Namespace %q requires administrator approval", namespace.Path)
 					ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("The namespace %q was not approved by an administrator. %s", namespace.Path, approvalErrMsg)})
+					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 					return
 				} else {
 					log.Warningln("Failed to verify token:", err)
@@ -1143,6 +1237,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 						Status: server_structs.RespFailed,
 						Msg:    fmt.Sprintf("Authorization token verification failed: %v", err),
 					})
+					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 					return
 				}
 			}
@@ -1153,6 +1248,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 					Status: server_structs.RespFailed,
 					Msg:    "Authorization token verification failed. Token missing required scope",
 				})
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 				return
 			}
 		}

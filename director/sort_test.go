@@ -54,9 +54,13 @@ func TestCheckOverrides(t *testing.T) {
 
 	// We'll also check that our logging feature responsibly reports
 	// what Pelican is telling the user.
+	origOutput := log.StandardLogger().Out
 	logOutput := &(bytes.Buffer{})
 	log.SetOutput(logOutput)
 	log.SetLevel(log.DebugLevel)
+	t.Cleanup(func() {
+		log.SetOutput(origOutput)
+	})
 
 	viper.SetConfigType("yaml")
 	err := viper.ReadConfig(strings.NewReader(yamlMockup))
@@ -462,9 +466,13 @@ func TestGetClientLatLong(t *testing.T) {
 	clientIpCache.DeleteAll()
 	t.Run("invalid-ip", func(t *testing.T) {
 		// Capture the log and check that the correct error is logged
+		origOutput := log.StandardLogger().Out
 		logOutput := &(bytes.Buffer{})
 		log.SetOutput(logOutput)
 		log.SetLevel(log.DebugLevel)
+		defer func() {
+			log.SetOutput(origOutput)
+		}()
 
 		clientIp := netip.Addr{}
 		assert.False(t, clientIpCache.Has(clientIp))
@@ -473,20 +481,24 @@ func TestGetClientLatLong(t *testing.T) {
 		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
 		assert.True(t, coord1.Long <= usLongMax && coord1.Long >= usLongMin)
 		assert.Contains(t, logOutput.String(), "Unable to sort servers based on client-server distance. Invalid client IP address")
-		assert.NotContains(t, logOutput.String(), "Retrieving pre-assigned lat/long")
+		assert.NotContains(t, logOutput.String(), "Using randomly-assigned lat/long")
 
 		// Get it again to make sure it's coming from the cache
 		coord2, _ := getClientLatLong(clientIp)
 		assert.Equal(t, coord1.Lat, coord2.Lat)
 		assert.Equal(t, coord1.Long, coord2.Long)
-		assert.Contains(t, logOutput.String(), "Retrieving pre-assigned lat/long for unresolved client IP")
+		assert.Contains(t, logOutput.String(), "Using randomly-assigned lat/long for unresolved client IP")
 		assert.True(t, clientIpCache.Has(clientIp))
 	})
 
 	t.Run("valid-ip-no-geoip-match", func(t *testing.T) {
 		logOutput := &(bytes.Buffer{})
+		origOutput := log.StandardLogger().Out
 		log.SetOutput(logOutput)
 		log.SetLevel(log.DebugLevel)
+		defer func() {
+			log.SetOutput(origOutput)
+		}()
 
 		clientIp := netip.MustParseAddr("192.168.0.1")
 		assert.False(t, clientIpCache.Has(clientIp))
@@ -495,13 +507,13 @@ func TestGetClientLatLong(t *testing.T) {
 		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
 		assert.True(t, coord1.Long <= usLongMax && coord1.Long >= usLongMin)
 		assert.Contains(t, logOutput.String(), "Client IP 192.168.0.1 has been re-assigned a random location in the contiguous US to lat/long")
-		assert.NotContains(t, logOutput.String(), "Retrieving pre-assigned lat/long")
+		assert.NotContains(t, logOutput.String(), "Using randomly-assigned lat/long")
 
 		// Get it again to make sure it's coming from the cache
 		coord2, _ := getClientLatLong(clientIp)
 		assert.Equal(t, coord1.Lat, coord2.Lat)
 		assert.Equal(t, coord1.Long, coord2.Long)
-		assert.Contains(t, logOutput.String(), "Retrieving pre-assigned lat/long for client IP")
+		assert.Contains(t, logOutput.String(), "Using randomly-assigned lat/long for client IP")
 		assert.True(t, clientIpCache.Has(clientIp))
 	})
 }

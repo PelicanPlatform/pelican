@@ -45,6 +45,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -607,6 +608,9 @@ func TestDirectorRegistration(t *testing.T) {
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
 
+		// Reset the timestamp so the cache server ad is not rejected.
+		allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
+
 		setupRequest(c, r, jsonad, token, server_structs.CacheType)
 
 		r.ServeHTTP(w, c.Request)
@@ -614,6 +618,76 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 		assert.NotNil(t, serverAds.Get("https://data-url.org"), "Cache fail to register at serverAds")
 		assert.Equal(t, "https://localhost:8844", serverAds.Get("https://data-url.org").Value().WebURL.String(), "WebURL in serverAds does not match data in cache registration request")
+		teardown()
+	})
+
+	// Verify if the prefixes in the cache server ad are correctly filtered
+	// based on the allowed prefix for caches data.
+	t.Run("cache-with-not-allowed-prefix-in-ad", func(t *testing.T) {
+		c, r, w := setupContext()
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+		setupJwksCache(t, "/caches/test", publicKey)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		// Define allowed prefixes
+		allowedPrefixes := map[string]map[string]struct{}{
+			"data-url.org": {
+				"/foo/baz": {},
+			},
+		}
+		allowedPrefixesForCaches.Store(&allowedPrefixes)
+		allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
+
+		ad := server_structs.OriginAdvertiseV2{
+			Name:           "Human-readable name",
+			RegistryPrefix: "/caches/test",
+			DataURL:        "https://data-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{
+				{
+					Path:   "/foo/bar",
+					Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+				},
+				{
+					Path:   "/foo/baz",
+					Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+				},
+			},
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRequest(c, r, jsonad, token, server_structs.CacheType)
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, 200, w.Result().StatusCode)
+
+		adEntry := serverAds.Get("https://data-url.org")
+		assert.NotNil(t, adEntry, "Cache failed to register at serverAds")
+
+		namespaceAds := adEntry.Value().NamespaceAds
+		assert.NotNil(t, namespaceAds, "NamespaceAds should not be nil")
+
+		foundFooBar := false
+		foundFooBaz := false
+
+		for _, ns := range namespaceAds {
+			if ns.Path == "/foo/bar" {
+				foundFooBar = true
+			}
+			if ns.Path == "/foo/baz" {
+				foundFooBaz = true
+			}
+		}
+
+		assert.False(t, foundFooBar, "Prefix /foo/bar should not have been registered")
+		assert.True(t, foundFooBaz, "Prefix /foo/baz should have been registered")
+
 		teardown()
 	})
 
@@ -1272,8 +1346,8 @@ func TestDiscoverOriginCache(t *testing.T) {
 	viper.Set("Server.ExternalWebUrl", mockDirectorUrl)
 
 	tDir := t.TempDir()
-	kfile := filepath.Join(tDir, "testKey")
-	viper.Set("IssuerKey", kfile)
+	kDir := filepath.Join(tDir, "testKeyDir")
+	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 
 	viper.Set("ConfigDir", t.TempDir())
 	config.InitConfig()

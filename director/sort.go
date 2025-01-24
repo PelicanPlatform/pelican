@@ -80,7 +80,9 @@ var (
 	geoNetOverrides []GeoNetOverride
 
 	// Stores a mapping of client IPs that have been randomly assigned a coordinate
-	clientIpCache = ttlcache.New(ttlcache.WithTTL[netip.Addr, Coordinate](20 * time.Minute))
+	clientIpCache = ttlcache.New(ttlcache.WithTTL[netip.Addr, Coordinate](20*time.Minute),
+		ttlcache.WithDisableTouchOnHit[netip.Addr, Coordinate](),
+	)
 )
 
 // Constants for the director sorting algorithm
@@ -257,9 +259,9 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate, err error) {
 		coord.Lat, coord.Long = assignRandBoundedCoord(usLatMin, usLatMax, usLongMin, usLongMax)
 		cached, exists := clientIpCache.GetOrSet(addr, coord)
 		if exists {
-			log.Warningf("Retrieving pre-assigned lat/long for unresolved client IP %s: %f, %f.This assignment will be cached for 20 minutes unless the client IP is used again in that period.", addr.String(), coord.Lat, coord.Long)
+			log.Warningf("Using randomly-assigned lat/long for unresolved client IP %s: %f, %f.  This assignment will be cached for %v.", addr.String(), cached.Value().Lat, cached.Value().Long, time.Until(cached.ExpiresAt()))
 		} else {
-			log.Warningf("Assigning random location in the contiguous US to lat/long %f, %f. This assignment will be cached for 20 minutes unless the client IP is used again in that period.", coord.Lat, coord.Long)
+			log.Warningf("Assigning random location in the contiguous US to lat/long %f, %f. This assignment will be cached for 20 minutes.", coord.Lat, coord.Long)
 		}
 		coord = cached.Value()
 		return
@@ -273,9 +275,9 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate, err error) {
 		coord.Lat, coord.Long = assignRandBoundedCoord(usLatMin, usLatMax, usLongMin, usLongMax)
 		cached, exists := clientIpCache.GetOrSet(addr, coord)
 		if exists {
-			log.Warningf("Retrieving pre-assigned lat/long for client IP %s: %f, %f. This assignment will be cached for 20 minutes unless the client IP is used again in that period.", addr.String(), coord.Lat, coord.Long)
+			log.Warningf("Using randomly-assigned lat/long for client IP %s: %f, %f. This assignment will be cached for %v.", addr.String(), cached.Value().Lat, cached.Value().Long, time.Until(cached.ExpiresAt()))
 		} else {
-			log.Warningf("Client IP %s has been re-assigned a random location in the contiguous US to lat/long %f, %f. This assignment will be cached for 20 minutes unless the client IP is used again in that period.", addr.String(), coord.Lat, coord.Long)
+			log.Warningf("Client IP %s has been re-assigned a random location in the contiguous US to lat/long %f, %f. This assignment will be cached for 20 minutes.", addr.String(), coord.Lat, coord.Long)
 		}
 		coord = cached.Value()
 	}

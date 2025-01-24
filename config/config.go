@@ -1022,6 +1022,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Xrootd_Authfile.GetName(), filepath.Join(configDir, "xrootd", "authfile"))
 	v.SetDefault(param.Xrootd_MacaroonsKeyFile.GetName(), filepath.Join(configDir, "macaroons-secret"))
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
+	v.SetDefault(param.IssuerKeysDirectory.GetName(), filepath.Join(configDir, "issuer-keys"))
 	v.SetDefault(param.Server_UIPasswordFile.GetName(), filepath.Join(configDir, "server-web-passwd"))
 	v.SetDefault(param.Server_UIActivationCodeFile.GetName(), filepath.Join(configDir, "server-web-activation-code"))
 	v.SetDefault(param.OIDC_ClientIDFile.GetName(), filepath.Join(configDir, "oidc-client-id"))
@@ -1341,6 +1342,15 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if currentServers.IsEnabled(server_structs.DirectorType) {
+		refreshInterval := param.Director_RegistryQueryInterval.GetDuration()
+		if refreshInterval < 1*time.Second {
+			log.Warnf("Director.RegistryQueryInterval is set to: %v, which is too low. Falling back to default: 1m", refreshInterval)
+
+			viper.Set(param.Director_RegistryQueryInterval.GetName(), "1m")
+		}
+	}
+
+	if currentServers.IsEnabled(server_structs.DirectorType) {
 		viper.SetDefault("Federation.DirectorUrl", param.Server_ExternalWebUrl.GetString())
 		minStatRes := param.Director_MinStatResponse.GetInt()
 		maxStatRes := param.Director_MaxStatResponse.GetInt()
@@ -1400,12 +1410,12 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		return err
 	}
 
-	// Reset issuerPrivateJWK to ensure test cases can use their own temp IssuerKey
-	ResetIssuerJWKPtr()
+	// Reset IssuerKeys to ensure test cases can use their own temp IssuerKeysDirectory
+	ResetIssuerPrivateKeys()
 
 	// As necessary, generate private keys, JWKS and corresponding certs
 
-	// Note: This function will generate a private key in the location stored by the viper var "IssuerKey"
+	// Note: This function will generate a private key in the location stored by the viper var "IssuerKeysDirectory"
 	// iff there isn't any valid private key present in that location
 	_, err = GetIssuerPublicJWKS()
 	if err != nil {
@@ -1456,6 +1466,8 @@ func SetClientDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
+	v.SetDefault(param.IssuerKeysDirectory.GetName(), filepath.Join(configDir, "issuer-keys"))
+
 	upperPrefix := GetPreferredPrefix()
 	if upperPrefix == OsdfPrefix || upperPrefix == StashPrefix {
 		v.SetDefault("Federation.TopologyNamespaceURL", "https://topology.opensciencegrid.org/osdf/namespaces")
@@ -1622,7 +1634,8 @@ func ResetConfig() {
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
 
-	ResetIssuerJWKPtr()
+	ResetIssuerPrivateKeys()
+
 	ResetClientInitialized()
 
 	// other than what's above, resetting Origin exports will be done by ResetTestState() in server_utils pkg

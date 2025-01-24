@@ -87,6 +87,7 @@ type Config struct {
 		MinStatResponse int `mapstructure:"minstatresponse" yaml:"MinStatResponse"`
 		OriginCacheHealthTestInterval time.Duration `mapstructure:"origincachehealthtestinterval" yaml:"OriginCacheHealthTestInterval"`
 		OriginResponseHostnames []string `mapstructure:"originresponsehostnames" yaml:"OriginResponseHostnames"`
+		RegistryQueryInterval time.Duration `mapstructure:"registryqueryinterval" yaml:"RegistryQueryInterval"`
 		StatConcurrencyLimit int `mapstructure:"statconcurrencylimit" yaml:"StatConcurrencyLimit"`
 		StatTimeout time.Duration `mapstructure:"stattimeout" yaml:"StatTimeout"`
 		SupportContactEmail string `mapstructure:"supportcontactemail" yaml:"SupportContactEmail"`
@@ -123,6 +124,7 @@ type Config struct {
 		UserStripDomain bool `mapstructure:"userstripdomain" yaml:"UserStripDomain"`
 	} `mapstructure:"issuer" yaml:"Issuer"`
 	IssuerKey string `mapstructure:"issuerkey" yaml:"IssuerKey"`
+	IssuerKeysDirectory string `mapstructure:"issuerkeysdirectory" yaml:"IssuerKeysDirectory"`
 	LocalCache struct {
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		HighWaterMarkPercentage int `mapstructure:"highwatermarkpercentage" yaml:"HighWaterMarkPercentage"`
@@ -168,10 +170,14 @@ type Config struct {
 		AggregatePrefixes []string `mapstructure:"aggregateprefixes" yaml:"AggregatePrefixes"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataRetention time.Duration `mapstructure:"dataretention" yaml:"DataRetention"`
+		LabelLimit int `mapstructure:"labellimit" yaml:"LabelLimit"`
+		LabelNameLengthLimit int `mapstructure:"labelnamelengthlimit" yaml:"LabelNameLengthLimit"`
+		LabelValueLengthLimit int `mapstructure:"labelvaluelengthlimit" yaml:"LabelValueLengthLimit"`
 		MetricAuthorization bool `mapstructure:"metricauthorization" yaml:"MetricAuthorization"`
 		PortHigher int `mapstructure:"porthigher" yaml:"PortHigher"`
 		PortLower int `mapstructure:"portlower" yaml:"PortLower"`
 		PromQLAuthorization bool `mapstructure:"promqlauthorization" yaml:"PromQLAuthorization"`
+		SampleLimit int `mapstructure:"samplelimit" yaml:"SampleLimit"`
 		TokenExpiresIn time.Duration `mapstructure:"tokenexpiresin" yaml:"TokenExpiresIn"`
 		TokenRefreshInterval time.Duration `mapstructure:"tokenrefreshinterval" yaml:"TokenRefreshInterval"`
 	} `mapstructure:"monitoring" yaml:"Monitoring"`
@@ -402,6 +408,7 @@ type configWithType struct {
 		MinStatResponse struct { Type string; Value int }
 		OriginCacheHealthTestInterval struct { Type string; Value time.Duration }
 		OriginResponseHostnames struct { Type string; Value []string }
+		RegistryQueryInterval struct { Type string; Value time.Duration }
 		StatConcurrencyLimit struct { Type string; Value int }
 		StatTimeout struct { Type string; Value time.Duration }
 		SupportContactEmail struct { Type string; Value string }
@@ -438,6 +445,7 @@ type configWithType struct {
 		UserStripDomain struct { Type string; Value bool }
 	}
 	IssuerKey struct { Type string; Value string }
+	IssuerKeysDirectory struct { Type string; Value string }
 	LocalCache struct {
 		DataLocation struct { Type string; Value string }
 		HighWaterMarkPercentage struct { Type string; Value int }
@@ -483,10 +491,14 @@ type configWithType struct {
 		AggregatePrefixes struct { Type string; Value []string }
 		DataLocation struct { Type string; Value string }
 		DataRetention struct { Type string; Value time.Duration }
+		LabelLimit struct { Type string; Value int }
+		LabelNameLengthLimit struct { Type string; Value int }
+		LabelValueLengthLimit struct { Type string; Value int }
 		MetricAuthorization struct { Type string; Value bool }
 		PortHigher struct { Type string; Value int }
 		PortLower struct { Type string; Value int }
 		PromQLAuthorization struct { Type string; Value bool }
+		SampleLimit struct { Type string; Value int }
 		TokenExpiresIn struct { Type string; Value time.Duration }
 		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}
