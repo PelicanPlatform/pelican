@@ -261,6 +261,7 @@ type Config struct {
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
+		HealthMonitoringPublic bool `mapstructure:"healthmonitoringpublic" yaml:"HealthMonitoringPublic"`
 		Hostname string `mapstructure:"hostname" yaml:"Hostname"`
 		IssuerHostname string `mapstructure:"issuerhostname" yaml:"IssuerHostname"`
 		IssuerJwks string `mapstructure:"issuerjwks" yaml:"IssuerJwks"`
@@ -579,6 +580,7 @@ type configWithType struct {
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }
+		HealthMonitoringPublic struct { Type string; Value bool }
 		Hostname struct { Type string; Value string }
 		IssuerHostname struct { Type string; Value string }
 		IssuerJwks struct { Type string; Value string }

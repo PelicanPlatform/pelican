@@ -1068,10 +1068,15 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Shoveler_QueueDirectory.GetName(), filepath.Join(configDir, "shoveler/queue"))
 		v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), filepath.Join(configDir, "shoveler-token"))
 
-		runtimeDir := filepath.Join(os.TempDir(), "pelican-xrootd-*") // Construct the expected path
-
+		var runtimeDir string
 		if v == viper.GetViper() && os.Getenv("XDG_RUNTIME_DIR") != "" {
 			runtimeDir = filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "pelican")
+		} else {
+			var err error
+			runtimeDir, err = os.MkdirTemp("", "pelican-xrootd-*")
+			if err != nil {
+				return errors.Wrap(err, "Failed to create temporary runtime directory for Pelican")
+			}
 		}
 
 		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join(runtimeDir, "cache"))

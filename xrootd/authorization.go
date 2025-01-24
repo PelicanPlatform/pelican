@@ -569,6 +569,10 @@ func WriteOriginScitokensConfig(authedPaths []string) error {
 	if err != nil {
 		return err
 	}
+	if aud := config.GetServerAudience(); !slices.Contains(cfg.Global.Audience, aud) {
+		cfg.Global.Audience = append(cfg.Global.Audience, aud)
+	}
+	log.Debugln("Audience setting:", cfg.Global.Audience)
 	if issuer, err := GenerateOriginIssuer(authedPaths); err == nil && len(issuer.Name) > 0 {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
@@ -576,7 +580,6 @@ func WriteOriginScitokensConfig(authedPaths []string) error {
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
-			cfg.Global.Audience = append(cfg.Global.Audience, config.GetServerAudience())
 		}
 	} else if err != nil {
 		return errors.Wrap(err, "failed to generate xrootd issuer for the origin")
@@ -589,7 +592,6 @@ func WriteOriginScitokensConfig(authedPaths []string) error {
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
-			cfg.Global.Audience = append(cfg.Global.Audience, config.GetServerAudience())
 		}
 	} else if err != nil {
 		return errors.Wrap(err, "failed to generate xrootd issuer for self-monitoring")

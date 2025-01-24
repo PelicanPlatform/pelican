@@ -1919,6 +1919,14 @@ type: string
 default: none
 components: ["cache", "director", "origin", "registry"]
 ---
+name: Server.HealthMonitoringPublic
+description: |+
+  Whether the server's health monitoring results should be made public without any
+  authentication required
+type: bool
+default: false
+components: ["cache", "director", "origin", "registry"]
+---
 name: Server.IssuerUrl
 description: |+
   The URL and port at which the server's issuer can be accessed.
