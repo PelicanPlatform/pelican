@@ -395,6 +395,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
+		// If the director restarted recently, tell the client to try again soon by sending a 429
 		if inStartupSequence() {
 			ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -623,6 +624,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
+		// If the director restarted recently, tell the client to try again soon by sending a 429
 		if inStartupSequence() {
 			ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
