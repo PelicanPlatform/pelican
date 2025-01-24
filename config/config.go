@@ -165,7 +165,7 @@ var (
 
 	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 
-	validPrefixes  = map[ConfigPrefix]bool{
+	validPrefixes = map[ConfigPrefix]bool{
 		PelicanPrefix: true,
 		OsdfPrefix:    true,
 		StashPrefix:   true,
