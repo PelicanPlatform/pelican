@@ -426,7 +426,7 @@ func createApiToken(ctx *gin.Context) {
 
 func deleteApiToken(ctx *gin.Context) {
 	id := ctx.Param("id")
-	err := database.DeleteApiKey(id)
+	err := database.DeleteApiKey(id, token.VerifiedKeysCache)
 	if err != nil {
 		log.Warning("Failed to delete API key: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -609,6 +609,9 @@ func waitUntilLogin(ctx context.Context) error {
 //
 // You need to mount the static resources for UI in a separate function
 func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
+	// start the cache for verified API keys
+	go token.VerifiedKeysCache.Start()
+
 	if err := configureCommonEndpoints(engine); err != nil {
 		return err
 	}
