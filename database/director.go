@@ -3,7 +3,6 @@ package database
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -32,12 +31,12 @@ func generateSecret(length int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(bytes), nil
+	return string(bytes), nil
 }
 
 func generateTokenID(secret string) string {
 	hash := sha256.Sum256([]byte(secret))
-	return hex.EncodeToString(hash[:])[:5]
+	return string(hash[:])[:5]
 }
 
 func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKey]) (bool, error) {
