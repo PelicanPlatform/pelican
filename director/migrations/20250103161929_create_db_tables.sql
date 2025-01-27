@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS server_downtimes (
 );
 
 CREATE TABLE grafana_api_keys (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY UNIQUE,
     name TEXT,
     hashed_value TEXT NOT NULL,
     scopes TEXT,
