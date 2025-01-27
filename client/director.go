@@ -79,8 +79,10 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 
 	var errMsg string
 	var body []byte
-	// In case the director is momentarily down, we will retry a few times using a backoff
-	// strategy.
+	// The `fromDirector` variable indicates we think this response came from a director
+	// process, not a proxy / ingress like traefik.
+	var fromDirector bool
+	// In case the director is momentarily down, we will retry a few times using a backoff strategy
 	// I assume numRetries is >=1, which should enforced in config.go. However, not all tests that hit this code initialize the client.
 	numRetries := param.Client_DirectorRetries.GetInt()
 	if numRetries < 1 {
@@ -126,7 +128,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		// If this isn't a Pelican process _and_ we got an error, sleep then retry. We may be talking
 		// to something like a Traefik ingress controller that's waiting for the Director to come
 		// back online.
-		fromDirector := fromPelican(resp)
+		fromDirector = fromPelican(resp)
 		if !fromDirector && (resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusInternalServerError) {
 			if idx == 0 {
 				log.Warnf("Response not from a Pelican process, the Director may be rebooting; will retry a total of %d times.", numRetries)
@@ -139,7 +141,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 			// We just hit the Director after a reboot, but potentially before it's repopulated its
 			// cache of server adds. Retry until we stop getting the 429 or we hit our limit.
 			if idx == 0 {
-				log.Warnf("The Director indicates it has just rebooted and is still discovering federation services.")
+				log.Warningln("The Director indicates it has just rebooted and is still discovering federation services.")
 			}
 			sleepFor := 3*idx + 3
 			log.Warningln("Sleeping for", sleepFor, "seconds before retrying.")
@@ -149,12 +151,6 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		}
 	}
 
-	errMsg := string(body)
-
-	// The `directorResponse` variable indicates we think this response came from a director
-	// process, not a proxy / ingress like traefik.
-	directorResponse := false
-
 	// The Content-Type will be alike "application/json; charset=utf-8"
 	if utils.HasContentType(resp, "application/json") {
 		var respErr server_structs.SimpleApiResp
@@ -162,7 +158,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 			log.Errorln("Failed to unmarshal the director's JSON response:", err)
 			return resp, unmarshalErr
 		}
-		directorResponse = true
+		fromDirector = true
 		// In case we have old director returning "error": "message content"
 		if respErr.Msg != "" {
 			errMsg = respErr.Msg
@@ -183,7 +179,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 				return queryDirector(ctx, http.MethodPut, pUrl, token)
 			}
 		}
-		if resp.StatusCode == http.StatusNotFound && directorResponse && (errMsg == "All sources report object was not found" || errMsg == "Object not found at any cache") {
+		if resp.StatusCode == http.StatusNotFound && fromDirector && (errMsg == "All sources report object was not found" || errMsg == "Object not found at any cache") {
 			sce := StatusCodeError(http.StatusNotFound)
 			err = &sce
 		} else {
