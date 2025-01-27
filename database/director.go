@@ -105,7 +105,7 @@ func CreateApiKey(name, createdBy, scopes string) (string, error) {
 		}
 		result := DirectorDB.Create(apiKey)
 		if result.Error != nil {
-			isConstraintError := result.Error.Error() == "UNIQUE constraint failed: tokens.id"
+			isConstraintError := errors.Is(result.Error, gorm.ErrDuplicatedKey)
 			if !isConstraintError {
 				return "", errors.Wrap(result.Error, "failed to create a new API key")
 			}
