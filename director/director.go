@@ -82,7 +82,7 @@ type (
 	// Context key for the project name
 	ProjectContextKey struct{}
 
-	CreateGrafanaTokenReq struct {
+	CreateApiTokenReq struct {
 		Name      string `json:"name"`
 		CreatedBy string `json:"created_by"`
 	}
@@ -1416,7 +1416,7 @@ func listNamespacesV2(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, namespacesAdsV2)
 }
 
-func createGrafanaToken(ctx *gin.Context) {
+func createApiToken(ctx *gin.Context) {
 	authOption := token.AuthOption{
 		Sources: []token.TokenSource{token.Cookie},
 		Issuers: []token.TokenIssuer{token.LocalIssuer},
@@ -1433,7 +1433,7 @@ func createGrafanaToken(ctx *gin.Context) {
 		return
 	}
 	// marshall body into struct
-	var req CreateGrafanaTokenReq
+	var req CreateApiTokenReq
 	err = ctx.ShouldBindJSON(&req)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
@@ -1444,9 +1444,9 @@ func createGrafanaToken(ctx *gin.Context) {
 	}
 
 	scopes := fmt.Sprintf("%s,%s", token_scopes.Monitoring_Query.String(), token_scopes.Monitoring_Scrape.String())
-	token, err := database.CreateGrafanaApiKey(req.Name, req.CreatedBy, scopes)
+	token, err := database.CreateApiKey(req.Name, req.CreatedBy, scopes)
 	if err != nil {
-		log.Warning("Failed to create Grafana API key: ", err)
+		log.Warning("Failed to create API key: ", err)
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    err.Error(),
@@ -1457,11 +1457,11 @@ func createGrafanaToken(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"token": token})
 }
 
-func deleteGrafanaToken(ctx *gin.Context) {
+func deleteApiToken(ctx *gin.Context) {
 	id := ctx.Param("id")
-	err := database.DeleteGrafanaApiKey(id)
+	err := database.DeleteApiKey(id)
 	if err != nil {
-		log.Warning("Failed to delete Grafana API key: ", err)
+		log.Warning("Failed to delete API key: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    err.Error(),
@@ -1471,7 +1471,7 @@ func deleteGrafanaToken(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
 		Status: server_structs.RespOK,
-		Msg:    "Grafana API key deleted",
+		Msg:    "API key deleted",
 	})
 }
 
@@ -1694,8 +1694,8 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		// Rename the endpoint to reflect such plan.
 		directorAPIV1.GET("/discoverServers", discoverOriginCache)
 
-		directorAPIV1.POST("/createGrafanaToken", createGrafanaToken)
-		directorAPIV1.DELETE("/deleteGrafanaToken/:id", deleteGrafanaToken)
+		directorAPIV1.POST("/createApiToken", createApiToken)
+		directorAPIV1.DELETE("/deleteApiToken/:id", deleteApiToken)
 	}
 
 	directorAPIV2 := router.Group("/api/v2.0/director", web_ui.ServerHeaderMiddleware)

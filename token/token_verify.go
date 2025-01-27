@@ -63,9 +63,9 @@ const (
 )
 
 const (
-	FederationIssuer   TokenIssuer = "FederationIssuer"
-	LocalIssuer        TokenIssuer = "LocalIssuer"
-	GrafanaTokenIssuer TokenIssuer = "GrafanaTokenIssuer"
+	FederationIssuer TokenIssuer = "FederationIssuer"
+	LocalIssuer      TokenIssuer = "LocalIssuer"
+	APITokenIssuer   TokenIssuer = "APITokenIssuer"
 )
 
 var (
@@ -245,14 +245,11 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 			} else {
 				return http.StatusOK, true, nil
 			}
-		case GrafanaTokenIssuer:
-			fmt.Println("GOT GRAFANA TOKEN")
-			ok, err := database.VerifyGrafanaApiKey(token)
+		case APITokenIssuer:
+			ok, err := database.VerifyApiKey(token)
 			if err != nil {
-				fmt.Println("FAILED TO VERIFY GRAFANA TOKEN")
-				errMsg += fmt.Sprintln("Cannot verify token with Grafana issuer: ", err)
+				errMsg += fmt.Sprintln("Cannot verify token with API key issuer: ", err)
 			} else if ok {
-				fmt.Println("GRAFANA TOKEN VERIFIED")
 				return http.StatusOK, true, nil
 			}
 		default:
