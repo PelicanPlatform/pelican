@@ -25,6 +25,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -75,6 +76,8 @@ var (
 	VerifiedKeysCache *ttlcache.Cache[string, database.ApiKey] = ttlcache.New[string, database.ApiKey](
 		ttlcache.WithTTL[string, database.ApiKey](time.Hour * 24),
 	)
+	// API token format: <5-char ID>.<64-char secret>, total length = 70, alphanumeric
+	ApiTokenRegex = regexp.MustCompile(`^[a-zA-Z0-9]{5}\.[a-zA-Z0-9]{64}$`)
 )
 
 func init() {
@@ -250,6 +253,11 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 				return http.StatusOK, true, nil
 			}
 		case APITokenIssuer:
+			matched := ApiTokenRegex.MatchString(token)
+			if !matched {
+				errMsg += fmt.Sprintln("Invalid API token format")
+				continue
+			}
 			ok, err := database.VerifyApiKey(token, VerifiedKeysCache)
 			if err != nil {
 				errMsg += fmt.Sprintln("Cannot verify token with API key issuer: ", err)
