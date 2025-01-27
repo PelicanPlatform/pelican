@@ -1030,29 +1030,17 @@ func TestPrestage(t *testing.T) {
 		age, size, err := tc.CacheInfo(fed.Ctx, innerFileUrl)
 		require.NoError(t, err)
 		assert.Equal(t, int64(len(testFileContent)), size)
-		// Temporarily commenting out this assertion because a GET request
-		// (with a byte range of 0-0) is used to retrieve object metadata
-		// instead of a HEAD request. This results in the first byte being
-		// fetched, causing the age to be 0 instead of -1.
-		// Currently, the HEAD request does not return the Content-Age header.
-
-		// assert.Equal(t, -1, age)
-
-		// Temporarily asserting age as 0 to avoid unused variable error.
+		// Due to an xrootd limitation, CacheInfo performs a GET request instead of a HEAD request.
+		// Once this limitation is resolved and CacheInfo is updated accordingly,
+		// the assertion should be changed to -1 instead of 0.
 		assert.Equal(t, 0, age)
 
 		age, size, err = tc.CacheInfo(fed.Ctx, innerFileUrl)
 		require.NoError(t, err)
 		assert.Equal(t, int64(len(testFileContent)), size)
-		// Temporarily commenting out this assertion because a GET request
-		// (with a byte range of 0-0) is used to retrieve object metadata
-		// instead of a HEAD request. This results in the first byte being
-		// fetched, causing the age to be 0 instead of -1.
-		// Currently, the HEAD request does not return the Content-Age header.
-
-		// assert.Equal(t, -1, age)
-
-		// Temporarily asserting age as 0 to avoid unused variable error.
+		// Due to an xrootd limitation, CacheInfo performs a GET request instead of a HEAD request.
+		// Once this limitation is resolved and CacheInfo is updated accordingly,
+		// the assertion should be changed to -1 instead of 0.
 		assert.Equal(t, 0, age)
 
 		// Prestage the object
