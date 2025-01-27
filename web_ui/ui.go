@@ -47,10 +47,13 @@ import (
 	"golang.org/x/term"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 var (
@@ -66,6 +69,11 @@ const notFoundFilePath = "frontend/out/404/index.html"
 
 func ServerHeaderMiddleware(ctx *gin.Context) {
 	ctx.Writer.Header().Add("Server", "pelican/"+config.GetVersion())
+}
+
+type CreateApiTokenReq struct {
+	Name      string `json:"name"`
+	CreatedBy string `json:"created_by"`
 }
 
 // Initialize a hot restart of the server
@@ -375,6 +383,65 @@ func handleWebUIResource(ctx *gin.Context) {
 	}
 }
 
+func createApiToken(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie},
+		Issuers: []token.TokenIssuer{token.LocalIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		log.Warningf("Cannot verify token: %v", err)
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+	// marshall body into struct
+	var req CreateApiTokenReq
+	err = ctx.ShouldBindJSON(&req)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid request body: %v", err),
+		})
+		return
+	}
+
+	scopes := fmt.Sprintf("%s,%s", token_scopes.Monitoring_Query.String(), token_scopes.Monitoring_Scrape.String())
+	token, err := database.CreateApiKey(req.Name, req.CreatedBy, scopes)
+	if err != nil {
+		log.Warning("Failed to create API key: ", err)
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"token": token})
+}
+
+func deleteApiToken(ctx *gin.Context) {
+	id := ctx.Param("id")
+	err := database.DeleteApiKey(id)
+	if err != nil {
+		log.Warning("Failed to delete API key: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespOK,
+		Msg:    "API key deleted",
+	})
+}
+
 func configureWebResource(engine *gin.Engine) {
 
 	// Register the MIME type for .txt files
@@ -411,6 +478,8 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Web Engine Running. Time: %s", time.Now().String())})
 	})
+	engine.POST("/api/v1.0/createApiToken", createApiToken)
+	engine.DELETE("/api/v1.0/deleteApiToken/:id", deleteApiToken)
 	return nil
 }
 
