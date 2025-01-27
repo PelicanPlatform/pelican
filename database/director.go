@@ -17,7 +17,7 @@ import (
 var DirectorDB *gorm.DB
 
 type GrafanaApiKey struct {
-	ID          string `gorm:"primaryKey;column:id;type:text;not null"`
+	ID          string `gorm:"primaryKey;column:id;type:text;not null;unique"`
 	Name        string `gorm:"column:name;type:text"`
 	HashedValue string `gorm:"column:hashed_value;type:text;not null"`
 	Scopes      string `gorm:"column:scopes;type:text"`
