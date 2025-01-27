@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
@@ -69,8 +70,11 @@ const (
 )
 
 var (
-	federationJWK *jwk.Cache
-	authChecker   AuthChecker
+	federationJWK     *jwk.Cache
+	authChecker       AuthChecker
+	VerifiedKeysCache *ttlcache.Cache[string, database.ApiKey] = ttlcache.New[string, database.ApiKey](
+		ttlcache.WithTTL[string, database.ApiKey](time.Hour * 24),
+	)
 )
 
 func init() {
@@ -246,7 +250,7 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 				return http.StatusOK, true, nil
 			}
 		case APITokenIssuer:
-			ok, err := database.VerifyApiKey(token)
+			ok, err := database.VerifyApiKey(token, VerifiedKeysCache)
 			if err != nil {
 				errMsg += fmt.Sprintln("Cannot verify token with API key issuer: ", err)
 			} else if ok {

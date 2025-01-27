@@ -26,8 +26,6 @@ type ApiKey struct {
 	CreatedBy   string `gorm:"column:created_by;type:text"`
 }
 
-var verifiedKeysCache *ttlcache.Cache[string, ApiKey] = ttlcache.New[string, ApiKey]()
-
 func generateSecret(length int) (string, error) {
 	bytes := make([]byte, length)
 	_, err := rand.Read(bytes)
@@ -41,7 +39,8 @@ func generateTokenID(secret string) string {
 	hash := sha256.Sum256([]byte(secret))
 	return hex.EncodeToString(hash[:])[:5]
 }
-func VerifyApiKey(apiKey string) (bool, error) {
+
+func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKey]) (bool, error) {
 	parts := strings.Split(apiKey, ".")
 	if len(parts) != 2 {
 		return false, errors.New("invalid API key format")
@@ -118,7 +117,7 @@ func CreateApiKey(name, createdBy, scopes string) (string, error) {
 	}
 }
 
-func DeleteApiKey(id string) error {
+func DeleteApiKey(id string, verifiedKeysCache *ttlcache.Cache[string, ApiKey]) error {
 	result := DirectorDB.Delete(&ApiKey{}, "id = ?", id)
 	if result.Error != nil {
 		return errors.Wrap(result.Error, "failed to delete the API key")
