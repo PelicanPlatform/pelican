@@ -16,7 +16,7 @@ import (
 
 var DirectorDB *gorm.DB
 
-type GrafanaApiKey struct {
+type ApiKey struct {
 	ID          string `gorm:"primaryKey;column:id;type:text;not null;unique"`
 	Name        string `gorm:"column:name;type:text"`
 	HashedValue string `gorm:"column:hashed_value;type:text;not null"`
@@ -26,7 +26,7 @@ type GrafanaApiKey struct {
 	CreatedBy   string `gorm:"column:created_by;type:text"`
 }
 
-var verifiedKeysCache *ttlcache.Cache[string, GrafanaApiKey] = ttlcache.New[string, GrafanaApiKey]()
+var verifiedKeysCache *ttlcache.Cache[string, ApiKey] = ttlcache.New[string, ApiKey]()
 
 func generateSecret(length int) (string, error) {
 	bytes := make([]byte, length)
@@ -41,7 +41,7 @@ func generateTokenID(secret string) string {
 	hash := sha256.Sum256([]byte(secret))
 	return hex.EncodeToString(hash[:])[:5]
 }
-func VerifyGrafanaApiKey(apiKey string) (bool, error) {
+func VerifyApiKey(apiKey string) (bool, error) {
 	parts := strings.Split(apiKey, ".")
 	if len(parts) != 2 {
 		return false, errors.New("invalid API key format")
@@ -59,13 +59,13 @@ func VerifyGrafanaApiKey(apiKey string) (bool, error) {
 		}
 	}
 
-	var token GrafanaApiKey
+	var token ApiKey
 	result := DirectorDB.First(&token, "id = ?", id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return false, nil // token not found
 		}
-		return false, errors.Wrap(result.Error, "failed to retrieve the Grafana API key")
+		return false, errors.Wrap(result.Error, "failed to retrieve the API key")
 	}
 
 	if time.Now().After(token.ExpiresAt) {
@@ -81,7 +81,7 @@ func VerifyGrafanaApiKey(apiKey string) (bool, error) {
 	return true, nil
 }
 
-func CreateGrafanaApiKey(name, createdBy, scopes string) (string, error) {
+func CreateApiKey(name, createdBy, scopes string) (string, error) {
 	expiresAt := time.Now().Add(time.Hour * 24 * 30) // 30 days
 	for {
 		secret, err := generateSecret(32)
@@ -96,7 +96,7 @@ func CreateGrafanaApiKey(name, createdBy, scopes string) (string, error) {
 			return "", errors.Wrap(err, "failed to hash the secret")
 		}
 
-		apiKey := GrafanaApiKey{
+		apiKey := ApiKey{
 			ID:          id,
 			Name:        name,
 			HashedValue: string(hashedValue),
@@ -109,7 +109,7 @@ func CreateGrafanaApiKey(name, createdBy, scopes string) (string, error) {
 		if result.Error != nil {
 			isConstraintError := result.Error.Error() == "UNIQUE constraint failed: tokens.id"
 			if !isConstraintError {
-				return "", errors.Wrap(result.Error, "failed to create a new Grafana API key")
+				return "", errors.Wrap(result.Error, "failed to create a new API key")
 			}
 			// If the ID is already taken, try again
 			continue
@@ -118,10 +118,10 @@ func CreateGrafanaApiKey(name, createdBy, scopes string) (string, error) {
 	}
 }
 
-func DeleteGrafanaApiKey(id string) error {
-	result := DirectorDB.Delete(&GrafanaApiKey{}, "id = ?", id)
+func DeleteApiKey(id string) error {
+	result := DirectorDB.Delete(&ApiKey{}, "id = ?", id)
 	if result.Error != nil {
-		return errors.Wrap(result.Error, "failed to delete the Grafana API key")
+		return errors.Wrap(result.Error, "failed to delete the API key")
 	}
 	if result.RowsAffected == 0 {
 		return errors.New("API key not found")

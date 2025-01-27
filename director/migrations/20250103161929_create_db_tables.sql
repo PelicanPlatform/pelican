@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS server_downtimes (
     updated_at DATETIME NOT NULL
 );
 
-CREATE TABLE grafana_api_keys (
+CREATE TABLE api_keys (
     id TEXT PRIMARY KEY UNIQUE,
     name TEXT,
     hashed_value TEXT NOT NULL,
