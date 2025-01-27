@@ -300,9 +300,10 @@ const (
 	projectName classAd = "ProjectName"
 	jobId       classAd = "GlobalJobId"
 
-	SyncNone                          = iota // When synchronizing, always re-transfer, regardless of existence at destination.
-	SyncExist                                // Skip synchronization transfer if the destination exists
-	SyncSize                                 // Skip synchronization transfer if the destination exists and matches the current source size
+	SyncNone  = iota // When synchronizing, always re-transfer, regardless of existence at destination.
+	SyncExist        // Skip synchronization transfer if the destination exists
+	SyncSize         // Skip synchronization transfer if the destination exists and matches the current source size
+
 	transferTypeDownload transferType = iota // Transfer is downloading from the federation
 	transferTypeUpload                       // Transfer is uploading to the federation
 	transferTypePrestage                     // Transfer is staging at a federation cache
@@ -1990,10 +1991,10 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		unpacker = newAutoUnpacker(dest, behavior)
 		if req, err = grab.NewRequestToWriter(unpacker, transferUrl.String()); err != nil {
 			return 0, 0, -1, "", errors.Wrap(err, "Failed to create new download request")
-		} else if dest == "/dev/null" {
-			if req, err = grab.NewRequestToWriter(io.Discard, transferUrl.String()); err != nil {
-				return 0, 0, -1, "", errors.Wrap(err, "Failed to create new prestage request")
-			}
+		}
+	} else if dest == "/dev/null" {
+		if req, err = grab.NewRequestToWriter(io.Discard, transferUrl.String()); err != nil {
+			return 0, 0, -1, "", errors.Wrap(err, "Failed to create new prestage request")
 		}
 	} else if req, err = grab.NewRequest(dest, transferUrl.String()); err != nil {
 		return 0, 0, -1, "", errors.Wrap(err, "Failed to create new download request")
