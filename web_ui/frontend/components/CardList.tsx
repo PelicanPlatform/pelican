@@ -21,7 +21,7 @@ interface CardListProps<T> {
 }
 
 export function CardList<T>({ data, Card, cardProps }: CardListProps<T>) {
-  const PAGE_SIZE = 5;
+  const PAGE_SIZE = 10;
   const [page, setPage] = useState<number>(1);
 
   // Minus the page if the data length changes

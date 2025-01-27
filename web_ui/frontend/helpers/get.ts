@@ -69,9 +69,18 @@ export const getExtendedNamespaces = async (): Promise<
     }
   });
 
-  return data.map((d) => {
+  const mappedData = data.map((d) => {
     return { namespace: d };
   });
+
+  const sortedData = mappedData.sort((a, b) => {
+    return (
+      new Date(b.namespace.admin_metadata.updated_at).getTime() -
+      new Date(a.namespace.admin_metadata.updated_at).getTime()
+    );
+  });
+
+  return sortedData;
 };
 
 /**
