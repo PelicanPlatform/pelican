@@ -64,6 +64,10 @@ var (
 
 const notFoundFilePath = "frontend/out/404/index.html"
 
+func ServerHeaderMiddleware(ctx *gin.Context) {
+	ctx.Writer.Header().Add("Server", "pelican/"+config.GetVersion())
+}
+
 // Initialize a hot restart of the server
 func hotRestartServer(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{

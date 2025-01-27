@@ -1574,6 +1574,19 @@ func SetClientDefaults(v *viper.Viper) error {
 		}
 
 	}
+
+	// Some client actions may take different defaults depending on whether we detect the plugin
+	v.SetDefault(param.Client_IsPlugin.GetName(), false)
+	v.SetDefault(param.Client_DirectorRetries.GetName(), 5)
+	if param.Client_IsPlugin.GetBool() {
+		// If we _are_ the plugin, be more aggressive about retries
+		v.Set(param.Client_DirectorRetries.GetName(), 2*param.Client_DirectorRetries.GetInt())
+	}
+	if param.Client_DirectorRetries.GetInt() < 1 {
+		log.Warningf("Client.DirectorRetries was set to %d, but it must be at least 1. Falling back to default of 5.", param.Client_DirectorRetries.GetInt())
+		v.Set(param.Client_DirectorRetries.GetName(), 5)
+	}
+
 	return nil
 }
 

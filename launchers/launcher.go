@@ -122,7 +122,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	if modules.IsEnabled(server_structs.BrokerType) {
-		rootGroup := engine.Group("/")
+		rootGroup := engine.Group("/", web_ui.ServerHeaderMiddleware)
 		broker.RegisterBroker(ctx, rootGroup)
 		broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
 	}
@@ -192,7 +192,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		if err != nil {
 			return
 		}
-		rootGroup := engine.Group("/")
+		rootGroup := engine.Group("/", web_ui.ServerHeaderMiddleware)
 		lc.Register(ctx, rootGroup)
 	}
 

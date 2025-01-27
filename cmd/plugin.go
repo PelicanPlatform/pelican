@@ -36,11 +36,13 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/utils"
 )
@@ -86,6 +88,8 @@ func init() {
 }
 
 func stashPluginMain(args []string) {
+	viper.Set(param.Client_IsPlugin.GetName(), true)
+
 	// Handler function to recover from panics
 	defer func() {
 		if r := recover(); r != nil {

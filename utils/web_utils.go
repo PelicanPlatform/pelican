@@ -120,6 +120,9 @@ func HeaderParser(values string) (retMap map[string]string) {
 //
 // Source: https://gist.github.com/rjz/fe283b02cbaa50c5991e1ba921adf7c9
 func HasContentType(r *http.Response, mimetype string) bool {
+	if r == nil {
+		return false
+	}
 	contentType := r.Header.Get("Content-type")
 	if contentType == "" {
 		return mimetype == "application/octet-stream"

@@ -22,20 +22,37 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
+
+// Check whether an HTTP response is actually a response from a Pelican service, as
+// indicated by the "Server" header pointing to a pelican process.
+//
+// We use this to handle retries in the event that the Director is down, but some ingress proxy in
+// front of it is still answering requests with errant 404s, 500s, 502s, etc.
+func fromPelican(resp *http.Response) bool {
+	if param.Client_AssumeDirectorServerHeader.GetBool() {
+		log.Debugln("Will assume response is from Director instead of checking for matching Server header. To change this behavior,",
+			"set the 'Client.AssumeDirectorServerHeader' configuration option to false.")
+		return true
+	}
+	return strings.HasPrefix(resp.Header.Get("Server"), "pelican/")
+}
 
 // Make a request to the director for a given verb/resource; return the
 // HTTP response object only if a 307 is returned.
@@ -60,42 +77,79 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, verb, resourceUrl.String(), nil)
-	if err != nil {
-		log.Errorln("Failed to create an HTTP request:", err)
-		return nil, err
-	}
-
-	// Include the Client's version as a User-Agent header. The Director will decide
-	// if it supports the version, and provide an error message in the case that it
-	// cannot.
-	req.Header.Set("User-Agent", getUserAgent(""))
-
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	// Perform the HTTP request
-	resp, err = client.Do(req)
-
-	if err != nil {
-		log.Errorln("Failed to get response from the director:", err)
-		return
-	}
-
-	defer resp.Body.Close()
-	log.Tracef("Director's response: %#v\n", resp)
-	// Check HTTP response -- should be 307 (redirect), else something went wrong
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Errorln("Failed to read the body from the director response:", err)
-		return resp, err
-	}
-	errMsg := string(body)
-
-	// The `directorResponse` variable indicates we think this response came from a director
+	var errMsg string
+	var body []byte
+	// The `fromDirector` variable indicates we think this response came from a director
 	// process, not a proxy / ingress like traefik.
-	directorResponse := false
+	var fromDirector bool
+	// In case the director is momentarily down, we will retry a few times using a backoff strategy
+	// I assume numRetries is >=1, which should enforced in config.go. However, not all tests that hit this code initialize the client.
+	numRetries := param.Client_DirectorRetries.GetInt()
+	if numRetries < 1 {
+		log.Errorf("The config parameter %s is currently set to %d. This should not be possible. Will use fallback of 1 retry",
+			param.Client_DirectorRetries.GetName(), numRetries)
+		numRetries = 1
+	}
+	for idx := 0; idx < numRetries; idx++ {
+		var req *http.Request
+		req, err = http.NewRequestWithContext(ctx, verb, resourceUrl.String(), nil)
+		if err != nil {
+			log.Errorln("Failed to create an HTTP request:", err)
+			return nil, err
+		}
+
+		// Include the Client's version as a User-Agent header. The Director will decide
+		// if it supports the version, and provide an error message in the case that it
+		// cannot.
+		req.Header.Set("User-Agent", getUserAgent(""))
+
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+
+		// Perform the HTTP request
+		resp, err = client.Do(req)
+
+		if err != nil {
+			log.Errorln("Failed to get response from the director:", err)
+			return
+		}
+
+		defer resp.Body.Close()
+		log.Tracef("Director's response: %#v\n", resp)
+		// Check HTTP response -- should be 307 (redirect), else something went wrong
+		body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			log.Errorln("Failed to read the body from the director response:", err)
+			return resp, err
+		}
+		errMsg = string(body)
+
+		// If this isn't a Pelican process _and_ we got an error, sleep then retry. We may be talking
+		// to something like a Traefik ingress controller that's waiting for the Director to come
+		// back online.
+		fromDirector = fromPelican(resp)
+		if !fromDirector && (resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusInternalServerError) {
+			if idx == 0 {
+				log.Warnf("Response not from a Pelican process, the Director may be rebooting; will retry a total of %d times.", numRetries)
+			}
+			sleepFor := 3*idx + 3
+			log.Warningln("Sleeping for", sleepFor, "seconds before retrying.")
+			// backoff+randomness to avoid thundering herd
+			time.Sleep(time.Duration(sleepFor)*time.Second + time.Duration(rand.Float32()*1000)*time.Millisecond)
+		} else if fromDirector && resp.StatusCode == http.StatusTooManyRequests {
+			// We just hit the Director after a reboot, but potentially before it's repopulated its
+			// cache of server adds. Retry until we stop getting the 429 or we hit our limit.
+			if idx == 0 {
+				log.Warningln("The Director indicates it has just rebooted and is still discovering federation services.")
+			}
+			sleepFor := 3*idx + 3
+			log.Warningln("Sleeping for", sleepFor, "seconds before retrying.")
+			time.Sleep(time.Duration(sleepFor)*time.Second + time.Duration(rand.Float32()*1000)*time.Millisecond)
+		} else {
+			break
+		}
+	}
 
 	// The Content-Type will be alike "application/json; charset=utf-8"
 	if utils.HasContentType(resp, "application/json") {
@@ -104,7 +158,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 			log.Errorln("Failed to unmarshal the director's JSON response:", err)
 			return resp, unmarshalErr
 		}
-		directorResponse = true
+		fromDirector = true
 		// In case we have old director returning "error": "message content"
 		if respErr.Msg != "" {
 			errMsg = respErr.Msg
@@ -125,7 +179,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 				return queryDirector(ctx, http.MethodPut, pUrl, token)
 			}
 		}
-		if resp.StatusCode == http.StatusNotFound && directorResponse && (errMsg == "All sources report object was not found" || errMsg == "Object not found at any cache") {
+		if resp.StatusCode == http.StatusNotFound && fromDirector && (errMsg == "All sources report object was not found" || errMsg == "Object not found at any cache") {
 			sce := StatusCodeError(http.StatusNotFound)
 			err = &sce
 		} else {

@@ -308,6 +308,7 @@ var (
 	Cache_BlocksToPrefetch = IntParam{"Cache.BlocksToPrefetch"}
 	Cache_Concurrency = IntParam{"Cache.Concurrency"}
 	Cache_Port = IntParam{"Cache.Port"}
+	Client_DirectorRetries = IntParam{"Client.DirectorRetries"}
 	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
 	Client_WorkerCount = IntParam{"Client.WorkerCount"}
@@ -342,8 +343,10 @@ var (
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
+	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
+	Client_IsPlugin = BoolParam{"Client.IsPlugin"}
 	Debug = BoolParam{"Debug"}
 	Director_AssumePresenceAtSingleOrigin = BoolParam{"Director.AssumePresenceAtSingleOrigin"}
 	Director_CachesPullFromCaches = BoolParam{"Director.CachesPullFromCaches"}
