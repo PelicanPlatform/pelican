@@ -976,3 +976,86 @@ func TestTokenGenerate(t *testing.T) {
 		assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
 	}
 }
+
+func TestPrestage(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	fed := fed_test_utils.NewFedTest(t, bothAuthOriginCfg)
+
+	te, err := client.NewTransferEngine(fed.Ctx)
+	require.NoError(t, err)
+
+	// Other set-up items:
+	// The cache will open the file to stat it, downloading the first block.
+	// Make sure we are greater than 64kb in size.
+	testFileContent := strings.Repeat("test file content", 10000)
+	// Create the temporary file to upload
+	tempFile, err := os.CreateTemp(t.TempDir(), "test")
+	assert.NoError(t, err, "Error creating temp file")
+	defer os.Remove(tempFile.Name())
+	_, err = tempFile.WriteString(testFileContent)
+	assert.NoError(t, err, "Error writing to temp file")
+	tempFile.Close()
+
+	tempToken, _ := getTempToken(t)
+	defer tempToken.Close()
+	defer os.Remove(tempToken.Name())
+	// Disable progress bars to not reuse the same mpb instance
+	viper.Set("Logging.DisableProgressBars", true)
+
+	oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+	assert.NoError(t, err)
+	defer func() {
+		_, err := config.SetPreferredPrefix(oldPref)
+		require.NoError(t, err)
+	}()
+
+	// Set path for object to upload/download
+	for _, export := range fed.Exports {
+		tempPath := tempFile.Name()
+		fileName := filepath.Base(tempPath)
+		uploadURL := fmt.Sprintf("pelican://%s:%s%s/prestage/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+			export.FederationPrefix, fileName)
+
+		// Upload the file with COPY
+		transferResultsUpload, err := client.DoCopy(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithTokenLocation(tempToken.Name()))
+		assert.NoError(t, err)
+		assert.Equal(t, int64(len(testFileContent)), transferResultsUpload[0].TransferredBytes)
+
+		// Check the cache info twice, make sure it's not cached.
+		tc, err := te.NewClient(client.WithTokenLocation(tempToken.Name()))
+		require.NoError(t, err)
+		innerFileUrl, err := url.Parse(uploadURL)
+		require.NoError(t, err)
+		age, size, err := tc.CacheInfo(fed.Ctx, innerFileUrl)
+		require.NoError(t, err)
+		assert.Equal(t, int64(len(testFileContent)), size)
+		// Due to an xrootd limitation, CacheInfo performs a GET request instead of a HEAD request.
+		// Once this limitation is resolved and CacheInfo is updated accordingly,
+		// the assertion should be changed to -1 instead of 0.
+		assert.Equal(t, 0, age)
+
+		age, size, err = tc.CacheInfo(fed.Ctx, innerFileUrl)
+		require.NoError(t, err)
+		assert.Equal(t, int64(len(testFileContent)), size)
+		// Due to an xrootd limitation, CacheInfo performs a GET request instead of a HEAD request.
+		// Once this limitation is resolved and CacheInfo is updated accordingly,
+		// the assertion should be changed to -1 instead of 0.
+		assert.Equal(t, 0, age)
+
+		// Prestage the object
+		tj, err := tc.NewPrestageJob(fed.Ctx, innerFileUrl)
+		require.NoError(t, err)
+		err = tc.Submit(tj)
+		require.NoError(t, err)
+		results, err := tc.Shutdown()
+		require.NoError(t, err)
+		assert.Equal(t, 1, len(results))
+
+		// Check if object is cached.
+		age, size, err = tc.CacheInfo(fed.Ctx, innerFileUrl)
+		require.NoError(t, err)
+		assert.Equal(t, int64(len(testFileContent)), size)
+		require.NotEqual(t, -1, age)
+	}
+}

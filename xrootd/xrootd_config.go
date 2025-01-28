@@ -108,6 +108,7 @@ type (
 
 	CacheConfig struct {
 		UseCmsd                          bool
+		EnablePrefetch                   bool
 		EnableVoms                       bool
 		CalculatedPort                   string
 		HighWaterMark                    string

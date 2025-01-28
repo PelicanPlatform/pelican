@@ -123,6 +123,17 @@ func (tg *tokenGenerator) SetToken(contents string) {
 	tg.Token.Store(&info)
 }
 
+// Copy the contents
+func (tg *tokenGenerator) Copy() *tokenGenerator {
+	return &tokenGenerator{
+		DirResp:       tg.DirResp,
+		Destination:   tg.Destination,
+		IsWrite:       tg.IsWrite,
+		EnableAcquire: tg.EnableAcquire,
+		Sync:          new(singleflight.Group),
+	}
+}
+
 // Read a token from a file; ensure
 func getTokenFromFile(tokenLocation string) (string, error) {
 	//Read in the JSON
