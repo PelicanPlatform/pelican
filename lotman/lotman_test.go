@@ -555,7 +555,7 @@ func TestGetPolicyMap(t *testing.T) {
 				t.Fatalf("Error reading config: %v", err)
 			}
 
-			policyMap, err := getPolicyMap()
+			policyMap, err := GetPolicyMap()
 			if tc.expectErr {
 				require.Error(t, err)
 			} else {
@@ -743,8 +743,8 @@ func TestConvertWatermarkToBytes(t *testing.T) {
 	testCases := []testCase{
 		{
 			Name:          "Valid 'k' suffix",
-			Watermark:     "100k",
-			Expected:      uint64(100000), // 100KB
+			Watermark:     "100.1k",
+			Expected:      uint64(100100), // 100KB
 			ErrorExpected: false,
 		},
 		{
@@ -767,8 +767,8 @@ func TestConvertWatermarkToBytes(t *testing.T) {
 		},
 		{
 			Name:          "No suffix is percentage",
-			Watermark:     "50",
-			Expected:      uint64(500000000000), // 500GB
+			Watermark:     "50.5",
+			Expected:      uint64(505000000000), // 500GB
 			ErrorExpected: false,
 		},
 		{

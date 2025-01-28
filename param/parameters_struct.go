@@ -35,6 +35,9 @@ type Config struct {
 		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		ExportLocation string `mapstructure:"exportlocation" yaml:"ExportLocation"`
+		FilesBaseSize string `mapstructure:"filesbasesize" yaml:"FilesBaseSize"`
+		FilesMaxSize string `mapstructure:"filesmaxsize" yaml:"FilesMaxSize"`
+		FilesNominalSize string `mapstructure:"filesnominalsize" yaml:"FilesNominalSize"`
 		HighWaterMark string `mapstructure:"highwatermark" yaml:"HighWaterMark"`
 		LocalRoot string `mapstructure:"localroot" yaml:"LocalRoot"`
 		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
@@ -358,6 +361,9 @@ type configWithType struct {
 		EnablePrefetch struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
+		FilesBaseSize struct { Type string; Value string }
+		FilesMaxSize struct { Type string; Value string }
+		FilesNominalSize struct { Type string; Value string }
 		HighWaterMark struct { Type string; Value string }
 		LocalRoot struct { Type string; Value string }
 		LowWatermark struct { Type string; Value string }

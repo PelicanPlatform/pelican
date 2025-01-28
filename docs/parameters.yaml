@@ -1326,24 +1326,81 @@ components: ["cache"]
 ---
 name: Cache.LowWatermark
 description: |+
-  A value of cache disk usage that stops the purging of cached files.
+  Whenever the cache initiates file purging, it will attempt to clean files until its cumulative disk
+  usages reaches this value. Note that "cache disk usage" is calculated based on the cache's entire set of
+  configured disks, not just data directories from those disks.
 
   The value should be either a percentage integer of total available disk space (default is 90),
   or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
   m (mega-), g (giga-), or t (tera-) bytes, respectively.
+
+  For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
+  `pfc.diskusage`.
 type: string
 default: 90
 components: ["cache"]
 ---
 name: Cache.HighWaterMark
 description: |+
-  A value of cache disk usage that triggers the purging of cached files.
+  When the cache's disk usage exceeds this value, file purging is triggered. Note that "cache disk usage"
+  is calculated based on the cache's entire set of configured disks, not just data directories from those disks.
 
   The value should be either a percentage integer of total available disk space (default is 95),
   or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
   m (mega-), g (giga-), or t (tera-) bytes, respectively.
+
+  For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
+  `pfc.diskusage`.
 type: string
 default: 95
+components: ["cache"]
+---
+name: Cache.FilesMaxSize
+description: |+
+  A value that sets the maximum cumulative size of files that can be stored in the cache's data directories (specified
+  by `Cache.StorageLocation` and `Cache.DataLocations). When either this value or `Cache.HighWaterMark` is exceeded, the
+  cache will begin purging files until it reaches the `Cache.FilesNominal` value. If the cache's disk usage is still in
+  excess of the `Cache.LowWaterMark`, the cache will continue purging files until it reaches the `Cache.FilesBase` value.
+
+  Unlike watermark values, this value _must_ be suffixed by a unit of k, m, g, or t, which represent kilobytes, megabytes,
+  gigabytes, and terabytes, respectively. All `Cache.Files*Size` parameters must be less than the cache's calculated low
+  watermark, which may be configured as a percentage of total disk space from multiple disks.
+
+  For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
+  `pfc.diskusage`.
+type: string
+default: none
+components: ["cache"]
+---
+name: Cache.FilesNominalSize
+description: |+
+  A value that sets the "nominal" cumulative size of files that can be stored in the cache's data directory. When files
+  in the cache exceed the `Cache.FilesMax` value, or if the cache's overall disk exceeds its `Cache.HighWaterMark` value,
+  the cache will begin purging files until it reaches this value. If the cache's disk usage is still in excess of the
+  `Cache.LowWaterMark`, the cache will continue purging files until it reaches the `Cache.FilesBase`.
+
+  Unlike watermark values, this value _must_ be suffixed by a unit of k, m, g, or t, which represent kilobytes, megabytes,
+  gigabytes, and terabytes, respectively. All `Cache.Files*Size` parameters must be less than the cache's calculated low
+  watermark, which may be configured as a percentage of total disk space from multiple disks.
+
+  For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
+  `pfc.diskusage`.
+type: string
+default: none
+components: ["cache"]
+---
+name: Cache.FilesBaseSize
+description: |+
+  A value that sets the "base" cumulative size of files that can be stored in the cache's data directory. This is the
+  stopping point for the cache's purging routines.
+
+  Unlike watermark values, this value _must_ be suffixed by a unit of k, m, g, or t, which represent kilobytes, megabytes,
+  gigabytes, and terabytes, respectively.All `Cache.Files*Size` parameters must be less than the cache's calculated low
+  watermark, which may be configured as a percentage of total disk space from multiple disks.
+
+  For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for `pfc.diskusage`.
+type: string
+default: none
 components: ["cache"]
 ---
 name: Cache.EnableVoms
