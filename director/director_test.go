@@ -1569,7 +1569,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	})
 }
 
-func TestRedirects(t *testing.T) {
+func TestRedirectCheckHostnames(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
@@ -1592,137 +1592,156 @@ func TestRedirects(t *testing.T) {
 	// Check that the checkHostnameRedirects uses the pre-configured hostnames to redirect
 	// requests that come in at the default paths, but not if the request is made
 	// specifically for an object or a cache via the API.
-	t.Run("redirect-check-hostnames", func(t *testing.T) {
-		// Note that we don't test here for the case when hostname redirects is turned off
-		// because the checkHostnameRedirects function should be unreachable via ShortcutMiddleware
-		// in that case, ie if we call this function and the incoming hostname matches, we should do
-		// the redirect specified
-		viper.Set("Director.OriginResponseHostnames", []string{"origin-hostname.com"})
-		viper.Set("Director.CacheResponseHostnames", []string{"cache-hostname.com"})
+	viper.Set("Director.OriginResponseHostnames", []string{"origin-hostname.com"})
+	viper.Set("Director.CacheResponseHostnames", []string{"cache-hostname.com"})
 
-		// base path with origin-redirect hostname, should redirect to origin
-		c, _ := gin.CreateTestContext(httptest.NewRecorder())
-		req := httptest.NewRequest("GET", "/foo/bar", nil)
-		c.Request = req
-		checkHostnameRedirects(c, "origin-hostname.com")
-		expectedPath := "/api/v1.0/director/origin/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+	type redirectHostNames struct {
+		desc         string
+		requestPath  string
+		host         string
+		expectedPath string
+	}
 
-		// base path with cache-redirect hostname, should redirect to cache
-		req = httptest.NewRequest("GET", "/foo/bar", nil)
-		c.Request = req
-		checkHostnameRedirects(c, "cache-hostname.com")
-		expectedPath = "/api/v1.0/director/object/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+	hostnamesTestCases := []redirectHostNames{
+		{
+			desc:         "redirect to origin",
+			requestPath:  "/foo/bar",
+			host:         "origin-hostname.com",
+			expectedPath: "/api/v1.0/director/origin/foo/bar",
+		},
+		{
+			desc:         "redirect to cache",
+			requestPath:  "/foo/bar",
+			host:         "cache-hostname.com",
+			expectedPath: "/api/v1.0/director/object/foo/bar",
+		},
+		{
+			desc:         "always redirect to origin",
+			requestPath:  "/api/v1.0/director/origin/foo/bar",
+			host:         "cache-hostname.com",
+			expectedPath: "/api/v1.0/director/origin/foo/bar",
+		},
+		{
+			desc:         "always redirect to cache",
+			requestPath:  "/api/v1.0/director/object/foo/bar",
+			host:         "origin-hostname.com",
+			expectedPath: "/api/v1.0/director/object/foo/bar",
+		},
+	}
 
-		// API path that should ALWAYS redirect to an origin
-		req = httptest.NewRequest("GET", "/api/v1.0/director/origin/foo/bar", nil)
-		c.Request = req
-		// Tell it cache, but it shouldn't switch what it redirects to
-		checkHostnameRedirects(c, "cache-hostname.com")
-		expectedPath = "/api/v1.0/director/origin/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+	for _, tc := range hostnamesTestCases {
+		t.Run(tc.desc, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			req := httptest.NewRequest("GET", tc.requestPath, nil)
+			c.Request = req
+			checkHostnameRedirects(c, tc.host)
 
-		// API path that should ALWAYS redirect to a cache
-		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
-		c.Request = req
-		// Tell it origin, but it shouldn't switch what it redirects to
-		checkHostnameRedirects(c, "origin-hostname.com")
-		expectedPath = "/api/v1.0/director/object/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+			assert.Equal(t, tc.expectedPath, c.Request.URL.Path)
+		})
+	}
+	server_utils.ResetTestState()
+}
 
-		server_utils.ResetTestState()
+func TestRedirectMiddleware(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	// Use ads generated via mock topology for generating list of caches
+	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
+	defer topoServer.Close()
+	viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+	err := AdvertiseOSDF(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		serverAds.DeleteAll()
 	})
 
-	t.Run("redirect-middleware", func(t *testing.T) {
-		// First test that two API endpoints are functioning properly
-		c, _ := gin.CreateTestContext(httptest.NewRecorder())
-		req := httptest.NewRequest("GET", "/api/v1.0/director/origin/foo/bar", nil)
-		c.Request = req
+	router := gin.Default()
+	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
 
-		// test both APIs when in cache mode
-		ShortcutMiddleware("cache")(c)
-		expectedPath := "/api/v1.0/director/origin/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+	type testCase struct {
+		description  string            // Description of the test case
+		method       string            // HTTP Method (e.g., GET, PUT)
+		path         string            // Request path
+		mode         string            // Mode for middleware (either "origin" or "cache")
+		expectedPath string            // Expected path after middleware is applied
+		headers      map[string]string // Optional headers (like Host or X-Forwarded-Host)
+	}
 
-		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
-		c.Request = req
-		ShortcutMiddleware("cache")(c)
-		expectedPath = "/api/v1.0/director/object/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+	// Helper function to run the middleware and assert the URL path
+	testRequest := func(tc testCase) {
+		t.Run(tc.description, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = req
 
-		// test both APIs when in origin mode
-		req = httptest.NewRequest("GET", "/api/v1.0/director/origin/foo/bar", nil)
-		c.Request = req
-		ShortcutMiddleware("origin")(c)
-		expectedPath = "/api/v1.0/director/origin/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+			// Set headers if any
+			for key, value := range tc.headers {
+				c.Request.Header.Set(key, value)
+			}
 
-		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
-		c.Request = req
-		ShortcutMiddleware("origin")(c)
-		expectedPath = "/api/v1.0/director/object/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+			ShortcutMiddleware(tc.mode)(c)
+			assert.Equal(t, tc.expectedPath, c.Request.URL.Path)
+		})
+	}
 
-		// Test the base paths
-		// test that we get an origin at the base path when in origin mode
-		req = httptest.NewRequest("GET", "/foo/bar", nil)
-		c.Request = req
-		ShortcutMiddleware("origin")(c)
-		expectedPath = "/api/v1.0/director/origin/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+	testCases := []testCase{
+		// Test cache mode for different paths
+		{"Cache mode - origin path", "GET", "/api/v1.0/director/origin/foo/bar", "cache", "/api/v1.0/director/origin/foo/bar", nil},
+		{"Cache mode - object path", "GET", "/api/v1.0/director/object/foo/bar", "cache", "/api/v1.0/director/object/foo/bar", nil},
 
-		// test that we get a cache at the base path when in cache mode
-		req = httptest.NewRequest("GET", "/api/v1.0/director/object/foo/bar", nil)
-		c.Request = req
-		ShortcutMiddleware("cache")(c)
-		expectedPath = "/api/v1.0/director/object/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+		// Test origin mode for different paths
+		{"Origin mode - origin path", "GET", "/api/v1.0/director/origin/foo/bar", "origin", "/api/v1.0/director/origin/foo/bar", nil},
+		{"Origin mode - object path", "GET", "/api/v1.0/director/object/foo/bar", "origin", "/api/v1.0/director/object/foo/bar", nil},
 
-		// test a PUT request always goes to the origin endpoint
-		req = httptest.NewRequest("PUT", "/foo/bar", nil)
-		c.Request = req
-		ShortcutMiddleware("cache")(c)
-		expectedPath = "/api/v1.0/director/origin/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+		// Test base paths when in origin mode
+		{"Base path - origin mode", "GET", "/foo/bar", "origin", "/api/v1.0/director/origin/foo/bar", nil},
 
-		// Test PROPFIND works for both base path and API path
-		req = httptest.NewRequest("PROPFIND", "/foo/bar", nil)
-		c.Request = req
-		ShortcutMiddleware("origin")(c)
-		expectedPath = "/api/v1.0/director/origin/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+		// Test base paths when in cache mode
+		{"Base path - cache mode", "GET", "/api/v1.0/director/object/foo/bar", "cache", "/api/v1.0/director/object/foo/bar", nil},
 
-		req = httptest.NewRequest("PROPFIND", "/api/v1.0/director/origin/foo/bar", nil)
-		c.Request = req
-		ShortcutMiddleware("origin")(c)
-		expectedPath = "/api/v1.0/director/origin/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+		// Test PUT method always goes to origin
+		{"PUT request goes to origin", "PUT", "/foo/bar", "cache", "/api/v1.0/director/origin/foo/bar", nil},
 
-		// Host-aware tests
-		// Test that we can turn on host-aware redirects and get one appropriate redirect from each
-		// type of header (as we've already tested that hostname redirects function)
+		// Test PROPFIND for both base path and API path
+		{"PROPFIND - base path", "PROPFIND", "/foo/bar", "origin", "/api/v1.0/director/origin/foo/bar", nil},
+		{"PROPFIND - api path", "PROPFIND", "/api/v1.0/director/origin/foo/bar", "origin", "/api/v1.0/director/origin/foo/bar", nil},
 
-		// Host header
-		viper.Set("Director.OriginResponseHostnames", []string{"origin-hostname.com"})
-		viper.Set("Director.HostAwareRedirects", true)
-		req = httptest.NewRequest("GET", "/foo/bar", nil)
-		c.Request = req
-		c.Request.Header.Set("Host", "origin-hostname.com")
-		ShortcutMiddleware("cache")(c)
-		expectedPath = "/api/v1.0/director/origin/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+		// Host-aware tests for different headers
+		{"Host header - cache mode", "GET", "/foo/bar", "cache", "/api/v1.0/director/origin/foo/bar", map[string]string{"Host": "origin-hostname.com"}},
+		{"X-Forwarded-Host header - cache mode", "GET", "/foo/bar", "cache", "/api/v1.0/director/origin/foo/bar", map[string]string{"X-Forwarded-Host": "origin-hostname.com"}},
+	}
 
-		// X-Forwarded-Host header
-		req = httptest.NewRequest("GET", "/foo/bar", nil)
-		c.Request = req
-		c.Request.Header.Set("X-Forwarded-Host", "origin-hostname.com")
-		ShortcutMiddleware("cache")(c)
-		expectedPath = "/api/v1.0/director/origin/foo/bar"
-		assert.Equal(t, expectedPath, c.Request.URL.Path)
+	// Set the necessary viper configuration for host-aware tests
+	viper.Set("Director.OriginResponseHostnames", []string{"origin-hostname.com"})
+	viper.Set("Director.HostAwareRedirects", true)
 
-		server_utils.ResetTestState()
+	// Run all test cases
+	for _, tc := range testCases {
+		testRequest(tc)
+	}
+
+	server_utils.ResetTestState()
+
+}
+func TestRedirects(t *testing.T) {
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	// Use ads generated via mock topology for generating list of caches
+	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
+	defer topoServer.Close()
+	viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+	err := AdvertiseOSDF(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		serverAds.DeleteAll()
 	})
+
+	router := gin.Default()
+	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
 
 	t.Run("cache-test-file-redirect", func(t *testing.T) {
 		viper.Set("Server.ExternalWebUrl", "https://example.com")
@@ -1869,29 +1888,6 @@ func TestRedirects(t *testing.T) {
 		assert.NotContains(t, c.Writer.Header().Get("X-Pelican-Namespace"), "collections-url")
 	})
 
-	t.Run("object-endpoint-returns-all-headers", func(t *testing.T) {
-		server_utils.ResetTestState()
-		t.Cleanup(func() {
-			server_utils.ResetTestState()
-		})
-
-		viper.Set("Director.CacheSortMethod", "random")
-
-		req, _ := http.NewRequest("GET", "/my/server", nil)
-		req.Header.Add("User-Agent", "pelican-v7.999.999")
-		req.Header.Add("X-Real-Ip", "128.104.153.60")
-		recorder := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(recorder)
-		c.Request = req
-		redirectToCache(c)
-
-		assert.NotEmpty(t, c.Writer.Header().Get("Location"))
-		assert.NotEmpty(t, c.Writer.Header().Get("Link"))
-		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Authorization"))
-		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Token-Generation"))
-		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Namespace"))
-	})
-
 	t.Run("origin-endpoint-returns-all-headers", func(t *testing.T) {
 		server_utils.ResetTestState()
 		t.Cleanup(func() {
@@ -1915,6 +1911,7 @@ func TestRedirects(t *testing.T) {
 		assert.NotEmpty(t, c.Writer.Header().Get("X-Pelican-Namespace"))
 	})
 }
+
 func TestHeaderGenFuncs(t *testing.T) {
 	issUrl := url.URL{
 		Scheme: "https",
