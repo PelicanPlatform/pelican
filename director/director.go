@@ -390,7 +390,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	// If either disableStat or skipstat is set, then skip the stat query
 	skipStat := ginCtx.Request.URL.Query().Has("skipstat") || disableStat
 
-	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
+	namespaceAd, originAds, prelimCacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
@@ -414,6 +414,19 @@ func redirectToCache(ginCtx *gin.Context) {
 	depth, err := getLinkDepth(reqPath, namespaceAd.Path)
 	if err != nil {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
+	}
+
+	// If the namespace doesn't require a token for reads, remove all topology only ads in order to
+	// prevent redirection to the non-auth version of these caches
+	cacheAds := make([]server_structs.ServerAd, 0, len(prelimCacheAds))
+	if namespaceAd.Caps.PublicReads {
+		for _, pAd := range prelimCacheAds {
+			if !pAd.FromTopology {
+				cacheAds = append(cacheAds, pAd)
+			}
+		}
+	} else {
+		cacheAds = prelimCacheAds
 	}
 
 	// If the namespace requires a token yet there's no token available, skip the stat.
