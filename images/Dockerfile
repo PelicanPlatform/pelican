@@ -80,39 +80,24 @@ RUN yum -y update \
     && yum clean all \
     && rm -rf /var/cache/yum/
 
-####
-# Start building xrootd plugins (xrdcl-pelican and s3)
-####
+
+###############################
+# Begin XRootD Plugin Builder #
+###############################
 FROM dependency-build AS xrootd-plugin-builder
 # Install necessary build dependencies
-RUN  yum install -y --enablerepo=osg-testing xrootd-devel xrootd-server-devel xrootd-client-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
+RUN  yum install -y --enablerepo=osg-testing curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
 
 # The ADD command with a api.github.com URL in the next couple of sections
 # are for cache-hashing of the external repository that we rely on to build
 # the image
-ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/main /tmp/hash-xrdcl-pelican
+ENV JSON_VERSION="v3.11.3" \
+    JSON_SCHEMA_VALIDATOR_VERSION="2.3.0" \
+    LOTMAN_VERSION="v0.0.4"
 
-# Install xrdcl-pelican plugin
-RUN \
-    yum install -y --enablerepo=osg-testing xrdcl-pelican
-
-ADD https://api.github.com/repos/PelicanPlatform/xrootd-s3-http/git/refs/heads/main /tmp/hash-xrootd-s3-http
-
-# Install the S3 and HTTP server plugins for XRootD. For now we do this from source
-# until we can sort out the RPMs.
-# Ping the http plugin at a specific commit
-RUN \
-    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
-    cd xrootd-s3-http && \
-    git checkout v0.1.8 && \
-    git submodule update --init --recursive && \
-    mkdir build && cd build && \
-    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
-    make install
-
-ADD https://api.github.com/repos/nlohmann/json/git/refs/heads/master /tmp/hash-json
-ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/heads/master /tmp/hash-json
-ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/heads/main /tmp/hash-json
+ADD https://api.github.com/repos/nlohmann/json/git/refs/tags/${JSON_VERSION} /tmp/hash-json
+ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/tags/${JSON_SCHEMA_VALIDATOR_VERSION} /tmp/hash-json
+ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/tags/${LOTMAN_VERSION} /tmp/hash-json
 
 # LotMan Installation
 # First install dependencies
@@ -124,8 +109,7 @@ RUN git clone https://github.com/pboettch/json-schema-validator.git && \
     cd json-schema-validator && mkdir build && \
     cd build && cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j`nproc` install
-#Finally LotMan proper. For now we do this from source until we can sort out the RPMs.
-#Ping LotMan at a specific commit
+# Finally LotMan proper. For now we do this from source until we can sort out the RPMs.
 RUN \
     git clone https://github.com/PelicanPlatform/lotman.git && \
     cd lotman && \
@@ -138,9 +122,10 @@ RUN \
 FROM dependency-build AS final-stage
 
 # Any other yum-installable dependencies that need to be present in the final container
-# should go here. Installation in a previous section will result in the packages being
+# should go here. Installation in a previous section may result in the packages being
 # installed only in the intermediate builder containers!
-RUN yum install -y --enablerepo=osg-testing sssd-client
+RUN yum install -y --enablerepo=osg-testing sssd-client xrdcl-pelican xrootd-multiuser
+RUN yum install -y --enablerepo=epel-testing xrootd-s3-http
 
 WORKDIR /pelican
 
@@ -201,15 +186,11 @@ ENV JAVA_HOME=/usr/lib/jvm/jre \
     QDL_HOME="/opt/qdl" \
     PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
 
-# Copy xrdcl-pelican plugin config
-COPY --from=xrootd-plugin-builder /etc/xrootd/client.plugins.d/pelican-plugin.conf /etc/xrootd/client.plugins.d/pelican-plugin.conf
 # Remove http plugin to use pelican plugin
 RUN rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
 
-# Copy built s3 plugin library and xrdcl-pelican plugin library from build
-COPY --from=xrootd-plugin-builder /usr/lib64/libXrdS3-5.so /usr/lib64/libXrdHTTPServer-5.so /usr/lib64/libXrdClPelican-5.so \
-    /usr/lib64/libLotMan.so /usr/lib64/
-
+# Copy plugins built from the xrootd-plugin-builder stage
+COPY --from=xrootd-plugin-builder /usr/lib64/libLotMan.so /usr/lib64/
 # Copy the nlohmann json headers
 COPY --from=xrootd-plugin-builder /usr/include/nlohmann /usr/include/nlohmann
 # Copy the JSON schema validator library
