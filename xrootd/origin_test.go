@@ -75,7 +75,7 @@ func originMockup(ctx context.Context, egrp *errgroup.Group, t *testing.T) conte
 
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
-	config.InitConfig()
+	config.InitConfig(false)
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 

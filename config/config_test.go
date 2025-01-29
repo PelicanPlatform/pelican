@@ -151,7 +151,7 @@ func TestInitConfig(t *testing.T) {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
 
-	InitConfig() // Should set up pelican.yaml, osdf.yaml and defaults.yaml
+	InitConfig(false) // Should set up pelican.yaml, osdf.yaml and defaults.yaml
 
 	// Check if server address is correct by defaults.yaml
 	assert.Equal(t, "0.0.0.0", param.Server_WebHost.GetString())
@@ -164,7 +164,7 @@ func TestInitConfig(t *testing.T) {
 	}
 	ResetConfig()
 	viper.Set("config", tempCfgFile.Name()) // Set the temp file as the new 'pelican.yaml'
-	InitConfig()
+	InitConfig(false)
 
 	// Check if server address overrides the default
 	assert.Equal(t, "1.1.1.1", param.Server_WebHost.GetString())
@@ -177,7 +177,7 @@ func TestInitConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
-	InitConfig()
+	InitConfig(false)
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
 }
 
@@ -423,7 +423,7 @@ func TestDeprecationHandling(t *testing.T) {
 	logrus.SetOutput(&logBuffer)
 	defer logrus.SetOutput(os.Stdout) // Restore stdout after the test
 
-	InitConfig()
+	InitConfig(false)
 	err = SetServerDefaults(viper.GetViper())
 	require.NoError(t, err)
 

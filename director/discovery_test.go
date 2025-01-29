@@ -143,7 +143,7 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 			viper.Set("ConfigDir", t.TempDir())
 			viper.Set("Federation.DirectorUrl", tc.dirUrl)
 			viper.Set("Federation.RegistryUrl", tc.regUrl)
-			config.InitConfig()
+			config.InitConfig(false)
 			require.NoError(t, config.InitClient())
 
 			w := httptest.NewRecorder()
@@ -215,7 +215,7 @@ func TestOidcDiscoveryHandler(t *testing.T) {
 			server_utils.ResetTestState()
 			viper.Set("ConfigDir", t.TempDir())
 			viper.Set("Federation.DirectorUrl", tc.dirUrl)
-			config.InitConfig()
+			config.InitConfig(false)
 			require.NoError(t, config.InitClient())
 
 			w := httptest.NewRecorder()
