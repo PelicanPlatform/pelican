@@ -3,6 +3,7 @@ package database
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -32,18 +33,18 @@ type (
 	}
 )
 
-func generateSecret(length int) (string, error) {
-	bytes := make([]byte, length)
-	_, err := rand.Read(bytes)
+func generateSecret(length int) ([]byte, error) {
+	bytesSlice := make([]byte, length)
+	_, err := rand.Read(bytesSlice)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return string(bytes), nil
+	return bytesSlice, nil
 }
 
-func generateTokenID(secret string) string {
-	hash := sha256.Sum256([]byte(secret))
-	return string(hash[:])[:5]
+func generateTokenID(secret []byte) string {
+	hash := sha256.Sum256(secret)
+	return hex.EncodeToString(hash[:])[:5]
 }
 
 func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKeyCached]) (bool, []string, error) {
@@ -57,7 +58,18 @@ func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKe
 		return false, nil, errors.New("invalid API key format")
 	}
 	id := parts[0]
-	secret := parts[1]
+	secretHex := parts[1]
+
+	item := verifiedKeysCache.Get(id)
+	if item != nil {
+		// Cache hit
+		return true, item.Value().Capabilities, nil
+	}
+
+	secret, err := hex.DecodeString(secretHex)
+	if err != nil {
+		return false, nil, errors.Wrap(err, "failed to decode the secret")
+	}
 
 	var token ApiKey
 	result := DirectorDB.First(&token, "id = ?", id)
@@ -72,7 +84,7 @@ func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKe
 		return false, nil, nil
 	}
 
-	err := bcrypt.CompareHashAndPassword([]byte(token.HashedValue), []byte(secret))
+	err = bcrypt.CompareHashAndPassword([]byte(token.HashedValue), []byte(secret))
 	if err != nil {
 		return false, nil, nil
 	}
@@ -125,7 +137,7 @@ func CreateApiKey(name, createdBy, scopes string, expiration time.Time) (string,
 			// If the ID is already taken, try again
 			continue
 		}
-		return fmt.Sprintf("%s.%s", id, secret), nil
+		return fmt.Sprintf("%s.%s", id, hex.EncodeToString(secret)), nil
 	}
 }
 
