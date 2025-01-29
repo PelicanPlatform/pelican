@@ -857,21 +857,34 @@ func LogPelicanVersion() {
 	log.Infoln("Build Commit:", GetBuiltCommit())
 }
 
-// Print Pelican configuration to stderr
+// Dump Pelican configuration as structured logs and a human-readable format to stderr
 func PrintConfig() error {
 	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil {
 		return err
 	}
-	bytes, err := json.MarshalIndent(*rawConfig, "", "  ")
+
+	configMap := make(map[string]interface{})
+	configBytes, err := json.Marshal(rawConfig)
 	if err != nil {
 		return err
 	}
+	if err := json.Unmarshal(configBytes, &configMap); err != nil {
+		return err
+	}
+
+	// Dump configuration as a structured log
+	log.WithFields(log.Fields{
+		"pelican_config": configMap,
+	}).Info("Pelican Configuration Dump")
+
+	// Human-readable JSON to stderr
+	prettyConfig, _ := json.MarshalIndent(rawConfig, "", "  ")
 	fmt.Fprintln(os.Stderr,
 		"================ Pelican Configuration ================\n",
-		string(bytes),
-		"\n",
-		"============= End of Pelican Configuration ============")
+		string(prettyConfig),
+		"\n============= End of Pelican Configuration ============")
+
 	return nil
 }
 
