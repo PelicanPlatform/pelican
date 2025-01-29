@@ -73,8 +73,8 @@ const (
 var (
 	federationJWK     *jwk.Cache
 	authChecker       AuthChecker
-	VerifiedKeysCache *ttlcache.Cache[string, database.ApiKey] = ttlcache.New[string, database.ApiKey](
-		ttlcache.WithTTL[string, database.ApiKey](time.Hour * 24),
+	VerifiedKeysCache *ttlcache.Cache[string, database.ApiKeyCached] = ttlcache.New[string, database.ApiKeyCached](
+		ttlcache.WithTTL[string, database.ApiKeyCached](time.Hour * 24),
 	)
 	// API token format: <5-char ID>.<64-char secret>, total length = 70, alphanumeric
 	ApiTokenRegex = regexp.MustCompile(`^[a-zA-Z0-9]{5}\.[a-zA-Z0-9]{64}$`)
@@ -258,7 +258,7 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 				errMsg += fmt.Sprintln("Invalid API token format")
 				continue
 			}
-			ok, err := database.VerifyApiKey(token, VerifiedKeysCache)
+			ok, _, err := database.VerifyApiKey(token, VerifiedKeysCache)
 			if err != nil {
 				errMsg += fmt.Sprintln("Cannot verify token with API key issuer: ", err)
 			} else if ok {
