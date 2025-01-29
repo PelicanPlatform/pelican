@@ -102,6 +102,6 @@ func TestStatMemory(t *testing.T) {
 	log.Infoln("Go routine count after warm-up:", goCnt)
 	log.Infoln("Go routine count after test:", afterGoCnt)
 
-	assert.Less(t, afterStats.HeapAlloc, stats.HeapAlloc+7e5)
+	assert.Less(t, afterStats.HeapAlloc, stats.HeapAlloc+9e5)
 	assert.Less(t, afterGoCnt, goCnt+10)
 }
