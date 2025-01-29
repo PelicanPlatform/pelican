@@ -66,7 +66,7 @@ func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKe
 		return false, errors.Wrap(result.Error, "failed to retrieve the API key")
 	}
 
-	if time.Now().After(token.ExpiresAt) {
+	if !token.ExpiresAt.IsZero() && time.Now().After(token.ExpiresAt) {
 		return false, nil
 	}
 
@@ -79,8 +79,7 @@ func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKe
 	return true, nil
 }
 
-func CreateApiKey(name, createdBy, scopes string) (string, error) {
-	expiresAt := time.Now().Add(time.Hour * 24 * 30) // 30 days
+func CreateApiKey(name, createdBy, scopes string, expiration time.Time) (string, error) {
 	for {
 		secret, err := generateSecret(32)
 		if err != nil {
@@ -99,7 +98,7 @@ func CreateApiKey(name, createdBy, scopes string) (string, error) {
 			Name:        name,
 			HashedValue: string(hashedValue),
 			Scopes:      scopes,
-			ExpiresAt:   expiresAt,
+			ExpiresAt:   expiration,
 			CreatedAt:   time.Now(),
 			CreatedBy:   createdBy,
 		}
