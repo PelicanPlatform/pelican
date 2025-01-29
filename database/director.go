@@ -15,15 +15,22 @@ import (
 
 var DirectorDB *gorm.DB
 
-type ApiKey struct {
-	ID          string `gorm:"primaryKey;column:id;type:text;not null;unique"`
-	Name        string `gorm:"column:name;type:text"`
-	HashedValue string `gorm:"column:hashed_value;type:text;not null"`
-	Scopes      string `gorm:"column:scopes;type:text"`
-	ExpiresAt   time.Time
-	CreatedAt   time.Time
-	CreatedBy   string `gorm:"column:created_by;type:text"`
-}
+type (
+	ApiKey struct {
+		ID          string `gorm:"primaryKey;column:id;type:text;not null;unique"`
+		Name        string `gorm:"column:name;type:text"`
+		HashedValue string `gorm:"column:hashed_value;type:text;not null"`
+		Scopes      string `gorm:"column:scopes;type:text"`
+		ExpiresAt   time.Time
+		CreatedAt   time.Time
+		CreatedBy   string `gorm:"column:created_by;type:text"`
+	}
+
+	ApiKeyCached struct {
+		Token        string // "$ID.$SECRET_IN_HEX" string form
+		Capabilities []string
+	}
+)
 
 func generateSecret(length int) (string, error) {
 	bytes := make([]byte, length)
@@ -39,44 +46,51 @@ func generateTokenID(secret string) string {
 	return string(hash[:])[:5]
 }
 
-func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKey]) (bool, error) {
+func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKeyCached]) (bool, []string, error) {
+	item := verifiedKeysCache.Get(apiKey)
+	if item != nil {
+		// Cache hit
+		return true, item.Value().Capabilities, nil
+	}
 	parts := strings.Split(apiKey, ".")
 	if len(parts) != 2 {
-		return false, errors.New("invalid API key format")
+		return false, nil, errors.New("invalid API key format")
 	}
 	id := parts[0]
 	secret := parts[1]
-
-	item := verifiedKeysCache.Get(id)
-	if item != nil {
-		cachedToken := item.Value()
-		beforeExpiration := time.Now().Before(cachedToken.ExpiresAt)
-		matches := bcrypt.CompareHashAndPassword([]byte(cachedToken.HashedValue), []byte(secret)) == nil
-		if beforeExpiration && matches {
-			return true, nil
-		}
-	}
 
 	var token ApiKey
 	result := DirectorDB.First(&token, "id = ?", id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return false, nil // token not found
+			return false, nil, nil // token not found
 		}
-		return false, errors.Wrap(result.Error, "failed to retrieve the API key")
+		return false, nil, errors.Wrap(result.Error, "failed to retrieve the API key")
 	}
 
 	if !token.ExpiresAt.IsZero() && time.Now().After(token.ExpiresAt) {
-		return false, nil
+		return false, nil, nil
 	}
 
 	err := bcrypt.CompareHashAndPassword([]byte(token.HashedValue), []byte(secret))
 	if err != nil {
-		return false, nil
+		return false, nil, nil
 	}
 
-	verifiedKeysCache.Set(id, token, ttlcache.DefaultTTL)
-	return true, nil
+	cacheTTL := ttlcache.DefaultTTL
+	if !token.ExpiresAt.IsZero() {
+		timeUntilExpiration := time.Until(token.ExpiresAt)
+		if timeUntilExpiration < cacheTTL {
+			cacheTTL = timeUntilExpiration
+		}
+	}
+
+	cached := ApiKeyCached{
+		Token:        apiKey,
+		Capabilities: strings.Split(token.Scopes, ","),
+	}
+	verifiedKeysCache.Set(id, cached, cacheTTL)
+	return true, cached.Capabilities, nil
 }
 
 func CreateApiKey(name, createdBy, scopes string, expiration time.Time) (string, error) {
@@ -115,7 +129,7 @@ func CreateApiKey(name, createdBy, scopes string, expiration time.Time) (string,
 	}
 }
 
-func DeleteApiKey(id string, verifiedKeysCache *ttlcache.Cache[string, ApiKey]) error {
+func DeleteApiKey(id string, verifiedKeysCache *ttlcache.Cache[string, ApiKeyCached]) error {
 	result := DirectorDB.Delete(&ApiKey{}, "id = ?", id)
 	if result.Error != nil {
 		return errors.Wrap(result.Error, "failed to delete the API key")
