@@ -72,8 +72,9 @@ func ServerHeaderMiddleware(ctx *gin.Context) {
 }
 
 type CreateApiTokenReq struct {
-	Name      string `json:"name"`
-	CreatedBy string `json:"created_by"`
+	Name       string `json:"name"`
+	CreatedBy  string `json:"created_by"`
+	Expiration string `json:"expiration"` // RFC3339 format
 }
 
 // Initialize a hot restart of the server
@@ -411,7 +412,28 @@ func createApiToken(ctx *gin.Context) {
 	}
 
 	scopes := fmt.Sprintf("%s,%s", token_scopes.Monitoring_Query.String(), token_scopes.Monitoring_Scrape.String())
-	token, err := database.CreateApiKey(req.Name, req.CreatedBy, scopes)
+	var expirationTime time.Time
+	if req.Expiration == "" || req.Expiration == "never" { // if expiration is not provided, set token to never expire
+		expirationTime = time.Time{}
+	} else {
+		expirationTime, err = time.Parse(time.RFC3339, req.Expiration)
+		if err != nil {
+			log.Warningf("Failed to parse expiration time: %v", err)
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Invalid expiration time: %v", err),
+			})
+			return
+		}
+	}
+	if err != nil {
+		log.Warningf("Failed to parse expiration time: %v", err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid expiration time: %v", err),
+		})
+	}
+	token, err := database.CreateApiKey(req.Name, req.CreatedBy, scopes, expirationTime)
 	if err != nil {
 		log.Warning("Failed to create API key: ", err)
 		ctx.JSON(status, server_structs.SimpleApiResp{
