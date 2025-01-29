@@ -48,11 +48,6 @@ func generateTokenID(secret []byte) string {
 }
 
 func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKeyCached]) (bool, []string, error) {
-	item := verifiedKeysCache.Get(apiKey)
-	if item != nil {
-		// Cache hit
-		return true, item.Value().Capabilities, nil
-	}
 	parts := strings.Split(apiKey, ".")
 	if len(parts) != 2 {
 		return false, nil, errors.New("invalid API key format")
