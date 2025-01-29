@@ -253,15 +253,9 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 				return http.StatusOK, true, nil
 			}
 		case APITokenIssuer:
-			matched := ApiTokenRegex.MatchString(token)
-			if !matched {
-				errMsg += fmt.Sprintln("Invalid API token format")
-				continue
-			}
-			ok, _, err := database.VerifyApiKey(token, VerifiedKeysCache)
-			if err != nil {
-				errMsg += fmt.Sprintln("Cannot verify token with API key issuer: ", err)
-			} else if ok {
+			if err := checkApiTokenIssuer(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
+				errMsg += fmt.Sprintln("Cannot verify token with API token issuer: ", err)
+			} else {
 				return http.StatusOK, true, nil
 			}
 		default:
@@ -406,4 +400,26 @@ func GetJWKSFromIssUrl(issuer string) (*jwk.Set, error) {
 	}
 
 	return &kSet, nil
+}
+
+func checkApiTokenIssuer(ctx *gin.Context, token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+	matched := ApiTokenRegex.MatchString(token)
+	if !matched {
+		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Invalid API token format"})
+		return errors.New("Invalid API token format")
+	}
+	ok, capabilities, err := database.VerifyApiKey(token, VerifiedKeysCache)
+	if err != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return err
+	}
+	if !ok {
+		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Invalid API token"})
+		return errors.New("Invalid API token")
+	}
+
+	if !token_scopes.ScopeContains(capabilities, expectedScopes, allScopes) {
+		return errors.New(fmt.Sprintf("Token does not contain any of the scopes: %v", expectedScopes))
+	}
+	return nil
 }
