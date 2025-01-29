@@ -66,7 +66,6 @@ func listAdvertisement(serverTypes []server_structs.ServerType) []*server_struct
 func checkFilter(serverName string) (bool, filterType) {
 	filteredServersMutex.RLock()
 	defer filteredServersMutex.RUnlock()
-	log.Debugf("Checking for a downtime filter applied to server %s", serverName)
 	status, exists := filteredServers[serverName]
 	// No filter entry
 	if !exists {
