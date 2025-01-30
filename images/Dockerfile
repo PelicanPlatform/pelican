@@ -75,8 +75,9 @@ RUN groupadd -o -g 10940 xrootd
 RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
 
 # Install dependencies
+# Do a refresh here so we don't end up using outdated repo metadata from the base image
 RUN yum -y update \
-    && yum -y --allowerasing --enablerepo osg-testing install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms xrootd-multiuser curl java-17-openjdk-headless \
+    && yum -y --refresh --allowerasing --enablerepo osg-testing install tini xrootd xrootd-client xrdcl-http xrootd-server xrootd-scitokens xrootd-voms xrootd-multiuser curl java-17-openjdk-headless \
     && yum clean all \
     && rm -rf /var/cache/yum/
 
