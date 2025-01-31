@@ -16,350 +16,517 @@
 #
 # ***************************************************************
 
-ARG BASE_YUM_REPO=release
-ARG BASE_OSG_SERIES=23
+# For selecting OSG-maintained packages.
 ARG BASE_OS=el9
+ARG OSG_SERIES=23
+ARG OSG_REPO=release
 
-#######################
-# Begin Pelican Build #
-#######################
-# Building Pelican requires go, goreleaser, and packages for the web build
-FROM almalinux:9 AS pelican-build
-ARG IS_NONRELEASE_BUILD="true"
+# For compiling Pelican.
+ARG GO_VER=1.21.6
+ARG NODEJS_VER=20
 
-WORKDIR /pelican
-COPY . .
+# For compiling LotMan.
+ARG JSON_VERSION="v3.11.3"
+ARG JSON_SCHEMA_VALIDATOR_VERSION="2.3.0"
+ARG LOTMAN_VERSION="v0.0.4"
 
-# Set the go environment variables, also picked up go goreleaser and used in the build
-# for constructing the directory binaries are built in (i.e. /pelican/dist/$GOOS_$GOARCH/pelican_$GOOS_$GOARCH_v1)
-ENV GOOS="linux"
-ENV GOARCH="amd64"
+# For building the testing environment (container image). The safest choice
+# is to use the osdf-origin stage from the build being tested, but if you
+# know that an existing image already has the appropriate version of XRootD,
+# OA4MP, etc., you might use that in order to speed up the build process.
+ARG TESTING_BASE_IMAGE=osdf-origin
 
-# Install go
-RUN curl https://dl.google.com/go/go1.21.6.linux-$GOARCH.tar.gz -o go1.21.6.linux-$GOARCH.tar.gz && \
-    rm -rf /usr/local/go && tar -C /usr/local -xzf go1.21.6.linux-$GOARCH.tar.gz
+# Throughout the build, we need to refer to the platform that
+# we're building *on* and the platform that we're building *for*.
+# (Go supports cross-compilation.)
+#
+# Reference: https://docs.docker.com/reference/dockerfile/#automatic-platform-args-in-the-global-scope
+#
+# ARG BUILDPLATFORM
+# ARG BUILDOS
+# ARG BUILDARCH
+# ARG TARGETPLATFORM
+# ARG TARGETOS
+# ARG TARGETARCH
+
+# Set scitokens-oauth2-server image as a build stage so that we can copy its
+# OA4MP installation into the images being built here.
+FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
+
+#################################################################
+# Pelican Build Base
+#
+# This stage sets up the infrastructure for building the Pelican
+# binaries. The actual build happens in a later stage because it
+# depends on the target we're building for.
+#################################################################
+FROM --platform=${BUILDPLATFORM} almalinux:9 AS pelican-build-base
+ARG BUILDOS
+ARG BUILDARCH
+ARG GO_VER
+ARG NODEJS_VER
+
+WORKDIR /pelican-build
+
+COPY <<ENDCOPY /etc/yum.repos.d/goreleaser.repo
+[goreleaser]
+name=GoReleaser
+baseurl=https://repo.goreleaser.com/yum/
+enabled=1
+gpgcheck=0
+ENDCOPY
+RUN dnf install -y goreleaser
+
+RUN curl -O https://dl.google.com/go/go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz \
+    && rm -rf /usr/local/go \
+    && tar -C /usr/local -xzf go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz \
+    && rm -rf go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
 
-# Make goreleaser installable with dnf by adding its repo
-# This is a bash-ism but on almalinux:9, /bin/sh _is_ bash so we don't need to change SHELL
-RUN echo $'[goreleaser] \n\
-name=GoReleaser \n\
-baseurl=https://repo.goreleaser.com/yum/ \n\
-enabled=1 \n\
-gpgcheck=0' > /etc/yum.repos.d/goreleaser.repo
+# We use npm to bootstrap the installation of the required Node.js version
+# and an updated version of npm itself. The `dnf remove` in the middle is to
+# avoid there being multiple, incompatible versions of npm.
+RUN dnf install -y npm \
+    && npm install -g n \
+    && n ${NODEJS_VER} \
+    && dnf remove -y npm \
+    && npm install -g npm@latest \
+    && n prune
 
-RUN dnf update -y && \
-    dnf install -y npm goreleaser
+#################################################################
+# Pelican Build
+#
+# This stage builds the Pelican binaries. Later stages should
+# COPY them out as needed.
+#################################################################
+FROM --platform=${BUILDPLATFORM} pelican-build-base AS pelican-build
+ARG TARGETOS
+ARG TARGETARCH
 
-# Use npm to install node
-RUN npm install -g n
-ENV PATH="${PATH}:/usr/lib/node_modules/npm/bin"
+ARG IS_NONRELEASE_BUILD=true
+ENV GOOS=${TARGETOS}
+ENV GOARCH=${TARGETARCH}
 
-# Ensure the correct version of Node.js is used
-RUN n 20 && \
-    npm install -g npm@latest && \
-    n prune
+COPY . .
 
-RUN \
-    if $IS_NONRELEASE_BUILD;\
-        then goreleaser build --clean --snapshot --single-target;\
-    else goreleaser build --clean --single-target;\
-    fi
-#####################
-# End Pelican Build #
-#####################
+# Have Docker's build process cache the Go build's cache directories.
+RUN --mount=type=cache,target=/root/go,sharing=locked \
+    --mount=type=cache,target=/root/.cache,sharing=locked \
+    <<ENDRUN
 
-###################
-# Begin Scitokens #
-###################
-FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
-#################
-# End Scitokens #
-#################
+  set -eux
 
-##########################
-# Begin Dependency Build #
-##########################
-FROM --platform=linux/amd64 opensciencegrid/software-base:$BASE_OSG_SERIES-$BASE_OS-$BASE_YUM_REPO AS dependency-build
+  if ${IS_NONRELEASE_BUILD}; then
+    goreleaser build --clean --single-target --snapshot
+  else
+    goreleaser build --clean --single-target
+  fi
 
-# Re-reference these args from the base image -- args are otherwise scoped by build stage.
-ARG BASE_YUM_REPO
-ARG BASE_OSG_SERIES
+  # NOTE (brianaydemir): GoReleaser creates a dist directory whose path
+  # includes the target architecture variant. Unfortunately, Docker does
+  # not seem to reliably set TARGETVARIANT.
+  #
+  # On the assumption that we will never build for multiple variants of
+  # one architecture, we create a symlink to make it easier for later build
+  # stages to COPY files out.
+
+  if [ "$TARGETARCH" = "amd64" ]; then
+    VARIANT="v1"
+  elif [ "$TARGETARCH" = "arm64" ]; then
+    VARIANT="v8.0"
+  fi
+  for dir in ${PWD}/dist/${TARGETOS}_${TARGETARCH}/*${TARGETOS}_${TARGETARCH}*; do
+    ln -s ${dir} ${dir%_${VARIANT}}
+  done
+ENDRUN
+
+#################################################################
+# Pelican Software Base
+#
+# This stage should contain setup common to all images that we wish
+# to build (director, registry, origin, cache, etc.).
+#################################################################
+FROM hub.opensciencegrid.org/osg-htc/software-base:${OSG_SERIES}-${BASE_OS}-${OSG_REPO} AS pelican-software-base
+
+WORKDIR /pelican
+
+RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
+
+  # Throughout this build, we will have Docker's build process cache dnf's
+  # cache directory, so that we can not include it in any final images and
+  # also not incur the penalty of constantly re-pulling repo metadata.
+  #
+  # We configure dnf to expire metadata after 30min so that any build that
+  # is triggered uses relatively up-to-date metadata.
+  printf '%s\n' "metadata_expire=1800" >> /etc/dnf/dnf.conf
+
+  dnf install -y tini
+ENDRUN
+
+#################################################################
+# XRootD Software Init
+#
+# This stage adds the core of the XRootD installation, i.e.,
+# everything that can be installed from an RPM.
+#################################################################
+FROM pelican-software-base AS xrootd-software-init
+ARG TARGETARCH
 ARG BASE_OS
+ARG OSG_SERIES
 
-# Create the xrootd user with a fixed GID/UID
-RUN groupadd -o -g 10940 xrootd
-RUN useradd -o -u 10940 -g 10940 -s /bin/sh xrootd
+# xrootd's UID and GID here are effectively set in stone because of the
+# existing data out in the wild that is owned by these IDs.
+RUN groupadd -g 10940 xrootd \
+    && useradd -u 10940 -g 10940 -d / -s /sbin/nologin xrootd
 
-# Install dependencies
-RUN yum -y update \
-    && yum -y --allowerasing --enablerepo osg-testing install tini curl java-17-openjdk-headless \
-    && yum clean all \
-    && rm -rf /var/cache/yum/
-
-# Pin XRootD installs to RPMs from Koji -- this is intended to be a temporary measure until
-# all our patches are ingested upstream in the OSG repos
+# We need to pin the install for many of the RPMs to "Koji" until all of
+# Pelican's patches are ingested into the OSG repositories.
 ARG XROOTD_VERSION="5.7.2"
-ARG XROOTD_ARCH="x86_64"
-ARG XROOTD_RELEASE="1.5.purge.osg${BASE_OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_RELEASE="1.5.purge.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VERSION}/${XROOTD_RELEASE}"
 
-# Define packages and install them. Note that they have to be installed in the same yum command to avoid
-# unresolvable dependencies.
-ENV PACKAGES="xrootd xrootd-libs xrootd-client xrootd-client-libs xrdcl-http xrootd-server xrootd-server-libs xrootd-scitokens xrootd-voms xrootd-selinux"
-RUN <<EOT
-set -ex
-package_urls=()
-for package in $PACKAGES; do
-  if [ "$package" = "xrootd-selinux" ]; then
-    package_urls+=(${KOJIHUB_BASE_URL}/noarch/${package}-${XROOTD_VERSION}-${XROOTD_RELEASE}.noarch.rpm)
-  else
-    package_urls+=(${KOJIHUB_BASE_URL}/${XROOTD_ARCH}/${package}-${XROOTD_VERSION}-${XROOTD_RELEASE}.${XROOTD_ARCH}.rpm)
+# The packages from Koji need to be installed in a single dnf command in
+# order to avoid unresolvable dependencies.
+RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
+
+  # NOTE: The `devel` packages are not necessary for any production
+  # container images, but including them here simplifies the process
+  # of building the dev container image.
+
+  PACKAGES="\
+    xrootd \
+    xrootd-libs \
+    xrootd-client \
+    xrootd-client-libs \
+    xrootd-server \
+    xrootd-server-libs \
+    xrootd-scitokens \
+    xrootd-selinux \
+    xrootd-voms \
+    xrdcl-http \
+    \
+    xrootd-devel \
+    xrootd-client-devel \
+    xrootd-server-devel \
+    "
+
+  if [ "$TARGETARCH" = "amd64" ]; then
+      PKG_ARCH=x86_64
+  elif [ "$TARGETARCH" = "arm64" ]; then
+      PKG_ARCH=aarch64
   fi
-done
 
-yum install -y "${package_urls[@]}"
-EOT
+  package_urls=()
 
-########################
-# End Dependency Build #
-########################
+  for package in ${PACKAGES}; do
+    if [ "$package" = "xrootd-selinux" ]; then
+      package_urls+=(${KOJIHUB_BASE_URL}/noarch/${package}-${XROOTD_VERSION}-${XROOTD_RELEASE}.noarch.rpm)
+    else
+      package_urls+=(${KOJIHUB_BASE_URL}/${PKG_ARCH}/${package}-${XROOTD_VERSION}-${XROOTD_RELEASE}.${PKG_ARCH}.rpm)
+    fi
+  done
+  dnf install -y "${package_urls[@]}"
 
-###############################
-# Begin XRootD Plugin Builder #
-###############################
-FROM dependency-build AS xrootd-plugin-builder
-# Install necessary build dependencies
-RUN  yum install -y --enablerepo=osg-testing curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
+  # The remaining packages can be installed from our usual repositories.
+  dnf install -y --enablerepo=epel-testing xrootd-s3-http
+  dnf install -y --enablerepo=osg-testing xrootd-multiuser xrdcl-pelican
+  dnf install -y --enablerepo=osg-contrib xrootd-lotman
 
-# The ADD command with a api.github.com URL in the next couple of sections
-# are for cache-hashing of the external repository that we rely on to build
-# the image
-ENV JSON_VERSION="v3.11.3" \
-    JSON_SCHEMA_VALIDATOR_VERSION="2.3.0" \
-    LOTMAN_VERSION="v0.0.4"
+  # Configure XRootD to use the Pelican plugin.
+  rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
+ENDRUN
+
+#################################################################
+# XRootD Build
+#
+# This stage builds XRootD components from source. Later stages
+# should COPY out objects as needed.
+#################################################################
+FROM xrootd-software-init AS xrootd-build
+ARG JSON_VERSION
+ARG JSON_SCHEMA_VALIDATOR_VERSION
+ARG LOTMAN_VERSION
+
+WORKDIR /xrootd-build
+
+RUN dnf install -y \
+          cmake3 \
+          gcc-c++ \
+          git \
+          \
+          curl-devel \
+          openssl-devel \
+          sqlite-devel
+
+# These ADD commands are for cache-hashing of the external repositories that
+# we rely on for the build.
 
 ADD https://api.github.com/repos/nlohmann/json/git/refs/tags/${JSON_VERSION} /tmp/hash-json
-ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/tags/${JSON_SCHEMA_VALIDATOR_VERSION} /tmp/hash-json
-ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/tags/${LOTMAN_VERSION} /tmp/hash-json
+ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/tags/${JSON_SCHEMA_VALIDATOR_VERSION} /tmp/hash-json-schema-validator
+ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/tags/${LOTMAN_VERSION} /tmp/hash-lotman
 
-# LotMan Installation
-# First install dependencies
+# Install LotMan's dependencies.
+
 RUN git clone https://github.com/nlohmann/json.git && \
     cd json && \
     git checkout ${JSON_VERSION} && \
     mkdir build && cd build && \
     cmake .. && \
     make -j`nproc` install
+
 RUN git clone https://github.com/pboettch/json-schema-validator.git && \
     cd json-schema-validator && \
     git checkout ${JSON_SCHEMA_VALIDATOR_VERSION} && \
     mkdir build && cd build && \
     cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j`nproc` install
-# Finally LotMan proper. For now we do this from source until we can sort out the RPMs.
-RUN \
-    git clone https://github.com/PelicanPlatform/lotman.git && \
+
+# Install LotMan.
+
+RUN git clone https://github.com/PelicanPlatform/lotman.git && \
     cd lotman && \
     git checkout ${LOTMAN_VERSION} && \
     mkdir build && cd build && \
-    # LotMan CMakeLists.txt needs to be updated to use -DLIB_INSTALL_DIR. Issue #6
     cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j`nproc` install
-#############################
-# End XRootD Plugin Builder #
-#############################
 
-#############################
-# Begin Pelican Final Stage #
-#############################
-FROM dependency-build AS final-stage
+#################################################################
+# XRootD Software Base
+#
+# This stage assembles together a complete XRootD installation
+# for Pelican. In the name of simplicity, it includes both plugins
+# for running an origin and plugins for running a cache.
+#################################################################
+FROM xrootd-software-init AS xrootd-software-base
 
-# Any other yum-installable dependencies that need to be present in the final container
-# should go here. Installation in a previous section may result in the packages being
-# installed only in the intermediate builder containers!
-RUN yum install -y --enablerepo=osg-testing sssd-client xrdcl-pelican xrootd-multiuser
-RUN yum install -y --enablerepo=osg-contrib xrootd-lotman
-RUN yum install -y --enablerepo=epel-testing xrootd-s3-http
+# NOTE: If the xrootd-software-init stage installs the xrootd-lotman
+# package, then we do *not* need to copy LotMan-related libraries from the
+# xrootd-build stage. We maintain these commented-out build commands in
+# order to make it easy to switch to building these libraries from source.
 
-WORKDIR /pelican
+# COPY --from=xrootd-build /usr/include/nlohmann /usr/include/nlohmann
+# COPY --from=xrootd-build /usr/lib64/libLotMan.so /usr/lib64/
+# COPY --from=xrootd-build /usr/lib64/libnlohmann_json_schema_validator.a /usr/lib64/
 
-####
-# Now, start installing the SciTokens OA4MP server from
-# - https://github.com/scitokens/scitokens-oauth2-server/blob/master/Dockerfile
-####
+#################################################################
+# Origin Base
+#
+# This stage assembles together everything needed to run a Pelican
+# origin, except for the `pelican` binary itself.
+#################################################################
+FROM xrootd-software-base AS origin-base
 
-# Download and install tomcat
-RUN useradd -r -s /sbin/nologin tomcat ;\
-    mkdir -p /opt/tomcat ;\
-    curl -s -L https://archive.apache.org/dist/tomcat/tomcat-9/v9.0.83/bin/apache-tomcat-9.0.83.tar.gz | tar -zxf - -C /opt/tomcat --strip-components=1 ;\
-    chgrp -R tomcat /opt/tomcat/conf ;\
-    chmod g+rwx /opt/tomcat/conf ;\
-    chmod g+r /opt/tomcat/conf/* ;\
-    chown -R tomcat /opt/tomcat/logs/ /opt/tomcat/temp/ /opt/tomcat/webapps/ /opt/tomcat/work/ ;\
-    chgrp -R tomcat /opt/tomcat/bin /opt/tomcat/lib ;\
-    chmod g+rwx /opt/tomcat/bin ;\
-    chmod g+r /opt/tomcat/bin/* ;\
-    ln -s /usr/lib64/libapr-1.so.0 /opt/tomcat/lib/libapr-1.so.0
+RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
+  dnf install -y java-17-openjdk-headless
+ENDRUN
 
-RUN \
-    # Create various empty directories needed by the webapp
-    mkdir -p /opt/tomcat/webapps/scitokens-server ;\
-    curl -s -L https://github.com/javaee/javamail/releases/download/JAVAMAIL-1_6_2/javax.mail.jar > /opt/tomcat/lib/javax.mail.jar ;\
-    # Install support for the QDL CLI
-    curl -L -s https://github.com/ncsa/OA4MP/releases/download/v5.3.1/oa2-qdl-installer.jar >/tmp/oa2-qdl-installer.jar ;\
-    java -jar /tmp/oa2-qdl-installer.jar -dir /opt/qdl ;\
-    rm /tmp/oa2-qdl-installer.jar ;\
-    mkdir -p /opt/qdl/var/scripts ;\
-    # Remove the default manager apps and examples -- we don't use these
-    rm -rf /opt/tomcat/webapps/ROOT /opt/tomcat/webapps/docs /opt/tomcat/webapps/examples /opt/tomcat/webapps/host-manager /opt/tomcat/webapps/manager ;\
-    true;
+# Install OA4MP. Most of the installation is in /opt, but there are
+# additional files and configuration required.
+# Reference: https://github.com/scitokens/scitokens-oauth2-server/blob/master/Dockerfile
+COPY --from=scitokens-oauth2-server --chown=root:root /opt /opt
 
-# The generate_jwk.sh script is part of the documented bootstrap of the container.
-COPY --from=scitokens-oauth2-server /usr/local/bin/generate_jwk.sh /usr/local/bin/generate_jwk.sh
+# Fix ownership and permissions. This is necessary so long as the tomcat
+# user's UID and GID are not fixed by scitokens-oauth2-server.
+RUN useradd -r -s /sbin/nologin tomcat && \
+    chgrp -R tomcat /opt/tomcat/conf && \
+    chmod g+rwx /opt/tomcat/conf && \
+    chmod g+r /opt/tomcat/conf/* && \
+    chown -R tomcat /opt/tomcat/logs/ /opt/tomcat/temp/ /opt/tomcat/webapps/ /opt/tomcat/work/ && \
+    chgrp -R tomcat /opt/tomcat/bin /opt/tomcat/lib && \
+    chmod g+rwx /opt/tomcat/bin && \
+    chmod g+r /opt/tomcat/bin/* && \
+    chown -R tomcat:tomcat /opt/tomcat/webapps/scitokens-server/ && \
+    chown -R tomcat:tomcat /opt/scitokens-server/
 
-# Add other QDL CLI tools and configs
-COPY --from=scitokens-oauth2-server /opt/qdl /opt/qdl
-
-# Add in the tomcat server configuration
+# Replace the Tomcat server's default configuration so that Pelican can
+# communicate with it over a socket.
 COPY --chown=root:tomcat oa4mp/resources/server.xml /opt/tomcat/conf/server.xml
 
-# Copy over the OA4MP webapp.
-COPY --from=scitokens-oauth2-server --chown=tomcat:tomcat /opt/tomcat/webapps/scitokens-server/ /opt/tomcat/webapps/scitokens-server/
-COPY --from=scitokens-oauth2-server --chown=tomcat:tomcat /opt/scitokens-server/ /opt/scitokens-server/
+# This script is a documented part of OA4MP's bootstrap process, but we
+# otherwise do not need it.
+COPY --from=scitokens-oauth2-server /usr/local/bin/generate_jwk.sh /usr/local/bin/generate_jwk.sh
 
-# The security constraint line forces a redirect to HTTPS (which we aren't using)
-RUN sed 's/<security-constraint>/<!--&/; s/\/security-constraint>/&-->/;' /opt/scitokens-server/web.xml > /opt/tomcat/webapps/scitokens-server/WEB-INF/web.xml
+RUN <<ENDRUN
+  set -eux
 
-ENV JAVA_HOME=/usr/lib/jvm/jre \
-    CATALINA_PID=/opt/tomcat/temp/tomcat.pid \
-    CATALINA_HOME=/opt/tomcat \
-    CATALINA_BASE=/opt/tomcat \
-    CATALINA_OPTS="-Xms512M -Xmx1024M -server -XX:+UseParallelGC" \
+  ln -sf /usr/lib64/libapr-1.so.0 /opt/tomcat/lib/libapr-1.so.0
+
+  # This security constraint line forces a redirect to HTTPS, which we aren't using.
+  sed 's/<security-constraint>/<!--&/; s/\/security-constraint>/&-->/;' /opt/scitokens-server/web.xml > /opt/tomcat/webapps/scitokens-server/WEB-INF/web.xml
+ENDRUN
+
+ENV JAVA_HOME="/usr/lib/jvm/jre" \
     JAVA_OPTS="-Djava.awt.headless=true -Djava.security.egd=file:/dev/./urandom -Djava.library.path=/opt/tomcat/lib" \
+    \
+    CATALINA_HOME="/opt/tomcat" \
+    CATALINA_BASE="/opt/tomcat" \
+    CATALINA_OPTS="-Xms512M -Xmx1024M -server -XX:+UseParallelGC" \
+    CATALINA_PID="/opt/tomcat/temp/tomcat.pid" \
+    \
     ST_HOME="/opt/scitokens-server" \
     QDL_HOME="/opt/qdl" \
     PATH="${ST_HOME}/bin:${QDL_HOME}/bin:${PATH}"
 
-# Remove http plugin to use pelican plugin
-RUN rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
-
-# Copy plugins built from the xrootd-plugin-builder stage
-COPY --from=xrootd-plugin-builder /usr/lib64/libLotMan.so /usr/lib64/
-# Copy the nlohmann json headers
-COPY --from=xrootd-plugin-builder /usr/include/nlohmann /usr/include/nlohmann
-# Copy the JSON schema validator library
-COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a /usr/lib64/
-
+#################################################################
+# Pelican Director
+#################################################################
+FROM pelican-software-base AS director
+ARG TARGETOS TARGETARCH
+COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
 COPY images/entrypoint.sh /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh", "pelican", "director"]
+CMD ["serve"]
 
-# Copy here to reduce dependency on the pelican-build stage in the final-stage and x-base stage
-COPY --from=pelican-build /pelican/dist/linux_amd64/pelican_linux_amd64_v1/pelican /usr/local/bin/pelican
-COPY --from=pelican-build /pelican/dist/linux_amd64/pelican_linux_amd64_v1/pelican /usr/local/bin/osdf
-RUN    chmod +x /usr/local/bin/pelican \
-    && chmod +x /usr/local/bin/osdf \
-    && chmod +x /entrypoint.sh
-###########################
-# End Pelican Final Stage #
-###########################
+FROM director AS osdf-director
+RUN ln -s pelican /usr/local/bin/osdf
+ENTRYPOINT ["/entrypoint.sh", "osdf", "director"]
+CMD ["serve"]
 
-######################
-# Pelican base stage #
-######################
-FROM final-stage AS pelican-base
+#################################################################
+# Pelican Registry
+#################################################################
+FROM pelican-software-base AS registry
+ARG TARGETOS TARGETARCH
+COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
+COPY images/entrypoint.sh /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh", "pelican", "registry"]
+CMD ["serve"]
 
-RUN rm -f /usr/local/bin/osdf
+FROM registry AS osdf-registry
+RUN ln -s pelican /usr/local/bin/osdf
+ENTRYPOINT ["/entrypoint.sh", "osdf", "registry"]
+CMD ["serve"]
 
-######################
-# OSDF base stage #
-######################
-FROM final-stage AS osdf-base
+#################################################################
+# Pelican Origin
+#################################################################
+FROM origin-base AS origin
+ARG TARGETOS TARGETARCH
+COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
+COPY images/entrypoint.sh /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh", "pelican", "origin"]
+CMD ["serve"]
 
-RUN rm -f /usr/local/bin/pelican
+FROM origin AS osdf-origin
+RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
 
-####################
-# pelican/cache    #
-####################
+  # These IDs must match OSG's sssd sidecar containers.
+  groupadd -r -g 990 sssd
+  useradd -r -g sssd -u 990 -d / -s /usr/sbin/nologin -c "System user for sssd" sssd
+  dnf install -y sssd-client
+ENDRUN
+RUN ln -s pelican /usr/local/bin/osdf
+ENTRYPOINT ["/entrypoint.sh", "osdf", "origin"]
+CMD ["serve"]
 
-FROM pelican-base AS cache
-RUN rm -f /usr/local/bin/pelican /usr/local/bin/osdf
-COPY --from=pelican-build /pelican/dist/linux_amd64/pelican-server_linux_amd64_v1/pelican-server /usr/local/sbin/pelican-server
-RUN chmod +x /usr/local/sbin/pelican-server
-# For now, we're only using pelican-server in the cache, but eventually we'll use it in all servers
-ENTRYPOINT [ "/entrypoint.sh", "pelican-server", "cache"]
-CMD [ "serve" ]
+#################################################################
+# Pelican Cache
+#################################################################
+FROM xrootd-software-base AS cache
+ARG TARGETOS TARGETARCH
+COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/bin/pelican-server
+COPY images/entrypoint.sh /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh", "pelican-server", "cache"]
+CMD ["serve"]
 
-####################
-# pelican/origin   #
-####################
+FROM cache AS osdf-cache
+RUN ln -s pelican-server /usr/local/bin/osdf-server
+ENTRYPOINT ["/entrypoint.sh", "osdf-server", "cache"]
+CMD ["serve"]
 
-FROM pelican-base AS origin
+#################################################################
+# Testing Container Base
+#################################################################
+FROM ${TESTING_BASE_IMAGE} AS testing-container-base
+ARG TARGETOS
+ARG TARGETARCH
+ARG GO_VER
 
-ENTRYPOINT [ "/entrypoint.sh" ,"pelican", "origin"]
-CMD [ "serve" ]
+WORKDIR /pelican
+ENTRYPOINT []
+CMD ["/bin/bash"]
 
-####################
-# pelican/director #
-####################
+# Install Go using the same commands as the pelican-build-init stage, taking
+# care that the installation matches this build's target platform.
+RUN curl -O https://dl.google.com/go/go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
+    && rm -rf /usr/local/go \
+    && tar -C /usr/local -xzf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
+    && rm -rf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz
+ENV PATH="/usr/local/go/bin:${PATH}"
 
-FROM pelican-base AS director
+# Install the MinIO server and client for S3 tests.
+RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
 
-ENTRYPOINT [ "/entrypoint.sh" ,"pelican", "director"]
-CMD [ "serve" ]
+  if [ "$TARGETARCH" = "amd64" ]; then
+      PKG_ARCH=x86_64
+  elif [ "$TARGETARCH" = "arm64" ]; then
+      PKG_ARCH=aarch64
+  fi
 
-####################
-# pelican/registry #
-####################
+  curl -o ./minio.rpm https://dl.min.io/server/minio/release/${TARGETOS}-${TARGETARCH}/archive/minio-20231214185157.0.0-1.${PKG_ARCH}.rpm
+  dnf install -y ./minio.rpm
+  rm -f ./minio.rpm
+ENDRUN
 
-FROM pelican-base AS registry
+#################################################################
+# Testing Container
+#################################################################
+FROM testing-container-base AS testing-container
 
-ENTRYPOINT [ "/entrypoint.sh" ,"pelican", "registry"]
-CMD [ "serve" ]
+# Copy the Pelican source files we used for this build and the
+# resulting build artifacts.
+COPY --from=pelican-build /pelican-build /pelican-build
 
-####################################
-# OSDF                             #
-####################################
+#################################################################
+# Development Container
+#################################################################
+FROM testing-container-base AS development-container
+ARG NODEJS_VER
 
-####################
-# osdf/cache       #
-####################
+# Install GoReleaser using the same commands as the pelican-build-init stage.
+COPY <<ENDCOPY /etc/yum.repos.d/goreleaser.repo
+[goreleaser]
+name=GoReleaser
+baseurl=https://repo.goreleaser.com/yum/
+enabled=1
+gpgcheck=0
+ENDCOPY
+RUN dnf install -y goreleaser
 
-FROM osdf-base AS osdf-cache
-RUN rm -f /usr/local/bin/pelican /usr/local/bin/osdf
-COPY --from=pelican-build /pelican/dist/linux_amd64/pelican-server_linux_amd64_v1/pelican-server /usr/local/sbin/osdf-server
-RUN chmod +x /usr/local/sbin/osdf-server
-ENTRYPOINT [ "/entrypoint.sh" ,"osdf-server", "cache"]
-CMD [ "serve" ]
+# Install Node.js and npm using the same commands as the pelican-build-init stage.
+RUN dnf install -y npm \
+    && npm install -g n \
+    && n ${NODEJS_VER} \
+    && dnf remove -y npm \
+    && npm install -g npm@latest \
+    && n prune
 
-####################
-# osdf/origin      #
-####################
+# Enable the CodeReady Linux Builder repository.
+RUN /usr/bin/crb enable
 
-FROM osdf-base AS osdf-origin
-
-# Add support for SSSD
-# sssd UID must match between the origin and SSSD sidecar containers
-RUN groupadd -r -g 990 sssd \
-    && useradd -r -g sssd -u 990 -d / -s /usr/sbin/nologin -c "System user for sssd" sssd
-
-ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "origin"]
-CMD [ "serve" ]
-
-####################
-# osdf/director    #
-####################
-
-FROM osdf-base AS osdf-director
-
-ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "director"]
-CMD [ "serve" ]
-
-
-####################
-# osdf/registry    #
-####################
-
-FROM osdf-base AS osdf-registry
-
-ENTRYPOINT [ "/entrypoint.sh" ,"osdf", "registry"]
-CMD [ "serve" ]
+# Install a kitchen sink's worth of development tools and libraries.
+RUN dnf install -y \
+          docker \
+          jq \
+          procps \
+          sssd-client \
+          vim \
+          \
+          cmake3 \
+          gcc-c++ \
+          gdb \
+          git \
+          make \
+          valgrind \
+          \
+          curl-devel \
+          gtest-devel \
+          libcap-devel \
+          openssl-devel \
+          sqlite-devel \
+          zlib-devel
