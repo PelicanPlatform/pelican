@@ -68,9 +68,10 @@ var (
 const notFoundFilePath = "frontend/out/404/index.html"
 
 type CreateApiTokenReq struct {
-	Name       string `json:"name"`
-	CreatedBy  string `json:"created_by"`
-	Expiration string `json:"expiration"` // RFC3339 format
+	Name       string   `json:"name"`
+	CreatedBy  string   `json:"created_by"`
+	Expiration string   `json:"expiration"` // RFC3339 format, if not provided or "never" or "", token will not expire
+	Scopes     []string `json:"scopes"`
 }
 
 // Initialize a hot restart of the server
@@ -407,7 +408,29 @@ func createApiToken(ctx *gin.Context) {
 		return
 	}
 
-	scopes := fmt.Sprintf("%s,%s", token_scopes.Monitoring_Query.String(), token_scopes.Monitoring_Scrape.String())
+	// check if all of the fields in the request are valid
+	if req.Name == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Name is required",
+		})
+		return
+	}
+	if req.CreatedBy == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "CreatedBy is required",
+		})
+		return
+	}
+	if len(req.Scopes) == 0 {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Scopes is required",
+		})
+		return
+	}
+
 	var expirationTime time.Time
 	if req.Expiration == "" || req.Expiration == "never" { // if expiration is not provided, set token to never expire
 		expirationTime = time.Time{}
@@ -429,6 +452,7 @@ func createApiToken(ctx *gin.Context) {
 			Msg:    fmt.Sprintf("Invalid expiration time: %v", err),
 		})
 	}
+	scopes := strings.Join(req.Scopes, ",")
 	token, err := database.CreateApiKey(req.Name, req.CreatedBy, scopes, expirationTime)
 	if err != nil {
 		log.Warning("Failed to create API key: ", err)
