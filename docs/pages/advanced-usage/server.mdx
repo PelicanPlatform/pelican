@@ -14,7 +14,7 @@ This page covers various topics in managing these credentials.
 
 Pelican services rely on a private/public key pair for creating (signing) and verifying the user credentials (tokens) used to read or write objects.  When a new prefix in the data federation is created, an associated public key must be provided; the corresponding private key can generate any arbitrary permissions (including delete!) within the namespace.  For more information about namespace registration, see details [here](../federating-your-data.mdx#obtain-the-public-key-of-the-origin).
 
-When a Pelican origin or other service is started, the server automatically generates a new private key if one is not present.  However, if someone is running the origin on your behalf, you will need to generate the keypair on your own and send the public portion to the operator. If you're doing the deployment, it can also be convenient to generate the key-pair in advance and mount the private key file to the Pelican server via configuration variable, especially in a container environment.
+When a Pelican origin or other service is started, the server automatically generates a new private key if one is not present.  However, if someone is running the origin on your behalf, you will need to generate the keypair on your own and send the public portion to the origin operator. If you're doing the deployment, it can also be convenient to generate the key-pair in advance and mount the private key file to the Pelican server via configuration variable, especially in a container environment.
 
 The Pelican binary ships with a `pelican generate keygen` for generating a private/public key pairs:
 
@@ -37,7 +37,7 @@ You can change the location of the generated keys by passing in  arguments `priv
 pelican generate keygen --private-key /tmp/foo --public-key /tmp/bar
 ```
 
-For operators, the generated *private key* can be specified in the a Pelican server configuration via the `IssuerKey` parameter so that the server will use the newly-generated key:
+For origin operators, the generated *private key* can be specified in the a Pelican server configuration via the `IssuerKey` parameter so that the server will use the newly-generated key:
 
 
 ```yaml filename="pelican.yaml" copy
