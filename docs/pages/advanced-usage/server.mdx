@@ -10,7 +10,7 @@ This page covers various topics in managing these credentials.
 
 ### Namespace Private Key
 
-> **Note**: The namespace private key is a **powerful secret** and should never be shared with others.  With the private key, one can create user credentials the can arbitrary read or write into your namespace.
+> **Note**: The namespace private key is a **powerful secret** and should never be shared with others.  With the private key, one can create user credentials that can **arbitrarily read or write into your namespace**.
 
 Pelican services rely on a private/public key pair for creating (signing) and verifying the user credentials (tokens) used to read or write objects.  When a new prefix in the data federation is created, an associated public key must be provided; the corresponding private key can generate any arbitrary permissions (including delete!) within the namespace.  For more information about namespace registration, see details [here](../federating-your-data.mdx#obtain-the-public-key-of-the-origin).
 
