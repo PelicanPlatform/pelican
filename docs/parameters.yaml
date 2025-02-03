@@ -2196,6 +2196,13 @@ type: bool
 default: false
 components: ["cache", "director", "origin", "registry"]
 ---
+name: Server.DbLocation
+description: |+
+  A filepath to the intended location of the server's database.
+type: filename
+default: /var/lib/pelican/server.sqlite
+components: ["origin", "cache", "registry", "director"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################

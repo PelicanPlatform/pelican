@@ -267,6 +267,7 @@ type Config struct {
 		RequireOriginApproval bool `mapstructure:"requireoriginapproval" yaml:"RequireOriginApproval"`
 	} `mapstructure:"registry" yaml:"Registry"`
 	Server struct {
+		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
@@ -595,6 +596,7 @@ type configWithType struct {
 		RequireOriginApproval struct { Type string; Value bool }
 	}
 	Server struct {
+		DbLocation struct { Type string; Value string }
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }
