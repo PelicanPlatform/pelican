@@ -165,7 +165,7 @@ func (lc *LocalCache) purgeCmd(ginCtx *gin.Context) {
 
 	status, verified, err := token.Verify(ginCtx, token.AuthOption{
 		Sources: []token.TokenSource{token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
 		Scopes:  []token_scopes.TokenScope{token_scopes.Localcache_Purge},
 	})
 	if err != nil {
