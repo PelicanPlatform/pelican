@@ -48,9 +48,11 @@ export const DirectorDropdown = ({
             </Box>
           </Grid>
         </Grid>
-        <Box sx={{ my: 1 }}>
-          <ServerCapabilitiesTable server={server} />
-        </Box>
+        {['Origin', 'Namespace'].includes(server?.type) && (
+          <Box sx={{ my: 1 }}>
+            <ServerCapabilitiesTable server={server} />
+          </Box>
+        )}
       </Dropdown>
     </>
   );
