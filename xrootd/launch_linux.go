@@ -26,13 +26,17 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"kernel.org/pub/linux/libs/security/libcap/cap"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
+	"github.com/pelicanplatform/pelican/database"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 )
 
@@ -55,6 +59,15 @@ func doWait(pid int) error {
 		} else if wstatus.Continued() || wstatus.Stopped() {
 			continue
 		} else if wstatus.Signaled() {
+			crashTimestamp := time.Now().Unix()
+
+			err := database.CreateCounter("xrootd_last_crash", int(crashTimestamp))
+			if err != nil {
+				return errors.Wrap(err, "Unable to record xrootd crash")
+			}
+
+			metrics.PelicanServerXRootDLastCrash.With(prometheus.Labels{}).Set(float64(crashTimestamp))
+
 			return errors.Errorf("Daemon exited with signal %s", wstatus.Signal().String())
 		}
 		return errors.Errorf("Daemon exited in unknown status %d", wstatus)
