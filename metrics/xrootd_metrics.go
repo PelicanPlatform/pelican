@@ -21,6 +21,7 @@ package metrics
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"encoding/xml"
@@ -34,6 +35,7 @@ import (
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
+	shoveler "github.com/opensciencegrid/xrootd-monitoring-shoveler"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -590,6 +592,30 @@ func NullTermToString(nullTermBytes []byte) (str string) {
 }
 
 func HandlePacket(packet []byte) error {
+	// If a message starts with `{` its a shoveler message in the form of JSON
+	/*
+		{
+			remote: string,
+			version: string,
+			data: string // base64 encoded
+		}
+	*/
+	// It should be noted that an monitoring packets from XRootD that arrive from the shoveler
+	// will be in this format. So we can be agnostic to whether its a summary packet or a detailed monitoring packet
+	if packet[0] == '{' {
+		shovelerMsg := shoveler.Message{}
+		err := json.Unmarshal(packet, &shovelerMsg)
+		if err != nil {
+			return errors.Wrap(err, "Failed to parse shoveler message")
+		}
+
+		_, err = base64.StdEncoding.Decode(packet, []byte(shovelerMsg.Data))
+		if err != nil {
+			return errors.Wrap(err, "Failed to decode base64 encoded data")
+		}
+
+	}
+
 	// XML '<' character indicates a summary packet
 	if len(packet) > 0 && packet[0] == '<' {
 		return HandleSummaryPacket(packet)
