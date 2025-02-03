@@ -173,16 +173,26 @@ func loadServerKeys() (*ecdsa.PrivateKey, error) {
 	// Note: go 1.21 introduces `OnceValues` which automates this procedure.
 	// TODO: Reimplement the function once we switch to a minimum of 1.21
 	serverCredsLoad.Do(func() {
-		issuerFileName := param.IssuerKey.GetString()
-		var privateKey crypto.PrivateKey
-		privateKey, serverCredsErr = config.LoadPrivateKey(issuerFileName, false)
-
-		switch key := privateKey.(type) {
-		case *ecdsa.PrivateKey:
-			serverCredsPrivKey = key
-		default:
-			serverCredsErr = errors.Errorf("unsupported key type for server issuer key: %T", key)
+		var privateKey jwk.Key
+		privateKey, serverCredsErr = config.GetIssuerPrivateJWK()
+		if serverCredsErr != nil {
+			return
 		}
+
+		// Extract the underlying ECDSA private key
+		var rawKey interface{}
+		if err := privateKey.Raw(&rawKey); err != nil {
+			serverCredsErr = errors.Errorf("failed to extract raw key: %v", err)
+			return
+		}
+
+		ecdsaKey, ok := rawKey.(*ecdsa.PrivateKey)
+		if !ok {
+			serverCredsErr = errors.Errorf("unsupported key type for server issuer key: %T", rawKey)
+			return
+		}
+
+		serverCredsPrivKey = ecdsaKey
 	})
 
 	return serverCredsPrivKey, serverCredsErr
@@ -1187,6 +1197,7 @@ func RegisterRegistryAPI(router *gin.RouterGroup) {
 		registryAPI.GET("/*wildcard", wildcardHandler)
 		registryAPI.POST("/checkNamespaceExists", checkNamespaceExistsHandler)
 		registryAPI.POST("/checkNamespaceStatus", checkApprovalHandler)
+		registryAPI.POST("/updateNamespacesPubKey", updateNamespacesPubKey)
 
 		registryAPI.DELETE("/*wildcard", deleteNamespaceHandler)
 	}

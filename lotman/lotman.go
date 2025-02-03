@@ -33,6 +33,13 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
+// Minimal re-definition of PurgePolicy so that things compile on non-Linux platforms.
+// We may use a different approach someday so we don't need multiple definitions of this struct
+// but for now I think this is okay...
+type PurgePolicy struct {
+	PurgeOrder []string
+}
+
 func RegisterLotman(ctx context.Context, router *gin.RouterGroup) {
 	log.Warningln("LotMan is not supported on this platform. Skipping...")
 }
@@ -40,4 +47,9 @@ func RegisterLotman(ctx context.Context, router *gin.RouterGroup) {
 func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	log.Warningln("LotMan is not supported on this platform. Skipping...")
 	return false
+}
+
+func GetPolicyMap() (map[string]PurgePolicy, error) {
+	log.Warningln("LotMan is not supported on this platform. Skipping...")
+	return map[string]PurgePolicy{}, nil
 }

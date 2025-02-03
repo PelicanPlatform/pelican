@@ -278,6 +278,9 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 	if ok, err := tokenConfig.Validate(); !ok || err != nil {
 		return "", errors.Wrap(err, "invalid tokenConfig")
 	}
+	if key == nil {
+		return "", errors.New("cannot sign a token without a key")
+	}
 
 	jti_bytes := make([]byte, 16)
 	if _, err := rand.Read(jti_bytes); err != nil {

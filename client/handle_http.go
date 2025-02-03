@@ -72,6 +72,8 @@ type (
 
 	classAd string
 
+	transferType int
+
 	// Error type for when the transfer started to return data then completely stopped
 	StoppedTransferError struct {
 		BytesTransferred int64
@@ -182,7 +184,7 @@ type (
 		remoteURL  *url.URL
 		localPath  string
 		token      *tokenGenerator
-		upload     bool
+		xferType   transferType
 		packOption string
 		attempts   []transferAttemptDetails
 		project    string
@@ -206,7 +208,7 @@ type (
 		activeXfer     atomic.Int64
 		totalXfer      int
 		localPath      string
-		upload         bool
+		xferType       transferType
 		recursive      bool
 		skipAcquire    bool
 		syncLevel      SyncLevel  // Policy for handling synchronization when the destination exists
@@ -277,13 +279,14 @@ type (
 		setupResults   sync.Once
 	}
 
-	TransferOption                   = option.Interface
-	identTransferOptionCaches        struct{}
-	identTransferOptionCallback      struct{}
-	identTransferOptionTokenLocation struct{}
-	identTransferOptionAcquireToken  struct{}
-	identTransferOptionToken         struct{}
-	identTransferOptionSynchronize   struct{}
+	TransferOption                    = option.Interface
+	identTransferOptionCaches         struct{}
+	identTransferOptionCallback       struct{}
+	identTransferOptionTokenLocation  struct{}
+	identTransferOptionAcquireToken   struct{}
+	identTransferOptionToken          struct{}
+	identTransferOptionSynchronize    struct{}
+	identTransferOptionCollectionsUrl struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
@@ -300,6 +303,10 @@ const (
 	SyncNone  = iota // When synchronizing, always re-transfer, regardless of existence at destination.
 	SyncExist        // Skip synchronization transfer if the destination exists
 	SyncSize         // Skip synchronization transfer if the destination exists and matches the current source size
+
+	transferTypeDownload transferType = iota // Transfer is downloading from the federation
+	transferTypeUpload                       // Transfer is uploading to the federation
+	transferTypePrestage                     // Transfer is staging at a federation cache
 )
 
 // The progress container object creates several
@@ -311,6 +318,18 @@ func getProgressContainer() *mpb.Progress {
 		progressCtr = mpb.New()
 	})
 	return progressCtr
+}
+
+// mergeCancel combines two contexts and returns a new context with a unified cancel function.
+func mergeCancel(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {
+	newCtx, cancel := context.WithCancel(ctx1)
+	stop := context.AfterFunc(ctx2, func() {
+		cancel()
+	})
+	return newCtx, func() {
+		stop()
+		cancel()
+	}
 }
 
 func (e *HeaderTimeoutError) Error() string {
@@ -595,6 +614,11 @@ func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
 // bytes transferred, and the total object size
 func WithCallback(callback TransferCallbackFunc) TransferOption {
 	return option.New(identTransferOptionCallback{}, callback)
+}
+
+// Override collections URL to be used by the TransferClient
+func WithCollectionsUrl(url string) TransferOption {
+	return option.New(identTransferOptionCollectionsUrl{}, url)
 }
 
 // Create an option to override the cache list
@@ -1014,27 +1038,19 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		callback:       tc.callback,
 		skipAcquire:    tc.skipAcquire,
 		syncLevel:      tc.syncLevel,
-		upload:         upload,
+		xferType:       transferTypeDownload,
 		uuid:           id,
 		project:        project,
 		token:          newTokenGenerator(&copyUrl, nil, upload, !tc.skipAcquire),
+	}
+	if upload {
+		tj.xferType = transferTypeUpload
 	}
 	if tc.token != "" {
 		tj.token.SetToken(tc.token)
 	}
 	if tc.tokenLocation != "" {
 		tj.token.SetTokenLocation(tc.tokenLocation)
-	}
-
-	mergeCancel := func(ctx1, ctx2 context.Context) (context.Context, context.CancelFunc) {
-		newCtx, cancel := context.WithCancel(ctx1)
-		stop := context.AfterFunc(ctx2, func() {
-			cancel()
-		})
-		return newCtx, func() {
-			stop()
-			cancel()
-		}
 	}
 
 	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
@@ -1064,6 +1080,10 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	tj.directorUrl = copyUrl.FedInfo.DirectorEndpoint
 	dirResp, err := GetDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, "")
 	if err != nil {
+		var sce *StatusCodeError
+		if errors.As(err, &sce) {
+			return
+		}
 		log.Errorln(err)
 		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", pUrl.String())
 		return
@@ -1081,6 +1101,10 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		if contents != "" {
 			dirResp, err = GetDirectorInfoForPath(tj.ctx, &copyUrl, httpMethod, contents)
 			if err != nil {
+				var sce *StatusCodeError
+				if errors.As(err, &sce) {
+					return nil, err
+				}
 				log.Errorln(err)
 				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", copyUrl.String())
 				return nil, err
@@ -1105,6 +1129,100 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	return
 }
 
+// Create a new prestage job for the client
+//
+// The returned object can be further customized as desired.
+// This function does not "submit" the job for execution.
+func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL, options ...TransferOption) (tj *TransferJob, err error) {
+
+	id, err := uuid.NewV7()
+	if err != nil {
+		return
+	}
+
+	// See if we have a projectName defined
+	project := searchJobAd(projectName)
+
+	pelicanURL, err := ParseRemoteAsPUrl(ctx, remoteUrl.String())
+	if err != nil {
+		err = errors.Wrap(err, "error generating metadata for specified url")
+		return
+	}
+
+	copyUrl := *pelicanURL // Make a copy of the input URL to avoid concurrent issues.
+	tj = &TransferJob{
+		prefObjServers: tc.prefObjServers,
+		remoteURL:      &copyUrl,
+		callback:       tc.callback,
+		skipAcquire:    tc.skipAcquire,
+		syncLevel:      tc.syncLevel,
+		xferType:       transferTypePrestage,
+		uuid:           id,
+		project:        project,
+		token:          newTokenGenerator(&copyUrl, nil, false, !tc.skipAcquire),
+	}
+	if tc.token != "" {
+		tj.token.SetToken(tc.token)
+	}
+	if tc.tokenLocation != "" {
+		tj.token.SetTokenLocation(tc.tokenLocation)
+	}
+
+	tj.ctx, tj.cancel = mergeCancel(ctx, tc.ctx)
+
+	for _, option := range options {
+		switch option.Ident() {
+		case identTransferOptionCaches{}:
+			tj.prefObjServers = option.Value().([]*url.URL)
+		case identTransferOptionCallback{}:
+			tj.callback = option.Value().(TransferCallbackFunc)
+		case identTransferOptionTokenLocation{}:
+			tj.token.SetTokenLocation(option.Value().(string))
+		case identTransferOptionAcquireToken{}:
+			tj.token.EnableAcquire = option.Value().(bool)
+		case identTransferOptionToken{}:
+			tj.token.SetToken(option.Value().(string))
+		case identTransferOptionSynchronize{}:
+			tj.syncLevel = option.Value().(SyncLevel)
+		}
+	}
+
+	tj.directorUrl = pelicanURL.FedInfo.DirectorEndpoint
+	dirResp, err := GetDirectorInfoForPath(tj.ctx, pelicanURL, http.MethodGet, "")
+	if err != nil {
+		log.Errorln(err)
+		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
+		return
+	}
+	tj.dirResp = dirResp
+	tj.token.DirResp = &dirResp
+
+	log.Debugln("Dir resp:", dirResp.XPelNsHdr)
+	if dirResp.XPelNsHdr.RequireToken {
+		contents, err := tj.token.get()
+		if err != nil || contents == "" {
+			return nil, errors.Wrap(err, "failed to get token for transfer")
+		}
+
+		// The director response may change if it's given a token; let's repeat the query.
+		if contents != "" {
+			dirResp, err = GetDirectorInfoForPath(tj.ctx, pelicanURL, http.MethodGet, contents)
+			if err != nil {
+				log.Errorln(err)
+				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
+				return nil, err
+			}
+			tj.dirResp = dirResp
+			tj.token.DirResp = &dirResp
+		}
+	} else {
+		tj.token = nil
+	}
+
+	log.Debugf("Created new prestage job, ID %s client %s, for URL %s", tj.uuid.String(), tc.id.String(), remoteUrl.String())
+	return
+}
+
 // Returns the status of the transfer job-to-file(s) lookup
 //
 // ok is true if the lookup has completed.
@@ -1126,6 +1244,89 @@ func (tc *TransferClient) Submit(tj *TransferJob) error {
 	case tc.work <- tj:
 		return nil
 	}
+}
+
+// cacheInfo retrieves and returns the age and size of the specified object.
+func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, options ...TransferOption) (age int, size int64, err error) {
+	age = -1
+
+	pelicanURL, err := ParseRemoteAsPUrl(ctx, remoteUrl.String())
+	if err != nil {
+		err = errors.Wrap(err, "error generating metadata for specified URL")
+		return
+	}
+
+	var prefObjServers []*url.URL
+	token := newTokenGenerator(pelicanURL, nil, false, true)
+	if tc.token != "" {
+		token.SetToken(tc.token)
+	}
+	if tc.tokenLocation != "" {
+		token.SetTokenLocation(tc.tokenLocation)
+	}
+	if tc.skipAcquire {
+		token.EnableAcquire = !tc.skipAcquire
+	}
+	for _, option := range options {
+		switch option.Ident() {
+		case identTransferOptionCaches{}:
+			prefObjServers = option.Value().([]*url.URL)
+		case identTransferOptionTokenLocation{}:
+			token.SetTokenLocation(option.Value().(string))
+		case identTransferOptionAcquireToken{}:
+			token.EnableAcquire = option.Value().(bool)
+		case identTransferOptionToken{}:
+			token.SetToken(option.Value().(string))
+		}
+	}
+
+	ctx, cancel := mergeCancel(tc.ctx, ctx)
+	defer cancel()
+
+	dirResp, err := GetDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, "")
+	if err != nil {
+		log.Errorln(err)
+		err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
+		return
+	}
+	token.DirResp = &dirResp
+
+	if dirResp.XPelNsHdr.RequireToken {
+		var contents string
+		contents, err = token.get()
+		if err != nil || contents == "" {
+			err = errors.Wrap(err, "failed to get token for cache info query")
+			return
+		}
+
+		// The director response may change if it's given a token; let's repeat the query.
+		if contents != "" {
+			dirResp, err = GetDirectorInfoForPath(ctx, pelicanURL, http.MethodGet, contents)
+			if err != nil {
+				log.Errorln(err)
+				err = errors.Wrapf(err, "failed to get namespace information for remote URL %s", remoteUrl.String())
+				return
+			}
+			token.DirResp = &dirResp
+		}
+	} else {
+		token = nil
+	}
+
+	var sortedServers []*url.URL
+	sortedServers, err = generateSortedObjServers(dirResp, prefObjServers)
+	if err != nil {
+		log.Errorln("Failed to get namespace caches (treated as non-fatal):", err)
+		return
+	}
+	if len(sortedServers) == 0 {
+		err = errors.New("No available cache servers detected")
+		return
+	}
+	cacheUrl := *sortedServers[0]
+	cacheUrl.Path = remoteUrl.Path
+
+	return objectCached(ctx, &cacheUrl, token, config.GetTransport())
 }
 
 // Close the transfer client object
@@ -1314,10 +1515,10 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	if packOption != "" {
 		log.Debugln("Will use unpack option value", packOption)
 	}
-	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme}
+	remoteUrl := &url.URL{Path: job.job.remoteURL.Path, Scheme: job.job.remoteURL.Scheme, Host: job.job.remoteURL.Host}
 
 	var transfers []transferAttemptDetails
-	if job.job.upload { // Uploads use the redirected endpoint directly
+	if job.job.xferType == transferTypeUpload { // Uploads use the redirected endpoint
 		if len(job.job.dirResp.ObjectServers) == 0 {
 			err = errors.New("No origins found for upload")
 			return
@@ -1354,9 +1555,25 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 	}
 
 	if job.job.recursive {
-		if job.job.upload {
+		if job.job.xferType == transferTypeUpload {
 			return te.walkDirUpload(job, transfers, te.files, job.job.localPath)
 		} else {
+			return te.walkDirDownload(job, transfers, te.files, remoteUrl)
+		}
+	} else if job.job.xferType == transferTypePrestage {
+		// For prestage, from day one we handle internally whether it's recursive
+		// (as opposed to making the user specify explicitly)
+		var statInfo FileInfo
+		var pelicanUrl *pelican_url.PelicanURL
+		pelicanUrl, err = pelican_url.Parse(remoteUrl.String(), nil, nil)
+		if err != nil {
+			return
+		}
+		if statInfo, err = statHttp(pelicanUrl, job.job.dirResp, job.job.token); err != nil {
+			err = errors.Wrap(err, "failed to stat object to prestage")
+			return
+		}
+		if statInfo.IsCollection {
 			return te.walkDirDownload(job, transfers, te.files, remoteUrl)
 		}
 	}
@@ -1374,7 +1591,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			remoteURL:  remoteUrl,
 			packOption: packOption,
 			localPath:  job.job.localPath,
-			upload:     job.job.upload,
+			xferType:   job.job.xferType,
 			token:      job.job.token,
 			attempts:   transfers,
 			project:    job.job.project,
@@ -1426,7 +1643,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			}
 			var err error
 			var transferResults TransferResults
-			if file.file.upload {
+			if file.file.xferType == transferTypeUpload {
 				transferResults, err = uploadObject(file.file)
 			} else {
 				transferResults, err = downloadObject(file.file)
@@ -1485,56 +1702,13 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 				return
 			}
 
-			headClient := &http.Client{Transport: transport}
-			// Note we are not using a HEAD request here but a GET request for one byte;
-			// this is because the XRootD server currently (v5.6.9) only returns the Age
-			// header for GETs
-			headRequest, _ := http.NewRequestWithContext(ctx, http.MethodGet, tUrl.String(), nil)
-			headRequest.Header.Set("Range", "0-0")
-			if token != nil {
-				if tokenContents, err := token.get(); err == nil && tokenContents != "" {
-					headRequest.Header.Set("Authorization", "Bearer "+tokenContents)
-				}
-			}
-			var headResponse *http.Response
-			headResponse, err := headClient.Do(headRequest)
-			if err != nil {
+			if age, size, err := objectCached(ctx, tUrl, token, transport); err != nil {
 				headChan <- checkResults{idx, 0, -1, err}
 				return
-			}
-			// Allow response body to fail to read; we are only interested in the headers
-			// of the response, not the contents.
-			if _, err := io.ReadAll(headResponse.Body); err != nil {
-				log.Warningln("Failure when reading the one-byte-response body:", err)
-			}
-			headResponse.Body.Close()
-			var age int = -1
-			var size int64 = 0
-			if headResponse.StatusCode <= 300 {
-				contentLengthStr := headResponse.Header.Get("Content-Length")
-				if contentLengthStr != "" {
-					size, err = strconv.ParseInt(contentLengthStr, 10, 64)
-					if err != nil {
-						err = errors.Wrap(err, "problem converting Content-Length in response to an int")
-						log.Errorln(err.Error())
-
-					}
-				}
-				ageStr := headResponse.Header.Get("Age")
-				if ageStr != "" {
-					if ageParsed, err := strconv.Atoi(ageStr); err != nil {
-						log.Warningf("Ignoring invalid age value (%s) due to parsing error: %s", headRequest.Header.Get("Age"), err.Error())
-					} else {
-						age = ageParsed
-					}
-				}
 			} else {
-				err = &HttpErrResp{
-					Code: headResponse.StatusCode,
-					Err:  fmt.Sprintf("GET \"%s\" resulted in status code %d", tUrl, headResponse.StatusCode),
-				}
+				headChan <- checkResults{idx, uint64(size), age, err}
 			}
-			headChan <- checkResults{idx, uint64(size), age, err}
+
 		}(idx, &tUrl)
 	}
 	// 1 -> success.
@@ -1606,11 +1780,15 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 // create the destination directory).
 func downloadObject(transfer *transferFile) (transferResults TransferResults, err error) {
 	log.Debugln("Downloading object from", transfer.remoteURL, "to", transfer.localPath)
-	// Remove the source from the file path
-	directory := path.Dir(transfer.localPath)
 	var downloaded int64
-	if err = os.MkdirAll(directory, 0700); err != nil {
-		return
+	localPath := transfer.localPath
+	if transfer.xferType == transferTypeDownload {
+		directory := path.Dir(localPath)
+		if err = os.MkdirAll(directory, 0700); err != nil {
+			return
+		}
+	} else {
+		localPath = "/dev/null"
 	}
 
 	size, attempts := sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token)
@@ -1645,7 +1823,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			tokenContents, _ = transfer.token.get()
 		}
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, err := downloadHTTP(
-			ctx, transfer.engine, transfer.callback, transferEndpoint, transfer.localPath, size, tokenContents, transfer.project,
+			ctx, transfer.engine, transfer.callback, transferEndpoint, localPath, size, tokenContents, transfer.project,
 		)
 		endTime := time.Now()
 		if cacheAge >= 0 {
@@ -1813,6 +1991,10 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		unpacker = newAutoUnpacker(dest, behavior)
 		if req, err = grab.NewRequestToWriter(unpacker, transferUrl.String()); err != nil {
 			return 0, 0, -1, "", errors.Wrap(err, "Failed to create new download request")
+		}
+	} else if dest == "/dev/null" {
+		if req, err = grab.NewRequestToWriter(io.Discard, transferUrl.String()); err != nil {
+			return 0, 0, -1, "", errors.Wrap(err, "Failed to create new prestage request")
 		}
 	} else if req, err = grab.NewRequest(dest, transferUrl.String()); err != nil {
 		return 0, 0, -1, "", errors.Wrap(err, "Failed to create new download request")
@@ -2035,7 +2217,7 @@ Loop:
 		trailer := resp.HTTPResponse.Trailer
 		if errorStatus := trailer.Get("X-Transfer-Status"); errorStatus != "" {
 			statusCode, statusText := parseTransferStatus(errorStatus)
-			if statusCode != 200 {
+			if statusCode != http.StatusOK {
 				log.WithFields(fields).Debugln("Got error from file transfer")
 				err = errors.New("transfer error: " + statusText)
 				return
@@ -2044,7 +2226,7 @@ Loop:
 	}
 	// Valid responses include 200 and 206.  The latter occurs if the download was resumed after a
 	// prior attempt.
-	if resp.HTTPResponse.StatusCode != 200 && resp.HTTPResponse.StatusCode != 206 {
+	if resp.HTTPResponse.StatusCode != http.StatusOK && resp.HTTPResponse.StatusCode != http.StatusPartialContent {
 		log.WithFields(fields).Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
 		return 0, 0, -1, serverVersion, &HttpErrResp{resp.HTTPResponse.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s",
 			resp.HTTPResponse.StatusCode, resp.Err().Error())}
@@ -2271,7 +2453,9 @@ Loop:
 			log.Debugln("File closed")
 		case response := <-responseChan:
 			attempt.ServerVersion = response.Header.Get("Server")
-			if response.StatusCode != 200 {
+			// Note: Accept both 200 and 201 as success codes; the latter is the correct one, but
+			// older versions of XRootD incorrectly use 200.
+			if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 				log.Errorln("Got failure status code:", response.StatusCode)
 				lastError = &HttpErrResp{response.StatusCode, fmt.Sprintf("Request failed (HTTP status %d)",
 					response.StatusCode)}
@@ -2337,7 +2521,10 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 	}
 	dump, _ = httputil.DumpResponse(response, true)
 	log.Debugf("Dumping response: %s", dump)
-	if response.StatusCode != 200 {
+	// Note: XRootD used to always return 200 (OK) on upload, even when it was supposed to turn
+	// HTTP 201 (Created).  Check for both here; in the future we may want to remove the 200 check
+	// if we decide to drop support for the older versions of XRootD.
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 		log.Errorln("Error status code:", response.Status)
 		log.Debugln("From the server:")
 		textResponse, err := io.ReadAll(response.Body)
@@ -2350,6 +2537,26 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 	}
 	responseChan <- response
 
+}
+
+// Determine whether to skip a prestage based on whether an object is at a cache
+func skipPrestage(object string, job *TransferJob) bool {
+	var cache url.URL
+	if len(job.dirResp.ObjectServers) > 0 {
+		cache = *job.dirResp.ObjectServers[0]
+	} else if len(job.prefObjServers) > 0 {
+		cache = *job.prefObjServers[0]
+	} else {
+		log.Errorln("Cannot skip prestage if no cache is specified!")
+	}
+
+	cache.Path = object
+	if age, _, err := objectCached(job.ctx, &cache, job.token, config.GetTransport()); err == nil {
+		return age >= 0
+	} else {
+		log.Warningln("Failed to check cache status of object", cache.String(), "so assuming it needs prestaging:", err)
+		return false
+	}
 }
 
 // This helper function creates a web dav client to walkDavDir's. Used for recursive downloads and lists
@@ -2457,7 +2664,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 							remoteURL:  &url.URL{Path: remotePath},
 							packOption: transfers[0].PackOption,
 							localPath:  job.job.localPath,
-							upload:     job.job.upload,
+							xferType:   job.job.xferType,
 							token:      job.job.token,
 							attempts:   transfers,
 						},
@@ -2479,7 +2686,9 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 			if err != nil {
 				return err
 			}
-		} else if localPath := path.Join(job.job.localPath, localBase, info.Name()); skipDownload(job.job.syncLevel, info, localPath) {
+		} else if job.job.xferType == transferTypePrestage && skipPrestage(newPath, job.job) {
+			log.Infoln("Skipping prestage of object", newPath, "as it already is at the cache")
+		} else if localPath := path.Join(job.job.localPath, localBase, info.Name()); job.job.xferType == transferTypeDownload && skipDownload(job.job.syncLevel, info, localPath) {
 			log.Infoln("Skipping download of object", newPath, "as it already exists at", localPath)
 		} else {
 			job.job.activeXfer.Add(1)
@@ -2497,7 +2706,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					remoteURL:  &url.URL{Path: newPath},
 					packOption: transfers[0].PackOption,
 					localPath:  localPath,
-					upload:     job.job.upload,
+					xferType:   job.job.xferType,
 					token:      job.job.token,
 					attempts:   transfers,
 				},
@@ -2542,7 +2751,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 						remoteURL:  &url.URL{Path: remotePath},
 						packOption: transfers[0].PackOption,
 						localPath:  job.job.localPath,
-						upload:     job.job.upload,
+						xferType:   job.job.xferType,
 						token:      job.job.token,
 						attempts:   transfers,
 					},
@@ -2588,7 +2797,7 @@ func (te *TransferEngine) walkDirUpload(job *clientTransferJob, transfers []tran
 					remoteURL:  &url.URL{Path: remoteUrl.Path},
 					packOption: transfers[0].PackOption,
 					localPath:  newPath,
-					upload:     job.job.upload,
+					xferType:   job.job.xferType,
 					token:      job.job.token,
 					attempts:   transfers,
 				},
@@ -2608,6 +2817,10 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	}
 
 	collectionsUrl := dirResp.XPelNsHdr.CollectionsUrl
+	if collectionsUrl == nil {
+		err = errors.New("namespace does not provide a collections URL for listing")
+		return
+	}
 	log.Debugln("Collections URL: ", collectionsUrl.String())
 
 	project := searchJobAd(projectName)
@@ -2864,6 +3077,103 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 	}
 	if success {
 		err = nil
+	}
+	return
+}
+
+// Check if a given URL is present at the first cache in the director response
+//
+// Note that xrootd returns an `Age` header for GETs but only a `Content-Length`
+// header for HEADs.  If `Content-Range` is found, we will use that header; if not,
+// we will issue two commands.
+func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator, transport http.RoundTripper) (age int, size int64, err error) {
+
+	age = -1
+
+	headClient := &http.Client{Transport: transport}
+	headRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, objectUrl.String(), nil)
+	if err != nil {
+		return
+	}
+	headRequest.Header.Set("Range", "0-0")
+	if token != nil {
+		if tokenContents, err := token.get(); err == nil && tokenContents != "" {
+			headRequest.Header.Set("Authorization", "Bearer "+tokenContents)
+		}
+	}
+	var headResponse *http.Response
+	headResponse, err = headClient.Do(headRequest)
+	if err != nil {
+		return
+	}
+	// Allow response body to fail to read; we are only interested in the headers
+	// of the response, not the contents.
+	if _, err := io.Copy(io.Discard, headResponse.Body); err != nil {
+		log.Warningln("Failure when reading the one-byte-response body:", err)
+	}
+	headResponse.Body.Close()
+	gotContentRange := false
+	if headResponse.StatusCode <= 300 {
+		if contentRangeStr := headResponse.Header.Get("Content-Range"); contentRangeStr != "" {
+			if after, found := strings.CutPrefix(contentRangeStr, "bytes 0-0/"); found {
+				if afterParsed, err := strconv.Atoi(after); err == nil {
+					size = int64(afterParsed)
+					gotContentRange = true
+				} else {
+					log.Warningf("Ignoring invalid content range value (%s) due to parsing error: %s", after, err.Error())
+				}
+			} else {
+				log.Debugln("Unexpected value found in Content-Range header:", contentRangeStr)
+			}
+		}
+		ageStr := headResponse.Header.Get("Age")
+		if ageStr != "" {
+			if ageParsed, err := strconv.Atoi(ageStr); err != nil {
+				log.Warningf("Ignoring invalid age value (%s) due to parsing error: %s", headRequest.Header.Get("Age"), err.Error())
+			} else {
+				age = ageParsed
+			}
+		}
+	} else {
+		err = &HttpErrResp{
+			Code: headResponse.StatusCode,
+			Err:  fmt.Sprintf("GET \"%s\" resulted in status code %d", objectUrl, headResponse.StatusCode),
+		}
+	}
+	// Early return -- all the info we wanted was in the GET response.
+	if gotContentRange {
+		return
+	}
+
+	headRequest, err = http.NewRequestWithContext(ctx, http.MethodHead, objectUrl.String(), nil)
+	if err != nil {
+		return
+	}
+	if token != nil {
+		if tokenContents, err := token.get(); err == nil && tokenContents != "" {
+			headRequest.Header.Set("Authorization", "Bearer "+tokenContents)
+		}
+	}
+
+	headResponse, err = headClient.Do(headRequest)
+	if err != nil {
+		return
+	}
+	if headResponse.StatusCode <= 300 {
+		contentLengthStr := headResponse.Header.Get("Content-Length")
+		if contentLengthStr != "" {
+			size, err = strconv.ParseInt(contentLengthStr, 10, 64)
+			if err != nil {
+				err = errors.Wrap(err, "problem converting Content-Length in response to an int")
+				log.Errorln(err.Error())
+
+			}
+		}
+	} else {
+		err = &HttpErrResp{
+			Code: headResponse.StatusCode,
+			Err:  fmt.Sprintf("HEAD \"%s\" resulted in status code %d", objectUrl, headResponse.StatusCode),
+		}
 	}
 	return
 }

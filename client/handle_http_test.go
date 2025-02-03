@@ -430,7 +430,8 @@ func TestSortAttempts(t *testing.T) {
 	})
 	alwaysRespond := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
-			w.Header().Set("Content-Length", "42")
+			w.Header().Set("Content-Length", "1")
+			w.Header().Set("Content-Range", "bytes 0-0/42")
 			w.WriteHeader(http.StatusOK)
 			_, err := w.Write([]byte("A"))
 			require.NoError(t, err)

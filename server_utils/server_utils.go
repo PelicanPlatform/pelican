@@ -216,7 +216,6 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 	}
 	cases := make([]reflect.SelectCase, select_count)
 	ticker := time.NewTicker(sleepTime)
-	defer ticker.Stop()
 	cases[0].Dir = reflect.SelectRecv
 	cases[0].Chan = reflect.ValueOf(ticker.C)
 	cases[1].Dir = reflect.SelectRecv
@@ -233,6 +232,7 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 	}
 	egrp.Go(func() error {
 		defer watcher.Close()
+		defer ticker.Stop()
 		for {
 			chosen, recv, ok := reflect.Select(cases)
 			if chosen == 0 {

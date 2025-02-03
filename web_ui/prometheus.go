@@ -84,6 +84,36 @@ func init() {
 	prometheus.MustRegister(version.NewCollector(strings.ReplaceAll(appName, "-", "_")))
 }
 
+const (
+	MaxLabelLimit            = 128
+	MaxLabelNameLengthLimit  = 256
+	MaxLabelValueLengthLimit = 4096
+	MaxSampleLimit           = 800
+)
+
+func setCardinalityLimits(cfg *config.ScrapeConfig) {
+	if !(param.Monitoring_LabelLimit.GetInt() > 0 && param.Monitoring_LabelLimit.GetInt() < MaxLabelLimit) {
+		logrus.Warnf("Provided Monitoring.LabelLimit value: %d is either negative or greater than the maximum of %d. Defaulting to %d\n",
+			param.Monitoring_LabelLimit.GetInt(), MaxLabelLimit, 64)
+		cfg.LabelLimit = 64
+	}
+	if !(param.Monitoring_LabelNameLengthLimit.GetInt() > 0 && param.Monitoring_LabelNameLengthLimit.GetInt() < MaxLabelNameLengthLimit) {
+		logrus.Warnf("Provided Monitoring.LabelNameLengthLimit value: %d is either negative or greater than the maximum of %d. Defaulting to %d\n",
+			param.Monitoring_LabelNameLengthLimit.GetInt(), MaxLabelNameLengthLimit, 128)
+		cfg.LabelNameLengthLimit = 128
+	}
+	if !(param.Monitoring_LabelValueLengthLimit.GetInt() > 0 && param.Monitoring_LabelValueLengthLimit.GetInt() < MaxLabelValueLengthLimit) {
+		logrus.Warnf("Provided Monitoring.LabelValueLengthLimit value: %d is either negative or greater than the maximum of %d. Defaulting to %d\n",
+			param.Monitoring_LabelValueLengthLimit.GetInt(), 4096, 2048)
+		cfg.LabelValueLengthLimit = 2048
+	}
+	if !(param.Monitoring_SampleLimit.GetInt() > 0 && param.Monitoring_SampleLimit.GetInt() < MaxSampleLimit) {
+		logrus.Warnf("Provided Monitoring.SampleLimit value: %d is either negative or greater than the maximum of %d. Defaulting to %d\n",
+			param.Monitoring_SampleLimit.GetInt(), MaxSampleLimit, 200)
+		cfg.SampleLimit = 200
+	}
+}
+
 type flagConfig struct {
 	serverStoragePath   string
 	forGracePeriod      model.Duration
@@ -228,6 +258,10 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 		RefreshInterval:  model.Duration(15 * time.Second),
 		HTTPClientConfig: sdHttpClientConfig,
 	}
+
+	// Cardinality limits for Prometheus, configured via Pelican configuration file
+	setCardinalityLimits(&scrapeConfig)
+
 	return &scrapeConfig, nil
 }
 
@@ -396,6 +430,10 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 			}},
 		},
 	}
+
+	// Cardinality limits for Prometheus, configured via Pelican configuration file
+	setCardinalityLimits(&scrapeConfig)
+
 	promCfg.ScrapeConfigs[0] = &scrapeConfig
 
 	// Add origins/caches monitoring to director's prometheus instance
@@ -737,6 +775,8 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 								if err != nil {
 									return fmt.Errorf("Failed to generate token for director scraper when refresh it: %v", err)
 								}
+								// Cardinality limits for Prometheus, configured via Pelican configuration file
+								setCardinalityLimits(storageServerScrapeCfg)
 
 								// Idx 0 is the config for server's onboard scraper
 								// Idx 1 is the config for director scraper at origins/caches

@@ -45,14 +45,14 @@ var originReportNotFoundError = errors.New("Origin does not support new reportin
 
 // Report the health status of test file transfer to storage server
 func reportStatusToServer(ctx context.Context, serverWebUrl string, status string, message string, serverType string, fallback bool) error {
-	directorUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
-		return errors.Wrapf(err, "failed to parse external URL %v", param.Server_ExternalWebUrl.GetString())
+		return err
 	}
 
 	testTokenCfg := token.NewWLCGToken()
 	testTokenCfg.Lifetime = time.Minute
-	testTokenCfg.Issuer = directorUrl.String()
+	testTokenCfg.Issuer = fedInfo.DiscoveryEndpoint
 	testTokenCfg.AddAudiences(serverWebUrl)
 	testTokenCfg.Subject = "director"
 	testTokenCfg.AddScopes(token_scopes.Pelican_DirectorTestReport)

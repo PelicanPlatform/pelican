@@ -33,7 +33,7 @@ import (
 
 // Create tmpdir, change cwd, and setup clean up functions
 func setupTestRun(t *testing.T) string {
-	config.ResetIssuerJWKPtr()
+	config.ResetIssuerPrivateKeys()
 	wd, err := os.Getwd()
 	require.NoError(t, err)
 
@@ -45,7 +45,6 @@ func setupTestRun(t *testing.T) string {
 		err := os.Chdir(wd)
 		require.NoError(t, err)
 		server_utils.ResetTestState()
-		config.ResetIssuerJWKPtr()
 	})
 	return tmpDir
 }
@@ -64,11 +63,10 @@ func checkKeys(t *testing.T, privateKey, publicKey string) {
 }
 
 func TestKeygenMain(t *testing.T) {
-	config.ResetIssuerJWKPtr()
+	config.ResetIssuerPrivateKeys()
 
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
-		config.ResetIssuerJWKPtr()
 	})
 
 	t.Run("no-args-gen-to-wd", func(t *testing.T) {

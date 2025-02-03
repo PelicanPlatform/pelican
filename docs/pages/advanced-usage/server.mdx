@@ -1,22 +1,28 @@
-# Advanced Usage - Servers
+# Managing Administrator Credentials
 
-This page documents advanced usage of Pelican servers. Features listed below are for server admins familiar with Pelican Servers.
+Pelican services maintain multiple types of credentials:
+- The *admin password* provides access to the server's web interface.
+- The *namespace private key* can create arbitrary new credentials (user tokens) for a portion of the federation's namespace.
 
-## Pre-generate Server Credentials
+This page covers various topics in managing these credentials.
 
-### Server Private Key
+## Pre-generate Credentials
 
-> **Note**: The server private key should be treated as a **secret** and never shared with the public.
+### Namespace Private Key
 
-Pelican servers rely on an ECDSA key-pair for signing and verifying tokens used in API requests and object accesses. Pelican servers automatically generate a private key in ECDSA form at the server start, and provide the public key through the OIDC-style discovery endpoint at `/.well-known/openid-configuration`. The public key is useful for various things including Origin namespace prefix registration at the registry (see details [here](../federating-your-data.mdx#obtain-the-public-key-of-the-origin)).
+> **Note**: The namespace private key is a **powerful secret** and should never be shared with others.  With the private key, one can create user credentials that can **arbitrarily read or write into your namespace**.
 
-In deployment, it can be convenient to generate the key-pair in advance and mount the private key file to the Pelican server via configuration variable, especially in a container environment. The Pelican CLI comes with a command `pelican generate keygen` for generating private/public key pairs:
+Pelican services rely on a private/public key pair for creating (signing) and verifying the user credentials (tokens) used to read or write objects.  When a new prefix in the data federation is created, an associated public key must be provided; the corresponding private key can generate any arbitrary permissions (including delete!) within the namespace.  For more information about namespace registration, see details [here](../federating-your-data.mdx#obtain-the-public-key-of-the-origin).
+
+When a Pelican origin or other service is started, the server automatically generates a new private key if one is not present.  However, if someone is running the origin on your behalf, you will need to generate the keypair on your own and send the public portion to the origin operator. If you're doing the deployment, it can also be convenient to generate the key-pair in advance and mount the private key file to the Pelican server via configuration variable, especially in a container environment.
+
+The Pelican binary ships with a `pelican generate keygen` for generating a private/public key pairs:
 
 ```bash copy
 pelican generate keygen
 ```
 
-and Pelican will generate both the private key and the public key under the current working directory:
+Pelican will generate both the private key and the public key under the current working directory:
 
 ```console
 Successfully generated keys at:
@@ -31,17 +37,46 @@ You can change the location of the generated keys by passing in  arguments `priv
 pelican generate keygen --private-key /tmp/foo --public-key /tmp/bar
 ```
 
-The generated *private key* can be passed to a Pelican server via `IssuerKey` configuration parameter so that the server will take advantage of the generated key instead of generating a new key.
+For origin operators, the generated *private key* can be specified in the a Pelican server configuration via the `IssuerKey` parameter so that the server will use the newly-generated key:
 
 
 ```yaml filename="pelican.yaml" copy
 IssuerKey: /path/to/generated/issuer.jwk
 ```
 
+If there is a remote operator for your origin, email them the **public key** portion.  Never send anyone your private key.  A sample public key looks like the following:
 
-### Admin Website Password
+```bash
+$ cat issuer-pub.jwks
+{
+	"keys": [
+		{
+			"alg": "ES256",
+			"crv": "P-256",
+			"kid": "N3Tks9H791dG7bdzjjlQzV-fwwCrnXd_mcd_2D5ZvYE",
+			"kty": "EC",
+			"x": "9IIkGEzyWywecBsIisrJsH-_XqMal-U25dthHewUC5w",
+			"y": "h_1DUotM2qnLPPRia6hGXNKZdpi92VJ5u_NSrZ-pd0c"
+		}
+	]
+}
+```
 
-The `pelican generate` command generates the [htpasswd](https://httpd.apache.org/docs/2.4/programs/htpasswd.html) password file for storing the admin website login password. By pre-generating the htpasswd file, Pelican server admin can skip the initial website setup with the one-time passcode. To generate a password file, run:
+A sample private key has the following format:
+```bash
+$ cat issuer.jwk
+-----BEGIN PRIVATE KEY-----
+M0G+AgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgzeomq6yJvek0fg2Z
+g+NY6qklGz4ZjVlrRgTDT9hk5EShRANCAAT0giQYTPJbLB5wGwiKysmwf79eoxqX
+5Tbl22Ed7BQLnIf9Q1KLTNqpyzz0YmuoRlzSmXaYvdlSebvzUq2fqXdH
+-----END PRIVATE KEY-----
+```
+
+### Web Interface Administrator Password
+
+By default, Pelican's administrator web interface requires a username/password to be setup to access.  This password can be enabled by a one-time passcode the server writes into the log file.  However, by pre-generating the credential, Pelican server administrators can skip the initial setup and automate installation.
+
+The `pelican generate` command generates the [htpasswd](https://httpd.apache.org/docs/2.4/programs/htpasswd.html)-formatted password file for storing the web interface administrator login password. To generate a password file, run:
 
 ```bash copy
 pelican generate password

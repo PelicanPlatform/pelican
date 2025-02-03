@@ -47,6 +47,7 @@ import (
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 type (
@@ -102,12 +103,24 @@ var (
 	healthTestUtils      = make(map[string]*healthTestUtil) // The utilities for the director file tests. The key is string form of ServerAd.URL
 	healthTestUtilsMutex = sync.RWMutex{}
 
-	statUtils      = make(map[string]serverStatUtil) // The utilities for the stat call. The key is string form of ServerAd.URL
+	statUtils      = make(map[string]*serverStatUtil) // The utilities for the stat call. The key is string form of ServerAd.URL
 	statUtilsMutex = sync.RWMutex{}
+
+	startupTime = time.Now()
 )
 
 func init() {
 	hookServerAdsCache()
+}
+
+// Used for testing, where the Director has pretty much _always_ been started in the
+// last 5 minutes.
+func SetStartupTime(t time.Time) {
+	startupTime = t
+}
+
+func inStartupSequence() bool {
+	return time.Since(startupTime) <= 5*time.Minute
 }
 
 func getRedirectURL(reqPath string, ad server_structs.ServerAd, requiresAuth bool) (redirectURL url.URL) {
@@ -377,15 +390,23 @@ func redirectToCache(ginCtx *gin.Context) {
 	// If either disableStat or skipstat is set, then skip the stat query
 	skipStat := ginCtx.Request.URL.Query().Has("skipstat") || disableStat
 
-	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
+	namespaceAd, originAds, prelimCacheAds := getAdsForPath(reqPath)
 	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
-		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems",
-		})
+		// If the director restarted recently, tell the client to try again soon by sending a 429
+		if inStartupSequence() {
+			ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "No cache serving requested prefix; director just restarted, try again later",
+			})
+		} else {
+			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "No namespace found for prefix. Either it doesn't exist, or the Director is experiencing problems",
+			})
+		}
 		return
 	}
 	// if err != nil, depth == 0, which is the default value for depth
@@ -393,6 +414,19 @@ func redirectToCache(ginCtx *gin.Context) {
 	depth, err := getLinkDepth(reqPath, namespaceAd.Path)
 	if err != nil {
 		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
+	}
+
+	// If the namespace doesn't require a token for reads, remove all topology only ads in order to
+	// prevent redirection to the non-auth version of these caches
+	cacheAds := make([]server_structs.ServerAd, 0, len(prelimCacheAds))
+	if namespaceAd.Caps.PublicReads {
+		for _, pAd := range prelimCacheAds {
+			if !pAd.FromTopology {
+				cacheAds = append(cacheAds, pAd)
+			}
+		}
+	} else {
+		cacheAds = prelimCacheAds
 	}
 
 	// If the namespace requires a token yet there's no token available, skip the stat.
@@ -424,7 +458,7 @@ func redirectToCache(ginCtx *gin.Context) {
 		maxRes := len(cacheAds) + len(originAds)
 		qr := q.Query(context.Background(), reqPath, st, 1, maxRes,
 			withOriginAds(originAds), withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
-		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
+		log.Debugf("Cache stat result for %s: %s", reqPath, qr.String())
 
 		// For successful response, we got a list of URLs to access the object.
 		// We will use the host of the object url to match the URL field in originAds and cacheAds
@@ -443,7 +477,13 @@ func redirectToCache(ginCtx *gin.Context) {
 				}
 			}
 		} else if qr.Status == queryFailed {
-			if qr.ErrorType != queryInsufficientResErr {
+			if qr.ErrorType == queryNoSourcesErr {
+				ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "Object not found at any cache",
+				})
+				return
+			} else if qr.ErrorType != queryInsufficientResErr {
 				ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg),
@@ -603,10 +643,18 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// report the lack of path first -- this is most important for the user because it tells them
 	// they're trying to get an object that simply doesn't exist
 	if namespaceAd.Path == "" {
-		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems",
-		})
+		// If the director restarted recently, tell the client to try again soon by sending a 429
+		if inStartupSequence() {
+			ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "No origin serving requested prefix; director just restarted, try again later",
+			})
+		} else {
+			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems",
+			})
+		}
 		return
 	}
 
@@ -626,7 +674,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		q = NewObjectStat()
 		qr := q.Query(context.Background(), reqPath, server_structs.OriginType, 1, 3,
 			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.Caps.PublicReads))
-		log.Debugf("Stat result for %s: %s", reqPath, qr.String())
+		log.Debugf("Origin stat result for %s: %s", reqPath, qr.String())
 
 		// For a successful response, we got a list of object URLs.
 		// We then use the host of the object url to match the URL field in originAds
@@ -642,7 +690,12 @@ func redirectToOrigin(ginCtx *gin.Context) {
 				}
 			}
 		} else if qr.Status == queryFailed {
-			if qr.ErrorType != queryInsufficientResErr {
+			if qr.ErrorType == queryNoSourcesErr {
+				ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    "All sources report object was not found",
+				})
+			} else if qr.ErrorType != queryInsufficientResErr {
 				ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg),
@@ -888,6 +941,8 @@ func checkHostnameRedirects(c *gin.Context, incomingHost string) {
 // original request had been made to /api/v1.0/director/object/foo/bar
 func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		web_ui.ServerHeaderMiddleware(c)
+
 		// If this is a request for getting public key, don't modify the path
 		// If this is a request to the Prometheus API, don't modify the path
 		if strings.HasPrefix(c.Request.URL.Path, "/.well-known/") ||
@@ -1154,6 +1209,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 			if err == adminApprovalErr {
 				log.Warningf("Failed to verify token. %s %q was not approved", sType.String(), adV2.Name)
 				ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("%s %q was not approved by an administrator. %s", sType.String(), ad.Name, approvalErrMsg)})
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 				return
 			} else {
 				log.Warningln("Failed to verify token:", err)
@@ -1161,6 +1217,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
 				})
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 				return
 			}
 		}
@@ -1170,6 +1227,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				Status: server_structs.RespFailed,
 				Msg:    "Authorization token verification failed. Token missing required scope",
 			})
+			metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 			return
 		}
 	}
@@ -1184,6 +1242,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 				if err == adminApprovalErr {
 					log.Warningf("Failed to verify advertise token. Namespace %q requires administrator approval", namespace.Path)
 					ctx.JSON(http.StatusForbidden, gin.H{"approval_error": true, "error": fmt.Sprintf("The namespace %q was not approved by an administrator. %s", namespace.Path, approvalErrMsg)})
+					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 					return
 				} else {
 					log.Warningln("Failed to verify token:", err)
@@ -1191,6 +1250,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 						Status: server_structs.RespFailed,
 						Msg:    fmt.Sprintf("Authorization token verification failed: %v", err),
 					})
+					metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 					return
 				}
 			}
@@ -1201,6 +1261,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 					Status: server_structs.RespFailed,
 					Msg:    "Authorization token verification failed. Token missing required scope",
 				})
+				metrics.PelicanDirectorRejectedAdvertisements.With(prometheus.Labels{"hostname": adV2.Name}).Inc()
 				return
 			}
 		}
@@ -1484,7 +1545,7 @@ func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
 }
 
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
-	directorAPIV1 := router.Group("/api/v1.0/director")
+	directorAPIV1 := router.Group("/api/v1.0/director", web_ui.ServerHeaderMiddleware)
 	{
 		// Establish the routes used for cache/origin redirection
 		directorAPIV1.GET("/object/*any", redirectToCache)
@@ -1513,7 +1574,7 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 
 	}
 
-	directorAPIV2 := router.Group("/api/v2.0/director")
+	directorAPIV2 := router.Group("/api/v2.0/director", web_ui.ServerHeaderMiddleware)
 	{
 		directorAPIV2.GET("/listNamespaces", listNamespacesV2)
 	}

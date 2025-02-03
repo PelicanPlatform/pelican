@@ -56,6 +56,7 @@ func GetDeprecated() map[string][]string {
         "Director.EnableStat": {"Director.CheckOriginPresence"},
         "DisableHttpProxy": {"Client.DisableHttpProxy"},
         "DisableProxyFallback": {"Client.DisableProxyFallback"},
+        "IssuerKey": {"none"},
         "MinimumDownloadSpeed": {"Client.MinimumDownloadSpeed"},
         "Origin.EnableDirListing": {"Origin.EnableListings"},
         "Origin.EnableFallbackRead": {"Origin.EnableDirectReads"},
@@ -146,6 +147,9 @@ func (oP ObjectParam) IsSet() bool {
 var (
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
+	Cache_FilesBaseSize = StringParam{"Cache.FilesBaseSize"}
+	Cache_FilesMaxSize = StringParam{"Cache.FilesMaxSize"}
+	Cache_FilesNominalSize = StringParam{"Cache.FilesNominalSize"}
 	Cache_HighWaterMark = StringParam{"Cache.HighWaterMark"}
 	Cache_LocalRoot = StringParam{"Cache.LocalRoot"}
 	Cache_LowWatermark = StringParam{"Cache.LowWatermark"}
@@ -167,6 +171,7 @@ var (
 	Federation_TopologyNamespaceUrl = StringParam{"Federation.TopologyNamespaceUrl"}
 	Federation_TopologyUrl = StringParam{"Federation.TopologyUrl"}
 	IssuerKey = StringParam{"IssuerKey"}
+	IssuerKeysDirectory = StringParam{"IssuerKeysDirectory"}
 	Issuer_AuthenticationSource = StringParam{"Issuer.AuthenticationSource"}
 	Issuer_GroupFile = StringParam{"Issuer.GroupFile"}
 	Issuer_GroupSource = StringParam{"Issuer.GroupSource"}
@@ -306,6 +311,7 @@ var (
 	Cache_BlocksToPrefetch = IntParam{"Cache.BlocksToPrefetch"}
 	Cache_Concurrency = IntParam{"Cache.Concurrency"}
 	Cache_Port = IntParam{"Cache.Port"}
+	Client_DirectorRetries = IntParam{"Client.DirectorRetries"}
 	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
 	Client_MinimumDownloadSpeed = IntParam{"Client.MinimumDownloadSpeed"}
 	Client_WorkerCount = IntParam{"Client.WorkerCount"}
@@ -316,8 +322,12 @@ var (
 	LocalCache_HighWaterMarkPercentage = IntParam{"LocalCache.HighWaterMarkPercentage"}
 	LocalCache_LowWaterMarkPercentage = IntParam{"LocalCache.LowWaterMarkPercentage"}
 	MinimumDownloadSpeed = IntParam{"MinimumDownloadSpeed"}
+	Monitoring_LabelLimit = IntParam{"Monitoring.LabelLimit"}
+	Monitoring_LabelNameLengthLimit = IntParam{"Monitoring.LabelNameLengthLimit"}
+	Monitoring_LabelValueLengthLimit = IntParam{"Monitoring.LabelValueLengthLimit"}
 	Monitoring_PortHigher = IntParam{"Monitoring.PortHigher"}
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
+	Monitoring_SampleLimit = IntParam{"Monitoring.SampleLimit"}
 	Origin_Port = IntParam{"Origin.Port"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
@@ -334,10 +344,13 @@ var (
 var (
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
+	Cache_EnablePrefetch = BoolParam{"Cache.EnablePrefetch"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
+	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
 	Client_DisableHttpProxy = BoolParam{"Client.DisableHttpProxy"}
 	Client_DisableProxyFallback = BoolParam{"Client.DisableProxyFallback"}
+	Client_IsPlugin = BoolParam{"Client.IsPlugin"}
 	Debug = BoolParam{"Debug"}
 	Director_AssumePresenceAtSingleOrigin = BoolParam{"Director.AssumePresenceAtSingleOrigin"}
 	Director_CachesPullFromCaches = BoolParam{"Director.CachesPullFromCaches"}
@@ -377,6 +390,7 @@ var (
 	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
 	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
+	Server_HealthMonitoringPublic = BoolParam{"Server.HealthMonitoringPublic"}
 	Shoveler_Enable = BoolParam{"Shoveler.Enable"}
 	Shoveler_VerifyHeader = BoolParam{"Shoveler.VerifyHeader"}
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}

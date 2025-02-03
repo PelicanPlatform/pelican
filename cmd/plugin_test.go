@@ -35,6 +35,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -306,8 +307,10 @@ func TestStashPluginMain(t *testing.T) {
 	output := strings.Replace(stderr.String(), "\\\\", "\\", -1)
 
 	// Check captured output for successful download
-	expectedOutput := "Downloading object from pelican:///test/test.txt to " + tempDir
-	assert.Contains(t, output, expectedOutput)
+	expectedPattern := `Downloading object from pelican://[^/]+/test/test.txt to ` + regexp.QuoteMeta(tempDir)
+	matched, err := regexp.MatchString(expectedPattern, output)
+	assert.NoError(t, err)
+	assert.True(t, matched, "Output does not match expected pattern")
 	successfulDownloadMsg := "HTTP Transfer was successful"
 	assert.Contains(t, output, successfulDownloadMsg)
 	amountDownloaded := "Downloaded bytes: 17"
@@ -920,7 +923,7 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		results := make(chan *classads.ClassAd, 5)
 		err = runPluginWorker(fed.Ctx, false, workChan, results)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Failed to create new transfer job: no collections URL found in director response")
+		assert.Regexp(t, "Failed to create new transfer job: error while querying the director at https://[A-Za-z0-9:.-]+: server returned 404 Not Found", err.Error())
 	})
 }
 

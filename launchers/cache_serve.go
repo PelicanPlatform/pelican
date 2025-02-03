@@ -41,6 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/web_ui"
 	"github.com/pelicanplatform/pelican/xrootd"
 )
 
@@ -72,7 +73,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		// Register the web endpoints
 		if param.Lotman_EnableAPI.GetBool() {
 			log.Debugln("Registering Lotman API")
-			lotman.RegisterLotman(ctx, engine.Group("/"))
+			lotman.RegisterLotman(ctx, engine.Group("/", web_ui.ServerHeaderMiddleware))
 		}
 
 		// Until https://github.com/PelicanPlatform/lotman/issues/24 is closed, we can only really logic over
@@ -88,7 +89,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		}
 	}
 
-	broker.RegisterBrokerCallback(ctx, engine.Group("/"))
+	broker.RegisterBrokerCallback(ctx, engine.Group("/", web_ui.ServerHeaderMiddleware))
 	broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
 	configPath, err := xrootd.ConfigXrootd(ctx, false)
 	if err != nil {
@@ -110,7 +111,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 	// Director and origin also registers this metadata URL; avoid registering twice.
 	if !modules.IsEnabled(server_structs.DirectorType) && !modules.IsEnabled(server_structs.OriginType) {
-		server_utils.RegisterOIDCAPI(engine.Group("/"), false)
+		server_utils.RegisterOIDCAPI(engine.Group("/", web_ui.ServerHeaderMiddleware), false)
 	}
 
 	log.Info("Launching cache")

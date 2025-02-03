@@ -331,7 +331,10 @@ func TestClient(t *testing.T) {
 		_, err = client.DoGet(ctx, "pelican://"+param.Server_Hostname.GetString()+":"+strconv.Itoa(param.Server_WebPort.GetInt())+"/test/hello_world.txt.1",
 			filepath.Join(tmpDir, "hello_world.txt.1"), false, client.WithToken(token), client.WithCaches(cacheUrl), client.WithAcquireToken(false))
 		require.Error(t, err)
-		assert.Equal(t, "failed download from local-cache: server returned 404 Not Found", err.Error())
+		// TODO (bbockelm, 10-Jan-2025): It's surprising that the `client.DoGet` above is querying the director then the local cache.
+		// It seems like, in the local cache case, we should skip any director queries.
+		// See description in https://github.com/PelicanPlatform/pelican/issues/1929
+		assert.Regexp(t, "error while querying the director at https://[a-zA-Z0-9:.-]+: server returned 404 Not Found", err.Error())
 	})
 	t.Cleanup(func() {
 		cancel()

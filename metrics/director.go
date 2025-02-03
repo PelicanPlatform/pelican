@@ -65,7 +65,7 @@ var (
 	PelicanDirectorMapItemsTotal = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_director_map_items_total",
 		Help: "The total number of map items in the director, by the name of the map",
-	}, []string{"name"}) // name: healthTestUtils, filteredServers, originStatUtils
+	}, []string{"name"}) // name: healthTestUtils, filteredServers, serverStatUtils, serverStatEntries
 
 	PelicanDirectorTTLCache = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "pelican_director_ttl_cache",
@@ -101,4 +101,9 @@ var (
 		Name: "pelican_director_geoip_errors",
 		Help: "The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database",
 	}, []string{"network", "source", "proj"})
+
+	PelicanDirectorRejectedAdvertisements = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_rejected_advertisements",
+		Help: "The total number of advertisements rejected by the director",
+	}, []string{"hostname"})
 )

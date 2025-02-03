@@ -459,7 +459,7 @@ func validateFieldsHook() mapstructure.DecodeHookFunc {
 
 // Grab a map of policy definitions from the config file, where the policy
 // name is the key and its attributes comprise the value.
-func getPolicyMap() (map[string]PurgePolicy, error) {
+func GetPolicyMap() (map[string]PurgePolicy, error) {
 	policyMap := make(map[string]PurgePolicy)
 	var policies []PurgePolicy
 	// Use custom decoder hook to validate fields. This validates all the way down to the bottom of the lot object.
@@ -606,11 +606,11 @@ func convertWatermarkToBytes(value string, totalDiskSpace uint64) (uint64, error
     if len(value) > 1 {
         suffix := strings.ToLower(string(value[len(value)-1]))
         if multiplier, exists := suffixMultipliers[suffix]; exists {
-            number, err := strconv.ParseUint(value[:len(value)-1], 10, 64)
+            number, err := strconv.ParseFloat(value[:len(value)-1], 64)
             if err != nil {
                 return 0, err
             }
-            return number * multiplier, nil
+            return uint64(number * float64(multiplier)), nil
         }
     }
 
@@ -621,7 +621,6 @@ func convertWatermarkToBytes(value string, totalDiskSpace uint64) (uint64, error
     }
     return uint64((percentage / 100) * float64(totalDiskSpace)), nil
 }
-
 
 // Divide the remaining space among lots' dedicatedGB values -- we don't ever want to
 // dedicate more space than we have available, as indicated by the HWM of the cache. This is because
@@ -802,7 +801,7 @@ func topoSort(lotMap map[string]Lot) ([]Lot, error) {
 func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 	var internalLots []Lot
 
-	policies, err := getPolicyMap()
+	policies, err := GetPolicyMap()
 	if err != nil {
 		return internalLots, errors.Wrap(err, "unable to parse lotman configuration")
 	}
@@ -1039,6 +1038,7 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 		log.Infof("Created default lot")
 	} else if ret == 1 {
 		log.Infoln("Default lot already exists, skipping creation")
+		defaultInitialized = true
 	}
 
 	rootInitialized := false
@@ -1069,6 +1069,7 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 		log.Infof("Created root lot")
 	} else if ret == 1 {
 		log.Infoln("Root lot already exists, skipping creation")
+		rootInitialized = true
 	}
 
 	if !defaultInitialized || !rootInitialized {

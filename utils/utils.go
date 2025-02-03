@@ -22,13 +22,20 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+)
+
+var (
+	watermarkUnits = []byte{'k', 'm', 'g', 't'}
 )
 
 // snakeCaseToCamelCase converts a snake case string to camel case.
@@ -152,4 +159,56 @@ func MapToSlice[K comparable, V any](m map[K]V) []V {
 		s = append(s, v)
 	}
 	return s
+}
+
+// Function for validating the various types of watermarks we might get from config
+//
+// In particular, some parameters may be provided as an integer percentage (e.g. 95), or as a byte value with
+// a unit suffix (e.g. 100k). We then return the value as an float64 so that the layer calling this function
+// can validate relative values of different watermarks (e.g. !(low > high)). The returned float64 is only meant
+// to be used for comparing two watermark values, but only if both are either percentages or byte values, as
+// indicated by the isAbsolute return value.
+func ValidateWatermark(paramName string, requireSuffix bool) (wm float64, isAbsolute bool, err error) {
+	wmStr := viper.GetString(paramName)
+	if wmStr == "" {
+		return 0, false, errors.Errorf("watermark value for config param '%s' is empty.", paramName)
+	}
+
+	// If the watermark doesn't parse as a float or we require a suffix, assume it's a byte value
+	// and try to validate it as such
+	wm, err = strconv.ParseFloat(wmStr, 64)
+	if requireSuffix || err != nil {
+		suffix := wmStr[len(wmStr)-1]
+		valStr := wmStr[:len(wmStr)-1]
+		if !slices.Contains(watermarkUnits, suffix) {
+			return 0, false, errors.Errorf("watermark value %s for config param '%s' is missing a valid byte suffix (k|m|g|t).", wmStr, paramName)
+		}
+
+		val, err := strconv.ParseFloat(valStr, 64)
+		if err != nil {
+			return 0, false, errors.Wrapf(err, "watermark value %s for config param '%s' is not a valid number.", wmStr, paramName)
+		}
+
+		// These all constitute absolute values because they aren't relative to disk size.
+		switch suffix {
+		case 'k':
+			return val * 1024, true, nil
+		case 'm':
+			return val * 1024 * 1024, true, nil
+		case 'g':
+			return val * 1024 * 1024 * 1024, true, nil
+		case 't':
+			return val * 1024 * 1024 * 1024 * 1024, true, nil
+		default: // Should never hit this default because of the check above, but can't hurt to set a default
+			return 0, false, errors.Errorf("watermark value %s for config param '%s' is missing a valid byte suffix (k|m|g|t).", wmStr, paramName)
+		}
+
+	}
+
+	log.Infof("Interpreting watermark value %s for config param '%s' as a percentage.", wmStr, paramName)
+	if wm > 100 || wm < 0 {
+		return 0, false, errors.Errorf("watermark value %s for config param '%s' must be a valid percentage in the range [0, 100].", wmStr, paramName)
+	}
+
+	return wm, false, nil
 }

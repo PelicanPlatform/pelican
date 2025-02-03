@@ -1,73 +1,107 @@
-# Install Pelican as a standalone binary on Linux
+# Install Pelican as unprivileged Linux user
 
-This document explains how to install Pelican on a Linux operating system as a standalone binary.
+This document explains how to install Pelican on a Linux operating system as a standalone binary without any special administrator privileges.
+
+## Quickstart
+
+To download the latest version of Pelican and unpack it into the default location for user binaries on most Linux hosts, copy/paste
+the following into a terminal:
+
+```bash
+wget -O - "https://dl.pelicanplatform.org/latest/pelican_$(uname -s)_$(uname -m).tar.gz" | tar zx -C ~/.local/bin/ --strip-components=1
+```
+
+To test the binary, execute:
+
+```bash
+pelican --version
+```
+
+If a version number did not print, then you may have a special platform or configuration on your host; follow the subsequent sections.  Otherwise, you're done and may follow the [Next Steps](#next-steps).
 
 ## Download Pelican Binary
 
-1. Navigate to [Pelican download page](../install.mdx#download-pelican-binary) and select the Pelican standalone binary you want to install.
+1. Navigate to the [Pelican download page](../install.mdx#download-pelican-binary) to select the Pelican standalone binary you want to install.
 
-2. In **Operating System** section, select **Linux**. In **Architectures** section, select **X86_64** or **AMR64** depending on the architecture of your machine.
+2. In **Operating System** section, select **Linux**. In **Architectures** section, select **X86_64** or **ARM64** depending on the architecture of your machine.
 
-3. In the list of candidates, copy the link to `pelican_Linux_x86_64.tar.gz` if you select **X86_64**, or `pelican_Linux_arm64.tar.gz` if you select **ARM64**.
+3. In the list of candidates, copy the link to `pelican_Linux_x86_64.tar.gz` or `pelican_Linux_arm64.tar.gz`, as appropriate.
 
 4. Change the following command with the link to the binary you copied in the previous step and run the command
 
     ```bash
     wget <replace-with-the-link-you-copied>
-    tar -zxvf pelican_Linux_x86_64.tar.gz # x86_64 user
+    mkdir -p ~/.local/bin
+    tar -zxvf -C ~/.local/bin/ --strip-components=1 pelican_Linux_$(uname -m).tar.gz
     ```
 
-    > **Note**: You need to replace `pelican_Linux_x86_64.tar.gz` with `pelican_Linux_arm64.tar.gz` if you are running an `ARM64` machine.
+    > **Note**: The shell should expand `$(uname -m)` with the machine's hardware platform.  If it fails, you may need to replace the filename with `pelican_Linux_x86_64.tar.gz` with `pelican_Linux_arm64.tar.gz`, as appropriate.
 
     Example to install Pelican standalone binary on an `X86_64` machine:
 
     ```bash
-    wget https://github.com/PelicanPlatform/pelican/releases/download/v7.5.8/pelican_Linux_x86_64.tar.gz
-    tar -zxvf pelican_Linux_x86_64.tar.gz
+    $ wget https://dl.pelicanplatform.org/latest/pelican_Linux_x86_64.tar.gz
+    $ mkdir -p ~/.local/bin
+    $ tar -zxvf -C ~/.local/bin/ --strip-components=1 pelican_Linux_x86_64.tar.gz
     ```
 
-## Add Pelican Binary to `PATH`
+## Make Pelican Binary Available
 
-The above command extracted the binary from the `tar` file. You may run the binary in the current folder, but it is recommended that you add Pelican binary to your `PATH` environment variable to allow `pelican` to be called directly from your command line.
+The above command extracted the binary from the `tar` file and placed it inside `.local/bin/` in your home directory.  On most Linux distributions, this makes the binary automatically available.
 
-> **Note**: You need to replace `pelican_Linux_x86_64` with `pelican_Linux_arm64` if you are running an `ARM64` machine and downloaded `pelican_Linux_arm64.tar.gz`.
-
-### Run Pelican binary from the downloaded folder:
+You may test this by running:
 
 ```bash
-$ cd pelican_Linux_x86_64 # Go to the binary folder
-$ ./pelican --version # Run Pelican binary
-
-Version: 7.5.8
-Build Date: 2024-03-01T18:13:00Z
-Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
-Built By: goreleaser
+command -v pelican
 ```
+
+If it outputs a path like this example:
+
+```bash
+$ command -v pelican
+/home/username/.local/bin/pelican
+```
+
+then you may skip this section.  If not, you need to alter the `PATH` environment variable that controls which directories are searched for binaries.
 
 ### Add Pelican binary to your `PATH` for the current terminal
 
+To change the `PATH` variable for only the currently-running terminal session, execute the following line:
+
 ```bash
-$ cd pelican_Linux_x86_64 # Go to the binary folder
-$ export PATH="$PWD:$PATH" # Add current folder to the PATH
+export PATH="$HOME/.local/bin/:$PATH"
+```
+
+Example outputs:
+
+```bash
+$ export PATH="$HOME/.local/bin/:$PATH" # Add ~/.local/bin/ to the PATH
 $ pelican --version # Run Pelican binary
 
-Version: 7.5.8
-Build Date: 2024-03-01T18:13:00Z
-Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
+Version: 7.12.0
+Build Date: 2025-01-14T21:33:23Z
+Build Commit: 57748c37af7574ec182e5a21db741c4c5a1e61a8
 Built By: goreleaser
 ```
 
 ### Add Pelican binary to your `PATH` permanently
 
+To add the `~/.local/bin/` directory to your `PATH` variable permanently, execute the following line (assuming you are using the 'bash' shell):
+
 ```bash
-$ cd pelican_Linux_x86_64 # Go to the binary folder
-$ echo "export PATH=$PWD:\$PATH" >> ~/.bashrc # Add the current folder to your .bashrc file
+echo "export PATH="\$HOME/.local/bin/:\$PATH" >> ~/.bashrc
+```
+
+Example outputs:
+
+```bash
+$ echo "export PATH=\$HOME/.local/bin:\$PATH" >> ~/.bashrc # Add the .local/bin folder to your .bashrc file
 $ source ~/.bashrc # Apply the change
 $ pelican --version # Run Pelican binary
 
-Version: 7.5.8
-Build Date: 2024-03-01T18:13:00Z
-Build Commit: d260a07d3b057d19b7fdd36125f91a8768531258
+Version: 7.12.0
+Build Date: 2025-01-14T21:33:23Z
+Build Commit: 57748c37af7574ec182e5a21db741c4c5a1e61a8
 Built By: goreleaser
 ```
 

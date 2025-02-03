@@ -32,8 +32,12 @@ type Config struct {
 		DefaultCacheTimeout time.Duration `mapstructure:"defaultcachetimeout" yaml:"DefaultCacheTimeout"`
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
+		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		ExportLocation string `mapstructure:"exportlocation" yaml:"ExportLocation"`
+		FilesBaseSize string `mapstructure:"filesbasesize" yaml:"FilesBaseSize"`
+		FilesMaxSize string `mapstructure:"filesmaxsize" yaml:"FilesMaxSize"`
+		FilesNominalSize string `mapstructure:"filesnominalsize" yaml:"FilesNominalSize"`
 		HighWaterMark string `mapstructure:"highwatermark" yaml:"HighWaterMark"`
 		LocalRoot string `mapstructure:"localroot" yaml:"LocalRoot"`
 		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
@@ -50,8 +54,11 @@ type Config struct {
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
 	} `mapstructure:"cache" yaml:"Cache"`
 	Client struct {
+		AssumeDirectorServerHeader bool `mapstructure:"assumedirectorserverheader" yaml:"AssumeDirectorServerHeader"`
+		DirectorRetries int `mapstructure:"directorretries" yaml:"DirectorRetries"`
 		DisableHttpProxy bool `mapstructure:"disablehttpproxy" yaml:"DisableHttpProxy"`
 		DisableProxyFallback bool `mapstructure:"disableproxyfallback" yaml:"DisableProxyFallback"`
+		IsPlugin bool `mapstructure:"isplugin" yaml:"IsPlugin"`
 		MaximumDownloadSpeed int `mapstructure:"maximumdownloadspeed" yaml:"MaximumDownloadSpeed"`
 		MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
 		SlowTransferRampupTime time.Duration `mapstructure:"slowtransferrampuptime" yaml:"SlowTransferRampupTime"`
@@ -121,6 +128,7 @@ type Config struct {
 		UserStripDomain bool `mapstructure:"userstripdomain" yaml:"UserStripDomain"`
 	} `mapstructure:"issuer" yaml:"Issuer"`
 	IssuerKey string `mapstructure:"issuerkey" yaml:"IssuerKey"`
+	IssuerKeysDirectory string `mapstructure:"issuerkeysdirectory" yaml:"IssuerKeysDirectory"`
 	LocalCache struct {
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		HighWaterMarkPercentage int `mapstructure:"highwatermarkpercentage" yaml:"HighWaterMarkPercentage"`
@@ -166,10 +174,14 @@ type Config struct {
 		AggregatePrefixes []string `mapstructure:"aggregateprefixes" yaml:"AggregatePrefixes"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataRetention time.Duration `mapstructure:"dataretention" yaml:"DataRetention"`
+		LabelLimit int `mapstructure:"labellimit" yaml:"LabelLimit"`
+		LabelNameLengthLimit int `mapstructure:"labelnamelengthlimit" yaml:"LabelNameLengthLimit"`
+		LabelValueLengthLimit int `mapstructure:"labelvaluelengthlimit" yaml:"LabelValueLengthLimit"`
 		MetricAuthorization bool `mapstructure:"metricauthorization" yaml:"MetricAuthorization"`
 		PortHigher int `mapstructure:"porthigher" yaml:"PortHigher"`
 		PortLower int `mapstructure:"portlower" yaml:"PortLower"`
 		PromQLAuthorization bool `mapstructure:"promqlauthorization" yaml:"PromQLAuthorization"`
+		SampleLimit int `mapstructure:"samplelimit" yaml:"SampleLimit"`
 		TokenExpiresIn time.Duration `mapstructure:"tokenexpiresin" yaml:"TokenExpiresIn"`
 		TokenRefreshInterval time.Duration `mapstructure:"tokenrefreshinterval" yaml:"TokenRefreshInterval"`
 	} `mapstructure:"monitoring" yaml:"Monitoring"`
@@ -256,6 +268,7 @@ type Config struct {
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
+		HealthMonitoringPublic bool `mapstructure:"healthmonitoringpublic" yaml:"HealthMonitoringPublic"`
 		Hostname string `mapstructure:"hostname" yaml:"Hostname"`
 		IssuerHostname string `mapstructure:"issuerhostname" yaml:"IssuerHostname"`
 		IssuerJwks string `mapstructure:"issuerjwks" yaml:"IssuerJwks"`
@@ -345,8 +358,12 @@ type configWithType struct {
 		DefaultCacheTimeout struct { Type string; Value time.Duration }
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
+		EnablePrefetch struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
+		FilesBaseSize struct { Type string; Value string }
+		FilesMaxSize struct { Type string; Value string }
+		FilesNominalSize struct { Type string; Value string }
 		HighWaterMark struct { Type string; Value string }
 		LocalRoot struct { Type string; Value string }
 		LowWatermark struct { Type string; Value string }
@@ -363,8 +380,11 @@ type configWithType struct {
 		XRootDPrefix struct { Type string; Value string }
 	}
 	Client struct {
+		AssumeDirectorServerHeader struct { Type string; Value bool }
+		DirectorRetries struct { Type string; Value int }
 		DisableHttpProxy struct { Type string; Value bool }
 		DisableProxyFallback struct { Type string; Value bool }
+		IsPlugin struct { Type string; Value bool }
 		MaximumDownloadSpeed struct { Type string; Value int }
 		MinimumDownloadSpeed struct { Type string; Value int }
 		SlowTransferRampupTime struct { Type string; Value time.Duration }
@@ -434,6 +454,7 @@ type configWithType struct {
 		UserStripDomain struct { Type string; Value bool }
 	}
 	IssuerKey struct { Type string; Value string }
+	IssuerKeysDirectory struct { Type string; Value string }
 	LocalCache struct {
 		DataLocation struct { Type string; Value string }
 		HighWaterMarkPercentage struct { Type string; Value int }
@@ -479,10 +500,14 @@ type configWithType struct {
 		AggregatePrefixes struct { Type string; Value []string }
 		DataLocation struct { Type string; Value string }
 		DataRetention struct { Type string; Value time.Duration }
+		LabelLimit struct { Type string; Value int }
+		LabelNameLengthLimit struct { Type string; Value int }
+		LabelValueLengthLimit struct { Type string; Value int }
 		MetricAuthorization struct { Type string; Value bool }
 		PortHigher struct { Type string; Value int }
 		PortLower struct { Type string; Value int }
 		PromQLAuthorization struct { Type string; Value bool }
+		SampleLimit struct { Type string; Value int }
 		TokenExpiresIn struct { Type string; Value time.Duration }
 		TokenRefreshInterval struct { Type string; Value time.Duration }
 	}
@@ -569,6 +594,7 @@ type configWithType struct {
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }
+		HealthMonitoringPublic struct { Type string; Value bool }
 		Hostname struct { Type string; Value string }
 		IssuerHostname struct { Type string; Value string }
 		IssuerJwks struct { Type string; Value string }

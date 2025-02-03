@@ -64,14 +64,33 @@ components: ["cache", "director", "origin", "registry"]
 ---
 name: IssuerKey
 description: |+
-  A filepath to the file containing a PEM-encoded ecdsa private key which later will be parsed
-  into a JWK and serves as the private key to sign various JWTs issued by this server.
+  [Deprecated] Use IssuerKeysDirectory instead.
+
+  A filepath to the file containing a PEM-encoded ECDSA private key which will be used
+  to sign credentials issued by this server.
+
+  A public key will be derived from this private key and used as the key for token verification
+  by external services.
+
+  The use of `IssuerKeysDirectory` is preferred as it allows administrators to have more than
+  one signing key.
+type: filename
+deprecated: true
+replacedby: none
+root_default: /etc/pelican/issuer.jwk
+default: $ConfigBase/issuer.jwk
+components: ["origin", "cache", "registry", "director"]
+---
+name: IssuerKeysDirectory
+description: |+
+  A filepath to the directory used for storing one or multiple PEM-encoded ecdsa private keys. The most recent modified
+  private key will be parsed into a JWK and serves as the active private key to sign various JWTs issued by this server.
 
   A public JWK will be derived from this private key and used as the key for token verification.
 type: filename
-root_default: /etc/pelican/issuer.jwk
-default: $ConfigBase/issuer.jwk
-components: ["client", "registry", "director"]
+root_default: /etc/pelican/issuer-keys
+default: $ConfigBase/issuer-keys
+components: ["origin", "cache", "registry", "director"]
 ---
 name: Transport.DialerTimeout
 description: |+
@@ -429,6 +448,27 @@ type: bool
 default: false
 components: ["client"]
 ---
+name: Client.IsPlugin
+description: |+
+  A bool indicating whether the client is being run in "plugin" mode. Some client actions may use alternative logic
+  when the plugin is detected, such as more aggressive retries, because we often assume failure is more costly for the
+  plugin
+type: bool
+default: false
+hidden: true
+components: ["client"]
+---
+name: Client.DirectorRetries
+description: |+
+  A positive integer indicating the number of retries a client should attempt when contacting a non-responsive Director. Each retry will
+  happen after a delay of 3*(1 + retries attempted) to give the Director time to recover. Some randomness is also added to this interval
+  to avoid the potential for thundering herd problems.
+
+  Plugin clients will retry twice the configured value because plugin failure is considered more "costly".
+type: int
+default: 5
+components: ["client"]
+---
 name: DisableProxyFallback
 description: |+
   [Deprecated] A legacy configuration for disabling the client's proxy fallback. See Client.DisableProxyFallback for new config.
@@ -460,6 +500,17 @@ description: |+
   This is not intended for use by production clients but rather for unit tests; 0 disables the rate limit.
 type: int
 default: 0
+components: ["client"]
+hidden: true
+---
+name: Client.AssumeDirectorServerHeader
+description: |+
+  Assume whether a Director response is actually coming from the Director.
+
+  When true, the client assumes all responses come from the Director (and not a response from some SSL termination server, like Traefik,
+  while pelican is restarting) and will neglect to check for an appropriate Server header.
+type: bool
+default: false
 components: ["client"]
 hidden: true
 ---
@@ -1208,6 +1259,16 @@ deprecated: true
 replacedby: Cache.StorageLocation
 components: ["cache"]
 ---
+name: Cache.EnablePrefetch
+description: |+
+  Control whether data prefeteching is enabled in the cache.
+  This is provided solely for testing purposes and is not advised to be disabled
+  in production
+type: bool
+default: true
+hidden: true
+components: ["cache"]
+---
 name: Cache.ExportLocation
 description: |+
   A path that's relative to the `Cache.NamespaceLocation` where the cache will expose its contents. This path can be used to
@@ -1265,24 +1326,81 @@ components: ["cache"]
 ---
 name: Cache.LowWatermark
 description: |+
-  A value of cache disk usage that stops the purging of cached files.
+  Whenever the cache initiates file purging, it will attempt to clean files until its cumulative disk
+  usages reaches this value. Note that "cache disk usage" is calculated based on the cache's entire set of
+  configured disks, not just data directories from those disks.
 
   The value should be either a percentage integer of total available disk space (default is 90),
   or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
   m (mega-), g (giga-), or t (tera-) bytes, respectively.
+
+  For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
+  `pfc.diskusage`.
 type: string
 default: 90
 components: ["cache"]
 ---
 name: Cache.HighWaterMark
 description: |+
-  A value of cache disk usage that triggers the purging of cached files.
+  When the cache's disk usage exceeds this value, file purging is triggered. Note that "cache disk usage"
+  is calculated based on the cache's entire set of configured disks, not just data directories from those disks.
 
   The value should be either a percentage integer of total available disk space (default is 95),
   or a number suffixed by k, m, g, or t. In which case, they must be absolute sizes in k (kilo-),
   m (mega-), g (giga-), or t (tera-) bytes, respectively.
+
+  For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
+  `pfc.diskusage`.
 type: string
 default: 95
+components: ["cache"]
+---
+name: Cache.FilesMaxSize
+description: |+
+  A value that sets the maximum cumulative size of files that can be stored in the cache's data directories (specified
+  by `Cache.StorageLocation` and `Cache.DataLocations). When either this value or `Cache.HighWaterMark` is exceeded, the
+  cache will begin purging files until it reaches the `Cache.FilesNominal` value. If the cache's disk usage is still in
+  excess of the `Cache.LowWaterMark`, the cache will continue purging files until it reaches the `Cache.FilesBase` value.
+
+  Unlike watermark values, this value _must_ be suffixed by a unit of k, m, g, or t, which represent kilobytes, megabytes,
+  gigabytes, and terabytes, respectively. All `Cache.Files*Size` parameters must be less than the cache's calculated low
+  watermark, which may be configured as a percentage of total disk space from multiple disks.
+
+  For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
+  `pfc.diskusage`.
+type: string
+default: none
+components: ["cache"]
+---
+name: Cache.FilesNominalSize
+description: |+
+  A value that sets the "nominal" cumulative size of files that can be stored in the cache's data directory. When files
+  in the cache exceed the `Cache.FilesMax` value, or if the cache's overall disk exceeds its `Cache.HighWaterMark` value,
+  the cache will begin purging files until it reaches this value. If the cache's disk usage is still in excess of the
+  `Cache.LowWaterMark`, the cache will continue purging files until it reaches the `Cache.FilesBase`.
+
+  Unlike watermark values, this value _must_ be suffixed by a unit of k, m, g, or t, which represent kilobytes, megabytes,
+  gigabytes, and terabytes, respectively. All `Cache.Files*Size` parameters must be less than the cache's calculated low
+  watermark, which may be configured as a percentage of total disk space from multiple disks.
+
+  For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for
+  `pfc.diskusage`.
+type: string
+default: none
+components: ["cache"]
+---
+name: Cache.FilesBaseSize
+description: |+
+  A value that sets the "base" cumulative size of files that can be stored in the cache's data directory. This is the
+  stopping point for the cache's purging routines.
+
+  Unlike watermark values, this value _must_ be suffixed by a unit of k, m, g, or t, which represent kilobytes, megabytes,
+  gigabytes, and terabytes, respectively.All `Cache.Files*Size` parameters must be less than the cache's calculated low
+  watermark, which may be configured as a percentage of total disk space from multiple disks.
+
+  For more information, see the [xrootd pfc documentation](https://xrootd.web.cern.ch/doc/dev56/pss_config.pdf) for `pfc.diskusage`.
+type: string
+default: none
 components: ["cache"]
 ---
 name: Cache.EnableVoms
@@ -1534,7 +1652,7 @@ description: |+
   See [golang.org/x/sync/errgroup](https://pkg.go.dev/golang.org/x/sync@v0.6.0/errgroup#Group.SetLimit)
   for detail
 type: int
-default: 1000
+default: 100
 components: ["director"]
 ---
 name: Director.AdvertisementTTL
@@ -1629,7 +1747,7 @@ description: |+
 
   This parameter controls how many responses, per-service, will be cached.
 type: int
-default: 10000
+default: 2000
 hidden: true
 components: ["director"]
 ---
@@ -1898,6 +2016,14 @@ description: |+
   The server's hostname, by default it's os.Hostname().
 type: string
 default: none
+components: ["cache", "director", "origin", "registry"]
+---
+name: Server.HealthMonitoringPublic
+description: |+
+  Whether the server's health monitoring results should be made public without any
+  authentication required
+type: bool
+default: false
 components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.IssuerUrl
@@ -2504,6 +2630,46 @@ description: |+
   The duration of which Prometheus should retain the monitoring data.
 type: duration
 default: 360h
+components: ["origin", "cache", "director", "registry"]
+---
+name: Monitoring.LabelLimit
+description: |+
+  The maximum number of labels that can be attached to a single metric. 0 means no limit.
+type: int
+default: 64
+components: ["origin", "cache", "director", "registry"]
+---
+name: Monitoring.LabelNameLengthLimit
+description: |+
+  The maximum length of a label name. 0 means no limit. The default value is 128 bytes, which allows for up to 32 characters.
+  For an example where the LabelNameLengthLimit is set to 24, meaning the label name can only be 6 characters long (This is very unrealistic).
+  ```
+  metric{name="Alice"} -> OK
+
+  other_metric{very_long_label_name="Alice"} -> Error
+  ```
+
+  It is worth noting that the picking sensible values is really important. The Prometheus server will reject any metrics that exceed the limit,
+  meaning that the metrics will not be scraped and will not be available for querying. If it is too large we could exceed the memory limits of Prometheus.
+  Be wary of modify this value. Similar considerations should be made for modifying Monitoring.LabelValueLengthLimit, Monitoring.LabelLimit, and Monitoring.SampleLimit.
+type: int
+default: 128
+components: ["origin", "cache", "director", "registry"]
+---
+name: Monitoring.LabelValueLengthLimit
+description: |+
+  The maximum length of a label value. 0 means no limit. The default value is 2048 bytes, which allows for up to 512 characters.
+type: int
+default: 2048
+components: ["origin", "cache", "director", "registry"]
+---
+name: Monitoring.SampleLimit
+description: |+
+  Per-scrape limit on the number of scraped samples that will be accepted.
+  If more than this number of samples are present after metric relabeling
+  the entire scrape will be treated as failed. 0 means no limit.
+type: int
+default: 200
 components: ["origin", "cache", "director", "registry"]
 ---
 ############################

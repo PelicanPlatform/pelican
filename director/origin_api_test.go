@@ -35,6 +35,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -50,10 +51,10 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	server_utils.ResetTestState()
 
 	tDir := t.TempDir()
-	kfile := filepath.Join(tDir, "t-key")
+	kDir := filepath.Join(tDir, "t-issuer-keys")
 
 	//Setup a private key and a token
-	viper.Set("IssuerKey", kfile)
+	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 
 	viper.Set("Federation.DirectorURL", "https://director-url.org")
 
