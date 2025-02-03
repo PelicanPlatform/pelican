@@ -130,18 +130,28 @@ EOT
 ###############################
 FROM dependency-build AS xrootd-plugin-builder
 # Install necessary build dependencies
-RUN  yum install -y --enablerepo=osg-testing curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
+RUN  yum install -y --enablerepo=osg-testing curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel xrootd-server-devel tinyxml2-devel
 
 # The ADD command with a api.github.com URL in the next couple of sections
 # are for cache-hashing of the external repository that we rely on to build
 # the image
-ENV JSON_VERSION="v3.11.3" \
+ENV XROOTD_S3_HTTP_VERSION="0.2.1" \
+    JSON_VERSION="v3.11.3" \
     JSON_SCHEMA_VALIDATOR_VERSION="2.3.0" \
     LOTMAN_VERSION="v0.0.4"
 
 ADD https://api.github.com/repos/nlohmann/json/git/refs/tags/${JSON_VERSION} /tmp/hash-json
 ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/tags/${JSON_SCHEMA_VALIDATOR_VERSION} /tmp/hash-json
 ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/tags/${LOTMAN_VERSION} /tmp/hash-json
+
+RUN \
+    git clone https://github.com/PelicanPlatform/xrootd-s3-http.git && \
+    cd xrootd-s3-http && \
+    mkdir -p ~/rpmbuild/SOURCES/ && \
+    curl -L https://github.com/PelicanPlatform/xrootd-s3-http/archive/refs/tags/v${XROOTD_S3_HTTP_VERSION}/xrootd-s3-http-${XROOTD_S3_HTTP_VERSION}.tar.gz > ~/rpmbuild/SOURCES/xrootd-s3-http-${XROOTD_S3_HTTP_VERSION}.tar.gz && \
+    git checkout v${XROOTD_S3_HTTP_VERSION} && \
+    rpmbuild -ba rpm/xrootd-s3-http.spec && \
+    cp ~/rpmbuild/RPMS/*/xrootd-s3-http-${XROOTD_S3_HTTP_VERSION}*.rpm /root/xrootd-s3-http.rpm
 
 # LotMan Installation
 # First install dependencies
@@ -180,7 +190,6 @@ FROM dependency-build AS final-stage
 # installed only in the intermediate builder containers!
 RUN yum install -y --enablerepo=osg-testing sssd-client xrdcl-pelican xrootd-multiuser
 RUN yum install -y --enablerepo=osg-contrib xrootd-lotman
-RUN yum install -y --enablerepo=epel-testing xrootd-s3-http
 
 WORKDIR /pelican
 
@@ -250,6 +259,8 @@ COPY --from=xrootd-plugin-builder /usr/lib64/libLotMan.so /usr/lib64/
 COPY --from=xrootd-plugin-builder /usr/include/nlohmann /usr/include/nlohmann
 # Copy the JSON schema validator library
 COPY --from=xrootd-plugin-builder /usr/lib64/libnlohmann_json_schema_validator.a /usr/lib64/
+# Copy the xrootd-s3-http plugin RPM and install it
+COPY --from=xrootd-plugin-builder /root/xrootd-s3-http.rpm /usr/lib64
 
 COPY images/entrypoint.sh /entrypoint.sh
 
@@ -258,7 +269,9 @@ COPY --from=pelican-build /pelican/dist/linux_amd64/pelican_linux_amd64_v1/pelic
 COPY --from=pelican-build /pelican/dist/linux_amd64/pelican_linux_amd64_v1/pelican /usr/local/bin/osdf
 RUN    chmod +x /usr/local/bin/pelican \
     && chmod +x /usr/local/bin/osdf \
-    && chmod +x /entrypoint.sh
+    && chmod +x /entrypoint.sh \
+    && rpm -Uhv /usr/lib64/xrootd-s3-http.rpm \
+    && rm /usr/lib64/xrootd-s3-http.rpm
 ###########################
 # End Pelican Final Stage #
 ###########################

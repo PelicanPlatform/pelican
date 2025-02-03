@@ -92,7 +92,7 @@ RUN yum install -y --enablerepo=osg-testing xrootd-multiuser goreleaser npm jq p
 # are for cache-hashing of the external repository that we rely on to build
 # the image
 ENV XRDCL_PELICAN_VERSION="v1.0.2" \
-    XROOTD_S3_HTTP_VERSION="v0.1.8" \
+    XROOTD_S3_HTTP_VERSION="v0.2.1" \
     JSON_VERSION="v3.11.3" \
     JSON_SCHEMA_VALIDATOR_VERSION="2.3.0" \
     LOTMAN_VERSION="v0.0.4" \
