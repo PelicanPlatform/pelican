@@ -157,8 +157,7 @@ RUN git clone https://github.com/pboettch/json-schema-validator.git && \
     mkdir build && cd build && \
     cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j`nproc` install
-# LotMan proper. For now we do this from source until we can sort out the RPMs.
-# Pin LotMan at a specific commit
+# Finally LotMan proper. For now we do this from source until we can sort out the RPMs.
 RUN \
     git clone https://github.com/PelicanPlatform/lotman.git && \
     cd lotman && \
@@ -171,8 +170,8 @@ RUN \
 # XrdHttp plugin for Pelican.  Provides a control channel for shutdown and updating TLS files
 RUN \
     git clone https://github.com/PelicanPlatform/xrdhttp-pelican.git && \
-    cd /xrdhttp-pelican && \
-    git checkout v0.0.2 && \
+    cd xrdhttp-pelican && \
+    git checkout v0.0.3 && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
     make -j`nproc` install
@@ -255,9 +254,8 @@ ENV JAVA_HOME=/usr/lib/jvm/jre \
 # Remove http plugin to use pelican plugin
 RUN rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
 
-# Copy built s3 plugin library and xrdcl-pelican plugin library from build
-COPY --from=xrootd-plugin-builder /usr/lib64/libXrdHttpPelican-5.so /usr/lib64/libXrdS3-5.so /usr/lib64/libXrdHTTPServer-5.so /usr/lib64/libXrdClPelican-5.so \
-    /usr/lib64/libLotMan.so /usr/lib64/
+# Copy plugins built from the xrootd-plugin-builder stage
+COPY --from=xrootd-plugin-builder /usr/lib64/libXrdHttpPelican-5.so /usr/lib64/libLotMan.so /usr/lib64/
 
 # Copy the nlohmann json headers
 COPY --from=xrootd-plugin-builder /usr/include/nlohmann /usr/include/nlohmann
