@@ -37,9 +37,14 @@ type Config struct {
 		EnableTLSClientAuth bool `mapstructure:"enabletlsclientauth" yaml:"EnableTLSClientAuth"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		ExportLocation string `mapstructure:"exportlocation" yaml:"ExportLocation"`
+<<<<<<< HEAD
+		FedTokenLocation string `mapstructure:"fedtokenlocation" yaml:"FedTokenLocation"`
 		FilesBaseSize string `mapstructure:"filesbasesize" yaml:"FilesBaseSize"`
 		FilesMaxSize string `mapstructure:"filesmaxsize" yaml:"FilesMaxSize"`
 		FilesNominalSize string `mapstructure:"filesnominalsize" yaml:"FilesNominalSize"`
+=======
+		FedTokenLocation string `mapstructure:"fedtokenlocation" yaml:"FedTokenLocation"`
+>>>>>>> 35924841 (Implement routine for cache to fetch and store federation tokens)
 		HighWaterMark string `mapstructure:"highwatermark" yaml:"HighWaterMark"`
 		LocalRoot string `mapstructure:"localroot" yaml:"LocalRoot"`
 		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
@@ -221,6 +226,7 @@ type Config struct {
 		ExportVolume string `mapstructure:"exportvolume" yaml:"ExportVolume"`
 		ExportVolumes []string `mapstructure:"exportvolumes" yaml:"ExportVolumes"`
 		Exports interface{} `mapstructure:"exports" yaml:"Exports"`
+		FedTokenLocation string `mapstructure:"fedtokenlocation" yaml:"FedTokenLocation"`
 		FederationPrefix string `mapstructure:"federationprefix" yaml:"FederationPrefix"`
 		GlobusClientIDFile string `mapstructure:"globusclientidfile" yaml:"GlobusClientIDFile"`
 		GlobusClientSecretFile string `mapstructure:"globusclientsecretfile" yaml:"GlobusClientSecretFile"`
@@ -369,6 +375,7 @@ type configWithType struct {
 		EnableTLSClientAuth struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
+		FedTokenLocation struct { Type string; Value string }
 		FilesBaseSize struct { Type string; Value string }
 		FilesMaxSize struct { Type string; Value string }
 		FilesNominalSize struct { Type string; Value string }
@@ -553,6 +560,7 @@ type configWithType struct {
 		ExportVolume struct { Type string; Value string }
 		ExportVolumes struct { Type string; Value []string }
 		Exports struct { Type string; Value interface{} }
+		FedTokenLocation struct { Type string; Value string }
 		FederationPrefix struct { Type string; Value string }
 		GlobusClientIDFile struct { Type string; Value string }
 		GlobusClientSecretFile struct { Type string; Value string }

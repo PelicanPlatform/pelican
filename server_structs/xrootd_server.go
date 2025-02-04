@@ -19,6 +19,7 @@
 package server_structs
 
 import (
+	"context"
 	"strings"
 )
 
@@ -29,6 +30,8 @@ type (
 		GetNamespaceAds() []NamespaceAdV2
 		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (*OriginAdvertiseV2, error)
 		GetNamespaceAdsFromDirector() error
+		GetAdTokCfg(context.Context) (AdTokCfg, error)
+		GetFedTokLocation() string
 
 		// Return the PIDs corresponding to the running process(es) for the XRootD
 		// server instance (could be multiple if there's both cmsd and xrootd)
@@ -40,6 +43,12 @@ type (
 
 	NamespaceHolder struct {
 		namespaceAds []NamespaceAdV2
+	}
+
+	AdTokCfg struct {
+		Issuer   string
+		Subject  string
+		Audience string
 	}
 
 	ServerPrefix string // The base namespace prefix for origin/cache server

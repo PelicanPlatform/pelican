@@ -30,6 +30,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"time"
@@ -43,6 +46,8 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // GetTopologyJSON returns the namespaces and caches from OSDF topology
@@ -320,4 +325,171 @@ func FilterTopLevelPrefixes(nsAds []server_structs.NamespaceAdV2) []server_struc
 		uniquePrefixes = append(uniquePrefixes, nsAd)
 	}
 	return uniquePrefixes
+}
+
+// Get an advertisement token for the given server. Advertisement tokens are signed by the server
+// and passed to the Director, which can then use them to check the server's identity. Tokens are
+// valid when the Director can query the public key for the given server from the Registry.
+func GetAdvertisementTok(ctx context.Context, server server_structs.XRootDServer) (tok string, err error) {
+	tokCfg, err := server.GetAdTokCfg(ctx)
+	if err != nil {
+		err = errors.Wrap(err, "failed to get advertisement token configuration")
+		return
+	}
+
+	advTokenCfg := token.NewWLCGToken()
+	advTokenCfg.Lifetime = time.Minute
+	advTokenCfg.Issuer = tokCfg.Issuer
+	advTokenCfg.AddAudiences(tokCfg.Audience)
+	// RFC 7519, Section 4.1.2 indicates the "sub" claim MUST be unique within its issuer scope,
+	// or better yet globally unique. Use the server's host:port to fulfill global uniqueness.
+	advTokenCfg.Subject = tokCfg.Subject
+	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)
+
+	tok, err = advTokenCfg.CreateToken()
+	if err != nil {
+		err = errors.Wrap(err, "failed to create director advertisement token")
+	}
+
+	return
+}
+
+// GetFedTok retrieves a federation token from the Director, which can be passed to other
+// federation services as proof of federation membership.
+func GetFedTok(ctx context.Context, server server_structs.XRootDServer) (string, error) {
+	// Set up the request to the Director
+	fInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get federation info")
+	}
+	directorUrl := fInfo.DirectorEndpoint
+	if directorUrl == "" {
+		return "", errors.New("unable to determine Director's URL")
+	}
+	directorEndpoint, err := url.JoinPath(directorUrl, "api", "v1.0", "director", "getFedToken")
+	if err != nil {
+		return "", errors.Wrap(err, "unable to join director url")
+	}
+	query, err := url.Parse(directorEndpoint)
+	if err != nil {
+		return "", errors.Wrap(err, "the configured Director URL appears malformed")
+	}
+
+	host := param.Server_Hostname.GetString()
+	adTok, err := GetAdvertisementTok(ctx, server)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get advertisement token")
+	}
+
+	// The fed token endpoint wants to know the host and server type,
+	// which it needs to verify the token
+	params := url.Values{}
+	params.Add("host", host)
+	params.Add("sType", server.GetServerType().String())
+	query.RawQuery = params.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", query.String(), nil)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create the request to get a federation token")
+	}
+	req.Header.Set("Authorization", "Bearer "+adTok)
+	userAgent := "pelican-" + strings.ToLower(server.GetServerType().String()) + "/" + config.GetVersion()
+	req.Header.Set("User-Agent", userAgent)
+
+	tr := config.GetTransport()
+	client := http.Client{Transport: tr}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to start the request for director advertisement")
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to read the response body for director advertisement")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		// Unmarshal the body as a simple api response
+		var apiResp server_structs.SimpleApiResp
+		if err := json.Unmarshal(body, &apiResp); err != nil {
+			return "", errors.Wrap(err, "failed to unmarshal error response from Director's federation token endpoint")
+		}
+
+		return "", errors.New(apiResp.Msg)
+	}
+
+	// Attempt to unmarshal the body into our token struct
+	var tokResponse server_structs.TokenResponse
+	if err := json.Unmarshal(body, &tokResponse); err != nil {
+		// Check for a simple api error response
+		var apiResp server_structs.SimpleApiResp
+		if err := json.Unmarshal(body, &apiResp); err == nil {
+			return "", errors.New(apiResp.Msg)
+		}
+
+		return "", errors.Wrap(err, "failed to unmarshal the response body for director advertisement")
+	}
+
+	return tokResponse.AccessToken, nil
+}
+
+// SetFedTok does an atomic write of a federation token to the server's token location.
+func SetFedTok(ctx context.Context, server server_structs.XRootDServer, tok string) error {
+	tokLoc := server.GetFedTokLocation()
+	if tokLoc == "" {
+		return errors.New("token location is empty")
+	}
+
+	dir := filepath.Dir(tokLoc)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		if !os.IsExist(err) {
+			return errors.Wrap(err, "failed to create fed token directories")
+		}
+	}
+
+	// Create a temporary file for storing the token. Later we'll do an atomic rename
+	tmpName := filepath.Join(dir, fmt.Sprintf(".fedtoken.%d", time.Now().UnixNano()))
+	tmpFile, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return errors.Wrap(err, "failed to create temporary token file")
+	}
+
+	defer func() {
+		tmpFile.Close()
+		os.Remove(tmpName)
+	}()
+
+	// Change ownership to xrootd user
+	uid, err := config.GetDaemonUID()
+	if err != nil {
+		return errors.Wrap(err, "failed to get daemon UID")
+	}
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		return errors.Wrap(err, "failed to get daemon GID")
+	}
+
+	if err := os.Chown(tmpName, uid, gid); err != nil {
+		return errors.Wrap(err, "failed to change token file ownership")
+	}
+
+	if _, err := tmpFile.WriteString(tok); err != nil {
+		return errors.Wrap(err, "failed to write token to temporary file")
+	}
+
+	if err := tmpFile.Sync(); err != nil {
+		return errors.Wrap(err, "failed to sync token file")
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return errors.Wrap(err, "failed to close temporary token file")
+	}
+
+	if err := os.Rename(tmpName, tokLoc); err != nil {
+		return errors.Wrap(err, "failed to move token file to final location")
+	}
+
+	return nil
 }

@@ -23,12 +23,16 @@ import (
 	"encoding/json"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -187,4 +191,67 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 
 func (server *CacheServer) GetServerType() server_structs.ServerType {
 	return server_structs.CacheType
+}
+
+func (server *CacheServer) GetAdTokCfg(ctx context.Context) (adTokCfg server_structs.AdTokCfg, err error) {
+	fInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		err = errors.Wrap(err, "failed to get federation info")
+		return
+	}
+	directorUrl := fInfo.DirectorEndpoint
+	if directorUrl == "" {
+		err = errors.New("unable to determine Director's URL")
+		return
+	}
+	adTokCfg.Audience = directorUrl
+	adTokCfg.Subject = param.Cache_Url.GetString()
+	adTokCfg.Issuer = param.Server_IssuerUrl.GetString()
+
+	return
+}
+
+func (server *CacheServer) GetFedTokLocation() string {
+	return param.Cache_FedTokenLocation.GetString()
+}
+
+func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server_structs.XRootDServer) {
+	// Do our initial token fetch+set, then turn things over to the ticker
+	tok, err := server_utils.GetFedTok(ctx, cache)
+	if err != nil {
+		log.Errorf("Failed to get a federation token: %v", err)
+	}
+
+	// Set the token in the cache
+	err = server_utils.SetFedTok(ctx, cache, tok)
+	if err != nil {
+		log.Errorf("Failed to set the federation token: %v", err)
+	}
+
+	// Fire the ticker every at 1/3 the period of token lifetime. This gives us a bit
+	// of buffer in the event the Director is down for a short period of time.
+	fedTokTicker := time.NewTicker(param.Director_FedTokenLifetime.GetDuration() / 3)
+	egrp.Go(func() error {
+		defer fedTokTicker.Stop()
+		for {
+			select {
+			case <-fedTokTicker.C:
+				// Time to ask the Director for a new token
+				log.Debugln("Refreshing federation token")
+				tok, err := server_utils.GetFedTok(ctx, cache)
+				if err != nil {
+					log.Errorf("Failed to get a federation token: %v", err)
+					continue
+				}
+
+				// Set the token in the cache
+				err = server_utils.SetFedTok(ctx, cache, tok)
+				if err != nil {
+					log.Errorf("Failed to write the federation token: %v", err)
+				}
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	})
 }
