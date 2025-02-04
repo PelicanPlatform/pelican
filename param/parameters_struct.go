@@ -35,6 +35,7 @@ type Config struct {
 		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		ExportLocation string `mapstructure:"exportlocation" yaml:"ExportLocation"`
+		FedTokenLocation string `mapstructure:"fedtokenlocation" yaml:"FedTokenLocation"`
 		HighWaterMark string `mapstructure:"highwatermark" yaml:"HighWaterMark"`
 		LocalRoot string `mapstructure:"localroot" yaml:"LocalRoot"`
 		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
@@ -215,6 +216,7 @@ type Config struct {
 		ExportVolume string `mapstructure:"exportvolume" yaml:"ExportVolume"`
 		ExportVolumes []string `mapstructure:"exportvolumes" yaml:"ExportVolumes"`
 		Exports interface{} `mapstructure:"exports" yaml:"Exports"`
+		FedTokenLocation string `mapstructure:"fedtokenlocation" yaml:"FedTokenLocation"`
 		FederationPrefix string `mapstructure:"federationprefix" yaml:"FederationPrefix"`
 		GlobusClientIDFile string `mapstructure:"globusclientidfile" yaml:"GlobusClientIDFile"`
 		GlobusClientSecretFile string `mapstructure:"globusclientsecretfile" yaml:"GlobusClientSecretFile"`
@@ -359,6 +361,7 @@ type configWithType struct {
 		EnablePrefetch struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
+		FedTokenLocation struct { Type string; Value string }
 		HighWaterMark struct { Type string; Value string }
 		LocalRoot struct { Type string; Value string }
 		LowWatermark struct { Type string; Value string }
@@ -539,6 +542,7 @@ type configWithType struct {
 		ExportVolume struct { Type string; Value string }
 		ExportVolumes struct { Type string; Value []string }
 		Exports struct { Type string; Value interface{} }
+		FedTokenLocation struct { Type string; Value string }
 		FederationPrefix struct { Type string; Value string }
 		GlobusClientIDFile struct { Type string; Value string }
 		GlobusClientSecretFile struct { Type string; Value string }

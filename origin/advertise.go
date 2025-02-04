@@ -199,3 +199,27 @@ func (server *OriginServer) GetAuthorizedPrefixes() ([]string, error) {
 
 	return prefixes, nil
 }
+
+// Advertisement token configuration for the origin server. Used to get Origin-specific
+// config that would differ from caches.
+func (server *OriginServer) GetAdTokCfg(ctx context.Context) (adTokCfg server_structs.AdTokCfg, err error) {
+	fInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		err = errors.Wrap(err, "failed to get federation info")
+		return
+	}
+	directorUrl := fInfo.DirectorEndpoint
+	if directorUrl == "" {
+		err = errors.New("unable to determine Director's URL")
+		return
+	}
+	adTokCfg.Audience = directorUrl
+	adTokCfg.Subject = param.Origin_Url.GetString()
+	adTokCfg.Issuer = param.Server_IssuerUrl.GetString()
+
+	return
+}
+
+func (server *OriginServer) GetFedTokLocation() string {
+	return param.Origin_FedTokenLocation.GetString()
+}

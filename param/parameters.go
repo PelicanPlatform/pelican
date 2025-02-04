@@ -147,6 +147,7 @@ func (oP ObjectParam) IsSet() bool {
 var (
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
+	Cache_FedTokenLocation = StringParam{"Cache.FedTokenLocation"}
 	Cache_HighWaterMark = StringParam{"Cache.HighWaterMark"}
 	Cache_LocalRoot = StringParam{"Cache.LocalRoot"}
 	Cache_LowWatermark = StringParam{"Cache.LowWatermark"}
@@ -213,6 +214,7 @@ var (
 	OIDC_UserInfoEndpoint = StringParam{"OIDC.UserInfoEndpoint"}
 	Origin_DbLocation = StringParam{"Origin.DbLocation"}
 	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
+	Origin_FedTokenLocation = StringParam{"Origin.FedTokenLocation"}
 	Origin_FederationPrefix = StringParam{"Origin.FederationPrefix"}
 	Origin_GlobusClientIDFile = StringParam{"Origin.GlobusClientIDFile"}
 	Origin_GlobusClientSecretFile = StringParam{"Origin.GlobusClientSecretFile"}
