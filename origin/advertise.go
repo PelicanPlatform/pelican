@@ -192,7 +192,7 @@ func (server *OriginServer) GetAuthorizedPrefixes() ([]string, error) {
 	}
 
 	for _, export := range originExports {
-		if (export.Capabilities.Reads && !export.Capabilities.PublicReads) || export.Capabilities.Writes {
+		if ((export.Capabilities.Reads || export.Capabilities.PublicReads) && !export.Capabilities.DirectReads) || export.Capabilities.Writes {
 			prefixes = append(prefixes, export.FederationPrefix)
 		}
 	}

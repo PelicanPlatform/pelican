@@ -611,7 +611,7 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 
 	t.Run("EmptyAuth", originAuthTester(originServer, "", "u * /.well-known lr\n"))
 
-	viper.Set("Origin.EnablePublicReads", true)
+	viper.Set("Origin.EnableDirectReads", true)
 	viper.Set("Origin.FederationPrefix", "/foo/bar")
 	t.Run("PublicAuth", originAuthTester(originServer, "", "u * /.well-known lr /foo/bar lr\n"))
 }

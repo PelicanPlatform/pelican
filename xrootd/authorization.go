@@ -299,7 +299,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 				}
 
 				for _, export := range originExports {
-					if export.Capabilities.PublicReads {
+					if export.Capabilities.DirectReads {
 						outStr += export.FederationPrefix + " lr "
 					}
 				}
@@ -314,7 +314,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 			output.Write([]byte(lineContents + "\n"))
 		}
 	}
-	// If Origin has no authfile already exists, add the ./well-known to the authfile
+	// If Origin has no authfile already, add the ./well-known to the authfile
 	if !foundPublicLine && server.GetServerType().IsEnabled(server_structs.OriginType) {
 		outStr := "u * /.well-known lr"
 
@@ -325,7 +325,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 		}
 
 		for _, export := range originExports {
-			if export.Capabilities.PublicReads {
+			if export.Capabilities.DirectReads {
 				outStr += " " + export.FederationPrefix + " lr"
 			}
 		}
@@ -532,7 +532,7 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 // Writes out the server's scitokens.cfg configuration
 func EmitScitokensConfig(server server_structs.XRootDServer) error {
 	if originServer, ok := server.(*origin.OriginServer); ok {
-		authedPrefixes, err := originServer.GetAuthorizedPrefixes()
+		authedPrefixes, err := originServer.GetAuthorizedPrefixes() //ETTODO Change to not just get authorized prefixes
 		if err != nil {
 			return err
 		}
