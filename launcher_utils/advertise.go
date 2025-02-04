@@ -145,7 +145,8 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 			log.Errorf("Failed to get sitename from the registry for the origin. Will fallback to use Xrootd.Sitename: %v", err)
 		}
 	} else if server.GetServerType().IsEnabled(server_structs.CacheType) {
-		cachePrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
+		hostname := param.Server_Hostname.GetString()
+		cachePrefix := server_structs.GetCacheNS(hostname)
 		name, err = getSitenameFromReg(ctx, cachePrefix)
 		if err != nil {
 			log.Errorf("Failed to get sitename from the registry for the cache. Will fallback to use Xrootd.Sitename: %v", err)
