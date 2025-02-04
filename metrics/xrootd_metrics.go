@@ -592,6 +592,9 @@ func NullTermToString(nullTermBytes []byte) (str string) {
 }
 
 func HandlePacket(packet []byte) error {
+	if len(packet) < 8 {
+		return errors.New("Packet is too small to be valid XRootD monitoring packet")
+	}
 	// If a message starts with `{` its a shoveler message in the form of JSON
 	/*
 		{
@@ -613,7 +616,6 @@ func HandlePacket(packet []byte) error {
 		if err != nil {
 			return errors.Wrap(err, "Failed to decode base64 encoded data")
 		}
-
 	}
 
 	// XML '<' character indicates a summary packet
@@ -621,9 +623,6 @@ func HandlePacket(packet []byte) error {
 		return HandleSummaryPacket(packet)
 	}
 
-	if len(packet) < 8 {
-		return errors.New("Packet is too small to be valid XRootD monitoring packet")
-	}
 	var header XrdXrootdMonHeader
 	header.Code = packet[0]
 	header.Pseq = packet[1]
