@@ -411,6 +411,7 @@ var (
 	Client_StoppedTransferTimeout = DurationParam{"Client.StoppedTransferTimeout"}
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
 	Director_CachePresenceTTL = DurationParam{"Director.CachePresenceTTL"}
+	Director_FedTokenLifetime = DurationParam{"Director.FedTokenLifetime"}
 	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
 	Director_RegistryQueryInterval = DurationParam{"Director.RegistryQueryInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}

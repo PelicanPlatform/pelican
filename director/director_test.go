@@ -239,7 +239,7 @@ func TestDirectorRegistration(t *testing.T) {
 	}
 
 	setupRequest := func(c *gin.Context, r *gin.Engine, bodyByte []byte, token string, stype server_structs.ServerType) {
-		r.POST("/", func(gctx *gin.Context) { registerServeAd(ctx, gctx, stype) })
+		r.POST("/", func(gctx *gin.Context) { registerServerAd(ctx, gctx, stype) })
 		c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(bodyByte))
 		c.Request.Header.Set("Authorization", "Bearer "+token)
 		c.Request.Header.Set("Content-Type", "application/json")

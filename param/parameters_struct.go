@@ -86,6 +86,7 @@ type Config struct {
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnableStat bool `mapstructure:"enablestat" yaml:"EnableStat"`
+		FedTokenLifetime time.Duration `mapstructure:"fedtokenlifetime" yaml:"FedTokenLifetime"`
 		FilteredServers []string `mapstructure:"filteredservers" yaml:"FilteredServers"`
 		GeoIPLocation string `mapstructure:"geoiplocation" yaml:"GeoIPLocation"`
 		MaxMindKeyFile string `mapstructure:"maxmindkeyfile" yaml:"MaxMindKeyFile"`
@@ -417,6 +418,7 @@ type configWithType struct {
 		EnableBroker struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		EnableStat struct { Type string; Value bool }
+		FedTokenLifetime struct { Type string; Value time.Duration }
 		FilteredServers struct { Type string; Value []string }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }

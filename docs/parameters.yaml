@@ -1822,6 +1822,14 @@ hidden: true
 default: 1m
 components: ["director"]
 ---
+name: Director.FedTokenLifetime
+description: |+
+  The default lifetime assigned to tokens issued by the director on behalf of the federation. These tokens may be issued
+  to caches to prove their authorization within the federation to origins that require it.
+type: duration
+default: 15m
+components: ["director"]
+---
 ############################
 #  Registry-level configs  #
 ############################
