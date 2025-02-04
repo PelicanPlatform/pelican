@@ -58,7 +58,10 @@ func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKe
 	item := verifiedKeysCache.Get(id)
 	if item != nil {
 		// Cache hit
-		return true, item.Value().Capabilities, nil
+		cached := item.Value()
+		if cached.Token == apiKey { // check the the cached token matches the one we are trying to verify
+			return true, cached.Capabilities, nil
+		} // otherwise the api token doesn't match the one in the cache so we do a hard check
 	}
 
 	secret, err := hex.DecodeString(secretHex)
