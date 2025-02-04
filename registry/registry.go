@@ -78,11 +78,6 @@ type Response struct {
 	DeviceCode              string `json:"device_code"`
 }
 
-type TokenResponse struct {
-	AccessToken string `json:"access_token"`
-	Error       string `json:"error"`
-}
-
 // Various auxiliary functions used for client-server security handshakes
 type NamespaceConfig struct {
 	JwksUri string `json:"jwks_uri"`
@@ -650,7 +645,7 @@ func cliRegisterNamespace(ctx *gin.Context) {
 			return
 		}
 
-		var tokenResponse TokenResponse
+		var tokenResponse server_structs.TokenResponse
 		err = json.Unmarshal(body, &tokenResponse)
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
