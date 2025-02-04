@@ -65,10 +65,9 @@ func handleExports(ctx *gin.Context) {
 
 	res := exportsRes{Type: string(storageType)}
 
-	extUrlStr := param.Server_ExternalWebUrl.GetString()
-	extUrl, _ := url.Parse(extUrlStr)
-	// Only use hostname:port
-	originPrefix := server_structs.GetOriginNs(extUrl.Host)
+	hostname := param.Server_Hostname.GetString()
+	// Only use server's hostname as prefix (without port)
+	originPrefix := server_structs.GetOriginNs(hostname)
 	if !registrationsStatus.Has(originPrefix) {
 		if err := FetchAndSetRegStatus(originPrefix); err != nil {
 			log.Errorf("Failed to fetch registration status from the registry: %v", err)
