@@ -49,7 +49,7 @@ const ServerUptime = () => {
   return (
     <Box overflow={'scroll'} height={'100%'}>
       <TableContainer>
-        <Table>
+        <Table size={'small'}>
           <TableHead>
             <TableRow>
               <TableCell>Server</TableCell>
