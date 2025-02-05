@@ -17,6 +17,7 @@
 # ***************************************************************
 
 project_name: pelican
+version: 2
 
 release:
   prerelease: true
