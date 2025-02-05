@@ -15,7 +15,7 @@
 #
 
 Logging:
-  Level: "Error"
+  Level: error
 Client:
   SlowTransferRampupTime: 100s
   SlowTransferWindow: 30s
