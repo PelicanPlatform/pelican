@@ -105,7 +105,7 @@ type (
 		// The value is from the Sitename of the server registration in the registry if set, or Xrootd.Sitename if not
 		Name string `json:"name"`
 		// The namespace prefix to register/look up the server in the registry.
-		// The value is /caches/{Xrootd.Sitename} for cache servers and /origins/{Xrootd.Sitename} for the origin servers
+		// The value is /caches/{Server.Hostname} for cache servers and /origins/{Server.Hostname} for the origin servers
 		RegistryPrefix      string            `json:"registry-prefix"`
 		BrokerURL           string            `json:"broker-url,omitempty"`
 		DataURL             string            `json:"data-url" binding:"required"`
