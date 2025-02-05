@@ -30,7 +30,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -552,6 +551,9 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 			return err
 		}
 		publicReadsPrefixes, err := originServer.GetPublicReadOnlyPrefixes()
+		if err != nil {
+			return err
+		}
 		return WriteOriginScitokensConfig(authedPrefixes, publicReadsPrefixes)
 	} else if cacheServer, ok := server.(*cache.CacheServer); ok {
 		directorAds := cacheServer.GetNamespaceAds()
