@@ -864,26 +864,28 @@ func PrintConfig() error {
 		return err
 	}
 
-	configMap := make(map[string]interface{})
-	configBytes, err := json.Marshal(rawConfig)
+	configBytes, err := json.MarshalIndent(rawConfig, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(configBytes, &configMap); err != nil {
-		return err
+
+	configDump := fmt.Sprintf(
+		"================ Pelican Configuration ================\n%s\n============= End of Pelican Configuration ============",
+		string(configBytes),
+	)
+
+	if param.Logging_LogLocation.GetString() != "" {
+		logFile, err := os.OpenFile(param.Logging_LogLocation.GetString(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return err
+		}
+		defer logFile.Close()
+
+		_, _ = logFile.WriteString(configDump + "\n")
+
 	}
 
-	// Dump configuration as a structured log
-	log.WithFields(log.Fields{
-		"pelican_config": configMap,
-	}).Info("Pelican Configuration Dump")
-
-	// Human-readable JSON to stderr
-	prettyConfig, _ := json.MarshalIndent(rawConfig, "", "  ")
-	fmt.Fprintln(os.Stderr,
-		"================ Pelican Configuration ================\n",
-		string(prettyConfig),
-		"\n============= End of Pelican Configuration ============")
+	fmt.Fprintln(os.Stderr, configDump)
 
 	return nil
 }
