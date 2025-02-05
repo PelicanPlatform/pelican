@@ -361,6 +361,68 @@ func TestEmitAuthfile(t *testing.T) {
 	}
 }
 
+func TestEmitOriginAuthfileWithCapabilities(t *testing.T) {
+	tests := []struct {
+		desc         string
+		name         string
+		authOut      string
+		capabilities []string
+	}{
+		{
+			desc:         "public-reads",
+			name:         "/public",
+			authOut:      "u * /.well-known lr\n",
+			capabilities: []string{"Origin.EnablePublicReads"},
+		},
+		{
+			desc:         "direct-reads",
+			name:         "/direct",
+			authOut:      "u * /.well-known lr /direct lr\n",
+			capabilities: []string{"Origin.EnableDirectReads"},
+		},
+		{
+			desc:         "direct-and-public-reads",
+			name:         "/direct-public",
+			authOut:      "u * /.well-known lr /direct-public lr\n",
+			capabilities: []string{"Origin.EnablePublicReads", "Origin.EnableDirectReads"},
+		},
+		{
+			desc:         "no-public-access",
+			name:         "/private",
+			authOut:      "u * /.well-known lr\n",
+			capabilities: []string{"Origin.EnableReads"},
+		},
+	}
+	for _, testInput := range tests {
+		t.Run(testInput.desc, func(t *testing.T) {
+			dirName := t.TempDir()
+			server_utils.ResetTestState()
+
+			defer server_utils.ResetTestState()
+
+			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
+			viper.Set("Origin.RunLocation", dirName)
+			viper.Set("Origin.FederationPrefix", testInput.name)
+			viper.Set("Origin.StoragePrefix", "/")
+			for _, cap := range testInput.capabilities {
+				viper.Set(cap, true)
+			}
+			originServer := &origin.OriginServer{}
+
+			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(""), fs.FileMode(0600))
+			require.NoError(t, err)
+
+			err = EmitAuthfile(originServer)
+			require.NoError(t, err)
+
+			contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
+			require.NoError(t, err)
+
+			assert.Equal(t, testInput.authOut, string(contents))
+		})
+	}
+}
+
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
@@ -753,7 +815,9 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	err = os.WriteFile(scitokensCfg, []byte(toMergeOutput), 0640)
 	require.NoError(t, err)
 
-	err = WriteOriginScitokensConfig([]string{"/foo/bar"})
+	viper.Set("Federation.DiscoveryUrl", "fed.discovery.com")
+
+	err = WriteOriginScitokensConfig([]string{"/foo/bar"}, []string{"/public"})
 	require.NoError(t, err)
 
 	genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
