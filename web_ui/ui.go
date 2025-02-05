@@ -656,7 +656,10 @@ func waitUntilLogin(ctx context.Context) error {
 // You need to mount the static resources for UI in a separate function
 func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
 	// start the cache for verified API keys
-	go token.VerifiedKeysCache.Start()
+	egrp.Go(func() error {
+		token.VerifiedKeysCache.Start()
+		return nil
+	})
 
 	if err := configureCommonEndpoints(engine); err != nil {
 		return err
