@@ -30,6 +30,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -69,6 +70,7 @@ type (
 		DefaultUser     string
 		UsernameClaim   string
 		NameMapfile     string
+		FedIssuer       bool
 	}
 
 	// Top-level configuration object for the template
@@ -482,6 +484,19 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 	return
 }
 
+func GenerateFederationIssuer(authPaths []string, publicPaths []string) (issuer Issuer) {
+	if len(authPaths) == 0 && len(publicPaths) == 0 {
+		return
+	}
+
+	issuer.Name = "Registry"
+	issuer.Issuer = param.Federation_DiscoveryUrl.GetString()
+	issuer.BasePaths = append(authPaths, publicPaths...)
+	issuer.FedIssuer = true
+
+	return
+}
+
 // We have a special issuer just for director-based monitoring of the origin.
 func GenerateDirectorMonitoringIssuer() (issuer Issuer, err error) {
 	fedInfo, err := config.GetFederation(context.Background())
@@ -532,11 +547,12 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 // Writes out the server's scitokens.cfg configuration
 func EmitScitokensConfig(server server_structs.XRootDServer) error {
 	if originServer, ok := server.(*origin.OriginServer); ok {
-		authedPrefixes, err := originServer.GetAuthorizedPrefixes() //ETTODO Change to not just get authorized prefixes
+		authedPrefixes, err := originServer.GetAuthorizedPrefixes()
 		if err != nil {
 			return err
 		}
-		return WriteOriginScitokensConfig(authedPrefixes)
+		publicReadsPrefixes, err := originServer.GetPublicReadOnlyPrefixes()
+		return WriteOriginScitokensConfig(authedPrefixes, publicReadsPrefixes)
 	} else if cacheServer, ok := server.(*cache.CacheServer); ok {
 		directorAds := cacheServer.GetNamespaceAds()
 		if param.Cache_SelfTest.GetBool() {
@@ -564,7 +580,7 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 }
 
 // Writes out the origin's scitokens.cfg configuration
-func WriteOriginScitokensConfig(authedPaths []string) error {
+func WriteOriginScitokensConfig(authedPaths []string, publicReadPaths []string) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
@@ -583,6 +599,18 @@ func WriteOriginScitokensConfig(authedPaths []string) error {
 		}
 	} else if err != nil {
 		return errors.Wrap(err, "failed to generate xrootd issuer for the origin")
+	}
+
+	if issuer := GenerateFederationIssuer(authedPaths, publicReadPaths); len(issuer.Name) > 0 {
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			val.Name += " and " + issuer.Name
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
+		}
+	} else if err != nil {
+		return errors.Wrap(err, "failed to generate xrootd registry issuer for the origin")
 	}
 
 	if issuer, err := GenerateMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {

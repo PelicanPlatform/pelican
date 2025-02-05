@@ -192,7 +192,23 @@ func (server *OriginServer) GetAuthorizedPrefixes() ([]string, error) {
 	}
 
 	for _, export := range originExports {
-		if ((export.Capabilities.Reads || export.Capabilities.PublicReads) && !export.Capabilities.DirectReads) || export.Capabilities.Writes {
+		if (export.Capabilities.Reads && !export.Capabilities.PublicReads) || export.Capabilities.Writes {
+			prefixes = append(prefixes, export.FederationPrefix)
+		}
+	}
+
+	return prefixes, nil
+}
+
+func (server *OriginServer) GetPublicReadOnlyPrefixes() ([]string, error) {
+	var prefixes []string
+	originExports, err := server_utils.GetOriginExports()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, export := range originExports {
+		if export.Capabilities.PublicReads && !export.Capabilities.DirectReads && !export.Capabilities.Writes {
 			prefixes = append(prefixes, export.FederationPrefix)
 		}
 	}
