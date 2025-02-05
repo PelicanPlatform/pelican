@@ -240,7 +240,7 @@ func TestHandlePacket(t *testing.T) {
 	mockWrite := int64(120)
 
 	t.Run("an-empty-detail-packet-should-return-error", func(t *testing.T) {
-		err := HandlePacket([]byte{})
+		err := handlePacket([]byte{})
 		assert.Error(t, err, "No error reported with an empty detail packet")
 	})
 
@@ -270,7 +270,7 @@ func TestHandlePacket(t *testing.T) {
 		`
 		expectedReader := strings.NewReader(mockPromThreads)
 
-		err = HandlePacket(mockShedSummaryBytes)
+		err = handlePacket(mockShedSummaryBytes)
 		require.NoError(t, err, "Error handling the packet")
 		if err := testutil.CollectAndCompare(Threads, expectedReader, "xrootd_sched_thread_count"); err != nil {
 			require.NoError(t, err, "Collected metric is different from expected")
@@ -359,7 +359,7 @@ func TestHandlePacket(t *testing.T) {
 		expectedLinkByteXferIncDup := strings.NewReader(mockPromLinkByteXferInc)
 
 		// First time received a summary packet
-		err = HandlePacket(mockLinkSummaryBaseBytes)
+		err = handlePacket(mockLinkSummaryBaseBytes)
 		require.NoError(t, err, "Error handling the packet")
 		if err := testutil.CollectAndCompare(Connections, expectedLinkConnectBase, "xrootd_server_connection_count"); err != nil {
 			require.NoError(t, err, "Collected metric is different from expected")
@@ -372,13 +372,13 @@ func TestHandlePacket(t *testing.T) {
 		// And metrics should be updated to the max number
 
 		// Have one CMSD summary packets which should be ignored
-		err = HandlePacket(mockLinkSummaryCMSDBaseBytes)
+		err = handlePacket(mockLinkSummaryCMSDBaseBytes)
 		require.NoError(t, err, "Error handling the packet")
 		// Have one CMSD summary packets which should be ignored
-		err = HandlePacket(mockLinkSummaryCMSDBaseBytes)
+		err = handlePacket(mockLinkSummaryCMSDBaseBytes)
 		require.NoError(t, err, "Error handling the packet")
 
-		err = HandlePacket(mockLinkSummaryIncBaseBytes)
+		err = handlePacket(mockLinkSummaryIncBaseBytes)
 		require.NoError(t, err, "Error handling the packet")
 
 		if err := testutil.CollectAndCompare(Connections, expectedLinkConnectInc, "xrootd_server_connection_count"); err != nil {
@@ -389,7 +389,7 @@ func TestHandlePacket(t *testing.T) {
 		}
 
 		// Summary data sent to CMSD shouldn't be recorded into the metrics
-		err = HandlePacket(mockLinkSummaryCMSDBaseBytes)
+		err = handlePacket(mockLinkSummaryCMSDBaseBytes)
 		require.NoError(t, err, "Error handling the packet")
 
 		if err := testutil.CollectAndCompare(Connections, expectedLinkConnectIncDup, "xrootd_server_connection_count"); err != nil {
@@ -432,7 +432,7 @@ func TestHandlePacket(t *testing.T) {
 
 		buf, err := mockMonMap.Serialize()
 		require.NoError(t, err, "Error serializing monitor packet")
-		err = HandlePacket(buf)
+		err = handlePacket(buf)
 		require.NoError(t, err, "Error handling packet")
 
 		require.Equal(t, 1, len(sessions.Keys()), "Session cache didn't update")
@@ -480,7 +480,7 @@ func TestHandlePacket(t *testing.T) {
 
 		buf, err := mockMonMapIPv4.Serialize()
 		require.NoError(t, err, "Error serializing monitor packet")
-		err = HandlePacket(buf)
+		err = handlePacket(buf)
 		require.NoError(t, err, "Error handling packet")
 
 		require.Equal(t, 1, len(sessions.Keys()), "Session cache didn't update")
@@ -523,7 +523,7 @@ func TestHandlePacket(t *testing.T) {
 
 		buf, err := mockMonMapIPv6.Serialize()
 		require.NoError(t, err, "Error serializing monitor packet")
-		err = HandlePacket(buf)
+		err = handlePacket(buf)
 		require.NoError(t, err, "Error handling packet")
 
 		require.Equal(t, 1, len(sessions.Keys()), "Session cache didn't update")
@@ -560,7 +560,7 @@ func TestHandlePacket(t *testing.T) {
 
 		transfers.DeleteAll()
 
-		err = HandlePacket(buf)
+		err = handlePacket(buf)
 		require.NoError(t, err, "Error handling packet")
 		require.Equal(t, 1, len(transfers.Keys()), "Transfer cache didn't update")
 		assert.Equal(t, uint32(10), transfers.Keys()[0].Id, "Id in session cache entry doesn't match expected")
@@ -580,7 +580,7 @@ func TestHandlePacket(t *testing.T) {
 
 		transfers.DeleteAll()
 
-		err = HandlePacket(bytePacket)
+		err = handlePacket(bytePacket)
 		require.NoError(t, err, "Error handling the packet")
 		require.Equal(t, 1, len(transfers.Keys()), "Transfer cache didn't update")
 		assert.Equal(t, mockFileID, transfers.Keys()[0].Id, "Id in session cache entry doesn't match expected")
@@ -601,7 +601,7 @@ func TestHandlePacket(t *testing.T) {
 
 		transfers.DeleteAll()
 
-		err = HandlePacket(bytePacket)
+		err = handlePacket(bytePacket)
 		require.NoError(t, err, "Error handling the packet")
 		require.Equal(t, 1, len(transfers.Keys()), "Transfer cache didn't update")
 		assert.Equal(t, mockFileID, transfers.Keys()[0].Id, "Id in session cache entry doesn't match expected")
@@ -621,10 +621,10 @@ func TestHandlePacket(t *testing.T) {
 
 		transfers.DeleteAll()
 
-		err = HandlePacket(openPacket)
+		err = handlePacket(openPacket)
 		require.NoError(t, err, "Error handling the file open packet")
 
-		err = HandlePacket(xftPacket)
+		err = handlePacket(xftPacket)
 		require.NoError(t, err, "Error handling the file transfer packet")
 
 		require.Equal(t, 1, len(transfers.Keys()), "Transfer cache didn't update")
@@ -665,7 +665,7 @@ func TestHandlePacket(t *testing.T) {
 		transfers.DeleteAll()
 		sessions.DeleteAll()
 
-		err = HandlePacket(openPacket)
+		err = handlePacket(openPacket)
 		require.NoError(t, err, "Error handling the file open packet")
 
 		require.Equal(t, 1, len(transfers.Keys()), "Transfer cache didn't update")
@@ -674,10 +674,10 @@ func TestHandlePacket(t *testing.T) {
 		assert.Equal(t, "/", transferEntry.Path, "Path in transfer cache entry doesn't match expected")
 		assert.Equal(t, mockUserID, transferEntry.UserId.Id, "UserID in transfer cache entry doesn't match expected")
 
-		err = HandlePacket(xftPacket)
+		err = handlePacket(xftPacket)
 		require.NoError(t, err, "Error handling the file transfer packet")
 
-		err = HandlePacket(clsPacket)
+		err = handlePacket(clsPacket)
 		require.NoError(t, err, "Error handling the file close packet")
 
 		// Transfer item should be deleted on file close
@@ -774,7 +774,7 @@ func TestHandlePacket(t *testing.T) {
 
 		buf, err := mockMonMap1.Serialize()
 		require.NoError(t, err, "Error serializing monitor packet")
-		err = HandlePacket(buf)
+		err = handlePacket(buf)
 		require.NoError(t, err, "Error handling packet")
 
 		require.Equal(t, 1, len(sessions.Keys()), "Session cache didn't update")
@@ -788,7 +788,7 @@ func TestHandlePacket(t *testing.T) {
 
 		buf, err = mockMonMap2.Serialize()
 		require.NoError(t, err)
-		err = HandlePacket(buf)
+		err = handlePacket(buf)
 		require.NoError(t, err)
 
 		require.Equal(t, 1, len(sessions.Keys()))

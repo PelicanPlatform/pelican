@@ -238,15 +238,6 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group, metricsPort int) 
 	// Create the UDP forwarding destinations
 	var udpDestinations []net.Conn
 
-	// By default, forward to metrics endpoint for Prometheus metrics
-	// TODO: integrate metrics to shoveler and remove the forwarding
-	metricsEndpoint := fmt.Sprint("127.0.0.1:", metricsPort)
-	udpConn, err := net.Dial("udp", metricsEndpoint)
-	if err != nil {
-		shovelerLogger.Warningln("Unable to connect to metrics endpoint:", metricsEndpoint, err)
-	}
-	udpDestinations = append(udpDestinations, udpConn)
-
 	if len(config.DestUdp) > 0 {
 		for _, dest := range config.DestUdp {
 			udpConn, err := net.Dial("udp", dest)
@@ -285,6 +276,12 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group, metricsPort int) 
 				continue
 			}
 			shoveler.PacketsReceived.Inc()
+
+			err = handlePacket(buf[:rlen])
+			if err != nil {
+				shovelerLogger.Errorln("Failed to handle packet:", err)
+				continue
+			}
 
 			if config.Verify && !shoveler.VerifyPacket(buf[:rlen]) {
 				shoveler.ValidationsFailed.Inc()
