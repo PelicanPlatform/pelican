@@ -51,7 +51,7 @@ export const CapabilitiesChip = ({
         ...CapabilityChipStyle,
         backgroundColor: isActive ? green[300] : grey[100],
         color: isActive ? 'black' : grey[700],
-        overflow: "hidden"
+        overflow: 'hidden',
       }}
     >
       <Typography variant={'body2'}>{name}</Typography>
