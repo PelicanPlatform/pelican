@@ -22,6 +22,7 @@ import {
   GraphDispatchContext,
 } from '@/components/graphs/GraphContext';
 import {
+  buildMetric,
   MatrixResponseData,
   query_raw,
   TimeDuration,
@@ -43,7 +44,7 @@ ChartJS.register(
   Colors
 );
 
-const MemoryGraph = () => {
+const MemoryGraph = ({ server_name }: { server_name?: string }) => {
   const graphContext = useContext(GraphContext);
 
   const { data: datasets } = useSWR<ChartDataset<any, any>>(
@@ -56,6 +57,7 @@ const MemoryGraph = () => {
     ],
     () =>
       getData(
+        buildMetric('go_memstats_alloc_bytes', { server_name }),
         graphContext.rate,
         graphContext.range,
         graphContext.resolution,
@@ -112,12 +114,13 @@ const MemoryGraph = () => {
 };
 
 const getData = async (
+  metric: string,
   rate: TimeDuration,
   range: TimeDuration,
   resolution: TimeDuration,
   time: DateTime
 ): Promise<ChartDataset<any, any>> => {
-  const query = `(go_memstats_alloc_bytes / 1024 / 1024)[${range}:${resolution}]`;
+  const query = `(${metric} / 1024 / 1024)[${range}:${resolution}]`;
   const dataResponse = await query_raw<MatrixResponseData>(
     query,
     time.toSeconds()
