@@ -328,3 +328,24 @@ export const fillArrayNulls = (
     return [parseInt(key), value];
   });
 };
+
+export const buildMetric = (
+  metric: string,
+  args: Record<
+    string,
+    string | { comparator: '=' | '!='; value: string } | undefined
+  >
+) => {
+  return `${metric}{${Object.entries(args)
+    .reduce((acc: string[], [key, value]) => {
+      if (typeof value === 'string') {
+        acc.push(`${key}="${value}"`);
+      } else if (value === undefined) {
+      } else {
+        acc.push(`${key}${value.comparator}"${value.value}"`);
+      }
+
+      return acc;
+    }, [])
+    .join(',')}}`;
+};

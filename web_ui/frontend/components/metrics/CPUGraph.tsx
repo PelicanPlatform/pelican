@@ -23,6 +23,7 @@ import {
   GraphDispatchContext,
 } from '@/components/graphs/GraphContext';
 import {
+  buildMetric,
   MatrixResponseData,
   query_raw,
   TimeDuration,
@@ -45,12 +46,13 @@ ChartJS.register(
   Filler
 );
 
-const CPUGraph = () => {
+const CPUGraph = ({ server_name = undefined }: { server_name?: string }) => {
   const graphContext = useContext(GraphContext);
 
   const { data: datasets } = useSWR<ChartDataset<any, any>>(
     [
       'cpuGraph',
+      server_name,
       graphContext.rate,
       graphContext.range,
       graphContext.resolution,
@@ -58,6 +60,7 @@ const CPUGraph = () => {
     ],
     () =>
       getData(
+        server_name,
         graphContext.rate,
         graphContext.range,
         graphContext.resolution,
@@ -114,12 +117,14 @@ const CPUGraph = () => {
 };
 
 const getData = async (
+  server_name: string | undefined,
   rate: TimeDuration,
   range: TimeDuration,
   resolution: TimeDuration,
   time: DateTime
 ): Promise<ChartDataset<any, any>> => {
-  const query = `avg by (instance) (irate(process_cpu_seconds_total[${rate}]))[${range}:${resolution}]`;
+  const metric = buildMetric('process_cpu_seconds_total', { server_name });
+  const query = `avg by (instance) (irate(${metric}[${rate}]))[${range}:${resolution}]`;
   const dataResponse = await query_raw<MatrixResponseData>(
     query,
     time.toSeconds()

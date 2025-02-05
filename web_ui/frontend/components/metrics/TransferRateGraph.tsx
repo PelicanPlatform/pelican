@@ -24,6 +24,7 @@ import {
   GraphDispatchContext,
 } from '@/components/graphs/GraphContext';
 import {
+  buildMetric,
   MatrixResponseData,
   query_raw,
   TimeDuration,
@@ -46,7 +47,11 @@ ChartJS.register(
   Colors
 );
 
-const TransferRateGraph = () => {
+const TransferRateGraph = ({
+  server_name = undefined,
+}: {
+  server_name?: string;
+}) => {
   const graphContext = useContext(GraphContext);
   const dispatch = useContext(GraphDispatchContext);
 
@@ -62,6 +67,7 @@ const TransferRateGraph = () => {
     ],
     () =>
       getData(
+        server_name,
         graphContext.rate,
         graphContext.range,
         graphContext.resolution,
@@ -174,12 +180,16 @@ const toBytesDataset = (
 };
 
 const getData = async (
+  server_name: string | undefined,
   rate: TimeDuration,
   range: TimeDuration,
   resolution: TimeDuration,
   time: DateTime
 ): Promise<ChartDataset<'line', { x: number; y: number }[]>[]> => {
-  const query = `sum by (path, type) (rate(xrootd_transfer_bytes[${rate}]))[${range}:${resolution}]`;
+  const metric = buildMetric('xrootd_transfer_bytes', {
+    server_name: server_name,
+  });
+  const query = `sum by (path, type) (rate(${metric}[${rate}]))[${range}:${resolution}]`;
   const dataResponse = await query_raw<MatrixResponseData>(
     query,
     time.toSeconds()

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Chart } from 'react-chartjs-2';
 import {
   CategoryScale,
@@ -19,6 +20,7 @@ import {
   TooltipLabelStyle,
   TooltipItem,
 } from 'chart.js';
+import { getRelativePosition } from 'chart.js/helpers';
 import { useContext, useEffect, useMemo, useState } from 'react';
 import {
   BoxAndWiskers,
@@ -43,6 +45,7 @@ import {
   toBytesString,
 } from '@/helpers/bytes';
 import { evaluateOrReturn, TypeOrTypeFunction } from '@/helpers/util';
+import { useRouter } from 'next/navigation';
 
 ChartJS.register(
   BoxPlotController,
@@ -69,6 +72,7 @@ export const BytesMetricBoxPlot = ({
   title: string;
   options?: ChartOptions;
 }) => {
+  const router = useRouter();
   const { rate, time, resolution, range } = useContext(GraphContext);
 
   const { data } = useSWR(
@@ -118,6 +122,22 @@ export const BytesMetricBoxPlot = ({
             type: 'logarithmic',
           },
         },
+        onClick: function (evt: any, item: any) {
+          if (item.length === 0) {
+            return;
+          }
+          const position = getRelativePosition(evt, evt.Chart) as any; // Typing is wrong
+          try {
+            const serverName =
+              position.chart.tooltip.body[0].lines[0].split(':')[0];
+            if (serverName != 'Missing Server Name') {
+              router.push(
+                '/director/metrics/origin/?server_name=' +
+                  position.chart.tooltip.body[0].lines[0].split(':')[0]
+              );
+            }
+          } catch {}
+        },
         plugins: {
           tooltip: {
             callbacks: {
@@ -153,6 +173,7 @@ export const MetricBoxPlot = ({
   title: string;
   options?: ChartOptions;
 }) => {
+  const router = useRouter();
   const { rate, time, resolution, range } = useContext(GraphContext);
 
   const { data } = useSWR(
@@ -186,6 +207,22 @@ export const MetricBoxPlot = ({
           y: {
             type: 'logarithmic',
           },
+        },
+        onClick: function (evt: any, item: any) {
+          if (item.length === 0) {
+            return;
+          }
+          const position = getRelativePosition(evt, evt.Chart) as any; // Typing is broken here for the Chartjs library
+          try {
+            const serverName =
+              position.chart.tooltip.body[0].lines[0].split(':')[0];
+            if (serverName != 'Missing Server Name') {
+              router.push(
+                '/director/metrics/origin/?server_name=' +
+                  position.chart.tooltip.body[0].lines[0].split(':')[0]
+              );
+            }
+          } catch {}
         },
         plugins: {
           tooltip: {

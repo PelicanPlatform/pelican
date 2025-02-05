@@ -10,6 +10,7 @@ import {
   TableRow,
 } from '@mui/material';
 import {
+  buildMetric,
   MatrixResponseData,
   query_raw,
   TimeDuration,
@@ -27,12 +28,16 @@ interface ProjectData {
   bytesAccessed: string;
 }
 
-const ProjectTable = () => {
+export const ProjectTable = ({
+  server_name = undefined,
+}: {
+  server_name?: string;
+}) => {
   const { rate, time, range, resolution } = useContext(GraphContext);
 
   const { data: projectData, error: projectError } = useSWR(
     ['projectData', time, range],
-    () => getProjectData(range, time)
+    () => getProjectData(server_name, range, time)
   );
 
   return (
@@ -66,11 +71,18 @@ const ProjectTable = () => {
 };
 
 const getProjectData = async (
+  server_name: string | undefined,
   range: TimeDuration,
   time: DateTime
 ): Promise<ProjectData[]> => {
+  const metric = buildMetric('xrootd_transfer_bytes', {
+    type: { comparator: '!=', value: 'value' },
+    proj: { comparator: '!=', value: '' },
+    server_name,
+  });
+
   const queryResponse = await query_raw<VectorResponseData>(
-    `sum by (proj) (increase(xrootd_transfer_bytes{type!="write", proj!=""}[${range}]))`,
+    `sum by (proj) (increase(${metric}[${range}]))`,
     time.toSeconds()
   );
   const result = queryResponse.data.result;

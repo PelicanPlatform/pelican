@@ -15,6 +15,7 @@ import { grey, blue } from '@mui/material/colors';
 
 import { GraphContext } from '@/components/graphs/GraphContext';
 import {
+  buildMetric,
   MatrixResponseData,
   query_raw,
   TimeDuration,
@@ -31,12 +32,16 @@ interface storageData {
   free: number;
 }
 
-const StorageGraph = () => {
+const StorageGraph = ({
+  server_name = undefined,
+}: {
+  server_name?: string;
+}) => {
   const graphContext = useContext(GraphContext);
 
   const { data } = useSWR<storageData>(
-    ['getStorageData', graphContext.time],
-    () => getStorageData(graphContext.time.toSeconds())
+    ['getStorageData', graphContext.time, server_name],
+    () => getStorageData(server_name, graphContext.time.toSeconds())
   );
 
   const [usedBytes, freeBytes] = convertListBytes([
@@ -74,9 +79,14 @@ const StorageGraph = () => {
 };
 
 const getStorageData = async (
+  server_name: string | undefined,
   time: number = DateTime.now().toSeconds()
 ): Promise<{ free: number; used: number }> => {
-  const url = `sum by (type) (xrootd_storage_volume_bytes{server_type="origin"})`;
+  const metric = buildMetric('xrootd_storage_volume_bytes', {
+    server_type: 'origin',
+    server_name,
+  });
+  const url = `sum by (type) (${metric})`;
   const response = await query_raw<VectorResponseData>(url, time);
 
   const result = response.data.result;
