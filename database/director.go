@@ -47,7 +47,7 @@ func generateTokenID(secret []byte) string {
 	return hex.EncodeToString(hash[:])[:5]
 }
 
-func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKeyCached]) (bool, []string, error) {
+func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKeyCached]) (bool, []string, error) {
 	parts := strings.Split(apiKey, ".")
 	if len(parts) != 2 {
 		return false, nil, errors.New("invalid API key format")
@@ -70,7 +70,7 @@ func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKe
 	}
 
 	var token ApiKey
-	result := DirectorDB.First(&token, "id = ?", id)
+	result := db.First(&token, "id = ?", id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return false, nil, nil // token not found
