@@ -855,3 +855,101 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 	})
 
 }
+
+func TestGenLoggingConfig(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	testCases := []struct {
+		name        string
+		pelLogLevel string
+		logMap      loggingMap
+		input       string
+		want        string
+		wantErr     bool
+	}{
+		{
+			name:        "EmptyLogMap",
+			pelLogLevel: "error",
+			logMap:      loggingMap{},
+			input:       "Trace",
+			want:        "",
+			wantErr:     true, // Programmer forgot to set up the log map
+		},
+		{
+			name:        "BadInput",
+			pelLogLevel: "error",
+			logMap: loggingMap{
+				Info:  "bar",
+				Error: "foo",
+			},
+			input:   "badinput", // Bad input configured by user
+			wantErr: true,
+		},
+		{
+			name:        "EmptyInput",
+			pelLogLevel: "warn",
+			logMap: loggingMap{
+				Info:  "bar",
+				Warn:  "baz",
+				Error: "foo",
+			},
+			want: "baz", // Should pick up "warn" from pel
+		},
+		{
+			name:        "DirectMatch",
+			pelLogLevel: "error",
+			logMap: loggingMap{
+				Info:  "bar",
+				Error: "foo",
+			},
+			input: "info",
+			want:  "bar", // No direct match, should drop to next lowest level
+		},
+		{
+			name:        "HandleUppercase",
+			pelLogLevel: "error",
+			logMap: loggingMap{
+				Info:  "bar",
+				Error: "foo",
+			},
+			input: "Info", // Both uppercase and lowercase input should work
+			want:  "bar",
+		},
+		{
+			name:        "MapDown",
+			pelLogLevel: "error",
+			logMap: loggingMap{
+				Info:  "bar",
+				Error: "foo",
+			},
+			input: "warn",
+			want:  "foo", // No direct match, should drop to next lowest level
+		},
+		{
+			name:        "MapUpIfNoDown",
+			pelLogLevel: "error",
+			logMap: loggingMap{
+				Info:  "bar",
+				Error: "foo",
+			},
+			input: "panic",
+			want:  "foo", // There is no next lowest level, get next highest
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server_utils.ResetTestState()
+			viper.Set("Logging.Level", tc.pelLogLevel)
+
+			output, err := genLoggingConfig(tc.input, tc.logMap)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, output)
+			}
+		})
+	}
+}

@@ -189,6 +189,7 @@ var (
 	Logging_Cache_Ofs = StringParam{"Logging.Cache.Ofs"}
 	Logging_Cache_Pfc = StringParam{"Logging.Cache.Pfc"}
 	Logging_Cache_Pss = StringParam{"Logging.Cache.Pss"}
+	Logging_Cache_PssSetOpt = StringParam{"Logging.Cache.PssSetOpt"}
 	Logging_Cache_Scitokens = StringParam{"Logging.Cache.Scitokens"}
 	Logging_Cache_Xrd = StringParam{"Logging.Cache.Xrd"}
 	Logging_Cache_Xrootd = StringParam{"Logging.Cache.Xrootd"}

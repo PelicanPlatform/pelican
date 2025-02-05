@@ -996,6 +996,18 @@ func SetServerDefaults(v *viper.Viper) error {
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
 	v.SetDefault(param.Origin_S3UrlStyle.GetName(), "path")
 
+	// At the time of writing this comment, Pelican's default log level is set to "Error". However, that's still
+	// too verbose for some XRootD parameters. Because we generally want to use Pelican's configured log level as a
+	// default for the XRootD parameters, we only set the corrected default values for these special XRootD directives
+	// when Pelican is running in its own default Error level. Otherwise we use Pelican's configured log level as a
+	// default for other params (handled in xrootd/xrootd_config.go::mapXrootdLogLevels).
+	if log.GetLevel() == log.ErrorLevel {
+		v.SetDefault(param.Logging_Origin_Scitokens.GetName(), "fatal")
+		v.SetDefault(param.Logging_Origin_Xrootd.GetName(), "info")
+		v.SetDefault(param.Logging_Cache_Scitokens.GetName(), "fatal")
+		v.SetDefault(param.Logging_Cache_Pfc.GetName(), "info")
+	}
+
 	if IsRootExecution() {
 		v.SetDefault(param.Origin_RunLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "origin"))
 		v.SetDefault(param.Cache_RunLocation.GetName(), filepath.Join("/run", "pelican", "xrootd", "cache"))

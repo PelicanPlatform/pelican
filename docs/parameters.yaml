@@ -287,6 +287,14 @@ type: string
 default: error
 components: ["cache"]
 ---
+name: Logging.Cache.PssSetOpt
+description: |+
+  Trace level of XRootD Proxy System Service Set Options. This component reports detailed information about the configuration
+  and operational settings of the Proxy System Service. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+type: string
+default: error
+components: ["cache"]
+---
 name: Logging.Cache.Scitokens
 description: |+
   Trace level of scitokens debug output within XRootD configuration. This entails token management

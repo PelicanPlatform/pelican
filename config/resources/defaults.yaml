@@ -16,22 +16,6 @@
 
 Logging:
   Level: "Error"
-  Origin:
-    Cms: error
-    Http: error
-    Ofs: error
-    Oss: error
-    Scitokens: fatal
-    Xrd: error
-    Xrootd: info
-  Cache:
-    Http: error
-    Ofs: error
-    Pfc: info
-    Pss: error
-    Scitokens: fatal
-    Xrd: error
-    Xrootd: error
 Client:
   SlowTransferRampupTime: 100s
   SlowTransferWindow: 30s
