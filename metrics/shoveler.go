@@ -184,7 +184,7 @@ func packageUdp(packet []byte, remote *net.UDPAddr) ([]byte, error) {
 	return b, nil
 }
 
-func LaunchShoveler(ctx context.Context, egrp *errgroup.Group, metricsPort int) (int, error) {
+func LaunchShoveler(ctx context.Context, egrp *errgroup.Group) (int, error) {
 	shovelerLogger = log.WithField("component", "shoveler")
 	shoveler.SetLogger(shovelerLogger)
 
