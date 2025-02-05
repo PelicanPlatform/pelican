@@ -48,15 +48,10 @@ export const CapabilitiesChip = ({
   return (
     <Box
       sx={{
-        borderRadius: 1,
-        display: 'flex',
-        justifyContent: 'space-between',
-        py: 0.4,
-        px: 1,
-        mb: 0.2,
+        ...CapabilityChipStyle,
         backgroundColor: isActive ? green[300] : grey[100],
         color: isActive ? 'black' : grey[700],
-        border: '1px 1px solid black',
+        overflow: "hidden"
       }}
     >
       <Typography variant={'body2'}>{name}</Typography>
@@ -65,4 +60,15 @@ export const CapabilitiesChip = ({
       </Box>
     </Box>
   );
+};
+
+export const CapabilityChipStyle = {
+  borderRadius: 1,
+  display: 'flex',
+  justifyContent: 'space-between',
+  py: 0.4,
+  px: 1,
+  mb: 0.2,
+  border: '1px 1px solid black',
+  backgroundColor: green[300],
 };

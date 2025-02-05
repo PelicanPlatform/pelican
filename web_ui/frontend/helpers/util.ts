@@ -138,3 +138,18 @@ export const errorToString = (error: ErrorWithCause): string => {
 
   return `${error.message}`;
 };
+
+/**
+ * Multi-sort objects, prioritizing the first sort function
+ */
+export const multiSort = <T>(arr: T[], ...args: ((a: T, b: T) => number)[]) => {
+  return arr.sort((a, b) => {
+    for (const fn of args) {
+      const result = fn(a, b);
+      if (result !== 0) {
+        return result;
+      }
+    }
+    return 0;
+  });
+};
