@@ -135,7 +135,8 @@ FROM dependency-build AS final-stage
 # Any other yum-installable dependencies that need to be present in the final container
 # should go here. Installation in a previous section may result in the packages being
 # installed only in the intermediate builder containers!
-RUN yum install -y --enablerepo=osg-testing sssd-client xrdcl-pelican xrootd-multiuser
+RUN yum update -y --refresh --enablerepo=osg-testing && \
+    yum install -y --refresh --enablerepo=osg-testing sssd-client xrdcl-pelican xrootd-multiuser
 
 WORKDIR /pelican
 

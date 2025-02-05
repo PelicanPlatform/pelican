@@ -69,7 +69,7 @@ ADD https://api.github.com/repos/PelicanPlatform/xrdcl-pelican/git/refs/heads/ma
 RUN \
     git clone https://github.com/PelicanPlatform/xrdcl-pelican.git && \
     cd xrdcl-pelican && \
-    git checkout v0.9.4 && \
+    git checkout v1.0.5 && \
     mkdir build && cd build && \
     cmake -DLIB_INSTALL_DIR=/usr/lib64 -DCMAKE_BUILD_TYPE=RelWithDebInfo .. && \
     make && make install
