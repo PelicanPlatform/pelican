@@ -35,7 +35,6 @@ const ServerUptime = () => {
     ['pelican_director_server_count', rate, time, resolution, range],
     () =>
       getMetricData(
-        'pelican_director_server_count[${range}:${resolution}]',
         rate,
         range,
         resolution,
@@ -54,6 +53,7 @@ const ServerUptime = () => {
             <TableRow>
               <TableCell>Server</TableCell>
               <TableCell>Downtime</TableCell>
+              <TableCell>Restarts</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -67,6 +67,7 @@ const ServerUptime = () => {
                     width={'150px'}
                   />
                 </TableCell>
+                <TableCell>{d.restarts}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -79,31 +80,44 @@ const ServerUptime = () => {
 interface ServerUptimeData {
   serverName: string;
   downtime: (boolean | undefined)[];
+  restarts: number;
 }
 
 export const getMetricData = async (
-  metric: string,
   rate: TimeDuration,
   range: TimeDuration,
   resolution: TimeDuration,
   time: DateTime
 ): Promise<ServerUptimeData[]> => {
-  const query = replaceQueryParameters(metric, {
-    metric,
+
+  const countQuery = replaceQueryParameters('pelican_director_server_count[${range}:${resolution}]', {
     rate,
     range,
     resolution,
   });
-
-  const dataResponse = await query_raw<MatrixResponseData>(
-    query,
+  const countResponse = await query_raw<MatrixResponseData>(
+    countQuery,
     time.toSeconds()
   );
 
-  let uptimes: ServerUptimeData[] = dataResponse.data.result.map((result) => {
+  const restartQuery = replaceQueryParameters('changes(process_start_time_seconds[${range}])', {
+    range
+  })
+  const restartResponse = await query_raw<VectorResponseData>(
+    restartQuery,
+    time.toSeconds()
+  );
+
+  let uptimes: ServerUptimeData[] = countResponse.data.result.map((result) => {
     const serverName = result.metric.server_name;
     const downtime = result.values.map((value) => value[1] === '1');
-    return { serverName, downtime };
+    const restartServer = restartResponse.data.result
+      .filter((r) => r.metric.server_name === serverName)
+    if (restartServer.length === 0) {
+      return { serverName, downtime, restarts: 0 };
+    }
+
+    return { serverName, downtime, restarts: parseInt(restartServer[0].value[1]) };
   });
 
   let maxLength = Math.max(...uptimes.map((u) => u.downtime.length));
@@ -113,7 +127,7 @@ export const getMetricData = async (
     while (downtime.length < maxLength) {
       downtime.unshift(undefined);
     }
-    return { serverName: u.serverName, downtime };
+    return { serverName: u.serverName, downtime, restarts: u.restarts };
   });
 
   return uptimes.sort((a, b) => {
