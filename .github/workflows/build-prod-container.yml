@@ -1,4 +1,4 @@
-name: Build and Push Prod Image
+name: Build and Push Production Images
 
 on:
   pull_request:
@@ -16,82 +16,60 @@ on:
       - dispatch-build
   workflow_dispatch:
 
-
 permissions:
   contents: write
 
 jobs:
-  build-base-image:
+  cache-image-layers:
     runs-on: ubuntu-latest
     steps:
 
-      - name: Checkout for push to main
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Cache base image
+      - name: Create a cache for Docker Buildx
         uses: actions/cache@v4
         with:
           path: /tmp/.base-buildx-cache
           key: base-buildx-${{ github.sha }}-${{ github.run_id }}
-          # allow cache hits from previous runs of the current branch,
-          # parent branch, then upstream branches, in that order
-          restore-keys: |
-            base-buildx-
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
           buildkitd-flags: --debug
 
-      # Free disk space
-      - name: Free Disk space
-        shell: bash
-        run: |
-          sudo rm -rf /usr/local/lib/android  # will release about 10 GB if you don't need Android
+      - name: Save the GitHub workspace
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}
+          key: github-workspace-${{ github.sha }}-${{ github.run_id }}
 
-      - name: Build and push Docker images
+      - name: Create and cache image layers
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./images/Dockerfile
-          target: final-stage
-          build-args: |
-            IS_PR_BUILD=${{ github.event_name == 'pull_request' }}
+          target: origin
           cache-from: type=local,src=/tmp/.base-buildx-cache
           cache-to: type=local,dest=/tmp/.base-buildx-cache,mode=max
 
-  make-date-tag:
+  make-tags:
     runs-on: ubuntu-latest
     outputs:
-      dtag: ${{ steps.mkdatetag.outputs.dtag }}
-    steps:
-      - name: make date tag
-        id: mkdatetag
-        run: echo "dtag=$(date +%Y%m%d-%H%M)" >> $GITHUB_OUTPUT
-
-  build-server-images:
-    needs: [build-base-image, make-date-tag]
-    strategy:
-      fail-fast: False
-      matrix:
-        image:
-          - cache
-          - origin
-          - director
-          - registry
-          - osdf-cache
-          - osdf-origin
-          - osdf-director
-          - osdf-registry
-    runs-on: ubuntu-latest
-
+      TIMESTAMP: ${{ steps.make_timestamp.outputs.TIMESTAMP }}
+      IS_LATEST: ${{ steps.is_latest.outputs.IS_LATEST }}
+      GITHUB_TAG: ${{ steps.determine_tags.outputs.GITHUB_TAG }}
     steps:
 
-      - name: Checkout for push to main
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Determine Latest Version Tag
-        id: latest_version
+      - name: Make timestamp tag
+        id: make_timestamp
+        run: echo "TIMESTAMP=$(date +%Y%m%d-%H%M)" >> $GITHUB_OUTPUT
+
+      - name: Determine whether to tag this build with "latest"
+        id: is_latest
         run: |
           git fetch --tags
           tags=$(git tag -l 'v*.*.*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
@@ -103,15 +81,9 @@ jobs:
             echo "IS_LATEST=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Generate tag list
-        id: generate-tag-list
-        env:
-          TIMESTAMP: ${{ needs.make-date-tag.outputs.dtag }}
-        # Here, we either tag the container with the "latest" tag if
-        # the commit that triggered this action doesn't have a tag,
-        # or we tag it with the commit's tag if one exists
+      - name: Determine the tags that triggered this build
+        id: determine_tags
         run: |
-          IS_LATEST=${{ steps.latest_version.outputs.IS_LATEST }}
           # Check if we're working with a tagged version
           if [ -z "${{ inputs.tag }}" ]
           then
@@ -132,8 +104,34 @@ jobs:
           echo "Current SHA:"
           echo $(git rev-parse HEAD)
 
+          echo "Computed tags:"
           echo $GITHUB_TAG
+          echo "GITHUB_TAG=$GITHUB_TAG" >> $GITHUB_OUTPUT
 
+  build-server-images:
+    needs: [cache-image-layers, make-tags]
+    strategy:
+      fail-fast: False
+      matrix:
+        image:
+          - cache
+          - origin
+          - director
+          - registry
+          - osdf-cache
+          - osdf-origin
+          - osdf-director
+          - osdf-registry
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Generate tag list
+        id: generate-tag-list
+        env:
+          GITHUB_TAG: ${{ needs.make-tags.outputs.GITHUB_TAG }}
+          IS_LATEST: ${{ needs.make-tags.outputs.IS_LATEST }}
+        run: |
           docker_repo="pelican_platform"
           image_name=${{ matrix.image }}
           tag_list=()
@@ -150,8 +148,8 @@ jobs:
           IFS=,
           echo "taglist=${tag_list[*]}" >> $GITHUB_OUTPUT
 
-      - name: Load cached base image
-        uses: actions/cache@v4
+      - name: Restore the cache for Docker Buildx
+        uses: actions/cache/restore@v4
         with:
           path: /tmp/.base-buildx-cache
           key: base-buildx-${{ github.sha }}-${{ github.run_id }}
@@ -171,6 +169,13 @@ jobs:
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
           password: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
 
+      - name: Restore the GitHub workspace
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}
+          key: github-workspace-${{ github.sha }}-${{ github.run_id }}
+          fail-on-cache-miss: true
+
       - name: Build and push Docker images
         uses: docker/build-push-action@v5
         with:
@@ -179,6 +184,4 @@ jobs:
           push: ${{ github.repository == 'PelicanPlatform/pelican' && startsWith(github.ref, 'refs/tags/') }}
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           target: ${{ matrix.image }}
-          build-args: |
-            IS_PR_BUILD=${{ github.event_name == 'pull_request' }}
           cache-from: type=local,src=/tmp/.base-buildx-cache
