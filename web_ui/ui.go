@@ -19,14 +19,17 @@
 package web_ui
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path"
@@ -51,6 +54,8 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 var (
@@ -177,6 +182,152 @@ func getEnabledServers(ctx *gin.Context) {
 	}
 
 	ctx.JSON(200, gin.H{"servers": enabledServers})
+}
+
+func handleSetDowntime(ctx *gin.Context) {
+	// Ensure the server is origin or cache
+	if !config.IsServerEnabled(server_structs.OriginType) && !config.IsServerEnabled(server_structs.CacheType) {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Downtime setting is only available for origin or cache servers",
+		})
+		return
+	}
+
+	// Get the downtime on/off status from the request body
+	// Assuming webUI sends a JSON payload like {"enableDowntime": true/false}
+	var downtimeStatus struct {
+		EnableDowntime bool `json:"enableDowntime"`
+	}
+	if err := ctx.ShouldBindJSON(&downtimeStatus); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid downtime status in request body",
+		})
+		return
+	}
+
+	hostname := param.Server_Hostname.GetString()
+	serverUrl := param.Origin_Url.GetString()
+
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		log.Error("failed to get federaion:", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server error when getting federation information: " + err.Error(),
+		})
+	}
+	directorUrlStr := fedInfo.DirectorEndpoint
+	if directorUrlStr == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Director endpoint URL is not known",
+		})
+	}
+	directorUrl, err := url.Parse(directorUrlStr)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to parse Federation.DirectorURL: " + directorUrlStr,
+		})
+	}
+
+	directorUrl.Path = "/api/v1.0/director/downtime"
+
+	// Construct the request body
+	downtimeRequest := server_structs.DowntimeRequest{
+		ServerUrl:      serverUrl,
+		Hostname:       hostname,
+		EnableDowntime: downtimeStatus.EnableDowntime,
+	}
+
+	reqBody, err := json.Marshal(downtimeRequest)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to marshal downtime request",
+		})
+		return
+	}
+
+	// Create token for setting downtime
+	issuerUrl, err := config.GetServerIssuerURL()
+	if err != nil {
+		log.Errorf("Failed to get server issuer url %v", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server encountered error when getting server issuer url " + err.Error(),
+		})
+		return
+	}
+	advTokenCfg := token.NewWLCGToken()
+	advTokenCfg.Lifetime = time.Minute
+	advTokenCfg.Issuer = issuerUrl
+	advTokenCfg.AddAudiences(fedInfo.DirectorEndpoint)
+	advTokenCfg.Subject = "origin" // For cache: advTokenCfg.Subject = "cache"
+	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)
+
+	tok, err := advTokenCfg.CreateToken()
+	if err != nil {
+		log.Errorf("Failed to create token for setting downtime %v", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server encountered error when creating token for setting downtime " + err.Error(),
+		})
+		return
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, directorUrl.String(), bytes.NewBuffer(reqBody))
+	if err != nil {
+		log.Error("Failed to create a POST request for downtime setting")
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server encountered error when creating a POST request for downtime setting " + err.Error(),
+		})
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tok)
+	userAgent := "pelican-origin/" + config.GetVersion() // For cache: "pelican-cache/"
+	req.Header.Set("User-Agent", userAgent)
+	log.Warningf("request url: %s", req.URL.String())
+
+	tr := config.GetTransport()
+	client := http.Client{Transport: tr}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to send request to director: %v", err),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Process the response from director
+	var directorResponse server_structs.SimpleApiResp
+	err = json.NewDecoder(resp.Body).Decode(&directorResponse)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to parse director's response: " + err.Error(),
+		})
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		ctx.JSON(resp.StatusCode, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Director returned error: %s", directorResponse.Msg),
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespFailed,
+		Msg:    fmt.Sprintf("Successfully set the downtime of %s to %v", hostname, downtimeRequest.EnableDowntime),
+	})
 }
 
 func handleGlobusPages(ctx *gin.Context) {
@@ -407,6 +558,10 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.PATCH("/api/v1.0/config", AuthHandler, AdminAuthHandler, updateConfigValues)
 	engine.POST("/api/v1.0/restart", AuthHandler, AdminAuthHandler, hotRestartServer)
 	engine.GET("/api/v1.0/servers", getEnabledServers)
+
+	// Both origin and cache can use this endpoint to set downtime, director will handle the difference
+	engine.POST("/api/v1.0/downtime", AuthHandler, AdminAuthHandler, handleSetDowntime)
+
 	// Health check endpoint for web engine
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Web Engine Running. Time: %s", time.Now().String())})

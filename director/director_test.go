@@ -2777,7 +2777,7 @@ func TestSetDowntimebyServer(t *testing.T) {
 
 		ad := server_structs.OriginAdvertiseV2{
 			BrokerURL: "https://broker-url.org",
-			DataURL:   "https://or-url.org",
+			DataURL:   "https://or-url.org:8443",
 			Name:      "test",
 			Namespaces: []server_structs.NamespaceAdV2{{
 				Path:   "/foo/bar",
@@ -2795,7 +2795,7 @@ func TestSetDowntimebyServer(t *testing.T) {
 		// Check to see that the code exits with status code 200 after given it a good token
 		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
 
-		get := serverAds.Get("https://or-url.org")
+		get := serverAds.Get("https://or-url.org:8443")
 		getAd := get.Value()
 		require.NotNil(t, get, "Coudln't find server in the director cache.")
 		assert.Equal(t, getAd.Name, ad.Name)
@@ -2804,7 +2804,8 @@ func TestSetDowntimebyServer(t *testing.T) {
 
 		// Second request - downtime setting
 		downtimeRequest := server_structs.DowntimeRequest{
-			ServerUrl:      "https://or-url.org",
+			ServerUrl:      "https://or-url.org:8443",
+			Hostname:       "or-url.org",
 			EnableDowntime: true,
 		}
 		requestBody, _ := json.Marshal(downtimeRequest)
@@ -2819,7 +2820,7 @@ func TestSetDowntimebyServer(t *testing.T) {
 		response, err := getLastJsonObj(w.Body.String())
 		assert.NoError(t, err, "Error unmarshaling response")
 		assert.Equal(t, server_structs.RespOK, response.Status)
-		assert.Equal(t, "Successfully set downtime", response.Msg)
+		assert.Equal(t, "Successfully set the downtime of Origin test to true", response.Msg)
 
 		// Test invalid token
 		wrongToken := "i-am-a-wrong-token"
