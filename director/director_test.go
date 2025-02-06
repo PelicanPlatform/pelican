@@ -2809,7 +2809,7 @@ func TestSetDowntimebyServer(t *testing.T) {
 		}
 		requestBody, _ := json.Marshal(downtimeRequest)
 
-		r.POST("/api/v1.0/director/downtime", setDowntimebyServer)
+		r.POST("/api/v1.0/director/downtime", setDowntimeByServer)
 		setupDowntimeRequest(c, requestBody, token)
 
 		r.ServeHTTP(w, c.Request)

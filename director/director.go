@@ -1517,7 +1517,7 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 }
 
 // Endpoint for origin and cache servers to set their own downtime in director
-func setDowntimebyServer(ctx *gin.Context) {
+func setDowntimeByServer(ctx *gin.Context) {
 	downtimeRequest := server_structs.DowntimeRequest{}
 	err := ctx.ShouldBindBodyWith(&downtimeRequest, binding.JSON)
 	if err != nil {
@@ -1528,8 +1528,8 @@ func setDowntimebyServer(ctx *gin.Context) {
 		return
 	}
 
-	// Get the server name via server url in the request body
-	serverUrl := downtimeRequest.ServerUrl // A full URL to the server starting with http:// or https://
+	// Server's XRootD URL starting with http:// or https://, and ending with a port number
+	serverUrl := downtimeRequest.ServerUrl
 	ad, err := getServerAd(serverUrl)
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -1609,7 +1609,7 @@ func setDowntimebyServer(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
 		Status: server_structs.RespOK,
-		Msg:    "Successfully set downtime",
+		Msg:    fmt.Sprintf("Successfully set the downtime of %s %s to %v", ad.Type, serverName, downtimeRequest.EnableDowntime),
 	})
 }
 
@@ -1670,7 +1670,7 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/discoverServers", discoverOriginCache)
 
 		// Cache/Origin sets their own downtime
-		directorAPIV1.POST("/downtime", setDowntimebyServer)
+		directorAPIV1.POST("/downtime", setDowntimeByServer)
 	}
 
 	directorAPIV2 := router.Group("/api/v2.0/director", web_ui.ServerHeaderMiddleware)

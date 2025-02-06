@@ -164,7 +164,21 @@ func handleExports(ctx *gin.Context) {
 }
 
 func handleSetDowntime(ctx *gin.Context) {
-	serverUrl := param.Server_ExternalWebUrl.GetString()
+	// Get the downtime on/off status from the request body
+	// Assuming webUI sends a JSON payload like {"enableDowntime": true/false}
+	var downtimeStatus struct {
+		EnableDowntime bool `json:"enableDowntime"`
+	}
+	if err := ctx.ShouldBindJSON(&downtimeStatus); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid downtime status in request body",
+		})
+		return
+	}
+
+	hostname := param.Server_Hostname.GetString()
+	serverUrl := param.Origin_Url.GetString()
 
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
@@ -194,21 +208,9 @@ func handleSetDowntime(ctx *gin.Context) {
 	// Construct the request body
 	downtimeRequest := server_structs.DowntimeRequest{
 		ServerUrl:      serverUrl,
-		EnableDowntime: true, // or false, depending on what the UI sends below
+		Hostname:       hostname,
+		EnableDowntime: downtimeStatus.EnableDowntime,
 	}
-	// Get the downtime enable/disable status from the request body
-	// Assuming webUI sends a JSON payload like {"enableDowntime": true/false}
-	var downtimeStatus struct {
-		EnableDowntime bool `json:"enableDowntime"`
-	}
-	if err := ctx.ShouldBindJSON(&downtimeStatus); err != nil {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Invalid downtime status in request body",
-		})
-		return
-	}
-	downtimeRequest.EnableDowntime = downtimeStatus.EnableDowntime
 
 	reqBody, err := json.Marshal(downtimeRequest)
 	if err != nil {
@@ -292,8 +294,10 @@ func handleSetDowntime(ctx *gin.Context) {
 		})
 		return
 	}
-
-	ctx.JSON(http.StatusOK, directorResponse)
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespFailed,
+		Msg:    fmt.Sprintf("Successfully set the downtime of %s to %v", hostname, downtimeRequest.EnableDowntime),
+	})
 }
 
 func RegisterOriginWebAPI(engine *gin.Engine) error {

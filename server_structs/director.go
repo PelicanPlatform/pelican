@@ -151,6 +151,7 @@ type (
 
 	DowntimeRequest struct {
 		ServerUrl      string `json:"server_url"`
+		Hostname       string `json:"hostname"`
 		EnableDowntime bool   `json:"enable_downtime"`
 	}
 
