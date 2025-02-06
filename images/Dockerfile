@@ -101,7 +101,7 @@ RUN yum -y update \
 # all our patches are ingested upstream in the OSG repos
 ARG XROOTD_VERSION="5.7.2"
 ARG XROOTD_ARCH="x86_64"
-ARG XROOTD_RELEASE="1.4.purge.osg${BASE_OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_RELEASE="1.5.purge.osg${BASE_OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VERSION}/${XROOTD_RELEASE}"
 
 # Define packages and install them. Note that they have to be installed in the same yum command to avoid
