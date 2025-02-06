@@ -30,11 +30,9 @@ ARG JSON_VERSION="v3.11.3"
 ARG JSON_SCHEMA_VALIDATOR_VERSION="2.3.0"
 ARG LOTMAN_VERSION="v0.0.4"
 
-# For building the testing environment (container image). The safest choice
-# is to use the osdf-origin stage from the build being tested, but if you
-# know that an existing image already has the appropriate version of XRootD,
-# OA4MP, etc., you might use that in order to speed up the build process.
-ARG TESTING_BASE_IMAGE=osdf-origin
+# Set the image or build stage to use for building the development and
+# testing containers. It should contain Pelican's run-time dependencies.
+ARG DEVTEST_BASE_IMAGE=origin-base
 
 # Throughout the build, we need to refer to the platform that
 # we're building *on* and the platform that we're building *for*.
@@ -61,6 +59,7 @@ FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-ser
 # depends on the target we're building for.
 #################################################################
 FROM --platform=${BUILDPLATFORM} almalinux:9 AS pelican-build-base
+ARG BUILDPLATFORM
 ARG BUILDOS
 ARG BUILDARCH
 ARG GO_VER
@@ -75,7 +74,10 @@ baseurl=https://repo.goreleaser.com/yum/
 enabled=1
 gpgcheck=0
 ENDCOPY
-RUN dnf install -y goreleaser
+RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
+  dnf install -y goreleaser
+ENDRUN
 
 RUN curl -O https://dl.google.com/go/go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz \
     && rm -rf /usr/local/go \
@@ -86,12 +88,15 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 # We use npm to bootstrap the installation of the required Node.js version
 # and an updated version of npm itself. The `dnf remove` in the middle is to
 # avoid there being multiple, incompatible versions of npm.
-RUN dnf install -y npm \
-    && npm install -g n \
-    && n ${NODEJS_VER} \
-    && dnf remove -y npm \
-    && npm install -g npm@latest \
-    && n prune
+RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
+  dnf install -y npm
+  npm install -g n
+  n ${NODEJS_VER}
+  dnf remove -y npm
+  npm install -g npm@latest
+  n prune
+ENDRUN
 
 #################################################################
 # Pelican Build
@@ -444,25 +449,46 @@ ENTRYPOINT ["/entrypoint.sh", "osdf-server", "cache"]
 CMD ["serve"]
 
 #################################################################
-# Testing Container Base
+# DevTest Container Base
 #################################################################
-FROM ${TESTING_BASE_IMAGE} AS testing-container-base
+FROM ${DEVTEST_BASE_IMAGE} AS devtest-container-base
 ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 ARG GO_VER
+ARG NODEJS_VER
 
-WORKDIR /pelican
-ENTRYPOINT []
-CMD ["/bin/bash"]
+# Install the Go and Node.js toolchains using the same commands as the
+# pelican-build-init stage, taking care that the installation matches this
+# build's target platform.
 
-# Install Go using the same commands as the pelican-build-init stage, taking
-# care that the installation matches this build's target platform.
+COPY <<ENDCOPY /etc/yum.repos.d/goreleaser.repo
+[goreleaser]
+name=GoReleaser
+baseurl=https://repo.goreleaser.com/yum/
+enabled=1
+gpgcheck=0
+ENDCOPY
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
+  dnf install -y goreleaser
+ENDRUN
+
 RUN curl -O https://dl.google.com/go/go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
     && rm -rf /usr/local/go \
     && tar -C /usr/local -xzf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
     && rm -rf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
+
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
+  dnf install -y npm
+  npm install -g n
+  n ${NODEJS_VER}
+  dnf remove -y npm
+  npm install -g npm@latest
+  n prune
+ENDRUN
 
 # Install the MinIO server and client for S3 tests.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
@@ -480,59 +506,52 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 ENDRUN
 
 #################################################################
-# Testing Container
-#################################################################
-FROM testing-container-base AS testing-container
-
-# Copy the Pelican source files we used for this build and the
-# resulting build artifacts.
-COPY --from=pelican-build /pelican-build /pelican-build
-
-#################################################################
 # Development Container
+#
+# This container should contain all of Pelican's dependencies,
+# both run-time and development-time. Because it is intended for
+# development, it does not need Pelican itself.
 #################################################################
-FROM testing-container-base AS development-container
-ARG NODEJS_VER
-
-# Install GoReleaser using the same commands as the pelican-build-init stage.
-COPY <<ENDCOPY /etc/yum.repos.d/goreleaser.repo
-[goreleaser]
-name=GoReleaser
-baseurl=https://repo.goreleaser.com/yum/
-enabled=1
-gpgcheck=0
-ENDCOPY
-RUN dnf install -y goreleaser
-
-# Install Node.js and npm using the same commands as the pelican-build-init stage.
-RUN dnf install -y npm \
-    && npm install -g n \
-    && n ${NODEJS_VER} \
-    && dnf remove -y npm \
-    && npm install -g npm@latest \
-    && n prune
+FROM devtest-container-base AS dev-container
+ARG TARGETPLATFORM
 
 # Enable the CodeReady Linux Builder repository.
 RUN /usr/bin/crb enable
 
 # Install a kitchen sink's worth of development tools and libraries.
-RUN dnf install -y \
-          docker \
-          jq \
-          procps \
-          sssd-client \
-          vim \
-          \
-          cmake3 \
-          gcc-c++ \
-          gdb \
-          git \
-          make \
-          valgrind \
-          \
-          curl-devel \
-          gtest-devel \
-          libcap-devel \
-          openssl-devel \
-          sqlite-devel \
-          zlib-devel
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
+  dnf install -y --enablerepo=osg-contrib \
+        cmake3 \
+        docker \
+        gdb \
+        gcc-c++ \
+        git \
+        jq \
+        make \
+        nano \
+        procps \
+        python3-pip \
+        systemd \
+        valgrind \
+        vim \
+        \
+        curl-devel \
+        gtest-devel \
+        libcap-devel \
+        libuuid-devel \
+        openssl-devel \
+        sqlite-devel \
+        tinyxml2-devel \
+        zlib-devel \
+        \
+        json-schema-validator-devel \
+        nlohmann-json-devel
+
+# Suppress Git's "dubious ownership" warning.
+ENV GOFLAGS="-buildvcs=false"
+
+RUN python3 -m pip --no-cache-dir install pre-commit
+COPY images/dev-config.yaml /etc/pelican/pelican.yaml
+WORKDIR /app
+COPY ./images/dev-container-entrypoint.sh /dev-container-entrypoint.sh
+ENTRYPOINT ["/dev-container-entrypoint.sh"]

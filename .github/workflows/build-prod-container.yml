@@ -1,4 +1,4 @@
-name: Build and Push Production Images
+name: Build and Push Container Images
 
 on:
   pull_request:
@@ -24,14 +24,18 @@ jobs:
     outputs:
       platforms: ${{ steps.parameters.outputs.PLATFORMS }}
       push-server: ${{ steps.parameters.outputs.PUSH_SERVER }}
+      push-dev: ${{ steps.parameters.outputs.PUSH_DEV }}
+      build-dev: ${{ steps.parameters.outputs.BUILD_DEV }}
     runs-on: ubuntu-latest
     steps:
       - name: Determine build parameters
         id: parameters
         run: |
           PUSH_SERVER=${{ github.repository == 'PelicanPlatform/pelican' && startsWith(github.ref, 'refs/tags/') }}
+          PUSH_DEV=${{ github.repository == 'PelicanPlatform/pelican' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          BUILD_DEV=${{ github.event_name == 'pull_request' || ( github.event_name == 'push' && github.ref == 'refs/heads/main' ) }}
 
-          if ${PUSH_SERVER}; then
+          if ${PUSH_SERVER} || ${PUSH_DEV}; then
             PLATFORMS=linux/amd64,linux/arm64
           else
             PLATFORMS=linux/amd64
@@ -39,6 +43,8 @@ jobs:
 
           echo "PLATFORMS=${PLATFORMS}" >> $GITHUB_OUTPUT
           echo "PUSH_SERVER=${PUSH_SERVER}" >> $GITHUB_OUTPUT
+          echo "PUSH_DEV=${PUSH_DEV}" >> $GITHUB_OUTPUT
+          echo "BUILD_DEV=${BUILD_DEV}" >> $GITHUB_OUTPUT
 
   cache-image-layers:
     needs: [set-build-parameters]
@@ -191,8 +197,6 @@ jobs:
         with:
           buildkitd-flags: --debug
 
-        # We only login to OSG harbor and push the image
-        # if the workflow was for the release
       - name: Log in to OSG Harbor
         uses: docker/login-action@v3
         if: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
@@ -217,4 +221,61 @@ jobs:
           target: ${{ matrix.image }}
           push: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
+          cache-from: type=local,src=/tmp/.base-buildx-cache
+
+  build-dev-image:
+    needs: [set-build-parameters, cache-image-layers]
+    if: ${{ needs.set-build-parameters.outputs.build-dev == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Determine image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: hub.opensciencegrid.org/pelican_platform/pelican-dev
+          tags: |
+            type=raw,value=latest-itb
+            type=raw,value=sha-{{sha}}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: amd64,arm64
+
+      - name: Restore the cache for Docker Buildx
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/.base-buildx-cache
+          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --debug
+
+      - name: Log in to OSG Harbor
+        uses: docker/login-action@v3
+        if: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
+        with:
+          registry: hub.opensciencegrid.org
+          username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
+          password: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
+
+      - name: Restore the GitHub workspace
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}
+          key: github-workspace-${{ github.sha }}-${{ github.run_id }}
+          fail-on-cache-miss: true
+
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./images/Dockerfile
+          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
+          target: dev-container
+          push: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=local,src=/tmp/.base-buildx-cache
