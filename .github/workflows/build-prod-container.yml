@@ -20,12 +20,38 @@ permissions:
   contents: write
 
 jobs:
+  set-build-parameters:
+    outputs:
+      platforms: ${{ steps.parameters.outputs.PLATFORMS }}
+      push-server: ${{ steps.parameters.outputs.PUSH_SERVER }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine build parameters
+        id: parameters
+        run: |
+          PUSH_SERVER=${{ github.repository == 'PelicanPlatform/pelican' && startsWith(github.ref, 'refs/tags/') }}
+
+          if ${PUSH_SERVER}; then
+            PLATFORMS=linux/amd64,linux/arm64
+          else
+            PLATFORMS=linux/amd64
+          fi
+
+          echo "PLATFORMS=${PLATFORMS}" >> $GITHUB_OUTPUT
+          echo "PUSH_SERVER=${PUSH_SERVER}" >> $GITHUB_OUTPUT
+
   cache-image-layers:
+    needs: [set-build-parameters]
     runs-on: ubuntu-latest
     steps:
 
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: amd64,arm64
 
       - name: Create a cache for Docker Buildx
         uses: actions/cache@v4
@@ -49,6 +75,7 @@ jobs:
         with:
           context: .
           file: ./images/Dockerfile
+          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
           target: origin
           cache-from: type=local,src=/tmp/.base-buildx-cache
           cache-to: type=local,dest=/tmp/.base-buildx-cache,mode=max
@@ -109,7 +136,7 @@ jobs:
           echo "GITHUB_TAG=$GITHUB_TAG" >> $GITHUB_OUTPUT
 
   build-server-images:
-    needs: [cache-image-layers, make-tags]
+    needs: [set-build-parameters, cache-image-layers, make-tags]
     strategy:
       fail-fast: False
       matrix:
@@ -125,6 +152,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: amd64,arm64
 
       - name: Generate tag list
         id: generate-tag-list
@@ -163,7 +195,7 @@ jobs:
         # if the workflow was for the release
       - name: Log in to OSG Harbor
         uses: docker/login-action@v3
-        if: github.repository == 'PelicanPlatform/pelican' && startsWith(github.ref, 'refs/tags/')
+        if: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
         with:
           registry: hub.opensciencegrid.org
           username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
@@ -181,7 +213,8 @@ jobs:
         with:
           context: .
           file: ./images/Dockerfile
-          push: ${{ github.repository == 'PelicanPlatform/pelican' && startsWith(github.ref, 'refs/tags/') }}
-          tags: "${{ steps.generate-tag-list.outputs.taglist }}"
+          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
           target: ${{ matrix.image }}
+          push: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
+          tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           cache-from: type=local,src=/tmp/.base-buildx-cache

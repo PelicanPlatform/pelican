@@ -100,6 +100,7 @@ RUN dnf install -y npm \
 # COPY them out as needed.
 #################################################################
 FROM --platform=${BUILDPLATFORM} pelican-build-base AS pelican-build
+ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -110,8 +111,8 @@ ENV GOARCH=${TARGETARCH}
 COPY . .
 
 # Have Docker's build process cache the Go build's cache directories.
-RUN --mount=type=cache,target=/root/go,sharing=locked \
-    --mount=type=cache,target=/root/.cache,sharing=locked \
+RUN --mount=type=cache,id=go-mod-${TARGETPLATFORM},target=/root/go,sharing=locked \
+    --mount=type=cache,id=go-cache-${TARGETPLATFORM},target=/root/.cache,sharing=locked \
     <<ENDRUN
 
   set -eux
@@ -147,10 +148,11 @@ ENDRUN
 # to build (director, registry, origin, cache, etc.).
 #################################################################
 FROM hub.opensciencegrid.org/osg-htc/software-base:${OSG_SERIES}-${BASE_OS}-${OSG_REPO} AS pelican-software-base
+ARG TARGETPLATFORM
 
 WORKDIR /pelican
 
-RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<ENDRUN
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
 
   # Throughout this build, we will have Docker's build process cache dnf's
@@ -171,6 +173,7 @@ ENDRUN
 # everything that can be installed from an RPM.
 #################################################################
 FROM pelican-software-base AS xrootd-software-init
+ARG TARGETPLATFORM
 ARG TARGETARCH
 ARG BASE_OS
 ARG OSG_SERIES
@@ -188,7 +191,7 @@ ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xroot
 
 # The packages from Koji need to be installed in a single dnf command in
 # order to avoid unresolvable dependencies.
-RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<ENDRUN
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
 
   # NOTE: The `devel` packages are not necessary for any production
@@ -317,8 +320,9 @@ FROM xrootd-software-init AS xrootd-software-base
 # origin, except for the `pelican` binary itself.
 #################################################################
 FROM xrootd-software-base AS origin-base
+ARG TARGETPLATFORM
 
-RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<ENDRUN
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
   dnf install -y java-17-openjdk-headless
 ENDRUN
@@ -411,7 +415,8 @@ ENTRYPOINT ["/entrypoint.sh", "pelican", "origin"]
 CMD ["serve"]
 
 FROM origin AS osdf-origin
-RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<ENDRUN
+ARG TARGETPLATFORM
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
 
   # These IDs must match OSG's sssd sidecar containers.
@@ -442,6 +447,7 @@ CMD ["serve"]
 # Testing Container Base
 #################################################################
 FROM ${TESTING_BASE_IMAGE} AS testing-container-base
+ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 ARG GO_VER
@@ -459,7 +465,7 @@ RUN curl -O https://dl.google.com/go/go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.g
 ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Install the MinIO server and client for S3 tests.
-RUN --mount=type=cache,target=/var/cache/dnf,sharing=locked <<ENDRUN
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
 
   if [ "$TARGETARCH" = "amd64" ]; then
