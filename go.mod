@@ -49,7 +49,6 @@ require (
 	golang.org/x/oauth2 v0.18.0
 	golang.org/x/term v0.22.0
 	gopkg.in/yaml.v3 v3.0.1
-	gorm.io/driver/sqlite v1.5.2
 	gorm.io/gorm v1.25.7
 	kernel.org/pub/linux/libs/security/libcap/cap v1.2.69
 )
@@ -77,7 +76,6 @@ require (
 	github.com/lestrrat-go/httprc v1.0.5 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
-	github.com/mattn/go-sqlite3 v2.0.3+incompatible // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect

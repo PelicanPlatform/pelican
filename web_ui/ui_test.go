@@ -36,12 +36,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tg123/go-htpasswd"
 	"golang.org/x/sync/errgroup"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -49,6 +49,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -524,8 +525,20 @@ func TestApiToken(t *testing.T) {
 		}
 	})
 
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	defer func() { require.NoError(t, egrp.Wait()) }()
+	defer cancel()
+
+	dirName := t.TempDir()
+	server_utils.ResetTestState()
+	viper.Set("ConfigDir", dirName)
+	config.InitConfig()
+	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
+	err := config.InitServer(ctx, server_structs.OriginType)
+	require.NoError(t, err)
+
 	content := "admin:password\n"
-	_, err := tempPasswdFile.WriteString(content)
+	_, err = tempPasswdFile.WriteString(content)
 	assert.NoError(t, err, "Error writing to temp password file")
 
 	//Configure UI
@@ -533,10 +546,11 @@ func TestApiToken(t *testing.T) {
 	assert.NoError(t, err)
 
 	//Create a user for testing
-	user := "admin" // With admin privilege
-	err = WritePasswordEntry(user, "password")
+	err = WritePasswordEntry("user", "password")
 	assert.NoError(t, err, "error writing a user")
 	password := "password"
+	user := "user"
+
 	payload := fmt.Sprintf(`{"user": "%s", "password": "%s"}`, user, password)
 
 	//Create a request
