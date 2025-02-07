@@ -1030,7 +1030,7 @@ func genLoggingConfig(input string, logMap loggingMap) (string, error) {
 
 	level := levelMap[strings.ToLower(input)]
 	if level == "" {
-		return "", errors.Errorf("unrecognized input log level %s", input)
+		return "", errors.Errorf("unrecognized input log level '%s'", input)
 	}
 
 	return level, nil

@@ -996,16 +996,43 @@ func SetServerDefaults(v *viper.Viper) error {
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
 	v.SetDefault(param.Origin_S3UrlStyle.GetName(), "path")
 
-	// At the time of writing this comment, Pelican's default log level is set to "Error". However, that's still
+	// At the time of this comment, Pelican's default log level is set to "Error". However, that's still
 	// too verbose for some XRootD parameters. Because we generally want to use Pelican's configured log level as a
 	// default for the XRootD parameters, we only set the corrected default values for these special XRootD directives
 	// when Pelican is running in its own default Error level. Otherwise we use Pelican's configured log level as a
-	// default for other params (handled in xrootd/xrootd_config.go::mapXrootdLogLevels).
+	// default for other params.
+	defaultLevel := log.GetLevel().String()
+	for _, param := range []param.StringParam{
+		param.Logging_Origin_Cms,
+		param.Logging_Origin_Xrd,
+		param.Logging_Origin_Ofs,
+		param.Logging_Origin_Oss,
+		param.Logging_Origin_Http,
+		param.Logging_Cache_Ofs,
+		param.Logging_Cache_Pss,
+		param.Logging_Cache_PssSetOpt,
+		param.Logging_Cache_Http,
+		param.Logging_Cache_Xrd,
+		param.Logging_Cache_Xrootd,
+	} {
+		v.SetDefault(param.GetName(), defaultLevel)
+	}
+
+	// If Pelican is at its default error level, do our custom mapping
 	if log.GetLevel() == log.ErrorLevel {
 		v.SetDefault(param.Logging_Origin_Scitokens.GetName(), "fatal")
 		v.SetDefault(param.Logging_Origin_Xrootd.GetName(), "info")
 		v.SetDefault(param.Logging_Cache_Scitokens.GetName(), "fatal")
 		v.SetDefault(param.Logging_Cache_Pfc.GetName(), "info")
+	} else { // Otherwise treat them as any other log level
+		for _, param := range []param.StringParam{
+			param.Logging_Origin_Scitokens,
+			param.Logging_Origin_Xrootd,
+			param.Logging_Cache_Scitokens,
+			param.Logging_Cache_Pfc,
+		} {
+			v.SetDefault(param.GetName(), defaultLevel)
+		}
 	}
 
 	if IsRootExecution() {
