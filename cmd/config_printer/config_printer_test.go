@@ -47,7 +47,7 @@ func setupMockConfig(t *testing.T) error {
 	// Setting Non-default values
 	viper.Set("Logging.Cache.Http", "info")
 	viper.Set("Logging.Cache.Xrootd", "info")
-	viper.Set("Logging.Level", "info")
+	viper.Set("Logging.Level", "trace")
 	viper.Set("Logging.Origin.Http", "info")
 
 	return nil
@@ -76,13 +76,13 @@ func TestConfigGet(t *testing.T) {
 		{
 			name:        "no-arguments",
 			args:        []string{},
-			expected:    []string{`logging.cache.http: "info"`, `logging.cache.xrootd: "info"`, `logging.level: "info"`, `logging.origin.http: "info"`},
+			expected:    []string{`logging.cache.http: "info"`, `logging.cache.xrootd: "info"`, `logging.level: "trace"`, `logging.origin.http: "info"`},
 			notExpected: []string{},
 		},
 		{
 			name:        "match-http",
 			args:        []string{"Http", "level"},
-			expected:    []string{`logging.cache.http: "info"`, `logging.level: "info"`, `logging.origin.http: "info"`},
+			expected:    []string{`logging.cache.http: "info"`, `logging.level: "trace"`, `logging.origin.http: "info"`},
 			notExpected: []string{`logging.cache.xrootd: "info"`},
 		},
 
@@ -90,7 +90,7 @@ func TestConfigGet(t *testing.T) {
 			name:        "match-http-with-origin-flag",
 			args:        []string{"Http", "-m", "origin"},
 			expected:    []string{`logging.origin.http: "info"`},
-			notExpected: []string{`logging.cache.http: "info"`, `logging.cache.xrootd: "info"`, `logging.level: "info"`},
+			notExpected: []string{`logging.cache.http: "info"`, `logging.cache.xrootd: "info"`, `logging.level: "trace"`},
 		},
 	}
 
@@ -187,7 +187,7 @@ func TestConfigSummary(t *testing.T) {
 
 	got := strings.TrimSpace(strings.ToLower(buf.String()))
 
-	expectedLines := []string{`logging:`, `    cache:`, `    origin:`, `    level: info`, `        http: info`}
+	expectedLines := []string{`logging:`, `    cache:`, `    origin:`, `    level: trace`, `        http: info`}
 	notExpectedLines := []string{`debug: true`}
 
 	for _, expected := range expectedLines {
