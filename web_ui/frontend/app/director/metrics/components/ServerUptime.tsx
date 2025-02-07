@@ -194,6 +194,7 @@ const restartResponseToPoints = (r: MatrixResult): Point[] => {
         value: n,
         fill: 'black',
         title: 'Restart',
+        onClick: (p) => { alert('Restart at ' + (new Date(p.value * 1000)).toLocaleString()); },
       });
     }
     previousValue = v;
