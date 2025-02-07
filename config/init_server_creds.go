@@ -189,20 +189,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool)
 	if keyLocation == "" {
 		return errors.New("failed to generate private key: key location is empty")
 	}
-	uid, err := GetDaemonUID()
-	if err != nil {
-		return err
-	}
-
-	gid, err := GetDaemonGID()
-	if err != nil {
-		return err
-	}
-	user, err := GetDaemonUser()
-	if err != nil {
-		return err
-	}
-	groupname, err := GetDaemonGroup()
+	user, err := GetPelicanUser()
 	if err != nil {
 		return err
 	}
@@ -222,7 +209,7 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool)
 	log.Warningf("Will generate a new private key at location: %v", keyLocation)
 
 	keyDir := filepath.Dir(keyLocation)
-	if err := MkdirAll(keyDir, 0750, -1, gid); err != nil {
+	if err := MkdirAll(keyDir, 0750, -1, user.Gid); err != nil {
 		return err
 	}
 	// In this case, the private key file doesn't exist.
@@ -235,16 +222,16 @@ func GeneratePrivateKey(keyLocation string, curve elliptic.Curve, allowRSA bool)
 	// Windows does not have "chown", has to work differently
 	currentOS := runtime.GOOS
 	if currentOS == "windows" {
-		cmd := exec.Command("icacls", keyLocation, "/grant", user+":F")
+		cmd := exec.Command("icacls", keyLocation, "/grant", user.Username+":F")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
-				keyLocation, groupname, string(output))
+				keyLocation, user.Groupname, string(output))
 		}
 	} else { // Else we are running on linux/mac
-		if err = os.Chown(keyLocation, uid, gid); err != nil {
+		if err = os.Chown(keyLocation, user.Uid, user.Gid); err != nil {
 			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
-				keyLocation, groupname)
+				keyLocation, user.Groupname)
 		}
 	}
 
@@ -273,15 +260,7 @@ func generatePrivateKeyToFile(file *os.File, curve elliptic.Curve) error {
 // for non-production environment so that we can use the private key of the CA
 // to sign the host certificate
 func GenerateCACert() error {
-	gid, err := GetDaemonGID()
-	if err != nil {
-		return err
-	}
-	groupname, err := GetDaemonGroup()
-	if err != nil {
-		return err
-	}
-	user, err := GetDaemonUser()
+	user, err := GetPelicanUser()
 	if err != nil {
 		return err
 	}
@@ -306,7 +285,7 @@ func GenerateCACert() error {
 
 	// No existing CA cert present, generate a new CA root certificate and private key
 	tlsCertDir := filepath.Dir(tlsCACert)
-	if err := MkdirAll(tlsCertDir, 0755, -1, gid); err != nil {
+	if err := MkdirAll(tlsCertDir, 0755, user.Uid, user.Gid); err != nil {
 		return err
 	}
 
@@ -364,16 +343,16 @@ func GenerateCACert() error {
 	// Windows does not have "chown", has to work differently
 	currentOS := runtime.GOOS
 	if currentOS == "windows" {
-		cmd := exec.Command("icacls", tlsCACert, "/grant", user+":F")
+		cmd := exec.Command("icacls", tlsCACert, "/grant", user.Username+":F")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
-				tlsCACert, groupname, string(output))
+				tlsCACert, user.Groupname, string(output))
 		}
 	} else { // Else we are running on linux/mac
-		if err = os.Chown(tlsCACert, -1, gid); err != nil {
+		if err = os.Chown(tlsCACert, user.Uid, user.Gid); err != nil {
 			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
-				tlsCACert, groupname)
+				tlsCACert, user.Groupname)
 		}
 	}
 
@@ -408,7 +387,7 @@ func LoadCertificate(certFile string) (*x509.Certificate, error) {
 		}
 	}
 	if cert == nil {
-		return nil, fmt.Errorf("Certificate file, %v, contains no certificate", certFile)
+		return nil, fmt.Errorf("certificate file, %v, contains no certificate", certFile)
 	}
 	return cert, nil
 }
@@ -416,15 +395,7 @@ func LoadCertificate(certFile string) (*x509.Certificate, error) {
 // Generate a TLS certificate (host certificate) and its private key
 // for non-production environment if the required TLS files are not present
 func GenerateCert() error {
-	gid, err := GetDaemonGID()
-	if err != nil {
-		return err
-	}
-	groupname, err := GetDaemonGroup()
-	if err != nil {
-		return err
-	}
-	user, err := GetDaemonUser()
+	user, err := GetPelicanUser()
 	if err != nil {
 		return err
 	}
@@ -483,7 +454,7 @@ func GenerateCert() error {
 	}
 
 	tlsCertDir := filepath.Dir(tlsCert)
-	if err := MkdirAll(tlsCertDir, 0755, -1, gid); err != nil {
+	if err := MkdirAll(tlsCertDir, 0755, user.Uid, user.Gid); err != nil {
 		return err
 	}
 
@@ -554,16 +525,16 @@ func GenerateCert() error {
 	// Windows does not have "chown", has to work differently
 	currentOS := runtime.GOOS
 	if currentOS == "windows" {
-		cmd := exec.Command("icacls", tlsCert, "/grant", user+":F")
+		cmd := exec.Command("icacls", tlsCert, "/grant", user.Username+":F")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
-				tlsCert, groupname, string(output))
+				tlsCert, user.Groupname, string(output))
 		}
 	} else { // Else we are running on linux/mac
-		if err = os.Chown(tlsCert, -1, gid); err != nil {
+		if err = os.Chown(tlsCert, user.Uid, user.Gid); err != nil {
 			return errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v",
-				tlsCert, groupname)
+				tlsCert, user.Groupname)
 		}
 	}
 
@@ -857,20 +828,7 @@ func GenerateSessionSecret() error {
 		return errors.New("Empty filename for Server_SessionSecretFile")
 	}
 
-	uid, err := GetDaemonUID()
-	if err != nil {
-		return err
-	}
-
-	gid, err := GetDaemonGID()
-	if err != nil {
-		return err
-	}
-	user, err := GetDaemonUser()
-	if err != nil {
-		return err
-	}
-	groupname, err := GetDaemonGroup()
+	user, err := GetPelicanUser()
 	if err != nil {
 		return err
 	}
@@ -891,7 +849,7 @@ func GenerateSessionSecret() error {
 		return errors.Wrap(err, "Failed to load session secret due to I/O error")
 	}
 	keyDir := filepath.Dir(secretLocation)
-	if err := MkdirAll(keyDir, 0750, -1, gid); err != nil {
+	if err := MkdirAll(keyDir, 0750, user.Uid, user.Gid); err != nil {
 		return err
 	}
 
@@ -904,16 +862,16 @@ func GenerateSessionSecret() error {
 	// Windows does not have "chown", has to work differently
 	currentOS := runtime.GOOS
 	if currentOS == "windows" {
-		cmd := exec.Command("icacls", secretLocation, "/grant", user+":F")
+		cmd := exec.Command("icacls", secretLocation, "/grant", user.Username+":F")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return errors.Wrapf(err, "Failed to chown generated session secret %v to daemon group %v: %s",
-				secretLocation, groupname, string(output))
+				secretLocation, user.Groupname, string(output))
 		}
 	} else { // Else we are running on linux/mac
-		if err = os.Chown(secretLocation, uid, gid); err != nil {
+		if err = os.Chown(secretLocation, user.Uid, user.Gid); err != nil {
 			return errors.Wrapf(err, "Failed to chown generated session secret %v to daemon group %v",
-				secretLocation, groupname)
+				secretLocation, user.Groupname)
 		}
 	}
 

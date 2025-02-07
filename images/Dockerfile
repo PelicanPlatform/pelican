@@ -130,7 +130,7 @@ EOT
 ###############################
 FROM dependency-build AS xrootd-plugin-builder
 # Install necessary build dependencies
-RUN  yum install -y --enablerepo=osg-testing curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
+RUN  yum install -y --enablerepo=osg-testing xrootd-devel xrootd-server-devel xrootd-client-devel xrootd-private-devel curl-devel openssl-devel git cmake3 gcc-c++ sqlite-devel
 
 # The ADD command with a api.github.com URL in the next couple of sections
 # are for cache-hashing of the external repository that we rely on to build
@@ -166,6 +166,16 @@ RUN \
     # LotMan CMakeLists.txt needs to be updated to use -DLIB_INSTALL_DIR. Issue #6
     cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
     make -j`nproc` install
+
+# XrdHttp plugin for Pelican.  Provides a control channel for shutdown and updating TLS files
+RUN \
+    git clone https://github.com/PelicanPlatform/xrdhttp-pelican.git && \
+    cd xrdhttp-pelican && \
+    git checkout v0.0.3 && \
+    mkdir build && cd build && \
+    cmake -DLIB_INSTALL_DIR=/usr/lib64 .. && \
+    make -j`nproc` install
+
 #############################
 # End XRootD Plugin Builder #
 #############################
@@ -245,7 +255,8 @@ ENV JAVA_HOME=/usr/lib/jvm/jre \
 RUN rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
 
 # Copy plugins built from the xrootd-plugin-builder stage
-COPY --from=xrootd-plugin-builder /usr/lib64/libLotMan.so /usr/lib64/
+COPY --from=xrootd-plugin-builder /usr/lib64/libXrdHttpPelican-5.so /usr/lib64/libLotMan.so /usr/lib64/
+
 # Copy the nlohmann json headers
 COPY --from=xrootd-plugin-builder /usr/include/nlohmann /usr/include/nlohmann
 # Copy the JSON schema validator library

@@ -1,3 +1,5 @@
+//go:build windows
+
 /***************************************************************
  *
  * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
@@ -16,29 +18,26 @@
  *
  ***************************************************************/
 
-package daemon
+package xrootd
 
 import (
-	"context"
+	"os"
+
+	"github.com/pkg/errors"
 )
 
-type (
-	Launcher interface {
-		Name() string
-		Launch(ctx context.Context) (context.Context, int, error)
-		KillFunc() func(pid int, sig int) error
-	}
+// Set the origin's FDs; not implemented on Windows
+func setOriginFds([2]int) {}
 
-	DaemonLauncher struct {
-		DaemonName string
-		Args       []string
-		Uid        int
-		Gid        int
-		ExtraEnv   []string
-		InheritFds []int
-	}
-)
+// Set the cache's FDs; not implemented on Windows
+func setCacheFds([2]int) {}
 
-func (launcher DaemonLauncher) Name() string {
-	return launcher.DaemonName
+// Send a provided file descriptor to a child xrootd process; not implemented on Windows
+func sendChildFD(bool, int, *os.File) error {
+	return errors.New("sendChildFD not implemented on Windows")
+}
+
+// Close the child socket; not implemented on Windows
+func closeChildSocket(origin bool) error {
+	return errors.New("closeChildSocket not implemented on Windows")
 }
