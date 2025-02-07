@@ -2818,7 +2818,7 @@ func TestSetDowntimebyServer(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		response, err := getLastJsonObj(w.Body.String())
-		assert.NoError(t, err, "Error unmarshaling response")
+		assert.NoError(t, err, "Error unmarshalling response")
 		assert.Equal(t, server_structs.RespOK, response.Status)
 		assert.Equal(t, "Successfully set the downtime of Origin test to true", response.Msg)
 
@@ -2829,7 +2829,7 @@ func TestSetDowntimebyServer(t *testing.T) {
 		r.ServeHTTP(w, c.Request)
 
 		response, err = getLastJsonObj(w.Body.String())
-		assert.NoError(t, err, "Error unmarshaling response")
+		assert.NoError(t, err, "Error unmarshalling response")
 		assert.Equal(t, server_structs.RespFailed, response.Status)
 		assert.Equal(t, "Authorization token verification failed invalid JWT", response.Msg)
 
