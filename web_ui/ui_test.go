@@ -634,4 +634,71 @@ func TestApiToken(t *testing.T) {
 		// Check unauthorized http response
 		assert.Equal(t, http.StatusForbidden, recorder.Code)
 	})
+
+	t.Run("unauthorized-delete", func(t *testing.T) {
+		// Create a request
+		req, err := http.NewRequest("DELETE", "/api/v1.0/deleteApiToken/123", nil)
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+
+		// Check unauthorized http response
+		assert.Equal(t, http.StatusForbidden, recorder.Code)
+	})
+
+	t.Run("unauthorized-privileged-route", func(t *testing.T) {
+		// Create a request
+		req, err := http.NewRequest("GET", "/privilegedRoute", nil)
+		assert.NoError(t, err)
+
+		recorder := httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+
+		// Check unauthorized http response
+		assert.Equal(t, http.StatusForbidden, recorder.Code)
+	})
+
+	t.Run("authorized-privileged-route", func(t *testing.T) {
+		req, err := http.NewRequest("POST", "/api/v1.0/createToken", nil)
+		assert.NoError(t, err)
+
+		req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
+
+		createTokenReq := CreateApiTokenReq{
+			Name:       "test-token",
+			CreatedBy:  "admin",
+			Expiration: "never",
+			Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
+		}
+
+		createTokenBody, err := json.Marshal(createTokenReq)
+		assert.NoError(t, err)
+		req.Body = io.NopCloser(bytes.NewReader(createTokenBody))
+
+		recorder := httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+
+		// Check ok http response
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		// unmarshal the response
+		var createTokenResp map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&createTokenResp)
+		assert.NoError(t, err)
+
+		token := createTokenResp["token"]
+		assert.NotEmpty(t, token)
+		// Create a request
+		req, err = http.NewRequest("GET", "/privilegedRoute", nil)
+		assert.NoError(t, err)
+
+		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
+
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+
+		// Check unauthorized http response
+		assert.Equal(t, http.StatusOK, recorder.Code)
+	})
 }
