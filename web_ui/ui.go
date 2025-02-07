@@ -675,6 +675,13 @@ func ConfigureServerWebAPI(ctx context.Context, engine *gin.Engine, egrp *errgro
 		return nil
 	})
 
+	// Wait on the context to stop the cache
+	egrp.Go(func() error {
+		<-ctx.Done()
+		token.VerifiedKeysCache.Stop()
+		return nil
+	})
+
 	if err := configureCommonEndpoints(engine); err != nil {
 		return err
 	}
