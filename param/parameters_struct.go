@@ -50,6 +50,7 @@ type Config struct {
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
 		SentinelLocation string `mapstructure:"sentinellocation" yaml:"SentinelLocation"`
 		StorageLocation string `mapstructure:"storagelocation" yaml:"StorageLocation"`
+		TLSClientAuth bool `mapstructure:"tlsclientauth" yaml:"TLSClientAuth"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
 	} `mapstructure:"cache" yaml:"Cache"`
@@ -96,7 +97,6 @@ type Config struct {
 		StatTimeout time.Duration `mapstructure:"stattimeout" yaml:"StatTimeout"`
 		SupportContactEmail string `mapstructure:"supportcontactemail" yaml:"SupportContactEmail"`
 		SupportContactUrl string `mapstructure:"supportcontacturl" yaml:"SupportContactUrl"`
-		X509ClientAuthenticationPrefixes []string `mapstructure:"x509clientauthenticationprefixes" yaml:"X509ClientAuthenticationPrefixes"`
 	} `mapstructure:"director" yaml:"Director"`
 	DisableHttpProxy bool `mapstructure:"disablehttpproxy" yaml:"DisableHttpProxy"`
 	DisableProxyFallback bool `mapstructure:"disableproxyfallback" yaml:"DisableProxyFallback"`
@@ -376,6 +376,7 @@ type configWithType struct {
 		SelfTestInterval struct { Type string; Value time.Duration }
 		SentinelLocation struct { Type string; Value string }
 		StorageLocation struct { Type string; Value string }
+		TLSClientAuth struct { Type string; Value bool }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 	}
@@ -422,7 +423,6 @@ type configWithType struct {
 		StatTimeout struct { Type string; Value time.Duration }
 		SupportContactEmail struct { Type string; Value string }
 		SupportContactUrl struct { Type string; Value string }
-		X509ClientAuthenticationPrefixes struct { Type string; Value []string }
 	}
 	DisableHttpProxy struct { Type string; Value bool }
 	DisableProxyFallback struct { Type string; Value bool }
