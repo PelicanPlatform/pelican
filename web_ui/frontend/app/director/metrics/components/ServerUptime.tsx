@@ -4,7 +4,9 @@
  *
  */
 import {
+  fillMatrixNulls,
   MatrixResponseData,
+  MatrixResult,
   query_raw,
   replaceQueryParameters,
   TimeDuration,
@@ -13,8 +15,9 @@ import {
 import { useContext, useMemo } from 'react';
 import { GraphContext } from '@/components/graphs/GraphContext';
 import { DateTime } from 'luxon';
-import { ChartDataset, ChartData } from 'chart.js';
-import { DowntimeBar } from '@chtc/web-components';
+import { green, red } from '@mui/material/colors';
+import { TimeBar } from '@chtc/web-components';
+import { TimeBarProps, Point, Range } from '@chtc/web-components/dist/types';
 import useSWR from 'swr';
 import {
   Box,
@@ -33,13 +36,7 @@ const ServerUptime = () => {
 
   const { data } = useSWR(
     ['pelican_director_server_count', rate, time, resolution, range],
-    () =>
-      getMetricData(
-        rate,
-        range,
-        resolution,
-        time
-      ),
+    () => getMetricData(rate, range, resolution, time),
     {
       fallbackData: [],
     }
@@ -52,22 +49,27 @@ const ServerUptime = () => {
           <TableHead>
             <TableRow>
               <TableCell>Server</TableCell>
-              <TableCell>Downtime</TableCell>
+              <TableCell>Status</TableCell>
               <TableCell>Restarts</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {data.map((d) => (
               <TableRow key={d.serverName}>
-                <TableCell>{d.serverName}</TableCell>
+                <TableCell sx={{ maxWidth: '120px', overflow: 'hidden' }}>
+                  {d.serverName}
+                </TableCell>
                 <TableCell>
-                  <DowntimeBar
-                    data={d.downtime}
-                    height={'20px'}
-                    width={'150px'}
+                  <TimeBar
+                    ranges={d.ranges}
+                    points={d.points}
+                    svgProps={{
+                      width: '100%',
+                      height: 20,
+                    }}
                   />
                 </TableCell>
-                <TableCell>{d.restarts}</TableCell>
+                <TableCell>{d.points.length}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -79,8 +81,8 @@ const ServerUptime = () => {
 
 interface ServerUptimeData {
   serverName: string;
-  downtime: (boolean | undefined)[];
-  restarts: number;
+  ranges: Range[];
+  points: Point[];
 }
 
 export const getMetricData = async (
@@ -89,54 +91,115 @@ export const getMetricData = async (
   resolution: TimeDuration,
   time: DateTime
 ): Promise<ServerUptimeData[]> => {
-
-  const countQuery = replaceQueryParameters('pelican_director_server_count[${range}:${resolution}]', {
-    rate,
-    range,
-    resolution,
-  });
+  const countQuery = replaceQueryParameters(
+    'pelican_director_server_count[${range}:${resolution}]',
+    {
+      rate,
+      range,
+      resolution,
+    }
+  );
   const countResponse = await query_raw<MatrixResponseData>(
     countQuery,
     time.toSeconds()
   );
 
-  const restartQuery = replaceQueryParameters('changes(process_start_time_seconds[${range}])', {
-    range
-  })
-  const restartResponse = await query_raw<VectorResponseData>(
+  const restartQuery = replaceQueryParameters(
+    'process_start_time_seconds[${range}:${resolution}]',
+    {
+      range,
+      resolution,
+    }
+  );
+  const restartResponse = await query_raw<MatrixResponseData>(
     restartQuery,
     time.toSeconds()
   );
 
-  let uptimes: ServerUptimeData[] = countResponse.data.result.map((result) => {
+  const countResponseFilled = fillMatrixNulls(0, countResponse.data);
+
+  let uptimes: ServerUptimeData[] = countResponseFilled.result.map((result) => {
     const serverName = result.metric.server_name;
-    const downtime = result.values.map((value) => value[1] === '1');
-    const restartServer = restartResponse.data.result
-      .filter((r) => r.metric.server_name === serverName)
+    const ranges = countResponseToRanges(result);
+    const restartServer = restartResponse.data.result.filter(
+      (r) => r.metric.server_name === serverName
+    );
     if (restartServer.length === 0) {
-      return { serverName, downtime, restarts: 0 };
+      return { serverName, ranges, points: [] };
     }
 
-    return { serverName, downtime, restarts: parseInt(restartServer[0].value[1]) };
-  });
-
-  let maxLength = Math.max(...uptimes.map((u) => u.downtime.length));
-
-  uptimes = uptimes.map((u) => {
-    let downtime = u.downtime;
-    while (downtime.length < maxLength) {
-      downtime.unshift(undefined);
-    }
-    return { serverName: u.serverName, downtime, restarts: u.restarts };
+    return {
+      serverName,
+      ranges,
+      points: restartResponseToPoints(restartServer[0]),
+    };
   });
 
   return uptimes.sort((a, b) => {
-    // Sort by the number of downtimes with the most downtimes first
-    return (
-      a.downtime.reduce((acc, d) => acc + (d ? 1 : 0), 0) -
-      b.downtime.reduce((acc, d) => acc + (d ? 1 : 0), 0)
-    );
+    // Sort by the number of restarts
+    return b.points.length - a.points.length;
   });
+};
+
+/** Our response will have value 0 or 1, bin together the values to reduce the number of data points */
+const countResponseToRanges = (r: MatrixResult): Range[] => {
+  // If there is a single data point, return a single range
+  if (r.values.length === 1) {
+    return [
+      {
+        start: r.values[0][0],
+        end: r.values[0][0],
+        fill: r.values[0][1] === '1' ? green[600] : red[600],
+        title: r.values[0][1] === '1' ? 'Active' : 'Inactive',
+      },
+    ];
+  }
+
+  // Otherwise we can use the first value to determine the resolution length
+  const resolution = r.values[1][0] - r.values[0][0];
+  const ranges: Range[] = [];
+  let activeRange: Range = {
+    start: r.values[0][0] - resolution,
+    end: r.values[0][0],
+    fill: r.values[0][1] === '1' ? green[600] : red[600],
+    title: r.values[0][1] === '1' ? 'Active' : 'Inactive',
+  };
+
+  r.values.slice(1, r.values.length).forEach(([n, v]) => {
+    const currentState = activeRange?.fill === green[600] ? '1' : '0';
+    if (v === currentState) {
+      activeRange.end = n;
+    } else {
+      ranges.push(structuredClone(activeRange));
+      activeRange = {
+        start: n - resolution,
+        end: n,
+        fill: v === '1' ? green[600] : red[600],
+        title: v === '1' ? 'Active' : 'Inactive',
+      };
+    }
+  });
+
+  ranges.push(activeRange);
+
+  return ranges;
+};
+
+const restartResponseToPoints = (r: MatrixResult): Point[] => {
+  const points: Point[] = [];
+  let previousValue = r.values[0][1];
+  r.values.forEach(([n, v]) => {
+    if (v !== previousValue) {
+      points.push({
+        value: n,
+        fill: 'black',
+        title: 'Restart',
+      });
+    }
+    previousValue = v;
+  });
+
+  return points;
 };
 
 export default ServerUptime;
