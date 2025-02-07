@@ -529,19 +529,26 @@ func TestApiToken(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
+	tempFile, err := os.CreateTemp("", "web-ui-passwd-api-token")
+	if err != nil {
+		fmt.Println("Failed to setup web-ui-passwd file")
+		os.Exit(1)
+	}
+	defer os.Remove(tempFile.Name())
+
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
-	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
-	err := config.InitServer(ctx, server_structs.OriginType)
+	viper.Set("Server.UIPasswordFile", tempFile.Name())
+	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
 	content := "admin:password\n"
-	_, err = tempPasswdFile.WriteString(content)
+	_, err = tempFile.WriteString(content)
 	assert.NoError(t, err, "Error writing to temp password file")
 
-	err = tempPasswdFile.Sync()
+	err = tempFile.Sync()
 	require.NoError(t, err)
 
 	//Configure UI
