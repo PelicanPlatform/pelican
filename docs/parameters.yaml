@@ -2062,6 +2062,7 @@ description: |+
   A list of modules to enable when running pelican in `pelican serve` mode.
 type: stringSlice
 default: []
+hidden: true
 components: ["*"]
 ---
 name: Server.UIActivationCodeFile
@@ -2070,14 +2071,14 @@ description: |+
   contain the activation code necessary to turn it on.
 type: filename
 default: $ConfigBase/server-web-activation-code
-components: ["origin", "cache", "registry", "director"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.UIPasswordFile
 description: |+
   A filepath specifying where the server's web UI password file should be stored.
 type: filename
 default: $ConfigBase/server-web-passwd
-components: ["origin", "cache", "registry", "director"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.SessionSecretFile
 description: |+
@@ -2088,7 +2089,7 @@ description: |+
 type: filename
 default: $ConfigBase/session-secret
   The default content of the file is the hash of the concatenation of "pelican" and the DER form of ${IssuerKey}
-components: ["registry", "director"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.RegistrationRetryInterval
 description: |+
@@ -2096,14 +2097,14 @@ description: |+
   was failed.
 type: duration
 default: 10s
-components: ["origin", "cache"]
+components: ["cache", "origin"]
 ---
 name: Server.UILoginRateLimit
 description: |+
   The maximum number of requests a user can be made under the same IP address per second against the login endpoint
 type: int
 default: 1
-components: ["*"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.WebConfigFile
 description: |+
@@ -2111,7 +2112,7 @@ description: |+
 type: filename
 root_default: /etc/pelican/web-config.yaml
 default: "$ConfigBase/web-config.yaml"
-components: ["*"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.UIAdminUsers
 description: |+
@@ -2121,7 +2122,7 @@ description: |+
   The "subject" claim should be the "CILogon User Identifier" from CILogon user page: https://cilogon.org/
 type: stringSlice
 default: []
-components: ["registry", "origin", "cache"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.StartupTimeout
 description: |+
@@ -2129,14 +2130,14 @@ description: |+
   If the timeout is hit while waiting on a component, the server will shutdown.
 type: duration
 default: 10s
-components: ["origin", "cache", "registry", "director"]
+components: ["cache", "director", "origin", "registry"]
 ---
 name: Server.EnablePprof
 description: |+
   A boolean to enable or disable the [pprof](https://pkg.go.dev/runtime/pprof) endpoints for debugging.
 type: bool
 default: false
-components: ["*"]
+components: ["cache", "director", "origin", "registry"]
 ---
 ################################
 #   Issuer's Configurations    #
