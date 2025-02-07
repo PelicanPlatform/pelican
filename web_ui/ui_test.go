@@ -541,6 +541,9 @@ func TestApiToken(t *testing.T) {
 	_, err = tempPasswdFile.WriteString(content)
 	assert.NoError(t, err, "Error writing to temp password file")
 
+	err = tempPasswdFile.Sync()
+	require.NoError(t, err)
+
 	//Configure UI
 	err = configureAuthDB()
 	assert.NoError(t, err)
