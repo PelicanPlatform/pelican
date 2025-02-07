@@ -701,4 +701,53 @@ func TestApiToken(t *testing.T) {
 		// Check unauthorized http response
 		assert.Equal(t, http.StatusOK, recorder.Code)
 	})
+
+	t.Run("correct-id-wrong-secret", func(t *testing.T) {
+		req, err := http.NewRequest("POST", "/api/v1.0/createToken", nil)
+		assert.NoError(t, err)
+
+		req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
+
+		createTokenReq := CreateApiTokenReq{
+			Name:       "test-token",
+			CreatedBy:  "admin",
+			Expiration: "never",
+			Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
+		}
+
+		createTokenBody, err := json.Marshal(createTokenReq)
+		assert.NoError(t, err)
+		req.Body = io.NopCloser(bytes.NewReader(createTokenBody))
+
+		recorder := httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+
+		// Check ok http response
+		assert.Equal(t, http.StatusOK, recorder.Code)
+
+		// unmarshal the response
+		var createTokenResp map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&createTokenResp)
+		assert.NoError(t, err)
+
+		token := createTokenResp["token"]
+		assert.NotEmpty(t, token)
+
+		tokenID := strings.Split(token, ".")[0]
+		incorrectSecret := "a25956257878eb0bf6ef69ef7a34812fdf03b0c191b8ac66258fd06b3c902e02"
+
+		incorrectToken := fmt.Sprintf("%s.%s", tokenID, incorrectSecret)
+
+		req, err = http.NewRequest("GET", "/privilegedRoute", nil)
+		assert.NoError(t, err)
+		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", incorrectToken))
+
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+
+		// Check unauthorized http response
+		assert.Equal(t, http.StatusForbidden, recorder.Code)
+
+		assert.Contains(t, recorder.Body.String(), "Invalid API token")
+	})
 }
