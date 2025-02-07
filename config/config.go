@@ -801,7 +801,7 @@ func InitConfig() {
 	if logLocation != "" {
 		dir := filepath.Dir(logLocation)
 		if dir != "" {
-			if err := os.MkdirAll(dir, 0640); err != nil {
+			if err := os.MkdirAll(dir, 0750); err != nil {
 				cobra.CheckErr(fmt.Errorf("failed to access/create specified directory: %w", err))
 			}
 		}
@@ -870,19 +870,24 @@ func PrintConfig() error {
 	}
 
 	configDump := fmt.Sprintf(
-		"================ Pelican Configuration ================\n%s\n============= End of Pelican Configuration ============",
+		"================ Pelican Configuration ================\n"+
+			"%s\n"+
+			"============= End of Pelican Configuration ============",
 		string(configBytes),
 	)
 
 	if param.Logging_LogLocation.GetString() != "" {
 		logFile, err := os.OpenFile(param.Logging_LogLocation.GetString(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
+			log.WithError(err).Error("Failed to open log file for writing configuration")
 			return err
 		}
 		defer logFile.Close()
 
-		_, _ = logFile.WriteString(configDump + "\n")
-
+		if _, err := logFile.WriteString(configDump + "\n"); err != nil {
+			log.WithError(err).Error("Failed to write configuration to log file")
+			return err
+		}
 	}
 
 	fmt.Fprintln(os.Stderr, configDump)
