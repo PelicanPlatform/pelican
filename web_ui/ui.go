@@ -471,8 +471,22 @@ func createApiToken(ctx *gin.Context) {
 }
 
 func deleteApiToken(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie},
+		Issuers: []token.TokenIssuer{token.LocalIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		log.Warningf("Cannot verify token: %v", err)
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
 	id := ctx.Param("id")
-	err := database.DeleteApiKey(id, token.VerifiedKeysCache)
+	err = database.DeleteApiKey(id, token.VerifiedKeysCache)
 	if err != nil {
 		log.Warning("Failed to delete API key: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
