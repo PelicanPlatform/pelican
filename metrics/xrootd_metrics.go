@@ -400,23 +400,27 @@ func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error)
 		return nil
 	})
 
-	go func() {
-		var buf [65536]byte
-		for {
-			// TODO: actually parse the UDP packets
-			plen, _, err := conn.ReadFromUDP(buf[:])
-			if errors.Is(err, net.ErrClosed) {
-				return
-			} else if err != nil {
-				log.Errorln("Failed to read from UDP connection", err)
-				continue
+	// if the shoveler is not enabled, then we need to listen to the UDP packets coming from XRootD
+	// if the shoveler is enabled, then the shoveler will listen to XRootD and update the metrics
+	if !param.Shoveler_Enable.GetBool() {
+		go func() {
+			var buf [65536]byte
+			for {
+				// TODO: actually parse the UDP packets
+				plen, _, err := conn.ReadFromUDP(buf[:])
+				if errors.Is(err, net.ErrClosed) {
+					return
+				} else if err != nil {
+					log.Errorln("Failed to read from UDP connection", err)
+					continue
+				}
+				PacketsReceived.Inc()
+				if err = handlePacket(buf[:plen]); err != nil {
+					log.Errorln("Failed to handle packet:", err)
+				}
 			}
-			PacketsReceived.Inc()
-			if err = HandlePacket(buf[:plen]); err != nil {
-				log.Errorln("Failed to handle packet:", err)
-			}
-		}
-	}()
+		}()
+	}
 
 	return addr.Port, nil
 }
@@ -584,15 +588,16 @@ func NullTermToString(nullTermBytes []byte) (str string) {
 	return string(nullTermBytes[0:idx])
 }
 
-func HandlePacket(packet []byte) error {
+func handlePacket(packet []byte) error {
+	if len(packet) < 8 {
+		return errors.New("Packet is too small to be valid XRootD monitoring packet")
+	}
+
 	// XML '<' character indicates a summary packet
 	if len(packet) > 0 && packet[0] == '<' {
 		return HandleSummaryPacket(packet)
 	}
 
-	if len(packet) < 8 {
-		return errors.New("Packet is too small to be valid XRootD monitoring packet")
-	}
 	var header XrdXrootdMonHeader
 	header.Code = packet[0]
 	header.Pseq = packet[1]
@@ -606,7 +611,7 @@ func HandlePacket(packet []byte) error {
 
 	switch header.Code {
 	case 'd':
-		log.Debug("HandlePacket: Received a file-open packet")
+		log.Debug("handlePacket: Received a file-open packet")
 		if len(packet) < 12 {
 			return errors.New("Packet is too small to be valid file-open packet")
 		}
@@ -620,7 +625,7 @@ func HandlePacket(packet []byte) error {
 			transfers.Set(fileid, FileRecord{UserId: useridItem.Value(), Path: path}, ttlcache.DefaultTTL)
 		}
 	case 'f':
-		log.Debug("HandlePacket: Received a f-stream packet")
+		log.Debug("handlePacket: Received a f-stream packet")
 		// sizeof(XrdXrootdMonHeader) + sizeof(XrdXrootdMonFileTOD)
 		if len(packet) < 8+24 {
 			return errors.New("Packet is too small to be a valid f-stream packet")
@@ -830,7 +835,7 @@ func HandlePacket(packet []byte) error {
 			offset += uint32(fileHdr.RecSize)
 		}
 	case 'g':
-		log.Debug("HandlePacket: Received a g-stream packet")
+		log.Debug("handlePacket: Received a g-stream packet")
 		if len(packet) < 8+16 {
 			return errors.New("Packet is too small to be a valid g-stream packet")
 		}
@@ -845,7 +850,7 @@ func HandlePacket(packet []byte) error {
 		detail := NullTermToString(packet[24:])
 		strJsons := strings.Split(detail, "\n")
 		if providerID == 'C' { // pfc: Cache monitoring info
-			log.Debug("HandlePacket: Received g-stream packet is from cache")
+			log.Debug("handlePacket: Received g-stream packet is from cache")
 			aggCacheStat := make(map[string]*CacheAccessStat)
 			for _, js := range strJsons {
 				cacheStat := CacheGS{}
@@ -874,7 +879,7 @@ func HandlePacket(packet []byte) error {
 				CacheAccess.WithLabelValues(prefix, "bypass").Add(float64(stat.Bypass))
 			}
 		} else if providerID == 'R' { // IO activity from the throttle plugin
-			log.Debug("HandlePacket: Received g-stream packet is from the throttle plugin")
+			log.Debug("handlePacket: Received g-stream packet is from the throttle plugin")
 			for _, js := range strJsons {
 				throttleGS := ThrottleGS{}
 				if err := json.Unmarshal([]byte(js), &throttleGS); err != nil {
@@ -899,7 +904,7 @@ func HandlePacket(packet []byte) error {
 		}
 
 	case 'i':
-		log.Debug("HandlePacket: Received an appinfo packet")
+		log.Debug("handlePacket: Received an appinfo packet")
 		infoSize := uint32(header.Plen - 12)
 		if xrdUserId, appinfo, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			if userids.Has(xrdUserId) {
@@ -918,7 +923,7 @@ func HandlePacket(packet []byte) error {
 			return err
 		}
 	case 'u':
-		log.Debug("HandlePacket: Received a user login packet")
+		log.Debug("handlePacket: Received a user login packet")
 		infoSize := uint32(header.Plen - 12)
 		if xrdUserId, auth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			var record UserRecord
@@ -950,7 +955,7 @@ func HandlePacket(packet []byte) error {
 			return err
 		}
 	case 'T':
-		log.Debug("HandlePacket: Received a token info packet")
+		log.Debug("handlePacket: Received a token info packet")
 		infoSize := uint32(header.Plen - 12)
 		if xrdUserId, tokenauth, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
 			userId, userRecord, err := ParseTokenAuth(tokenauth)
@@ -963,7 +968,7 @@ func HandlePacket(packet []byte) error {
 			return err
 		}
 	default:
-		log.Debugf("HandlePacket: Received an unhandled monitoring packet of type %v", header.Code)
+		log.Debugf("handlePacket: Received an unhandled monitoring packet of type %v", header.Code)
 	}
 
 	return nil
