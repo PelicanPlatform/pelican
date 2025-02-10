@@ -167,6 +167,7 @@ type Config struct {
 		EnableAPI bool `mapstructure:"enableapi" yaml:"EnableAPI"`
 		EnabledPolicy string `mapstructure:"enabledpolicy" yaml:"EnabledPolicy"`
 		LibLocation string `mapstructure:"liblocation" yaml:"LibLocation"`
+		LotHome string `mapstructure:"lothome" yaml:"LotHome"`
 		PolicyDefinitions interface{} `mapstructure:"policydefinitions" yaml:"PolicyDefinitions"`
 	} `mapstructure:"lotman" yaml:"Lotman"`
 	MinimumDownloadSpeed int `mapstructure:"minimumdownloadspeed" yaml:"MinimumDownloadSpeed"`
@@ -493,6 +494,7 @@ type configWithType struct {
 		EnableAPI struct { Type string; Value bool }
 		EnabledPolicy struct { Type string; Value string }
 		LibLocation struct { Type string; Value string }
+		LotHome struct { Type string; Value string }
 		PolicyDefinitions struct { Type string; Value interface{} }
 	}
 	MinimumDownloadSpeed struct { Type string; Value int }
