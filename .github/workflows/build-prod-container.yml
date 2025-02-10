@@ -22,71 +22,34 @@ permissions:
 jobs:
   set-build-parameters:
     outputs:
+      #
+      # While some of these outputs are intended to be treated as booleans,
+      # they are actually strings ('true', 'false'). In any conditionals, test
+      # their values using "== 'true'" or "== 'false'".
+      #
       platforms: ${{ steps.parameters.outputs.PLATFORMS }}
-      push-server: ${{ steps.parameters.outputs.PUSH_SERVER }}
       push-dev: ${{ steps.parameters.outputs.PUSH_DEV }}
-      build-dev: ${{ steps.parameters.outputs.BUILD_DEV }}
+      push-server: ${{ steps.parameters.outputs.PUSH_SERVER }}
     runs-on: ubuntu-latest
     steps:
       - name: Determine build parameters
         id: parameters
         run: |
+          PUSH_DEV=${{ github.repository == 'PelicanPlatform/pelican' && github.ref == 'refs/heads/main' }}
           PUSH_SERVER=${{ github.repository == 'PelicanPlatform/pelican' && startsWith(github.ref, 'refs/tags/') }}
-          PUSH_DEV=${{ github.repository == 'PelicanPlatform/pelican' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          BUILD_DEV=${{ github.event_name == 'pull_request' || ( github.event_name == 'push' && github.ref == 'refs/heads/main' ) }}
 
-          if ${PUSH_SERVER} || ${PUSH_DEV}; then
+          if ${PUSH_DEV} || ${PUSH_SERVER}; then
             PLATFORMS=linux/amd64,linux/arm64
           else
+            # If we're not pushing images to a registry, then save resources.
             PLATFORMS=linux/amd64
           fi
 
           echo "PLATFORMS=${PLATFORMS}" >> $GITHUB_OUTPUT
-          echo "PUSH_SERVER=${PUSH_SERVER}" >> $GITHUB_OUTPUT
           echo "PUSH_DEV=${PUSH_DEV}" >> $GITHUB_OUTPUT
-          echo "BUILD_DEV=${BUILD_DEV}" >> $GITHUB_OUTPUT
+          echo "PUSH_SERVER=${PUSH_SERVER}" >> $GITHUB_OUTPUT
 
-  cache-image-layers:
-    needs: [set-build-parameters]
-    runs-on: ubuntu-latest
-    steps:
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: amd64,arm64
-
-      - name: Create a cache for Docker Buildx
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.base-buildx-cache
-          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          buildkitd-flags: --debug
-
-      - name: Save the GitHub workspace
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ github.workspace }}
-          key: github-workspace-${{ github.sha }}-${{ github.run_id }}
-
-      - name: Create and cache image layers
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./images/Dockerfile
-          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
-          target: origin
-          cache-from: type=local,src=/tmp/.base-buildx-cache
-          cache-to: type=local,dest=/tmp/.base-buildx-cache,mode=max
-
-  make-tags:
+  set-tags:
     runs-on: ubuntu-latest
     outputs:
       TIMESTAMP: ${{ steps.make_timestamp.outputs.TIMESTAMP }}
@@ -120,7 +83,7 @@ jobs:
           # Check if we're working with a tagged version
           if [ -z "${{ inputs.tag }}" ]
           then
-            # Use regex to check for a semver tag match
+            # Use regex to check for a semver tag match.
             if [[ ${GITHUB_REF##*/} =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]
             then
               GITHUB_TAG=${GITHUB_REF##*/}
@@ -141,18 +104,62 @@ jobs:
           echo $GITHUB_TAG
           echo "GITHUB_TAG=$GITHUB_TAG" >> $GITHUB_OUTPUT
 
+  cache-image-layers:
+    needs: [set-build-parameters]
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: amd64,arm64
+
+      # NOTE (brianaydemir): Do not try to be clever and/or ambitious here.
+      # Keep the cache small by restricting it to the current GitHub Action
+      # run. We need to be able to save it for future jobs.
+
+      - name: Create a cache for Docker Buildx
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.base-buildx-cache
+          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --debug
+
+      - name: Save the GitHub workspace
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}
+          key: github-workspace-${{ github.sha }}-${{ github.run_id }}
+
+      - name: Create and cache image layers
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./images/Dockerfile
+          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
+          target: origin
+          cache-from: type=local,src=/tmp/.base-buildx-cache
+          cache-to: type=local,dest=/tmp/.base-buildx-cache,mode=max
+
   build-server-images:
-    needs: [set-build-parameters, cache-image-layers, make-tags]
+    needs: [set-build-parameters, cache-image-layers, set-tags]
     strategy:
-      fail-fast: False
+      fail-fast: false
       matrix:
         image:
-          - cache
           - origin
+          - cache
           - director
           - registry
-          - osdf-cache
           - osdf-origin
+          - osdf-cache
           - osdf-director
           - osdf-registry
     runs-on: ubuntu-latest
@@ -167,8 +174,8 @@ jobs:
       - name: Generate tag list
         id: generate-tag-list
         env:
-          GITHUB_TAG: ${{ needs.make-tags.outputs.GITHUB_TAG }}
-          IS_LATEST: ${{ needs.make-tags.outputs.IS_LATEST }}
+          GITHUB_TAG: ${{ needs.set-tags.outputs.GITHUB_TAG }}
+          IS_LATEST: ${{ needs.set-tags.outputs.IS_LATEST }}
         run: |
           docker_repo="pelican_platform"
           image_name=${{ matrix.image }}
@@ -210,6 +217,11 @@ jobs:
         with:
           path: ${{ github.workspace }}
           key: github-workspace-${{ github.sha }}-${{ github.run_id }}
+          #
+          # NOTE (brianaydemir): If we've somehow managed to get the GitHub
+          # workspace cache evicted, then there are likely serious problems
+          # with how we're triggering and using GitHub actions. Make noise!
+          #
           fail-on-cache-miss: true
 
       - name: Build and push Docker images
@@ -223,9 +235,8 @@ jobs:
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           cache-from: type=local,src=/tmp/.base-buildx-cache
 
-  build-dev-image:
+  build-dev-container-image:
     needs: [set-build-parameters, cache-image-layers]
-    if: ${{ needs.set-build-parameters.outputs.build-dev == 'true' }}
     runs-on: ubuntu-latest
     steps:
 
@@ -267,6 +278,11 @@ jobs:
         with:
           path: ${{ github.workspace }}
           key: github-workspace-${{ github.sha }}-${{ github.run_id }}
+          #
+          # NOTE (brianaydemir): If we've somehow managed to get the GitHub
+          # workspace cache evicted, then there are likely serious problems
+          # with how we're triggering and using GitHub actions. Make noise!
+          #
           fail-on-cache-miss: true
 
       - name: Build and push Docker images

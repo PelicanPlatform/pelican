@@ -16,24 +16,6 @@
 #
 # ***************************************************************
 
-# For selecting OSG-maintained packages.
-ARG BASE_OS=el9
-ARG OSG_SERIES=23
-ARG OSG_REPO=release
-
-# For compiling Pelican.
-ARG GO_VER=1.21.6
-ARG NODEJS_VER=20
-
-# For compiling LotMan.
-ARG JSON_VERSION="v3.11.3"
-ARG JSON_SCHEMA_VALIDATOR_VERSION="2.3.0"
-ARG LOTMAN_VERSION="v0.0.4"
-
-# Set the image or build stage to use for building the development and
-# testing containers. It should contain Pelican's run-time dependencies.
-ARG DEVTEST_BASE_IMAGE=origin-base
-
 # Throughout the build, we need to refer to the platform that
 # we're building *on* and the platform that we're building *for*.
 # (Go supports cross-compilation.)
@@ -46,6 +28,37 @@ ARG DEVTEST_BASE_IMAGE=origin-base
 # ARG TARGETPLATFORM
 # ARG TARGETOS
 # ARG TARGETARCH
+
+# For selecting OSG-maintained packages.
+ARG BASE_OS=el9
+ARG OSG_SERIES=23
+ARG OSG_REPO=release
+
+# For compiling Pelican.
+ARG GO_VER=1.21.6
+ARG NODEJS_VER=20
+
+# For controlling how XRootD plugins are installed:
+#
+#   - Set '*_BUILD' to 'true' to build RPMs from source.
+#     Otherwise, the RPMs will be installed from the "usual" repositories.
+#
+#   - Set '*_VER' to the version (tag) to install, without the leading "v".
+#     When building RPMs from source, this may be any commit spec understood
+#     by 'git checkout'.
+#
+#     WARNING: When building an RPM from source, the version the built RPM
+#     claims to be will *always* come from the .spec file. The upstream Git
+#     repository must have a correct .spec file, or confusion will ensue.
+#
+ARG LOTMAN_SRC_BUILD=false
+ARG LOTMAN_VER=0.0.4
+ARG XRDCL_PELICAN_SRC_BUILD=false
+ARG XRDCL_PELICAN_VER=1.0.5
+ARG XROOTD_LOTMAN_SRC_BUILD=false
+ARG XROOTD_LOTMAN_VER=0.0.2
+ARG XROOTD_S3_HTTP_SRC_BUILD=false
+ARG XROOTD_S3_HTTP_VER=0.2.1
 
 # Set scitokens-oauth2-server image as a build stage so that we can copy its
 # OA4MP installation into the images being built here.
@@ -115,7 +128,6 @@ ENV GOARCH=${TARGETARCH}
 
 COPY . .
 
-# Have Docker's build process cache the Go build's cache directories.
 RUN --mount=type=cache,id=go-mod-${TARGETPLATFORM},target=/root/go,sharing=locked \
     --mount=type=cache,id=go-cache-${TARGETPLATFORM},target=/root/.cache,sharing=locked \
     <<ENDRUN
@@ -166,6 +178,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   #
   # We configure dnf to expire metadata after 30min so that any build that
   # is triggered uses relatively up-to-date metadata.
+
   printf '%s\n' "metadata_expire=1800" >> /etc/dnf/dnf.conf
 
   dnf install -y tini
@@ -175,7 +188,7 @@ ENDRUN
 # XRootD Software Init
 #
 # This stage adds the core of the XRootD installation, i.e.,
-# everything that can be installed from an RPM.
+# everything that should be installed from an existing RPM.
 #################################################################
 FROM pelican-software-base AS xrootd-software-init
 ARG TARGETPLATFORM
@@ -200,8 +213,8 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   set -eux
 
   # NOTE: The `devel` packages are not necessary for any production
-  # container images, but including them here simplifies the process
-  # of building the dev container image.
+  # container images, but including them here means we that don't need to
+  # duplicate all this logic when building other stages and images.
 
   PACKAGES="\
     xrootd \
@@ -236,69 +249,94 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     fi
   done
   dnf install -y "${package_urls[@]}"
-
-  # The remaining packages can be installed from our usual repositories.
-  dnf install -y --enablerepo=epel-testing xrootd-s3-http
-  dnf install -y --enablerepo=osg-testing xrootd-multiuser xrdcl-pelican
-  dnf install -y --enablerepo=osg-contrib xrootd-lotman
-
-  # Configure XRootD to use the Pelican plugin.
-  rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
 ENDRUN
 
 #################################################################
 # XRootD Build
 #
-# This stage builds XRootD components from source. Later stages
-# should COPY out objects as needed.
+# This stage builds XRootD components from source.
 #################################################################
 FROM xrootd-software-init AS xrootd-build
-ARG JSON_VERSION
-ARG JSON_SCHEMA_VALIDATOR_VERSION
-ARG LOTMAN_VERSION
+ARG LOTMAN_SRC_BUILD
+ARG LOTMAN_VER
+ARG XRDCL_PELICAN_SRC_BUILD
+ARG XRDCL_PELICAN_VER
+ARG XROOTD_LOTMAN_SRC_BUILD
+ARG XROOTD_LOTMAN_VER
+ARG XROOTD_S3_HTTP_SRC_BUILD
+ARG XROOTD_S3_HTTP_VER
 
 WORKDIR /xrootd-build
 
-RUN dnf install -y \
-          cmake3 \
-          gcc-c++ \
-          git \
-          \
-          curl-devel \
-          openssl-devel \
-          sqlite-devel
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
 
-# These ADD commands are for cache-hashing of the external repositories that
-# we rely on for the build.
+  # Install the build requirements only if we actually need them, so that we
+  # don't slow down the overall build unnecessarily.
 
-ADD https://api.github.com/repos/nlohmann/json/git/refs/tags/${JSON_VERSION} /tmp/hash-json
-ADD https://api.github.com/repos/pboettch/json-schema-validator/git/refs/tags/${JSON_SCHEMA_VALIDATOR_VERSION} /tmp/hash-json-schema-validator
-ADD https://api.github.com/repos/PelicanPlatform/lotman/git/refs/tags/${LOTMAN_VERSION} /tmp/hash-lotman
+  have_requirements=false
 
-# Install LotMan's dependencies.
+  install_requirements() {
+    if ! ${have_requirements}; then
+      dnf install -y --enablerepo=osg-contrib \
+            cmake3 \
+            gcc-c++ \
+            git \
+            systemd \
+            \
+            curl-devel \
+            libcap-devel \
+            libuuid-devel \
+            openssl-devel \
+            sqlite-devel \
+            tinyxml2-devel \
+            zlib-devel \
+            \
+            json-schema-validator-devel \
+            nlohmann-json-devel
+    fi
+    have_requirements=true
+  }
 
-RUN git clone https://github.com/nlohmann/json.git && \
-    cd json && \
-    git checkout ${JSON_VERSION} && \
-    mkdir build && cd build && \
-    cmake .. && \
-    make -j`nproc` install
+  # The implementation and use of `run_task` is made possible by bash's
+  # "indirect expansion" feature, and an assumption that all of the relevant
+  # GitHub repositories are laid out similarly.
+  #
+  # References:
+  #   - https://www.gnu.org/software/bash/manual/html_node/Shell-Parameter-Expansion.html
+  #   - https://unix.stackexchange.com/a/718622
 
-RUN git clone https://github.com/pboettch/json-schema-validator.git && \
-    cd json-schema-validator && \
-    git checkout ${JSON_SCHEMA_VALIDATOR_VERSION} && \
-    mkdir build && cd build && \
-    cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_INSTALL_PREFIX=/usr .. && \
-    make -j`nproc` install
+  run_task() {
+    local ARG=$1
+    local PROJECT=$2
+    local REPO=$3
 
-# Install LotMan.
+    local SRC_BUILD=${ARG}_SRC_BUILD
+    local VER=${ARG}_VER
 
-RUN git clone https://github.com/PelicanPlatform/lotman.git && \
-    cd lotman && \
-    git checkout ${LOTMAN_VERSION} && \
-    mkdir build && cd build && \
-    cmake -DCMAKE_INSTALL_PREFIX=/usr .. && \
-    make -j`nproc` install
+    if ${!SRC_BUILD}; then
+      install_requirements
+      git clone https://github.com/${PROJECT}/${REPO}.git ${REPO}
+      (
+        # Use a subshell to scope the `cd` below to this `run_task` invocation.
+        cd ${REPO}
+        if [[ ${!VER} =~ "." ]]; then
+          git checkout v${!VER}
+        else
+          git checkout ${!VER}
+        fi
+        rpmbuild -bb --build-in-place --define '_topdir /xrootd-build' rpm/${REPO}.spec
+      )
+      # Install the package in case its a dependency of a later package.
+      dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
+    fi
+  }
+
+  run_task  LOTMAN          PelicanPlatform  lotman
+  run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
+  run_task  XROOTD_LOTMAN   PelicanPlatform  xrootd-lotman
+  run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
+ENDRUN
 
 #################################################################
 # XRootD Software Base
@@ -308,15 +346,49 @@ RUN git clone https://github.com/PelicanPlatform/lotman.git && \
 # for running an origin and plugins for running a cache.
 #################################################################
 FROM xrootd-software-init AS xrootd-software-base
+ARG LOTMAN_SRC_BUILD
+ARG LOTMAN_VER
+ARG XRDCL_PELICAN_SRC_BUILD
+ARG XRDCL_PELICAN_VER
+ARG XROOTD_LOTMAN_SRC_BUILD
+ARG XROOTD_LOTMAN_VER
+ARG XROOTD_S3_HTTP_SRC_BUILD
+ARG XROOTD_S3_HTTP_VER
 
-# NOTE: If the xrootd-software-init stage installs the xrootd-lotman
-# package, then we do *not* need to copy LotMan-related libraries from the
-# xrootd-build stage. We maintain these commented-out build commands in
-# order to make it easy to switch to building these libraries from source.
+RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-build \
+    --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
+    <<ENDRUN
 
-# COPY --from=xrootd-build /usr/include/nlohmann /usr/include/nlohmann
-# COPY --from=xrootd-build /usr/lib64/libLotMan.so /usr/lib64/
-# COPY --from=xrootd-build /usr/lib64/libnlohmann_json_schema_validator.a /usr/lib64/
+  set -eux
+
+  dnf install -y xrootd-multiuser
+
+  # NOTE: We include the `PROJECT` parameter here, even thought it is not
+  # used, in order to maintain symmetry with the xrootd-build stage above.
+
+  run_task() {
+    local ARG=$1
+    local PROJECT=$2
+    local REPO=$3
+
+    local SRC_BUILD=${ARG}_SRC_BUILD
+    local VER=${ARG}_VER
+
+    if ${!SRC_BUILD}; then
+      dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
+    else
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-contrib --enablerepo=osg-testing ${REPO}-${!VER}
+    fi
+  }
+
+  run_task  LOTMAN          PelicanPlatform  lotman
+  run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
+  run_task  XROOTD_LOTMAN   PelicanPlatform  xrootd-lotman
+  run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
+
+  # Configure XRootD to use the Pelican plugin.
+  rm -f /etc/xrootd/client.plugins.d/xrdcl-http-plugin.conf
+ENDRUN
 
 #################################################################
 # Origin Base
@@ -451,7 +523,7 @@ CMD ["serve"]
 #################################################################
 # DevTest Container Base
 #################################################################
-FROM ${DEVTEST_BASE_IMAGE} AS devtest-container-base
+FROM origin-base AS devtest-container-base
 ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
