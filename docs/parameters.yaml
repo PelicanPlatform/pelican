@@ -2677,7 +2677,7 @@ components: ["origin", "cache", "director", "registry"]
 ############################
 name: Shoveler.Enable
 description: |+
-  The shoveler gathers UDP monitoring messages from XRootD servers and sends them to a message bus, such
+  Enable the XRootD monitoring shoveler. The shoveler gathers UDP monitoring messages from XRootD servers and sends them to a message bus, such
   as [RabbitMQ](https://www.rabbitmq.com/). It is used within Pelican for a variety of metrics aggregation when
   those metrics are collected by the XRootD daemon and not by Pelican itself.
 
