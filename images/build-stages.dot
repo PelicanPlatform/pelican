@@ -37,6 +37,6 @@ digraph {
 
   subgraph cluster_4 {
     style=invis;
-    origin_base -> devtest_container_base -> dev_container;
+    origin_base -> pelican_test -> pelican_dev;
   }
 }

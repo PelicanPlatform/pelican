@@ -63,6 +63,7 @@ SOCKET_DIR="`mktemp -d -t pelican-citest-XXXXXX`"
 export PELICAN_LOCALCACHE_SOCKET=$SOCKET_DIR/socket
 export PELICAN_LOCALCACHE_DATALOCATION=$SOCKET_DIR/data
 export PELICAN_SERVER_ENABLEUI=false
+export PELICAN_TLSSKIPVERIFY=true
 
 ./pelican serve -d -f osg-htc.org --module localcache &
 PELICAN_PID=$!
