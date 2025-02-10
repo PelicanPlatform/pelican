@@ -22,26 +22,24 @@ import { Box } from '@mui/material';
 import useSWR from 'swr';
 import { Server } from '@/index';
 import { ServerMap } from '@/components/Map';
+import { useContext } from 'react';
+import { AlertDispatchContext } from '@/components/AlertProvider';
+import { ServerGeneral } from '@/types';
+import { alertOnError } from '@/helpers/util';
+import { getDirectorServers } from '@/helpers/get';
 
 export default function Page() {
-  const { data } = useSWR<Server[]>('getServers', getServers);
+  const dispatch = useContext(AlertDispatchContext);
 
-  return (
-    <Box width={'100%'}>
-      <ServerMap servers={data} />
-    </Box>
+  const { data } = useSWR<ServerGeneral[] | undefined>(
+    'getDirectorServers',
+    async () =>
+      await alertOnError(
+        getDirectorServers,
+        'Failed to fetch servers',
+        dispatch
+      )
   );
+
+  return <ServerMap servers={data} />;
 }
-
-const getServers = async (): Promise<Server[]> => {
-  const url = new URL('/api/v1.0/director_ui/servers', window.location.origin);
-
-  let response = await fetch(url);
-  if (response.ok) {
-    const responseData: Server[] = await response.json();
-    responseData.sort((a, b) => a.name.localeCompare(b.name));
-    return responseData;
-  }
-
-  throw new Error('Failed to fetch servers');
-};
