@@ -9,6 +9,7 @@ import {
 } from '@/app/director/metrics/components/MetricBoxPlot';
 import { StorageTable } from '@/app/director/metrics/components/StorageTable';
 import { TransferBarGraph } from '@/app/director/metrics/components/TransferBarGraph';
+import ServerUptime from '@/app/director/metrics/components/ServerUptime';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 
 const Page = () => {
@@ -22,7 +23,7 @@ const Page = () => {
         <Grid item xs={12} md={5} display={'flex'}>
           <Grid container spacing={1}>
             {[
-              <ProjectTable key={'project-table'} />,
+              <ServerUptime key={'server-count-var-graph'} />,
               <StorageTable key={'storage-table'} />,
             ].map((component, index) => (
               <Grid key={index} item xs={12} display={'flex'} height={'45vh'}>
