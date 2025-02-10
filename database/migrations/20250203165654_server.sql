@@ -8,5 +8,4 @@ CREATE TABLE IF NOT EXISTS counters (
 
 -- +goose Down
 -- +goose StatementBegin
-SELECT 'down SQL query';
 -- +goose StatementEnd

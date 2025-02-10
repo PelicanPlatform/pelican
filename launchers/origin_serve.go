@@ -33,6 +33,7 @@ import (
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/oa4mp"
@@ -61,6 +62,10 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 
 	if err := origin.InitializeDB(); err != nil {
 		return nil, errors.Wrap(err, "failed to initialize origin sqlite database")
+	}
+
+	if err := database.InitServerDatabase(); err != nil {
+		return nil, errors.Wrap(err, "failed to initialize server sqlite database")
 	}
 
 	origin.ConfigOriginTTLCache(ctx, egrp)

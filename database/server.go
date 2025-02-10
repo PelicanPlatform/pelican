@@ -2,9 +2,7 @@ package database
 
 import (
 	"embed"
-	"sync"
 
-	"github.com/pkg/errors"
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/param"
@@ -13,7 +11,7 @@ import (
 
 var ServerDatabase *gorm.DB
 
-//go:embed migrations/server/*.sql
+//go:embed migrations/*.sql
 var embedMigrations embed.FS
 
 type Counter struct {
@@ -21,28 +19,26 @@ type Counter struct {
 	Value int    `gorm:"not null;default:0"`
 }
 
-func init() {
-	initDB := sync.OnceFunc(func() {
-		dbPath := param.Server_DbLocation.GetString()
-		tdb, err := server_utils.InitSQLiteDB(dbPath)
-		if err != nil {
-			panic(err)
-		}
+func InitServerDatabase() error {
+	dbPath := param.Server_DbLocation.GetString()
 
-		ServerDatabase = tdb
+	tdb, err := server_utils.InitSQLiteDB(dbPath)
+	if err != nil {
+		return err
+	}
+	ServerDatabase = tdb
 
-		sqldb, err := ServerDatabase.DB()
+	sqlDB, err := ServerDatabase.DB()
+	if err != nil {
+		return err
+	}
 
-		if err != nil {
-			panic(errors.Wrapf(err, "Failed to get sql.DB from gorm DB: %s", dbPath))
-		}
+	// run migrations
+	if err := server_utils.MigrateDB(sqlDB, embedMigrations); err != nil {
+		return err
+	}
 
-		// Run database migrations
-		if err := server_utils.MigrateDB(sqldb, embedMigrations); err != nil {
-			panic(err)
-		}
-	})
-	initDB()
+	return nil
 }
 
 func CreateCounter(key string, value int) error {
