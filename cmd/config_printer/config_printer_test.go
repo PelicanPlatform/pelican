@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -33,22 +34,30 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 )
 
+// Config commands use ansi encoding for color output. This function strips
+// those characters for easier comparison of expected and actual output.
+func stripAnsiCodes(input string) string {
+	ansiEscape := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	return ansiEscape.ReplaceAllString(input, "")
+}
+
 // Mock configuration setup
 func setupMockConfig(t *testing.T) error {
+	// Setting Non-default values, mimics what we'd get from config file
+	viper.Set("Logging.Level", "trace")
+	viper.Set("Logging.Cache.Http", "info")
+	viper.Set("Logging.Cache.Xrootd", "info")
+	viper.Set("Logging.Origin.Http", "info")
+
 	// Set default config
-	config.SetBaseDefaultsInConfig(viper.GetViper())
 	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
 	if err := config.SetServerDefaults(viper.GetViper()); err != nil {
 		return err
 	}
 	if err := config.SetClientDefaults(viper.GetViper()); err != nil {
 		return err
 	}
-	// Setting Non-default values
-	viper.Set("Logging.Cache.Http", "info")
-	viper.Set("Logging.Cache.Xrootd", "info")
-	viper.Set("Logging.Level", "trace")
-	viper.Set("Logging.Origin.Http", "info")
 
 	return nil
 }
@@ -119,7 +128,7 @@ func TestConfigGet(t *testing.T) {
 		<-done
 		os.Stdout = oldStdout
 
-		got := strings.TrimSpace(strings.ToLower(buf.String()))
+		got := strings.TrimSpace(strings.ToLower(stripAnsiCodes(buf.String())))
 
 		for _, expected := range expectedLines {
 			expectedLower := strings.ToLower(expected)
@@ -185,7 +194,7 @@ func TestConfigSummary(t *testing.T) {
 	<-done
 	os.Stdout = oldStdout
 
-	got := strings.TrimSpace(strings.ToLower(buf.String()))
+	got := strings.TrimSpace(strings.ToLower(stripAnsiCodes(buf.String())))
 
 	expectedLines := []string{`logging:`, `    cache:`, `    origin:`, `    level: trace`, `        http: info`}
 	notExpectedLines := []string{`debug: true`}

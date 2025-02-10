@@ -1019,7 +1019,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	}
 
 	// If Pelican is at its default error level, do our custom mapping
-	if log.GetLevel() == log.ErrorLevel {
+	if defaultLevel == log.ErrorLevel.String() {
 		v.SetDefault(param.Logging_Origin_Scitokens.GetName(), "fatal")
 		v.SetDefault(param.Logging_Origin_Xrootd.GetName(), "info")
 		v.SetDefault(param.Logging_Cache_Scitokens.GetName(), "fatal")
