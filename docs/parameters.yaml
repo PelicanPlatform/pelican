@@ -2735,7 +2735,10 @@ components: ["origin", "cache", "director", "registry"]
 ############################
 name: Shoveler.Enable
 description: |+
-  Enable XRootD monitoring shoveler: https://github.com/opensciencegrid/xrootd-monitoring-shoveler.
+  Enable the XRootD monitoring shoveler. The shoveler gathers UDP monitoring messages from XRootD servers and sends them to a message bus, such
+  as [RabbitMQ](https://www.rabbitmq.com/).
+
+  For more information, see https://github.com/opensciencegrid/xrootd-monitoring-shoveler
 type: bool
 default: false
 components: ["origin", "cache"]
