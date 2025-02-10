@@ -22,7 +22,9 @@ All of the Pelican servers have the following metrics:
 
 ### `process_start_time_seconds`
 
-The UNIX epoch time in seconds since the Pelican process started. To get the duration of the Pelican server running time, use the following PromQL:
+The UNIX epoch time in seconds when the Pelican process started. 
+
+To get the duration of the Pelican server running time, use the following PromQL:
 
 ```plaintext filename="PromQL" copy
 time() - process_start_time_seconds
