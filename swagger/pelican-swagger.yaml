@@ -155,6 +155,24 @@ definitions:
         type: string
         format: date-time
         description: "Timestamp of the last update"
+  CreateApiToken:
+    type: object
+    properties:
+      name:
+        type: string
+        description: The name of the token
+      created_by:
+        type: string
+        description: The user who created the token
+      expiration:
+        type: string
+        description: The expiration time of the token. If it is empty or "never", the token will never expire
+  CreateApiTokenSuccess:
+    type: object
+    properties:
+      token:
+        type: string
+        description: The created token
   AdminMetadataForRegistration:
     type: object
     required:
@@ -860,6 +878,57 @@ paths:
                 example: ["director", "origin", "registry"]
         "500":
           description: Server encountered error in reading institution configuration
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /createApiToken:
+    post:
+      tags:
+        - common
+      summary: Create an API token for the user
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: body
+          description: Create API Token request
+          required: true
+          schema:
+            $ref: "#/definitions/CreateApiToken"
+      responses:
+        "200":
+          description: Token created successfully
+          schema:
+            type: object
+            $ref: "#/definitions/CreateApiTokenSuccess"
+        "400":
+          description: Invalid request
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /deleteApiToken/:id:
+    delete:
+      tags:
+        - common
+      summary: Delete an API token for the user
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      parameters:
+        - in: path
+          name: id
+          description: The ID of the token to delete
+          required: true
+          type: string
+      responses:
+        "200":
+          description: Token deleted successfully
+          schema:
+            type: object
+            $ref: "#/definitions/SuccessModelV2"
+        "500":
+          description: Failed to delete token
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
