@@ -9,6 +9,7 @@ import {
   StringField,
 } from '@/components/configuration';
 import { verifyIpAddress } from '@/components/configuration/util';
+import { DefaultMap, SinglePointMap } from '@/components/Map';
 
 const verifySourceIp = (x: string) => {
   const isValidIp =
