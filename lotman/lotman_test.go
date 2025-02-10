@@ -108,7 +108,7 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
 	require.NoError(t, err)
 
-	viper.Set("Lotman.DbLocation", tmpPath)
+	viper.Set("Lotman.LotHome", tmpPath)
 	success := InitLotman(nsAds)
 	//reset func
 	return success, func() {

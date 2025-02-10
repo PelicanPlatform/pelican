@@ -57,6 +57,7 @@ func GetDeprecated() map[string][]string {
         "DisableHttpProxy": {"Client.DisableHttpProxy"},
         "DisableProxyFallback": {"Client.DisableProxyFallback"},
         "IssuerKey": {"none"},
+        "Lotman.DbLocation": {"Lotman.LotHome"},
         "MinimumDownloadSpeed": {"Client.MinimumDownloadSpeed"},
         "Origin.EnableDirListing": {"Origin.EnableListings"},
         "Origin.EnableFallbackRead": {"Origin.EnableDirectReads"},
@@ -205,6 +206,7 @@ var (
 	Lotman_DbLocation = StringParam{"Lotman.DbLocation"}
 	Lotman_EnabledPolicy = StringParam{"Lotman.EnabledPolicy"}
 	Lotman_LibLocation = StringParam{"Lotman.LibLocation"}
+	Lotman_LotHome = StringParam{"Lotman.LotHome"}
 	Monitoring_DataLocation = StringParam{"Monitoring.DataLocation"}
 	OIDC_AuthorizationEndpoint = StringParam{"OIDC.AuthorizationEndpoint"}
 	OIDC_ClientID = StringParam{"OIDC.ClientID"}
