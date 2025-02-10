@@ -1,8 +1,11 @@
-name: Test Template
+name: Run Tests (Linux)
 
 on:
   workflow_call:
     inputs:
+      image:
+        required: true
+        type: string
       tags:
         required: true
         type: string
@@ -13,11 +16,14 @@ on:
         required: true
         type: string
 
+permissions:
+  pull-requests: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
     container:
-      image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+      image: ${{ inputs.image }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4

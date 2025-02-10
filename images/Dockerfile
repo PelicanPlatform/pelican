@@ -521,9 +521,47 @@ ENTRYPOINT ["/entrypoint.sh", "osdf-server", "cache"]
 CMD ["serve"]
 
 #################################################################
-# DevTest Container Base
+# Testing Environment
+#
+# This container should contain a minimum of extra packages and
+# other software for testing a Pelican release.
 #################################################################
-FROM origin-base AS devtest-container-base
+FROM origin-base as pelican-test
+ARG TARGETPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
+
+# Install Git.
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
+  dnf install -y git
+
+# Install the MinIO server and client for S3 tests.
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
+
+  if [ "$TARGETARCH" = "amd64" ]; then
+      PKG_ARCH=x86_64
+  elif [ "$TARGETARCH" = "arm64" ]; then
+      PKG_ARCH=aarch64
+  fi
+
+  curl -o ./minio.rpm https://dl.min.io/server/minio/release/${TARGETOS}-${TARGETARCH}/archive/minio-20231214185157.0.0-1.${PKG_ARCH}.rpm
+  dnf install -y ./minio.rpm
+  rm -f ./minio.rpm
+ENDRUN
+
+ENTRYPOINT []
+CMD ["/bin/bash"]
+WORKDIR /app
+
+#################################################################
+# Development Environment
+#
+# This container should contain all of Pelican's dependencies,
+# both run-time and development-time. Because it is intended for
+# development, it does not need Pelican itself.
+#################################################################
+FROM pelican-test AS pelican-dev
 ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
@@ -561,31 +599,6 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   npm install -g npm@latest
   n prune
 ENDRUN
-
-# Install the MinIO server and client for S3 tests.
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
-  set -eux
-
-  if [ "$TARGETARCH" = "amd64" ]; then
-      PKG_ARCH=x86_64
-  elif [ "$TARGETARCH" = "arm64" ]; then
-      PKG_ARCH=aarch64
-  fi
-
-  curl -o ./minio.rpm https://dl.min.io/server/minio/release/${TARGETOS}-${TARGETARCH}/archive/minio-20231214185157.0.0-1.${PKG_ARCH}.rpm
-  dnf install -y ./minio.rpm
-  rm -f ./minio.rpm
-ENDRUN
-
-#################################################################
-# Development Container
-#
-# This container should contain all of Pelican's dependencies,
-# both run-time and development-time. Because it is intended for
-# development, it does not need Pelican itself.
-#################################################################
-FROM devtest-container-base AS dev-container
-ARG TARGETPLATFORM
 
 # Enable the CodeReady Linux Builder repository.
 RUN /usr/bin/crb enable

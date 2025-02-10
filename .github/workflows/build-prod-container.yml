@@ -1,4 +1,4 @@
-name: Build and Push Container Images
+name: Build and Test
 
 on:
   pull_request:
@@ -162,6 +162,7 @@ jobs:
           - osdf-cache
           - osdf-director
           - osdf-registry
+          - pelican-test
     runs-on: ubuntu-latest
 
     steps:
@@ -235,7 +236,7 @@ jobs:
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           cache-from: type=local,src=/tmp/.base-buildx-cache
 
-  build-dev-container-image:
+  build-dev-images:
     needs: [set-build-parameters, cache-image-layers]
     runs-on: ubuntu-latest
     steps:
@@ -291,7 +292,90 @@ jobs:
           context: .
           file: ./images/Dockerfile
           platforms: ${{ needs.set-build-parameters.outputs.platforms }}
-          target: dev-container
+          target: pelican-dev
           push: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=local,src=/tmp/.base-buildx-cache
+
+  # The macOS and Windows tests do not depend on any of the images being
+  # built above. We trigger them here so that all of our tests are triggered
+  # from a single workflow.
+
+  test-macos-windows:
+    uses: ./.github/workflows/test-macos-windows.yml
+
+  # The Linux tests are less straightforward because we need to determine
+  # which container image to run the tests in, which might require waiting
+  # for the image to be built.
+  #
+  # If this is a pull request, we are not pushing any new container images.
+  # Thus, our only choice is to use an existing image. To keep things simple,
+  # we'll use the latest dev container.
+  #
+  # This can be fine in practice if we keep all branches currently under
+  # development using the same version of XRootD, and if we commit updates
+  # to XRootD to 'main' before any PRs that depend on those updates.
+
+  test-pr-linux:
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/test-linux.yml
+    with:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+      tags: ""
+      coverprofile: coverage.out
+      binary_name: pelican
+
+  test-pr-linux-server:
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/test-linux.yml
+    with:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+      tags: lotman
+      coverprofile: coverage-server.out
+      binary_name: pelican-server
+
+  # If this is a push to main, we are pushing a new dev container image.
+  # Wait for it to be built before triggering the tests.
+
+  test-main-linux:
+    needs: [set-build-parameters, build-dev-images]
+    if: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
+    uses: ./.github/workflows/test-linux.yml
+    with:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+      tags: ""
+      coverprofile: coverage.out
+      binary_name: pelican
+
+  test-main-linux-server:
+    needs: [set-build-parameters, build-dev-images]
+    if: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
+    uses: ./.github/workflows/test-linux.yml
+    with:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+      tags: lotman
+      coverprofile: coverage-server.out
+      binary_name: pelican-server
+
+  # If this is a push to a tag, we are pushing new server images. Wait for
+  # them to be built, and then use the corresponding test container.
+
+  test-tag-linux:
+    needs: [set-build-parameters, set-tags, build-server-images]
+    if: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
+    uses: ./.github/workflows/test-linux.yml
+    with:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-test:${{ needs.set-tags.outputs.GITHUB_TAG }}
+      tags: ""
+      coverprofile: coverage.out
+      binary_name: pelican
+
+  test-tag-linux-server:
+    needs: [set-build-parameters, set-tags, build-server-images]
+    if: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
+    uses: ./.github/workflows/test-linux.yml
+    with:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-test:${{ needs.set-tags.outputs.GITHUB_TAG }}
+      tags: lotman
+      coverprofile: coverage-server.out
+      binary_name: pelican-server

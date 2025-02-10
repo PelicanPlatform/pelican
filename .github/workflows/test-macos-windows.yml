@@ -1,7 +1,11 @@
-on: [push, pull_request]
-name: Test
+name: Run Tests (macOS, Windows)
+
+on:
+  workflow_call:
+
 permissions:
   pull-requests: write
+
 jobs:
   test:
     strategy:
@@ -54,15 +58,3 @@ jobs:
         distribution: goreleaser
         version: latest
         args: build --single-target --clean --snapshot
-  test-ubuntu:
-    uses: ./.github/workflows/test-template.yml
-    with:
-      tags: ""
-      coverprofile: "coverage.out"
-      binary_name: "pelican"
-  test-ubuntu-server:
-    uses: ./.github/workflows/test-template.yml
-    with:
-      tags: "lotman"
-      coverprofile: "coverage-server.out"
-      binary_name: "pelican-server"
