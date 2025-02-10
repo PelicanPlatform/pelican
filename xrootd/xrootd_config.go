@@ -275,7 +275,11 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 		if err != nil {
 			return err
 		}
-		err = WriteOriginScitokensConfig(authedPrefixes)
+		publicReadPrefixes, err := originServer.GetPublicReadOnlyPrefixes()
+		if err != nil {
+			return err
+		}
+		err = WriteOriginScitokensConfig(authedPrefixes, publicReadPrefixes)
 		if err != nil {
 			return err
 		}
