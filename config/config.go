@@ -801,7 +801,7 @@ func InitConfig() {
 	if logLocation != "" {
 		dir := filepath.Dir(logLocation)
 		if dir != "" {
-			if err := os.MkdirAll(dir, 0640); err != nil {
+			if err := os.MkdirAll(dir, 0750); err != nil {
 				cobra.CheckErr(fmt.Errorf("failed to access/create specified directory: %w", err))
 			}
 		}
@@ -857,21 +857,41 @@ func LogPelicanVersion() {
 	log.Infoln("Build Commit:", GetBuiltCommit())
 }
 
-// Print Pelican configuration to stderr
+// Dump Pelican configuration as structured logs and a human-readable format to stderr
 func PrintConfig() error {
 	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil {
 		return err
 	}
-	bytes, err := json.MarshalIndent(*rawConfig, "", "  ")
+
+	configBytes, err := json.MarshalIndent(rawConfig, "", "  ")
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr,
-		"================ Pelican Configuration ================\n",
-		string(bytes),
-		"\n",
-		"============= End of Pelican Configuration ============")
+
+	configDump := fmt.Sprintf(
+		"================ Pelican Configuration ================\n"+
+			"%s\n"+
+			"============= End of Pelican Configuration ============",
+		string(configBytes),
+	)
+
+	if param.Logging_LogLocation.GetString() != "" {
+		logFile, err := os.OpenFile(param.Logging_LogLocation.GetString(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			log.WithError(err).Error("Failed to open log file for writing configuration")
+			return err
+		}
+		defer logFile.Close()
+
+		if _, err := logFile.WriteString(configDump + "\n"); err != nil {
+			log.WithError(err).Error("Failed to write configuration to log file")
+			return err
+		}
+	}
+
+	fmt.Fprintln(os.Stderr, configDump)
+
 	return nil
 }
 
