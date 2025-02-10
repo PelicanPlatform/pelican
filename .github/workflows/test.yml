@@ -48,7 +48,7 @@ jobs:
         make web-build
         go test ./...
     - name: Run GoReleaser for Non-Ubuntu
-      uses: goreleaser/goreleaser-action@v5
+      uses: goreleaser/goreleaser-action@v6
       with:
         # either 'goreleaser' (default) or 'goreleaser-pro'
         distribution: goreleaser

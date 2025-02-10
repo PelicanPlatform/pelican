@@ -17,6 +17,7 @@
 # ***************************************************************
 
 project_name: pelican
+version: 2
 
 release:
   prerelease: true
@@ -95,7 +96,7 @@ archives:
 checksum:
   name_template: "checksums.txt"
 snapshot:
-  name_template: "{{ .Version }}"
+  version_template: "{{ .Version }}"
 changelog:
   sort: asc
   filters:
