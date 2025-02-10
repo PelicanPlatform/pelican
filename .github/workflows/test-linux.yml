@@ -16,9 +16,6 @@ on:
         required: true
         type: string
 
-permissions:
-  pull-requests: write
-
 jobs:
   test:
     runs-on: ubuntu-latest

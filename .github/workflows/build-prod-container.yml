@@ -16,9 +16,6 @@ on:
       - dispatch-build
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   set-build-parameters:
     outputs:
