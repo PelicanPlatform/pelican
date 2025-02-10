@@ -174,8 +174,10 @@ components: ["director"]
 name: Logging.Level
 description: |+
   A string defining the log level of the client. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+
+  Log levels are inherited by all components unless explicitly overridden. Levels are case-insensitive.
 type: string
-default: Error
+default: error
 components: ["*"]
 ---
 name: Logging.LogLocation
@@ -199,6 +201,9 @@ description: |+
   connect to a master one informing it if a server is available. XRootD asks cms where a file
   could be found and cms works to report back the server for where the file is located.
   Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: error
 components: ["origin"]
@@ -207,6 +212,9 @@ name: Logging.Origin.Scitokens
 description: |+
   Trace level of scitokens debug output within XRootD configuration. This entails token management
   and security credentials within XRootD. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: fatal
 components: ["origin"]
@@ -215,6 +223,9 @@ name: Logging.Origin.Xrd
 description: |+
   Trace level of the eXtended Request Daemon within XRootD, another main XRootD executable. This reports information
   the XRootD protocol and works with cms. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: error
 components: ["origin"]
@@ -223,7 +234,11 @@ name: Logging.Origin.Xrootd
 description: |+
   Trace options for XRootD debug output within XRootD configuration. This prefix is reserved for the xroot protocol,
   which is the component that sits on sockets and talks to clients as they query file-system info, open files, and read data.
-  This is the protocol for XRootD (like http) and handles connections and requests. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+  This is the protocol for XRootD (like http) and handles connections and requests. Accepted values: `trace`, `debug`, `info`,
+  `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: info
 components: ["origin"]
@@ -233,6 +248,9 @@ description: |+
   Logging level for the HTTP component of the origin. Increasing to debug
   will cause the Xrootd daemon to log all headers and requests.
   Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: error
 components: ["origin"]
@@ -241,6 +259,9 @@ name: Logging.Origin.Ofs
 description: |+
   Logging level of Xrootd's "Open File System" (ofs) subsystem.  The OFS manages the file descriptor table and redirection/
   error handling. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: error
 components: ["origin"]
@@ -249,6 +270,9 @@ name: Logging.Origin.Oss
 description: |+
   Logging level of Xrootd's "Open Storage System" (oss) subsystem.  The OSS manages the interaction with the underlying
   POSIX storage (open, read, write, close, etc). Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: error
 components: ["origin"]
@@ -257,6 +281,9 @@ name: Logging.Cache.Http
 description: |+
   Logging level for the HTTP component of the cache.  Increasing to debug will cause the Xrootd daemon to log
   all headers and requests. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: error
 components: ["cache"]
@@ -266,6 +293,9 @@ description: |+
   Trace level of XRootD's Open File System. This component cares about files and directories from the administrative perspective.
   This component is build on top of the Open Storage System component, which deals with things like file creation and reads and
   writes for files and directories. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: error
 components: ["cache"]
@@ -275,6 +305,9 @@ description: |+
   Trace level of XRootD Proxy File Cache (XCache), the caching mechanism used by XRootD. This component
   entails information for caches/caching within XRootD. This component instantiates its own Open Storage
   System (OSS) to write local files to. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: info
 components: ["cache"]
@@ -282,7 +315,22 @@ components: ["cache"]
 name: Logging.Cache.Pss
 description: |+
   Trace level of XRootD Proxy System Service. Variables this component reports include: number of remotes file opens,
-  number of opens that failed, number of remote file closes, and number of closes that failed. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+  number of opens that failed, number of remote file closes, and number of closes that failed. Accepted values: `trace`, `debug`,
+  `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
+type: string
+default: error
+components: ["cache"]
+---
+name: Logging.Cache.PssSetOpt
+description: |+
+  Trace level of XRootD Proxy System Service Set Options. This component reports detailed information about the configuration
+  and operational settings of the Proxy System Service. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: error
 components: ["cache"]
@@ -291,6 +339,9 @@ name: Logging.Cache.Scitokens
 description: |+
   Trace level of scitokens debug output within XRootD configuration. This entails token management
   and security credentials within XRootD. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: fatal
 components: ["cache"]
@@ -299,6 +350,9 @@ name: Logging.Cache.Xrd
 description: |+
   Trace level of the eXtended Request Daemon within XRootD, another main XRootD executable. This reports information
   the XRootD protocol and works with cms. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: error
 components: ["cache"]
@@ -308,6 +362,9 @@ description: |+
   Trace options for XRootD debug output within XRootD configuration. This prefix is reserved for the xroot protocol,
   which is the component that sits on sockets and talks to clients as they query file-system info, open files, and read data.
   This is the protocol for XRootD (like http) and handles connections and requests. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
+
+  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  overridden here. Levels are case-insensitive.
 type: string
 default: error
 components: ["cache"]

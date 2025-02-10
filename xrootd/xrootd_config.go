@@ -955,166 +955,191 @@ func SetUpMonitoring(ctx context.Context, egrp *errgroup.Group) error {
 	return nil
 }
 
-func genLoggingConfig(config string, xrdConfig *XrootdConfig, configVal string, logMap loggingMap) (string, error) {
-	xrootdConfigLogLevel, err := log.ParseLevel(configVal)
-	if err != nil {
-		return "", errors.Wrapf(err, "Error parsing specified log level for %s, proper values include: panic, fatal, error, warn, info, debug, trace", config)
+// genLoggingConfig is a helper function that handles mapping input log levels to
+// log levels for XRootD components. In the event that the input log level doesn't have
+// a concretely-defined mapping for the XRootD component, it will get the next best level
+// of verbocity for which there is a defined mapping. If the input log level is empty, it
+// will inherit the log level from Pelican's log level.
+//
+// For example, an input loggingMap of:
+//
+//	loggingMap{
+//	  Info:  "bar",
+//	  Error: "foo",
+//	}
+//
+// Should result in the following mappings:
+//
+//	"trace" --> "bar"
+//	"debug" --> "bar"
+//	"info"  --> "bar"
+//	"warn"  --> "bar"
+//	"error" --> "foo"
+//	"fatal" --> "foo"
+//	"panic" --> "foo"
+func genLoggingConfig(input string, logMap loggingMap) (string, error) {
+	// If no input is configured, inherit from Pelican's log level
+	if input == "" {
+		// Grab the log level directly from param, not from the logrus object
+		// itself, which has a lot of fancy schmancy stuff that in effect makes it look
+		// like it's debug when Pelican uses its default "Error" level.
+		input = param.Logging_Level.GetString()
 	}
 
-	var previousValue string
+	orderedLevels := []string{
+		"Panic",
+		"Fatal",
+		"Error",
+		"Warn",
+		"Info",
+		"Debug",
+		"Trace",
+	}
 
-	// Iterate thru the map struct to see what values are set
-	logStruct := reflect.TypeOf(logMap)
-	logValue := reflect.ValueOf(logMap)
-	for i := 0; i < logStruct.NumField(); i++ {
-		field := logStruct.Field(i)
-		value := logValue.Field(i)
-		strValue := value.String()
+	levelMap := make(map[string]string, len(orderedLevels))
+	v := reflect.ValueOf(logMap)
 
-		// We get the logLevel of the field and check if it is the level we want
-		fieldLogLevel, err := log.ParseLevel(field.Name)
-		if err != nil {
-			return "", errors.Wrap(err, "Not a valid log level within logMap")
+	var lastValidValue string
+	comeBackTo := make([]string, 0, len(orderedLevels))
+	goneBack := false
+	for _, level := range orderedLevels {
+		field := v.FieldByName(level)
+		if field.IsValid() && field.Kind() == reflect.String && field.String() != "" {
+			lastValidValue = field.String()
 		}
-
-		// If we have a match we assign the value to xrootd config (the value should never be "")
-		if fieldLogLevel == xrootdConfigLogLevel && strValue != "" {
-			return strValue, nil
-		} else if fieldLogLevel == xrootdConfigLogLevel && strValue == "" {
-			// if we have no previous value, we return an error
-			if previousValue == "" {
-				if i > 1 {
-					// if we have room to get more previous levels, get them
-					return genLoggingConfig(config, xrdConfig, (xrootdConfigLogLevel + 1).String(), logMap)
-				}
-				return "", errors.New("Unset specified log level without a previous value, loggingMap passed to function needs fixing")
-			} else {
-				// If we have no value, get the previous
-				return previousValue, nil
+		// If we haven't yet encountered a valid log level for the component,
+		// we need to back-assign the first valid map we find.
+		if lastValidValue == "" && !goneBack {
+			comeBackTo = append(comeBackTo, level)
+			continue
+		}
+		if !goneBack {
+			goneBack = true
+			for _, unmappedLevel := range comeBackTo {
+				levelMap[strings.ToLower(unmappedLevel)] = lastValidValue
 			}
-		} else {
-			// else we continue and set the previous value
-			previousValue = strValue
 		}
 
+		levelMap[strings.ToLower(level)] = lastValidValue
 	}
-	return "", errors.New("No set log levels within loggingMap that match desired log level")
+
+	// Just in case the programmer provided an empty map
+	if len(levelMap) == 0 {
+		return "", errors.New("the logging map is empty -- this is a Pelican bug, not a user error!")
+	}
+
+	level := levelMap[strings.ToLower(input)]
+	if level == "" {
+		return "", errors.Errorf("unrecognized input log level '%s'", input)
+	}
+
+	return level, nil
 }
 
 // mapXrootdLogLevels is utilized to map Pelican config values to Xrootd ones
 // this is used to keep our log levels for Xrootd simple, so one does not need
 // to be an Xrootd expert to understand the inconsistent logs within Xrootd
 func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
-
 	/////////////////////////ORIGIN/////////////////////////////
 	// Origin Cms
 	// https://xrootd.slac.stanford.edu/doc/dev54/cms_config.htm
 	var err error
-	xrdConfig.Logging.OriginCms, err = genLoggingConfig("cms", xrdConfig, param.Logging_Origin_Cms.GetString(), loggingMap{
+	if xrdConfig.Logging.OriginCms, err = genLoggingConfig(param.Logging_Origin_Cms.GetString(), loggingMap{
 		Trace: "debug",
 		Debug: "debug",
 		Info:  "all",
 		Error: "-all",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Origin_Cms")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Origin.Cms")
 	}
 
 	// Origin Scitokens
 	// https://github.com/xrootd/xrootd/blob/8f8498d66aa583c54c0875bb1cfe432f4be040f4/src/XrdSciTokens/XrdSciTokensAccess.cc#L951-L963
-	xrdConfig.Logging.OriginScitokens, err = genLoggingConfig("scitokens", xrdConfig, param.Logging_Origin_Scitokens.GetString(), loggingMap{
+	if xrdConfig.Logging.OriginScitokens, err = genLoggingConfig(param.Logging_Origin_Scitokens.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug info warning error",
 		Info:  "info warning error",
 		Warn:  "warning error",
 		Error: "error",
 		Fatal: "none",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Origin_Scitokens")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Origin.Scitokens")
 	}
 
 	// Origin Xrd
 	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
-	xrdConfig.Logging.OriginXrd, err = genLoggingConfig("xrd", xrdConfig, param.Logging_Origin_Xrd.GetString(), loggingMap{
+	if xrdConfig.Logging.OriginXrd, err = genLoggingConfig(param.Logging_Origin_Xrd.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
 		Info:  "-all",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Origin_Xrd")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Origin.Xrd")
 	}
 
 	// Origin Xrootd
 	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
-	xrdConfig.Logging.OriginXrootd, err = genLoggingConfig("xrootd", xrdConfig, param.Logging_Origin_Xrootd.GetString(), loggingMap{
+	if xrdConfig.Logging.OriginXrootd, err = genLoggingConfig(param.Logging_Origin_Xrootd.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
 		Info:  "emsg login stall redirect", // what we had set originally
 		Warn:  "emsg",                      // errors sent back to the client
 		Error: "-all",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Origin_Xrootd")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Origin.Xrootd")
 	}
 
 	// Origin Ofs
 	// https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.htm
-	xrdConfig.Logging.OriginOfs, err = genLoggingConfig("ofs", xrdConfig, param.Logging_Origin_Ofs.GetString(), loggingMap{
+	if xrdConfig.Logging.OriginOfs, err = genLoggingConfig(param.Logging_Origin_Ofs.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
 		Info:  "info",
 		Warn:  "most",
 		Error: "-all",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Logging.Origin.Ofs")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Origin.Ofs")
 	}
 
 	// Origin Oss
-	xrdConfig.Logging.OriginOss, err = genLoggingConfig("oss", xrdConfig, param.Logging_Origin_Oss.GetString(), loggingMap{
+	if xrdConfig.Logging.OriginOss, err = genLoggingConfig(param.Logging_Origin_Oss.GetString(), loggingMap{
 		Trace: "all",
 		Info:  "-all",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Logging.Origin.Oss")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Origin.Oss")
 	}
 
 	// Origin HTTP
-	xrdConfig.Logging.OriginHttp, err = genLoggingConfig("http", xrdConfig, param.Logging_Origin_Http.GetString(), loggingMap{
+	if xrdConfig.Logging.OriginHttp, err = genLoggingConfig(param.Logging_Origin_Http.GetString(), loggingMap{
 		Debug: "all",
 		Info:  "none",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Logging.Origin.Http")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Origin.Http")
 	}
 
 	//////////////////////////CACHE/////////////////////////////
 	// Cache Ofs
 	// https://xrootd.slac.stanford.edu/doc/dev56/ofs_config.htm
-	xrdConfig.Logging.CacheOfs, err = genLoggingConfig("Ofs", xrdConfig, param.Logging_Cache_Ofs.GetString(), loggingMap{
+	if xrdConfig.Logging.CacheOfs, err = genLoggingConfig(param.Logging_Cache_Ofs.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
 		Info:  "info",
 		Warn:  "most",
 		Error: "-all",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Cache_Ofs")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Cache.Ofs")
 	}
 
 	// Cache Pfc
 	// https://xrootd.slac.stanford.edu/doc/dev56/pss_config.htm
-	xrdConfig.Logging.CachePfc, err = genLoggingConfig("pfc", xrdConfig, param.Logging_Cache_Pfc.GetString(), loggingMap{
+	if xrdConfig.Logging.CachePfc, err = genLoggingConfig(param.Logging_Cache_Pfc.GetString(), loggingMap{
 		Trace: "dump",
 		Debug: "debug",
 		Info:  "info",
 		Warn:  "warning",
 		Error: "error",
 		Fatal: "none",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Cache_Pfc")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Cache.Pfc")
 	}
 
 	// Cache PssSetOptCache and Cache Pss
@@ -1124,73 +1149,67 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	// on      warning events.
 	// debug   error events.
 	// Therefore the following pss.trace I came up with is what follows:
-	xrdConfig.Logging.CachePss, err = genLoggingConfig("pss", xrdConfig, param.Logging_Cache_Pss.GetString(), loggingMap{
+	if xrdConfig.Logging.CachePss, err = genLoggingConfig(param.Logging_Cache_Pss.GetString(), loggingMap{
 		Trace: "all",
 		Info:  "on",
 		Warn:  "debug",
 		Error: "off",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Cache_Pss")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Cache.Pss")
 	}
 
-	// Setopt:
-	xrdConfig.Logging.PssSetOptCache, err = genLoggingConfig("pss", xrdConfig, param.Logging_Cache_Pss.GetString(), loggingMap{
+	// Cache Setopt:
+	if xrdConfig.Logging.PssSetOptCache, err = genLoggingConfig(param.Logging_Cache_PssSetOpt.GetString(), loggingMap{
 		Trace: "DebugLevel 4",
 		Info:  "DebugLevel 3",
 		Warn:  "DebugLevel 2",
 		Error: "DebugLevel 1",
 		Fatal: "DebugLevel 0",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Cache_Pss")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Cache.PssSetOpt")
 	}
 
 	// Cache HTTP
-	xrdConfig.Logging.CacheHttp, err = genLoggingConfig("http", xrdConfig, param.Logging_Cache_Http.GetString(), loggingMap{
+	if xrdConfig.Logging.CacheHttp, err = genLoggingConfig(param.Logging_Cache_Http.GetString(), loggingMap{
 		Debug: "all",
 		Info:  "none",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Logging.Cache.Http")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Cache.Http")
 	}
 
 	// Cache Scitokens
 	// https://github.com/xrootd/xrootd/blob/8f8498d66aa583c54c0875bb1cfe432f4be040f4/src/XrdSciTokens/XrdSciTokensAccess.cc#L951-L963
-	xrdConfig.Logging.CacheScitokens, err = genLoggingConfig("scitokens", xrdConfig, param.Logging_Cache_Scitokens.GetString(), loggingMap{
+	if xrdConfig.Logging.CacheScitokens, err = genLoggingConfig(param.Logging_Cache_Scitokens.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug info warning error",
 		Info:  "info warning error",
 		Warn:  "warning error",
 		Error: "error",
 		Fatal: "none",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Cache_Scitokens")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Cache.Scitokens")
 	}
 
 	// Cache Xrd
 	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
-	xrdConfig.Logging.CacheXrd, err = genLoggingConfig("xrd", xrdConfig, param.Logging_Cache_Xrd.GetString(), loggingMap{
+	if xrdConfig.Logging.CacheXrd, err = genLoggingConfig(param.Logging_Cache_Xrd.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
 		Info:  "-all",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Cache_Xrd")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Cache.Xrd")
 	}
 
 	// Cache Xrootd
 	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
-	xrdConfig.Logging.CacheXrootd, err = genLoggingConfig("xrootd", xrdConfig, param.Logging_Cache_Xrootd.GetString(), loggingMap{
+	if xrdConfig.Logging.CacheXrootd, err = genLoggingConfig(param.Logging_Cache_Xrootd.GetString(), loggingMap{
 		Trace: "all",
 		Debug: "debug",
 		Info:  "emsg login stall redirect", // what we had set originally
 		Warn:  "emsg",                      // errors sent back to the client
 		Error: "-all",
-	})
-	if err != nil {
-		return errors.Wrap(err, "Error parsing specified log level for Cache_Xrootd")
+	}); err != nil {
+		return errors.Wrapf(err, "failed to map logging level for Logging.Cache.Xrootd")
 	}
 
 	return nil

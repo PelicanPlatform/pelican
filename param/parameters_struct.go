@@ -143,6 +143,7 @@ type Config struct {
 			Ofs string `mapstructure:"ofs" yaml:"Ofs"`
 			Pfc string `mapstructure:"pfc" yaml:"Pfc"`
 			Pss string `mapstructure:"pss" yaml:"Pss"`
+			PssSetOpt string `mapstructure:"psssetopt" yaml:"PssSetOpt"`
 			Scitokens string `mapstructure:"scitokens" yaml:"Scitokens"`
 			Xrd string `mapstructure:"xrd" yaml:"Xrd"`
 			Xrootd string `mapstructure:"xrootd" yaml:"Xrootd"`
@@ -469,6 +470,7 @@ type configWithType struct {
 			Ofs struct { Type string; Value string }
 			Pfc struct { Type string; Value string }
 			Pss struct { Type string; Value string }
+			PssSetOpt struct { Type string; Value string }
 			Scitokens struct { Type string; Value string }
 			Xrd struct { Type string; Value string }
 			Xrootd struct { Type string; Value string }
