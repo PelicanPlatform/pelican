@@ -149,6 +149,12 @@ type (
 		DeviceEndpoint       string   `json:"device_authorization_endpoint,omitempty"`
 	}
 
+	DowntimeRequest struct {
+		ServerUrl      string `json:"server_url"`
+		Hostname       string `json:"hostname"`
+		EnableDowntime bool   `json:"enable_downtime"`
+	}
+
 	XPelHeader interface {
 		GetName() string
 		ParseRawHeader(*http.Response) error
