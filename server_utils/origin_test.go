@@ -23,6 +23,7 @@ package server_utils
 import (
 	_ "embed"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -63,15 +64,84 @@ var (
 
 	//go:embed resources/s3-origins/single-export-volume.yml
 	s3exportSingleVolumeConfig string
+
+	//go:embed resources/https-origins/single-export.yml
+	httpsSingleExport string
+
+	//go:embed resources/https-origins/multi-export.yml
+	httpsMultiExport string
+
+	//go:embed resources/globus-origins/single-export-valid.yml
+	globusSingleExportValid string
+
+	//go:embed resources/globus-origins/single-export-invalid.yml
+	globusSingleExportInvalid string
+
+	//go:embed resources/globus-origins/multi-export-valid.yml
+	globusMultiExport string
+
+	//go:embed resources/xroot-origins/single-export-invalid.yml
+	xrootSingleExportInvalid string
+
+	//go:embed resources/xroot-origins/single-export-valid.yml
+	xrootSingleExportValid string
 )
 
-func setup(t *testing.T, config string) []OriginExport {
+func getTmpFile(t *testing.T) string {
+	tmpFile := t.TempDir() + "/tmpfile"
+
+	// Create the file
+	file, err := os.Create(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	file.Close()
+
+	// Set file permissions to 777
+	err = os.Chmod(tmpFile, 0777)
+	if err != nil {
+		t.Fatalf("Failed to set file permissions: %v", err)
+	}
+
+	return tmpFile
+}
+
+func setup(t *testing.T, config string, shouldError bool) []OriginExport {
 	viper.SetConfigType("yaml")
 	// Use viper to read in the embedded config
 	err := viper.ReadConfig(strings.NewReader(config))
 	require.NoError(t, err, "error reading config")
+	// Some keys need to be overridden because GetOriginExports validates things like filepaths by making
+	// sure the file exists and is readable by the process.
+	// Iterate through Origin.XXX keys and check for "SHOULD-OVERRIDE" in the value
+	for _, key := range viper.AllKeys() {
+		if strings.Contains(viper.GetString(key), "SHOULD-OVERRIDE-TEMPFILE") {
+			tmpFile := getTmpFile(t)
+			viper.Set(key, tmpFile)
+		} else if key == "origin.exports" { // keys will be lowercased
+			// We also need to override paths for any exports that define "SHOULD-OVERRIDE-TEMPFILE"
+			exports := viper.Get(key).([]interface{})
+			for _, export := range exports {
+				exportMap := export.(map[string]interface{})
+				for k, v := range exportMap {
+					if v == "SHOULD-OVERRIDE-TEMPFILE" {
+						tmpFile := getTmpFile(t)
+						exportMap[k] = tmpFile
+					}
+				}
+			}
+			// Set the modified exports back to viper after all overrides
+			viper.Set(key, exports)
+		}
+	}
+
 	// Now call GetOriginExports and check the struct
 	exports, err := GetOriginExports()
+	if shouldError {
+		require.Error(t, err, "expected error getting origin exports")
+		require.ErrorIs(t, err, ErrInvalidOriginConfig, "expected invalid origin config error")
+		return nil
+	}
 	require.NoError(t, err, "error getting origin exports")
 	return exports
 }
@@ -85,7 +155,7 @@ func TestGetExports(t *testing.T) {
 	// Posix tests
 	t.Run("testSingleExportValid", func(t *testing.T) {
 		defer ResetTestState()
-		exports := setup(t, envVarMimicConfig)
+		exports := setup(t, envVarMimicConfig, false)
 
 		assert.Len(t, exports, 1, "expected 1 export")
 		assert.Equal(t, "/foo", exports[0].StoragePrefix, "expected /foo")
@@ -98,8 +168,7 @@ func TestGetExports(t *testing.T) {
 
 	t.Run("testMultiExportValid", func(t *testing.T) {
 		defer ResetTestState()
-		exports := setup(t, multiExportValidConfig)
-		assert.Len(t, exports, 2, "expected 2 exports")
+		exports := setup(t, multiExportValidConfig, false)
 
 		expectedExport1 := OriginExport{
 			StoragePrefix:    "/test1",
@@ -112,7 +181,6 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport1, exports[0])
 
 		expectedExport2 := OriginExport{
 			StoragePrefix:    "/test2",
@@ -125,13 +193,15 @@ func TestGetExports(t *testing.T) {
 				DirectReads: false,
 			},
 		}
+
+		assert.Len(t, exports, 2, "expected 2 exports")
+		assert.Equal(t, expectedExport1, exports[0])
 		assert.Equal(t, expectedExport2, exports[1])
 	})
 
 	t.Run("testExportVolumesValid", func(t *testing.T) {
 		defer ResetTestState()
-		exports := setup(t, exportVolumesValidConfig)
-		assert.Len(t, exports, 2, "expected 2 exports")
+		exports := setup(t, exportVolumesValidConfig, false)
 
 		expectedExport1 := OriginExport{
 			StoragePrefix:    "/test1",
@@ -144,7 +214,6 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport1, exports[0])
 
 		expectedExport2 := OriginExport{
 			StoragePrefix:    "/test2",
@@ -157,6 +226,9 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
+
+		assert.Len(t, exports, 2, "expected 2 exports")
+		assert.Equal(t, expectedExport1, exports[0])
 		assert.Equal(t, expectedExport2, exports[1])
 	})
 
@@ -164,8 +236,7 @@ func TestGetExports(t *testing.T) {
 	// used by sections of code that assume a single export. Test that those are set properly
 	t.Run("testExportVolumesSingle", func(t *testing.T) {
 		defer ResetTestState()
-		exports := setup(t, exportSingleVolumeConfig)
-		assert.Len(t, exports, 1, "expected 1 export")
+		exports := setup(t, exportSingleVolumeConfig, false)
 
 		expectedExport := OriginExport{
 			StoragePrefix:    "/test1",
@@ -178,6 +249,8 @@ func TestGetExports(t *testing.T) {
 				DirectReads: false,
 			},
 		}
+
+		assert.Len(t, exports, 1, "expected 1 export")
 		assert.Equal(t, expectedExport, exports[0])
 
 		// Now check that we properly set the other viper vars we should have
@@ -192,8 +265,7 @@ func TestGetExports(t *testing.T) {
 
 	t.Run("testSingleExportBlock", func(t *testing.T) {
 		defer ResetTestState()
-		exports := setup(t, singleExportBlockConfig)
-		assert.Len(t, exports, 1, "expected 1 export")
+		exports := setup(t, singleExportBlockConfig, false)
 
 		expectedExport := OriginExport{
 			StoragePrefix:    "/test1",
@@ -206,6 +278,8 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
+
+		assert.Len(t, exports, 1, "expected 1 export")
 		assert.Equal(t, expectedExport, exports[0])
 
 		// Now check that we properly set the other viper vars we should have
@@ -245,13 +319,15 @@ func TestGetExports(t *testing.T) {
 	t.Run("testSingleExportValidS3", func(t *testing.T) {
 		defer ResetTestState()
 
-		exports := setup(t, s3envVarMimicConfig)
+		exports := setup(t, s3envVarMimicConfig, false)
 
 		assert.Len(t, exports, 1, "expected 1 export")
 		assert.Equal(t, "/my/namespace", exports[0].FederationPrefix, "expected /my/namespace")
 		assert.Equal(t, "my-bucket", exports[0].S3Bucket, "expected my-bucket")
-		assert.Equal(t, "/path/to/access.key", exports[0].S3AccessKeyfile, "expected /path/to/access.key")
-		assert.Equal(t, "/path/to/secret.key", exports[0].S3SecretKeyfile, "expected /path/to/secret.key")
+		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", exports[0].S3AccessKeyfile, "S3AccessKeyfile was not overridden from config")
+		assert.NotEmpty(t, exports[0].S3AccessKeyfile)
+		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", exports[0].S3SecretKeyfile, "S3SecretKeyfile was not overridden from config")
+		assert.NotEmpty(t, exports[0].S3SecretKeyfile)
 
 		assert.False(t, exports[0].Capabilities.Writes, "expected no writes")
 		assert.True(t, exports[0].Capabilities.PublicReads, "expected public reads")
@@ -261,8 +337,7 @@ func TestGetExports(t *testing.T) {
 
 	t.Run("testMultiExportValidS3", func(t *testing.T) {
 		defer ResetTestState()
-		exports := setup(t, s3multiExportValidConfig)
-		assert.Len(t, exports, 2, "expected 2 exports")
+		exports := setup(t, s3multiExportValidConfig, false)
 
 		expectedExport1 := OriginExport{
 			S3Bucket:         "first-bucket",
@@ -275,12 +350,9 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport1, exports[0])
 
 		expectedExport2 := OriginExport{
 			S3Bucket:         "second-bucket",
-			S3AccessKeyfile:  "/path/to/second/access.key",
-			S3SecretKeyfile:  "/path/to/second/secret.key",
 			FederationPrefix: "/second/namespace",
 			Capabilities: server_structs.Capabilities{
 				Writes:      true,
@@ -290,17 +362,29 @@ func TestGetExports(t *testing.T) {
 				DirectReads: false,
 			},
 		}
-		assert.Equal(t, expectedExport2, exports[1])
+
+		assert.Len(t, exports, 2, "expected 2 exports")
+		assert.Equal(t, expectedExport1, exports[0])
+
+		// Check that the S3AccessKeyfile and S3SecretKeyfile are not empty and not equal to "SHOULD-OVERRIDE-TEMPFILE"
+		assert.NotEmpty(t, exports[1].S3AccessKeyfile)
+		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", exports[1].S3AccessKeyfile)
+		assert.NotEmpty(t, exports[1].S3SecretKeyfile)
+		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", exports[1].S3SecretKeyfile)
+
+		// Check the rest of the fields
+		assert.Equal(t, expectedExport2.S3Bucket, exports[1].S3Bucket)
+		assert.Equal(t, expectedExport2.FederationPrefix, exports[1].FederationPrefix)
+		assert.Equal(t, expectedExport2.Capabilities, exports[1].Capabilities)
 	})
 
 	t.Run("testExportVolumesValidS3", func(t *testing.T) {
 		defer ResetTestState()
-		exports := setup(t, s3exportVolumesValidConfig)
-		assert.Len(t, exports, 2, "expected 2 exports")
+		exports := setup(t, s3exportVolumesValidConfig, false)
 
 		expectedExport1 := OriginExport{
-			StoragePrefix:    "/",
-			S3Bucket:         "",
+			StoragePrefix:    "/first/namespace",
+			S3Bucket:         "my-bucket",
 			FederationPrefix: "/first/namespace",
 			Capabilities: server_structs.Capabilities{
 				Writes:      false,
@@ -310,10 +394,9 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport1, exports[0])
 
 		expectedExport2 := OriginExport{
-			StoragePrefix:    "/",
+			StoragePrefix:    "some-prefix",
 			S3Bucket:         "my-bucket",
 			FederationPrefix: "/second/namespace",
 			Capabilities: server_structs.Capabilities{
@@ -324,19 +407,19 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
+
+		assert.Len(t, exports, 2, "expected 2 exports")
+		assert.Equal(t, expectedExport1, exports[0])
 		assert.Equal(t, expectedExport2, exports[1])
 	})
 
 	t.Run("testExportVolumesSingleS3", func(t *testing.T) {
 		defer ResetTestState()
-		exports := setup(t, s3exportSingleVolumeConfig)
-		assert.Len(t, exports, 1, "expected 1 export")
+		exports := setup(t, s3exportSingleVolumeConfig, false)
 
 		expectedExport := OriginExport{
-			StoragePrefix:    "/",
-			S3Bucket:         "my-bucket",
-			S3AccessKeyfile:  "/path/to/access.key",
-			S3SecretKeyfile:  "/path/to/secret.key",
+			StoragePrefix:    "some-prefix",
+			S3Bucket:         "",
 			FederationPrefix: "/first/namespace",
 			Capabilities: server_structs.Capabilities{
 				Writes:      true,
@@ -346,12 +429,23 @@ func TestGetExports(t *testing.T) {
 				DirectReads: false,
 			},
 		}
-		assert.Equal(t, expectedExport, exports[0])
+
+		assert.Len(t, exports, 1, "expected 1 export")
+		assert.Equal(t, expectedExport.StoragePrefix, exports[0].StoragePrefix)
+		assert.Equal(t, expectedExport.FederationPrefix, exports[0].FederationPrefix)
+		assert.Equal(t, expectedExport.S3Bucket, exports[0].S3Bucket)
+		assert.Equal(t, expectedExport.Capabilities.Writes, exports[0].Capabilities.Writes)
+		assert.Equal(t, expectedExport.Capabilities.PublicReads, exports[0].Capabilities.PublicReads)
+		assert.Equal(t, expectedExport.Capabilities.Listings, exports[0].Capabilities.Listings)
+		assert.Equal(t, expectedExport.Capabilities.Reads, exports[0].Capabilities.Reads)
+		assert.Equal(t, expectedExport.Capabilities.DirectReads, exports[0].Capabilities.DirectReads)
 
 		// Now check that we properly set the other viper vars we should have
-		assert.Equal(t, "my-bucket", viper.GetString("Origin.S3Bucket"))
-		assert.Equal(t, "/path/to/access.key", viper.GetString("Origin.S3AccessKeyfile"))
-		assert.Equal(t, "/path/to/secret.key", viper.GetString("Origin.S3SecretKeyfile"))
+		assert.Equal(t, "", viper.GetString("Origin.S3Bucket"))
+		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", viper.GetString("Origin.S3AccessKeyfile"), "S3AccessKeyfile was not overridden from config")
+		assert.NotEmpty(t, viper.GetString("Origin.S3AccessKeyfile"))
+		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", viper.GetString("Origin.S3SecretKeyfile"), "S3SecretKeyfile was not overridden from config")
+		assert.NotEmpty(t, viper.GetString("Origin.S3SecretKeyfile"))
 		assert.Equal(t, "/first/namespace", viper.GetString("Origin.FederationPrefix"))
 		assert.True(t, viper.GetBool("Origin.EnableReads"))
 		assert.True(t, viper.GetBool("Origin.EnableWrites"))
@@ -362,14 +456,12 @@ func TestGetExports(t *testing.T) {
 
 	t.Run("testSingleExportBlockS3", func(t *testing.T) {
 		defer ResetTestState()
-		exports := setup(t, s3singleExportBlockConfig)
-		assert.Len(t, exports, 1, "expected 1 export")
+		exports := setup(t, s3singleExportBlockConfig, false)
 
 		expectedExport := OriginExport{
 			S3Bucket:         "my-bucket",
-			S3AccessKeyfile:  "/path/to/access.key",
-			S3SecretKeyfile:  "/path/to/secret.key",
 			FederationPrefix: "/first/namespace",
+			StoragePrefix:    "/",
 			Capabilities: server_structs.Capabilities{
 				Writes:      false,
 				PublicReads: true,
@@ -378,18 +470,156 @@ func TestGetExports(t *testing.T) {
 				DirectReads: true,
 			},
 		}
-		assert.Equal(t, expectedExport, exports[0])
+
+		assert.Len(t, exports, 1, "expected 1 export")
+		assert.Equal(t, expectedExport.S3Bucket, exports[0].S3Bucket)
+		assert.Equal(t, expectedExport.FederationPrefix, exports[0].FederationPrefix)
+		assert.Equal(t, expectedExport.StoragePrefix, exports[0].StoragePrefix)
+		assert.Equal(t, expectedExport.Capabilities.Writes, exports[0].Capabilities.Writes)
+		assert.Equal(t, expectedExport.Capabilities.PublicReads, exports[0].Capabilities.PublicReads)
+		assert.Equal(t, expectedExport.Capabilities.Listings, exports[0].Capabilities.Listings)
+		assert.Equal(t, expectedExport.Capabilities.Reads, exports[0].Capabilities.Reads)
+		assert.Equal(t, expectedExport.Capabilities.DirectReads, exports[0].Capabilities.DirectReads)
 
 		// Now check that we properly set the other viper vars we should have
 		assert.Equal(t, "my-bucket", viper.GetString("Origin.S3Bucket"))
-		assert.Equal(t, "/path/to/access.key", viper.GetString("Origin.S3AccessKeyfile"))
-		assert.Equal(t, "/path/to/secret.key", viper.GetString("Origin.S3SecretKeyfile"))
+		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", viper.GetString("Origin.S3AccessKeyfile"), "S3AccessKeyfile was not overridden from config")
+		assert.NotEmpty(t, viper.GetString("Origin.S3AccessKeyfile"))
+		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", viper.GetString("Origin.S3SecretKeyfile"), "S3SecretKeyfile was not overridden from config")
+		assert.NotEmpty(t, viper.GetString("Origin.S3SecretKeyfile"))
 		assert.Equal(t, "/first/namespace", viper.GetString("Origin.FederationPrefix"))
 		assert.True(t, viper.GetBool("Origin.EnableReads"))
 		assert.False(t, viper.GetBool("Origin.EnableWrites"))
 		assert.True(t, viper.GetBool("Origin.EnablePublicReads"))
 		assert.False(t, viper.GetBool("Origin.EnableListings"))
 		assert.True(t, viper.GetBool("Origin.EnableDirectReads"))
+	})
+
+	t.Run("testSingleExportBlockHTTPS", func(t *testing.T) {
+		defer ResetTestState()
+		exports := setup(t, httpsSingleExport, false)
+
+		expectedExport := OriginExport{
+			FederationPrefix: "/first/namespace",
+			StoragePrefix:    "/foo", // Notice lack of trailing /
+			Capabilities: server_structs.Capabilities{
+				Writes:      false,
+				PublicReads: true,
+				Listings:    true,
+				Reads:       true,
+				DirectReads: true,
+			},
+		}
+
+		assert.Len(t, exports, 1, "expected 1 export")
+		assert.Equal(t, viper.GetString("Origin.HTTPServiceUrl"), "https://example.com")
+		assert.Equal(t, expectedExport, exports[0])
+	})
+
+	// Should currently fail -- HTTPS origins do not support multiple exports yet
+	t.Run("testMultiExportBlockHTTPS", func(t *testing.T) {
+		defer ResetTestState()
+		_ = setup(t, httpsMultiExport, true)
+	})
+
+	t.Run("testSingleExportInvalidGlobus", func(t *testing.T) {
+		defer ResetTestState()
+		_ = setup(t, globusSingleExportInvalid, true)
+	})
+
+	t.Run("testSingleExportValidGlobus", func(t *testing.T) {
+		defer ResetTestState()
+		exports := setup(t, globusSingleExportValid, false)
+
+		expectedExport := OriginExport{
+			FederationPrefix:     "/first/namespace",
+			StoragePrefix:        "/foo",
+			GlobusCollectionID:   "abc123",
+			GlobusCollectionName: "Pelican >> Globus!",
+			Capabilities: server_structs.Capabilities{
+				Writes:      true,
+				PublicReads: true,
+				Listings:    false,
+				Reads:       true,
+				DirectReads: true,
+			},
+		}
+
+		assert.Len(t, exports, 1, "expected 1 export")
+		assert.Equal(t, expectedExport, exports[0])
+		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", viper.GetString("Origin.GlobusClientIDFile"), "GlobusClientIDFile was not overridden from config")
+		assert.NotEmpty(t, viper.GetString("Origin.GlobusClientIDFile"))
+		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", viper.GetString("Origin.GlobusClientSecretFile"), "GlobusClientSecretFile was not overridden from config")
+		assert.NotEmpty(t, viper.GetString("Origin.GlobusClientSecretFile"))
+		assert.Equal(t, "abc123", viper.GetString("Origin.GlobusCollectionID"))
+		assert.Equal(t, "Pelican >> Globus!", viper.GetString("Origin.GlobusCollectionName"))
+	})
+
+	t.Run("testMultiExportValidGlobus", func(t *testing.T) {
+		defer ResetTestState()
+		exports := setup(t, globusMultiExport, false)
+
+		expectedExport1 := OriginExport{
+			FederationPrefix:     "/first/namespace",
+			StoragePrefix:        "/foo",
+			GlobusCollectionID:   "abc123",
+			GlobusCollectionName: "Pelican >> Globus!",
+			Capabilities: server_structs.Capabilities{
+				Writes:      true,
+				PublicReads: true,
+				Listings:    false,
+				Reads:       true,
+				DirectReads: true,
+			},
+		}
+
+		expectedExport2 := OriginExport{
+			FederationPrefix:     "/second/namespace",
+			StoragePrefix:        "/bar",
+			GlobusCollectionID:   "123abc",
+			GlobusCollectionName: "Globus << Pelican!",
+			Capabilities: server_structs.Capabilities{
+				Writes:      false,
+				PublicReads: true,
+				Listings:    false,
+				Reads:       true,
+				DirectReads: true,
+			},
+		}
+
+		assert.Len(t, exports, 2, "expected 2 exports")
+		assert.Equal(t, expectedExport1, exports[0])
+		assert.Equal(t, expectedExport2, exports[1])
+		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", viper.GetString("Origin.GlobusClientIDFile"), "GlobusClientIDFile was not overridden from config")
+		assert.NotEmpty(t, viper.GetString("Origin.GlobusClientIDFile"))
+		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", viper.GetString("Origin.GlobusClientSecretFile"), "GlobusClientSecretFile was not overridden from config")
+		assert.NotEmpty(t, viper.GetString("Origin.GlobusClientSecretFile"))
+	})
+
+	// XRoot Origin tests
+	t.Run("testSingleExportInvalidXRoot", func(t *testing.T) {
+		defer ResetTestState()
+		_ = setup(t, xrootSingleExportInvalid, true)
+	})
+
+	t.Run("testSingleExportValidXRoot", func(t *testing.T) {
+		defer ResetTestState()
+		exports := setup(t, xrootSingleExportValid, false)
+
+		expectedExport := OriginExport{
+			FederationPrefix: "/foo",
+			StoragePrefix:    "/foo",
+			Capabilities: server_structs.Capabilities{
+				Writes:      true,
+				PublicReads: true,
+				Listings:    false,
+				Reads:       true,
+				DirectReads: true,
+			},
+		}
+
+		assert.Len(t, exports, 1, "expected 1 export")
+		assert.Equal(t, expectedExport, exports[0])
 	})
 }
 

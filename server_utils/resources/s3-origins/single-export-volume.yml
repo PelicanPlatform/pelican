@@ -6,7 +6,8 @@ Origin:
   StorageType: "s3"
   EnableWrites: true
   EnablePublicReads: true
-  S3AccessKeyFile: "/path/to/access.key"
-  S3SecretKeyFile: "/path/to/secret.key"
+  S3ServiceUrl: "https://example.com"
+  S3AccessKeyFile: "SHOULD-OVERRIDE-TEMPFILE"
+  S3SecretKeyFile: "SHOULD-OVERRIDE-TEMPFILE"
   ExportVolumes:
-    - "my-bucket:/first/namespace"
+    - "some-prefix:/first/namespace"

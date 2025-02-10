@@ -1,0 +1,14 @@
+# Config is invalid because OIDC.Issuer != globus, but
+# No Origin.GlobusClientIDFile/GlobusClientSecretFile are provided
+
+Origin:
+  StorageType: "globus"
+  Exports:
+    - StoragePrefix: "/foo"
+      FederationPrefix: "/first/namespace"
+      GlobusCollectionID: "abc123"
+      GlobusCollectionName: "Pelican >> Globus!"
+      Capabilities: ["PublicReads", "DirectReads", "Writes"]
+
+OIDC:
+  Issuer: "foobar"

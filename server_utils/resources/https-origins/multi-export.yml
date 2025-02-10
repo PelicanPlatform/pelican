@@ -1,0 +1,16 @@
+# Until HTTPS origins can export multiple prefixes, this should be an invalid config
+
+Origin:
+  # Things that configure the origin itself
+  StorageType: "https"
+  HTTPServiceUrl: "https://example.com"
+
+
+  # The actual namespaces we export
+  Exports:
+    - StoragePrefix: "/"
+      FederationPrefix: "/first/namespace"
+      Capabilities: ["PublicReads", "Writes", "Listings", "DirectReads"]
+    - StoragePrefix: "/"
+      FederationPrefix: "/second/namespace"
+      Capabilities: ["Writes"]

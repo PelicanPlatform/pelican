@@ -1,0 +1,10 @@
+Origin:
+  StorageType: "globus"
+  GlobusClientIDFile: "SHOULD-OVERRIDE-TEMPFILE"
+  GlobusClientSecretFile: "SHOULD-OVERRIDE-TEMPFILE"
+  Exports:
+    - StoragePrefix: "/foo"
+      FederationPrefix: "/first/namespace"
+      GlobusCollectionID: "abc123"
+      GlobusCollectionName: "Pelican >> Globus!"
+      Capabilities: ["PublicReads", "DirectReads", "Writes"]
