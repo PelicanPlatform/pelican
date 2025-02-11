@@ -79,26 +79,26 @@
 <!-- origin -->
 <g id="node13" class="node">
 <title>origin</title>
-<polygon fill="none" stroke="black" points="439,-124 385,-124 385,-88 439,-88 439,-124"/>
-<text text-anchor="middle" x="412" y="-101.8" font-family="Times,serif" font-size="14.00">origin</text>
+<polygon fill="none" stroke="black" points="424,-124 370,-124 370,-88 424,-88 424,-124"/>
+<text text-anchor="middle" x="397" y="-101.8" font-family="Times,serif" font-size="14.00">origin</text>
 </g>
 <!-- pelican_build&#45;&gt;origin -->
 <g id="edge18" class="edge">
 <title>pelican_build-&gt;origin</title>
-<path fill="none" stroke="gray" stroke-dasharray="1,5" d="M550.32,-447.92C554.46,-439.69 559.04,-429.55 562,-420 574.91,-378.26 578,-366.69 578,-323 578,-323 578,-323 578,-249 578,-215.29 497.97,-159.93 449.04,-129.24"/>
-<polygon fill="gray" stroke="gray" points="451.04,-126.36 440.7,-124.06 447.35,-132.31 451.04,-126.36"/>
+<path fill="none" stroke="gray" stroke-dasharray="1,5" d="M550.32,-447.92C554.46,-439.69 559.04,-429.55 562,-420 574.91,-378.26 578,-366.69 578,-323 578,-323 578,-323 578,-249 578,-212.87 487.58,-156.87 434.56,-127.15"/>
+<polygon fill="gray" stroke="gray" points="436.26,-124.09 425.81,-122.3 432.86,-130.21 436.26,-124.09"/>
 </g>
 <!-- cache -->
 <g id="node15" class="node">
 <title>cache</title>
-<polygon fill="none" stroke="black" points="537,-124 483,-124 483,-88 537,-88 537,-124"/>
-<text text-anchor="middle" x="510" y="-101.8" font-family="Times,serif" font-size="14.00">cache</text>
+<polygon fill="none" stroke="black" points="522,-124 468,-124 468,-88 522,-88 522,-124"/>
+<text text-anchor="middle" x="495" y="-101.8" font-family="Times,serif" font-size="14.00">cache</text>
 </g>
 <!-- pelican_build&#45;&gt;cache -->
 <g id="edge19" class="edge">
 <title>pelican_build-&gt;cache</title>
-<path fill="none" stroke="gray" stroke-dasharray="1,5" d="M566.59,-447.57C575.84,-440.08 585.57,-430.6 592,-420 615.03,-382.03 616,-367.41 616,-323 616,-323 616,-323 616,-249 616,-204.59 619.08,-187.2 592,-152 580.9,-137.57 563.79,-127.15 548.07,-119.99"/>
-<polygon fill="gray" stroke="gray" points="549.47,-116.78 538.89,-116.13 546.75,-123.23 549.47,-116.78"/>
+<path fill="none" stroke="gray" stroke-dasharray="1,5" d="M566.59,-447.57C575.84,-440.08 585.57,-430.6 592,-420 615.03,-382.03 616,-367.41 616,-323 616,-323 616,-323 616,-249 616,-204.59 620.25,-186.27 592,-152 577.15,-133.99 553.5,-122.82 533.26,-116.11"/>
+<polygon fill="gray" stroke="gray" points="534.48,-112.82 523.9,-113.27 532.45,-119.52 534.48,-112.82"/>
 </g>
 <!-- pelican_software_base -->
 <g id="node4" class="node">
@@ -163,24 +163,24 @@
 <!-- xrootd_software_base&#45;&gt;cache -->
 <g id="edge16" class="edge">
 <title>xrootd_software_base-&gt;cache</title>
-<path fill="none" stroke="black" d="M288.9,-231.59C335.38,-205.4 423.13,-155.95 472.97,-127.87"/>
-<polygon fill="black" stroke="black" points="474.39,-131.08 481.38,-123.13 470.95,-124.99 474.39,-131.08"/>
+<path fill="none" stroke="black" d="M287.06,-231.59C330.01,-205.85 410.45,-157.66 457.7,-129.35"/>
+<polygon fill="black" stroke="black" points="459.46,-132.37 466.24,-124.23 455.86,-126.37 459.46,-132.37"/>
 </g>
 <!-- origin_base&#45;&gt;origin -->
 <g id="edge14" class="edge">
 <title>origin_base-&gt;origin</title>
-<path fill="none" stroke="black" d="M296.46,-159.52C320.26,-148.7 350.67,-134.88 374.32,-124.13"/>
-<polygon fill="black" stroke="black" points="375.63,-127.38 383.28,-120.05 372.73,-121.01 375.63,-127.38"/>
+<path fill="none" stroke="black" d="M292.72,-159.52C313.08,-149.26 338.81,-136.31 359.61,-125.83"/>
+<polygon fill="black" stroke="black" points="360.98,-129.06 368.34,-121.43 357.83,-122.81 360.98,-129.06"/>
 </g>
-<!-- devtest_container_base -->
+<!-- pelican_test -->
 <g id="node17" class="node">
-<title>devtest_container_base</title>
-<polygon fill="none" stroke="black" points="331.31,-124 184.69,-124 184.69,-88 331.31,-88 331.31,-124"/>
-<text text-anchor="middle" x="258" y="-101.8" font-family="Times,serif" font-size="14.00">devtest_container_base</text>
+<title>pelican_test</title>
+<polygon fill="none" stroke="black" points="299.43,-124 216.57,-124 216.57,-88 299.43,-88 299.43,-124"/>
+<text text-anchor="middle" x="258" y="-101.8" font-family="Times,serif" font-size="14.00">pelican_test</text>
 </g>
-<!-- origin_base&#45;&gt;devtest_container_base -->
+<!-- origin_base&#45;&gt;pelican_test -->
 <g id="edge20" class="edge">
-<title>origin_base-&gt;devtest_container_base</title>
+<title>origin_base-&gt;pelican_test</title>
 <path fill="none" stroke="black" d="M258,-159.7C258,-152.41 258,-143.73 258,-135.54"/>
 <polygon fill="black" stroke="black" points="261.5,-135.62 258,-125.62 254.5,-135.62 261.5,-135.62"/>
 </g>
@@ -217,36 +217,36 @@
 <!-- osdf_origin -->
 <g id="node14" class="node">
 <title>osdf_origin</title>
-<polygon fill="none" stroke="black" points="452.28,-52 371.72,-52 371.72,-16 452.28,-16 452.28,-52"/>
-<text text-anchor="middle" x="412" y="-29.8" font-family="Times,serif" font-size="14.00">osdf_origin</text>
+<polygon fill="none" stroke="black" points="437.28,-52 356.72,-52 356.72,-16 437.28,-16 437.28,-52"/>
+<text text-anchor="middle" x="397" y="-29.8" font-family="Times,serif" font-size="14.00">osdf_origin</text>
 </g>
 <!-- origin&#45;&gt;osdf_origin -->
 <g id="edge15" class="edge">
 <title>origin-&gt;osdf_origin</title>
-<path fill="none" stroke="black" d="M412,-87.7C412,-80.41 412,-71.73 412,-63.54"/>
-<polygon fill="black" stroke="black" points="415.5,-63.62 412,-53.62 408.5,-63.62 415.5,-63.62"/>
+<path fill="none" stroke="black" d="M397,-87.7C397,-80.41 397,-71.73 397,-63.54"/>
+<polygon fill="black" stroke="black" points="400.5,-63.62 397,-53.62 393.5,-63.62 400.5,-63.62"/>
 </g>
 <!-- osdf_cache -->
 <g id="node16" class="node">
 <title>osdf_cache</title>
-<polygon fill="none" stroke="black" points="549.48,-52 470.52,-52 470.52,-16 549.48,-16 549.48,-52"/>
-<text text-anchor="middle" x="510" y="-29.8" font-family="Times,serif" font-size="14.00">osdf_cache</text>
+<polygon fill="none" stroke="black" points="534.48,-52 455.52,-52 455.52,-16 534.48,-16 534.48,-52"/>
+<text text-anchor="middle" x="495" y="-29.8" font-family="Times,serif" font-size="14.00">osdf_cache</text>
 </g>
 <!-- cache&#45;&gt;osdf_cache -->
 <g id="edge17" class="edge">
 <title>cache-&gt;osdf_cache</title>
-<path fill="none" stroke="black" d="M510,-87.7C510,-80.41 510,-71.73 510,-63.54"/>
-<polygon fill="black" stroke="black" points="513.5,-63.62 510,-53.62 506.5,-63.62 513.5,-63.62"/>
+<path fill="none" stroke="black" d="M495,-87.7C495,-80.41 495,-71.73 495,-63.54"/>
+<polygon fill="black" stroke="black" points="498.5,-63.62 495,-53.62 491.5,-63.62 498.5,-63.62"/>
 </g>
-<!-- dev_container -->
+<!-- pelican_dev -->
 <g id="node18" class="node">
-<title>dev_container</title>
-<polygon fill="none" stroke="black" points="305.65,-52 210.35,-52 210.35,-16 305.65,-16 305.65,-52"/>
-<text text-anchor="middle" x="258" y="-29.8" font-family="Times,serif" font-size="14.00">dev_container</text>
+<title>pelican_dev</title>
+<polygon fill="none" stroke="black" points="299.82,-52 216.18,-52 216.18,-16 299.82,-16 299.82,-52"/>
+<text text-anchor="middle" x="258" y="-29.8" font-family="Times,serif" font-size="14.00">pelican_dev</text>
 </g>
-<!-- devtest_container_base&#45;&gt;dev_container -->
+<!-- pelican_test&#45;&gt;pelican_dev -->
 <g id="edge21" class="edge">
-<title>devtest_container_base-&gt;dev_container</title>
+<title>pelican_test-&gt;pelican_dev</title>
 <path fill="none" stroke="black" d="M258,-87.7C258,-80.41 258,-71.73 258,-63.54"/>
 <polygon fill="black" stroke="black" points="261.5,-63.62 258,-53.62 254.5,-63.62 261.5,-63.62"/>
 </g>

@@ -521,46 +521,27 @@ ENTRYPOINT ["/entrypoint.sh", "osdf-server", "cache"]
 CMD ["serve"]
 
 #################################################################
-# DevTest Container Base
+# Testing Environment
+#
+# This container should contain a minimum of extra packages and
+# other software for testing a Pelican release.
 #################################################################
-FROM origin-base AS devtest-container-base
+FROM origin-base AS pelican-test
 ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 ARG GO_VER
-ARG NODEJS_VER
 
-# Install the Go and Node.js toolchains using the same commands as the
-# pelican-build-init stage, taking care that the installation matches this
-# build's target platform.
+# Install select development packages.
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
+  dnf install -y git make
 
-COPY <<ENDCOPY /etc/yum.repos.d/goreleaser.repo
-[goreleaser]
-name=GoReleaser
-baseurl=https://repo.goreleaser.com/yum/
-enabled=1
-gpgcheck=0
-ENDCOPY
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
-  set -eux
-  dnf install -y goreleaser
-ENDRUN
-
+# Install Go using the same commands as the pelican-build-init stage.
 RUN curl -O https://dl.google.com/go/go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
     && rm -rf /usr/local/go \
     && tar -C /usr/local -xzf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz \
     && rm -rf go${GO_VER}.${TARGETOS}-${TARGETARCH}.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
-
-RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
-  set -eux
-  dnf install -y npm
-  npm install -g n
-  n ${NODEJS_VER}
-  dnf remove -y npm
-  npm install -g npm@latest
-  n prune
-ENDRUN
 
 # Install the MinIO server and client for S3 tests.
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
@@ -577,15 +558,44 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   rm -f ./minio.rpm
 ENDRUN
 
+ENTRYPOINT []
+CMD ["/bin/bash"]
+WORKDIR /app
+
 #################################################################
-# Development Container
+# Development Environment
 #
 # This container should contain all of Pelican's dependencies,
 # both run-time and development-time. Because it is intended for
 # development, it does not need Pelican itself.
 #################################################################
-FROM devtest-container-base AS dev-container
+FROM pelican-test AS pelican-dev
 ARG TARGETPLATFORM
+ARG NODEJS_VER
+
+# Install GoReleaser using the same commands as the pelican-build-init stage.
+COPY <<ENDCOPY /etc/yum.repos.d/goreleaser.repo
+[goreleaser]
+name=GoReleaser
+baseurl=https://repo.goreleaser.com/yum/
+enabled=1
+gpgcheck=0
+ENDCOPY
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
+  dnf install -y goreleaser
+ENDRUN
+
+# Install Node.js using the same commands as the pelican-build-init stage.
+RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
+  set -eux
+  dnf install -y npm
+  npm install -g n
+  n ${NODEJS_VER}
+  dnf remove -y npm
+  npm install -g npm@latest
+  n prune
+ENDRUN
 
 # Enable the CodeReady Linux Builder repository.
 RUN /usr/bin/crb enable

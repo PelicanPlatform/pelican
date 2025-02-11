@@ -1,4 +1,4 @@
-name: Build and Push Container Images
+name: Build and Test
 
 on:
   pull_request:
@@ -15,9 +15,6 @@ on:
     types:
       - dispatch-build
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   set-build-parameters:
@@ -145,7 +142,9 @@ jobs:
           file: ./images/Dockerfile
           platforms: ${{ needs.set-build-parameters.outputs.platforms }}
           target: origin
-          cache-from: type=local,src=/tmp/.base-buildx-cache
+          cache-from: |
+            type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican-dev:buildcache
+            type=local,src=/tmp/.base-buildx-cache
           cache-to: type=local,dest=/tmp/.base-buildx-cache,mode=max
 
   build-server-images:
@@ -162,6 +161,7 @@ jobs:
           - osdf-cache
           - osdf-director
           - osdf-registry
+          - pelican-test
     runs-on: ubuntu-latest
 
     steps:
@@ -235,13 +235,26 @@ jobs:
           tags: "${{ steps.generate-tag-list.outputs.taglist }}"
           cache-from: type=local,src=/tmp/.base-buildx-cache
 
-  build-dev-container-image:
+  build-devtest-images:
     needs: [set-build-parameters, cache-image-layers]
     runs-on: ubuntu-latest
     steps:
 
-      - name: Determine image tags
-        id: meta
+      # NOTE (brianaydemir): If it wasn't for the potential expense of
+      # loading the Docker Buildx cache, we could implement this job using
+      # a matrix and eliminate near-identical steps.
+
+      - name: Determine image tags (pelican-test)
+        id: pelican-test-tags
+        uses: docker/metadata-action@v5
+        with:
+          images: hub.opensciencegrid.org/pelican_platform/pelican-test
+          tags: |
+            type=raw,value=latest-itb
+            type=raw,value=sha-{{sha}}
+
+      - name: Determine image tags (pelican-dev)
+        id: pelican-dev-tags
         uses: docker/metadata-action@v5
         with:
           images: hub.opensciencegrid.org/pelican_platform/pelican-dev
@@ -285,13 +298,62 @@ jobs:
           #
           fail-on-cache-miss: true
 
-      - name: Build and push Docker images
+      - name: Build and push Docker images (pelican-test)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./images/Dockerfile
           platforms: ${{ needs.set-build-parameters.outputs.platforms }}
-          target: dev-container
+          target: pelican-test
           push: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.pelican-test-tags.outputs.tags }}
           cache-from: type=local,src=/tmp/.base-buildx-cache
+
+      - name: Build and push Docker images (pelican-dev)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./images/Dockerfile
+          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
+          target: pelican-dev
+          push: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
+          tags: ${{ steps.pelican-dev-tags.outputs.tags }}
+          cache-from: type=local,src=/tmp/.base-buildx-cache
+          cache-to: type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican-dev:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
+
+  # The macOS and Windows tests do not depend on any of the images being
+  # built above. We go ahead and trigger those tests here so that all of our
+  # tests are triggered from a single workflow.
+
+  test-macos-windows:
+    uses: ./.github/workflows/test-macos-windows.yml
+
+  # The Linux tests are less straightforward because we need to decide
+  # which container image to run the tests in, which might require waiting
+  # for the image to be built.
+  #
+  # For the pull-request job, we cannot build and push a newer image. Thus,
+  # in the name of simplicity, the job uses the most recent container image
+  # that was built. (And technically, it might also get triggered in other
+  # scenarios, but pull requests requests will be the common one.)
+
+  test-linux-pull-request:
+    needs: [set-build-parameters]
+    if: ${{ needs.set-build-parameters.outputs.push-dev != 'true' && needs.set-build-parameters.outputs.push-server != 'true' }}
+    uses: ./.github/workflows/test-linux.yml
+    with:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
+
+  test-linux-push-to-main:
+    needs: [set-build-parameters, build-devtest-images]
+    if: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
+    uses: ./.github/workflows/test-linux.yml
+    with:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
+
+  test-linux-push-to-tag:
+    needs: [set-build-parameters, set-tags, build-server-images]
+    if: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
+    uses: ./.github/workflows/test-linux.yml
+    with:
+      image: hub.opensciencegrid.org/pelican_platform/pelican-test:${{ needs.set-tags.outputs.GITHUB_TAG }}
