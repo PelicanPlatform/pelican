@@ -1,0 +1,297 @@
+name: Build and Push Container Images
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      # only run release on v7.0.0 and up
+      - v[7-9]\.[0-9]+\.[0-9]+
+      - v[7-9]\.[0-9]+\.[0-9]+-rc\.[0-9]+
+      - v[1-9][0-9]+\.[0-9]+\.[0-9]+
+      - v[1-9][0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+
+  repository_dispatch:
+    types:
+      - dispatch-build
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  set-build-parameters:
+    outputs:
+      #
+      # While some of these outputs are intended to be treated as booleans,
+      # they are actually strings ('true', 'false'). In any conditionals, test
+      # their values using "== 'true'" or "== 'false'".
+      #
+      platforms: ${{ steps.parameters.outputs.PLATFORMS }}
+      push-dev: ${{ steps.parameters.outputs.PUSH_DEV }}
+      push-server: ${{ steps.parameters.outputs.PUSH_SERVER }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine build parameters
+        id: parameters
+        run: |
+          PUSH_DEV=${{ github.repository == 'PelicanPlatform/pelican' && github.ref == 'refs/heads/main' }}
+          PUSH_SERVER=${{ github.repository == 'PelicanPlatform/pelican' && startsWith(github.ref, 'refs/tags/') }}
+
+          if ${PUSH_DEV} || ${PUSH_SERVER}; then
+            PLATFORMS=linux/amd64,linux/arm64
+          else
+            # If we're not pushing images to a registry, then save resources.
+            PLATFORMS=linux/amd64
+          fi
+
+          echo "PLATFORMS=${PLATFORMS}" >> $GITHUB_OUTPUT
+          echo "PUSH_DEV=${PUSH_DEV}" >> $GITHUB_OUTPUT
+          echo "PUSH_SERVER=${PUSH_SERVER}" >> $GITHUB_OUTPUT
+
+  set-tags:
+    runs-on: ubuntu-latest
+    outputs:
+      TIMESTAMP: ${{ steps.make_timestamp.outputs.TIMESTAMP }}
+      IS_LATEST: ${{ steps.is_latest.outputs.IS_LATEST }}
+      GITHUB_TAG: ${{ steps.determine_tags.outputs.GITHUB_TAG }}
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Make timestamp tag
+        id: make_timestamp
+        run: echo "TIMESTAMP=$(date +%Y%m%d-%H%M)" >> $GITHUB_OUTPUT
+
+      - name: Determine whether to tag this build with "latest"
+        id: is_latest
+        run: |
+          git fetch --tags
+          tags=$(git tag -l 'v*.*.*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)
+          highest_tag=$(echo "${tags}" | tail -n1)
+          echo "Highest version tag is ${highest_tag}"
+          if [[ "${GITHUB_REF##*/}" == "${highest_tag}" ]]; then
+            echo "IS_LATEST=true" >> $GITHUB_OUTPUT
+          else
+            echo "IS_LATEST=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine the tags that triggered this build
+        id: determine_tags
+        run: |
+          # Check if we're working with a tagged version
+          if [ -z "${{ inputs.tag }}" ]
+          then
+            # Use regex to check for a semver tag match.
+            if [[ ${GITHUB_REF##*/} =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]
+            then
+              GITHUB_TAG=${GITHUB_REF##*/}
+            else
+              GITHUB_TAG="latest-dev"
+            fi
+          else
+            GITHUB_TAG=${{ inputs.tag }}
+          fi
+
+          echo "Master SHA:"
+          echo $(git rev-parse $GITHUB_REF_NAME)
+
+          echo "Current SHA:"
+          echo $(git rev-parse HEAD)
+
+          echo "Computed tags:"
+          echo $GITHUB_TAG
+          echo "GITHUB_TAG=$GITHUB_TAG" >> $GITHUB_OUTPUT
+
+  cache-image-layers:
+    needs: [set-build-parameters]
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: amd64,arm64
+
+      # NOTE (brianaydemir): Do not try to be clever and/or ambitious here.
+      # Keep the cache small by restricting it to the current GitHub Action
+      # run. We need to be able to save it for future jobs.
+
+      - name: Create a cache for Docker Buildx
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.base-buildx-cache
+          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --debug
+
+      - name: Save the GitHub workspace
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}
+          key: github-workspace-${{ github.sha }}-${{ github.run_id }}
+
+      - name: Create and cache image layers
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./images/Dockerfile
+          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
+          target: origin
+          cache-from: type=local,src=/tmp/.base-buildx-cache
+          cache-to: type=local,dest=/tmp/.base-buildx-cache,mode=max
+
+  build-server-images:
+    needs: [set-build-parameters, cache-image-layers, set-tags]
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - origin
+          - cache
+          - director
+          - registry
+          - osdf-origin
+          - osdf-cache
+          - osdf-director
+          - osdf-registry
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: amd64,arm64
+
+      - name: Generate tag list
+        id: generate-tag-list
+        env:
+          GITHUB_TAG: ${{ needs.set-tags.outputs.GITHUB_TAG }}
+          IS_LATEST: ${{ needs.set-tags.outputs.IS_LATEST }}
+        run: |
+          docker_repo="pelican_platform"
+          image_name=${{ matrix.image }}
+          tag_list=()
+          for registry in hub.opensciencegrid.org; do
+            for image_tag in "$GITHUB_TAG"; do
+              tag_list+=("$registry/$docker_repo/$image_name":"$image_tag")
+            done
+          done
+          if [[ "$IS_LATEST" == "true" ]]; then
+            tag_list+=("$registry/$docker_repo/$image_name:latest")
+          fi
+          # This causes the tag_list array to be comma-separated below,
+          # which is required for build-push-action
+          IFS=,
+          echo "taglist=${tag_list[*]}" >> $GITHUB_OUTPUT
+
+      - name: Restore the cache for Docker Buildx
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/.base-buildx-cache
+          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --debug
+
+      - name: Log in to OSG Harbor
+        uses: docker/login-action@v3
+        if: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
+        with:
+          registry: hub.opensciencegrid.org
+          username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
+          password: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
+
+      - name: Restore the GitHub workspace
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}
+          key: github-workspace-${{ github.sha }}-${{ github.run_id }}
+          #
+          # NOTE (brianaydemir): If we've somehow managed to get the GitHub
+          # workspace cache evicted, then there are likely serious problems
+          # with how we're triggering and using GitHub actions. Make noise!
+          #
+          fail-on-cache-miss: true
+
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./images/Dockerfile
+          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
+          target: ${{ matrix.image }}
+          push: ${{ needs.set-build-parameters.outputs.push-server == 'true' }}
+          tags: "${{ steps.generate-tag-list.outputs.taglist }}"
+          cache-from: type=local,src=/tmp/.base-buildx-cache
+
+  build-dev-container-image:
+    needs: [set-build-parameters, cache-image-layers]
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Determine image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: hub.opensciencegrid.org/pelican_platform/pelican-dev
+          tags: |
+            type=raw,value=latest-itb
+            type=raw,value=sha-{{sha}}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: amd64,arm64
+
+      - name: Restore the cache for Docker Buildx
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/.base-buildx-cache
+          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-flags: --debug
+
+      - name: Log in to OSG Harbor
+        uses: docker/login-action@v3
+        if: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
+        with:
+          registry: hub.opensciencegrid.org
+          username: ${{ secrets.PELICAN_HARBOR_ROBOT_USER }}
+          password: ${{ secrets.PELICAN_HARBOR_ROBOT_PASSWORD }}
+
+      - name: Restore the GitHub workspace
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}
+          key: github-workspace-${{ github.sha }}-${{ github.run_id }}
+          #
+          # NOTE (brianaydemir): If we've somehow managed to get the GitHub
+          # workspace cache evicted, then there are likely serious problems
+          # with how we're triggering and using GitHub actions. Make noise!
+          #
+          fail-on-cache-miss: true
+
+      - name: Build and push Docker images
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./images/Dockerfile
+          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
+          target: dev-container
+          push: ${{ needs.set-build-parameters.outputs.push-dev == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=local,src=/tmp/.base-buildx-cache

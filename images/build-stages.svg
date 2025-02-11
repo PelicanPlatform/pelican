@@ -1,0 +1,254 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="627pt" height="580pt" viewBox="0.00 0.00 627.00 580.00">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(4 576)">
+<polygon fill="white" stroke="none" points="-4,4 -4,-576 623,-576 623,4 -4,4"/>
+<g id="clust1" class="cluster">
+<title>cluster_0</title>
+</g>
+<g id="clust2" class="cluster">
+<title>cluster_1</title>
+</g>
+<g id="clust3" class="cluster">
+<title>cluster_2</title>
+</g>
+<g id="clust4" class="cluster">
+<title>cluster_3</title>
+</g>
+<g id="clust5" class="cluster">
+<title>cluster_4</title>
+</g>
+<!-- scitokens_oauth2_server -->
+<g id="node1" class="node">
+<title>scitokens_oauth2_server</title>
+<polygon fill="none" stroke="black" points="170.2,-268 15.8,-268 15.8,-232 170.2,-232 170.2,-268"/>
+<text text-anchor="middle" x="93" y="-245.8" font-family="Times,serif" font-size="14.00">scitokens_oauth2_server</text>
+</g>
+<!-- origin_base -->
+<g id="node7" class="node">
+<title>origin_base</title>
+<polygon fill="none" stroke="black" points="298.66,-196 217.34,-196 217.34,-160 298.66,-160 298.66,-196"/>
+<text text-anchor="middle" x="258" y="-173.8" font-family="Times,serif" font-size="14.00">origin_base</text>
+</g>
+<!-- scitokens_oauth2_server&#45;&gt;origin_base -->
+<g id="edge7" class="edge">
+<title>scitokens_oauth2_server-&gt;origin_base</title>
+<path fill="none" stroke="gray" stroke-dasharray="5,2" d="M134.21,-231.52C156.15,-222.21 183.33,-210.68 206.63,-200.79"/>
+<polygon fill="gray" stroke="gray" points="207.8,-204.1 215.64,-196.97 205.06,-197.66 207.8,-204.1"/>
+</g>
+<!-- pelican_build_base -->
+<g id="node2" class="node">
+<title>pelican_build_base</title>
+<polygon fill="none" stroke="black" points="603.04,-556 478.96,-556 478.96,-520 603.04,-520 603.04,-556"/>
+<text text-anchor="middle" x="541" y="-533.8" font-family="Times,serif" font-size="14.00">pelican_build_base</text>
+</g>
+<!-- pelican_build -->
+<g id="node3" class="node">
+<title>pelican_build</title>
+<polygon fill="none" stroke="black" points="587.1,-484 494.9,-484 494.9,-448 587.1,-448 587.1,-484"/>
+<text text-anchor="middle" x="541" y="-461.8" font-family="Times,serif" font-size="14.00">pelican_build</text>
+</g>
+<!-- pelican_build_base&#45;&gt;pelican_build -->
+<g id="edge1" class="edge">
+<title>pelican_build_base-&gt;pelican_build</title>
+<path fill="none" stroke="black" d="M541,-519.7C541,-512.41 541,-503.73 541,-495.54"/>
+<polygon fill="black" stroke="black" points="544.5,-495.62 541,-485.62 537.5,-495.62 544.5,-495.62"/>
+</g>
+<!-- director -->
+<g id="node9" class="node">
+<title>director</title>
+<polygon fill="none" stroke="black" points="426.77,-412 367.23,-412 367.23,-376 426.77,-376 426.77,-412"/>
+<text text-anchor="middle" x="397" y="-389.8" font-family="Times,serif" font-size="14.00">director</text>
+</g>
+<!-- pelican_build&#45;&gt;director -->
+<g id="edge12" class="edge">
+<title>pelican_build-&gt;director</title>
+<path fill="none" stroke="gray" stroke-dasharray="1,5" d="M505.03,-447.52C484.51,-437.54 458.72,-425 437.49,-414.68"/>
+<polygon fill="gray" stroke="gray" points="439.05,-411.55 428.53,-410.33 435.99,-417.85 439.05,-411.55"/>
+</g>
+<!-- registry -->
+<g id="node11" class="node">
+<title>registry</title>
+<polygon fill="none" stroke="black" points="534.38,-412 475.62,-412 475.62,-376 534.38,-376 534.38,-412"/>
+<text text-anchor="middle" x="505" y="-389.8" font-family="Times,serif" font-size="14.00">registry</text>
+</g>
+<!-- pelican_build&#45;&gt;registry -->
+<g id="edge13" class="edge">
+<title>pelican_build-&gt;registry</title>
+<path fill="none" stroke="gray" stroke-dasharray="1,5" d="M532.1,-447.7C528.13,-439.98 523.37,-430.71 518.94,-422.11"/>
+<polygon fill="gray" stroke="gray" points="522.17,-420.74 514.49,-413.45 515.95,-423.94 522.17,-420.74"/>
+</g>
+<!-- origin -->
+<g id="node13" class="node">
+<title>origin</title>
+<polygon fill="none" stroke="black" points="439,-124 385,-124 385,-88 439,-88 439,-124"/>
+<text text-anchor="middle" x="412" y="-101.8" font-family="Times,serif" font-size="14.00">origin</text>
+</g>
+<!-- pelican_build&#45;&gt;origin -->
+<g id="edge18" class="edge">
+<title>pelican_build-&gt;origin</title>
+<path fill="none" stroke="gray" stroke-dasharray="1,5" d="M550.32,-447.92C554.46,-439.69 559.04,-429.55 562,-420 574.91,-378.26 578,-366.69 578,-323 578,-323 578,-323 578,-249 578,-215.29 497.97,-159.93 449.04,-129.24"/>
+<polygon fill="gray" stroke="gray" points="451.04,-126.36 440.7,-124.06 447.35,-132.31 451.04,-126.36"/>
+</g>
+<!-- cache -->
+<g id="node15" class="node">
+<title>cache</title>
+<polygon fill="none" stroke="black" points="537,-124 483,-124 483,-88 537,-88 537,-124"/>
+<text text-anchor="middle" x="510" y="-101.8" font-family="Times,serif" font-size="14.00">cache</text>
+</g>
+<!-- pelican_build&#45;&gt;cache -->
+<g id="edge19" class="edge">
+<title>pelican_build-&gt;cache</title>
+<path fill="none" stroke="gray" stroke-dasharray="1,5" d="M566.59,-447.57C575.84,-440.08 585.57,-430.6 592,-420 615.03,-382.03 616,-367.41 616,-323 616,-323 616,-323 616,-249 616,-204.59 619.08,-187.2 592,-152 580.9,-137.57 563.79,-127.15 548.07,-119.99"/>
+<polygon fill="gray" stroke="gray" points="549.47,-116.78 538.89,-116.13 546.75,-123.23 549.47,-116.78"/>
+</g>
+<!-- pelican_software_base -->
+<g id="node4" class="node">
+<title>pelican_software_base</title>
+<polygon fill="none" stroke="black" points="327.75,-484 184.25,-484 184.25,-448 327.75,-448 327.75,-484"/>
+<text text-anchor="middle" x="256" y="-461.8" font-family="Times,serif" font-size="14.00">pelican_software_base</text>
+</g>
+<!-- xrootd_software_init -->
+<g id="node5" class="node">
+<title>xrootd_software_init</title>
+<polygon fill="none" stroke="black" points="322.71,-412 189.29,-412 189.29,-376 322.71,-376 322.71,-412"/>
+<text text-anchor="middle" x="256" y="-389.8" font-family="Times,serif" font-size="14.00">xrootd_software_init</text>
+</g>
+<!-- pelican_software_base&#45;&gt;xrootd_software_init -->
+<g id="edge2" class="edge">
+<title>pelican_software_base-&gt;xrootd_software_init</title>
+<path fill="none" stroke="black" d="M256,-447.7C256,-440.41 256,-431.73 256,-423.54"/>
+<polygon fill="black" stroke="black" points="259.5,-423.62 256,-413.62 252.5,-423.62 259.5,-423.62"/>
+</g>
+<!-- pelican_software_base&#45;&gt;director -->
+<g id="edge8" class="edge">
+<title>pelican_software_base-&gt;director</title>
+<path fill="none" stroke="black" d="M291.22,-447.52C311.17,-437.61 336.21,-425.18 356.92,-414.9"/>
+<polygon fill="black" stroke="black" points="358.24,-418.15 365.64,-410.57 355.13,-411.88 358.24,-418.15"/>
+</g>
+<!-- pelican_software_base&#45;&gt;registry -->
+<g id="edge10" class="edge">
+<title>pelican_software_base-&gt;registry</title>
+<path fill="none" stroke="black" d="M327.85,-448.82C361,-440.91 400.72,-430.77 436,-420 445.37,-417.14 455.34,-413.74 464.7,-410.39"/>
+<polygon fill="black" stroke="black" points="465.72,-413.74 473.92,-407.02 463.32,-407.16 465.72,-413.74"/>
+</g>
+<!-- xrootd_software_base -->
+<g id="node6" class="node">
+<title>xrootd_software_base</title>
+<polygon fill="none" stroke="black" points="327.81,-268 188.19,-268 188.19,-232 327.81,-232 327.81,-268"/>
+<text text-anchor="middle" x="258" y="-245.8" font-family="Times,serif" font-size="14.00">xrootd_software_base</text>
+</g>
+<!-- xrootd_software_init&#45;&gt;xrootd_software_base -->
+<g id="edge3" class="edge">
+<title>xrootd_software_init-&gt;xrootd_software_base</title>
+<path fill="none" stroke="black" d="M239.54,-375.92C231.35,-366.22 222.3,-353.37 218,-340 212.02,-321.38 211.05,-314.28 218,-296 220.7,-288.91 225.08,-282.22 229.97,-276.28"/>
+<polygon fill="black" stroke="black" points="232.21,-279.02 236.35,-269.27 227.04,-274.31 232.21,-279.02"/>
+</g>
+<!-- xrootd_build -->
+<g id="node8" class="node">
+<title>xrootd_build</title>
+<polygon fill="none" stroke="black" points="315.17,-340 226.83,-340 226.83,-304 315.17,-304 315.17,-340"/>
+<text text-anchor="middle" x="271" y="-317.8" font-family="Times,serif" font-size="14.00">xrootd_build</text>
+</g>
+<!-- xrootd_software_init&#45;&gt;xrootd_build -->
+<g id="edge5" class="edge">
+<title>xrootd_software_init-&gt;xrootd_build</title>
+<path fill="none" stroke="black" d="M259.71,-375.7C261.29,-368.32 263.17,-359.52 264.95,-351.25"/>
+<polygon fill="black" stroke="black" points="268.34,-352.1 267.02,-341.58 261.5,-350.63 268.34,-352.1"/>
+</g>
+<!-- xrootd_software_base&#45;&gt;origin_base -->
+<g id="edge4" class="edge">
+<title>xrootd_software_base-&gt;origin_base</title>
+<path fill="none" stroke="black" d="M258,-231.7C258,-224.41 258,-215.73 258,-207.54"/>
+<polygon fill="black" stroke="black" points="261.5,-207.62 258,-197.62 254.5,-207.62 261.5,-207.62"/>
+</g>
+<!-- xrootd_software_base&#45;&gt;cache -->
+<g id="edge16" class="edge">
+<title>xrootd_software_base-&gt;cache</title>
+<path fill="none" stroke="black" d="M288.9,-231.59C335.38,-205.4 423.13,-155.95 472.97,-127.87"/>
+<polygon fill="black" stroke="black" points="474.39,-131.08 481.38,-123.13 470.95,-124.99 474.39,-131.08"/>
+</g>
+<!-- origin_base&#45;&gt;origin -->
+<g id="edge14" class="edge">
+<title>origin_base-&gt;origin</title>
+<path fill="none" stroke="black" d="M296.46,-159.52C320.26,-148.7 350.67,-134.88 374.32,-124.13"/>
+<polygon fill="black" stroke="black" points="375.63,-127.38 383.28,-120.05 372.73,-121.01 375.63,-127.38"/>
+</g>
+<!-- devtest_container_base -->
+<g id="node17" class="node">
+<title>devtest_container_base</title>
+<polygon fill="none" stroke="black" points="331.31,-124 184.69,-124 184.69,-88 331.31,-88 331.31,-124"/>
+<text text-anchor="middle" x="258" y="-101.8" font-family="Times,serif" font-size="14.00">devtest_container_base</text>
+</g>
+<!-- origin_base&#45;&gt;devtest_container_base -->
+<g id="edge20" class="edge">
+<title>origin_base-&gt;devtest_container_base</title>
+<path fill="none" stroke="black" d="M258,-159.7C258,-152.41 258,-143.73 258,-135.54"/>
+<polygon fill="black" stroke="black" points="261.5,-135.62 258,-125.62 254.5,-135.62 261.5,-135.62"/>
+</g>
+<!-- xrootd_build&#45;&gt;xrootd_software_base -->
+<g id="edge6" class="edge">
+<title>xrootd_build-&gt;xrootd_software_base</title>
+<path fill="none" stroke="gray" stroke-dasharray="5,2" d="M267.79,-303.7C266.42,-296.32 264.78,-287.52 263.25,-279.25"/>
+<polygon fill="gray" stroke="gray" points="266.72,-278.79 261.45,-269.59 259.84,-280.06 266.72,-278.79"/>
+</g>
+<!-- osdf_director -->
+<g id="node10" class="node">
+<title>osdf_director</title>
+<polygon fill="none" stroke="black" points="442.32,-340 351.68,-340 351.68,-304 442.32,-304 442.32,-340"/>
+<text text-anchor="middle" x="397" y="-317.8" font-family="Times,serif" font-size="14.00">osdf_director</text>
+</g>
+<!-- director&#45;&gt;osdf_director -->
+<g id="edge9" class="edge">
+<title>director-&gt;osdf_director</title>
+<path fill="none" stroke="black" d="M397,-375.7C397,-368.41 397,-359.73 397,-351.54"/>
+<polygon fill="black" stroke="black" points="400.5,-351.62 397,-341.62 393.5,-351.62 400.5,-351.62"/>
+</g>
+<!-- osdf_registry -->
+<g id="node12" class="node">
+<title>osdf_registry</title>
+<polygon fill="none" stroke="black" points="549.94,-340 460.06,-340 460.06,-304 549.94,-304 549.94,-340"/>
+<text text-anchor="middle" x="505" y="-317.8" font-family="Times,serif" font-size="14.00">osdf_registry</text>
+</g>
+<!-- registry&#45;&gt;osdf_registry -->
+<g id="edge11" class="edge">
+<title>registry-&gt;osdf_registry</title>
+<path fill="none" stroke="black" d="M505,-375.7C505,-368.41 505,-359.73 505,-351.54"/>
+<polygon fill="black" stroke="black" points="508.5,-351.62 505,-341.62 501.5,-351.62 508.5,-351.62"/>
+</g>
+<!-- osdf_origin -->
+<g id="node14" class="node">
+<title>osdf_origin</title>
+<polygon fill="none" stroke="black" points="452.28,-52 371.72,-52 371.72,-16 452.28,-16 452.28,-52"/>
+<text text-anchor="middle" x="412" y="-29.8" font-family="Times,serif" font-size="14.00">osdf_origin</text>
+</g>
+<!-- origin&#45;&gt;osdf_origin -->
+<g id="edge15" class="edge">
+<title>origin-&gt;osdf_origin</title>
+<path fill="none" stroke="black" d="M412,-87.7C412,-80.41 412,-71.73 412,-63.54"/>
+<polygon fill="black" stroke="black" points="415.5,-63.62 412,-53.62 408.5,-63.62 415.5,-63.62"/>
+</g>
+<!-- osdf_cache -->
+<g id="node16" class="node">
+<title>osdf_cache</title>
+<polygon fill="none" stroke="black" points="549.48,-52 470.52,-52 470.52,-16 549.48,-16 549.48,-52"/>
+<text text-anchor="middle" x="510" y="-29.8" font-family="Times,serif" font-size="14.00">osdf_cache</text>
+</g>
+<!-- cache&#45;&gt;osdf_cache -->
+<g id="edge17" class="edge">
+<title>cache-&gt;osdf_cache</title>
+<path fill="none" stroke="black" d="M510,-87.7C510,-80.41 510,-71.73 510,-63.54"/>
+<polygon fill="black" stroke="black" points="513.5,-63.62 510,-53.62 506.5,-63.62 513.5,-63.62"/>
+</g>
+<!-- dev_container -->
+<g id="node18" class="node">
+<title>dev_container</title>
+<polygon fill="none" stroke="black" points="305.65,-52 210.35,-52 210.35,-16 305.65,-16 305.65,-52"/>
+<text text-anchor="middle" x="258" y="-29.8" font-family="Times,serif" font-size="14.00">dev_container</text>
+</g>
+<!-- devtest_container_base&#45;&gt;dev_container -->
+<g id="edge21" class="edge">
+<title>devtest_container_base-&gt;dev_container</title>
+<path fill="none" stroke="black" d="M258,-87.7C258,-80.41 258,-71.73 258,-63.54"/>
+<polygon fill="black" stroke="black" points="261.5,-63.62 258,-53.62 254.5,-63.62 261.5,-63.62"/>
+</g>
+</g>
+</svg>
