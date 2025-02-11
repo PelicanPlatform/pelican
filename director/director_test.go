@@ -2011,7 +2011,8 @@ func TestHeaderGenFuncs(t *testing.T) {
 
 func TestGetHealthTestFile(t *testing.T) {
 	router := gin.Default()
-	router.GET("/api/v1.0/director/healthTest/*path", getHealthTestFile)
+	router.Any("/api/v1.0/director/healthTest/*path", getHealthTestFile)
+	router.Handle("PROPFIND", "/api/v1.0/director/healthTest/*path", getHealthTestFile)
 
 	t.Run("400-on-empty-path", func(t *testing.T) {
 		w := httptest.NewRecorder()
@@ -2039,22 +2040,62 @@ func TestGetHealthTestFile(t *testing.T) {
 
 	t.Run("400-on-missing-file-ext", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/pelican/monitoring/testfile", nil)
+		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/pelican/monitoring/selfTest/testfile", nil)
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code)
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(bytes), "Test file name is missing file extension")
+	})
+
+	t.Run("400-on-bad-timestamp", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/pelican/monitoring/directorTest/director-test-123123123123123.txt", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(bytes), "Invalid timestamp in file name")
 	})
 
 	t.Run("200-on-correct-request-file", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/pelican/monitoring/testfile.txt", nil)
+		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/pelican/monitoring/directorTest/director-test-2006-01-02T15:04:10Z.txt", nil)
 		router.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, http.StatusOK, w.Code)
 
 		bytes, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
 		assert.Equal(t, server_utils.DirectorTestBody+"\n", string(bytes))
+	})
+
+	t.Run("207-and-XML-on-PROPFIND", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PROPFIND", "/api/v1.0/director/healthTest/pelican/monitoring/directorTest/director-test-2006-01-02T15:04:10Z.txt", nil)
+		router.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusMultiStatus, w.Code)
+
+		bytes, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, `<?xml version="1.0" encoding="utf-8"?>
+	<D:multistatus xmlns:D="DAV:" xmlns:ns1="http://apache.org/dav/props/" xmlns:ns0="DAV:">
+		<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/" xmlns:lp3="LCGDM:">
+			<D:href>/pelican/monitoring/directorTest/director-test-2006-01-02T15:04:10Z.txt</D:href>
+			<D:propstat>
+				<D:prop>
+					<lp1:getcontentlength>67</lp1:getcontentlength>
+					<lp1:getlastmodified>Mon, 02 Jan 2006 15:04:10 GMT</lp1:getlastmodified>
+					<lp1:iscollection>0</lp1:iscollection>
+					<lp1:executable>F</lp1:executable>
+				</D:prop>
+				<D:status>HTTP/1.1 200 OK</D:status>
+			</D:propstat>
+		</D:response>
+	</D:multistatus>`, string(bytes))
 	})
 }
 

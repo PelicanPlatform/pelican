@@ -19,7 +19,9 @@
 package director
 
 import (
+	"bytes"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -1446,39 +1448,111 @@ func getPrefixByPath(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, res)
 }
 
+// Given a request for a health test file, validate the incoming path, the file extension and the timestamp.
+func validateHealthTestRequest(fPath string) (string, error) {
+	// Incoming paths might look like
+	//   - /pelican/monitoring/directorTest/director-test-2006-01-02T15:04:10Z.txt
+	//   - /pelican/monitoring/selfTest/self-test-2006-01-02T15:04:10Z.txt
+	// These paths/prefixes are defined by the file transfer test utilities in server_utils/test_file_transfer.go
+	if fPath == "" || !strings.HasPrefix(fPath, server_utils.MonitoringBaseNs+"/") {
+		return "", fmt.Errorf("Path parameter is not a valid health test path: %s", fPath)
+	}
+	fName := strings.TrimPrefix(fPath, server_utils.MonitoringBaseNs+"/")
+	if fName == "" {
+		return "", fmt.Errorf("Path parameter is not a valid health test path because it contains no file name: %s", fPath)
+	}
+	fNameSplit := strings.Split(fName, "/")
+	if len(fNameSplit) == 0 {
+		return "", fmt.Errorf("Path parameter is not a valid health test path because it contains no file name: %s", fPath)
+	}
+	// Grab the filename from the remaining components
+	fName = fNameSplit[len(fNameSplit)-1]
+
+	// Validate the file extension
+	extSplit := strings.SplitN(fName, ".", 2)
+	if len(extSplit) != 2 {
+		return "", fmt.Errorf("Test file name is missing file extension: %s", fPath)
+	}
+
+	// validate the timestamp in the file name
+	var tStampStr string
+	if strings.HasPrefix(fName, server_utils.DirectorTest.String()) {
+		tStampStr = strings.TrimPrefix(fName, server_utils.DirectorTest.String()+"-")
+	} else if strings.HasPrefix(fName, server_utils.ServerSelfTest.String()) {
+		tStampStr = strings.TrimPrefix(fName, server_utils.ServerSelfTest.String()+"-")
+	} else {
+		return "", fmt.Errorf("File name does not have a valid prefix: %s", fName)
+	}
+	tStampStr = strings.TrimSuffix(tStampStr, "."+extSplit[1])
+	tStamp, err := time.Parse("2006-01-02T15:04:05Z07:00", tStampStr)
+	if err != nil {
+		return "", fmt.Errorf("Invalid timestamp in file name: '%s'. Should conform to 2006-01-02T15:04:05Z07:00 format (RFC 3339)", tStampStr)
+	}
+	formatted := tStamp.Format("Mon, 02 Jan 2006 15:04:05 GMT")
+	return formatted, nil
+}
+
+// Generate a PROPFIND response for a health test file. This is important for caches, where xrdcl-pelican's first query
+// will always be a PROPFIND request to check whether the requested resource is an object or a collection.
+func generatePROPFINDResponse(fPath string, size int, tStamp string) string {
+	// Generate the XML content. This template was obtained by sending a curl command to a real cache to query for a known test file:
+	//   curl -v -X PROPFIND -i -H "Depth: 0" https://osdf-uw-cache.svc.osg-htc.org:8443/pelican/monitoring/directorTest/director-test-2025-01-24T12:16:59Z.txt
+	xmlContent := fmt.Sprintf(`<?xml version="1.0" encoding="utf-8"?>
+	<D:multistatus xmlns:D="DAV:" xmlns:ns1="http://apache.org/dav/props/" xmlns:ns0="DAV:">
+		<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/" xmlns:lp3="LCGDM:">
+			<D:href>%s</D:href>
+			<D:propstat>
+				<D:prop>
+					<lp1:getcontentlength>%d</lp1:getcontentlength>
+					<lp1:getlastmodified>%s</lp1:getlastmodified>
+					<lp1:iscollection>0</lp1:iscollection>
+					<lp1:executable>F</lp1:executable>
+				</D:prop>
+				<D:status>HTTP/1.1 200 OK</D:status>
+			</D:propstat>
+		</D:response>
+	</D:multistatus>`, fPath, size, tStamp)
+
+	return xmlContent
+}
+
 // Generate a mock file for caches to fetch. This is for director-based health tests for caches
 // So that we don't require an origin to feed the test file to the cache
 func getHealthTestFile(ctx *gin.Context) {
-	// Expected path: /pelican/monitoring/directorTest/2006-01-02T15:04:05Z07:00.txt
 	pathParam := ctx.Param("path")
 	cleanedPath := path.Clean(pathParam)
-	if cleanedPath == "" || !strings.HasPrefix(cleanedPath, server_utils.MonitoringBaseNs+"/") {
+	tStamp, err := validateHealthTestRequest(cleanedPath)
+	if err != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Path parameter is not a valid health test path: " + cleanedPath})
-		return
-	}
-	fileName := strings.TrimPrefix(cleanedPath, server_utils.MonitoringBaseNs+"/")
-	if fileName == "" {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Path parameter is not a valid health test path: " + cleanedPath})
-		return
-	}
-
-	fileNameSplit := strings.SplitN(fileName, ".", 2)
-
-	if len(fileNameSplit) != 2 {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Test file name is missing file extension: " + cleanedPath})
+			Msg:    err.Error(),
+		})
 		return
 	}
 
 	fileContent := server_utils.DirectorTestBody + "\n"
 
-	if ctx.Request.Method == "HEAD" {
+	method := ctx.Request.Method
+	switch method {
+	case "PROPFIND":
+		var buf bytes.Buffer
+		if err := xml.EscapeText(&buf, []byte(cleanedPath)); err != nil {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    errors.Wrapf(err, "Unable to properly escape XML content for path: %s", cleanedPath).Error(),
+			})
+		}
+
+		// Respond with the special Multi Status 207 code. Technically we're only sending a
+		// single XML response in our "multi-status" xml (notice the 200 OK in the XML body),
+		// but this is the PROPFIND status code clients will typically expect to see.
+		ctx.String(http.StatusMultiStatus, generatePROPFINDResponse(cleanedPath, len(fileContent), tStamp))
+	case "HEAD":
 		ctx.Header("Content-Length", strconv.Itoa(len(fileContent)))
-	} else {
+	case "GET":
 		ctx.String(http.StatusOK, fileContent)
+	default:
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Unsupported method: " + method})
 	}
 }
 
@@ -1554,18 +1628,15 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.HEAD("/origin/*any", redirectToOrigin)
 		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
 		directorAPIV1.DELETE("/origin/*any", redirectToOrigin)
+		directorAPIV1.Handle("PROPFIND", "/origin/*any", redirectToOrigin)
 		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
 		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
 		directorAPIV1.HEAD("/healthTest/*path", getHealthTestFile)
+		directorAPIV1.Handle("PROPFIND", "/healthTest/*path", getHealthTestFile)
 		directorAPIV1.GET("/listX509ClientPrefixes", listX509ClientPrefixes)
-		directorAPIV1.Any("/origin", func(gctx *gin.Context) { // Need to do this for PROPFIND since gin does not support it
-			if gctx.Request.Method == "PROPFIND" {
-				redirectToOrigin(gctx)
-			}
-		})
 
 		// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
 		// so that director can be our point of contact for collecting system-level metrics.
