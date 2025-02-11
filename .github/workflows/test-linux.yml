@@ -15,6 +15,7 @@ jobs:
     container:
       image: ${{ inputs.image }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - binary_name: pelican
