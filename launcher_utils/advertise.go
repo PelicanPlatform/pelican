@@ -137,16 +137,19 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	var err error
 	// Fetch site name from the registry, if not, fall back to Xrootd.Sitename.
 	if server.GetServerType().IsEnabled(server_structs.OriginType) {
-		// We use Server_Hostname (without port) as the origin/cache prefix
-		hostname := param.Server_Hostname.GetString()
-		originPrefix := server_structs.GetOriginNs(hostname)
+		// Note we use Server_ExternalWebUrl as the origin prefix
+		// But caches still use Xrootd_Sitename, which will be changed to Server_ExternalWebUrl in
+		// https://github.com/PelicanPlatform/pelican/issues/1351
+		extUrlStr := param.Server_ExternalWebUrl.GetString()
+		extUrl, _ := url.Parse(extUrlStr)
+		// Only use hostname:port
+		originPrefix := server_structs.GetOriginNs(extUrl.Host)
 		name, err = getSitenameFromReg(ctx, originPrefix)
 		if err != nil {
 			log.Errorf("Failed to get sitename from the registry for the origin. Will fallback to use Xrootd.Sitename: %v", err)
 		}
 	} else if server.GetServerType().IsEnabled(server_structs.CacheType) {
-		hostname := param.Server_Hostname.GetString()
-		cachePrefix := server_structs.GetCacheNS(hostname)
+		cachePrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
 		name, err = getSitenameFromReg(ctx, cachePrefix)
 		if err != nil {
 			log.Errorf("Failed to get sitename from the registry for the cache. Will fallback to use Xrootd.Sitename: %v", err)

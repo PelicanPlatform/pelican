@@ -123,9 +123,10 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 
 	// PublicReads implies reads
 	reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
-	hostname := param.Server_Hostname.GetString()
-	// Only use server's hostname as prefix (without port)
-	registryPrefix := server_structs.GetOriginNs(hostname)
+	extUrlStr := param.Server_ExternalWebUrl.GetString()
+	extUrl, _ := url.Parse(extUrlStr)
+	// Only use hostname:port
+	registryPrefix := server_structs.GetOriginNs(extUrl.Host)
 	ad := server_structs.OriginAdvertiseV2{
 		Name:           name,
 		RegistryPrefix: registryPrefix,

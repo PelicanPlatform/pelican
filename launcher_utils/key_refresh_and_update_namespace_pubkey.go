@@ -89,9 +89,9 @@ func updateNamespacesPubKey(ctx context.Context, prefixes []string) error {
 }
 
 func triggerNamespacesPubKeyUpdate(ctx context.Context) error {
-	hostname := param.Server_Hostname.GetString()
-	// Only use server's hostname as prefix/namespace (without port)
-	namespace := server_structs.GetOriginNs(hostname)
+	extUrlStr := param.Server_ExternalWebUrl.GetString()
+	extUrl, _ := url.Parse(extUrlStr)
+	namespace := server_structs.GetOriginNs(extUrl.Host)
 	if err := updateNamespacesPubKey(ctx, []string{namespace}); err != nil {
 		log.Errorf("Error updating the public key of the registered origin namespace %s: %v", namespace, err)
 	}
