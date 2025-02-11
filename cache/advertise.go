@@ -42,7 +42,7 @@ type (
 )
 
 func (server *CacheServer) CreateAdvertisement(name, originUrl, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
-	registryPrefix := server_structs.GetCacheNS(param.Server_Hostname.GetString())
+	registryPrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
 	ad := server_structs.OriginAdvertiseV2{
 		Name:           name,
 		RegistryPrefix: registryPrefix,
