@@ -203,9 +203,9 @@ RUN groupadd -g 10940 xrootd \
 
 # We need to pin the install for many of the RPMs to "Koji" until all of
 # Pelican's patches are ingested into the OSG repositories.
-ARG XROOTD_VERSION="5.7.2"
+ARG XROOTD_VER="5.7.2"
 ARG XROOTD_RELEASE="1.5.purge.osg${OSG_SERIES}.${BASE_OS}"
-ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VERSION}/${XROOTD_RELEASE}"
+ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
 # The packages from Koji need to be installed in a single dnf command in
 # order to avoid unresolvable dependencies.
@@ -243,9 +243,9 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   for package in ${PACKAGES}; do
     if [ "$package" = "xrootd-selinux" ]; then
-      package_urls+=(${KOJIHUB_BASE_URL}/noarch/${package}-${XROOTD_VERSION}-${XROOTD_RELEASE}.noarch.rpm)
+      package_urls+=(${KOJIHUB_BASE_URL}/noarch/${package}-${XROOTD_VER}-${XROOTD_RELEASE}.noarch.rpm)
     else
-      package_urls+=(${KOJIHUB_BASE_URL}/${PKG_ARCH}/${package}-${XROOTD_VERSION}-${XROOTD_RELEASE}.${PKG_ARCH}.rpm)
+      package_urls+=(${KOJIHUB_BASE_URL}/${PKG_ARCH}/${package}-${XROOTD_VER}-${XROOTD_RELEASE}.${PKG_ARCH}.rpm)
     fi
   done
   dnf install -y "${package_urls[@]}"
