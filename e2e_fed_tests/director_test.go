@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
 *
 * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
@@ -19,12 +21,11 @@
 package fed_tests
 
 import (
-	"io"
-
 	"context"
 	"crypto/tls"
 	_ "embed"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
 	"testing"
