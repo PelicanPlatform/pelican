@@ -238,6 +238,7 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 		tickerRate = parsedTok.Expiration().Sub(parsedTok.IssuedAt())
 	}
 	tickerRate /= 3
+	log.Debugf("Federation token refresh rate set to %.3fm", tickerRate.Minutes())
 
 	// Set the token in the cache
 	err = server_utils.SetFedTok(ctx, cache, tok)
@@ -260,12 +261,14 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 					log.Errorf("Failed to get a federation token: %v", err)
 					continue
 				}
+				log.Traceln("Successfully received new federation token")
 
 				// Set the token in the cache
 				err = server_utils.SetFedTok(ctx, cache, tok)
 				if err != nil {
 					log.Errorf("Failed to write the federation token: %v", err)
 				}
+				log.Traceln("Successfully wrote new federation token to disk")
 			case <-ctx.Done():
 				return nil
 			}
