@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
@@ -254,11 +255,12 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 					crashTimestamp := time.Now().Unix()
 					log.Debug("Recording xrootd crash at time: ", crashTimestamp)
 
-					dbErr := database.CreateOrIncrementCounter(service_key, 1)
+					dbErr := database.CreateOrUpdateCounter(service_key, int(crashTimestamp))
 					if dbErr != nil {
 						log.Debug("Error recording xrootd crash: ", dbErr)
 						return errors.Wrap(err, "Unable to record xrootd crash")
 					}
+					metrics.PelicanServerXRootDLastCrash.With(prometheus.Labels{"server_type": service_key}).Set(float64(crashTimestamp))
 					log.Errorln(err)
 					return err
 				}
