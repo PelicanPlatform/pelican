@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -222,15 +223,31 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 		log.Errorf("Failed to get a federation token: %v", err)
 	}
 
+	// We want to fire the ticker at 1/3 the period of the token lifetime, or 1/3 the default
+	// lifetime for the token if we can't otherwise determine it. In most cases, the two values
+	// will be the same unless some fed administrator thinks they know better! This 1/3 period approach
+	// gives us a bit of buffer in the event the Director is down for a short period of time.
+	//
+	// I think verificationless parsing is fine here, because we already assume a strong
+	// trust relationship with the Director, and if its been compromised, we have bigger problems.
+	var tickerRate time.Duration
+	if parsedTok, err := jwt.ParseInsecure([]byte(tok)); err != nil {
+		log.Errorf("Failed to parse a federation token from the Director: %v", err)
+		tickerRate = param.Director_FedTokenLifetime.GetDuration()
+	} else {
+		tickerRate = parsedTok.Expiration().Sub(parsedTok.IssuedAt())
+	}
+	tickerRate /= 3
+
 	// Set the token in the cache
 	err = server_utils.SetFedTok(ctx, cache, tok)
 	if err != nil {
 		log.Errorf("Failed to set the federation token: %v", err)
 	}
 
-	// Fire the ticker every at 1/3 the period of token lifetime. This gives us a bit
-	// of buffer in the event the Director is down for a short period of time.
-	fedTokTicker := time.NewTicker(param.Director_FedTokenLifetime.GetDuration() / 3)
+	// TODO: Figure out what to do if the Director starts issuing tokens with a different
+	// lifetime --> we can adjust ticker period dynamically, but what's the sensible thing to do?
+	fedTokTicker := time.NewTicker(tickerRate)
 	egrp.Go(func() error {
 		defer fedTokTicker.Stop()
 		for {
