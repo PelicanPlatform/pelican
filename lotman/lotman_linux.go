@@ -970,7 +970,7 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	purego.RegisterLibFunc(&LotmanGetLotsFromDir, lotmanLib, "lotman_get_lots_from_dir")
 
 	// Set the lot_home context -- where the db lives
-	lotHome := param.Lotman_DbLocation.GetString()
+	lotHome := param.Lotman_LotHome.GetString()
 
 	errMsg := make([]byte, 2048)
 

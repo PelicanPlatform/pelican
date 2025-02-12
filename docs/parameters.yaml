@@ -2946,13 +2946,27 @@ components: ["plugin"]
 ############################
 #   LotMan-level configs   #
 ############################
+name: Lotman.LotHome
+description: |+
+  The prefix indicating where LotMan should store its lot database. Configured with path `<path>`, the database
+  will be stored at `<path>/.lot/lotman_cpp.sqlite`.
+type: filename
+root_default: /var/run/pelican
+default: $ConfigBase
+components: ["cache"]
+---
 name: Lotman.DbLocation
 description: |+
+  [Deprecated] `Lotman.DbLocation` is deprecated and will be removed in a future release. Please migrate to
+  use `Lotman.LotHome` instead.
+
   The prefix indicating where LotMan should store its lot database. For the provided path, the database
   will be stored at <path>/.lot/lotman_cpp.sqlite.
 type: filename
 root_default: /var/run/pelican
 default: $ConfigBase
+deprecated: true
+replacedby: ["Lotman.LotHome"]
 components: ["cache"]
 ---
 name: Lotman.LibLocation

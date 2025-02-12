@@ -1051,7 +1051,7 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Registry_DbLocation.GetName(), "/var/lib/pelican/registry.sqlite")
 		v.SetDefault(param.Director_DbLocation.GetName(), "/var/lib/pelican/director.sqlite")
 		// The lotman db will actually take this path and create the lot at /path/.lot/lotman_cpp.sqlite
-		v.SetDefault(param.Lotman_DbLocation.GetName(), "/var/lib/pelican")
+		v.SetDefault(param.Lotman_LotHome.GetName(), "/var/lib/pelican")
 		v.SetDefault(param.Monitoring_DataLocation.GetName(), "/var/lib/pelican/monitoring/data")
 		v.SetDefault(param.Shoveler_QueueDirectory.GetName(), "/var/spool/pelican/shoveler/queue")
 		v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), "/etc/pelican/shoveler-token")
@@ -1062,7 +1062,7 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Registry_DbLocation.GetName(), filepath.Join(configDir, "ns-registry.sqlite"))
 		v.SetDefault(param.Director_DbLocation.GetName(), filepath.Join(configDir, "director.sqlite"))
 		// Lotdb will live at <configDir>/.lot/lotman_cpp.sqlite
-		v.SetDefault(param.Lotman_DbLocation.GetName(), configDir)
+		v.SetDefault(param.Lotman_LotHome.GetName(), configDir)
 		v.SetDefault(param.Monitoring_DataLocation.GetName(), filepath.Join(configDir, "monitoring/data"))
 		v.SetDefault(param.Shoveler_QueueDirectory.GetName(), filepath.Join(configDir, "shoveler/queue"))
 		v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), filepath.Join(configDir, "shoveler-token"))
