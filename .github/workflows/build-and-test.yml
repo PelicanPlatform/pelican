@@ -103,7 +103,14 @@ jobs:
 
   cache-image-layers:
     needs: [set-build-parameters]
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runner-platform: ubuntu-latest
+            target-platform: linux/amd64
+          - runner-platform: ubuntu-24.04-arm
+            target-platform: linux/arm64
+    runs-on: ${{ matrix.runner-platform }}
     steps:
 
       - name: Checkout repository
@@ -122,7 +129,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/.base-buildx-cache
-          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
+          key: base-buildx-${{ github.sha }}-${{ github.run_id }}-${{ matrix.runner-platform }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -140,7 +147,7 @@ jobs:
         with:
           context: .
           file: ./images/Dockerfile
-          platforms: ${{ needs.set-build-parameters.outputs.platforms }}
+          platforms: ${{ matrix.target-platform }}
           target: origin
           cache-from: |
             type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican-dev:buildcache
@@ -193,11 +200,17 @@ jobs:
           IFS=,
           echo "taglist=${tag_list[*]}" >> $GITHUB_OUTPUT
 
-      - name: Restore the cache for Docker Buildx
+      - name: Restore the cache for Docker Buildx (amd64)
         uses: actions/cache/restore@v4
         with:
           path: /tmp/.base-buildx-cache
-          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
+          key: base-buildx-${{ github.sha }}-${{ github.run_id }}-ubuntu-latest
+
+      - name: Restore the cache for Docker Buildx (arm64)
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/.base-buildx-cache
+          key: base-buildx-${{ github.sha }}-${{ github.run_id }}-ubuntu-24.04-arm
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -267,11 +280,17 @@ jobs:
         with:
           platforms: amd64,arm64
 
-      - name: Restore the cache for Docker Buildx
+      - name: Restore the cache for Docker Buildx (amd64)
         uses: actions/cache/restore@v4
         with:
           path: /tmp/.base-buildx-cache
-          key: base-buildx-${{ github.sha }}-${{ github.run_id }}
+          key: base-buildx-${{ github.sha }}-${{ github.run_id }}-ubuntu-latest
+
+      - name: Restore the cache for Docker Buildx (arm64)
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/.base-buildx-cache
+          key: base-buildx-${{ github.sha }}-${{ github.run_id }}-ubuntu-24.04-arm
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
