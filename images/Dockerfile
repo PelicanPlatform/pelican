@@ -55,6 +55,8 @@ ARG LOTMAN_SRC_BUILD=false
 ARG LOTMAN_VER=0.0.4
 ARG XRDCL_PELICAN_SRC_BUILD=false
 ARG XRDCL_PELICAN_VER=1.0.5
+ARG XRDHTTP_PELICAN_SRC_BUILD=false
+ARG XRDHTTP_PELICAN_VER=0.0.3
 ARG XROOTD_LOTMAN_SRC_BUILD=false
 ARG XROOTD_LOTMAN_VER=0.0.2
 ARG XROOTD_S3_HTTP_SRC_BUILD=false
@@ -230,6 +232,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     \
     xrootd-devel \
     xrootd-client-devel \
+    xrootd-private-devel \
     xrootd-server-devel \
     "
 
@@ -261,6 +264,8 @@ ARG LOTMAN_SRC_BUILD
 ARG LOTMAN_VER
 ARG XRDCL_PELICAN_SRC_BUILD
 ARG XRDCL_PELICAN_VER
+ARG XRDHTTP_PELICAN_SRC_BUILD
+ARG XRDHTTP_PELICAN_VER
 ARG XROOTD_LOTMAN_SRC_BUILD
 ARG XROOTD_LOTMAN_VER
 ARG XROOTD_S3_HTTP_SRC_BUILD
@@ -334,6 +339,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   run_task  LOTMAN          PelicanPlatform  lotman
   run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
+  run_task  XRDHTTP_PELICAN PelicanPlatform  xrdhttp-pelican
   run_task  XROOTD_LOTMAN   PelicanPlatform  xrootd-lotman
   run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
 ENDRUN
@@ -350,6 +356,8 @@ ARG LOTMAN_SRC_BUILD
 ARG LOTMAN_VER
 ARG XRDCL_PELICAN_SRC_BUILD
 ARG XRDCL_PELICAN_VER
+ARG XRDHTTP_PELICAN_SRC_BUILD
+ARG XRDHTTP_PELICAN_VER
 ARG XROOTD_LOTMAN_SRC_BUILD
 ARG XROOTD_LOTMAN_VER
 ARG XROOTD_S3_HTTP_SRC_BUILD
@@ -377,12 +385,13 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     if ${!SRC_BUILD}; then
       dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
     else
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-contrib --enablerepo=osg-testing ${REPO}-${!VER}
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-contrib --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
     fi
   }
 
   run_task  LOTMAN          PelicanPlatform  lotman
   run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
+  run_task  XRDHTTP_PELICAN PelicanPlatform  xrdhttp-pelican
   run_task  XROOTD_LOTMAN   PelicanPlatform  xrootd-lotman
   run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
 
