@@ -254,7 +254,7 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 					crashTimestamp := time.Now().Unix()
 					log.Debug("Recording xrootd crash at time: ", crashTimestamp)
 
-					dbErr := database.CreateOrUpdateCounter(service_key, int(crashTimestamp))
+					dbErr := database.CreateOrIncrementCounter(service_key, 1)
 					if dbErr != nil {
 						log.Debug("Error recording xrootd crash: ", dbErr)
 						return errors.Wrap(err, "Unable to record xrootd crash")
