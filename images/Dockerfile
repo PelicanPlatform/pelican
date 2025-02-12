@@ -296,7 +296,6 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
             sqlite-devel \
             tinyxml2-devel \
             zlib-devel \
-            xrootd-private-devel \
             \
             json-schema-validator-devel \
             nlohmann-json-devel
