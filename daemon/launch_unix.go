@@ -37,7 +37,10 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 type (
@@ -244,6 +247,18 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 					metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(metricName), metrics.StatusCritical,
 						launchers[chosen].Name()+" process failed unexpectedly")
 					err = errors.Wrapf(waitResult, "%s process failed unexpectedly", launchers[chosen].Name())
+					service_key := "origin"
+					if config.IsServerEnabled(server_structs.CacheType) {
+						service_key = "cache"
+					}
+					crashTimestamp := time.Now().Unix()
+					log.Debug("Recording xrootd crash at time: ", crashTimestamp)
+
+					dbErr := database.CreateOrUpdateCounter(service_key, int(crashTimestamp))
+					if dbErr != nil {
+						log.Debug("Error recording xrootd crash: ", dbErr)
+						return errors.Wrap(err, "Unable to record xrootd crash")
+					}
 					log.Errorln(err)
 					return err
 				}
