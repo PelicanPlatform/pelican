@@ -360,6 +360,13 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 			fedInfo.BrokerEndpoint = externalUrlStr
 		}
 
+		// Some services in the Director, like federation tokens, may require a defined federation root (discovery URL)
+		// so for these to have a chance at working in places where a Director truly is acting as the fed root (e.g.
+		// fed-in-box unit tests), we need to set the discovery endpoint to the director endpoint.
+		if fedInfo.DiscoveryEndpoint == "" && enabledServers.IsEnabled(server_structs.DirectorType) {
+			fedInfo.DiscoveryEndpoint = fedInfo.DirectorEndpoint
+		}
+
 		// Make sure any values in global federation metadata are url-parseable
 		fedInfo.DirectorEndpoint = wrapWithHttpsIfNeeded(fedInfo.DirectorEndpoint)
 		fedInfo.RegistryEndpoint = wrapWithHttpsIfNeeded(fedInfo.RegistryEndpoint)

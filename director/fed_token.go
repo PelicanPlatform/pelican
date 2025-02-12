@@ -21,6 +21,7 @@ package director
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -115,12 +116,18 @@ func createFedTok(ginCtx *gin.Context, rInfo requestInfo) (tok string, err error
 
 	hostPrefixes, exists := allowedPrefixes[rInfo.Host]
 	if !exists {
-		// If there are no prefixes, we assume the cache is configured to read all namespaces
+		// If the entry does not exist, we assume there are no prefix restrictions
 		hostPrefixes = map[string]struct{}{"/": {}}
 	}
 
 	scopes := make([]token_scopes.TokenScope, 0, len(allowedPrefixes[rInfo.Host]))
 	for prefix := range hostPrefixes {
+		// Provide at least _some_ basic validation before we use this value to mint read tokens...
+		if !strings.HasPrefix(prefix, "/") {
+			log.Warningf("Invalid prefix from registry's 'AllowedPrefixes' custom field found while creating "+
+				"federation token for host '%s': '%s'", rInfo.Host, prefix)
+			continue
+		}
 		var readScope token_scopes.TokenScope
 		readScope, err = token_scopes.Storage_Read.Path(prefix)
 		if err != nil {
