@@ -48,3 +48,11 @@ func CreateCounter(key string, value int) error {
 	}
 	return ServerDatabase.Create(&counter).Error
 }
+
+func CreateOrUpdateCounter(key string, value int) error {
+	counter := Counter{
+		Key:   key,
+		Value: value,
+	}
+	return ServerDatabase.Save(&counter).Error
+}
