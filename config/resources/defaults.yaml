@@ -28,7 +28,7 @@ Server:
   RegistrationRetryInterval: 10s
   StartupTimeout: 10s
   UILoginRateLimit: 1
-  DbLocation: "/var/lib/pelican"
+  DbLocation: "/var/lib/pelican/server.sqlite"
 Director:
   DefaultResponse: cache
   CacheSortMethod: "distance"
