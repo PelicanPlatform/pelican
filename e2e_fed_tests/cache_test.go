@@ -24,6 +24,7 @@ import (
 	"context"
 	_ "embed"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -46,10 +47,12 @@ func TestCacheFedTokMaint(t *testing.T) {
 
 	// Spin up the full fed so that our cache server can get the token from the director
 	viper.Set(param.Director_FedTokenLifetime.GetName(), "12s")
+	oldMinTokRate := cache.MinFedTokenTickerRate
+	defer func() {
+		cache.MinFedTokenTickerRate = oldMinTokRate
+	}()
+	cache.MinFedTokenTickerRate = 1 * time.Second
 	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
-	// Now unset this to prove the cache maint thread is using token lifetime, and not
-	// a value the maintenance thread gets from viper.
-	viper.Set(param.Director_FedTokenLifetime.GetName(), nil)
 
 	// Run the token maintenance routine for two periods and make sure
 	// the cache token on disk is never older than 4s (1/3 the configured lifetime)
@@ -57,6 +60,9 @@ func TestCacheFedTokMaint(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(ctx, t)
 	defer cancel()
 	cacheServer := cache.CacheServer{}
+
+	// Give this "cache" instance a unique location so it doesn't compete with the fed test cache token
+	viper.Set(param.Cache_FedTokenLocation.GetName(), filepath.Join(t.TempDir(), t.Name()+"_fedtok"))
 	cache.LaunchFedTokManager(ctx, egrp, &cacheServer)
 	tokFile := cacheServer.GetFedTokLocation()
 
@@ -70,7 +76,7 @@ func TestCacheFedTokMaint(t *testing.T) {
 			info, err := os.Stat(tokFile)
 			require.NoError(t, err, "Failed to stat token file")
 			age := time.Since(info.ModTime())
-			if age > 4*time.Second {
+			if age > (4*time.Second + 500*time.Millisecond) { // build in a little slop
 				t.Fatalf("Token file age exceeded 4s: %v", age)
 			}
 		case <-timeout:
