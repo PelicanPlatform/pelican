@@ -758,7 +758,8 @@ func writeTransferErrorMessage(currentError string, transferUrl string) (errMsg 
 	return
 }
 
-// This function parses the machine ad present with a condor job to get the site name.
+// This function parses the machine ad present with a condor job to get the site name and the physical hostname if run
+// on a K8S setup.
 // Only really needed on the ospool, otherwise this will return ""
 func parseMachineAd() (string, string) {
 	var filename string
