@@ -154,7 +154,7 @@ type Origin interface {
 
 	// Some methods are passed the Origin interface so they can call the appropriate
 	// method on a concrete origin type. This is necessary for overriding the base methods.
-	// The methods taking an Origin interface define common setup that needs to happey for _every_ origin.
+	// The methods taking an Origin interface define common setup that needs to happen for _every_ origin.
 	// The "Extra" methods are used for origin-specific validation, configuration, etc.
 	//
 	// handleVolumeMounts is primarily used for configuring exports from the -v flag
