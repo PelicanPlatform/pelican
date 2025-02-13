@@ -37,14 +37,10 @@ type Config struct {
 		EnableTLSClientAuth bool `mapstructure:"enabletlsclientauth" yaml:"EnableTLSClientAuth"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		ExportLocation string `mapstructure:"exportlocation" yaml:"ExportLocation"`
-<<<<<<< HEAD
 		FedTokenLocation string `mapstructure:"fedtokenlocation" yaml:"FedTokenLocation"`
 		FilesBaseSize string `mapstructure:"filesbasesize" yaml:"FilesBaseSize"`
 		FilesMaxSize string `mapstructure:"filesmaxsize" yaml:"FilesMaxSize"`
 		FilesNominalSize string `mapstructure:"filesnominalsize" yaml:"FilesNominalSize"`
-=======
-		FedTokenLocation string `mapstructure:"fedtokenlocation" yaml:"FedTokenLocation"`
->>>>>>> 35924841 (Implement routine for cache to fetch and store federation tokens)
 		HighWaterMark string `mapstructure:"highwatermark" yaml:"HighWaterMark"`
 		LocalRoot string `mapstructure:"localroot" yaml:"LocalRoot"`
 		LowWatermark string `mapstructure:"lowwatermark" yaml:"LowWatermark"`
