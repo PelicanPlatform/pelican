@@ -26,12 +26,14 @@ import (
 	"strings"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func main() {
+	defer logging.FlushLogs(false)
 	err := handleCLI(os.Args)
 	if err != nil {
 		os.Exit(1)
