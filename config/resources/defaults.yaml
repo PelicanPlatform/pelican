@@ -60,7 +60,7 @@ Cache:
   LowWatermark: 90
   HighWaterMark: 95
   BlocksToPrefetch: 0
-  TLSClientAuth: false
+  EnableTLSClientAuth: false
 Lotman:
   EnabledPolicy: "fairshare"
   DefaultLotExpirationLifetime: "2016h"

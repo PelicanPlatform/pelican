@@ -33,6 +33,7 @@ type Config struct {
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
+		EnableTLSClientAuth bool `mapstructure:"enabletlsclientauth" yaml:"EnableTLSClientAuth"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		ExportLocation string `mapstructure:"exportlocation" yaml:"ExportLocation"`
 		FilesBaseSize string `mapstructure:"filesbasesize" yaml:"FilesBaseSize"`
@@ -50,7 +51,6 @@ type Config struct {
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
 		SentinelLocation string `mapstructure:"sentinellocation" yaml:"SentinelLocation"`
 		StorageLocation string `mapstructure:"storagelocation" yaml:"StorageLocation"`
-		TLSClientAuth bool `mapstructure:"tlsclientauth" yaml:"TLSClientAuth"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
 	} `mapstructure:"cache" yaml:"Cache"`
@@ -361,6 +361,7 @@ type configWithType struct {
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		EnablePrefetch struct { Type string; Value bool }
+		EnableTLSClientAuth struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
 		FilesBaseSize struct { Type string; Value string }
@@ -378,7 +379,6 @@ type configWithType struct {
 		SelfTestInterval struct { Type string; Value time.Duration }
 		SentinelLocation struct { Type string; Value string }
 		StorageLocation struct { Type string; Value string }
-		TLSClientAuth struct { Type string; Value bool }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 	}

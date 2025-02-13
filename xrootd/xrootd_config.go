@@ -131,9 +131,8 @@ type (
 		PSSOrigin                        string
 		BlocksToPrefetch                 int
 		Concurrency                      int
-		X509ClientAuthenticationPrefixes []string
 		LotmanCfg                        LotmanCfg
-		TLSClientAuth                    bool
+		EnableTLSClientAuth              bool
 	}
 
 	XrootdOptions struct {
