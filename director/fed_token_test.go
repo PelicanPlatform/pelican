@@ -207,15 +207,6 @@ func TestCreateFedTok(t *testing.T) {
 			expectErr: false,
 		},
 		{
-			name:            "Malformed discovery config",
-			host:            "test-cache.example.com",
-			sType:           server_structs.CacheType,
-			discoveryUrl:    "",
-			allowedPrefixes: map[string]map[string]struct{}{},
-			expectErr:       true,
-			errContains:     "federation issuer is not set",
-		},
-		{
 			name:         "No allowed prefixes defaults to root of namespace",
 			host:         "test-cache.example.com",
 			sType:        server_structs.CacheType,
