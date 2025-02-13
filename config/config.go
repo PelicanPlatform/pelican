@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -51,6 +51,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/docs"
+	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -797,23 +798,6 @@ func InitConfig() {
 	if err != nil {
 		cobra.CheckErr(err)
 	}
-	logLocation := param.Logging_LogLocation.GetString()
-	if logLocation != "" {
-		dir := filepath.Dir(logLocation)
-		if dir != "" {
-			if err := os.MkdirAll(dir, 0640); err != nil {
-				cobra.CheckErr(fmt.Errorf("failed to access/create specified directory: %w", err))
-			}
-		}
-
-		// Note: logrus handles file closure, so no need to close manually
-		f, err := os.OpenFile(logLocation, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
-		if err != nil {
-			cobra.CheckErr(fmt.Errorf("failed to access specified log file: %w", err))
-		}
-		fmt.Fprintf(os.Stderr, "Logging.LogLocation is set to %s. All logs are redirected to the log file.\n", logLocation)
-		log.SetOutput(f)
-	}
 
 	if param.Debug.GetBool() {
 		SetLogging(log.DebugLevel)
@@ -857,7 +841,7 @@ func LogPelicanVersion() {
 	log.Infoln("Build Commit:", GetBuiltCommit())
 }
 
-// Print Pelican configuration to stderr
+// PrintConfig logs the full config dump in JSON format.
 func PrintConfig() error {
 	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil {
@@ -867,11 +851,22 @@ func PrintConfig() error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr,
-		"================ Pelican Configuration ================\n",
-		string(bytes),
-		"\n",
-		"============= End of Pelican Configuration ============")
+
+	originalFormatter := log.StandardLogger().Formatter
+
+	log.SetFormatter(&log.TextFormatter{
+		DisableQuote:           true,
+		DisableTimestamp:       true,
+		DisableLevelTruncation: true,
+	})
+
+	// Log the formatted JSON
+	log.Print("\n================ Pelican Configuration ================\n" +
+		string(bytes) +
+		"\n============= End of Pelican Configuration ============")
+
+	log.SetFormatter(originalFormatter)
+
 	return nil
 }
 
@@ -949,7 +944,7 @@ func filterConfigRecursive(v reflect.Value, currentPath string, component string
 	}
 }
 
-// PrintClientConfig prints the client config in JSON format to stderr.
+// PrintClientConfig logs the client config in JSON format.
 func PrintClientConfig() error {
 	clientConfig, err := GetComponentConfig("client")
 	if err != nil {
@@ -960,11 +955,21 @@ func PrintClientConfig() error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr,
-		"================ Pelican Client Configuration ================\n",
-		string(bytes),
-		"\n",
-		"============= End of Pelican Client Configuration ============")
+	originalFormatter := log.StandardLogger().Formatter
+
+	log.SetFormatter(&log.TextFormatter{
+		DisableQuote:           true,
+		DisableTimestamp:       true,
+		DisableLevelTruncation: true,
+	})
+
+	// Log the formatted JSON
+	log.Print("\n================ Pelican Configuration ================\n" +
+		string(bytes) +
+		"\n============= End of Pelican Configuration ============")
+
+	log.SetFormatter(originalFormatter)
+
 	return nil
 }
 
@@ -1202,7 +1207,7 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
-
+	logging.FlushLogs(true)
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
@@ -1635,6 +1640,7 @@ func SetClientDefaults(v *viper.Viper) error {
 }
 
 func InitClient() error {
+	logging.FlushLogs(true)
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
 	}
