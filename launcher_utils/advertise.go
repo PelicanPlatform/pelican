@@ -41,8 +41,7 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/token"
-	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -169,10 +168,6 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	}
 	serverUrl := param.Origin_Url.GetString()
 	webUrl := param.Server_ExternalWebUrl.GetString()
-	serverIssuer, err := config.GetServerIssuerURL()
-	if err != nil {
-		return errors.Wrap(err, "failed to get server issuer URL")
-	}
 
 	if server.GetServerType().IsEnabled(server_structs.CacheType) {
 		serverUrl = param.Cache_Url.GetString()
@@ -203,21 +198,9 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 
 	directorUrl.Path = "/api/v1.0/director/register" + server.GetServerType().String()
 
-	advTokenCfg := token.NewWLCGToken()
-	advTokenCfg.Lifetime = time.Minute
-	advTokenCfg.Issuer = serverIssuer
-	advTokenCfg.AddAudiences(fedInfo.DirectorEndpoint)
-	if server.GetServerType().IsEnabled(server_structs.CacheType) {
-		advTokenCfg.Subject = "cache"
-	} else if server.GetServerType().IsEnabled(server_structs.OriginType) {
-		advTokenCfg.Subject = "origin"
-	}
-	advTokenCfg.AddScopes(token_scopes.Pelican_Advertise)
-
-	// CreateToken also handles validation for us
-	tok, err := advTokenCfg.CreateToken()
+	tok, err := server_utils.GetAdvertisementTok(ctx, server)
 	if err != nil {
-		return errors.Wrap(err, "failed to create director advertisement token")
+		return errors.Wrap(err, "failed to get advertisement token")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, directorUrl.String(), bytes.NewBuffer(body))

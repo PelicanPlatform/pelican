@@ -35,6 +35,7 @@ type Config struct {
 		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		ExportLocation string `mapstructure:"exportlocation" yaml:"ExportLocation"`
+		FedTokenLocation string `mapstructure:"fedtokenlocation" yaml:"FedTokenLocation"`
 		FilesBaseSize string `mapstructure:"filesbasesize" yaml:"FilesBaseSize"`
 		FilesMaxSize string `mapstructure:"filesmaxsize" yaml:"FilesMaxSize"`
 		FilesNominalSize string `mapstructure:"filesnominalsize" yaml:"FilesNominalSize"`
@@ -84,6 +85,7 @@ type Config struct {
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnableStat bool `mapstructure:"enablestat" yaml:"EnableStat"`
+		FedTokenLifetime time.Duration `mapstructure:"fedtokenlifetime" yaml:"FedTokenLifetime"`
 		FilteredServers []string `mapstructure:"filteredservers" yaml:"FilteredServers"`
 		GeoIPLocation string `mapstructure:"geoiplocation" yaml:"GeoIPLocation"`
 		MaxMindKeyFile string `mapstructure:"maxmindkeyfile" yaml:"MaxMindKeyFile"`
@@ -219,6 +221,7 @@ type Config struct {
 		ExportVolume string `mapstructure:"exportvolume" yaml:"ExportVolume"`
 		ExportVolumes []string `mapstructure:"exportvolumes" yaml:"ExportVolumes"`
 		Exports interface{} `mapstructure:"exports" yaml:"Exports"`
+		FedTokenLocation string `mapstructure:"fedtokenlocation" yaml:"FedTokenLocation"`
 		FederationPrefix string `mapstructure:"federationprefix" yaml:"FederationPrefix"`
 		GlobusClientIDFile string `mapstructure:"globusclientidfile" yaml:"GlobusClientIDFile"`
 		GlobusClientSecretFile string `mapstructure:"globusclientsecretfile" yaml:"GlobusClientSecretFile"`
@@ -363,6 +366,7 @@ type configWithType struct {
 		EnablePrefetch struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
+		FedTokenLocation struct { Type string; Value string }
 		FilesBaseSize struct { Type string; Value string }
 		FilesMaxSize struct { Type string; Value string }
 		FilesNominalSize struct { Type string; Value string }
@@ -412,6 +416,7 @@ type configWithType struct {
 		EnableBroker struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		EnableStat struct { Type string; Value bool }
+		FedTokenLifetime struct { Type string; Value time.Duration }
 		FilteredServers struct { Type string; Value []string }
 		GeoIPLocation struct { Type string; Value string }
 		MaxMindKeyFile struct { Type string; Value string }
@@ -547,6 +552,7 @@ type configWithType struct {
 		ExportVolume struct { Type string; Value string }
 		ExportVolumes struct { Type string; Value []string }
 		Exports struct { Type string; Value interface{} }
+		FedTokenLocation struct { Type string; Value string }
 		FederationPrefix struct { Type string; Value string }
 		GlobusClientIDFile struct { Type string; Value string }
 		GlobusClientSecretFile struct { Type string; Value string }

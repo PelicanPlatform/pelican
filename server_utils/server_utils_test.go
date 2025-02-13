@@ -1,3 +1,5 @@
+//go:build !windows
+
 /***************************************************************
  *
  * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
@@ -24,6 +26,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -188,4 +192,87 @@ func TestFilterTopLevelPrefixes(t *testing.T) {
 	}
 
 	assert.ElementsMatch(t, expectedPaths, filteredPaths)
+}
+
+// Mocked server to fulfill the XRootDServer interface in testing
+type mockServer struct {
+	tokenLoc     string
+	uid          int
+	gid          int
+	pids         []int
+	serverType   server_structs.ServerType
+	namespaceAds []server_structs.NamespaceAdV2
+}
+
+func (m *mockServer) GetServerType() server_structs.ServerType           { return m.serverType }
+func (m *mockServer) SetNamespaceAds(ads []server_structs.NamespaceAdV2) { m.namespaceAds = ads }
+func (m *mockServer) GetNamespaceAds() []server_structs.NamespaceAdV2    { return m.namespaceAds }
+func (m *mockServer) CreateAdvertisement(name, serverUrl, serverWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+	return nil, nil
+}
+func (m *mockServer) GetNamespaceAdsFromDirector() error { return nil }
+func (m *mockServer) GetAdTokCfg(ctx context.Context) (server_structs.AdTokCfg, error) {
+	return server_structs.AdTokCfg{}, nil
+}
+func (m *mockServer) GetFedTokLocation() string { return m.tokenLoc }
+func (m *mockServer) GetPids() []int            { return m.pids }
+func (m *mockServer) SetPids(pids []int)        { m.pids = pids }
+
+func TestSetFedTok(t *testing.T) {
+	testCases := []struct {
+		name      string
+		server    *mockServer
+		token     string
+		setupDir  bool // Whether to create directory structure
+		expectErr bool
+		errMsg    string
+	}{
+		{
+			name: "Valid token write",
+			server: &mockServer{
+				tokenLoc: filepath.Join(t.TempDir(), "tokens", "fed.token"),
+				uid:      os.Getuid(),
+				gid:      os.Getgid(),
+			},
+			token:     "test-token",
+			setupDir:  true,
+			expectErr: false,
+			errMsg:    "",
+		},
+		{
+			name: "Empty token location",
+			server: &mockServer{
+				tokenLoc: "",
+			},
+			token:     "test-token",
+			setupDir:  false,
+			expectErr: true,
+			errMsg:    "token location is empty",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.setupDir {
+				require.NoError(t, os.MkdirAll(filepath.Dir(tc.server.tokenLoc), 0755))
+			}
+
+			err := SetFedTok(context.Background(), tc.server, tc.token)
+
+			if tc.expectErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.errMsg)
+				return
+			}
+			require.NoError(t, err)
+
+			content, err := os.ReadFile(tc.server.tokenLoc)
+			require.NoError(t, err)
+			assert.Equal(t, tc.token, string(content))
+
+			info, err := os.Stat(tc.server.tokenLoc)
+			require.NoError(t, err)
+			assert.Equal(t, os.FileMode(0600), info.Mode().Perm())
+		})
+	}
 }

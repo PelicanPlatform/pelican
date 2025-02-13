@@ -27,4 +27,9 @@ type (
 		State string `form:"state"`
 		Code  string `form:"code"`
 	}
+
+	TokenResponse struct {
+		AccessToken string `json:"access_token"`
+		Error       string `json:"error"`
+	}
 )
