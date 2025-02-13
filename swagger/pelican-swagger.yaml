@@ -2019,6 +2019,67 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
+  /director/getFedToken:
+    get:
+      summary: Get a token signed by the federation's issuer
+      description: Generates a federation token for a given host and server type.
+      parameters:
+        - name: host
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The hostname of the server.
+        - name: sType
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [Cache, Origin]
+          description: The server type (Cache or Origin).
+        - name: authz
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The authorization token, may also be passed via "Authorization" header.
+      responses:
+        '200':
+          description: Successfully generated federation token.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  AccessToken:
+                    type: string
+                    description: The generated federation token.
+        '403':
+          description: Forbidden - validation error or unauthorized request.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Status:
+                    type: string
+                    example: RespFailed
+                  Msg:
+                    type: string
+                    description: Error message.
+        '500':
+          description: Internal Server Error - unexpected error occurred.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Status:
+                    type: string
+                    example: RespFailed
+                  Msg:
+                    type: string
+                    description: Error message.
   /origin_ui/exports:
     get:
       summary: Returns the data exports of the origin server
