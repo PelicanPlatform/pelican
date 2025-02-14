@@ -444,7 +444,7 @@ func createApiToken(ctx *gin.Context) {
 			log.Warningf("Failed to parse expiration time: %v", err)
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Invalid expiration time: %v", err),
+				Msg:    "Expiration time was not given in RFC3339 format",
 			})
 			return
 		}
