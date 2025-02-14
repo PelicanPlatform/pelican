@@ -67,15 +67,23 @@ func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[
 		return false, nil, errors.New("Failed to retrieve the API key")
 	}
 
+	// Check if the token has expired
+	// If the token has an expiration time and the current time is after the expiration time, the token is invalid
 	if !token.ExpiresAt.IsZero() && time.Now().After(token.ExpiresAt) {
 		return false, nil, errors.New("Token has expired")
 	}
 
+	// We compare the hashed value of the secret with the stored hashed value
+	// If there is a match, the API key is valid
+	// Otherwise, the API key is invalid
 	err = bcrypt.CompareHashAndPassword([]byte(token.HashedValue), []byte(secret))
 	if err != nil {
 		return false, nil, errors.New("Invalid API token")
 	}
 
+	// Cache the verified API key
+	// Keys that have an expiration time are cached with a TTL equal to the time until expiration
+	// Keys that don't have an expiration time are cached with the default TTL
 	cacheTTL := ttlcache.DefaultTTL
 	if !token.ExpiresAt.IsZero() {
 		timeUntilExpiration := time.Until(token.ExpiresAt)
