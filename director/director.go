@@ -1398,12 +1398,6 @@ func listNamespacesV1(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, namespaceAdsV1)
 }
 
-func listX509ClientPrefixes(ctx *gin.Context) {
-	// Return a list of client prefixes which require x509 authenticat
-
-	ctx.JSON(http.StatusOK, []string{})
-}
-
 func listNamespacesV2(ctx *gin.Context) {
 	namespacesAdsV2 := listNamespacesFromOrigins()
 	namespacesAdsV2 = append(namespacesAdsV2, server_structs.NamespaceAdV2{
@@ -1629,7 +1623,6 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
 		directorAPIV1.HEAD("/healthTest/*path", getHealthTestFile)
 		directorAPIV1.Handle("PROPFIND", "/healthTest/*path", getHealthTestFile)
-		directorAPIV1.GET("/listX509ClientPrefixes", listX509ClientPrefixes)
 
 		// In the foreseeable feature, director will scrape all servers in Pelican ecosystem (including registry)
 		// so that director can be our point of contact for collecting system-level metrics.
