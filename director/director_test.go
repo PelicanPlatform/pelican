@@ -32,6 +32,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -2010,52 +2011,142 @@ func TestHeaderGenFuncs(t *testing.T) {
 }
 
 func TestGetHealthTestFile(t *testing.T) {
-	router := gin.Default()
-	router.GET("/api/v1.0/director/healthTest/*path", getHealthTestFile)
+	gEngine := gin.Default()
+	router := gEngine.Group("/")
+	ctx := context.Background()
+	ctx, cancel, _ := test_utils.TestContext(ctx, t)
+	defer cancel()
+	RegisterDirectorAPI(ctx, router)
 
-	t.Run("400-on-empty-path", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/", nil)
-		router.ServeHTTP(w, req)
+	tests := []struct {
+		name       string
+		method     string
+		url        string
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:       "400-on-empty-path",
+			method:     "GET",
+			url:        "/api/v1.0/director/healthTest/",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "400-on-random-path",
+			method:     "GET",
+			url:        "/api/v1.0/director/healthTest/foo/bar",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "400-on-dir",
+			method:     "GET",
+			url:        "/api/v1.0/director/healthTest/pelican/monitoring",
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "400-on-missing-file-ext-self-test",
+			method:     "GET",
+			url:        "/api/v1.0/director/healthTest/pelican/monitoring/selfTest/testfile",
+			wantStatus: http.StatusBadRequest,
+			wantBody:   "{\"status\":\"error\",\"msg\":\"Test file name is missing file extension: /pelican/monitoring/selfTest/testfile\"}",
+		},
+		{
+			name:       "400-on-missing-file-ext-director-test",
+			method:     "GET",
+			url:        "/api/v1.0/director/healthTest/pelican/monitoring/directorTest/testfile",
+			wantStatus: http.StatusBadRequest,
+			wantBody:   "{\"status\":\"error\",\"msg\":\"Test file name is missing file extension: /pelican/monitoring/directorTest/testfile\"}",
+		},
+		{
+			name:       "400-on-bad-timestamp-self-test",
+			method:     "GET",
+			url:        "/api/v1.0/director/healthTest/pelican/monitoring/selfTest/self-test-123123123123123.txt",
+			wantStatus: http.StatusBadRequest,
+			wantBody:   "{\"status\":\"error\",\"msg\":\"Invalid timestamp in file name: '123123123123123'. Should conform to 2006-01-02T15:04:05Z07:00 format (RFC 3339)\"}",
+		},
+		{
+			name:       "400-on-bad-timestamp-director-test",
+			method:     "GET",
+			url:        "/api/v1.0/director/healthTest/pelican/monitoring/directorTest/director-test-123123123123123.txt",
+			wantStatus: http.StatusBadRequest,
+			wantBody:   "{\"status\":\"error\",\"msg\":\"Invalid timestamp in file name: '123123123123123'. Should conform to 2006-01-02T15:04:05Z07:00 format (RFC 3339)\"}",
+		},
+		{
+			name:       "200-on-correct-request-file-self-test",
+			method:     "GET",
+			url:        "/api/v1.0/director/healthTest/pelican/monitoring/selfTest/self-test-2006-01-02T15:04:10Z.txt",
+			wantStatus: http.StatusOK,
+			wantBody:   server_utils.DirectorTestBody + "\n",
+		},
+		{
+			name:       "200-on-correct-request-file-director-test",
+			method:     "GET",
+			url:        "/api/v1.0/director/healthTest/pelican/monitoring/directorTest/director-test-2006-01-02T15:04:10Z.txt",
+			wantStatus: http.StatusOK,
+			wantBody:   server_utils.DirectorTestBody + "\n",
+		},
+		{
+			name:       "207-and-XML-on-PROPFIND-self-test",
+			method:     "PROPFIND",
+			url:        "/api/v1.0/director/healthTest/pelican/monitoring/selfTest/self-test-2006-01-02T15:04:10Z.txt",
+			wantStatus: http.StatusMultiStatus,
+			wantBody: `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:ns1="http://apache.org/dav/props/" xmlns:ns0="DAV:">
+	<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/" xmlns:lp3="LCGDM:">
+		<D:href>/pelican/monitoring/selfTest/self-test-2006-01-02T15:04:10Z.txt</D:href>
+		<D:propstat>
+			<D:prop>
+				<lp1:getcontentlength>67</lp1:getcontentlength>
+				<lp1:getlastmodified>Mon, 02 Jan 2006 15:04:10 GMT</lp1:getlastmodified>
+				<lp1:iscollection>0</lp1:iscollection>
+				<lp1:executable>F</lp1:executable>
+			</D:prop>
+			<D:status>HTTP/1.1 200 OK</D:status>
+		</D:propstat>
+	</D:response>
+</D:multistatus>`,
+		},
+		{
+			name:       "207-and-XML-on-PROPFIND-director-test",
+			method:     "PROPFIND",
+			url:        "/api/v1.0/director/healthTest/pelican/monitoring/directorTest/director-test-2006-01-02T15:04:10Z.txt",
+			wantStatus: http.StatusMultiStatus,
+			wantBody: `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:ns1="http://apache.org/dav/props/" xmlns:ns0="DAV:">
+	<D:response xmlns:lp1="DAV:" xmlns:lp2="http://apache.org/dav/props/" xmlns:lp3="LCGDM:">
+		<D:href>/pelican/monitoring/directorTest/director-test-2006-01-02T15:04:10Z.txt</D:href>
+		<D:propstat>
+			<D:prop>
+				<lp1:getcontentlength>67</lp1:getcontentlength>
+				<lp1:getlastmodified>Mon, 02 Jan 2006 15:04:10 GMT</lp1:getlastmodified>
+				<lp1:iscollection>0</lp1:iscollection>
+				<lp1:executable>F</lp1:executable>
+			</D:prop>
+			<D:status>HTTP/1.1 200 OK</D:status>
+		</D:propstat>
+	</D:response>
+</D:multistatus>`,
+		},
+	}
 
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(tt.method, tt.url, nil)
+			gEngine.ServeHTTP(w, req)
 
-	t.Run("400-on-random-path", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/foo/bar", nil)
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("400-on-dir", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/pelican/monitoring", nil)
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("400-on-missing-file-ext", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/pelican/monitoring/testfile", nil)
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-	})
-
-	t.Run("200-on-correct-request-file", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/v1.0/director/healthTest/pelican/monitoring/testfile.txt", nil)
-		router.ServeHTTP(w, req)
-
-		require.Equal(t, http.StatusOK, w.Code)
-
-		bytes, err := io.ReadAll(w.Result().Body)
-		require.NoError(t, err)
-		assert.Equal(t, server_utils.DirectorTestBody+"\n", string(bytes))
-	})
+			assert.Equal(t, tt.wantStatus, w.Code)
+			if tt.wantBody != "" {
+				bytes, err := io.ReadAll(w.Result().Body)
+				require.NoError(t, err)
+				// Normalize whitespace in the response body and expected body so
+				// we can compare them directly
+				actual := strings.Join(strings.Fields(string(bytes)), " ")
+				expected := strings.Join(strings.Fields(tt.wantBody), " ")
+				assert.Equal(t, expected, actual)
+			}
+		})
+	}
 }
 
 func TestHandleFilterServer(t *testing.T) {
