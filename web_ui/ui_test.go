@@ -506,8 +506,8 @@ func TestServerHostRestart(t *testing.T) {
 
 func TestApiToken(t *testing.T) {
 	route := gin.New()
-	route.POST("/api/v1.0/createToken", createApiToken)
-	route.DELETE("/api/v1.0/deleteApiToken/:id", deleteApiToken)
+	err := configureCommonEndpoints(route)
+	require.NoError(t, err)
 	route.GET("/privilegedRoute", func(ctx *gin.Context) {
 		authOption := token.AuthOption{
 			Sources: []token.TokenSource{token.Header},
@@ -588,7 +588,7 @@ func TestApiToken(t *testing.T) {
 
 	t.Run("create-and-delete-token", func(t *testing.T) {
 		// Create a request
-		req, err := http.NewRequest("POST", "/api/v1.0/createToken", nil)
+		req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
 		assert.NoError(t, err)
 
 		req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
@@ -635,7 +635,7 @@ func TestApiToken(t *testing.T) {
 
 	t.Run("unauthorized-create", func(t *testing.T) {
 		// Create a request
-		req, err := http.NewRequest("POST", "/api/v1.0/createToken", nil)
+		req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
 		assert.NoError(t, err)
 
 		recorder := httptest.NewRecorder()
@@ -670,7 +670,7 @@ func TestApiToken(t *testing.T) {
 	})
 
 	t.Run("authorized-privileged-route", func(t *testing.T) {
-		req, err := http.NewRequest("POST", "/api/v1.0/createToken", nil)
+		req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
 		assert.NoError(t, err)
 
 		req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
@@ -713,7 +713,7 @@ func TestApiToken(t *testing.T) {
 	})
 
 	t.Run("correct-id-wrong-secret", func(t *testing.T) {
-		req, err := http.NewRequest("POST", "/api/v1.0/createToken", nil)
+		req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
 		assert.NoError(t, err)
 
 		req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
