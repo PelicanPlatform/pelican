@@ -516,7 +516,13 @@ func TestApiToken(t *testing.T) {
 		}
 
 		status, ok, err := token.Verify(ctx, authOption)
-		if !ok {
+		if err != nil {
+			ctx.JSON(status, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
+			return
+		} else if !ok {
 			ctx.JSON(status, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    err.Error(),
