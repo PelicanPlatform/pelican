@@ -31,7 +31,7 @@
 
 # For selecting OSG-maintained packages.
 ARG BASE_OS=el9
-ARG OSG_SERIES=23
+ARG OSG_SERIES=24
 ARG OSG_REPO=release
 
 # For compiling Pelican.
