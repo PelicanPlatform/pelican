@@ -166,7 +166,7 @@ definitions:
         description: The user who created the token
       expiration:
         type: string
-        description: The expiration time of the token. If it is empty or "never", the token will never expire
+        description: The expiration time of the token. If it is empty or "never", the token will never expire. The token should be in the RFC3339 format.
   CreateApiTokenSuccess:
     type: object
     properties:
