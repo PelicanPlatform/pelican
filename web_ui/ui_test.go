@@ -550,18 +550,18 @@ func TestApiToken(t *testing.T) {
 
 	content := "admin:password\n"
 	_, err = tempFile.WriteString(content)
-	assert.NoError(t, err, "Error writing to temp password file")
+	require.NoError(t, err, "Error writing to temp password file")
 
 	err = tempFile.Sync()
 	require.NoError(t, err)
 
 	//Configure UI
 	err = configureAuthDB()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	//Create a user for testing
 	err = WritePasswordEntry("user", "password")
-	assert.NoError(t, err, "error writing a user")
+	require.NoError(t, err, "error writing a user")
 	password := "password"
 	user := "user"
 
@@ -569,7 +569,7 @@ func TestApiToken(t *testing.T) {
 
 	//Create a request
 	req, err := http.NewRequest("POST", "/api/v1.0/auth/login", strings.NewReader(payload))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	req.Header.Set("Content-Type", "application/json")
 
