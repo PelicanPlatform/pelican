@@ -529,12 +529,9 @@ func TestApiToken(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	tempFile, err := os.CreateTemp("", "web-ui-passwd-api-token")
-	if err != nil {
-		fmt.Println("Failed to setup web-ui-passwd file")
-		os.Exit(1)
-	}
-	defer os.Remove(tempFile.Name())
+	passwordTempDir := t.TempDir()
+	tempFile, err := os.CreateTemp(passwordTempDir, "web-ui-passwd-api-token")
+	require.NoError(t, err)
 
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
