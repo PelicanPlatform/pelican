@@ -590,178 +590,164 @@ func TestApiToken(t *testing.T) {
 	err = database.DirectorDB.AutoMigrate(&server_structs.ApiKey{})
 	require.NoError(t, err, "Failed to migrate DB for API key table")
 
-	t.Run("create-and-delete-token", func(t *testing.T) {
-		// Create a request
-		req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
-		assert.NoError(t, err)
+	testCases := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "create-and-delete-token",
+			run: func(t *testing.T) {
+				// Create a token
+				req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
+				assert.NoError(t, err)
+				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
 
-		req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
+				createTokenReq := CreateApiTokenReq{
+					Name:       "test-token",
+					CreatedBy:  "admin",
+					Expiration: "never",
+					Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
+				}
+				createTokenBody, err := json.Marshal(createTokenReq)
+				assert.NoError(t, err)
+				req.Body = io.NopCloser(bytes.NewReader(createTokenBody))
 
-		createTokenReq := CreateApiTokenReq{
-			Name:       "test-token",
-			CreatedBy:  "admin",
-			Expiration: "never",
-			Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
-		}
+				recorder := httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusOK, recorder.Code)
 
-		createTokenBody, err := json.Marshal(createTokenReq)
-		assert.NoError(t, err)
-		req.Body = io.NopCloser(bytes.NewReader(createTokenBody))
+				// Parse the response to retrieve the token
+				var createTokenResp map[string]string
+				err = json.NewDecoder(recorder.Body).Decode(&createTokenResp)
+				assert.NoError(t, err)
+				tokenStr := createTokenResp["token"]
+				assert.NotEmpty(t, tokenStr)
 
-		recorder := httptest.NewRecorder()
-		route.ServeHTTP(recorder, req)
+				// Delete the token using its ID (the part before the dot)
+				tokenID := strings.Split(tokenStr, ".")[0]
+				endpoint := fmt.Sprintf("/api/v1.0/deleteApiToken/%s", tokenID)
+				req, err = http.NewRequest("DELETE", endpoint, nil)
+				assert.NoError(t, err)
+				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
 
-		// Check ok http response
-		assert.Equal(t, http.StatusOK, recorder.Code)
+				recorder = httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusOK, recorder.Code)
+			},
+		},
+		{
+			name: "unauthorized-create",
+			run: func(t *testing.T) {
+				req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
+				assert.NoError(t, err)
+				recorder := httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusForbidden, recorder.Code)
+			},
+		},
+		{
+			name: "unauthorized-delete",
+			run: func(t *testing.T) {
+				req, err := http.NewRequest("DELETE", "/api/v1.0/deleteApiToken/123", nil)
+				assert.NoError(t, err)
+				recorder := httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusForbidden, recorder.Code)
+			},
+		},
+		{
+			name: "unauthorized-privileged-route",
+			run: func(t *testing.T) {
+				req, err := http.NewRequest("GET", "/privilegedRoute", nil)
+				assert.NoError(t, err)
+				recorder := httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusForbidden, recorder.Code)
+			},
+		},
+		{
+			name: "authorized-privileged-route",
+			run: func(t *testing.T) {
+				// First, create a token to use for authorization
+				req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
+				assert.NoError(t, err)
+				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
 
-		// unmarshal the response
-		var createTokenResp map[string]string
-		err = json.NewDecoder(recorder.Body).Decode(&createTokenResp)
-		assert.NoError(t, err)
+				createTokenReq := CreateApiTokenReq{
+					Name:       "test-token",
+					CreatedBy:  "admin",
+					Expiration: "never",
+					Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
+				}
+				createTokenBody, err := json.Marshal(createTokenReq)
+				assert.NoError(t, err)
+				req.Body = io.NopCloser(bytes.NewReader(createTokenBody))
 
-		token := createTokenResp["token"]
-		assert.NotEmpty(t, token)
+				recorder := httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusOK, recorder.Code)
 
-		tokenID := strings.Split(token, ".")[0]
+				var createTokenResp map[string]string
+				err = json.NewDecoder(recorder.Body).Decode(&createTokenResp)
+				assert.NoError(t, err)
+				token := createTokenResp["token"]
+				assert.NotEmpty(t, token)
 
-		endpoint := fmt.Sprintf("/api/v1.0/deleteApiToken/%s", tokenID)
-		req, err = http.NewRequest("DELETE", endpoint, nil)
-		assert.NoError(t, err)
+				// Use the valid token to access the privileged route
+				req, err = http.NewRequest("GET", "/privilegedRoute", nil)
+				assert.NoError(t, err)
+				req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
+				recorder = httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusOK, recorder.Code)
+			},
+		},
+		{
+			name: "correct-id-wrong-secret",
+			run: func(t *testing.T) {
+				// Create a token
+				req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
+				assert.NoError(t, err)
+				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
 
-		req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
+				createTokenReq := CreateApiTokenReq{
+					Name:       "test-token",
+					CreatedBy:  "admin",
+					Expiration: "never",
+					Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
+				}
+				createTokenBody, err := json.Marshal(createTokenReq)
+				assert.NoError(t, err)
+				req.Body = io.NopCloser(bytes.NewReader(createTokenBody))
 
-		recorder = httptest.NewRecorder()
-		route.ServeHTTP(recorder, req)
+				recorder := httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusOK, recorder.Code)
 
-		// Check ok http response
-		assert.Equal(t, http.StatusOK, recorder.Code)
-	})
+				var createTokenResp map[string]string
+				err = json.NewDecoder(recorder.Body).Decode(&createTokenResp)
+				assert.NoError(t, err)
+				token := createTokenResp["token"]
+				assert.NotEmpty(t, token)
 
-	t.Run("unauthorized-create", func(t *testing.T) {
-		// Create a request
-		req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
-		assert.NoError(t, err)
+				// Use a valid token ID but an incorrect secret to access the privileged route
+				tokenID := strings.Split(token, ".")[0]
+				incorrectSecret := "a25956257878eb0bf6ef69ef7a34812fdf03b0c191b8ac66258fd06b3c902e02"
+				incorrectToken := fmt.Sprintf("%s.%s", tokenID, incorrectSecret)
 
-		recorder := httptest.NewRecorder()
-		route.ServeHTTP(recorder, req)
+				req, err = http.NewRequest("GET", "/privilegedRoute", nil)
+				assert.NoError(t, err)
+				req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", incorrectToken))
+				recorder = httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusForbidden, recorder.Code)
+				assert.Contains(t, recorder.Body.String(), "Invalid API token")
+			},
+		},
+	}
 
-		// Check unauthorized http response
-		assert.Equal(t, http.StatusForbidden, recorder.Code)
-	})
-
-	t.Run("unauthorized-delete", func(t *testing.T) {
-		// Create a request
-		req, err := http.NewRequest("DELETE", "/api/v1.0/deleteApiToken/123", nil)
-		assert.NoError(t, err)
-
-		recorder := httptest.NewRecorder()
-		route.ServeHTTP(recorder, req)
-
-		// Check unauthorized http response
-		assert.Equal(t, http.StatusForbidden, recorder.Code)
-	})
-
-	t.Run("unauthorized-privileged-route", func(t *testing.T) {
-		// Create a request
-		req, err := http.NewRequest("GET", "/privilegedRoute", nil)
-		assert.NoError(t, err)
-
-		recorder := httptest.NewRecorder()
-		route.ServeHTTP(recorder, req)
-
-		// Check unauthorized http response
-		assert.Equal(t, http.StatusForbidden, recorder.Code)
-	})
-
-	t.Run("authorized-privileged-route", func(t *testing.T) {
-		req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
-		assert.NoError(t, err)
-
-		req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
-
-		createTokenReq := CreateApiTokenReq{
-			Name:       "test-token",
-			CreatedBy:  "admin",
-			Expiration: "never",
-			Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
-		}
-
-		createTokenBody, err := json.Marshal(createTokenReq)
-		assert.NoError(t, err)
-		req.Body = io.NopCloser(bytes.NewReader(createTokenBody))
-
-		recorder := httptest.NewRecorder()
-		route.ServeHTTP(recorder, req)
-
-		// Check ok http response
-		assert.Equal(t, http.StatusOK, recorder.Code)
-
-		// unmarshal the response
-		var createTokenResp map[string]string
-		err = json.NewDecoder(recorder.Body).Decode(&createTokenResp)
-		assert.NoError(t, err)
-
-		token := createTokenResp["token"]
-		assert.NotEmpty(t, token)
-		// Create a request
-		req, err = http.NewRequest("GET", "/privilegedRoute", nil)
-		assert.NoError(t, err)
-
-		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
-
-		recorder = httptest.NewRecorder()
-		route.ServeHTTP(recorder, req)
-
-		// Check unauthorized http response
-		assert.Equal(t, http.StatusOK, recorder.Code)
-	})
-
-	t.Run("correct-id-wrong-secret", func(t *testing.T) {
-		req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
-		assert.NoError(t, err)
-
-		req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
-
-		createTokenReq := CreateApiTokenReq{
-			Name:       "test-token",
-			CreatedBy:  "admin",
-			Expiration: "never",
-			Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
-		}
-
-		createTokenBody, err := json.Marshal(createTokenReq)
-		assert.NoError(t, err)
-		req.Body = io.NopCloser(bytes.NewReader(createTokenBody))
-
-		recorder := httptest.NewRecorder()
-		route.ServeHTTP(recorder, req)
-
-		// Check ok http response
-		assert.Equal(t, http.StatusOK, recorder.Code)
-
-		// unmarshal the response
-		var createTokenResp map[string]string
-		err = json.NewDecoder(recorder.Body).Decode(&createTokenResp)
-		assert.NoError(t, err)
-
-		token := createTokenResp["token"]
-		assert.NotEmpty(t, token)
-
-		tokenID := strings.Split(token, ".")[0]
-		incorrectSecret := "a25956257878eb0bf6ef69ef7a34812fdf03b0c191b8ac66258fd06b3c902e02"
-
-		incorrectToken := fmt.Sprintf("%s.%s", tokenID, incorrectSecret)
-
-		req, err = http.NewRequest("GET", "/privilegedRoute", nil)
-		assert.NoError(t, err)
-		req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", incorrectToken))
-
-		recorder = httptest.NewRecorder()
-		route.ServeHTTP(recorder, req)
-
-		// Check unauthorized http response
-		assert.Equal(t, http.StatusForbidden, recorder.Code)
-
-		assert.Contains(t, recorder.Body.String(), "Invalid API token")
-	})
+	// Run all the test cases
+	for _, tc := range testCases {
+		t.Run(tc.name, tc.run)
+	}
 }
