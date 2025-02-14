@@ -449,13 +449,6 @@ func createApiToken(ctx *gin.Context) {
 			return
 		}
 	}
-	if err != nil {
-		log.Warningf("Failed to parse expiration time: %v", err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid expiration time: %v", err),
-		})
-	}
 	scopes := strings.Join(req.Scopes, ",")
 	token, err := database.CreateApiKey(req.Name, req.CreatedBy, scopes, expirationTime)
 	if err != nil {
