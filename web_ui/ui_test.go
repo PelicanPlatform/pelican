@@ -535,6 +535,7 @@ func TestApiToken(t *testing.T) {
 
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
 	config.InitConfig()
 	viper.Set("Server.UIPasswordFile", tempFile.Name())
