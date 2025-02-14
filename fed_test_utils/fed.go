@@ -84,9 +84,28 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, err)
 
 	viper.Set("ConfigDir", tmpPath)
-	viper.Set("Logging.Level", "debug")
-	viper.Set("Logging.Cache.Pss", "debug")
-	viper.Set("TLSSkipVerify", true)
+	// Configure all relevant logging levels. We don't let the XRootD
+	// log levels inherit from the global log level, because the many
+	// fed tests we run back-to-back would otherwise generate a lot of
+	// log output.
+	viper.Set(param.Logging_Level.GetName(), "debug")
+	viper.Set(param.Logging_Origin_Cms.GetName(), "error")
+	viper.Set(param.Logging_Origin_Xrd.GetName(), "error")
+	viper.Set(param.Logging_Origin_Ofs.GetName(), "error")
+	viper.Set(param.Logging_Origin_Oss.GetName(), "error")
+	viper.Set(param.Logging_Origin_Http.GetName(), "error")
+	viper.Set(param.Logging_Origin_Scitokens.GetName(), "fatal")
+	viper.Set(param.Logging_Origin_Xrootd.GetName(), "info")
+	viper.Set(param.Logging_Cache_Ofs.GetName(), "error")
+	viper.Set(param.Logging_Cache_Pss.GetName(), "error")
+	viper.Set(param.Logging_Cache_PssSetOpt.GetName(), "error")
+	viper.Set(param.Logging_Cache_Http.GetName(), "error")
+	viper.Set(param.Logging_Cache_Xrd.GetName(), "error")
+	viper.Set(param.Logging_Cache_Xrootd.GetName(), "error")
+	viper.Set(param.Logging_Cache_Scitokens.GetName(), "fatal")
+	viper.Set(param.Logging_Cache_Pfc.GetName(), "info")
+
+	viper.Set(param.TLSSkipVerify.GetName(), true)
 
 	config.InitConfig()
 
@@ -133,22 +152,22 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	}
 
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	viper.Set("Origin.EnableCmsd", false)
-	viper.Set("Origin.EnableMacaroons", false)
-	viper.Set("Origin.EnableVoms", false)
-	viper.Set("Server.EnableUI", false)
-	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
-	viper.Set("Origin.Port", 0)
-	viper.Set("Cache.Port", 0)
-	viper.Set("Server.WebPort", 0)
-	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "origin"))
-	viper.Set("Cache.RunLocation", filepath.Join(tmpPath, "cache"))
-	viper.Set("Cache.StorageLocation", filepath.Join(tmpPath, "xcache-data"))
-	viper.Set("LocalCache.RunLocation", filepath.Join(tmpPath, "local-cache"))
-	viper.Set("Registry.RequireOriginApproval", false)
-	viper.Set("Registry.RequireCacheApproval", false)
-	viper.Set("Director.CacheSortMethod", "distance")
-	viper.Set("Director.DbLocation", filepath.Join(t.TempDir(), "director.sqlite"))
+	viper.Set(param.Registry_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite"))
+	viper.Set(param.Registry_RequireOriginApproval.GetName(), false)
+	viper.Set(param.Registry_RequireCacheApproval.GetName(), false)
+	viper.Set(param.Director_CacheSortMethod.GetName(), "distance")
+	viper.Set(param.Director_DbLocation.GetName(), filepath.Join(t.TempDir(), "director.sqlite"))
+	viper.Set(param.Origin_EnableCmsd.GetName(), false)
+	viper.Set(param.Origin_EnableVoms.GetName(), false)
+	viper.Set(param.Origin_Port.GetName(), 0)
+	viper.Set(param.Origin_RunLocation.GetName(), filepath.Join(tmpPath, "origin"))
+	viper.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite"))
+	viper.Set(param.Cache_Port.GetName(), 0)
+	viper.Set(param.Cache_RunLocation.GetName(), filepath.Join(tmpPath, "cache"))
+	viper.Set(param.Cache_StorageLocation.GetName(), filepath.Join(tmpPath, "xcache-data"))
+	viper.Set(param.Server_EnableUI.GetName(), false)
+	viper.Set(param.Server_WebPort.GetName(), 0)
+	viper.Set(param.LocalCache_RunLocation.GetName(), filepath.Join(tmpPath, "local-cache"))
 
 	// Set the Director's start time to 6 minutes ago. This prevents it from sending an HTTP 429 for
 	// unknown prefixes.
@@ -185,7 +204,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	}
 	discoveryServer := httptest.NewTLSServer(http.HandlerFunc(handler))
 	t.Cleanup(discoveryServer.Close)
-	viper.Set("Federation.DiscoveryUrl", discoveryServer.URL)
+	viper.Set(param.Federation_DiscoveryUrl.GetName(), discoveryServer.URL)
 
 	desiredURL := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	err = server_utils.WaitUntilWorking(ctx, "GET", desiredURL, "director", 200, false)
