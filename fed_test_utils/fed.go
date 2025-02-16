@@ -22,6 +22,7 @@ package fed_test_utils
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -59,8 +60,18 @@ type (
 	}
 )
 
+var (
+	//go:embed resources/default.yaml
+	fedTestDefaultConfig string
+)
+
 func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	ft = &FedTest{}
+	director.ResetState()
+
+	if originConfig == "" {
+		originConfig = fedTestDefaultConfig
+	}
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	ft.Ctx = ctx
