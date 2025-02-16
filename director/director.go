@@ -1299,7 +1299,6 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	}
 
 	sAd := server_structs.ServerAd{
-		Name:                adV2.Name,
 		StorageType:         st,
 		DisableDirectorTest: adV2.DisableDirectorTest,
 		URL:                 *adUrl,
@@ -1308,8 +1307,8 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		Type:                sType.String(),
 		Caps:                adV2.Caps,
 		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
-		Version:             adV2.Version,
 	}
+	sAd.CopyFrom(adV2)
 
 	recordAd(engineCtx, sAd, &adV2.Namespaces)
 
