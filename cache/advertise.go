@@ -51,13 +51,12 @@ var MinFedTokenTickerRate = 1 * time.Minute
 func (server *CacheServer) CreateAdvertisement(name, originUrl, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
 	registryPrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
 	ad := server_structs.OriginAdvertiseV2{
-		Name:           name,
 		RegistryPrefix: registryPrefix,
 		DataURL:        originUrl,
 		WebURL:         originWebUrl,
 		Namespaces:     server.GetNamespaceAds(),
-		Version:        config.GetVersion(),
 	}
+	ad.Initialize(name)
 
 	return &ad, nil
 }

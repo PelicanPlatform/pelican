@@ -127,8 +127,8 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 	extUrl, _ := url.Parse(extUrlStr)
 	// Only use hostname:port
 	registryPrefix := server_structs.GetOriginNs(extUrl.Host)
+
 	ad := server_structs.OriginAdvertiseV2{
-		Name:           name,
 		RegistryPrefix: registryPrefix,
 		DataURL:        originUrlStr,
 		WebURL:         originWebUrl,
@@ -146,8 +146,8 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		}},
 		StorageType:         ost,
 		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
-		Version:             config.GetVersion(),
 	}
+	ad.Initialize(name)
 
 	if len(prefixes) == 0 {
 		if isGlobusBackend {
