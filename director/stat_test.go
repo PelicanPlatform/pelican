@@ -96,63 +96,63 @@ func TestQueryServersForObject(t *testing.T) {
 
 	mockTTLCache := func() {
 		mockServerAd1 := server_structs.ServerAd{
-			Name:    "origin1",
 			URL:     url.URL{Host: "mock-origin-1.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "mock-origin-1-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
 			Type:    server_structs.OriginType.String()}
+		mockServerAd1.Initialize("origin1")
 		mockServerAd2 := server_structs.ServerAd{
-			Name:    "origin2",
 			URL:     url.URL{Host: "mock-origin-2.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "mock-origin-2-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
 			Type:    server_structs.OriginType.String()}
+		mockServerAd2.Initialize("origin2")
 		mockServerAd3 := server_structs.ServerAd{
-			Name:    "origin3",
 			URL:     url.URL{Host: "mock-origin-3.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "mock-origin-3-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
 			Type:    server_structs.OriginType.String()}
+		mockServerAd3.Initialize("origin3")
 		mockServerAd4 := server_structs.ServerAd{
-			Name:    "origin4",
 			URL:     url.URL{Host: "mock-origin-4.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "mock-origin-4-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
 			Type:    server_structs.OriginType.String()}
+		mockServerAd4.Initialize("origin4")
 		mockServerAdPrivateTopology := server_structs.ServerAd{
-			Name:         "originPrivateTopology",
 			URL:          url.URL{Host: "mock-private-topo-origin.com", Scheme: "http"},
 			AuthURL:      url.URL{Host: "mock-private-topo-origin-auth.com:8444", Scheme: "https"},
 			Caps:         server_structs.Capabilities{PublicReads: false},
 			Type:         server_structs.OriginType.String(),
 			FromTopology: true}
+		mockServerAdPrivateTopology.Initialize("originPrivateTopology")
 		mockServerAdPublicTopology := server_structs.ServerAd{
-			Name:         "originPublicTopology",
 			URL:          url.URL{Host: "mock-public-topo-origin.com", Scheme: "http"},
 			AuthURL:      url.URL{Host: "mock-public-topo-origin-auth.com:8444", Scheme: "https"},
 			Caps:         server_structs.Capabilities{PublicReads: true},
 			Type:         server_structs.OriginType.String(),
 			FromTopology: true}
+		mockServerAdPublicTopology.Initialize("originPublicTopology")
 		mockServerAdPrivateTopologyWOAuthUrl := server_structs.ServerAd{
-			Name:         "originPrivateTopologyNoAuthUrl",
 			URL:          url.URL{Host: "mock-private-topo-origin-no-authurl.com", Scheme: "http"},
 			Caps:         server_structs.Capabilities{PublicReads: false},
 			Type:         server_structs.OriginType.String(),
 			FromTopology: true}
+		mockServerAdPrivateTopologyWOAuthUrl.Initialize("originPrivateTopologyNoAuthUrl")
 		mockTopoPubServerMixNs := server_structs.ServerAd{
-			Name:         "originMixNsTopology",
 			URL:          url.URL{Host: "mock-mix-ns-topo-origin.com", Scheme: "http"},
 			AuthURL:      url.URL{Host: "mock-mix-ns-topo-origin-auth.com:8444", Scheme: "https"},
 			Caps:         server_structs.Capabilities{PublicReads: true},
 			Type:         server_structs.OriginType.String(),
 			FromTopology: true,
 		}
+		mockTopoPubServerMixNs.Initialize("originMixNsTopology")
 		mockServerAd5 := server_structs.ServerAd{
-			Name:    "cache1",
 			URL:     url.URL{Host: "cache1.com", Scheme: "https"},
 			AuthURL: url.URL{Host: "cache1-auth.com:8444", Scheme: "https"},
 			Caps:    server_structs.Capabilities{PublicReads: true},
 			Type:    server_structs.CacheType.String()}
+		mockServerAd5.Initialize("cache1")
 		mockNsAd0 := server_structs.NamespaceAdV2{Path: "/foo"}
 		mockNsAd1 := server_structs.NamespaceAdV2{Path: "/foo/bar"}
 		mockNsAd2 := server_structs.NamespaceAdV2{Path: "/foo/x"}
@@ -390,7 +390,8 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		mockCacheServer := []server_structs.ServerAd{{Name: "cache-overwrite", URL: url.URL{Host: "cache-overwrites.com", Scheme: "https"}}}
+		mockCacheServer := []server_structs.ServerAd{{URL: url.URL{Host: "cache-overwrites.com", Scheme: "https"}}}
+		mockCacheServer[0].Initialize("cache-overwrite")
 
 		statUtilsMutex.Lock()
 		statUtils[mockCacheServer[0].URL.String()] = &serverStatUtil{
@@ -425,7 +426,8 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		mockOrigin := []server_structs.ServerAd{{Name: "origin-overwrite", URL: url.URL{Host: "origin-overwrites.com", Scheme: "https"}}}
+		mockOrigin := []server_structs.ServerAd{{URL: url.URL{Host: "origin-overwrites.com", Scheme: "https"}}}
+		mockOrigin[0].Initialize("origin-overwrite")
 
 		statUtilsMutex.Lock()
 		statUtils[mockOrigin[0].URL.String()] = &serverStatUtil{
@@ -736,11 +738,11 @@ func TestCache(t *testing.T) {
 	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
 
 	mockCacheAd := server_structs.ServerAd{
-		Name: "cache",
 		Type: server_structs.CacheType.String(),
 		URL:  *realServerUrl,
 		Caps: server_structs.Capabilities{PublicReads: true},
 	}
+	mockCacheAd.Initialize("cache")
 	mockNsAd := server_structs.NamespaceAdV2{Path: "/foo"}
 	serverAds.Set(
 		mockCacheAd.URL.String(),

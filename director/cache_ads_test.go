@@ -103,43 +103,42 @@ func TestGetAdsForPath(t *testing.T) {
 	}
 
 	cacheAd1 := server_structs.ServerAd{
-		Name: "cache1",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "cache1.wisc.edu",
 		},
 		Type: server_structs.CacheType.String(),
 	}
+	cacheAd1.Initialize("cache1")
 
 	cacheAd2 := server_structs.ServerAd{
-		Name: "cache2",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "cache2.wisc.edu",
 		},
 		Type: server_structs.CacheType.String(),
 	}
+	cacheAd2.Initialize("cache2")
 
 	originAd1 := server_structs.ServerAd{
-		Name: "origin1",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "origin1.wisc.edu",
 		},
 		Type: server_structs.OriginType.String(),
 	}
+	originAd1.Initialize("origin1")
 
 	originAd2 := server_structs.ServerAd{
-		Name: "origin2",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "origin2.wisc.edu",
 		},
 		Type: server_structs.OriginType.String(),
 	}
+	originAd2.Initialize("origin2")
 
 	originAdTopo1 := server_structs.ServerAd{
-		Name: "topology origin 1",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "topology.wisc.edu",
@@ -147,6 +146,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Type:         server_structs.OriginType.String(),
 		FromTopology: true,
 	}
+	originAdTopo1.Initialize("topology origin 1")
 
 	o1Slice := []server_structs.NamespaceAdV2{nsAd1}
 	o2Slice := []server_structs.NamespaceAdV2{nsAd2, nsAd3}
@@ -234,7 +234,6 @@ func TestGetAdsForPath(t *testing.T) {
 
 func TestLaunchTTLCache(t *testing.T) {
 	mockPelicanOriginServerAd := server_structs.ServerAd{
-		Name:    "test-origin-server",
 		AuthURL: url.URL{},
 		URL: url.URL{
 			Scheme: "https",
@@ -248,6 +247,8 @@ func TestLaunchTTLCache(t *testing.T) {
 		Latitude:  123.05,
 		Longitude: 456.78,
 	}
+	mockPelicanOriginServerAd.Initialize("test-origin-server")
+
 	mockNamespaceAd := server_structs.NamespaceAdV2{
 		Caps:   server_structs.Capabilities{PublicReads: false},
 		Path:   "/foo/bar/",
@@ -320,7 +321,8 @@ func TestLaunchTTLCache(t *testing.T) {
 }
 
 func TestServerAdsCacheEviction(t *testing.T) {
-	mockServerAd := server_structs.ServerAd{Name: "foo", Type: server_structs.OriginType.String(), URL: url.URL{Host: "mock.server.org"}}
+	mockServerAd := server_structs.ServerAd{Type: server_structs.OriginType.String(), URL: url.URL{Host: "mock.server.org"}}
+	mockServerAd.Initialize("foo")
 
 	t.Run("evict-after-expire-time", func(t *testing.T) {
 		// Start cache eviction
@@ -459,7 +461,9 @@ func TestRecordAd(t *testing.T) {
 
 		viper.Set("GeoIPOverrides", []map[string]interface{}{{"IP": "192.168.100.100", "Coordinate": map[string]float64{"lat": 43.567, "long": -65.322}}})
 		mockUrl := url.URL{Scheme: "https", Host: "192.168.100.100"}
-		updatedAd := recordAd(context.Background(), server_structs.ServerAd{Name: "TEST_ORIGIN", URL: mockUrl, WebURL: mockUrl, FromTopology: false}, &mockPelican.NamespaceAds)
+		serverAd := server_structs.ServerAd{URL: mockUrl, WebURL: mockUrl, FromTopology: false}
+		serverAd.Initialize("TEST_ORIGIN")
+		updatedAd := recordAd(context.Background(), serverAd, &mockPelican.NamespaceAds)
 		assert.NotEmpty(t, updatedAd.Longitude)
 		assert.NotEmpty(t, updatedAd.Latitude)
 		_, ok := healthTestUtils[mockUrl.String()]

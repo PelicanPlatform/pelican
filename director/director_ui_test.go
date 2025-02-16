@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -33,6 +34,22 @@ import (
 )
 
 func TestListServers(t *testing.T) {
+	mockOriginServerAd := server_structs.ServerAd{
+		URL:       url.URL{Host: "origin.com", Scheme: "https"},
+		Type:      server_structs.OriginType.String(),
+		Latitude:  123.05,
+		Longitude: 456.78,
+	}
+	mockOriginServerAd.Initialize("test-origin-server")
+
+	mockCacheServerAd := server_structs.ServerAd{
+		URL:       url.URL{Host: "cache.com", Scheme: "https"},
+		Type:      server_structs.CacheType.String(),
+		Latitude:  45.67,
+		Longitude: 123.05,
+	}
+	mockCacheServerAd.Initialize("test-cache-server")
+
 	router := gin.Default()
 
 	router.GET("/servers", listServers)
@@ -77,6 +94,7 @@ func TestListServers(t *testing.T) {
 		FromTopology:      mockOriginServerAd.FromTopology,
 		HealthStatus:      HealthStatusUnknown,
 		NamespacePrefixes: expectedListOriginResNss,
+		Version:           "dev",
 	}
 
 	expectedlistCacheRes := listServerResponse{
@@ -92,6 +110,7 @@ func TestListServers(t *testing.T) {
 		FromTopology:      mockCacheServerAd.FromTopology,
 		HealthStatus:      HealthStatusUnknown,
 		NamespacePrefixes: expectedListCacheResNss,
+		Version:           "dev",
 	}
 
 	t.Run("query-origin", func(t *testing.T) {
@@ -171,6 +190,22 @@ func TestListServers(t *testing.T) {
 }
 
 func TestGetServer(t *testing.T) {
+	mockOriginServerAd := server_structs.ServerAd{
+		URL:       url.URL{Host: "origin.com", Scheme: "https"},
+		Type:      server_structs.OriginType.String(),
+		Latitude:  123.05,
+		Longitude: 456.78,
+	}
+	mockOriginServerAd.Initialize("test-origin-server")
+
+	mockCacheServerAd := server_structs.ServerAd{
+		URL:       url.URL{Host: "cache.com", Scheme: "https"},
+		Type:      server_structs.CacheType.String(),
+		Latitude:  45.67,
+		Longitude: 123.05,
+	}
+	mockCacheServerAd.Initialize("test-cache-server")
+
 	router := gin.Default()
 
 	router.GET("/servers/:name", getServerHandler)
@@ -216,6 +251,7 @@ func TestGetServer(t *testing.T) {
 		FromTopology: mockOriginServerAd.FromTopology,
 		HealthStatus: HealthStatusUnknown,
 		Namespaces:   expectedListOriginResNss,
+		Version:      "dev",
 	}
 
 	expectedlistCacheRes := serverResponse{
@@ -231,6 +267,7 @@ func TestGetServer(t *testing.T) {
 		FromTopology: mockCacheServerAd.FromTopology,
 		HealthStatus: HealthStatusUnknown,
 		Namespaces:   expectedListCacheResNss,
+		Version:      "dev",
 	}
 
 	t.Run("get-origin", func(t *testing.T) {
@@ -304,6 +341,22 @@ func TestGetServer(t *testing.T) {
 }
 
 func TestGetNamespaces(t *testing.T) {
+	mockOriginServerAd := server_structs.ServerAd{
+		URL:       url.URL{Host: "origin.com", Scheme: "https"},
+		Type:      server_structs.OriginType.String(),
+		Latitude:  123.05,
+		Longitude: 456.78,
+	}
+	mockOriginServerAd.Initialize("test-origin-server")
+
+	mockCacheServerAd := server_structs.ServerAd{
+		URL:       url.URL{Host: "cache.com", Scheme: "https"},
+		Type:      server_structs.CacheType.String(),
+		Latitude:  45.67,
+		Longitude: 123.05,
+	}
+	mockCacheServerAd.Initialize("test-cache-server")
+
 	router := gin.Default()
 
 	router.GET("/namespaces", listNamespacesHandler)
