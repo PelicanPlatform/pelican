@@ -1,22 +1,4 @@
-/***************************************************************
- *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- ***************************************************************/
-
-package launcher_utils
+package server_utils
 
 import (
 	"context"
@@ -32,12 +14,11 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 func TestGetSitenameFromReg(t *testing.T) {
 	t.Cleanup(func() {
-		server_utils.ResetTestState()
+		ResetTestState()
 	})
 
 	t.Run("no-registry-url", func(t *testing.T) {
@@ -50,7 +31,7 @@ func TestGetSitenameFromReg(t *testing.T) {
 	})
 
 	t.Run("registry-returns-404", func(t *testing.T) {
-		server_utils.ResetTestState()
+		ResetTestState()
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		}))
@@ -64,7 +45,7 @@ func TestGetSitenameFromReg(t *testing.T) {
 	})
 
 	t.Run("registry-returns-correct-object", func(t *testing.T) {
-		server_utils.ResetTestState()
+		ResetTestState()
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if strings.HasPrefix(req.URL.Path, "/api/v1.0/registry") {
 				prefix := strings.TrimPrefix(req.URL.Path, "/api/v1.0/registry")
