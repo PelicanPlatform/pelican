@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -279,6 +280,10 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 func ResetTestState() {
 	config.ResetConfig()
 	ResetOriginExports()
+	baseAdOnce = sync.Once{}
+	baseAd = server_structs.ServerBaseAd{}
+	baseAdErr = nil
+	directorEndpoints.Store(nil)
 }
 
 // Given a slice of NamespaceAdV2 objects, return a slice of unique top-level prefixes.

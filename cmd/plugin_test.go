@@ -51,6 +51,7 @@ import (
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
@@ -237,6 +238,7 @@ func (f *FedTest) Teardown() {
 	f.FedCancel()
 	assert.NoError(f.T, f.ErrGroup.Wait())
 	server_utils.ResetTestState()
+	director.ResetState()
 }
 
 // Test the main function for the pelican plugin

@@ -1075,6 +1075,7 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		adV2 = server_structs.OriginAdvertiseV2{}
 		err = ctx.ShouldBindBodyWith(&adV2, binding.JSON)
 		if err != nil {
+			log.Debugln("Failed to parse ad of type", sType.String(), "due to error:", err)
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    fmt.Sprintf("Invalid %s registration", sType),
@@ -1149,35 +1150,6 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 	}
 	namespacePaths = strings.TrimSpace(namespacePaths)
 	ctx.Set("namespacePaths", namespacePaths)
-
-	adUrl, err := url.Parse(adV2.DataURL)
-	if err != nil {
-		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. %s.URL %s is not a valid URL", sType, sType, adV2.DataURL), // Origin.URL / Cache.URL
-		})
-		return
-	}
-
-	adWebUrl, err := url.Parse(adV2.WebURL)
-	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
-		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. Server.ExternalWebUrl %s is not a valid URL", sType, adV2.WebURL),
-		})
-		return
-	}
-
-	brokerUrl, err := url.Parse(adV2.BrokerURL)
-	if err != nil {
-		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. BrokerURL %s is not a valid URL", sType, adV2.BrokerURL),
-		})
-	}
 
 	// Verify server registration
 	token := strings.TrimPrefix(tokens[0], "Bearer ")
@@ -1269,17 +1241,6 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		}
 	}
 
-	st := adV2.StorageType
-	// Defaults to POSIX
-	if st == "" {
-		st = server_structs.OriginStoragePosix
-	}
-	// Disable director test if the server isn't POSIX
-	if st != server_structs.OriginStoragePosix && !adV2.DisableDirectorTest {
-		log.Warningf("%s server %s with storage type %s enabled director test. This is not supported.", sType, adV2.Name, string(st))
-		adV2.DisableDirectorTest = true
-	}
-
 	// if we didn't receive a version from the ad but we were able to extract the request version from the user agent,
 	// then we can fallback to the request version
 	// otherwise, we set the version to unknown because our sources of truth are not available
@@ -1296,6 +1257,55 @@ func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_s
 		}
 	} else if adV2.Version == "" {
 		adV2.Version = "unknown"
+	}
+
+	// Forward to other directors, if applicable
+	forwardServiceAd(engineCtx, &adV2, sType)
+
+	finishRegisterServeAd(engineCtx, ctx, &adV2, sType)
+}
+
+// Finish registering the provided service ad (cache or origin) after authorization was completed.
+func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, adV2 *server_structs.OriginAdvertiseV2, sType server_structs.ServerType) {
+	log.Debugf("finishRegisterServeAd received %+v", adV2)
+	st := adV2.StorageType
+	// Defaults to POSIX
+	if st == "" {
+		st = server_structs.OriginStoragePosix
+	}
+	// Disable director test if the server isn't POSIX
+	if st != server_structs.OriginStoragePosix && !adV2.DisableDirectorTest {
+		log.Warningf("%s server %s with storage type %s enabled director test. This is not supported.", sType, adV2.Name, string(st))
+		adV2.DisableDirectorTest = true
+	}
+
+	adUrl, err := url.Parse(adV2.DataURL)
+	if err != nil {
+		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid %s registration. %s.URL %s is not a valid URL", sType, sType, adV2.DataURL), // Origin.URL / Cache.URL
+		})
+		return
+	}
+
+	adWebUrl, err := url.Parse(adV2.WebURL)
+	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
+		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid %s registration. Server.ExternalWebUrl %s is not a valid URL", sType, adV2.WebURL),
+		})
+		return
+	}
+
+	brokerUrl, err := url.Parse(adV2.BrokerURL)
+	if err != nil {
+		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid %s registration. BrokerURL %s is not a valid URL", sType, adV2.BrokerURL),
+		})
 	}
 
 	sAd := server_structs.ServerAd{
@@ -1618,6 +1628,8 @@ func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
 }
 
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
+	egrp := ctx.Value(config.EgrpKey).(*errgroup.Group)
+
 	directorAPIV1 := router.Group("/api/v1.0/director", web_ui.ServerHeaderMiddleware)
 	{
 		// Establish the routes used for cache/origin redirection
@@ -1628,8 +1640,10 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
 		directorAPIV1.DELETE("/origin/*any", redirectToOrigin)
 		directorAPIV1.Handle("PROPFIND", "/origin/*any", redirectToOrigin)
+		directorAPIV1.GET("/directors", listDirectors)
 		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
 		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
+		directorAPIV1.POST("/registerDirector", serverAdMetricMiddleware, func(gctx *gin.Context) { registerDirectorAd(ctx, egrp, gctx) })
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
