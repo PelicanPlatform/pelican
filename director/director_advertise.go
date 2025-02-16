@@ -398,8 +398,12 @@ func sendMyAd(ctx context.Context) {
 		log.Errorln("Local service does not know its own name (cannot forward ad to remote directors):", err)
 		return
 	}
+	adUrl := param.Director_AdvertiseUrl.GetString()
+	if adUrl == "" {
+		adUrl = param.Server_ExternalWebUrl.GetString()
+	}
 	directorAd := &server_structs.DirectorAd{
-		AdvertiseUrl: param.Server_ExternalWebUrl.GetString(),
+		AdvertiseUrl: adUrl,
 	}
 	directorAd.Initialize(name)
 

@@ -1598,6 +1598,19 @@ components: ["cache"]
 ############################
 #  Director-level configs  #
 ############################
+name: Director.AdvertiseUrl
+description: |+
+  The URL that director advertisements should be sent to.
+
+  In a high-availability setup, the URL/hostname where the director receives advertisements
+  from the cache & origin services may be distinct from the shared URL/hostname used by the
+  clients for HA.  This will set the advertisement URL separate from the external URL.
+
+  If not set, Server.ExternalWebUrl will be used instead.
+type: url
+default: $(Server.ExternalWebUrl)
+components: ["director"]
+---
 name: Director.DbLocation
 description: |+
   A filepath to the intended location of the director's database, where server downtime info is stored.
