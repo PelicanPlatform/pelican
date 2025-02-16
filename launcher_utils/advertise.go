@@ -42,6 +42,8 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -103,68 +105,14 @@ func Advertise(ctx context.Context, servers []server_structs.XRootDServer) error
 	return firstErr
 }
 
-// Get the site name from the registry given a namespace prefix
-func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, err error) {
-	fed, err := config.GetFederation(ctx)
-	if err != nil {
-		return
-	}
-	if fed.RegistryEndpoint == "" {
-		err = fmt.Errorf("unable to fetch site name from the registry. Federation.RegistryUrl or Federation.DiscoveryUrl is unset")
-		return
-	}
-	requestUrl, err := url.JoinPath(fed.RegistryEndpoint, "api/v1.0/registry", prefix)
-	if err != nil {
-		return
-	}
-	tr := config.GetTransport()
-	res, err := utils.MakeRequest(context.Background(), tr, requestUrl, http.MethodGet, nil, nil)
-	if err != nil {
-		return
-	}
-	ns := server_structs.Namespace{}
-	err = json.Unmarshal(res, &ns)
-	if err != nil {
-		return
-	}
-	sitename = ns.AdminMetadata.SiteName
-	return
-}
-
 func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) error {
-	name := ""
-	var err error
-	// Fetch site name from the registry, if not, fall back to Xrootd.Sitename.
-	if server.GetServerType().IsEnabled(server_structs.OriginType) {
-		// Note we use Server_ExternalWebUrl as the origin prefix
-		// But caches still use Xrootd_Sitename, which will be changed to Server_ExternalWebUrl in
-		// https://github.com/PelicanPlatform/pelican/issues/1351
-		extUrlStr := param.Server_ExternalWebUrl.GetString()
-		extUrl, _ := url.Parse(extUrlStr)
-		// Only use hostname:port
-		originPrefix := server_structs.GetOriginNs(extUrl.Host)
-		name, err = getSitenameFromReg(ctx, originPrefix)
-		if err != nil {
-			log.Errorf("Failed to get sitename from the registry for the origin. Will fallback to use Xrootd.Sitename: %v", err)
-		}
-	} else if server.GetServerType().IsEnabled(server_structs.CacheType) {
-		cachePrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
-		name, err = getSitenameFromReg(ctx, cachePrefix)
-		if err != nil {
-			log.Errorf("Failed to get sitename from the registry for the cache. Will fallback to use Xrootd.Sitename: %v", err)
-		}
-	}
-
-	if name == "" {
-		log.Infof("Sitename from the registry is empty, fall back to Xrootd.Sitename: %s", param.Xrootd_Sitename.GetString())
-		name = param.Xrootd_Sitename.GetString()
-	}
-	if name == "" {
-		return errors.New(fmt.Sprintf("%s name isn't set. Please set the name via Xrootd.Sitename", server.GetServerType()))
+	name, err := server_utils.GetServiceName(ctx, server.GetServerType())
+	if err != nil {
+		return errors.Wrap(err, "failed to determine service name for advertising to director")
 	}
 
 	if err = server.GetNamespaceAdsFromDirector(); err != nil {
-		return errors.Wrap(err, fmt.Sprintf("%s failed to get namespaceAds from the director", server.GetServerType()))
+		return errors.Wrapf(err, "%s failed to get namespaceAds from the director", server.GetServerType())
 	}
 	serverUrl := param.Origin_Url.GetString()
 	webUrl := param.Server_ExternalWebUrl.GetString()
