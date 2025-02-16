@@ -145,6 +145,7 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 		}()
 	} else if fAd.AdType == server_structs.CacheType.String() || fAd.AdType == server_structs.OriginType.String() {
 		if fAd.ServiceAd == nil {
+			log.Debugln("Received registration of type", fAd.AdType, "with missing service ad")
 			ctx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    "Bad request. Service ad is missing in forward request",
@@ -163,6 +164,7 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 		forwardServiceAd(appCtx, fAd.ServiceAd, sType)
 
 	} else {
+		log.Debugln("Received registration of unrecognized type", fAd.AdType)
 		ctx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Bad request. Invalid ad type for forwarding",

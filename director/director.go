@@ -1102,6 +1102,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		// Parse URL to extract hostname
 		parsedURL, err := url.Parse(adV2.DataURL)
 		if err != nil {
+			log.Debugln("Failed to parse data URL for cache:", err)
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    fmt.Sprintf("Invalid Cache URL %s (config parameter: Cache.Url): %s", adV2.DataURL, err.Error()),
