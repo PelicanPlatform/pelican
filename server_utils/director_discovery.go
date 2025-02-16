@@ -65,13 +65,21 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 		endpointsTemp[endpoint] = true
 	}
 	if isDirector {
-		endpointsTemp[param.Server_ExternalWebUrl.GetString()] = true
+		adUrl := param.Director_AdvertiseUrl.GetString()
+		if adUrl == "" {
+			adUrl = param.Server_ExternalWebUrl.GetString()
+			log.Debugln("Server will advertise to itself using the external web URL", adUrl)
+		} else {
+			log.Debugln("Server will advertise to itself using the configured advertise URL", adUrl)
+		}
+
+		endpointsTemp[adUrl] = true
 		// Bootstrap my own ad, even if nothing else is discovered.
 		if servers := directorEndpoints.Load(); servers == nil {
 			servers := make([]server_structs.DirectorAd, 1)
 			if name, err := GetServiceName(ctx, server_structs.DirectorType); err == nil {
 				servers[0] = server_structs.DirectorAd{
-					AdvertiseUrl: param.Server_ExternalWebUrl.GetString(),
+					AdvertiseUrl: adUrl,
 				}
 				servers[0].Initialize(name)
 				directorEndpoints.CompareAndSwap(nil, &servers)
