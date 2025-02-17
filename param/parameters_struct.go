@@ -29,6 +29,7 @@ type Config struct {
 		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataLocations []string `mapstructure:"datalocations" yaml:"DataLocations"`
+		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultCacheTimeout time.Duration `mapstructure:"defaultcachetimeout" yaml:"DefaultCacheTimeout"`
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
@@ -267,7 +268,6 @@ type Config struct {
 		RequireOriginApproval bool `mapstructure:"requireoriginapproval" yaml:"RequireOriginApproval"`
 	} `mapstructure:"registry" yaml:"Registry"`
 	Server struct {
-		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
@@ -358,6 +358,7 @@ type configWithType struct {
 		Concurrency struct { Type string; Value int }
 		DataLocation struct { Type string; Value string }
 		DataLocations struct { Type string; Value []string }
+		DbLocation struct { Type string; Value string }
 		DefaultCacheTimeout struct { Type string; Value time.Duration }
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
@@ -596,7 +597,6 @@ type configWithType struct {
 		RequireOriginApproval struct { Type string; Value bool }
 	}
 	Server struct {
-		DbLocation struct { Type string; Value string }
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }

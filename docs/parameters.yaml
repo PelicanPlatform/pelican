@@ -1541,6 +1541,13 @@ default: 9.5s
 hidden: true
 components: ["cache"]
 ---
+name: Cache.DbLocation
+description: |+
+  A filepath to the intended location of the cache's database.
+type: filename
+default: /var/lib/pelican/cache.sqlite
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################
@@ -2195,13 +2202,6 @@ description: |+
 type: bool
 default: false
 components: ["cache", "director", "origin", "registry"]
----
-name: Server.DbLocation
-description: |+
-  A filepath to the intended location of the server's database.
-type: filename
-default: /var/lib/pelican/server.sqlite
-components: ["origin", "cache", "registry", "director"]
 ---
 ################################
 #   Issuer's Configurations    #

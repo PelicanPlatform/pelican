@@ -2,10 +2,12 @@ package database
 
 import (
 	"embed"
+	"errors"
 
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -19,8 +21,16 @@ type Counter struct {
 	Value int    `gorm:"not null;default:0"`
 }
 
-func InitServerDatabase() error {
-	dbPath := param.Server_DbLocation.GetString()
+func InitServerDatabase(serverType server_structs.ServerType) error {
+	if serverType != server_structs.OriginType && serverType != server_structs.CacheType {
+		return errors.New("invalid server type")
+	}
+	var dbPath string
+	if serverType == server_structs.OriginType {
+		dbPath = param.Origin_DbLocation.GetString()
+	} else {
+		dbPath = param.Cache_DbLocation.GetString()
+	}
 
 	tdb, err := server_utils.InitSQLiteDB(dbPath)
 	if err != nil {

@@ -1050,6 +1050,7 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Director_GeoIPLocation.GetName(), "/var/cache/pelican/maxmind/GeoLite2-City.mmdb")
 		v.SetDefault(param.Registry_DbLocation.GetName(), "/var/lib/pelican/registry.sqlite")
 		v.SetDefault(param.Director_DbLocation.GetName(), "/var/lib/pelican/director.sqlite")
+		v.SetDefault(param.Cache_DbLocation.GetName(), "/var/lib/pelican/cache.sqlite")
 		// The lotman db will actually take this path and create the lot at /path/.lot/lotman_cpp.sqlite
 		v.SetDefault(param.Lotman_LotHome.GetName(), "/var/lib/pelican")
 		v.SetDefault(param.Monitoring_DataLocation.GetName(), "/var/lib/pelican/monitoring/data")

@@ -147,6 +147,7 @@ func (oP ObjectParam) IsSet() bool {
 
 var (
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
+	Cache_DbLocation = StringParam{"Cache.DbLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
 	Cache_FilesBaseSize = StringParam{"Cache.FilesBaseSize"}
 	Cache_FilesMaxSize = StringParam{"Cache.FilesMaxSize"}
@@ -248,7 +249,6 @@ var (
 	Plugin_Token = StringParam{"Plugin.Token"}
 	Registry_DbLocation = StringParam{"Registry.DbLocation"}
 	Registry_InstitutionsUrl = StringParam{"Registry.InstitutionsUrl"}
-	Server_DbLocation = StringParam{"Server.DbLocation"}
 	Server_ExternalWebUrl = StringParam{"Server.ExternalWebUrl"}
 	Server_Hostname = StringParam{"Server.Hostname"}
 	Server_IssuerHostname = StringParam{"Server.IssuerHostname"}
