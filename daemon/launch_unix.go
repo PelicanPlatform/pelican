@@ -262,15 +262,16 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 						}
 					}
 
-					crashTimestamp := time.Now().Unix()
-					log.Debug("Recording xrootd crash at time: ", crashTimestamp)
+					crashTimestamp := time.Now()
+					crashTimestampUnix := crashTimestamp.Unix()
+					log.Debug("Recording xrootd crash at time: ", crashTimestamp.Format(time.RFC3339))
 
-					dbErr := database.CreateOrUpdateCounter(service_key, int(crashTimestamp))
+					dbErr := database.CreateOrUpdateCounter(service_key, int(crashTimestampUnix))
 					if dbErr != nil {
 						log.Debug("Error recording xrootd crash: ", dbErr)
 						return errors.Wrap(err, "Unable to record xrootd crash")
 					}
-					metrics.PelicanServerXRootDLastCrash.With(prometheus.Labels{"server_type": service_key}).Set(float64(crashTimestamp))
+					metrics.PelicanServerXRootDLastCrash.With(prometheus.Labels{"server_type": service_key}).Set(float64(crashTimestampUnix))
 					log.Errorln(err)
 					return err
 				}
