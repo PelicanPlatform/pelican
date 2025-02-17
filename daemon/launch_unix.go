@@ -250,28 +250,32 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 
 					// determine service key
 					failedDaemon := launchers[chosen].Name()
-					var service_key string
+					serviceKey := "unknown"
 					for _, launcher := range launchers {
 						if launcher.Name() == failedDaemon {
 							if strings.Contains(failedDaemon, "origin") {
-								service_key = server_structs.OriginType.String()
+								serviceKey = server_structs.OriginType.String()
 							} else if strings.Contains(failedDaemon, "cache") {
-								service_key = server_structs.CacheType.String()
+								serviceKey = server_structs.CacheType.String()
 							}
 							break
 						}
+					}
+
+					if serviceKey == "unknown" {
+						log.Error("Unable to determine service key for failed daemon: ", failedDaemon)
 					}
 
 					crashTimestamp := time.Now()
 					crashTimestampUnix := crashTimestamp.Unix()
 					log.Debug("Recording xrootd crash at time: ", crashTimestamp.Format(time.RFC3339))
 
-					dbErr := database.CreateOrUpdateCounter(service_key, int(crashTimestampUnix))
+					dbErr := database.CreateOrUpdateCounter(serviceKey, int(crashTimestampUnix))
 					if dbErr != nil {
 						log.Debug("Error recording xrootd crash: ", dbErr)
 						return errors.Wrap(err, "Unable to record xrootd crash")
 					}
-					metrics.PelicanServerXRootDLastCrash.With(prometheus.Labels{"server_type": service_key}).Set(float64(crashTimestampUnix))
+					metrics.PelicanServerXRootDLastCrash.With(prometheus.Labels{"server_type": serviceKey}).Set(float64(crashTimestampUnix))
 					log.Errorln(err)
 					return err
 				}
