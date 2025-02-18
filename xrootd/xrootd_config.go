@@ -114,25 +114,25 @@ type (
 	}
 
 	CacheConfig struct {
-		UseCmsd                          bool
-		EnablePrefetch                   bool
-		EnableVoms                       bool
-		CalculatedPort                   string
-		HighWaterMark                    string
-		LowWatermark                     string
-		FilesBaseSize                    string
-		FilesNominalSize                 string
-		FilesMaxSize                     string
-		ExportLocation                   string
-		RunLocation                      string
-		DataLocations                    []string
-		MetaLocations                    []string
-		NamespaceLocation                string
-		PSSOrigin                        string
-		BlocksToPrefetch                 int
-		Concurrency                      int
-		X509ClientAuthenticationPrefixes []string
-		LotmanCfg                        LotmanCfg
+		UseCmsd             bool
+		EnablePrefetch      bool
+		EnableVoms          bool
+		CalculatedPort      string
+		HighWaterMark       string
+		LowWatermark        string
+		FilesBaseSize       string
+		FilesNominalSize    string
+		FilesMaxSize        string
+		ExportLocation      string
+		RunLocation         string
+		DataLocations       []string
+		MetaLocations       []string
+		NamespaceLocation   string
+		PSSOrigin           string
+		BlocksToPrefetch    int
+		Concurrency         int
+		LotmanCfg           LotmanCfg
+		EnableTLSClientAuth bool
 	}
 
 	XrootdOptions struct {

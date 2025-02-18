@@ -299,7 +299,6 @@ var (
 	Director_CacheResponseHostnames = StringSliceParam{"Director.CacheResponseHostnames"}
 	Director_FilteredServers = StringSliceParam{"Director.FilteredServers"}
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
-	Director_X509ClientAuthenticationPrefixes = StringSliceParam{"Director.X509ClientAuthenticationPrefixes"}
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
 	Origin_ExportVolumes = StringSliceParam{"Origin.ExportVolumes"}
@@ -348,6 +347,7 @@ var (
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
 	Cache_EnablePrefetch = BoolParam{"Cache.EnablePrefetch"}
+	Cache_EnableTLSClientAuth = BoolParam{"Cache.EnableTLSClientAuth"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
 	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
