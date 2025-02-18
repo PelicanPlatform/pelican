@@ -39,7 +39,7 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: ${{ matrix.go-version }}
-    - name: Create go temporary director (Windows workaround)
+    - name: Create Go temporary directories (Windows workaround)
       if: runner.os == 'Windows'
       shell: pwsh
       run: mkdir D:\gotmp; mkdir D:\gomodcache; mkdir D:\gocache
@@ -58,12 +58,12 @@ jobs:
     - name: Install Mac OS X Dependencies
       run: ./github_scripts/osx_install.sh
       if: runner.os == 'macOS'
-    - name: Test OS X
+    - name: Test Mac OS X
       if: runner.os == 'macOS'
       run: |
         make web-build
         go test -p=4 -v -coverpkg=./... -coverprofile=coverage.out -covermode=count ./...
-    - name: Test
+    - name: Test Windows
       if: runner.os == 'Windows'
       env:
         # Fix slow Go compile and cache restore
@@ -74,7 +74,7 @@ jobs:
       run: |
         make web-build
         go test -p=4 ./...
-    - name: Run GoReleaser for Non-Ubuntu
+    - name: Run GoReleaser for Mac OS X
       uses: goreleaser/goreleaser-action@v6
       if: runner.os == 'macOS'
       with:
