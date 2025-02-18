@@ -7,9 +7,13 @@
 Origin:
   StorageType: "s3"
   FederationPrefix: /my/namespace
+  S3ServiceUrl: "https://example.com"
   S3Bucket: "my-bucket"
-  S3AccessKeyfile: "/path/to/access.key"
-  S3SecretKeyfile: "/path/to/secret.key"
+  S3AccessKeyfile: "SHOULD-OVERRIDE-TEMPFILE"
+  S3SecretKeyfile: "SHOULD-OVERRIDE-TEMPFILE"
+
+  # S3AccessKeyfile: "/path/to/access.key"
+  # S3SecretKeyfile: "/path/to/secret.key"
 
   EnableWrites: false
   EnablePublicReads: true
