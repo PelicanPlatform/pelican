@@ -153,9 +153,15 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 
 	directorAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *directorInfo]) {
 		info := i.Value()
-		info.cancel()
-		close(info.forwardAdChan)
-		close(info.internalAdChan)
+		if info.cancel != nil {
+			info.cancel()
+		}
+		if info.forwardAdChan != nil {
+			close(info.forwardAdChan)
+		}
+		if info.internalAdChan != nil {
+			close(info.internalAdChan)
+		}
 	})
 
 	// Put stop logic in a separate goroutine so that parent function is not blocking

@@ -182,6 +182,9 @@ func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.Origi
 	defer directorAdMutex.RUnlock()
 	directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
 		dinfo := item.Value()
+		if dinfo.ad == nil {
+			return true
+		}
 		if self, err := server_utils.IsDirectorAdFromSelf(engineCtx, dinfo.ad); err == nil && !self {
 			dinfo.forwardService(serviceAd, sType)
 		}
@@ -390,6 +393,9 @@ func sendMyAd(ctx context.Context) {
 	defer directorAdMutex.RUnlock()
 	directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
 		dinfo := item.Value()
+		if dinfo.ad == nil {
+			return true
+		}
 		if self, err := server_utils.IsDirectorAdFromSelf(ctx, dinfo.ad); err == nil && !self {
 			dinfo.forwardDirector(directorAd)
 		}
