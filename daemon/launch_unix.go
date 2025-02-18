@@ -42,10 +42,11 @@ import (
 
 type (
 	launchInfo struct {
-		ctx    context.Context
-		expiry time.Time
-		pid    int
-		name   string
+		ctx      context.Context
+		expiry   time.Time
+		pid      int
+		name     string
+		killFunc func(pid int, sig int) error
 	}
 )
 
@@ -150,6 +151,13 @@ func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int
 		cmd.Env = append(newEnv, launcher.ExtraEnv...)
 	}
 
+	if len(launcher.InheritFds) > 0 {
+		cmd.ExtraFiles = make([]*os.File, len(launcher.InheritFds))
+		for idx, fd := range launcher.InheritFds {
+			cmd.ExtraFiles[idx] = os.NewFile(uintptr(fd), "")
+		}
+	}
+
 	if err := cmd.Start(); err != nil {
 		return ctx, -1, err
 	}
@@ -160,6 +168,19 @@ func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int
 		cancel(cmd.Wait())
 	}()
 	return ctx_result, cmd.Process.Pid, nil
+}
+
+func (launcher DaemonLauncher) KillFunc() func(pid int, sig int) error {
+	return func(pid int, sig int) error {
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			return errors.Wrapf(err, "unable to find PID %d", pid)
+		}
+		if err = process.Signal(syscall.Signal(sig)); err != nil {
+			return errors.Wrapf(err, "failed to send signal %d to process with pid %d", sig, pid)
+		}
+		return nil
+	}
 }
 
 func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Group) (pids []int, err error) {
@@ -180,6 +201,7 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 		daemons[idx].ctx = newCtx
 		daemons[idx].pid = pid
 		daemons[idx].name = daemon.Name()
+		daemons[idx].killFunc = daemon.KillFunc()
 		pids[idx] = pid
 		log.Infoln("Successfully launched", daemon.Name())
 		metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(metricName), metrics.StatusOK, "")
@@ -211,7 +233,7 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 				log.Warnf("Forwarding signal %v to daemons\n", sys_sig)
 				var lastErr error
 				for idx, daemon := range daemons {
-					if err = syscall.Kill(daemon.pid, sys_sig); err != nil {
+					if err = daemon.killFunc(daemon.pid, int(sys_sig)); err != nil {
 						lastErr = errors.Wrapf(err, "Failed to forward signal to %s process", launchers[idx].Name())
 					}
 					daemon.expiry = time.Now().Add(10 * time.Second)
@@ -226,7 +248,7 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 				// Kill the daemon if it's still alive
 				exists := checkPIDExists(daemons[chosen].pid)
 				if exists {
-					if err = syscall.Kill(daemons[chosen].pid, syscall.SIGTERM); err != nil {
+					if err = daemons[chosen].killFunc(daemons[chosen].pid, int(syscall.SIGTERM)); err != nil {
 						err = errors.Wrapf(err, "Failed to kill %s with pid %d", daemons[chosen].name, daemons[chosen].pid)
 						log.Errorln(err)
 						return err
@@ -253,7 +275,7 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 				for idx, daemon := range daemons {
 					// Daemon is expired, clean up
 					if !daemon.expiry.IsZero() && time.Now().After(daemon.expiry) {
-						if err = syscall.Kill(daemon.pid, syscall.SIGKILL); err != nil {
+						if err = daemon.killFunc(daemon.pid, int(syscall.SIGKILL)); err != nil {
 							err = errors.Wrapf(err, "Failed to SIGKILL the %s process", launchers[idx].Name())
 							log.Errorln(err)
 							return err

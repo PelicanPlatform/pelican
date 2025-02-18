@@ -168,11 +168,16 @@ ENDRUN
 #################################################################
 FROM hub.opensciencegrid.org/osg-htc/software-base:${OSG_SERIES}-${BASE_OS}-${OSG_REPO} AS pelican-software-base
 ARG TARGETPLATFORM
+ARG PELICAN_USER=pelican
 
 WORKDIR /pelican
 
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
+
+  # Create pelican user and group
+  groupadd -g 10941 ${PELICAN_USER}
+  useradd -u 10941 -g 10941 -d / -s /sbin/nologin ${PELICAN_USER}
 
   # Throughout this build, we will have Docker's build process cache dnf's
   # cache directory, so that we can not include it in any final images and

@@ -267,6 +267,7 @@ type Config struct {
 		RequireOriginApproval bool `mapstructure:"requireoriginapproval" yaml:"RequireOriginApproval"`
 	} `mapstructure:"registry" yaml:"Registry"`
 	Server struct {
+		DropPrivileges bool `mapstructure:"dropprivileges" yaml:"DropPrivileges"`
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
@@ -290,6 +291,7 @@ type Config struct {
 		UIAdminUsers []string `mapstructure:"uiadminusers" yaml:"UIAdminUsers"`
 		UILoginRateLimit int `mapstructure:"uiloginratelimit" yaml:"UILoginRateLimit"`
 		UIPasswordFile string `mapstructure:"uipasswordfile" yaml:"UIPasswordFile"`
+		UnprivilegedUser string `mapstructure:"unprivilegeduser" yaml:"UnprivilegedUser"`
 		WebConfigFile string `mapstructure:"webconfigfile" yaml:"WebConfigFile"`
 		WebHost string `mapstructure:"webhost" yaml:"WebHost"`
 		WebPort int `mapstructure:"webport" yaml:"WebPort"`
@@ -595,6 +597,7 @@ type configWithType struct {
 		RequireOriginApproval struct { Type string; Value bool }
 	}
 	Server struct {
+		DropPrivileges struct { Type string; Value bool }
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }
@@ -618,6 +621,7 @@ type configWithType struct {
 		UIAdminUsers struct { Type string; Value []string }
 		UILoginRateLimit struct { Type string; Value int }
 		UIPasswordFile struct { Type string; Value string }
+		UnprivilegedUser struct { Type string; Value string }
 		WebConfigFile struct { Type string; Value string }
 		WebHost struct { Type string; Value string }
 		WebPort struct { Type string; Value int }

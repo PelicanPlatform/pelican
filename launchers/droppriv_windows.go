@@ -1,3 +1,5 @@
+//go:build windows
+
 /***************************************************************
  *
  * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
@@ -16,29 +18,10 @@
  *
  ***************************************************************/
 
-package daemon
+package launchers
 
-import (
-	"context"
-)
+import "github.com/pkg/errors"
 
-type (
-	Launcher interface {
-		Name() string
-		Launch(ctx context.Context) (context.Context, int, error)
-		KillFunc() func(pid int, sig int) error
-	}
-
-	DaemonLauncher struct {
-		DaemonName string
-		Args       []string
-		Uid        int
-		Gid        int
-		ExtraEnv   []string
-		InheritFds []int
-	}
-)
-
-func (launcher DaemonLauncher) Name() string {
-	return launcher.DaemonName
+func dropPrivileges() (err error) {
+	return errors.New("dropping privileges is not supported on Windows")
 }
