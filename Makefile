@@ -86,7 +86,16 @@ else
 endif
 
 .PHONY: web-build
+
+ifeq ($(goos),windows)
+web-build:
+	@echo Skipping web build on Windows
+	@mkdir -p web_ui/frontend/out
+	@touch web_ui/frontend/out/index.html
+else
 web-build: generate web_ui/frontend/out/index.html
+endif
+
 web_ui/frontend/out/index.html : $(WEBSITE_SRC_FILES)
 ifeq ($(USE_DOCKER),0)
 	@cd $(WEBSITE_SRC_PATH) && npm install && npm run build

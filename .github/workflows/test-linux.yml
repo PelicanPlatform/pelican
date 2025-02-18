@@ -48,7 +48,7 @@ jobs:
     - name: Test
       run: |
         make web-build
-        go test -tags=${{ matrix.tags }} -timeout 15m -coverpkg=./... -coverprofile=${{ matrix.coverprofile }} -covermode=count ./...
+        go test -p=4 -tags=${{ matrix.tags }} -timeout 15m -coverpkg=./... -coverprofile=${{ matrix.coverprofile }} -covermode=count ./...
     - name: Get total code coverage
       if: github.event_name == 'pull_request'
       id: cc
@@ -56,36 +56,9 @@ jobs:
         set -x
         cc_total=`go tool cover -func=${{ matrix.coverprofile }} | grep total | grep -Eo '[0-9]+\.[0-9]+'`
         echo "cc_total=$cc_total" >> $GITHUB_OUTPUT
-    - name: Restore base test coverage
-      id: base-coverage
-      if: github.event.pull_request.base.sha != ''
-      uses: actions/cache@v4
-      with:
-        path: |
-          unit-base.txt
-        key: ${{ runner.os }}-unit-test-coverage-${{ (github.event.pull_request.base.sha != github.event.after) && github.event.pull_request.base.sha || github.event.after }}
-    - name: Run test for base code
-      if: steps.base-coverage.outputs.cache-hit != 'true' && github.event.pull_request.base.sha != ''
-      run: |
-        git config --global --add safe.directory "$GITHUB_WORKSPACE"
-        git fetch origin main ${{ github.event.pull_request.base.sha }}
-        HEAD=$(git rev-parse HEAD)
-        git reset --hard ${{ github.event.pull_request.base.sha }}
-        make web-build
-        go generate ./...
-        go test -tags=${{ matrix.tags }} -timeout 15m -coverpkg=./... -coverprofile=base_coverage.out -covermode=count ./...
-        go tool cover -func=base_coverage.out > unit-base.txt
-        git reset --hard $HEAD
-    - name: Get base code coverage value
-      if: github.event_name == 'pull_request'
-      id: cc_b
-      run: |
-        set -x
-        cc_base_total=`grep total ./unit-base.txt | grep -Eo '[0-9]+\.[0-9]+'`
-        echo "cc_base_total=$cc_base_total" >> $GITHUB_OUTPUT
     - name: Add coverage information to action summary
       if: github.event_name == 'pull_request'
-      run: echo 'Code coverage ' ${{steps.cc.outputs.cc_total}}'% Prev ' ${{steps.cc_b.outputs.cc_base_total}}'%' >> $GITHUB_STEP_SUMMARY
+      run: echo 'Code coverage ' ${{steps.cc.outputs.cc_total}}'%' >> $GITHUB_STEP_SUMMARY
     - name: Run GoReleaser for Ubuntu
       uses: goreleaser/goreleaser-action@v6
       with:
