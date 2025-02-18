@@ -334,6 +334,7 @@ type Config struct {
 		ConfigFile string `mapstructure:"configfile" yaml:"ConfigFile"`
 		DetailedMonitoringHost string `mapstructure:"detailedmonitoringhost" yaml:"DetailedMonitoringHost"`
 		DetailedMonitoringPort int `mapstructure:"detailedmonitoringport" yaml:"DetailedMonitoringPort"`
+		EnableLocalMonitoring bool `mapstructure:"enablelocalmonitoring" yaml:"EnableLocalMonitoring"`
 		LocalMonitoringHost string `mapstructure:"localmonitoringhost" yaml:"LocalMonitoringHost"`
 		MacaroonsKeyFile string `mapstructure:"macaroonskeyfile" yaml:"MacaroonsKeyFile"`
 		ManagerHost string `mapstructure:"managerhost" yaml:"ManagerHost"`
@@ -662,6 +663,7 @@ type configWithType struct {
 		ConfigFile struct { Type string; Value string }
 		DetailedMonitoringHost struct { Type string; Value string }
 		DetailedMonitoringPort struct { Type string; Value int }
+		EnableLocalMonitoring struct { Type string; Value bool }
 		LocalMonitoringHost struct { Type string; Value string }
 		MacaroonsKeyFile struct { Type string; Value string }
 		ManagerHost struct { Type string; Value string }

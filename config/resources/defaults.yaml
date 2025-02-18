@@ -114,6 +114,7 @@ Xrootd:
   DetailedMonitoringPort: 9930
   SummaryMonitoringPort: 9931
   AuthRefreshInterval: 5m
+  EnableLocalMonitoring: true
 Transport:
   DialerTimeout: 10s
   DialerKeepAlive: 30s
