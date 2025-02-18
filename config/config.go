@@ -1259,28 +1259,42 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		// Set up the directories for the server to run as a non-root user;
 		// for the most part, we need to recursively chown and chmod the directory
 		// so either root or pelican can access it.
-		pelicanLocations := []string{
-			param.Registry_DbLocation.GetString(),
-			param.Origin_DbLocation.GetString(),
-			param.Director_GeoIPLocation.GetString(),
-			param.Director_DbLocation.GetString(),
+		pelicanLocations := []string{}
+		if currentServers.IsEnabled(server_structs.RegistryType) {
+			pelicanLocations = append(pelicanLocations, param.Registry_DbLocation.GetString())
+		}
+		if currentServers.IsEnabled(server_structs.OriginType) {
+			pelicanLocations = append(pelicanLocations, param.Origin_DbLocation.GetString())
+		}
+		if currentServers.IsEnabled(server_structs.DirectorType) {
+			pelicanLocations = append(pelicanLocations, param.Director_DbLocation.GetString(), param.Director_GeoIPLocation.GetString())
 		}
 		if err = setFileAndDirPerms(pelicanLocations, 0750, 0640, puser.Uid, 0, true); err != nil {
 			return errors.Wrap(err, "failure when setting up the file permissions for pelican")
 		}
-		pelicanLocationsNoRecursive := []string{
-			param.Shoveler_AMQPTokenLocation.GetString(),
+
+		pelicanLocationsNoRecursive := []string{}
+		if (currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType)) && param.Shoveler_Enable.GetBool() {
+			pelicanLocationsNoRecursive = append(pelicanLocationsNoRecursive, param.Shoveler_AMQPTokenLocation.GetString())
 		}
 		if err = setFileAndDirPerms(pelicanLocationsNoRecursive, 0750, 0640, puser.Uid, 0, false); err != nil {
 			return errors.Wrap(err, "failure when setting up the file permissions for pelican")
 		}
+
 		pelicanDirs := []string{
-			param.LocalCache_RunLocation.GetString(),
-			param.Lotman_DbLocation.GetString(),
-			param.Lotman_LotHome.GetString(),
 			param.Monitoring_DataLocation.GetString(),
-			param.Shoveler_QueueDirectory.GetString(),
-			param.Origin_GlobusConfigLocation.GetString(),
+		}
+		if currentServers.IsEnabled(server_structs.LocalCacheType) {
+			pelicanDirs = append(pelicanDirs, param.LocalCache_RunLocation.GetString())
+		}
+		if currentServers.IsEnabled(server_structs.CacheType) && param.Cache_EnableLotman.GetBool() {
+			pelicanDirs = append(pelicanDirs, param.Lotman_LotHome.GetString(), param.Lotman_DbLocation.GetString())
+		}
+		if (currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType)) && param.Shoveler_Enable.GetBool() {
+			pelicanDirs = append(pelicanDirs, param.Shoveler_QueueDirectory.GetString())
+		}
+		if currentServers.IsEnabled(server_structs.OriginType) {
+			pelicanDirs = append(pelicanDirs, param.Origin_GlobusConfigLocation.GetString())
 		}
 		if err = setDirPerms(pelicanDirs, 0750, 0640, puser.Uid, puser.Gid, true); err != nil {
 			return errors.Wrap(err, "failure when setting up the directory permissions for pelican")
