@@ -2702,3 +2702,228 @@ func TestExtractProjectFromUserAgent(t *testing.T) {
 		assert.Equal(t, "", result)
 	})
 }
+
+func TestSetDowntimebyServer(t *testing.T) {
+	server_utils.ResetTestState()
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	SetupMockDirectorDB(t)
+	t.Cleanup(func() {
+		TeardownMockDirectorDB(t)
+		cancel()
+		assert.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
+	})
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == "POST" && req.URL.Path == "/api/v1.0/registry/checkNamespaceStatus" {
+			reqBody, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			reqJson := server_structs.CheckNamespaceStatusReq{}
+			err = json.Unmarshal(reqBody, &reqJson)
+			require.NoError(t, err)
+
+			// Validate the expected prefixes
+			// We expect the registration to use "test" for namespace, /caches/test for cache, and /origins/test for origin
+			if reqJson.Prefix != "test" && reqJson.Prefix != "/caches/test" && reqJson.Prefix != "/origins/test" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+
+			// Respond with approved status
+			res := server_structs.CheckNamespaceStatusRes{Approved: true}
+			resByte, err := json.Marshal(res)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, err = w.Write(resByte)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	viper.Set("Federation.RegistryUrl", ts.URL)
+	viper.Set("Director.CacheSortMethod", "distance")
+	viper.Set("Director.StatTimeout", 300*time.Millisecond)
+	viper.Set("Director.StatConcurrencyLimit", 1)
+
+	setupContext := func() (*gin.Context, *gin.Engine, *httptest.ResponseRecorder) {
+		w := httptest.NewRecorder()
+		c, r := gin.CreateTestContext(w)
+		return c, r, w
+	}
+
+	generateToken := func() (jwk.Key, string, url.URL) {
+		// Create a private key to use for the test
+		privateKey, err := ecdsa.GenerateKey(elliptic.P521(), rand.Reader)
+		assert.NoError(t, err, "Error generating private key")
+
+		// Convert from raw ecdsa to jwk.Key
+		pKey, err := jwk.FromRaw(privateKey)
+		assert.NoError(t, err, "Unable to convert ecdsa.PrivateKey to jwk.Key")
+
+		//Assign Key id to the private key
+		err = jwk.AssignKeyID(pKey)
+		assert.NoError(t, err, "Error assigning kid to private key")
+
+		//Set an algorithm for the key
+		err = pKey.Set(jwk.AlgorithmKey, jwa.ES256)
+		assert.NoError(t, err, "Unable to set algorithm for pKey")
+
+		issuerURL := url.URL{
+			Scheme: "https",
+			Path:   ts.URL,
+		}
+
+		// Create a token to be inserted
+		tok, err := jwt.NewBuilder().
+			Issuer(issuerURL.String()).
+			Claim("scope", token_scopes.Pelican_Advertise.String()).
+			Audience([]string{"director.test"}).
+			Subject("origin").
+			Build()
+		assert.NoError(t, err, "Error creating token")
+
+		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, pKey))
+		assert.NoError(t, err, "Error signing token")
+
+		return pKey, string(signed), issuerURL
+	}
+
+	setupRegisterRequest := func(c *gin.Context, r *gin.Engine, bodyByte []byte, token string, stype server_structs.ServerType) {
+		r.POST("/", func(gctx *gin.Context) { registerServeAd(ctx, gctx, stype) })
+		c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(bodyByte))
+		c.Request.Header.Set("Authorization", "Bearer "+token)
+		c.Request.Header.Set("Content-Type", "application/json")
+		// Hard code the current min version. When this test starts failing because of new stuff in the Director,
+		// we'll know that means it's time to update the min version in redirect.go
+		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
+	}
+
+	setupDowntimeRequest := func(c *gin.Context, bodyByte []byte, token string) {
+
+		c.Request, _ = http.NewRequest(http.MethodPost, "/api/v1.0/director/downtime", bytes.NewBuffer(bodyByte))
+		c.Request.Header.Set("Authorization", "Bearer "+token)
+		c.Request.Header.Set("Content-Type", "application/json")
+		// Hard code the current min version. When this test starts failing because of new stuff in the Director,
+		// we'll know that means it's time to update the min version in redirect.go
+		c.Request.Header.Set("User-Agent", "pelican-origin/7.0.0")
+	}
+
+	setupJwksCache := func(t *testing.T, ns string, key jwk.Key) {
+		jwks := jwk.NewSet()
+		err := jwks.AddKey(key)
+		require.NoError(t, err)
+		namespaceKeys.Set(ts.URL+"/api/v1.0/registry"+ns+"/.well-known/issuer.jwks", jwks, ttlcache.DefaultTTL)
+	}
+
+	getLastJsonObj := func(data string) (server_structs.SimpleApiResp, error) {
+		// Split the string into individual JSON objects
+		objects := strings.Split(data, "}{")
+
+		// Get the last object
+		lastObj := objects[len(objects)-1]
+
+		// Add closing brace if missing
+		if !strings.HasSuffix(lastObj, "}") {
+			lastObj = lastObj + "}"
+		}
+
+		// Add opening brace if missing
+		if !strings.HasPrefix(lastObj, "{") {
+			lastObj = "{" + lastObj
+		}
+
+		// Unmarshal only the last object
+		var resp server_structs.SimpleApiResp
+		err := json.Unmarshal([]byte(lastObj), &resp)
+		return resp, err
+	}
+
+	teardown := func() {
+		serverAds.DeleteAll()
+		namespaceKeys.DeleteAll()
+	}
+
+	t.Run("successful-and-failed-downtime-enable", func(t *testing.T) {
+		c, r, w := setupContext()
+
+		// Server advertisement setting and retrieval
+		pKey, token, _ := generateToken()
+		publicKey, err := jwk.PublicKeyOf(pKey)
+		assert.NoError(t, err, "Error creating public key from private key")
+
+		setupJwksCache(t, "/foo/bar", publicKey)
+		setupJwksCache(t, "/origins/test", publicKey)
+
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+
+		ad := server_structs.OriginAdvertiseV2{
+			BrokerURL: "https://broker-url.org",
+			DataURL:   "https://or-url.org:8443",
+			Name:      "test",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+		}
+
+		jsonad, err := json.Marshal(ad)
+		assert.NoError(t, err, "Error marshalling OriginAdvertise")
+
+		setupRegisterRequest(c, r, jsonad, token, server_structs.OriginType)
+
+		r.ServeHTTP(w, c.Request)
+
+		// Check to see that the code exits with status code 200 after given it a good token
+		assert.Equal(t, 200, w.Result().StatusCode, "Expected status code of 200")
+
+		get := serverAds.Get("https://or-url.org:8443")
+		getAd := get.Value()
+		require.NotNil(t, get, "Coudln't find server in the director cache.")
+		assert.Equal(t, getAd.Name, ad.Name)
+		require.Len(t, getAd.NamespaceAds, 1)
+		assert.Equal(t, getAd.NamespaceAds[0].Path, "/foo/bar")
+
+		// Second request - downtime setting
+		downtimeRequest := server_structs.DowntimeRequest{
+			ServerUrl:      "https://or-url.org:8443",
+			Hostname:       "or-url.org",
+			EnableDowntime: true,
+		}
+		requestBody, _ := json.Marshal(downtimeRequest)
+
+		r.POST("/api/v1.0/director/downtime", setDowntimeByServer)
+		setupDowntimeRequest(c, requestBody, token)
+
+		r.ServeHTTP(w, c.Request)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		response, err := getLastJsonObj(w.Body.String())
+		assert.NoError(t, err, "Error unmarshalling response")
+		assert.Equal(t, server_structs.RespOK, response.Status)
+		assert.Equal(t, "Successfully set the downtime of Origin test to true", response.Msg)
+
+		// Test invalid token
+		wrongToken := "i-am-a-wrong-token"
+		setupDowntimeRequest(c, requestBody, wrongToken)
+
+		r.ServeHTTP(w, c.Request)
+
+		response, err = getLastJsonObj(w.Body.String())
+		assert.NoError(t, err, "Error unmarshalling response")
+		assert.Equal(t, server_structs.RespFailed, response.Status)
+		assert.Equal(t, "Authorization token verification failed invalid JWT", response.Msg)
+
+		teardown()
+	})
+
+}

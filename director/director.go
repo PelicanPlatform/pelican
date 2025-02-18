@@ -1577,6 +1577,103 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": shortenedVersion, "service": service}).Inc()
 }
 
+// Endpoint for origin and cache servers to set their own downtime in director
+func setDowntimeByServer(ctx *gin.Context) {
+	downtimeRequest := server_structs.DowntimeRequest{}
+	err := ctx.ShouldBindBodyWith(&downtimeRequest, binding.JSON)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid downtime setting request",
+		})
+		return
+	}
+
+	// Server's XRootD URL starting with http:// or https://, and ending with a port number
+	serverUrl := downtimeRequest.ServerUrl
+	ad, err := getServerAd(serverUrl)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server not found in cached server ads: " + serverUrl,
+		})
+		return
+	}
+	serverName := ad.Name
+	if serverName == "" {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server name not found",
+		})
+		return
+	}
+
+	tokens, present := ctx.Request.Header["Authorization"]
+	if !present || len(tokens) == 0 {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Bearer token not present in the 'Authorization' header",
+		})
+		return
+	}
+
+	token := strings.TrimPrefix(tokens[0], "Bearer ")
+
+	serverType := ad.ServerAd.Type
+	var serverNs string
+	if serverType == "Origin" {
+		serverNs = server_structs.GetOriginNs(serverName)
+	} else if serverType == "Cache" {
+		serverNs = server_structs.GetCacheNS(serverName)
+	}
+	if serverNs == "" {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server namespace not found",
+		})
+		return
+	}
+
+	ok, err := verifyAdvertiseToken(ctx, token, serverNs)
+	if err != nil {
+		if err == adminApprovalErr {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("%s was not approved by an administrator", downtimeRequest.ServerUrl),
+			})
+			return
+		} else {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Authorization token verification failed %v", err),
+			})
+			return
+		}
+	}
+
+	if !ok {
+		ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Authorization token verification failed. Token missing required scope",
+		})
+		return
+	}
+
+	ctx.Params = append(ctx.Params, gin.Param{Key: "name", Value: serverName})
+
+	// Set the downtime
+	if downtimeRequest.EnableDowntime {
+		handleFilterServer(ctx)
+	} else {
+		handleAllowServer(ctx)
+	}
+
+	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{
+		Status: server_structs.RespOK,
+		Msg:    fmt.Sprintf("Successfully set the downtime of %s %s to %v", ad.Type, serverName, downtimeRequest.EnableDowntime),
+	})
+}
+
 func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
 	labels := prometheus.Labels{
 		"destination": destination,
@@ -1628,6 +1725,9 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		// so that director can be our point of contact for collecting system-level metrics.
 		// Rename the endpoint to reflect such plan.
 		directorAPIV1.GET("/discoverServers", discoverOriginCache)
+
+		// Cache/Origin sets their own downtime
+		directorAPIV1.POST("/downtime", setDowntimeByServer)
 	}
 
 	directorAPIV2 := router.Group("/api/v2.0/director", web_ui.ServerHeaderMiddleware)
