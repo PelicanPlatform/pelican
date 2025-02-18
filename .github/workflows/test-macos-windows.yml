@@ -35,6 +35,23 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
     - name: Install Go
+      if: runner.os != 'Windows'
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Create go temporary director (Windows workaround)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: mkdir D:\gotmp; mkdir D:\gomodcache; mkdir D:\gocache
+    - name: Install Go (Windows workaround)
+      if: runner.os == 'Windows'
+      env:
+        # Fix slow Go compile and cache restore
+        # See https://github.com/actions/setup-go/pull/515
+        GOCACHE: D:\gocache
+        GOMODCACHE: D:\gomodcache
+        GOTMPDIR: D:\gotmp
+
       uses: actions/setup-go@v5
       with:
         go-version: ${{ matrix.go-version }}
@@ -47,12 +64,31 @@ jobs:
         make web-build
         go test -v -coverpkg=./... -coverprofile=coverage.out -covermode=count ./...
     - name: Test
-      if: runner.os != 'macOS'
+      if: runner.os == 'Windows'
+      env:
+        # Fix slow Go compile and cache restore
+        # See https://github.com/actions/setup-go/pull/515
+        GOCACHE: D:\gocache
+        GOMODCACHE: D:\gomodcache
+        GOTMPDIR: D:\gotmp
       run: |
         make web-build
         go test ./...
     - name: Run GoReleaser for Non-Ubuntu
       uses: goreleaser/goreleaser-action@v6
+      if: runner.os == 'macOS'
+      with:
+        # either 'goreleaser' (default) or 'goreleaser-pro'
+        distribution: goreleaser
+        version: latest
+        args: build --single-target --clean --snapshot
+    - name: Run GoReleaser for Windows
+      if: runner.os == 'Windows'
+      uses: goreleaser/goreleaser-action@v6
+      env:
+        GOCACHE: D:\gocache
+        GOMODCACHE: D:\gomodcache
+        GOTMPDIR: D:\gotmp
       with:
         # either 'goreleaser' (default) or 'goreleaser-pro'
         distribution: goreleaser
