@@ -70,6 +70,7 @@ type Config struct {
 	ConfigLocations []string `mapstructure:"configlocations" yaml:"ConfigLocations"`
 	Debug bool `mapstructure:"debug" yaml:"Debug"`
 	Director struct {
+		AdvertiseUrl string `mapstructure:"advertiseurl" yaml:"AdvertiseUrl"`
 		AdvertisementTTL time.Duration `mapstructure:"advertisementttl" yaml:"AdvertisementTTL"`
 		AssumePresenceAtSingleOrigin bool `mapstructure:"assumepresenceatsingleorigin" yaml:"AssumePresenceAtSingleOrigin"`
 		CachePresenceCapacity int `mapstructure:"cachepresencecapacity" yaml:"CachePresenceCapacity"`
@@ -267,6 +268,7 @@ type Config struct {
 		RequireOriginApproval bool `mapstructure:"requireoriginapproval" yaml:"RequireOriginApproval"`
 	} `mapstructure:"registry" yaml:"Registry"`
 	Server struct {
+		DirectorURLs []string `mapstructure:"directorurls" yaml:"DirectorURLs"`
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
@@ -398,6 +400,7 @@ type configWithType struct {
 	ConfigLocations struct { Type string; Value []string }
 	Debug struct { Type string; Value bool }
 	Director struct {
+		AdvertiseUrl struct { Type string; Value string }
 		AdvertisementTTL struct { Type string; Value time.Duration }
 		AssumePresenceAtSingleOrigin struct { Type string; Value bool }
 		CachePresenceCapacity struct { Type string; Value int }
@@ -595,6 +598,7 @@ type configWithType struct {
 		RequireOriginApproval struct { Type string; Value bool }
 	}
 	Server struct {
+		DirectorURLs struct { Type string; Value []string }
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }

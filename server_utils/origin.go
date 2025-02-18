@@ -603,7 +603,7 @@ from S3 service URL. In this configuration, objects can be accessed at /federati
 				viper.Set("Origin.EnableListings", tmpExports[0].Capabilities.Listings)
 				viper.Set("Origin.EnableDirectReads", tmpExports[0].Capabilities.DirectReads)
 			} else { // As of 2024/05/28, we only support one Globus export due to Xrootd restriction
-				return nil, fmt.Errorf("Globus storage backend only supports single collection but Origin.Exports has %d", len(tmpExports))
+				return nil, fmt.Errorf("globus storage backend only supports single collection but Origin.Exports has %d", len(tmpExports))
 			}
 
 			// TODO: once xrootd supports multiple http servers, come back and allow multiple Globus collections
