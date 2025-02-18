@@ -62,7 +62,7 @@ jobs:
       if: runner.os == 'macOS'
       run: |
         make web-build
-        go test -v -coverpkg=./... -coverprofile=coverage.out -covermode=count ./...
+        go test -p=4 -v -coverpkg=./... -coverprofile=coverage.out -covermode=count ./...
     - name: Test
       if: runner.os == 'Windows'
       env:
@@ -73,7 +73,7 @@ jobs:
         GOTMPDIR: D:\gotmp
       run: |
         make web-build
-        go test ./...
+        go test -p=4 ./...
     - name: Run GoReleaser for Non-Ubuntu
       uses: goreleaser/goreleaser-action@v6
       if: runner.os == 'macOS'

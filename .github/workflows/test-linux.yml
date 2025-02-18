@@ -48,7 +48,7 @@ jobs:
     - name: Test
       run: |
         make web-build
-        go test -tags=${{ matrix.tags }} -timeout 15m -coverpkg=./... -coverprofile=${{ matrix.coverprofile }} -covermode=count ./...
+        go test -p=4 -tags=${{ matrix.tags }} -timeout 15m -coverpkg=./... -coverprofile=${{ matrix.coverprofile }} -covermode=count ./...
     - name: Get total code coverage
       if: github.event_name == 'pull_request'
       id: cc
