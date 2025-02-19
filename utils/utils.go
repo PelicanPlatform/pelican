@@ -36,6 +36,7 @@ import (
 
 var (
 	watermarkUnits = []byte{'k', 'm', 'g', 't'}
+	uaRegExp       = regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
 )
 
 // snakeCaseToCamelCase converts a snake case string to camel case.
@@ -124,7 +125,6 @@ func ExtractAndMaskIP(ipStr string) (maskedIP string, ok bool) {
 // the user agent.
 // It will return empty strings if the provided userAgent fails to match against the parser
 func ExtractVersionAndServiceFromUserAgent(userAgent string) (reqVer, service string) {
-	uaRegExp := regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
 	if matches := uaRegExp.MatchString(userAgent); !matches {
 		return "", ""
 	}

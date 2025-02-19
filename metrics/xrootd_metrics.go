@@ -400,6 +400,8 @@ func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error)
 		return nil
 	})
 
+	enableHandlePacket := param.Xrootd_EnableLocalMonitoring.GetBool()
+
 	go func() {
 		var buf [65536]byte
 		for {
@@ -412,6 +414,9 @@ func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error)
 				continue
 			}
 			PacketsReceived.Inc()
+			if !enableHandlePacket {
+				continue
+			}
 			if err = HandlePacket(buf[:plen]); err != nil {
 				log.Errorln("Failed to handle packet:", err)
 			}
@@ -627,7 +632,7 @@ func HandlePacket(packet []byte) error {
 		}
 		firstHeaderSize := binary.BigEndian.Uint16(packet[10:12])
 		if firstHeaderSize < 24 {
-			return fmt.Errorf("First entry in f-stream packet is %v bytes, smaller than the minimum XrdXrootdMonFileTOD size of 24 bytes", firstHeaderSize)
+			return fmt.Errorf("first entry in f-stream packet is %v bytes, smaller than the minimum XrdXrootdMonFileTOD size of 24 bytes", firstHeaderSize)
 		}
 		offset := uint32(firstHeaderSize + 8)
 		bytesRemain := header.Plen - uint16(offset)
@@ -818,9 +823,7 @@ func HandlePacket(packet []byte) error {
 			case isDisc: // XrdXrootdMonFileHdr::isDisc
 				log.Debug("MonPacket: Received a f-stream disconnect packet")
 				userId := UserId{Id: fileHdr.UserId}
-				if session := sessions.Get(userId); session != nil {
-					sessions.Delete(userId)
-				}
+				sessions.Delete(userId)
 			default:
 				log.Debug("MonPacket: Received an unhandled file monitoring packet "+
 					"of type ", fileHdr.RecType)
@@ -902,17 +905,22 @@ func HandlePacket(packet []byte) error {
 		log.Debug("HandlePacket: Received an appinfo packet")
 		infoSize := uint32(header.Plen - 12)
 		if xrdUserId, appinfo, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
-			if userids.Has(xrdUserId) {
-				userId := userids.Get(xrdUserId).Value()
+			item := userids.Get(xrdUserId)
+			if item != nil {
+				userId := item.Value()
 				project := utils.ExtractProjectFromUserAgent([]string{appinfo})
-				if sessions.Has(userId) {
-					existingRec := sessions.Get(userId).Value()
+				item, found := sessions.GetOrSet(userId, UserRecord{Project: project, Host: xrdUserId.Host}, ttlcache.WithTTL[UserId, UserRecord](ttlcache.DefaultTTL))
+				if found {
+					existingRec := item.Value()
 					existingRec.Project = project
 					existingRec.Host = xrdUserId.Host
 					sessions.Set(userId, existingRec, ttlcache.DefaultTTL)
 				} else {
 					sessions.Set(userId, UserRecord{Project: project, Host: xrdUserId.Host}, ttlcache.DefaultTTL)
 				}
+				// Remove the user id record as this is the only use for it; otherwise, it'll sit around in the cache,
+				// using memory.
+				userids.Delete(xrdUserId)
 			}
 		} else {
 			return err
