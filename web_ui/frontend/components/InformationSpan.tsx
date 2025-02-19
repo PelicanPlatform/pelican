@@ -47,15 +47,13 @@ export const InformationSpan = ({
     <Tooltip title={name} placement={'right'}>
       <Box
         sx={{
-          '&:nth-of-type(odd)': {
-            bgcolor: grey[300],
-            p: '4px 6px',
-            borderRadius: '4px',
-          },
-          '&:nth-of-type(even)': {
-            p: '4px 6px',
-          },
+          borderTop: '1px solid',
+          p: '4px 6px',
           display: 'flex',
+          // On the final element add a bottom border
+          '&:last-child': {
+            borderBottom: '1px solid',
+          },
         }}
       >
         <Typography variant={'body2'} sx={{ display: 'inline', mr: 2 }}>

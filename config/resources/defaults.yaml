@@ -28,6 +28,7 @@ Server:
   RegistrationRetryInterval: 10s
   StartupTimeout: 10s
   UILoginRateLimit: 1
+  UnprivilegedUser: pelican
 Director:
   DefaultResponse: cache
   CacheSortMethod: "distance"
@@ -60,6 +61,7 @@ Cache:
   LowWatermark: 90
   HighWaterMark: 95
   BlocksToPrefetch: 0
+  EnableTLSClientAuth: false
 Lotman:
   EnabledPolicy: "fairshare"
   DefaultLotExpirationLifetime: "2016h"

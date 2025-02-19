@@ -263,6 +263,7 @@ var (
 	Server_TLSKey = StringParam{"Server.TLSKey"}
 	Server_UIActivationCodeFile = StringParam{"Server.UIActivationCodeFile"}
 	Server_UIPasswordFile = StringParam{"Server.UIPasswordFile"}
+	Server_UnprivilegedUser = StringParam{"Server.UnprivilegedUser"}
 	Server_WebConfigFile = StringParam{"Server.WebConfigFile"}
 	Server_WebHost = StringParam{"Server.WebHost"}
 	Shoveler_AMQPExchange = StringParam{"Shoveler.AMQPExchange"}
@@ -300,7 +301,6 @@ var (
 	Director_CacheResponseHostnames = StringSliceParam{"Director.CacheResponseHostnames"}
 	Director_FilteredServers = StringSliceParam{"Director.FilteredServers"}
 	Director_OriginResponseHostnames = StringSliceParam{"Director.OriginResponseHostnames"}
-	Director_X509ClientAuthenticationPrefixes = StringSliceParam{"Director.X509ClientAuthenticationPrefixes"}
 	Issuer_GroupRequirements = StringSliceParam{"Issuer.GroupRequirements"}
 	Monitoring_AggregatePrefixes = StringSliceParam{"Monitoring.AggregatePrefixes"}
 	Origin_ExportVolumes = StringSliceParam{"Origin.ExportVolumes"}
@@ -349,6 +349,7 @@ var (
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
 	Cache_EnablePrefetch = BoolParam{"Cache.EnablePrefetch"}
+	Cache_EnableTLSClientAuth = BoolParam{"Cache.EnableTLSClientAuth"}
 	Cache_EnableVoms = BoolParam{"Cache.EnableVoms"}
 	Cache_SelfTest = BoolParam{"Cache.SelfTest"}
 	Client_AssumeDirectorServerHeader = BoolParam{"Client.AssumeDirectorServerHeader"}
@@ -392,6 +393,7 @@ var (
 	Registry_RequireCacheApproval = BoolParam{"Registry.RequireCacheApproval"}
 	Registry_RequireKeyChaining = BoolParam{"Registry.RequireKeyChaining"}
 	Registry_RequireOriginApproval = BoolParam{"Registry.RequireOriginApproval"}
+	Server_DropPrivileges = BoolParam{"Server.DropPrivileges"}
 	Server_EnablePprof = BoolParam{"Server.EnablePprof"}
 	Server_EnableUI = BoolParam{"Server.EnableUI"}
 	Server_HealthMonitoringPublic = BoolParam{"Server.HealthMonitoringPublic"}

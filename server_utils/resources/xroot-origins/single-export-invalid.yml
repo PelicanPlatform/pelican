@@ -1,0 +1,8 @@
+# Invalid origin config because the StoragePrefix does not match the FederationPrefix
+Origin:
+  StorageType: "xroot"
+  XRootServiceUrl: "root://foo.bar:1094"
+  Exports:
+    - FederationPrefix: "/prefixes/for/xroot"
+      StoragePrefix: "/are/required/to/match"
+      Capabilities: ["PublicReads", "Writes", "DirectReads"]

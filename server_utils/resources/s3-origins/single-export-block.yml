@@ -3,11 +3,13 @@
 Origin:
   # Things that configure the origin itself
   StorageType: "s3"
+  S3ServiceUrl: "https://example.com"
 
   # The actual namespaces we export
   Exports:
-    - S3Bucket: my-bucket
-      S3AccessKeyfile: /path/to/access.key
-      S3SecretKeyfile: /path/to/secret.key
-      FederationPrefix: /first/namespace
+    - S3Bucket: "my-bucket"
+      S3AccessKeyfile: "SHOULD-OVERRIDE-TEMPFILE"
+      S3SecretKeyfile: "SHOULD-OVERRIDE-TEMPFILE"
+      FederationPrefix: "/first/namespace"
+      StoragePrefix: "/"
       Capabilities: ["PublicReads", "DirectReads"]

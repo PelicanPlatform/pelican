@@ -26,6 +26,7 @@ type (
 	Launcher interface {
 		Name() string
 		Launch(ctx context.Context) (context.Context, int, error)
+		KillFunc() func(pid int, sig int) error
 	}
 
 	DaemonLauncher struct {
@@ -34,6 +35,7 @@ type (
 		Uid        int
 		Gid        int
 		ExtraEnv   []string
+		InheritFds []int
 	}
 )
 

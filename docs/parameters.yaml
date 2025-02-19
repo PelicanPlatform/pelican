@@ -1549,6 +1549,15 @@ root_default: /var/lib/pelican/cache.sqlite
 default: $ConfigBase/cache.sqlite
 components: ["cache"]
 ---
+name: Cache.EnableTLSClientAuth
+description: |+
+  Turns client certificate authentication on or off in xrootd for the HTTPS protocol. When false (default) the
+  cache will never request a TLS certificate. When true, the cache will always request
+  a client certificate from the client.
+type: bool
+default: false
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################
@@ -1779,19 +1788,6 @@ description: |+
 type: bool
 default: false
 components: ["director"]
----
-name: Director.X509ClientAuthenticationPrefixes
-description: |+
-  A list of object prefixes where the origin uses X.509 client authentication.
-
-  If a cache requests an object starting with one of these prefixes, then it will be instructed by the director
-  to use X.509 client authentication if available.
-
-  This setting allows for compatibility with specific legacy OSDF origins and is not needed for new origins.
-type: stringSlice
-default: []
-components: ["director"]
-hidden: true
 ---
 name: Director.CachePresenceTTL
 description: |+
@@ -2203,6 +2199,21 @@ description: |+
 type: bool
 default: false
 components: ["cache", "director", "origin", "registry"]
+---
+name: Server.DropPrivileges
+description: |+
+  If the server has been started with root privileges, drop down to an unprivileged user.
+type: bool
+default: false
+components: ["*"]
+---
+name: Server.UnprivilegedUser
+description: |+
+  The user to run as after dropping root privileges.
+  This is only relevant if `Server.DropPrivileges` is set to true
+type: string
+default: pelican
+components: ["*"]
 ---
 ################################
 #   Issuer's Configurations    #

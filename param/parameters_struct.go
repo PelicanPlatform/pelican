@@ -34,6 +34,7 @@ type Config struct {
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
+		EnableTLSClientAuth bool `mapstructure:"enabletlsclientauth" yaml:"EnableTLSClientAuth"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
 		ExportLocation string `mapstructure:"exportlocation" yaml:"ExportLocation"`
 		FilesBaseSize string `mapstructure:"filesbasesize" yaml:"FilesBaseSize"`
@@ -97,7 +98,6 @@ type Config struct {
 		StatTimeout time.Duration `mapstructure:"stattimeout" yaml:"StatTimeout"`
 		SupportContactEmail string `mapstructure:"supportcontactemail" yaml:"SupportContactEmail"`
 		SupportContactUrl string `mapstructure:"supportcontacturl" yaml:"SupportContactUrl"`
-		X509ClientAuthenticationPrefixes []string `mapstructure:"x509clientauthenticationprefixes" yaml:"X509ClientAuthenticationPrefixes"`
 	} `mapstructure:"director" yaml:"Director"`
 	DisableHttpProxy bool `mapstructure:"disablehttpproxy" yaml:"DisableHttpProxy"`
 	DisableProxyFallback bool `mapstructure:"disableproxyfallback" yaml:"DisableProxyFallback"`
@@ -268,6 +268,7 @@ type Config struct {
 		RequireOriginApproval bool `mapstructure:"requireoriginapproval" yaml:"RequireOriginApproval"`
 	} `mapstructure:"registry" yaml:"Registry"`
 	Server struct {
+		DropPrivileges bool `mapstructure:"dropprivileges" yaml:"DropPrivileges"`
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
 		ExternalWebUrl string `mapstructure:"externalweburl" yaml:"ExternalWebUrl"`
@@ -291,6 +292,7 @@ type Config struct {
 		UIAdminUsers []string `mapstructure:"uiadminusers" yaml:"UIAdminUsers"`
 		UILoginRateLimit int `mapstructure:"uiloginratelimit" yaml:"UILoginRateLimit"`
 		UIPasswordFile string `mapstructure:"uipasswordfile" yaml:"UIPasswordFile"`
+		UnprivilegedUser string `mapstructure:"unprivilegeduser" yaml:"UnprivilegedUser"`
 		WebConfigFile string `mapstructure:"webconfigfile" yaml:"WebConfigFile"`
 		WebHost string `mapstructure:"webhost" yaml:"WebHost"`
 		WebPort int `mapstructure:"webport" yaml:"WebPort"`
@@ -363,6 +365,7 @@ type configWithType struct {
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		EnablePrefetch struct { Type string; Value bool }
+		EnableTLSClientAuth struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
 		ExportLocation struct { Type string; Value string }
 		FilesBaseSize struct { Type string; Value string }
@@ -426,7 +429,6 @@ type configWithType struct {
 		StatTimeout struct { Type string; Value time.Duration }
 		SupportContactEmail struct { Type string; Value string }
 		SupportContactUrl struct { Type string; Value string }
-		X509ClientAuthenticationPrefixes struct { Type string; Value []string }
 	}
 	DisableHttpProxy struct { Type string; Value bool }
 	DisableProxyFallback struct { Type string; Value bool }
@@ -597,6 +599,7 @@ type configWithType struct {
 		RequireOriginApproval struct { Type string; Value bool }
 	}
 	Server struct {
+		DropPrivileges struct { Type string; Value bool }
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }
 		ExternalWebUrl struct { Type string; Value string }
@@ -620,6 +623,7 @@ type configWithType struct {
 		UIAdminUsers struct { Type string; Value []string }
 		UILoginRateLimit struct { Type string; Value int }
 		UIPasswordFile struct { Type string; Value string }
+		UnprivilegedUser struct { Type string; Value string }
 		WebConfigFile struct { Type string; Value string }
 		WebHost struct { Type string; Value string }
 		WebPort struct { Type string; Value int }
