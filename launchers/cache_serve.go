@@ -35,6 +35,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/cache"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/lotman"
 	"github.com/pelicanplatform/pelican/metrics"
@@ -52,6 +53,10 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	}
 
 	if err := cache.CheckCacheSentinelLocation(); err != nil {
+		return nil, err
+	}
+
+	if err := database.InitServerDatabase(server_structs.CacheType); err != nil {
 		return nil, err
 	}
 

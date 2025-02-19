@@ -1541,6 +1541,14 @@ default: 9.5s
 hidden: true
 components: ["cache"]
 ---
+name: Cache.DbLocation
+description: |+
+  A filepath to the intended location of the cache's database.
+type: filename
+root_default: /var/lib/pelican/cache.sqlite
+default: $ConfigBase/cache.sqlite
+components: ["cache"]
+---
 name: Cache.EnableTLSClientAuth
 description: |+
   Turns client certificate authentication on or off in xrootd for the HTTPS protocol. When false (default) the
@@ -1550,7 +1558,6 @@ type: bool
 default: false
 components: ["cache"]
 ---
-
 ############################
 #  Director-level configs  #
 ############################
