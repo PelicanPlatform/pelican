@@ -107,8 +107,6 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 
 	viper.Set(param.TLSSkipVerify.GetName(), true)
 
-	config.InitConfig()
-
 	// Read in any config we may have set
 	if originConfig != "" {
 		viper.SetConfigType("yaml")
@@ -175,8 +173,21 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	directorStartTime := time.Now().Add(-6 * time.Minute)
 	director.SetStartupTime(directorStartTime)
 
-	err = config.InitServer(ctx, modules)
-	require.NoError(t, err)
+	// Set the config file to be the inported yaml so as to not overwrite from the default
+	originConf := strings.NewReader(originConfig)
+
+	tmpFile, err := os.CreateTemp("", "tempfile_*.yaml")
+	if err != nil {
+		t.Fatalf("Error creating temporary config file for fed test: %v", err)
+	}
+	defer tmpFile.Close()
+
+	_, err = io.Copy(tmpFile, originConf)
+	if err != nil {
+		t.Fatalf("Error writing to temporary config file for fed test: %v", err)
+	}
+
+	viper.Set("config", tmpFile.Name())
 
 	servers, _, err := launchers.LaunchModules(ctx, modules)
 	require.NoError(t, err)
