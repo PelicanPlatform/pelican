@@ -1545,7 +1545,8 @@ name: Cache.DbLocation
 description: |+
   A filepath to the intended location of the cache's database.
 type: filename
-default: /var/lib/pelican/cache.sqlite
+root_default: /var/lib/pelican/cache.sqlite
+default: $ConfigBase/cache.sqlite
 components: ["cache"]
 ---
 ############################

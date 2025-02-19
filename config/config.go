@@ -1062,6 +1062,7 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Director_GeoIPLocation.GetName(), filepath.Join(configDir, "maxmind", "GeoLite2-City.mmdb"))
 		v.SetDefault(param.Registry_DbLocation.GetName(), filepath.Join(configDir, "ns-registry.sqlite"))
 		v.SetDefault(param.Director_DbLocation.GetName(), filepath.Join(configDir, "director.sqlite"))
+		v.SetDefault(param.Cache_DbLocation.GetName(), filepath.Join(configDir, "cache.sqlite"))
 		// Lotdb will live at <configDir>/.lot/lotman_cpp.sqlite
 		v.SetDefault(param.Lotman_LotHome.GetName(), configDir)
 		v.SetDefault(param.Monitoring_DataLocation.GetName(), filepath.Join(configDir, "monitoring/data"))
