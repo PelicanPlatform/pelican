@@ -1251,6 +1251,7 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
+	InitConfig()
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
@@ -1864,6 +1865,7 @@ func SetClientDefaults(v *viper.Viper) error {
 }
 
 func InitClient() error {
+	InitConfig()
 	logging.FlushLogs(true)
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
@@ -1930,6 +1932,7 @@ func ResetConfig() {
 	fedDiscoveryOnce = &sync.Once{}
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
+	setServerOnce = sync.Once{}
 
 	ResetIssuerPrivateKeys()
 

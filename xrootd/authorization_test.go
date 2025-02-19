@@ -613,7 +613,6 @@ func TestMergeConfig(t *testing.T) {
 			err := os.WriteFile(scitokensConfigFile, []byte(configInput), fs.FileMode(0600))
 			require.NoError(t, err)
 
-			config.InitConfigDir(viper.GetViper())
 			err = config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
@@ -814,7 +813,6 @@ func TestGenerateOriginIssuer(t *testing.T) {
 			viper.SetConfigType("yaml")
 			err := viper.MergeConfig(strings.NewReader(tc.yamlConfig))
 			require.NoError(t, err, "error reading config")
-			config.InitConfig()
 			err = config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 

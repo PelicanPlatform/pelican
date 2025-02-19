@@ -178,10 +178,6 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	directorStartTime := time.Now().Add(-6 * time.Minute)
 	director.SetStartupTime(directorStartTime)
 
-	config.InitConfig()
-	err = config.InitServer(ctx, modules)
-	require.NoError(t, err)
-
 	// Read in any config we may have set
 	if originConfig != "" {
 		viper.SetConfigType("yaml")
@@ -223,7 +219,20 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		err = os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
 		require.NoError(t, err)
 	}
+	originConf := strings.NewReader(originConfig)
 
+	tmpFile, err := os.CreateTemp("", "tempfile_*.yaml")
+	if err != nil {
+		t.Fatalf("Error creating temporary config file for fed test: %v", err)
+	}
+	defer tmpFile.Close()
+
+	_, err = io.Copy(tmpFile, originConf)
+	if err != nil {
+		t.Fatalf("Error writing to temporary config file for fed test: %v", err)
+	}
+
+	viper.Set("config", tmpFile.Name())
 	servers, _, err := launchers.LaunchModules(ctx, modules)
 	require.NoError(t, err)
 

@@ -113,7 +113,6 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	viper.Set("ConfigDir", dirname)
-	config.InitConfig()
 	viper.Set("Server.UILoginRateLimit", 100)
 
 	if err := config.InitServer(ctx, server_structs.OriginType); err != nil {

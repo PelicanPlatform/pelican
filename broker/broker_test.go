@@ -79,7 +79,6 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	server_utils.ResetTestState()
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("ConfigDir", filepath.Join(dirpath, "config"))
-	config.InitConfig()
 	viper.Set("Server.WebPort", "0")
 	viper.Set("Registry.DbLocation", filepath.Join(dirpath, "ns-registry.sqlite"))
 	viper.Set("Origin.FederationPrefix", "/foo")

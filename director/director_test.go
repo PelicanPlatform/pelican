@@ -1587,6 +1587,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 	viper.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(t.TempDir(), "testKeyDir"))
 	pKeySet, err := config.GetIssuerPublicJWKS()
 	assert.NoError(t, err, "Error fetching public key for test")
+
 	privateKey, err := config.GetIssuerPrivateJWK()
 	assert.NoError(t, err, "Error fetching private key for test")
 
@@ -1596,6 +1597,10 @@ func TestDiscoverOriginCache(t *testing.T) {
 	test_utils.MockFederationRoot(t, nil, &pKeySet)
 	fedInfo, err := config.GetFederation(ctx)
 	assert.NoError(t, err, "Error fetching federation info for test")
+
+	viper.Set("ConfigDir", t.TempDir())
+	err = config.InitServer(ctx, server_structs.DirectorType)
+	require.NoError(t, err)
 
 	// The Director's service discovery endpoint should accept tokens from the local issuer,
 	// the API token issuer or the federation issuer. Configure the URL to be used for local

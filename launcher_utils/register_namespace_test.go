@@ -65,7 +65,6 @@ func TestRegistration(t *testing.T) {
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
 	viper.Set(param.IssuerKeysDirectory.GetName(), keysDir)
 
-	config.InitConfig()
 	viper.Set("Registry.DbLocation", filepath.Join(tempConfigDir, "test.sql"))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
@@ -192,7 +191,6 @@ func TestMultiKeysRegistration(t *testing.T) {
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
 	viper.Set(param.IssuerKeysDirectory.GetName(), keysDir)
 
-	config.InitConfig()
 	viper.Set("Registry.DbLocation", filepath.Join(tempConfigDir, "test.sql"))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
