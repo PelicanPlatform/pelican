@@ -900,16 +900,14 @@ func TestObjectList405Error(t *testing.T) {
 // end-to-end
 func TestClientUnpack(t *testing.T) {
 	server_utils.ResetTestState()
-
-	err := config.InitClient()
-	require.NoError(t, err)
+	test_utils.InitClient(t, make(map[string]any))
 
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 	export := fed.Exports[0]
 
 	tmpDir := t.TempDir()
 	fooLocation := filepath.Join(tmpDir, "foo.txt")
-	err = os.WriteFile(fooLocation, []byte("hello world"), os.FileMode(0600))
+	err := os.WriteFile(fooLocation, []byte("hello world"), os.FileMode(0600))
 	require.NoError(t, err)
 	fi, err := os.Stat(fooLocation)
 	require.NoError(t, err)

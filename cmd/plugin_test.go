@@ -163,7 +163,6 @@ func (f *FedTest) Spinup() {
 
 	viper.Set("ConfigDir", tmpPath)
 
-	config.InitConfig()
 	// Create a file to capture output from commands
 	output, err := os.CreateTemp(f.T.TempDir(), "output")
 	assert.NoError(f.T, err)
