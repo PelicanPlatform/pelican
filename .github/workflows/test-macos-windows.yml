@@ -56,10 +56,10 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: ${{ matrix.go-version }}
-    - name: Install Mac OS X Dependencies
+    - name: Install macOS Dependencies
       run: ./github_scripts/osx_install.sh
       if: runner.os == 'macOS'
-    - name: Test Mac OS X
+    - name: Test macOS
       if: runner.os == 'macOS'
       run: |
         make web-build
@@ -75,7 +75,7 @@ jobs:
       run: |
         make web-build
         go test -p=4 ./...
-    - name: Run GoReleaser for Mac OS X
+    - name: Run GoReleaser for macOS
       uses: goreleaser/goreleaser-action@v6
       if: runner.os == 'macOS'
       with:
