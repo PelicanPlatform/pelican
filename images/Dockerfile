@@ -130,8 +130,8 @@ ENV GOARCH=${TARGETARCH}
 
 COPY . .
 
-RUN --mount=type=cache,id=go-mod-${TARGETPLATFORM},target=/root/go,sharing=locked \
-    --mount=type=cache,id=go-cache-${TARGETPLATFORM},target=/root/.cache,sharing=locked \
+RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
+    --mount=type=cache,id=go-mod-cache-${TARGETPLATFORM},target=/root/go,sharing=locked \
     <<ENDRUN
 
   set -eux
