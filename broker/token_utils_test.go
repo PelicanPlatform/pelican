@@ -34,7 +34,6 @@ import (
 func TestGetCacheHostnameFromToken(t *testing.T) {
 	server_utils.ResetTestState()
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	require.NoError(t, config.InitClient())
 
 	viper.Set("Federation.RegistryUrl", "https://your-registry.com")
