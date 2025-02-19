@@ -51,7 +51,7 @@ func registryMockup(ctx context.Context, t *testing.T, testName string) *httptes
 	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
 	viper.Set("Server.WebPort", 8444)
 	viper.Set("ConfigDir", tDir)
-	config.InitConfig()
+	config.InitConfig(false)
 
 	err := config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
@@ -425,7 +425,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	tDir2 := t.TempDir()
 	viper.Set("IssuerKeysDirectory", tDir2+"/keychaining2")
 	viper.Set("ConfigDir", tDir2)
-	config.InitConfig()
+	config.InitConfig(false)
 	err = config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
 
@@ -505,7 +505,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 	// Now we create a new key and try to use it to register a super/sub space. These shouldn't succeed
 	viper.Set("IssuerKeysDirectory", t.TempDir()+"/keychaining2")
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
+	config.InitConfig(false)
 	err = config.InitServer(ctx, server_structs.RegistryType)
 	require.NoError(t, err)
 

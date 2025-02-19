@@ -107,7 +107,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 
 	viper.Set(param.TLSSkipVerify.GetName(), true)
 
-	config.InitConfig()
+	config.InitConfig(false)
 
 	// Read in any config we may have set
 	if originConfig != "" {

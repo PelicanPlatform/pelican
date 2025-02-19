@@ -54,7 +54,7 @@ func setupPingEngine(t *testing.T, ctx context.Context, egrp *errgroup.Group) (c
 	viper.Set("ConfigDir", dirname)
 	viper.Set("Server.WebPort", 8444)
 	viper.Set("Origin.Port", 8443)
-	config.InitConfig()
+	config.InitConfig(false)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(ctx)

@@ -32,7 +32,7 @@ import (
 func TestGetNSIssuerURL(t *testing.T) {
 	ResetTestState()
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
+	config.InitConfig(false)
 	require.NoError(t, config.InitClient())
 
 	viper.Set("Federation.RegistryUrl", "https://registry.com:8446")
@@ -45,7 +45,7 @@ func TestGetNSIssuerURL(t *testing.T) {
 func TestGetJWKSURLFromIssuerURL(t *testing.T) {
 	ResetTestState()
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
+	config.InitConfig(false)
 	require.NoError(t, config.InitClient())
 
 	registry := test_utils.RegistryMockup(t, "/test-prefix")

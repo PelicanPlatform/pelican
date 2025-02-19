@@ -82,7 +82,7 @@ func TestVerifyAdvertiseToken(t *testing.T) {
 	// Mock cached jwks
 	viper.Set("Federation.RegistryUrl", ts.URL)
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
+	config.InitConfig(false)
 	err := config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
