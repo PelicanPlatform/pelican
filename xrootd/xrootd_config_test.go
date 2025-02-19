@@ -321,6 +321,7 @@ func TestUpdateAuth(t *testing.T) {
 	viper.Set("Xrootd.ScitokensConfig", scitokensName)
 	viper.Set("Origin.FederationPrefix", "/test")
 	viper.Set("Origin.StoragePrefix", "/")
+	viper.Set("Origin.EnableDirectReads", false)
 	config.InitConfig()
 
 	err := config.InitServer(ctx, server_structs.OriginType)
