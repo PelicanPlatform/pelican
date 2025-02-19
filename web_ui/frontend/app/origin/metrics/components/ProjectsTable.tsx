@@ -40,7 +40,7 @@ export const ProjectTable = () => {
       {projectData !== undefined && (
         <Box overflow={'scroll'} height={'100%'}>
           <TableContainer>
-            <Table>
+            <Table size={'small'}>
               <TableHead>
                 <TableRow>
                   <TableCell>Project</TableCell>

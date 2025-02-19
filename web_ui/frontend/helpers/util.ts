@@ -100,7 +100,8 @@ type ErrorWithCause = Error & { cause?: Error };
 export async function alertOnError<T = any>(
   f: () => Promise<T> | T | undefined,
   title: string = 'Error',
-  dispatch: Dispatch<AlertReducerAction>
+  dispatch: Dispatch<AlertReducerAction>,
+  passError: boolean = false
 ) {
   try {
     return await f();
@@ -115,6 +116,11 @@ export async function alertOnError<T = any>(
           onClose: () => dispatch({ type: 'closeAlert' }),
         },
       });
+
+      // Re throw the error if requested
+      if (passError) {
+        throw error;
+      }
     }
   }
 }

@@ -41,31 +41,31 @@ const rangeValues: Record<string, RangePreset> = {
   '1h': {
     prevRange: '1h',
     nextRange: '1d',
-    resolution: '1m',
+    resolution: '40s', // 60
     rate: '1m',
   },
   '1d': {
     prevRange: '1h',
     nextRange: '1w',
-    resolution: '30m',
+    resolution: '15m', // 48
     rate: '30m',
   },
   '1w': {
     prevRange: '1d',
     nextRange: '4w',
-    resolution: '4h',
+    resolution: '90m', // 35
     rate: '4h',
   },
   '4w': {
     prevRange: '1w',
     nextRange: '1y',
-    resolution: '12h',
+    resolution: '6h', // 56
     rate: '12h',
   },
   '1y': {
     prevRange: '4w',
     nextRange: '1y',
-    resolution: '7d',
+    resolution: '4d', // 52
     rate: '7d',
   },
 };
