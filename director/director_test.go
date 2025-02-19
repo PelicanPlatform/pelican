@@ -1353,7 +1353,6 @@ func TestDiscoverOriginCache(t *testing.T) {
 	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 
