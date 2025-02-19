@@ -857,7 +857,7 @@ func LogPelicanVersion() {
 	log.Infoln("Build Commit:", GetBuiltCommit())
 }
 
-// Print Pelican configuration to stderr
+// PrintConfig logs the full config dump in JSON format.
 func PrintConfig() error {
 	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil {
@@ -867,11 +867,25 @@ func PrintConfig() error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr,
-		"================ Pelican Configuration ================\n",
-		string(bytes),
-		"\n",
-		"============= End of Pelican Configuration ============")
+
+	originalFormatter := log.StandardLogger().Formatter
+
+	isStdout := param.Logging_LogLocation.GetString() == ""
+
+	log.SetFormatter(&log.TextFormatter{
+		DisableQuote:           true,
+		DisableTimestamp:       true,
+		DisableLevelTruncation: true,
+		ForceColors:            isStdout,
+	})
+
+	// Log the formatted JSON
+	log.Info("\n================ Pelican Configuration ================\n" +
+		string(bytes) +
+		"\n============= End of Pelican Configuration ============")
+
+	log.SetFormatter(originalFormatter)
+
 	return nil
 }
 
@@ -949,7 +963,7 @@ func filterConfigRecursive(v reflect.Value, currentPath string, component string
 	}
 }
 
-// PrintClientConfig prints the client config in JSON format to stderr.
+// PrintClientConfig logs the client config in JSON format.
 func PrintClientConfig() error {
 	clientConfig, err := GetComponentConfig("client")
 	if err != nil {
@@ -960,11 +974,25 @@ func PrintClientConfig() error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr,
-		"================ Pelican Client Configuration ================\n",
-		string(bytes),
-		"\n",
-		"============= End of Pelican Client Configuration ============")
+
+	originalFormatter := log.StandardLogger().Formatter
+
+	isStdout := param.Logging_LogLocation.GetString() == ""
+
+	log.SetFormatter(&log.TextFormatter{
+		DisableQuote:           true,
+		DisableTimestamp:       true,
+		DisableLevelTruncation: true,
+		ForceColors:            isStdout,
+	})
+
+	// Log the formatted JSON
+	log.Info("\n================ Pelican Configuration ================\n" +
+		string(bytes) +
+		"\n============= End of Pelican Configuration ============")
+
+	log.SetFormatter(originalFormatter)
+
 	return nil
 }
 
