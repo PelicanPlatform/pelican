@@ -165,10 +165,10 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set(param.Cache_Port.GetName(), 0)
 	viper.Set(param.Cache_RunLocation.GetName(), filepath.Join(tmpPath, "cache"))
 	viper.Set(param.Cache_StorageLocation.GetName(), filepath.Join(tmpPath, "xcache-data"))
+	viper.Set(param.Cache_DbLocation.GetString(), filepath.Join(t.TempDir(), "cache.sqlite"))
 	viper.Set(param.Server_EnableUI.GetName(), false)
 	viper.Set(param.Server_WebPort.GetName(), 0)
 	viper.Set(param.LocalCache_RunLocation.GetName(), filepath.Join(tmpPath, "local-cache"))
-	viper.Set(param.Cache_DbLocation.GetString(), filepath.Join(t.TempDir(), "cache.sqlite"))
 
 	// Set the Director's start time to 6 minutes ago. This prevents it from sending an HTTP 429 for
 	// unknown prefixes.
