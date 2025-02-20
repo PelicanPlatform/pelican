@@ -28,14 +28,16 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
+        # Do fetch depth 0 here because otherwise GoReleaser might not work properly:
+        # https://goreleaser.com/ci/actions/?h=tag#workflow
         fetch-depth: 0
+    - name: Mark the checkout as safe
+      # NOTE (brianaydemir): This appears to be required for TestHandleCLIExecutableAlias.
+      run: |
+        git config --global --add safe.directory /__w/pelican/pelican
     - uses: actions/setup-node@v4
       with:
         node-version: 20
-    - name: Fetch tags
-      run: |
-        git config --global --add safe.directory /__w/pelican/pelican
-        git fetch --force --tags
     - name: Cache Next.js
       uses: actions/cache@v4
       with:
@@ -51,7 +53,7 @@ jobs:
     - name: Test
       run: |
         make web-build
-        go test -p=4 -tags=${{ matrix.tags }} -timeout 15m -coverpkg=./... -coverprofile=${{ matrix.coverprofile }} -covermode=count ./...
+        go test -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=${{ matrix.coverprofile }} -tags=${{ matrix.tags }} ./...
     - name: Get total code coverage
       if: github.event_name == 'pull_request'
       id: cc
@@ -68,7 +70,7 @@ jobs:
         distribution: goreleaser
         version: latest
         args: build --single-target --clean --snapshot
-    - name: Copy files
+    - name: Copy the pelican binary for the end-to-end tests
       run: |
         cp dist/${{ matrix.binary_name }}_linux_amd64_v1/${{ matrix.binary_name }} ./pelican
     - name: Run integration tests
