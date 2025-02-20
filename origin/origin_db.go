@@ -27,6 +27,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
@@ -138,4 +139,61 @@ func updateCollection(uuid string, updatedCollection *GlobusCollection) error {
 // Hard-delete the collection from the DB
 func deleteCollectionByUUID(uuid string) error {
 	return db.Delete(&GlobusCollection{}, "uuid = ?", uuid).Error
+}
+
+// CRUD operations for downtimes table
+// Create a new downtime entry
+func createDowntime(downtime *server_structs.Downtime) error {
+	if err := db.Create(downtime).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// Update an existing downtime entry by UUID
+func updateDowntime(uuid string, updatedDowntime *server_structs.Downtime) error {
+	if err := db.Model(&server_structs.Downtime{}).Where("uuid = ?", uuid).Updates(updatedDowntime).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// Delete a downtime entry by UUID (hard delete)
+func deleteDowntime(uuid string) error {
+	return db.Delete(&server_structs.Downtime{}, "uuid = ?", uuid).Error
+}
+
+// Retrieve all downtime entries where EndTime is later than the current UTC time.
+func getActiveDowntimes() ([]server_structs.Downtime, error) {
+	var downtimes []server_structs.Downtime
+	currentTime := time.Now().UTC().UnixMilli()
+
+	err := db.Where("end_time > ?", currentTime).Find(&downtimes).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return downtimes, nil
+}
+
+// Retrieve all downtime entries
+func getAllDowntimes() ([]server_structs.Downtime, error) {
+	var downtimes []server_structs.Downtime
+
+	err := db.Find(&downtimes).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return downtimes, nil
+}
+
+// Retrieve a downtime entry by UUID
+func getDowntimeByUUID(uuid string) (*server_structs.Downtime, error) {
+	var downtime server_structs.Downtime
+	err := db.First(&downtime, "uuid = ?", uuid).Error
+	if err != nil {
+		return nil, err
+	}
+	return &downtime, nil
 }

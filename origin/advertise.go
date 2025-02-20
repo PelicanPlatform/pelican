@@ -138,6 +138,12 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		prefixes = append(prefixes, export.FederationPrefix)
 	}
 
+	// Fetch origin's active downtimes
+	downtimes, err := getActiveDowntimes()
+	if err != nil {
+		return nil, err
+	}
+
 	// PublicReads implies reads
 	reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
 	extUrlStr := param.Server_ExternalWebUrl.GetString()
@@ -169,6 +175,8 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		}},
 		StorageType:         ost,
 		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
+		Downtimes:           downtimes,
+		Version:             config.GetVersion(),
 	}
 	ad.Initialize(name)
 
