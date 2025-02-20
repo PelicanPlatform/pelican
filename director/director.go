@@ -1300,6 +1300,10 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		adV2.Version = "unknown"
 	}
 
+	if adV2.Downtimes != nil {
+		// TODO: handle incoming origin downtimes and process it with the director downtime data
+	}
+
 	sAd := server_structs.ServerAd{
 		Name:                adV2.Name,
 		StorageType:         st,
