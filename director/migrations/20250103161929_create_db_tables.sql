@@ -1,15 +1,5 @@
 -- +goose Up
 -- +goose StatementBegin
-SELECT 'up SQL query';
--- +goose StatementEnd
-
-CREATE TABLE IF NOT EXISTS server_downtimes (
-    uuid TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    filter_type TEXT NOT NULL,
-    created_at DATETIME NOT NULL,
-    updated_at DATETIME NOT NULL
-);
 
 CREATE TABLE api_keys (
     id TEXT PRIMARY KEY UNIQUE,
@@ -21,7 +11,10 @@ CREATE TABLE api_keys (
     created_by TEXT
 );
 
+-- +goose StatementEnd
+
 -- +goose Down
 -- +goose StatementBegin
-SELECT 'down SQL query';
+DROP TABLE IF EXISTS server_downtimes;
+DROP TABLE IF EXISTS api_keys;
 -- +goose StatementEnd
