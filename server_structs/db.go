@@ -6,6 +6,7 @@ type (
 	ApiKeyCached struct {
 		Token        string // "$ID.$SECRET_IN_HEX" string form
 		Capabilities []string
+		ExpiresAt    time.Time
 	}
 
 	ApiKey struct {

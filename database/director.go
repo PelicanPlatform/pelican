@@ -49,6 +49,10 @@ func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[
 		// Cache hit
 		cached := item.Value()
 		if cached.Token == apiKey { // check the cached token matches the one we are trying to verify
+			// check if the token has expired
+			if !cached.ExpiresAt.IsZero() && time.Now().After(cached.ExpiresAt) {
+				return false, nil, errors.New("Token has expired")
+			}
 			return true, cached.Capabilities, nil
 		} // otherwise the api token doesn't match the one in the cache so we do a hard check
 	}
@@ -95,6 +99,7 @@ func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[
 	cached := server_structs.ApiKeyCached{
 		Token:        apiKey,
 		Capabilities: strings.Split(token.Scopes, ","),
+		ExpiresAt:    token.ExpiresAt,
 	}
 	verifiedKeysCache.Set(id, cached, cacheTTL)
 	return true, cached.Capabilities, nil
