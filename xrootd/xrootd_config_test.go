@@ -57,8 +57,8 @@ func setupXrootd(t *testing.T, ctx context.Context, server server_structs.Server
 	server_utils.ResetTestState()
 
 	dirname, err := os.MkdirTemp("", "tmpDir")
-	require.NoError(x.T, err)
-	x.T.Cleanup(func() {
+	require.NoError(t, err)
+	t.Cleanup(func() {
 		os.RemoveAll(dirname)
 	})
 	viper.Set("ConfigDir", dirname)

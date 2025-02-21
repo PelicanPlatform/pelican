@@ -178,10 +178,6 @@ func TestCreateFedTok(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	kDir := filepath.Join(t.TempDir(), "keys")
-	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
-	viper.Set("ConfigDir", t.TempDir())
-
 	testCases := []struct {
 		name            string
 		host            string
@@ -223,9 +219,13 @@ func TestCreateFedTok(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// config.ResetFederationForTest()
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
+
+			confDir := t.TempDir()
+			kDir := filepath.Join(confDir, "keys")
+			viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
+			viper.Set("ConfigDir", confDir)
 
 			config.ResetFederationForTest()
 			fed := pelican_url.FederationDiscovery{

@@ -22,6 +22,7 @@ package lotman
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -101,7 +102,7 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 		// If we're not reading from the embedded yaml, grab the
 		// default configuration. We need _some_ configuration to work.
 		viper.Set("ConfigDir", t.TempDir())
-		config.InitServer(server_structs.CacheType)
+		config.InitServer(context.Background(), server_structs.CacheType)
 	}
 
 	tmpPathPattern := name + "*"
@@ -147,6 +148,7 @@ func TestLotmanInit(t *testing.T) {
 
 	t.Run("TestGoodInit", func(t *testing.T) {
 		viper.Set("Log.Level", "debug")
+		viper.Set("Cache.DataLocations", []string{})
 		server := getMockDiscoveryHost()
 		// Set the Federation.DiscoveryUrl to the test server's URL
 		// Lotman uses the discovered URLs/keys to determine some aspects of lot ownership
