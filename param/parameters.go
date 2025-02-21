@@ -403,6 +403,7 @@ var (
 	Shoveler_VerifyHeader = BoolParam{"Shoveler.VerifyHeader"}
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}
 	TLSSkipVerify = BoolParam{"TLSSkipVerify"}
+	Xrootd_EnableLocalMonitoring = BoolParam{"Xrootd.EnableLocalMonitoring"}
 )
 
 var (

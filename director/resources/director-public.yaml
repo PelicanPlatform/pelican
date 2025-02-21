@@ -11,6 +11,9 @@ Director:
   # to trigger any memory hoarding issues.
   #AssumePresenceAtSingleOrigin: false
   CachePresenceCapacity: 100
+  CheckCachePresence: true
+  CheckOriginPresence: true
+  EnableStat: true
 
 Origin:
   # Things that configure the origin itself
