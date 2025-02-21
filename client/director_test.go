@@ -31,7 +31,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -105,6 +107,10 @@ func TestQueryDirector(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	viper.Set(param.Client_DirectorRetries.GetName(), 3)
+	// This test assumes the debugging level is at debug or higher
+	viper.Set(param.Debug.GetName(), true)
+	err := config.InitClient()
+	require.NoError(t, err)
 
 	type testCase struct {
 		name             string
