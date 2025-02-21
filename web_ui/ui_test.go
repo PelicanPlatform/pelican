@@ -583,7 +583,7 @@ func TestApiToken(t *testing.T) {
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	database.DirectorDB = mockDB
 	require.NoError(t, err, "Error setting up mock origin DB")
-	err = database.DirectorDB.AutoMigrate(&database.ApiKey{})
+	err = database.DirectorDB.AutoMigrate(&server_structs.ApiKey{})
 	require.NoError(t, err, "Failed to migrate DB for API key table")
 
 	t.Run("create-and-delete-token", func(t *testing.T) {

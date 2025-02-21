@@ -32,6 +32,10 @@ func generateTokenID(secret []byte) string {
 	return hex.EncodeToString(hash[:])[:5]
 }
 
+// VerifyApiKey verifies the API key and returns the capabilities associated with the key.
+// It assumes that the API key is in the format "$ID.$SECRET_IN_HEX".
+// It returns true if the API key is valid, false if the API key is invalid, and an error if an error occurred.
+// If the API key is valid, it also returns the capabilities associated with the key.
 func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[string, server_structs.ApiKeyCached]) (bool, []string, error) {
 	parts := strings.Split(apiKey, ".")
 	if len(parts) != 2 {
@@ -44,32 +48,32 @@ func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[
 	if item != nil {
 		// Cache hit
 		cached := item.Value()
-		if cached.Token == apiKey { // check the the cached token matches the one we are trying to verify
+		if cached.Token == apiKey { // check the cached token matches the one we are trying to verify
 			return true, cached.Capabilities, nil
 		} // otherwise the api token doesn't match the one in the cache so we do a hard check
 	}
 
 	secret, err := hex.DecodeString(secretHex)
 	if err != nil {
-		return false, nil, errors.Wrap(err, "failed to decode the secret")
+		return false, nil, errors.New("Failed to decode the secret")
 	}
 
 	var token server_structs.ApiKey
 	result := db.First(&token, "id = ?", id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return false, nil, nil // token not found
+			return false, nil, errors.New("Token not found") // token not found
 		}
-		return false, nil, errors.Wrap(result.Error, "failed to retrieve the API key")
+		return false, nil, errors.New("Failed to retrieve the API key")
 	}
 
 	if !token.ExpiresAt.IsZero() && time.Now().After(token.ExpiresAt) {
-		return false, nil, nil
+		return false, nil, errors.New("Token has expired")
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(token.HashedValue), []byte(secret))
 	if err != nil {
-		return false, nil, nil
+		return false, nil, errors.New("Invalid API token")
 	}
 
 	cacheTTL := ttlcache.DefaultTTL
