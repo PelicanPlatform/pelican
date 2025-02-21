@@ -34,10 +34,13 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 type (
@@ -266,6 +269,35 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 					metrics.SetComponentHealthStatus(metrics.HealthStatusComponent(metricName), metrics.StatusCritical,
 						launchers[chosen].Name()+" process failed unexpectedly")
 					err = errors.Wrapf(waitResult, "%s process failed unexpectedly", launchers[chosen].Name())
+
+					// determine service key
+					failedDaemon := launchers[chosen].Name()
+					serviceKey := "unknown"
+					for _, launcher := range launchers {
+						if launcher.Name() == failedDaemon {
+							if strings.Contains(failedDaemon, "origin") {
+								serviceKey = server_structs.OriginType.String()
+							} else if strings.Contains(failedDaemon, "cache") {
+								serviceKey = server_structs.CacheType.String()
+							}
+							break
+						}
+					}
+
+					if serviceKey == "unknown" {
+						log.Error("Unable to determine service key for failed daemon: ", failedDaemon)
+					}
+
+					crashTimestamp := time.Now()
+					crashTimestampUnix := crashTimestamp.Unix()
+					log.Debug("Recording xrootd crash at time: ", crashTimestamp.Format(time.RFC3339))
+
+					dbErr := database.CreateOrUpdateCounter(serviceKey, int(crashTimestampUnix))
+					if dbErr != nil {
+						log.Debug("Error recording xrootd crash: ", dbErr)
+						return errors.Wrap(err, "Unable to record xrootd crash")
+					}
+					metrics.PelicanServerXRootDLastCrash.With(prometheus.Labels{"server_type": serviceKey}).Set(float64(crashTimestampUnix))
 					log.Errorln(err)
 					return err
 				}
