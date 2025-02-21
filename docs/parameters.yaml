@@ -1565,6 +1565,7 @@ description: |+
   a client certificate from the client.
 type: bool
 default: false
+components: ["cache"]
 ---
 name: Cache.FedTokenLocation
 description: |+
