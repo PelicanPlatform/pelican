@@ -74,6 +74,36 @@ func (f filterType) String() string {
 	}
 }
 
+// getServerAd returns the existing server ad of the given server url from the cache
+func getServerAd(serverUrl string) (*server_structs.Advertisement, error) {
+	if serverUrl == "" {
+		return nil, errors.Errorf("The URL of the serverAd is empty. Cannot set the TTL cache.")
+	}
+	// Since servers from topology always use http, while servers from Pelican always use https
+	// we want to ignore the scheme difference when checking duplicates (only consider hostname:port)
+	rawURL := serverUrl // could be http (topology) or https (Pelican or some topology ones)
+	httpURL := serverUrl
+	httpsURL := serverUrl
+	if strings.HasPrefix(rawURL, "https") {
+		httpURL = "http" + strings.TrimPrefix(rawURL, "https")
+	}
+	if strings.HasPrefix(rawURL, "http://") {
+		httpsURL = "https://" + strings.TrimPrefix(rawURL, "http://")
+	}
+
+	existing := serverAds.Get(httpURL)
+	if existing == nil {
+		existing = serverAds.Get(httpsURL)
+	}
+	if existing == nil {
+		existing = serverAds.Get(rawURL)
+	}
+	if existing == nil {
+		return nil, errors.Errorf("The server ad for %s is not found in the cache", serverUrl)
+	}
+	return existing.Value(), nil
+}
+
 // recordAd does following for an incoming ServerAd and []NamespaceAdV2 pair:
 //
 //  1. Update the ServerAd by setting server location and updating server topology attribute
@@ -90,44 +120,25 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 		log.Debugln("Failed to lookup GeoIP coordinates for host", sAd.URL.Host)
 	}
 
-	if sAd.URL.String() == "" {
-		log.Errorf("The URL of the serverAd %#v is empty. Cannot set the TTL cache.", sAd)
-		return
-	}
-	// Since servers from topology always use http, while servers from Pelican always use https
-	// we want to ignore the scheme difference when checking duplicates (only consider hostname:port)
-	rawURL := sAd.URL.String() // could be http (topology) or https (Pelican or some topology ones)
-	httpURL := sAd.URL.String()
-	httpsURL := sAd.URL.String()
-	if strings.HasPrefix(rawURL, "https") {
-		httpURL = "http" + strings.TrimPrefix(rawURL, "https")
-	}
-	if strings.HasPrefix(rawURL, "http://") {
-		httpsURL = "https://" + strings.TrimPrefix(rawURL, "http://")
-	}
-
-	existing := serverAds.Get(httpURL)
-	if existing == nil {
-		existing = serverAds.Get(httpsURL)
-	}
-	if existing == nil {
-		existing = serverAds.Get(rawURL)
+	existing, err := getServerAd(sAd.URL.String())
+	if err != nil {
+		log.Debugf("No existing server ad for %s: %v", sAd.URL.String(), err)
 	}
 
 	// There's an existing ad in the cache
 	if existing != nil {
-		if sAd.FromTopology && !existing.Value().FromTopology {
+		if sAd.FromTopology && !existing.FromTopology {
 			// if the incoming is from topology but the existing is from Pelican
 			log.Debugf("The ServerAd generated from topology with name %s and URL %s was ignored because there's already a Pelican ad for this server", sAd.Name, sAd.URL.String())
 			return
 		}
-		if !sAd.FromTopology && existing.Value().FromTopology {
+		if !sAd.FromTopology && existing.FromTopology {
 			// Pelican server will overwrite topology one. We leave a message to let admin know
-			log.Debugf("The existing ServerAd generated from topology with name %s and URL %s is replaced by the Pelican server with name %s", existing.Value().Name, existing.Value().URL.String(), sAd.Name)
-			serverAds.Delete(existing.Value().URL.String())
+			log.Debugf("The existing ServerAd generated from topology with name %s and URL %s is replaced by the Pelican server with name %s", existing.Name, existing.URL.String(), sAd.Name)
+			serverAds.Delete(existing.URL.String())
 		}
-		if !sAd.FromTopology && !existing.Value().FromTopology { // Only copy the IO Load value for Pelican server
-			sAd.IOLoad = existing.Value().GetIOLoad() // we copy the value from the existing serverAD to be consistent
+		if !sAd.FromTopology && !existing.FromTopology { // Only copy the IO Load value for Pelican server
+			sAd.IOLoad = existing.GetIOLoad() // we copy the value from the existing serverAD to be consistent
 		}
 	}
 
