@@ -360,6 +360,13 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 			fedInfo.BrokerEndpoint = externalUrlStr
 		}
 
+		// Some services in the Director, like federation tokens, may require a defined federation root (discovery URL)
+		// so for these to have a chance at working in places where a Director truly is acting as the fed root (e.g.
+		// fed-in-box unit tests), we need to set the discovery endpoint to the director endpoint.
+		if fedInfo.DiscoveryEndpoint == "" && enabledServers.IsEnabled(server_structs.DirectorType) {
+			fedInfo.DiscoveryEndpoint = fedInfo.DirectorEndpoint
+		}
+
 		// Make sure any values in global federation metadata are url-parseable
 		fedInfo.DirectorEndpoint = wrapWithHttpsIfNeeded(fedInfo.DirectorEndpoint)
 		fedInfo.RegistryEndpoint = wrapWithHttpsIfNeeded(fedInfo.RegistryEndpoint)
@@ -373,6 +380,9 @@ func discoverFederationImpl(ctx context.Context) (fedInfo pelican_url.Federation
 	fedInfo.JwksUri = viper.GetString("Federation.JwkUrl")
 	fedInfo.BrokerEndpoint = viper.GetString("Federation.BrokerUrl")
 	if fedInfo.DirectorEndpoint != "" && fedInfo.RegistryEndpoint != "" && fedInfo.JwksUri != "" && fedInfo.BrokerEndpoint != "" {
+		if federationStr != "" {
+			fedInfo.DiscoveryEndpoint = federationStr
+		}
 		return
 	}
 
@@ -1505,6 +1515,17 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 				return fmt.Errorf("fail to open the file Xrootd.ConfigFile at %s: %v", param.Xrootd_ConfigFile.GetString(), err)
 			}
 		}
+	}
+
+	// Set fed token locations for cache/origin. Note that fed tokens aren't yet used by the
+	// Origin (2025-02-04), but they may be soon for things like third party copy.
+	configDir := viper.GetString("ConfigDir")
+	if currentServers.IsEnabled(server_structs.OriginType) {
+		viper.SetDefault(param.Origin_FedTokenLocation.GetName(), filepath.Join(configDir, "origin-fed-token"))
+	}
+	if currentServers.IsEnabled(server_structs.CacheType) {
+		viper.SetDefault(param.Cache_FedTokenLocation.GetName(), filepath.Join(configDir, "cache-fed-token"))
+		os.Setenv("XRD_PELICANCACHETOKENLOCATION", param.Cache_FedTokenLocation.GetString())
 	}
 
 	// Unmarshal Viper config into a Go struct

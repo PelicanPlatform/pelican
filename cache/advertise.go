@@ -23,12 +23,17 @@ import (
 	"encoding/json"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -39,6 +44,9 @@ type (
 		pids            []int
 	}
 )
+
+// Can use this mechanism to override the minimum for the sake of tests
+var MinFedTokenTickerRate = 1 * time.Minute
 
 func (server *CacheServer) CreateAdvertisement(name, originUrl, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
 	registryPrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
@@ -187,4 +195,133 @@ func (server *CacheServer) GetNamespaceAdsFromDirector() error {
 
 func (server *CacheServer) GetServerType() server_structs.ServerType {
 	return server_structs.CacheType
+}
+
+func (server *CacheServer) GetAdTokCfg(ctx context.Context) (adTokCfg server_structs.AdTokCfg, err error) {
+	fInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		err = errors.Wrap(err, "failed to get federation info")
+		return
+	}
+	directorUrl := fInfo.DirectorEndpoint
+	if directorUrl == "" {
+		err = errors.New("unable to determine Director's URL")
+		return
+	}
+	adTokCfg.Audience = directorUrl
+	adTokCfg.Subject = param.Cache_Url.GetString()
+	adTokCfg.Issuer = param.Server_IssuerUrl.GetString()
+
+	return
+}
+
+func (server *CacheServer) GetFedTokLocation() string {
+	return param.Cache_FedTokenLocation.GetString()
+}
+
+// Given a token, calculate the lifetime of the token
+func calcTokLifetime(tok string) (time.Duration, error) {
+	// I think verificationless parsing is fine here, because we already assume a strong
+	// trust relationship with the Director, and if its been compromised, we have bigger problems.
+	parsedTok, err := jwt.ParseInsecure([]byte(tok))
+	if err != nil {
+		return 0, err
+	}
+	return parsedTok.Expiration().Sub(parsedTok.IssuedAt()), nil
+}
+
+// validateTickerRate is the circuit breaker that prevents the ticker
+// from firing too often. It also handles logging errors/warnings related
+// to the token lifetime and the refresh rate.
+func validateTickerRate(tickerRate time.Duration, tokLifetime time.Duration) time.Duration {
+	validated := tickerRate
+
+	if validated < MinFedTokenTickerRate {
+		log.Warningf("Deduced federation token refresh period is less than minimum of %.3fm; setting to %.3fm",
+			MinFedTokenTickerRate.Minutes(), MinFedTokenTickerRate.Minutes())
+		validated = MinFedTokenTickerRate
+	}
+
+	// Unfortunately we can't do anything here about the Director sending
+	// such short lived tokens unless we're willing to forgo the circuit
+	// breaker.
+	if validated > tokLifetime {
+		log.Errorf("Deduced federation token refresh period exceeds token lifetime. Tokens will expire before refresh")
+	}
+
+	log.Debugf("Federation token refresh rate set to %.3fm", validated.Minutes())
+
+	return validated
+}
+
+// getTickerRate calculates the rate at which the federation token should be refreshed
+// by looking at the token lifetime and setting the ticker to 1/3 of that lifetime.
+// If the token lifetime cannot be determined, the ticker is set to 1/3 of the default with
+// a minimum of 1 minute.
+func getTickerRate(tok string) time.Duration {
+	var tickerRate time.Duration
+	tokenLifetime, err := calcTokLifetime(tok)
+	if err != nil {
+		tokenLifetime = param.Director_FedTokenLifetime.GetDuration()
+		log.Errorf("Failed to calculate lifetime of federation token: %v.", err)
+	}
+	tickerRate = tokenLifetime / 3
+	return validateTickerRate(tickerRate, tokenLifetime)
+}
+
+func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server_structs.XRootDServer) {
+	// Do our initial token fetch+set, then turn things over to the ticker
+	tok, err := server_utils.CreateFedTok(ctx, cache)
+	if err != nil {
+		log.Errorf("Failed to get a federation token: %v", err)
+	}
+
+	// We want to fire the ticker at 1/3 the period of the token lifetime, or 1/3 the default
+	// lifetime for the token if we can't otherwise determine it. In most cases, the two values
+	// will be the same unless some fed administrator thinks they know better! This 1/3 period approach
+	// gives us a bit of buffer in the event the Director is down for a short period of time.
+	tickerRate := getTickerRate(tok)
+
+	// Set the token in the cache
+	err = server_utils.SetFedTok(ctx, cache, tok)
+	if err != nil {
+		log.Errorf("Failed to set the federation token: %v", err)
+	}
+
+	// TODO: Figure out what to do if the Director starts issuing tokens with a different
+	// lifetime --> we can adjust ticker period dynamically, but what's the sensible thing to do?
+	fedTokTicker := time.NewTicker(tickerRate)
+	egrp.Go(func() error {
+		defer fedTokTicker.Stop()
+		for {
+			select {
+			case <-fedTokTicker.C:
+				// Time to ask the Director for a new token
+				log.Debugln("Refreshing federation token")
+				tok, err := server_utils.CreateFedTok(ctx, cache)
+				if err != nil {
+					log.Errorf("Failed to get a federation token: %v", err)
+					continue
+				}
+				log.Traceln("Successfully received new federation token")
+
+				// Once again, parse the token, use it to set the next ticker fire
+				// while also building in a circuit breaker to set a min ticker rate
+				newTickerRate := getTickerRate(tok)
+				if newTickerRate != tickerRate {
+					fedTokTicker.Reset(newTickerRate)
+					tickerRate = newTickerRate
+				}
+
+				// Set the token in the cache
+				err = server_utils.SetFedTok(ctx, cache, tok)
+				if err != nil {
+					log.Errorf("Failed to write the federation token: %v", err)
+				}
+				log.Traceln("Successfully wrote new federation token to disk")
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	})
 }

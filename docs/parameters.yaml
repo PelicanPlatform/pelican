@@ -1148,6 +1148,15 @@ root_default: /run/pelican/xrootd/origin/globus
 default: $XDG_RUNTIME_DIR/pelican/xrootd/origin/globus
 components: ["origin"]
 ---
+name: Origin.FedTokenLocation
+description: |+
+  A path to the file containing a token issued by the federation's issuer. This token may be consumed by other federation services
+  to prove the origin's membership in the federation. For example, a third-party copy from one Origin to another that serves a namespace
+  without DirectReads enabled may require a token to prove the origin's membership in the federation.
+type: filename
+default: $ConfigBase/origin-fed-token
+components: ["origin"]
+---
 ############################
 #   Local cache configs    #
 ############################
@@ -1558,6 +1567,15 @@ type: bool
 default: false
 components: ["cache"]
 ---
+name: Cache.FedTokenLocation
+description: |+
+  A path to the file containing a token issued by the federation's issuer. This token may be consumed by other federation services
+  to prove the cache's membership in the federation. For example, Origins serving a namespace without DirectReads enabled require
+  that all clients prove they come from within the federation.
+type: filename
+default: $ConfigBase/cache-fed-token
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################
@@ -1820,6 +1838,14 @@ description: |+
 type: duration
 hidden: true
 default: 1m
+components: ["director"]
+---
+name: Director.FedTokenLifetime
+description: |+
+  The default lifetime assigned to tokens issued by the director on behalf of the federation. These tokens may be issued
+  to caches to prove their authorization within the federation to origins that require it.
+type: duration
+default: 15m
 components: ["director"]
 ---
 ############################

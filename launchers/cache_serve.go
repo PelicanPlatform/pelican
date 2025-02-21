@@ -105,6 +105,8 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 	cache.LaunchDirectorTestFileCleanup(ctx)
 
+	cache.LaunchFedTokManager(ctx, egrp, cacheServer)
+
 	if param.Cache_SelfTest.GetBool() {
 		err = cache.InitSelfTestDir()
 		if err != nil {

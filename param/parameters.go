@@ -149,6 +149,7 @@ var (
 	Cache_DataLocation = StringParam{"Cache.DataLocation"}
 	Cache_DbLocation = StringParam{"Cache.DbLocation"}
 	Cache_ExportLocation = StringParam{"Cache.ExportLocation"}
+	Cache_FedTokenLocation = StringParam{"Cache.FedTokenLocation"}
 	Cache_FilesBaseSize = StringParam{"Cache.FilesBaseSize"}
 	Cache_FilesMaxSize = StringParam{"Cache.FilesMaxSize"}
 	Cache_FilesNominalSize = StringParam{"Cache.FilesNominalSize"}
@@ -220,6 +221,7 @@ var (
 	OIDC_UserInfoEndpoint = StringParam{"OIDC.UserInfoEndpoint"}
 	Origin_DbLocation = StringParam{"Origin.DbLocation"}
 	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
+	Origin_FedTokenLocation = StringParam{"Origin.FedTokenLocation"}
 	Origin_FederationPrefix = StringParam{"Origin.FederationPrefix"}
 	Origin_GlobusClientIDFile = StringParam{"Origin.GlobusClientIDFile"}
 	Origin_GlobusClientSecretFile = StringParam{"Origin.GlobusClientSecretFile"}
@@ -411,6 +413,7 @@ var (
 	Client_StoppedTransferTimeout = DurationParam{"Client.StoppedTransferTimeout"}
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
 	Director_CachePresenceTTL = DurationParam{"Director.CachePresenceTTL"}
+	Director_FedTokenLifetime = DurationParam{"Director.FedTokenLifetime"}
 	Director_OriginCacheHealthTestInterval = DurationParam{"Director.OriginCacheHealthTestInterval"}
 	Director_RegistryQueryInterval = DurationParam{"Director.RegistryQueryInterval"}
 	Director_StatTimeout = DurationParam{"Director.StatTimeout"}

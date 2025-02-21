@@ -52,6 +52,8 @@ Director:
   # it seems golang uses 500 - 1000 bytes per entry; a reduction to
   # 2k means there will be around 1-2MB of cached data per server.
   CachePresenceCapacity: 2000
+  RegistryQueryInterval: 1m
+  FedTokenLifetime: 15m
 Cache:
   DefaultCacheTimeout: "9.5s"
   EnablePrefetch: true

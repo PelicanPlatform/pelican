@@ -175,6 +175,15 @@ func getLinkDepth(filepath, prefix string) (int, error) {
 // Aggregate various request parameters from header and query to a single url.Values struct
 func getRequestParameters(req *http.Request) (requestParams url.Values) {
 	requestParams = url.Values{}
+
+	// Start off by passing along any generic query params. If we have any reserved query params
+	// that we specifically handle from both queries and headers, we'll overwrite them later with a Set().
+	for key, vals := range req.URL.Query() {
+		for _, val := range vals {
+			requestParams.Add(key, val)
+		}
+	}
+
 	authz := ""
 	if authzQuery := req.URL.Query()["authz"]; len(authzQuery) > 0 {
 		authz = authzQuery[0]
@@ -198,19 +207,19 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 
 	// url.Values.Encode will help us escape all them
 	if authz != "" {
-		requestParams.Add("authz", authz)
+		requestParams.Set("authz", authz)
 	}
 	if timeout != "" {
-		requestParams.Add("pelican.timeout", timeout)
+		requestParams.Set("pelican.timeout", timeout)
 	}
 	if skipStat {
-		requestParams.Add(pelican_url.QuerySkipStat, "")
+		requestParams.Set(pelican_url.QuerySkipStat, "")
 	}
 	if preferCached {
-		requestParams.Add(pelican_url.QueryPreferCached, "")
+		requestParams.Set(pelican_url.QueryPreferCached, "")
 	}
 	if directRead {
-		requestParams.Add(pelican_url.QueryDirectRead, "")
+		requestParams.Set(pelican_url.QueryDirectRead, "")
 	}
 	return
 }
@@ -1008,7 +1017,7 @@ func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	}
 }
 
-func registerServeAd(engineCtx context.Context, ctx *gin.Context, sType server_structs.ServerType) {
+func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_structs.ServerType) {
 	ctx.Set("serverType", sType.String())
 	tokens, present := ctx.Request.Header["Authorization"]
 	if !present || len(tokens) == 0 {
@@ -1616,8 +1625,9 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
 		directorAPIV1.DELETE("/origin/*any", redirectToOrigin)
 		directorAPIV1.Handle("PROPFIND", "/origin/*any", redirectToOrigin)
-		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.OriginType) })
-		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServeAd(ctx, gctx, server_structs.CacheType) })
+		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServerAd(ctx, gctx, server_structs.OriginType) })
+		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServerAd(ctx, gctx, server_structs.CacheType) })
+		directorAPIV1.GET("/getFedToken", getFedToken)
 		directorAPIV1.GET("/listNamespaces", listNamespacesV1)
 		directorAPIV1.GET("/namespaces/prefix/*path", getPrefixByPath)
 		directorAPIV1.GET("/healthTest/*path", getHealthTestFile)
