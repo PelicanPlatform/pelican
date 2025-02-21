@@ -15,6 +15,5 @@ CREATE TABLE api_keys (
 
 -- +goose Down
 -- +goose StatementBegin
-DROP TABLE IF EXISTS server_downtimes;
 DROP TABLE IF EXISTS api_keys;
 -- +goose StatementEnd
