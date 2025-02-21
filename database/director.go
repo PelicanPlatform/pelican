@@ -105,6 +105,10 @@ func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[
 	return true, cached.Capabilities, nil
 }
 
+// CreateApiKey creates a new API key with the given name, creator, scopes, and expiration time.
+// It returns the API key in the format "$ID.$SECRET_IN_HEX" and an error if an error occurred.
+// The scopes can are a comma-separated list of capabilities. i.e "monitoring.query,monitoring.scrape"
+// The scopes are defined in the token_scopes package
 func CreateApiKey(name, createdBy, scopes string, expiration time.Time) (string, error) {
 	for {
 		secret, err := generateSecret(32)
@@ -141,6 +145,9 @@ func CreateApiKey(name, createdBy, scopes string, expiration time.Time) (string,
 	}
 }
 
+// DeleteApiKey deletes the API key with the given ID.
+// It returns an error if an error occurred.
+// It also removes the API key from the verifiedKeysCache so that the deleted key is no longer valid.
 func DeleteApiKey(id string, verifiedKeysCache *ttlcache.Cache[string, server_structs.ApiKeyCached]) error {
 	result := DirectorDB.Delete(&server_structs.ApiKey{}, "id = ?", id)
 	if result.Error != nil {
