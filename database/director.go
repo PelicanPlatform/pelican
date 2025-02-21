@@ -50,7 +50,7 @@ func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[
 		cached := item.Value()
 		if cached.Token == apiKey { // check the cached token matches the one we are trying to verify
 			// check if the token has expired
-			if !cached.ExpiresAt.IsZero() && time.Now().After(cached.ExpiresAt) {
+			if !cached.ExpiresAt.IsZero() && time.Now().UTC().After(cached.ExpiresAt) {
 				return false, nil, errors.New("Token has expired")
 			}
 			return true, cached.Capabilities, nil
@@ -73,7 +73,7 @@ func VerifyApiKey(db *gorm.DB, apiKey string, verifiedKeysCache *ttlcache.Cache[
 
 	// Check if the token has expired
 	// If the token has an expiration time and the current time is after the expiration time, the token is invalid
-	if !token.ExpiresAt.IsZero() && time.Now().After(token.ExpiresAt) {
+	if !token.ExpiresAt.IsZero() && time.Now().UTC().After(token.ExpiresAt) {
 		return false, nil, errors.New("Token has expired")
 	}
 
@@ -128,8 +128,8 @@ func CreateApiKey(name, createdBy, scopes string, expiration time.Time) (string,
 			Name:        name,
 			HashedValue: string(hashedValue),
 			Scopes:      scopes,
-			ExpiresAt:   expiration,
-			CreatedAt:   time.Now(),
+			ExpiresAt:   expiration.UTC(),
+			CreatedAt:   time.Now().UTC(),
 			CreatedBy:   createdBy,
 		}
 		result := DirectorDB.Create(apiKey)

@@ -448,6 +448,7 @@ func createApiToken(ctx *gin.Context) {
 			})
 			return
 		}
+		expirationTime = expirationTime.UTC()
 	}
 	scopes := strings.Join(req.Scopes, ",")
 	token, err := database.CreateApiKey(req.Name, req.CreatedBy, scopes, expirationTime)
