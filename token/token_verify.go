@@ -25,17 +25,21 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -64,11 +68,17 @@ const (
 const (
 	FederationIssuer TokenIssuer = "FederationIssuer"
 	LocalIssuer      TokenIssuer = "LocalIssuer"
+	APITokenIssuer   TokenIssuer = "APITokenIssuer"
 )
 
 var (
-	federationJWK *jwk.Cache
-	authChecker   AuthChecker
+	federationJWK     *jwk.Cache
+	authChecker       AuthChecker
+	VerifiedKeysCache *ttlcache.Cache[string, server_structs.ApiKeyCached] = ttlcache.New[string, server_structs.ApiKeyCached](
+		ttlcache.WithTTL[string, server_structs.ApiKeyCached](time.Hour * 24),
+	)
+	// API token format: <5-char ID>.<64-char secret>, total length = 70, alphanumeric
+	ApiTokenRegex = regexp.MustCompile(`^[a-zA-Z0-9]{5}\.[a-zA-Z0-9]{64}$`)
 )
 
 func init() {
@@ -243,6 +253,12 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 			} else {
 				return http.StatusOK, true, nil
 			}
+		case APITokenIssuer:
+			if err := checkApiTokenIssuer(token, authOption.Scopes, authOption.AllScopes); err != nil {
+				errMsg += fmt.Sprintln("Cannot verify token with API token issuer: ", err)
+			} else {
+				return http.StatusOK, true, nil
+			}
 		default:
 			log.Error("Invalid/unsupported token issuer")
 			return http.StatusInternalServerError, false, errors.New("Cannot verify token due to bad server configuration. Invalid/unsupported token issuer")
@@ -385,4 +401,23 @@ func GetJWKSFromIssUrl(issuer string) (*jwk.Set, error) {
 	}
 
 	return &kSet, nil
+}
+
+func checkApiTokenIssuer(token string, expectedScopes []token_scopes.TokenScope, allScopes bool) error {
+	matched := ApiTokenRegex.MatchString(token)
+	if !matched {
+		return errors.New("Invalid API token format")
+	}
+	ok, capabilities, err := database.VerifyApiKey(database.DirectorDB, token, VerifiedKeysCache)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("Invalid API token")
+	}
+
+	if !token_scopes.ScopeContains(capabilities, expectedScopes, allScopes) {
+		return errors.New(fmt.Sprintf("Token does not contain any of the scopes: %v", expectedScopes))
+	}
+	return nil
 }

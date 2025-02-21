@@ -1355,7 +1355,7 @@ func serverAdMetricMiddleware(ctx *gin.Context) {
 func discoverOriginCache(ctx *gin.Context) {
 	authOption := token.AuthOption{
 		Sources: []token.TokenSource{token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
 		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorServiceDiscovery},
 	}
 
@@ -1638,6 +1638,7 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		// so that director can be our point of contact for collecting system-level metrics.
 		// Rename the endpoint to reflect such plan.
 		directorAPIV1.GET("/discoverServers", discoverOriginCache)
+
 	}
 
 	directorAPIV2 := router.Group("/api/v2.0/director", web_ui.ServerHeaderMiddleware)
