@@ -1570,7 +1570,7 @@ components: ["cache"]
 name: Cache.FedTokenLocation
 description: |+
   A path to the file containing a token issued by the federation's issuer. This token may be consumed by other federation services
-  to prove the cache's membership in the federation. For example, Origin's serving a namespace without DirectReads enabled require
+  to prove the cache's membership in the federation. For example, Origins serving a namespace without DirectReads enabled require
   that all clients prove they come from within the federation.
 type: filename
 default: $ConfigBase/cache-fed-token
