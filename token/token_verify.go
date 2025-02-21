@@ -408,7 +408,7 @@ func checkApiTokenIssuer(token string, expectedScopes []token_scopes.TokenScope,
 	if !matched {
 		return errors.New("Invalid API token format")
 	}
-	ok, capabilities, err := database.VerifyApiKey(token, VerifiedKeysCache)
+	ok, capabilities, err := database.VerifyApiKey(database.DirectorDB, token, VerifiedKeysCache)
 	if err != nil {
 		return err
 	}
