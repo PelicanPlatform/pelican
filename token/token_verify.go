@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -73,8 +74,8 @@ const (
 var (
 	federationJWK     *jwk.Cache
 	authChecker       AuthChecker
-	VerifiedKeysCache *ttlcache.Cache[string, database.ApiKeyCached] = ttlcache.New[string, database.ApiKeyCached](
-		ttlcache.WithTTL[string, database.ApiKeyCached](time.Hour * 24),
+	VerifiedKeysCache *ttlcache.Cache[string, server_structs.ApiKeyCached] = ttlcache.New[string, server_structs.ApiKeyCached](
+		ttlcache.WithTTL[string, server_structs.ApiKeyCached](time.Hour * 24),
 	)
 	// API token format: <5-char ID>.<64-char secret>, total length = 70, alphanumeric
 	ApiTokenRegex = regexp.MustCompile(`^[a-zA-Z0-9]{5}\.[a-zA-Z0-9]{64}$`)

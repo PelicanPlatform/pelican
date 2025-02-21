@@ -6,9 +6,9 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 var ServerDatabase *gorm.DB
@@ -32,7 +32,7 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 		dbPath = param.Cache_DbLocation.GetString()
 	}
 
-	tdb, err := server_utils.InitSQLiteDB(dbPath)
+	tdb, err := utils.InitSQLiteDB(dbPath)
 	if err != nil {
 		return err
 	}
@@ -44,7 +44,7 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 	}
 
 	// run migrations
-	if err := server_utils.MigrateDB(sqlDB, embedMigrations); err != nil {
+	if err := utils.MigrateDB(sqlDB, embedMigrations); err != nil {
 		return err
 	}
 

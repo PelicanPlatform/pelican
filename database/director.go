@@ -12,26 +12,11 @@ import (
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var DirectorDB *gorm.DB
-
-type (
-	ApiKey struct {
-		ID          string `gorm:"primaryKey;column:id;type:text;not null;unique"`
-		Name        string `gorm:"column:name;type:text"`
-		HashedValue string `gorm:"column:hashed_value;type:text;not null"`
-		Scopes      string `gorm:"column:scopes;type:text"`
-		ExpiresAt   time.Time
-		CreatedAt   time.Time
-		CreatedBy   string `gorm:"column:created_by;type:text"`
-	}
-
-	ApiKeyCached struct {
-		Token        string // "$ID.$SECRET_IN_HEX" string form
-		Capabilities []string
-	}
-)
 
 func generateSecret(length int) ([]byte, error) {
 	bytesSlice := make([]byte, length)
@@ -47,7 +32,7 @@ func generateTokenID(secret []byte) string {
 	return hex.EncodeToString(hash[:])[:5]
 }
 
-func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKeyCached]) (bool, []string, error) {
+func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, server_structs.ApiKeyCached]) (bool, []string, error) {
 	parts := strings.Split(apiKey, ".")
 	if len(parts) != 2 {
 		return false, nil, errors.New("invalid API key format")
@@ -69,7 +54,7 @@ func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKe
 		return false, nil, errors.Wrap(err, "failed to decode the secret")
 	}
 
-	var token ApiKey
+	var token server_structs.ApiKey
 	result := DirectorDB.First(&token, "id = ?", id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
@@ -95,7 +80,7 @@ func VerifyApiKey(apiKey string, verifiedKeysCache *ttlcache.Cache[string, ApiKe
 		}
 	}
 
-	cached := ApiKeyCached{
+	cached := server_structs.ApiKeyCached{
 		Token:        apiKey,
 		Capabilities: strings.Split(token.Scopes, ","),
 	}
@@ -117,7 +102,7 @@ func CreateApiKey(name, createdBy, scopes string, expiration time.Time) (string,
 			return "", errors.Wrap(err, "failed to hash the secret")
 		}
 
-		apiKey := ApiKey{
+		apiKey := server_structs.ApiKey{
 			ID:          id,
 			Name:        name,
 			HashedValue: string(hashedValue),
@@ -139,8 +124,8 @@ func CreateApiKey(name, createdBy, scopes string, expiration time.Time) (string,
 	}
 }
 
-func DeleteApiKey(id string, verifiedKeysCache *ttlcache.Cache[string, ApiKeyCached]) error {
-	result := DirectorDB.Delete(&ApiKey{}, "id = ?", id)
+func DeleteApiKey(id string, verifiedKeysCache *ttlcache.Cache[string, server_structs.ApiKeyCached]) error {
+	result := DirectorDB.Delete(&server_structs.ApiKey{}, "id = ?", id)
 	if result.Error != nil {
 		return errors.Wrap(result.Error, "failed to delete the API key")
 	}
