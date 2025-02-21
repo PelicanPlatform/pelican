@@ -233,7 +233,7 @@ func TestDirectorFedTokenCacheAPI(t *testing.T) {
 			ctx := context.Background()
 			ctx, _, _ = test_utils.TestContext(ctx, t)
 			cache := cache.CacheServer{}
-			tokStr, err := server_utils.GetFedTok(ctx, &cache)
+			tokStr, err := server_utils.CreateFedTok(ctx, &cache)
 			require.NoError(t, err, "Failed to get cache's advertisement token")
 			require.NotEmpty(t, tokStr, "Got an empty token")
 

@@ -356,7 +356,7 @@ func GetAdvertisementTok(ctx context.Context, server server_structs.XRootDServer
 
 // GetFedTok retrieves a federation token from the Director, which can be passed to other
 // federation services as proof of federation membership.
-func GetFedTok(ctx context.Context, server server_structs.XRootDServer) (string, error) {
+func CreateFedTok(ctx context.Context, server server_structs.XRootDServer) (string, error) {
 	// Set up the request to the Director
 	fInfo, err := config.GetFederation(ctx)
 	if err != nil {
@@ -444,17 +444,16 @@ func SetFedTok(ctx context.Context, server server_structs.XRootDServer, tok stri
 
 	dir := filepath.Dir(tokLoc)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		if !os.IsExist(err) {
-			return errors.Wrap(err, "failed to create fed token directories")
-		}
+		return errors.Wrap(err, "failed to create fed token directories")
 	}
 
 	// Create a temporary file for storing the token. Later we'll do an atomic rename
-	tmpName := filepath.Join(dir, fmt.Sprintf(".fedtoken.%d", time.Now().UnixNano()))
-	tmpFile, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	filenamePattern := fmt.Sprintf(".fedtoken.%d.*", time.Now().UnixNano())
+	tmpFile, err := os.CreateTemp(dir, filenamePattern)
 	if err != nil {
 		return errors.Wrap(err, "failed to create temporary token file")
 	}
+	tmpName := tmpFile.Name()
 
 	defer func() {
 		tmpFile.Close()
@@ -472,7 +471,7 @@ func SetFedTok(ctx context.Context, server server_structs.XRootDServer, tok stri
 	}
 
 	if err := os.Chown(tmpName, uid, gid); err != nil {
-		return errors.Wrap(err, "failed to change token file ownership")
+		return errors.Wrapf(err, "failed to change token file ownership of %s to %d:%d", tmpName, uid, gid)
 	}
 
 	if _, err := tmpFile.WriteString(tok); err != nil {

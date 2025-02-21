@@ -271,7 +271,7 @@ func getTickerRate(tok string) time.Duration {
 
 func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server_structs.XRootDServer) {
 	// Do our initial token fetch+set, then turn things over to the ticker
-	tok, err := server_utils.GetFedTok(ctx, cache)
+	tok, err := server_utils.CreateFedTok(ctx, cache)
 	if err != nil {
 		log.Errorf("Failed to get a federation token: %v", err)
 	}
@@ -298,7 +298,7 @@ func LaunchFedTokManager(ctx context.Context, egrp *errgroup.Group, cache server
 			case <-fedTokTicker.C:
 				// Time to ask the Director for a new token
 				log.Debugln("Refreshing federation token")
-				tok, err := server_utils.GetFedTok(ctx, cache)
+				tok, err := server_utils.CreateFedTok(ctx, cache)
 				if err != nil {
 					log.Errorf("Failed to get a federation token: %v", err)
 					continue

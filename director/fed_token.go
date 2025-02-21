@@ -48,10 +48,10 @@ func validateFedTokRequest(ginCtx *gin.Context) (rInfo requestInfo, err error) {
 	reqParams := getRequestParameters(ginCtx.Request)
 	hNames, exists := reqParams["host"]
 	if !exists || len(hNames) == 0 {
-		err = fmt.Errorf("no hostname found in the 'host' url parameter")
+		err = fmt.Errorf("no hostname found in the 'host' url parameter: %s", ginCtx.Request.URL.String())
 		return
 	} else if len(hNames) > 1 {
-		err = fmt.Errorf("multiple hostnames found in the 'host' url parameter")
+		err = fmt.Errorf("multiple hostnames found in the 'host' url parameter: %s", ginCtx.Request.URL.String())
 		return
 	}
 	rInfo.Host = hNames[0]
@@ -59,15 +59,15 @@ func validateFedTokRequest(ginCtx *gin.Context) (rInfo requestInfo, err error) {
 	sTypes, exists := reqParams["sType"]
 	var sType server_structs.ServerType
 	if !exists || len(sTypes) == 0 {
-		err = fmt.Errorf("host '%s' generated request with no server type found in the 'sType' url parameter", rInfo.Host)
+		err = fmt.Errorf("host '%s' generated request with no server type found in the 'sType' url parameter: %s", rInfo.Host, ginCtx.Request.URL.String())
 		return
 	} else if len(sTypes) > 1 {
-		err = fmt.Errorf("host '%s' generated request with multiple server types in the 'sType' url parameter", rInfo.Host)
+		err = fmt.Errorf("host '%s' generated request with multiple server types in the 'sType' url parameter: %s", rInfo.Host, ginCtx.Request.URL.String())
 		return
 	}
 	valid := sType.SetString(sTypes[0])
 	if !valid || (sType != server_structs.CacheType && sType != server_structs.OriginType) {
-		err = fmt.Errorf("host '%s' generated request with invalid server type '%s' as value of 'sType' url parameter", rInfo.Host, sTypes[0])
+		err = fmt.Errorf("host '%s' generated request with invalid server type '%s' as value of 'sType' url parameter: %s", rInfo.Host, sTypes[0], ginCtx.Request.URL.String())
 		return
 	}
 	rInfo.SType = sType
