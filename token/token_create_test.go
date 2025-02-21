@@ -212,7 +212,6 @@ func TestCreateToken(t *testing.T) {
 	kDir := filepath.Join(tDir, "testKeyDir")
 	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)
 

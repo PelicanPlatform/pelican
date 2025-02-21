@@ -33,6 +33,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -510,8 +511,11 @@ func CleanupTempResources() (err error) {
 func getConfigBase() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// We currently don't handle this case in Windows (and it may not even occur)
-		// This will be revisited in the future
+		os := runtime.GOOS
+		if os == "windows" {
+			log.Warningln("No home directory found for user -- will check for configuration yaml in C:/ProgramData/pelican")
+			return filepath.Join("C:", "ProgramData", "pelican")
+		}
 		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
 		return filepath.Join("/etc", "pelican")
 	}
@@ -762,7 +766,12 @@ func InitConfigDir(v *viper.Viper) {
 	configDir := v.GetString("ConfigDir")
 	if configDir == "" {
 		if IsRootExecution() {
-			configDir = "/etc/pelican" // We currently don't handle this case in windows, will be revisited in the future
+			os := runtime.GOOS
+			if os == "windows" {
+				configDir = filepath.Join("C:", "ProgramData", "pelican")
+			} else {
+				configDir = filepath.Join("/etc", "pelican")
+			}
 		} else {
 			configDir = getConfigBase()
 		}
@@ -1214,7 +1223,7 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
-
+	InitConfig()
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
@@ -1710,6 +1719,7 @@ func SetClientDefaults(v *viper.Viper) error {
 }
 
 func InitClient() error {
+	InitConfig()
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
 	}
@@ -1757,6 +1767,7 @@ func ResetConfig() {
 	fedDiscoveryOnce = &sync.Once{}
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
+	setServerOnce = sync.Once{}
 
 	ResetIssuerPrivateKeys()
 
