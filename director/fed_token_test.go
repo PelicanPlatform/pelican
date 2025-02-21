@@ -29,6 +29,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
@@ -237,7 +238,8 @@ func TestCreateFedTok(t *testing.T) {
 				BrokerEndpoint:    "https://dne-broker.com",
 			}
 			config.SetFederation(fed)
-			config.InitConfig() // Helps us populate the keys directory with a signing key
+			err := config.InitServer(c, server_structs.RegistryType) // Helps us populate the keys directory with a signing key
+			require.NoError(t, err)
 
 			allowedPrefixesForCaches.Store(&tc.allowedPrefixes)
 			rInfo := requestInfo{
