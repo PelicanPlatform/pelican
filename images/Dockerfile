@@ -130,8 +130,11 @@ ENV GOARCH=${TARGETARCH}
 
 COPY . .
 
-RUN --mount=type=cache,id=go-mod-${TARGETPLATFORM},target=/root/go,sharing=locked \
-    --mount=type=cache,id=go-cache-${TARGETPLATFORM},target=/root/.cache,sharing=locked \
+RUN --mount=type=cache,id=go-cache,target=/root/.cache/go-build,sharing=shared \
+    --mount=type=cache,id=go-mod-cache-${TARGETPLATFORM},target=/root/go,sharing=locked \
+    --mount=type=cache,id=npm-${TARGETPLATFORM},target=/root/.npm,sharing=locked \
+    --mount=type=cache,id=node-modules-${TARGETPLATFORM},target=/pelican-build/web_ui/frontend/node_modules,sharing=locked \
+    --mount=type=cache,id=nextjs-cache-${TARGETPLATFORM},target=/pelican-build/web_ui/frontend/.next/cache,sharing=locked \
     <<ENDRUN
 
   set -eux
