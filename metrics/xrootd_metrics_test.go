@@ -414,6 +414,7 @@ func TestHandlePacket(t *testing.T) {
 			Sid:  143152967831384,
 			Host: "fae8c2865de4",
 		}
+		mockUserRecord.XrdUserId = mockXrdUserId
 		mockInfo := []byte(getUserIdString(mockXrdUserId) + "\n" + getAuthInfoString(mockUserRecord))
 		mockMonMap := XrdXrootdMonMap{
 			Hdr: XrdXrootdMonHeader{ // 8B
@@ -442,7 +443,7 @@ func TestHandlePacket(t *testing.T) {
 		assert.Equal(t, mockUserRecord.DN, sessionEntry.DN)
 		assert.Equal(t, mockUserRecord.Role, sessionEntry.Role)
 		assert.Equal(t, mockUserRecord.Org, sessionEntry.Org)
-		assert.Equal(t, mockXrdUserId.Host, sessionEntry.Host)
+		assert.Equal(t, mockXrdUserId.Host, sessionEntry.XrdUserId.Host)
 
 		sessions.DeleteAll()
 	})
@@ -485,7 +486,7 @@ func TestHandlePacket(t *testing.T) {
 		require.Equal(t, 1, len(sessions.Keys()), "Session cache didn't update")
 
 		sessionEntry := sessions.Get(sessions.Keys()[0]).Value()
-		assert.Equal(t, expectedIPv4, sessionEntry.Host)
+		assert.Equal(t, expectedIPv4, sessionEntry.XrdUserId.Host)
 
 	})
 
@@ -504,6 +505,7 @@ func TestHandlePacket(t *testing.T) {
 			Sid:  143152967831384,
 			Host: expectedIPv6,
 		}
+		mockUserRecord.XrdUserId = mockXrdUserIdIPv6
 		mockInfoIPv6 := []byte(getUserIdString(mockXrdUserIdIPv6) + "\n" + getAuthInfoString(mockUserRecord))
 		mockMonMapIPv6 := XrdXrootdMonMap{
 			Hdr: XrdXrootdMonHeader{ // 8B
@@ -527,7 +529,7 @@ func TestHandlePacket(t *testing.T) {
 		require.Equal(t, 1, len(sessions.Keys()), "Session cache didn't update")
 
 		sessionEntry := sessions.Get(sessions.Keys()[0]).Value()
-		assert.Equal(t, expectedIPv6, sessionEntry.Host)
+		assert.Equal(t, expectedIPv6, sessionEntry.XrdUserId.Host)
 	})
 
 	t.Run("file-path-packet-d-should-register-correct-info", func(t *testing.T) {
