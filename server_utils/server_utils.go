@@ -35,6 +35,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -284,6 +285,10 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 func ResetTestState() {
 	config.ResetConfig()
 	ResetOriginExports()
+	baseAdOnce = sync.Once{}
+	baseAd = server_structs.ServerBaseAd{}
+	baseAdErr = nil
+	directorEndpoints.Store(nil)
 }
 
 // Given a slice of NamespaceAdV2 objects, return a slice of unique top-level prefixes.
@@ -330,8 +335,8 @@ func FilterTopLevelPrefixes(nsAds []server_structs.NamespaceAdV2) []server_struc
 // Get an advertisement token for the given server. Advertisement tokens are signed by the server
 // and passed to the Director, which can then use them to check the server's identity. Tokens are
 // valid when the Director can query the public key for the given server from the Registry.
-func GetAdvertisementTok(ctx context.Context, server server_structs.XRootDServer) (tok string, err error) {
-	tokCfg, err := server.GetAdTokCfg(ctx)
+func GetAdvertisementTok(ctx context.Context, server server_structs.XRootDServer, directorUrl string) (tok string, err error) {
+	tokCfg, err := server.GetAdTokCfg(ctx, directorUrl)
 	if err != nil {
 		err = errors.Wrap(err, "failed to get advertisement token configuration")
 		return
@@ -376,7 +381,7 @@ func CreateFedTok(ctx context.Context, server server_structs.XRootDServer) (stri
 	}
 
 	host := param.Server_Hostname.GetString()
-	adTok, err := GetAdvertisementTok(ctx, server)
+	adTok, err := GetAdvertisementTok(ctx, server, directorUrl)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to get advertisement token")
 	}
