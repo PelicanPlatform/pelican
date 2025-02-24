@@ -23,7 +23,9 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -122,7 +124,6 @@ func TestConversion(t *testing.T) {
 	}
 
 	oAdV2 := OriginAdvertiseV2{
-		Name:       "OriginTest",
 		DataURL:    "https://origin-url.org",
 		WebURL:     "https://WebUrl.org",
 		Namespaces: v2Ads,
@@ -146,8 +147,11 @@ func TestConversion(t *testing.T) {
 			},
 		},
 	}
+	oAdV2.Initialize("OriginTest")
 
 	OAdConv := ConvertOriginAdV1ToV2(oAdV1)
+	oAdV2.GenerationID = OAdConv.GenerationID
+	oAdV2.Expiration = OAdConv.Expiration
 
 	require.Equal(t, oAdV2, OAdConv)
 }
@@ -279,5 +283,21 @@ func TestXPelTokGenParsing(t *testing.T) {
 		assert.Equal(t, uint(0), xPelTokGen.MaxScopeDepth)
 		assert.Len(t, xPelTokGen.Issuers, 0)
 		assert.Len(t, xPelTokGen.BasePaths, 0)
+	})
+}
+
+func TestServerBaseAdAfter(t *testing.T) {
+	t.Run("AfterMethod", func(t *testing.T) {
+		instanceID := uuid.New().String()
+		startTime := time.Now().Unix()
+
+		ad1 := ServerBaseAd{
+			GenerationID: 1,
+			InstanceID:   instanceID,
+			StartTime:    startTime,
+		}
+		ad2 := ServerBaseAd{}
+
+		assert.Equal(t, ad1.After(ad2), AdAfterUnknown)
 	})
 }

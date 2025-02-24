@@ -42,11 +42,12 @@ type (
 	}
 
 	FederationDiscovery struct {
-		DiscoveryEndpoint string `json:"discovery_endpoint"`
-		DirectorEndpoint  string `json:"director_endpoint"`
-		RegistryEndpoint  string `json:"namespace_registration_endpoint"`
-		JwksUri           string `json:"jwks_uri"`
-		BrokerEndpoint    string `json:"broker_endpoint"`
+		DiscoveryEndpoint          string   `json:"discovery_endpoint"`
+		DirectorEndpoint           string   `json:"director_endpoint"`
+		DirectorAdvertiseEndpoints []string `json:"director_advertise_endpoints,omitempty"`
+		RegistryEndpoint           string   `json:"namespace_registration_endpoint"`
+		JwksUri                    string   `json:"jwks_uri"`
+		BrokerEndpoint             string   `json:"broker_endpoint"`
 	}
 
 	discoveryOptions struct {

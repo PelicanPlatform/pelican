@@ -48,6 +48,12 @@ description: >-
 issuedBy: ["client"]
 acceptedBy: ["registry"]
 ---
+name: pelican.director_advertise
+description: >-
+  Permits a director service to advertise with another director in the federation
+issuedBy: ["director"]
+acceptedBy: ["director"]
+---
 ############################
 #      Web UI Scopes       #
 ############################

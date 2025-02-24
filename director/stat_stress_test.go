@@ -30,6 +30,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/sync/errgroup"
 
@@ -52,6 +53,7 @@ var (
 func TestStatMemory(t *testing.T) {
 	server_utils.ResetTestState()
 
+	viper.Set(param.Server_AdLifetime.GetName(), "100ms")
 	fed := fed_test_utils.NewFedTest(t, directorPublicCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	assert.NoError(t, err)
