@@ -36,6 +36,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/local_cache"
 	"github.com/pelicanplatform/pelican/origin"
@@ -217,6 +218,17 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		log.Errorln("Web engine check failed: ", err)
 		return
 	}
+
+	// Launch director discovery.  This is done after the director modules are done
+	// (since they may provide some of the response information) and before the origin/cache
+	// are started (since we may forward ads based on discovered directors)
+	if err = server_utils.LaunchPeriodicDirectorDiscovery(ctx, modules.IsEnabled(server_structs.DirectorType)); err != nil {
+		return
+	}
+	if modules.IsEnabled(server_structs.DirectorType) {
+		director.LaunchPeriodicAdvertise(ctx)
+	}
+
 	if param.Origin_EnableIssuer.GetBool() {
 		oa4mpHealthCheckUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/issuer/.well-known/openid-configuration"
 		if err = server_utils.WaitUntilWorking(ctx, "GET", oa4mpHealthCheckUrl, "Issuer", http.StatusOK, true); err != nil {

@@ -34,6 +34,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -196,18 +197,16 @@ func (server *CacheServer) GetServerType() server_structs.ServerType {
 	return server_structs.CacheType
 }
 
-func (server *CacheServer) GetAdTokCfg(ctx context.Context) (adTokCfg server_structs.AdTokCfg, err error) {
-	fInfo, err := config.GetFederation(ctx)
+func (server *CacheServer) GetAdTokCfg(directorUrl string) (adTokCfg server_structs.AdTokCfg, err error) {
+
+	var directorAudience string
+	directorAudience, err = token.GetWLCGAudience(directorUrl)
 	if err != nil {
-		err = errors.Wrap(err, "failed to get federation info")
+		err = errors.Wrap(err, "failed to determine correct token audience for director")
 		return
 	}
-	directorUrl := fInfo.DirectorEndpoint
-	if directorUrl == "" {
-		err = errors.New("unable to determine Director's URL")
-		return
-	}
-	adTokCfg.Audience = directorUrl
+
+	adTokCfg.Audience = directorAudience
 	adTokCfg.Subject = param.Cache_Url.GetString()
 	issuer, err := config.GetServerIssuerURL()
 	if err != nil {

@@ -1770,6 +1770,9 @@ func ResetConfig() {
 	onceTransport = sync.Once{}
 	transport = nil
 
+	// Clear the instance ID information for generated server ads
+	server_structs.Reset()
+
 	// Reset federation metadata
 	fedDiscoveryOnce = &sync.Once{}
 	globalFedInfo = pelican_url.FederationDiscovery{}

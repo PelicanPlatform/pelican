@@ -30,6 +30,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/token"
 )
 
 type (
@@ -205,18 +206,16 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 
 // Advertisement token configuration for the origin server. Used to get Origin-specific
 // config that would differ from caches.
-func (server *OriginServer) GetAdTokCfg(ctx context.Context) (adTokCfg server_structs.AdTokCfg, err error) {
-	fInfo, err := config.GetFederation(ctx)
+func (server *OriginServer) GetAdTokCfg(directorUrl string) (adTokCfg server_structs.AdTokCfg, err error) {
+
+	var directorAudience string
+	directorAudience, err = token.GetWLCGAudience(directorUrl)
 	if err != nil {
-		err = errors.Wrap(err, "failed to get federation info")
+		err = errors.Wrap(err, "failed to determine correct token audience for director")
 		return
 	}
-	directorUrl := fInfo.DirectorEndpoint
-	if directorUrl == "" {
-		err = errors.New("unable to determine Director's URL")
-		return
-	}
-	adTokCfg.Audience = directorUrl
+
+	adTokCfg.Audience = directorAudience
 	adTokCfg.Subject = param.Origin_Url.GetString()
 	adTokCfg.Issuer = param.Server_IssuerUrl.GetString()
 
