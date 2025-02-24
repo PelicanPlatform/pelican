@@ -37,12 +37,12 @@ export interface SuccessResponse<T extends ResponseData> {
   data: T;
 }
 
-interface VectorResult {
+export interface VectorResult {
   metric: Record<string, string>;
   value: DataTuple;
 }
 
-interface MatrixResult {
+export interface MatrixResult {
   metric: Record<string, string>;
   values: DataTuple[];
 }
@@ -274,4 +274,57 @@ export const replaceQueryParameters = (
     }
   });
   return q;
+};
+
+/** Takes a prometheus response and fills in null values with 0 */
+export const fillMatrixNulls = (
+  defaultValue: any,
+  data: MatrixResponseData
+): MatrixResponseData => {
+  let longestIndex = 0;
+  let longestLength = 0;
+  data.result.forEach((result, index) => {
+    let values = result.values;
+    if (values.length > longestLength) {
+      longestLength = values.length;
+      longestIndex = index;
+    }
+  });
+
+  let longestValues = data.result[longestIndex].values;
+  let timeKeys = longestValues.map((value) => value[0]);
+
+  // Fill in the null values with 0 for the times that are missing otherwise
+  data.result.forEach((result) => {
+    result.values = fillArrayNulls(defaultValue, timeKeys, result.values);
+  });
+
+  return data;
+};
+
+export const fillArrayNulls = (
+  defaultValue: any,
+  timeKeys: number[],
+  array: [number, string][]
+): [number, string][] => {
+  // If they are the same length there is nothing to be done
+  if (timeKeys.length == array.length) {
+    return array;
+  }
+
+  // Create an empty struct to be filled in by the partial array
+  let newStructure: Record<number, string> = {};
+  timeKeys.forEach((key) => {
+    newStructure[key] = defaultValue;
+  });
+
+  // Fill in the struct from the partial array
+  array.forEach(([key, value]) => {
+    newStructure[key] = value;
+  });
+
+  // Convert the struct back into an array
+  return Object.entries(newStructure).map(([key, value]) => {
+    return [parseInt(key), value];
+  });
 };
