@@ -51,7 +51,7 @@ const GeoIpErrorTable = () => {
       await alertOnError(getOverriddenGeoIps, 'Could not get config', dispatch)
   );
   const patchedIps = useMemo(() => {
-    return config?.GeoIPOverrides === undefined
+    return config?.GeoIPOverrides == null
       ? []
       : Object.values(config.GeoIPOverrides).map((x: GeoIPOverride) => x.ip);
   }, [config]);

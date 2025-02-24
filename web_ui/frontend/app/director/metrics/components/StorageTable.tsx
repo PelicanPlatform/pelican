@@ -79,11 +79,11 @@ export const StorageTable = () => {
               </TableHead>
               <TableBody>
                 {Object.values(storageData)
-                  .sort((a, b) =>
-                    a.serverName.toUpperCase() > b.serverName.toUpperCase()
-                      ? 1
-                      : -1
-                  )
+                  .sort((a, b) => {
+                    const nameA = a.serverName.toUpperCase();
+                    const nameB = b.serverName.toUpperCase();
+                    return nameA > nameB ? 1 : nameA < nameB ? -1 : 0;
+                  })
                   .map((d) => (
                     <TableRow key={d.serverName}>
                       <TableCell>{d.serverName}</TableCell>
@@ -137,6 +137,10 @@ const getStorageData = async (
   return result.reduce((acc: Record<string, any>, r) => {
     const serverName = r.metric.server_name;
     const type = r.metric.type;
+
+    if (serverName === undefined) {
+      return acc;
+    }
 
     acc[serverName] = {
       ...acc?.[serverName],
