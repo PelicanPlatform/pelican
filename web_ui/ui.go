@@ -189,6 +189,17 @@ func getEnabledServers(ctx *gin.Context) {
 	ctx.JSON(200, gin.H{"servers": enabledServers})
 }
 
+func getVersionHandler(ctx *gin.Context) {
+	response := gin.H{
+		"version":     config.GetVersion(),
+		"buildDate":   config.GetBuiltDate(),
+		"buildCommit": config.GetBuiltCommit(),
+		"builtBy":     config.GetBuiltBy(),
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
 func handleGlobusPages(ctx *gin.Context) {
 	// /foo/bar
 	requestPath := ctx.Param("requestPath")
@@ -534,6 +545,7 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	})
 	engine.POST("/api/v1.0/createApiToken", createApiToken)
 	engine.DELETE("/api/v1.0/deleteApiToken/:id", deleteApiToken)
+	engine.GET("/api/v1.0/version", getVersionHandler)
 	return nil
 }
 

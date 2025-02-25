@@ -651,7 +651,7 @@ definitions:
       exports:
         type: array
         items:
-           $ref: "#/definitions/OriginExport"
+          $ref: "#/definitions/OriginExport"
         minItems: 0
   GlobusExport:
     type: object
@@ -800,8 +800,7 @@ paths:
       tags:
         - "common"
       summary: Update the server configuration with user-provided changes
-      description:
-        "`Authentication Required` `Admin privilege Required`
+      description: "`Authentication Required` `Admin privilege Required`
 
 
         The server will restart promptly after a  successful request. You may query against
@@ -816,8 +815,7 @@ paths:
         - in: body
           name: config
           required: true
-          description:
-            The config value to update.
+          description: The config value to update.
             It must be a JSON object with keys/values that match config parameters' name and data type.
             Parameter names are case-insensitive.
           schema:
@@ -932,6 +930,39 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
+  /version:
+    get:
+      tags:
+        - "common"
+      summary: Retrieve server version and build details
+      description: |
+        This endpoint returns detailed version information about the server,
+        including the build commit, build date, the entity responsible for the build, and the current version.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Successful retrieval of server version and build metadata
+          schema:
+            type: object
+            properties:
+              buildCommit:
+                type: string
+                example: "2a6af914c9b9ed4831ef78cbd2611da43f454324"
+                description: The unique commit hash used for the build
+              buildDate:
+                type: string
+                format: date-time
+                example: "2025-02-24T16:24:23Z"
+                description: The timestamp when the build was created
+              builtBy:
+                type: string
+                example: "goreleaser"
+                description: The tool responsible for the build
+              version:
+                type: string
+                example: "7.8.0"
+                description: The current version of the server
   /metrics/health:
     get:
       tags:
@@ -2113,7 +2144,7 @@ paths:
             type: string
           description: The authorization token, may also be passed via "Authorization" header.
       responses:
-        '200':
+        "200":
           description: Successfully generated federation token.
           content:
             application/json:
@@ -2123,7 +2154,7 @@ paths:
                   AccessToken:
                     type: string
                     description: The generated federation token.
-        '403':
+        "403":
           description: Forbidden - validation error or unauthorized request.
           content:
             application/json:
@@ -2136,7 +2167,7 @@ paths:
                   Msg:
                     type: string
                     description: Error message.
-        '500':
+        "500":
           description: Internal Server Error - unexpected error occurred.
           content:
             application/json:
