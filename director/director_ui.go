@@ -575,6 +575,13 @@ func handleAllowServer(ctx *gin.Context) {
 			Msg:    fmt.Sprintf("Can't allow server %s that is disabled by the OSG Topology. Contact OSG admin at support@osg-htc.org to enable the server.", sn),
 		})
 		return
+	} else if ft == serverFiltered {
+		// Server is disabled by server admin
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Can't allow server %s that is disabled by the server admin. Contact server admin to enable the server.", sn),
+		})
+		return
 	}
 	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "success"})
 }

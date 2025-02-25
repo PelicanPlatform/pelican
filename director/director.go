@@ -1269,6 +1269,30 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		adV2.Version = "unknown"
 	}
 
+	if adV2.Downtimes != nil {
+		// Process received origin downtimes and toggle the director db accordingly when necessary
+		currentTime := time.Now().UTC().UnixMilli()
+		bringItDown := false
+		for _, downtime := range adV2.Downtimes {
+			if downtime.StartTime < currentTime && downtime.EndTime > currentTime {
+				// Server is currently in downtime
+				err := setServerDowntime(adV2.Name, serverFiltered) // error-prone, TODO
+				if err != nil {
+					log.Warningf("Failed to set downtime for server %s: %v", adV2.Name, err)
+				}
+				bringItDown = true
+				break
+			}
+		}
+		// If the origin doesn't ask to bring itself down, remove the downtime if it was set by server admin
+		if !bringItDown {
+			err := deleteServerDowntimeSetByServerAdmin(adV2.Name)
+			if err != nil {
+				log.Warningf("Failed to remove downtime for server %s: %v", adV2.Name, err)
+			}
+		}
+	}
+
 	// Forward to other directors, if applicable
 	forwardServiceAd(engineCtx, &adV2, sType)
 
@@ -1337,6 +1361,8 @@ func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, adV2 *se
 		Type:                sType.String(),
 		Caps:                adV2.Caps,
 		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
+		Downtimes:           adV2.Downtimes,
+		Version:             adV2.Version,
 	}
 	sAd.CopyFrom(adV2)
 

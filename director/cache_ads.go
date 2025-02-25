@@ -42,10 +42,11 @@ import (
 type filterType string
 
 const (
-	permFiltered filterType = "permFiltered"     // Read from Director.FilteredServers
-	tempFiltered filterType = "tempFiltered"     // Filtered by web UI, e.g. the server is put in downtime via the director website
-	topoFiltered filterType = "topologyFiltered" // Filtered by Topology, e.g. the server is put in downtime via the OSDF Topology change
-	tempAllowed  filterType = "tempAllowed"      // Read from Director.FilteredServers but mutated by web UI
+	permFiltered   filterType = "permFiltered"     // Read from Director.FilteredServers
+	tempFiltered   filterType = "tempFiltered"     // Filtered by web UI, e.g. the server is put in downtime via the director website
+	serverFiltered filterType = "serverFiltered"   // Filtered by the server itself, e.g. the server is put in downtime by the server admin
+	topoFiltered   filterType = "topologyFiltered" // Filtered by Topology, e.g. the server is put in downtime via the OSDF Topology change
+	tempAllowed    filterType = "tempAllowed"      // Read from Director.FilteredServers but mutated by web UI
 )
 
 var (
