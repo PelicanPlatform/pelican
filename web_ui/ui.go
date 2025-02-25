@@ -191,10 +191,10 @@ func getEnabledServers(ctx *gin.Context) {
 
 func getVersionHandler(ctx *gin.Context) {
 	response := gin.H{
-		"Version":      config.GetVersion(),
-		"Build Date":   config.GetBuiltDate(),
-		"Build Commit": config.GetBuiltCommit(),
-		"Built By":     config.GetBuiltBy(),
+		"version":     config.GetVersion(),
+		"buildDate":   config.GetBuiltDate(),
+		"buildCommit": config.GetBuiltCommit(),
+		"builtBy":     config.GetBuiltBy(),
 	}
 
 	ctx.JSON(http.StatusOK, response)

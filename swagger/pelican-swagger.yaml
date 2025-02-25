@@ -946,20 +946,20 @@ paths:
           schema:
             type: object
             properties:
-              Build Commit:
+              buildCommit:
                 type: string
                 example: "2a6af914c9b9ed4831ef78cbd2611da43f454324"
                 description: The unique commit hash used for the build
-              Build Date:
+              buildDate:
                 type: string
                 format: date-time
                 example: "2025-02-24T16:24:23Z"
                 description: The timestamp when the build was created
-              Built By:
+              builtBy:
                 type: string
                 example: "goreleaser"
                 description: The tool responsible for the build
-              Version:
+              version:
                 type: string
                 example: "7.8.0"
                 description: The current version of the server
