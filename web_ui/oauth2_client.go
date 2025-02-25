@@ -308,12 +308,9 @@ func handleOAuthCallback(ctx *gin.Context) {
 
 	client := oauthConfig.Client(c, token)
 	client.Transport = config.GetTransport()
-	// CILogon requires token to be set as part of post form
-	data := url.Values{}
-	data.Add("access_token", token.AccessToken)
 
 	// Use access_token to get user info from CILogon
-	userInfoReq, err := http.NewRequest(http.MethodPost, oauthUserInfoUrl, strings.NewReader(data.Encode()))
+	userInfoReq, err := http.NewRequest(http.MethodGet, oauthUserInfoUrl, nil)
 	if err != nil {
 		log.Errorf("Error creating a new request for user info from auth provider at %s. %v", oauthUserInfoUrl, err)
 		ctx.JSON(http.StatusInternalServerError,
@@ -324,7 +321,6 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 	userInfoReq.Header.Add("Authorization", token.TokenType+" "+token.AccessToken)
-	userInfoReq.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := client.Do(userInfoReq)
 	if err != nil {
