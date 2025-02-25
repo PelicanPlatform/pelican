@@ -45,7 +45,7 @@ popd
 # Add patches to xrootd source code if needed
 git clone https://github.com/PelicanPlatform/xrootd.git
 pushd xrootd
-git checkout v5.7.2-pelican
+git checkout v5.7.3-pelican
 mkdir xrootd_build
 cd xrootd_build
 cmake .. -GNinja
@@ -53,7 +53,7 @@ ninja
 ninja install
 popd
 
-git clone --branch v1.0.2 https://github.com/PelicanPlatform/xrdcl-pelican.git
+git clone --branch v1.0.5 https://github.com/PelicanPlatform/xrdcl-pelican.git
 pushd xrdcl-pelican
 mkdir build
 cd build
