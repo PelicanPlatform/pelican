@@ -867,7 +867,31 @@ func LogPelicanVersion() {
 	log.Infoln("Build Commit:", GetBuiltCommit())
 }
 
-// Print Pelican configuration to stderr
+// printConfigHelper is a helper function for PrintConfig and PrintClientConfig
+func printConfigHelper(bytes []byte) {
+	originalFormatter := log.StandardLogger().Formatter
+
+	// Defer resetting to the original formatter
+	defer func() {
+		log.SetFormatter(originalFormatter)
+	}()
+
+	isStdout := param.Logging_LogLocation.GetString() == ""
+
+	log.SetFormatter(&log.TextFormatter{
+		DisableQuote:           true,
+		DisableTimestamp:       true,
+		DisableLevelTruncation: true,
+		ForceColors:            isStdout,
+	})
+
+	// Log the formatted JSON
+	log.Info("\n================ Pelican Configuration ================\n" +
+		string(bytes) +
+		"\n============= End of Pelican Configuration ============")
+}
+
+// PrintConfig logs the full config dump in JSON format.
 func PrintConfig() error {
 	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil {
@@ -877,11 +901,9 @@ func PrintConfig() error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr,
-		"================ Pelican Configuration ================\n",
-		string(bytes),
-		"\n",
-		"============= End of Pelican Configuration ============")
+
+	printConfigHelper(bytes)
+
 	return nil
 }
 
@@ -959,7 +981,7 @@ func filterConfigRecursive(v reflect.Value, currentPath string, component string
 	}
 }
 
-// PrintClientConfig prints the client config in JSON format to stderr.
+// PrintClientConfig logs the client config in JSON format.
 func PrintClientConfig() error {
 	clientConfig, err := GetComponentConfig("client")
 	if err != nil {
@@ -970,11 +992,9 @@ func PrintClientConfig() error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(os.Stderr,
-		"================ Pelican Client Configuration ================\n",
-		string(bytes),
-		"\n",
-		"============= End of Pelican Client Configuration ============")
+
+	printConfigHelper(bytes)
+
 	return nil
 }
 
