@@ -857,18 +857,14 @@ func LogPelicanVersion() {
 	log.Infoln("Build Commit:", GetBuiltCommit())
 }
 
-// PrintConfig logs the full config dump in JSON format.
-func PrintConfig() error {
-	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
-	if err != nil {
-		return err
-	}
-	bytes, err := json.MarshalIndent(*rawConfig, "", "  ")
-	if err != nil {
-		return err
-	}
-
+// printConfigHelper is a helper function for PrintConfig and PrintClientConfig
+func printConfigHelper(bytes []byte) {
 	originalFormatter := log.StandardLogger().Formatter
+
+	// Defer resetting to the original formatter
+	defer func() {
+		log.SetFormatter(originalFormatter)
+	}()
 
 	isStdout := param.Logging_LogLocation.GetString() == ""
 
@@ -883,8 +879,20 @@ func PrintConfig() error {
 	log.Info("\n================ Pelican Configuration ================\n" +
 		string(bytes) +
 		"\n============= End of Pelican Configuration ============")
+}
 
-	log.SetFormatter(originalFormatter)
+// PrintConfig logs the full config dump in JSON format.
+func PrintConfig() error {
+	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
+	if err != nil {
+		return err
+	}
+	bytes, err := json.MarshalIndent(*rawConfig, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	printConfigHelper(bytes)
 
 	return nil
 }
@@ -975,23 +983,7 @@ func PrintClientConfig() error {
 		return err
 	}
 
-	originalFormatter := log.StandardLogger().Formatter
-
-	isStdout := param.Logging_LogLocation.GetString() == ""
-
-	log.SetFormatter(&log.TextFormatter{
-		DisableQuote:           true,
-		DisableTimestamp:       true,
-		DisableLevelTruncation: true,
-		ForceColors:            isStdout,
-	})
-
-	// Log the formatted JSON
-	log.Info("\n================ Pelican Configuration ================\n" +
-		string(bytes) +
-		"\n============= End of Pelican Configuration ============")
-
-	log.SetFormatter(originalFormatter)
+	printConfigHelper(bytes)
 
 	return nil
 }
