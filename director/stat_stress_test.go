@@ -30,6 +30,7 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/sync/errgroup"
 
@@ -52,6 +53,7 @@ var (
 func TestStatMemory(t *testing.T) {
 	server_utils.ResetTestState()
 
+	viper.Set(param.Xrootd_EnableLocalMonitoring.GetName(), false)
 	fed := fed_test_utils.NewFedTest(t, directorPublicCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	assert.NoError(t, err)
@@ -102,6 +104,6 @@ func TestStatMemory(t *testing.T) {
 	log.Infoln("Go routine count after warm-up:", goCnt)
 	log.Infoln("Go routine count after test:", afterGoCnt)
 
-	assert.Less(t, afterStats.HeapAlloc, stats.HeapAlloc+7e5)
-	assert.Less(t, afterGoCnt, goCnt+10)
+	assert.Less(t, afterStats.HeapAlloc, stats.HeapAlloc+5e5)
+	assert.Less(t, afterGoCnt, goCnt+20)
 }

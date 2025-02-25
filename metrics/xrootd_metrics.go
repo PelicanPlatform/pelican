@@ -67,7 +67,7 @@ type (
 		Org                    string
 		Groups                 []string
 		Project                string
-		Host                   string
+		XrdUserId              XrdUserId // Back reference to the XRootD user ID generating this record
 	}
 
 	FileId struct {
@@ -400,6 +400,8 @@ func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error)
 		return nil
 	})
 
+	enableHandlePacket := param.Xrootd_EnableLocalMonitoring.GetBool()
+
 	go func() {
 		var buf [65536]byte
 		for {
@@ -412,6 +414,9 @@ func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error)
 				continue
 			}
 			PacketsReceived.Inc()
+			if !enableHandlePacket {
+				continue
+			}
 			if err = HandlePacket(buf[:plen]); err != nil {
 				log.Errorln("Failed to handle packet:", err)
 			}
@@ -562,7 +567,7 @@ func ParseTokenAuth(tokenauth string) (userId UserId, record UserRecord, err err
 
 func ParseFileHeader(packet []byte) (XrdXrootdMonFileHdr, error) {
 	if len(packet) < 8 {
-		return XrdXrootdMonFileHdr{}, fmt.Errorf("Passed header of size %v which is below the minimum header size of 8 bytes", len(packet))
+		return XrdXrootdMonFileHdr{}, fmt.Errorf("passed header of size %v which is below the minimum header size of 8 bytes", len(packet))
 	}
 	fileHdr := XrdXrootdMonFileHdr{
 		RecType: recTval(packet[0]),
@@ -627,7 +632,7 @@ func HandlePacket(packet []byte) error {
 		}
 		firstHeaderSize := binary.BigEndian.Uint16(packet[10:12])
 		if firstHeaderSize < 24 {
-			return fmt.Errorf("First entry in f-stream packet is %v bytes, smaller than the minimum XrdXrootdMonFileTOD size of 24 bytes", firstHeaderSize)
+			return fmt.Errorf("first entry in f-stream packet is %v bytes, smaller than the minimum XrdXrootdMonFileTOD size of 24 bytes", firstHeaderSize)
 		}
 		offset := uint32(firstHeaderSize + 8)
 		bytesRemain := header.Plen - uint16(offset)
@@ -661,10 +666,9 @@ func HandlePacket(packet []byte) error {
 				var oldWriteBytes uint64 = 0
 				if xferRecord != nil {
 					userRecord := sessions.Get(xferRecord.Value().UserId)
-					sessions.Delete(xferRecord.Value().UserId)
 					labels["path"] = xferRecord.Value().Path
 					if userRecord != nil {
-						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().Host)
+						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().XrdUserId.Host)
 						if !ok {
 							log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
 						} else {
@@ -769,7 +773,7 @@ func HandlePacket(packet []byte) error {
 					userRecord := sessions.Get(record.UserId)
 					labels["path"] = record.Path
 					if userRecord != nil {
-						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().Host)
+						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().XrdUserId.Host)
 						if !ok {
 							log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
 						} else {
@@ -818,8 +822,9 @@ func HandlePacket(packet []byte) error {
 			case isDisc: // XrdXrootdMonFileHdr::isDisc
 				log.Debug("MonPacket: Received a f-stream disconnect packet")
 				userId := UserId{Id: fileHdr.UserId}
-				if session := sessions.Get(userId); session != nil {
-					sessions.Delete(userId)
+				item, found := sessions.GetAndDelete(userId)
+				if found {
+					userids.Delete(item.Value().XrdUserId)
 				}
 			default:
 				log.Debug("MonPacket: Received an unhandled file monitoring packet "+
@@ -902,16 +907,16 @@ func HandlePacket(packet []byte) error {
 		log.Debug("HandlePacket: Received an appinfo packet")
 		infoSize := uint32(header.Plen - 12)
 		if xrdUserId, appinfo, err := GetSIDRest(packet[12 : 12+infoSize]); err == nil {
-			if userids.Has(xrdUserId) {
-				userId := userids.Get(xrdUserId).Value()
+			item := userids.Get(xrdUserId)
+			if item != nil {
+				userId := item.Value()
 				project := utils.ExtractProjectFromUserAgent([]string{appinfo})
-				if sessions.Has(userId) {
-					existingRec := sessions.Get(userId).Value()
+				item, found := sessions.GetOrSet(userId, UserRecord{Project: project, XrdUserId: xrdUserId}, ttlcache.WithTTL[UserId, UserRecord](ttlcache.DefaultTTL))
+				if found {
+					existingRec := item.Value()
 					existingRec.Project = project
-					existingRec.Host = xrdUserId.Host
+					existingRec.XrdUserId = xrdUserId
 					sessions.Set(userId, existingRec, ttlcache.DefaultTTL)
-				} else {
-					sessions.Set(userId, UserRecord{Project: project, Host: xrdUserId.Host}, ttlcache.DefaultTTL)
 				}
 			}
 		} else {
@@ -943,7 +948,7 @@ func HandlePacket(packet []byte) error {
 			if len(record.AuthenticationProtocol) > 0 {
 				record.User = xrdUserId.User
 			}
-			record.Host = xrdUserId.Host
+			record.XrdUserId = xrdUserId
 			sessions.Set(UserId{Id: dictid}, record, ttlcache.DefaultTTL)
 			userids.Set(xrdUserId, UserId{Id: dictid}, ttlcache.DefaultTTL)
 		} else {
@@ -957,7 +962,7 @@ func HandlePacket(packet []byte) error {
 			if err != nil {
 				return err
 			}
-			userRecord.Host = xrdUserId.Host
+			userRecord.XrdUserId = xrdUserId
 			sessions.Set(userId, userRecord, ttlcache.DefaultTTL)
 		} else {
 			return err
