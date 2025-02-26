@@ -103,6 +103,7 @@ func TestFedServeCache(t *testing.T) {
 	viper.Set("Origin.EnableVoms", false)
 	viper.Set("Server.WebPort", 0)
 	viper.Set("Origin.Port", 0)
+	viper.Set("Cache.Port", 0)
 	viper.Set("TLSSkipVerify", true)
 	viper.Set("Server.EnableUI", false)
 	viper.Set("Registry.DbLocation", filepath.Join(t.TempDir(), "ns-registry.sqlite"))
