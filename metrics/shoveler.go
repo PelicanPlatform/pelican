@@ -270,7 +270,7 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group) (int, error) {
 				return
 			} else if err != nil {
 				// output errors
-				shovelerLogger.Errorln("Failed to read from UDP connection:", err)
+				shovelerLogger.Errorln("Failed to read from UDP connection while aggregating monitoring packet from XRootD:", err)
 				// If we failed to read from the UDP connection, I'm not
 				// sure what to do, maybe just continue as if nothing happened?
 				continue
@@ -279,7 +279,7 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group) (int, error) {
 
 			err = handlePacket(buf[:rlen])
 			if err != nil {
-				shovelerLogger.Errorln("Failed to handle packet:", err)
+				shovelerLogger.Errorln("Pelican failed to handle monitoring packet received from the Shoveler:", err)
 				continue
 			}
 

@@ -413,7 +413,7 @@ func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error)
 				if errors.Is(err, net.ErrClosed) {
 					return
 				} else if err != nil {
-					log.Errorln("Failed to read from UDP connection", err)
+					log.Errorln("Failed to read from UDP connection while aggregating monitoring packet from XRootD:", err)
 					continue
 				}
 				PacketsReceived.Inc()
@@ -421,7 +421,7 @@ func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error)
 					continue
 				}
 				if err = handlePacket(buf[:plen]); err != nil {
-					log.Errorln("Failed to handle packet:", err)
+					log.Errorln("Pelican failed to handle monitoring packet received from XRootD:", err)
 				}
 			}
 		}
