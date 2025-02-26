@@ -1,4 +1,5 @@
 import ExportedImage from "next-image-export-optimizer";
+import { Table } from 'nextra/components';
 
 # Namespace Prefixes and How To Choose One
 
@@ -130,3 +131,44 @@ other stores its images in posix. Namespacing allows the data owner to hide this
 namespace:
 
 <ExportedImage width={750} height={575000} src={"/pelican/aggregated-objects.png"} alt={"Objects from multiple storage types being accessed under the same namespace"} />
+
+## Namespace Prefix Restrictions
+There are two categories of characters and character combinations that Pelican prohibits in namespace prefixes: those that are special in POSIX filepaths and
+those that are special inside URLs. In both cases, Pelican disallows these characters as a matter of design because they may cause issues with the way Pelican
+uses HTTP, or they may have unintended consequences when interacting with XRootD, where object names are treated like POSIX paths.
+
+For example, the character sequence `../` in POSIX means "up one directory", such that a filepath like `/foo/bar/../baz` is actually expanded to `/foo/baz`. This makes it
+potentially unsafe to allow a prefix like `/my-prefix/../`, which when interpreted as a filepath is just `/`. Because of the special meaning given to these characters, and because
+their use can lead to certain forms of computer attacks when handled incorrectly, Pelican disallows some characters and character combinations in prefixes.
+
+Other top-level prefixes are restricted because Pelican uses them internally for things like origin/cache registration, or in monitoring.
+
+In total, these are Pelican's namespace prefix restrictions:
+<div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "1rem" }}>
+
+<div>
+### POSIX Characters
+- `//`
+- `./`
+- `..`
+- `~`
+- `$`
+- `*`
+- `\`
+</div>
+
+<div>
+### URL Characters
+- `?`
+- `#`
+- `%`
+</div>
+
+<div>
+### Top-Level Prefixes
+- `/cache`
+- `/origin`
+- `/pelican`
+</div>
+
+</div>
