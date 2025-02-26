@@ -47,9 +47,7 @@ type (
 	}
 
 	SwapMaps []SwapMap
-)
 
-type (
 	Coordinate struct {
 		Lat  float64 `mapstructure:"lat"`
 		Long float64 `mapstructure:"long"`
@@ -180,12 +178,12 @@ func setProjectLabel(ctx context.Context, labels *prometheus.Labels) {
 	}
 }
 
-func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
+func getLatLong(addr netip.Addr) (lat float64, long float64, radius uint16, err error) {
 	ip := net.IP(addr.AsSlice())
 	override := checkOverrides(ip)
 	if override != nil {
 		log.Infof("Overriding Geolocation of detected IP (%s) to lat:long %f:%f based on configured overrides", ip.String(), (override.Lat), override.Long)
-		return override.Lat, override.Long, nil
+		return override.Lat, override.Long, 0, nil
 	}
 
 	labels := prometheus.Labels{
@@ -216,7 +214,7 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	}
 	lat = record.Location.Latitude
 	long = record.Location.Longitude
-
+	radius = record.Location.AccuracyRadius
 	// If the lat/long results in null _before_ we've had a chance to potentially set it to null, log a warning.
 	// There's likely a problem with the GeoIP database or the IP address. Usually this just means the IP address
 	// comes from a private range.
@@ -231,9 +229,9 @@ func getLatLong(addr netip.Addr) (lat float64, long float64, err error) {
 	// IP, it sets the radius to 1000. If we get a radius of 900 or more (probably even much less than this...), we
 	// should be very suspicious of the data, and mark it as appearing at the null lat/long (and provide a warning in
 	// the Director), which also triggers random weighting in our sort algorithms.
-	if record.Location.AccuracyRadius >= 900 {
+	if radius >= 900 {
 		errMsg := fmt.Sprintf("GeoIP resolution of the address %s resulted in a suspiciously large accuracy radius of %d km. "+
-			"This will be treated as GeoIP resolution failure and result in random server sorting. Setting lat/long to null.", ip.String(), record.Location.AccuracyRadius)
+			"This will be treated as GeoIP resolution failure and result in random server sorting. Setting lat/long to null.", ip.String(), radius)
 		log.Warning(errMsg)
 		lat = 0
 		long = 0
@@ -253,7 +251,7 @@ func assignRandBoundedCoord(minLat, maxLat, minLong, maxLong float64) (lat, long
 
 // Given a client address, attempt to get the lat/long of the client. If the address is invalid or
 // the lat/long is not resolvable, assign a random location in the contiguous US.
-func getClientLatLong(addr netip.Addr) (coord Coordinate, err error) {
+func getClientLatLong(addr netip.Addr, redirectInfo *server_structs.RedirectInfo) (coord Coordinate, err error) {
 	if !addr.IsValid() {
 		log.Warningf("Unable to sort servers based on client-server distance. Invalid client IP address: %s", addr.String())
 		coord.Lat, coord.Long = assignRandBoundedCoord(usLatMin, usLatMax, usLongMin, usLongMax)
@@ -264,10 +262,15 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate, err error) {
 			log.Warningf("Assigning random location in the contiguous US to lat/long %f, %f. This assignment will be cached for 20 minutes.", coord.Lat, coord.Long)
 		}
 		coord = cached.Value()
+		redirectInfo.ClientInfo.Lat = coord.Lat
+		redirectInfo.ClientInfo.Lon = coord.Long
+		redirectInfo.ClientInfo.FromTTLCache = exists
+		redirectInfo.ClientInfo.Resolved = false
+		redirectInfo.ClientInfo.GeoIpRadiusKm = 0 // 0 indicates no radius, i.e. an error
 		return
 	}
 
-	coord.Lat, coord.Long, err = getLatLong(addr)
+	coord.Lat, coord.Long, redirectInfo.ClientInfo.GeoIpRadiusKm, err = getLatLong(addr)
 	if err != nil || (coord.Lat == 0 && coord.Long == 0) {
 		if err != nil {
 			log.Warningf("Error while getting the client IP address: %v", err)
@@ -280,7 +283,19 @@ func getClientLatLong(addr netip.Addr) (coord Coordinate, err error) {
 			log.Warningf("Client IP %s has been re-assigned a random location in the contiguous US to lat/long %f, %f. This assignment will be cached for 20 minutes.", addr.String(), coord.Lat, coord.Long)
 		}
 		coord = cached.Value()
+		redirectInfo.ClientInfo.Lat = coord.Lat
+		redirectInfo.ClientInfo.Lon = coord.Long
+		redirectInfo.ClientInfo.FromTTLCache = exists
+		redirectInfo.ClientInfo.Resolved = false
+		redirectInfo.ClientInfo.GeoIpRadiusKm = 0 // 0 indicates no radius, i.e. an error
+		return
 	}
+
+	redirectInfo.ClientInfo.FromTTLCache = false
+	redirectInfo.ClientInfo.Resolved = true
+	redirectInfo.ClientInfo.Lat = coord.Lat
+	redirectInfo.ClientInfo.Lon = coord.Long
+
 	return
 }
 
@@ -303,13 +318,14 @@ func invertWeightIfNeeded(isRand bool, weight float64) float64 {
 // Note that if the client has invalid IP address or MaxMind is unable to get the coordinates out of
 // the client IP, any distance-related steps are skipped. If the sort method is "distance", then
 // the serverAds are randomly sorted.
-func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_structs.ServerAd, availabilityMap map[string]bool) ([]server_structs.ServerAd, error) {
+func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_structs.ServerAd, availabilityMap map[string]bool, redirectInfo *server_structs.RedirectInfo) ([]server_structs.ServerAd, error) {
 	// Each entry in weights will map a priority to an index in the original ads slice.
 	// A larger weight is a higher priority.
 	weights := make(SwapMaps, len(ads))
 	sortMethod := param.Director_CacheSortMethod.GetString()
+	redirectInfo.DirectorSortMethod = sortMethod
 	// This will handle the case where the client address is invalid or the lat/long is not resolvable.
-	clientCoord, err := getClientLatLong(clientAddr)
+	clientCoord, err := getClientLatLong(clientAddr, redirectInfo)
 	if err != nil {
 		// If it is a geoIP error, then we get the labels and increment the error counter
 		// Otherwise we log the error and continue
@@ -323,6 +339,13 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {
+		redirectInfo.ServersInfo[ad.URL.String()] = &server_structs.ServerRedirectInfo{
+			Lat: ad.Latitude,
+			Lon: ad.Longitude,
+			LoadWeight: ad.IOLoad,
+			HasObject: "unknown",
+		}
+
 		switch server_structs.SortType(sortMethod) {
 		case server_structs.DistanceType:
 			// If either client or ad coordinates are null, the underlying distanceWeight function will return a random weight
@@ -368,10 +391,12 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 				weight *= 1.0
 			} else if hasObj, ok := availabilityMap[ad.URL.String()]; ok && hasObj {
 				weight *= invertWeightIfNeeded(isRand, 2.0)
+				redirectInfo.ServersInfo[ad.URL.String()].HasObject = "true"
 			} else if !ok {
 				weight *= 1.0
 			} else { // ok but does not have the object
 				weight *= invertWeightIfNeeded(isRand, 0.5)
+				redirectInfo.ServersInfo[ad.URL.String()].HasObject = "false"
 			}
 
 			// Load weight

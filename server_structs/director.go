@@ -172,6 +172,28 @@ type (
 		VaultServer   *url.URL
 	}
 
+	ClientRedirectInfo struct {
+		Lat           float64 `json:"lat"`
+		Lon           float64 `json:"lon"`
+		GeoIpRadiusKm uint16  `json:"geo-ip-radius-km"` // 0 will indicate no radius (i.e. no resolution)
+		Resolved      bool    `json:"resolved"`         // whether or not the client IP was resolved by MaxMind
+		FromTTLCache  bool    `json:"from-ttlcache"`    // whether we're using a cached value
+		IpAddr        string  `json:"ip-addr"`
+	}
+
+	ServerRedirectInfo struct {
+		Lat        float64 `json:"lat"`
+		Lon        float64 `json:"lon"`
+		HasObject  string  `json:"has-object"`
+		LoadWeight float64 `json:"load-weight"`
+	}
+
+	RedirectInfo struct {
+		ClientInfo         ClientRedirectInfo
+		ServersInfo        map[string]*ServerRedirectInfo
+		DirectorSortMethod string
+	}
+
 	DirectorResponse struct {
 		ObjectServers []*url.URL // List of servers provided in Link header
 		Location      *url.URL   // URL content of the location header
@@ -271,6 +293,15 @@ func (x *XPelTokGen) ParseRawResponse(resp *http.Response) error {
 		}
 	}
 	return nil
+}
+
+func NewRedirectInfoFromIP(ipAddr string) *RedirectInfo {
+	return &RedirectInfo{
+		ClientInfo: ClientRedirectInfo{
+			IpAddr: ipAddr,
+		},
+		ServersInfo: map[string]*ServerRedirectInfo{},
+	}
 }
 
 const (
