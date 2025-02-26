@@ -27,6 +27,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -139,7 +140,7 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 	}
 
 	// Fetch origin's active downtimes
-	downtimes, err := getActiveDowntimes()
+	downtimes, err := database.GetActiveDowntimes()
 	if err != nil {
 		return nil, err
 	}

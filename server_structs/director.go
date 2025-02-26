@@ -84,7 +84,7 @@ type (
 	Downtime struct {
 		UUID        string   `json:"uuid" gorm:"primaryKey"`
 		CreatedBy   string   `json:"createdBy" gorm:"not null"` // Person who created this downtime
-		Class       Class    `json:"class" gorm:"not null"`
+		Class       Class    `json:"class" gorm:"not null"`     // SCHEDULED or UNSCHEDULED
 		Description string   `json:"description" gorm:"type:text"`
 		Severity    Severity `json:"severity" gorm:"type:varchar(80);not null"`
 		StartTime   int64    `json:"startTime" gorm:"not null;index"` // Epoch UTC

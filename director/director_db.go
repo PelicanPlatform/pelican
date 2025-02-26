@@ -158,7 +158,7 @@ var deleteServerDowntimeFn deleteServerDowntimeFunc = deleteServerDowntime
 // Delete the downtime info of a given server from the Director's sqlite database when it was set by server admin
 func deleteServerDowntimeSetByServerAdmin(serverName string) error {
 	var serverDowntime ServerDowntime
-	err := db.First(&serverDowntime, "name = ?", serverName).Error
+	err := database.DirectorDB.First(&serverDowntime, "name = ?", serverName).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
@@ -166,7 +166,7 @@ func deleteServerDowntimeSetByServerAdmin(serverName string) error {
 		return errors.Wrapf(err, "unable to retrieve downtime status for server %s", serverName)
 	}
 
-	// If the downtime was set by server admin, delete it
+	// If the downtime was set by server admin, delete it; otherwise, do nothing
 	if serverDowntime.FilterType == serverFiltered {
 		return deleteServerDowntimeFn(serverName)
 	}

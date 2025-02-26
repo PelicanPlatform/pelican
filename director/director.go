@@ -1270,9 +1270,10 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	}
 
 	if adV2.Downtimes != nil {
-		// Process received origin downtimes and toggle the director db accordingly when necessary
+		// Process received server(origin/cache) downtimes and toggle the director db accordingly when necessary
 		currentTime := time.Now().UTC().UnixMilli()
 		bringItDown := false
+		// Check if the server is currently in downtime
 		for _, downtime := range adV2.Downtimes {
 			if downtime.StartTime < currentTime && downtime.EndTime > currentTime {
 				// Server is currently in downtime
@@ -1284,7 +1285,8 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 				break
 			}
 		}
-		// If the origin doesn't ask to bring itself down, remove the downtime if it was set by server admin
+		// If the server doesn't have an active downtime, it means Director's previously
+		// recorded downtime set by the server admin is stale and should be removed
 		if !bringItDown {
 			err := deleteServerDowntimeSetByServerAdmin(adV2.Name)
 			if err != nil {
