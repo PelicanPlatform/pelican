@@ -184,7 +184,7 @@ func packageUdp(packet []byte, remote *net.UDPAddr) ([]byte, error) {
 	return b, nil
 }
 
-func LaunchShoveler(ctx context.Context, egrp *errgroup.Group, metricsPort int) (int, error) {
+func LaunchShoveler(ctx context.Context, egrp *errgroup.Group) (int, error) {
 	shovelerLogger = log.WithField("component", "shoveler")
 	shoveler.SetLogger(shovelerLogger)
 
@@ -238,15 +238,6 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group, metricsPort int) 
 	// Create the UDP forwarding destinations
 	var udpDestinations []net.Conn
 
-	// By default, forward to metrics endpoint for Prometheus metrics
-	// TODO: integrate metrics to shoveler and remove the forwarding
-	metricsEndpoint := fmt.Sprint("127.0.0.1:", metricsPort)
-	udpConn, err := net.Dial("udp", metricsEndpoint)
-	if err != nil {
-		shovelerLogger.Warningln("Unable to connect to metrics endpoint:", metricsEndpoint, err)
-	}
-	udpDestinations = append(udpDestinations, udpConn)
-
 	if len(config.DestUdp) > 0 {
 		for _, dest := range config.DestUdp {
 			udpConn, err := net.Dial("udp", dest)
@@ -279,12 +270,18 @@ func LaunchShoveler(ctx context.Context, egrp *errgroup.Group, metricsPort int) 
 				return
 			} else if err != nil {
 				// output errors
-				shovelerLogger.Errorln("Failed to read from UDP connection:", err)
+				shovelerLogger.Errorln("Failed to read from UDP connection while aggregating monitoring packet from XRootD:", err)
 				// If we failed to read from the UDP connection, I'm not
 				// sure what to do, maybe just continue as if nothing happened?
 				continue
 			}
 			shoveler.PacketsReceived.Inc()
+
+			err = handlePacket(buf[:rlen])
+			if err != nil {
+				shovelerLogger.Errorln("Pelican failed to handle monitoring packet received from the Shoveler:", err)
+				continue
+			}
 
 			if config.Verify && !shoveler.VerifyPacket(buf[:rlen]) {
 				shoveler.ValidationsFailed.Inc()
