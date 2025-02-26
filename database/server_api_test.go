@@ -15,7 +15,7 @@
  * limitations under the License.
  *
  ***************************************************************/
-package origin
+package database
 
 import (
 	"bytes"
@@ -27,13 +27,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/server_structs"
-	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func setupRouter() *gin.Engine {
@@ -41,23 +41,23 @@ func setupRouter() *gin.Engine {
 	r := gin.Default()
 	originDowntimeAPI := r.Group("/api/v1.0/origin_ui/downtime")
 	{
-		originDowntimeAPI.POST("/", handleCreateDowntime)
-		originDowntimeAPI.GET("/", handleGetActiveDowntime)
-		originDowntimeAPI.GET("/all", handleGetAllDowntime)
-		originDowntimeAPI.GET("/:uuid", handleGetDowntimeByUUID)
-		originDowntimeAPI.PUT("/:uuid", handleUpdateDowntime)
-		originDowntimeAPI.DELETE("/:uuid", handleDeleteDowntime)
+		originDowntimeAPI.POST("/", HandleCreateDowntime)
+		originDowntimeAPI.GET("/", HandleGetActiveDowntime)
+		originDowntimeAPI.GET("/all", HandleGetAllDowntime)
+		originDowntimeAPI.GET("/:uuid", HandleGetDowntimeByUUID)
+		originDowntimeAPI.PUT("/:uuid", HandleUpdateDowntime)
+		originDowntimeAPI.DELETE("/:uuid", HandleDeleteDowntime)
 	}
 	return r
 }
 
 func TestDowntime(t *testing.T) {
-	server_utils.ResetTestState()
+	config.ResetConfig()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		cancel()
 		assert.NoError(t, egrp.Wait())
-		server_utils.ResetTestState()
+		config.ResetConfig()
 	})
 
 	// Initialize the mock database
@@ -96,8 +96,10 @@ func TestDowntime(t *testing.T) {
 		CreatedAt:   time.Now().UTC().Add(-20 * time.Hour).UnixMilli(),
 		UpdatedAt:   time.Now().UTC().Add(-20 * time.Hour).UnixMilli(),
 	}
-	insertMockDowntime(activeDowntime)
-	insertMockDowntime(pastDowntime)
+	err = insertMockDowntime(activeDowntime)
+	assert.NoError(t, err)
+	err = insertMockDowntime(pastDowntime)
+	assert.NoError(t, err)
 
 	t.Run("get-active-downtime", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/api/v1.0/origin_ui/downtime/", nil)
