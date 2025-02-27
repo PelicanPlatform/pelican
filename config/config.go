@@ -1341,9 +1341,12 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		return errors.Wrapf(err, "failure when creating a directory for the monitoring data")
 	}
 
-	if err := MkdirAll(param.Shoveler_QueueDirectory.GetString(), 0750, user.Uid, user.Gid); err != nil {
-		return errors.Wrapf(err, "failure when creating a directory for the shoveler on-disk queue")
+	if currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType) {
+		if err := MkdirAll(param.Shoveler_QueueDirectory.GetString(), 0750, user.Uid, user.Gid); err != nil {
+			return errors.Wrapf(err, "failure when creating a directory for the shoveler on-disk queue")
+		}
 	}
+
 	if currentServers.IsEnabled(server_structs.OriginType) {
 		ost := param.Origin_StorageType.GetString()
 		switch ost {
