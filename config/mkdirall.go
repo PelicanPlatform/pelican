@@ -23,7 +23,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"syscall"
 
 	"github.com/pkg/errors"
@@ -78,7 +77,11 @@ func MkdirAll(path string, perm os.FileMode, uid int, gid int) error {
 
 	// Set ownership on the directory that we just created.
 	if runtime.GOOS == "windows" {
-		cmd := exec.Command("icacls", path, "/grant", "*"+strconv.Itoa(uid)+":F")
+		username, err := GetDaemonUser() // FIXME (brianaydemir): This is not the correct user.
+		if err != nil {
+			return err
+		}
+		cmd := exec.Command("icacls", path, "/grant", username+":F")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return errors.Wrapf(err, "Failed to modify discretionary ACLs on directory %v: %s", path, string(output))
