@@ -473,8 +473,8 @@ ARG TARGETOS TARGETARCH
 COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican_${TARGETOS}_${TARGETARCH}/pelican /usr/local/bin/pelican
 COPY images/entrypoint.sh /entrypoint.sh
 COPY scripts/geoquery.py /usr/local/sbin/geoquery
-RUN dnf install -y python3-pip
-RUN python3 -m pip install geoip2
+RUN dnf install -y python3-pip \
+    && python3 -m pip install geoip2
 ENTRYPOINT ["/entrypoint.sh", "pelican", "director"]
 CMD ["serve"]
 
