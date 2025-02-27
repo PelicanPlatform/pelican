@@ -524,13 +524,13 @@ CMD ["serve"]
 #################################################################
 FROM xrootd-software-base AS cache
 ARG TARGETOS TARGETARCH
-COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/bin/pelican-server
+COPY --from=pelican-build /pelican-build/dist/${TARGETOS}_${TARGETARCH}/pelican-server_${TARGETOS}_${TARGETARCH}/pelican-server /usr/local/sbin/pelican-server
 COPY images/entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh", "pelican-server", "cache"]
 CMD ["serve"]
 
 FROM cache AS osdf-cache
-RUN ln -s pelican-server /usr/local/bin/osdf-server
+RUN ln -s pelican-server /usr/local/sbin/osdf-server
 ENTRYPOINT ["/entrypoint.sh", "osdf-server", "cache"]
 CMD ["serve"]
 
