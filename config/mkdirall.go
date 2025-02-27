@@ -75,29 +75,20 @@ func MkdirAll(path string, perm os.FileMode, uid int, gid int) error {
 		return err
 	}
 
-	user, err := GetDaemonUser()
-	if err != nil {
-		return err
-	}
-	groupname, err := GetDaemonGroup()
-	if err != nil {
-		return err
-	}
-
-	// Windows does not have "chown", has to work differently
-	currentOS := runtime.GOOS
-	if currentOS == "windows" {
-		cmd := exec.Command("icacls", path, "/grant", user+":F")
+	// Set ownership on the directory that we just created.
+	if runtime.GOOS == "windows" {
+		username, err := GetDaemonUser() // FIXME (brianaydemir): This is not the correct user.
+		if err != nil {
+			return err
+		}
+		cmd := exec.Command("icacls", path, "/grant", username+":F")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			return errors.Wrapf(err, "Failed to chown directory %v to groupname %v: %s",
-				path, groupname, string(output))
+			return errors.Wrapf(err, "Failed to modify discretionary ACLs on directory %v: %s", path, string(output))
 		}
-		return nil
-	} else { // Else we are running on linux/mac
+	} else { // Assume macOS or Linux.
 		if err = os.Chown(path, uid, gid); err != nil {
-			return errors.Wrapf(err, "Failed to chown directory %v to groupname %v",
-				path, groupname)
+			return errors.Wrapf(err, "Failed to chown on directory %v to %v:%v", path, uid, gid)
 		}
 	}
 	return nil
