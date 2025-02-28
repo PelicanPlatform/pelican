@@ -327,27 +327,15 @@ jobs:
           cache-to: type=registry,ref=hub.opensciencegrid.org/pelican_platform/pelican-dev:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
 
   # The macOS and Windows tests do not depend on any of the images being
-  # built above. We go ahead and trigger those tests here so that all of our
-  # tests are triggered from a single workflow.
-
-  test-macos-windows:
-    uses: ./.github/workflows/test-macos-windows.yml
-
+  # built above. Thus, there is a separate workflow for running the tests:
+  # test-macos-windows.yaml.
+  #
   # The Linux tests are less straightforward because we need to decide
   # which container image to run the tests in, which might require waiting
   # for the image to be built.
   #
-  # For the pull-request job, we cannot build and push a newer image. Thus,
-  # in the name of simplicity, the job uses the most recent container image
-  # that was built. (And technically, it might also get triggered in other
-  # scenarios, but pull requests requests will be the common one.)
-
-  test-linux-pull-request:
-    needs: [set-build-parameters]
-    if: ${{ needs.set-build-parameters.outputs.push-dev != 'true' && needs.set-build-parameters.outputs.push-server != 'true' }}
-    uses: ./.github/workflows/test-linux.yml
-    with:
-      image: hub.opensciencegrid.org/pelican_platform/pelican-test:latest-itb
+  # For a pull request, we cannot build and push a newer image. Thus, there
+  # is a separate workflow for running the tests: test-linux-pr.yaml.
 
   test-linux-push-to-main:
     needs: [set-build-parameters, build-devtest-images]

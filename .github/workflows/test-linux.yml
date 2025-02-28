@@ -1,6 +1,7 @@
 name: Run Tests (Linux)
 
-# This workflow is intended to be called from build-and-test.yml.
+# This workflow is intended to be called from other workflows, such as
+# build-and-test.yaml and test-linux-pr.yaml.
 
 on:
   workflow_call:
