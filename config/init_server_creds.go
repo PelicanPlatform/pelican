@@ -109,11 +109,11 @@ func GetIssuerPrivateKeys() map[string]jwk.Key {
 
 // Helper function to create a directory and set proper permissions to save private keys
 func createDirForKeys(dir string) error {
-	gid, err := GetDaemonGID()
+	user, err := GetPelicanUser()
 	if err != nil {
-		return errors.Wrap(err, "failed to get daemon gid")
+		return errors.Wrap(err, "failed to get pelican user")
 	}
-	if err := MkdirAll(dir, 0750, -1, gid); err != nil {
+	if err := MkdirAll(dir, 0750, -1, user.Gid); err != nil {
 		return errors.Wrapf(err, "failed to set the permission of %s", dir)
 	}
 	return nil
