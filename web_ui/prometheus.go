@@ -200,7 +200,7 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 	promTokenCfg.Lifetime = param.Monitoring_TokenExpiresIn.GetDuration()
 	promTokenCfg.Issuer = discoveryUrl.String()
 	promTokenCfg.AddAudiences(fedInfo.DirectorEndpoint)
-	promTokenCfg.Subject = "director"
+	promTokenCfg.Subject = fedInfo.DirectorEndpoint
 	promTokenCfg.AddScopes(token_scopes.Pelican_DirectorServiceDiscovery)
 
 	// CreateToken also handles validation for us
@@ -213,7 +213,7 @@ func configDirectorPromScraper(ctx context.Context) (*config.ScrapeConfig, error
 	scrapeTokenCfg.Lifetime = param.Monitoring_TokenExpiresIn.GetDuration()
 	scrapeTokenCfg.Issuer = discoveryUrl.String()
 	scrapeTokenCfg.AddAudiences("prometheus")
-	scrapeTokenCfg.Subject = "director"
+	scrapeTokenCfg.Subject = fedInfo.DirectorEndpoint
 	scrapeTokenCfg.AddScopes(token_scopes.Monitoring_Scrape)
 
 	scraperToken, err := scrapeTokenCfg.CreateToken()
