@@ -408,14 +408,15 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 			weights[idx] = SwapMap{rand.Float64(), idx}
 		default:
 			// Never say never, but this should never get hit because we validate the value on startup.
+			// The only real way to get here is through writing unit tests.
 			return nil, errors.Errorf("Invalid sort method '%s' set in Director.CacheSortMethod.", param.Director_CacheSortMethod.GetString())
 		}
 	}
 
 	if sortMethod == string(server_structs.AdaptiveType) {
-		candidates, _ := stochasticSort(weights, serverResLimit)
+		candidates := stochasticSort(weights, serverResLimit)
 		resultAds := []server_structs.ServerAd{}
-		for _, cidx := range candidates[:serverResLimit] {
+		for _, cidx := range candidates[:min(len(candidates), serverResLimit)] {
 			resultAds = append(resultAds, ads[cidx])
 		}
 		return resultAds, nil
