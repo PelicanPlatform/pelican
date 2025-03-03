@@ -84,58 +84,26 @@ func TestStochasticSort(t *testing.T) {
 		{Weight: 10.5, Index: 4},
 		{Weight: 8, Index: 5},
 		{Weight: 2.1, Index: 0},
+		{Weight: -0.9, Index: 7},
 	}
 	t.Run("non-positive-maxOut-returns-all", func(t *testing.T) {
-		c, r := stochasticSort(mockSwapMaps, 0)
+		c := stochasticSort(mockSwapMaps, 0)
 		assert.Len(t, c, len(mockSwapMaps))
-		assert.Len(t, r, len(mockSwapMaps))
 
-		c, r = stochasticSort(mockSwapMaps, -1)
+		c = stochasticSort(mockSwapMaps, -1)
 		assert.Len(t, c, len(mockSwapMaps))
-		assert.Len(t, r, len(mockSwapMaps))
 
-		c, r = stochasticSort(mockSwapMaps, -10)
+		c = stochasticSort(mockSwapMaps, -10)
 		assert.Len(t, c, len(mockSwapMaps))
-		assert.Len(t, r, len(mockSwapMaps))
 	})
 
 	t.Run("maxOut-greater-than-length-returns-len-of-sm", func(t *testing.T) {
-		c, r := stochasticSort(mockSwapMaps, len(mockSwapMaps)+1)
+		c:= stochasticSort(mockSwapMaps, len(mockSwapMaps)+1)
 		assert.Len(t, c, len(mockSwapMaps))
-		assert.Len(t, r, len(mockSwapMaps))
 	})
 
 	t.Run("maxOut-returns-correctly", func(t *testing.T) {
-		c, r := stochasticSort(mockSwapMaps, 3)
+		c := stochasticSort(mockSwapMaps, 3)
 		assert.Len(t, c, 3)
-		assert.Len(t, r, 3)
-	})
-
-	t.Run("random-num-matches-range", func(t *testing.T) {
-		c, r := stochasticSort(mockSwapMaps, 0)
-		ranges := [][]float64{} // items in ranges should corresponds to items in sm
-		for idx, val := range mockSwapMaps {
-			if idx == 0 {
-				ranges = append(ranges, []float64{0.0, val.Weight})
-			} else {
-				prev := ranges[idx-1][1]
-				ranges = append(ranges, []float64{prev, prev + val.Weight})
-			}
-		}
-
-		for ridx, ran := range r {
-			foundWeight := -1.0
-			foundMMIdx := -1
-			for midx, mm := range mockSwapMaps {
-				if c[ridx] == mm.Index {
-					foundWeight = mm.Weight
-					foundMMIdx = midx
-				}
-			}
-			assert.NotEqual(t, foundWeight, -1.0)
-			assert.NotEqual(t, foundMMIdx, -1)
-
-			assert.True(t, ran >= ranges[foundMMIdx][0] && ran < ranges[foundMMIdx][1])
-		}
 	})
 }
