@@ -31,7 +31,8 @@ jobs:
         # Do fetch depth 0 here because otherwise GoReleaser might not work properly:
         # https://goreleaser.com/ci/actions/?h=tag#workflow
         fetch-depth: 0
-    - uses: actions/setup-node@v4
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
       with:
         node-version: 20
     - name: Cache Next.js
