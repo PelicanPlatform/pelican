@@ -21,6 +21,7 @@ package config
 import (
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -80,10 +81,11 @@ func MkdirAll(path string, perm os.FileMode, uid int, gid int) error {
 	if runtime.GOOS == "windows" {
 		// A UID of -1 means to not change that value.
 		if uid != -1 {
-			// On Windows, assume this UID is actually the user's SID.
-			//   - https://pkg.go.dev/os/user#User
-			//   - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/icacls
-			cmd := exec.Command("icacls", path, "/grant", "*"+strconv.Itoa(uid)+":F")
+			u, err := user.LookupId(strconv.Itoa(uid))
+			if err != nil {
+				return errors.Wrapf(err, "Failed to lookup UID %v", uid)
+			}
+			cmd := exec.Command("icacls", path, "/grant", u.Username+":F")
 			output, err := cmd.CombinedOutput()
 			if err != nil {
 				return errors.Wrapf(err, "Failed to modify discretionary ACLs on directory %v: %s", path, string(output))
