@@ -97,7 +97,7 @@ func gatedHalvingMultiplier(val float64, threshold float64, halvingFactor float6
 }
 
 // Given a map of ranges and an index, remove the range at the index and shift the rest of the ranges
-// to the left.
+// to the left. Assumes incoming ranges are all positive values.
 func removeAndRerange(wSum *float64, ranges map[int][]float64, index int) {
 	shiftVal := ranges[index][1] - ranges[index][0]
 	*wSum -= shiftVal
@@ -118,14 +118,19 @@ func generateRanges(sm SwapMaps) (wSum float64, ranges map[int][]float64) {
 	// However, this adaptive sort algorithm assumes positive weights because of the way it stochastically
 	// grabs values from ranges. To handle this, we'll normalize the negative weights by making positive and
 	// dividing by the smallest non-negative weight from the swap maps. This guarantees negative weights always
-	// have a smaller range than positive weights, and more negative weights have smaller ranges.
-	var minWeight float64
-	for idx, val := range sm {
-		if idx == 0 {
+	// have a smaller range than positive weights, and more heavily negative weights have smaller ranges than
+	// less negative weights.
+	var minWeight float64 = math.Inf(1)
+	foundNonNegative := false
+	for _, val := range sm {
+		if val.Weight >= 0 && val.Weight < minWeight {
 			minWeight = val.Weight
-		} else if val.Weight < minWeight && val.Weight >= 0 {
-			minWeight = val.Weight
+			foundNonNegative = true
 		}
+	}
+	if !foundNonNegative {
+		// Handle the case where all weights are negative
+		minWeight = 1.0
 	}
 
 	// Calculate the ranges for each weight, and the total weight sum

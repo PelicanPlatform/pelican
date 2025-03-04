@@ -75,6 +75,169 @@ func TestGatedHalvingMultiplier(t *testing.T) {
 	assert.Equal(t, 0.25, gatedHalvingMultiplier(18, 10.0, 4.0))
 }
 
+// Given a set of ranges, test that the correct index is removed
+// and the remaining ranges are shifted to the left.
+func TestRemoveAndRerange(t *testing.T) {
+	tests := []struct {
+		name           string
+		wSum           float64
+		ranges         map[int][]float64
+		index          int
+		expectedWSum   float64
+		expectedRanges map[int][]float64
+	}{
+		{
+			name: "Remove middle range",
+			wSum: 10.0,
+			ranges: map[int][]float64{
+				0: {0.0, 2.0},
+				1: {2.0, 5.0},
+				2: {5.0, 10.0},
+			},
+			index:        1,
+			expectedWSum: 7.0,
+			expectedRanges: map[int][]float64{
+				0: {0.0, 2.0},
+				2: {2.0, 7.0},
+			},
+		},
+		{
+			name: "Remove first range",
+			wSum: 10.0,
+			ranges: map[int][]float64{
+				0: {0.0, 2.0},
+				1: {2.0, 5.0},
+				2: {5.0, 10.0},
+			},
+			index:        0,
+			expectedWSum: 8.0,
+			expectedRanges: map[int][]float64{
+				1: {0.0, 3.0},
+				2: {3.0, 8.0},
+			},
+		},
+		{
+			name: "Remove last range",
+			wSum: 10.0,
+			ranges: map[int][]float64{
+				0: {0.0, 2.0},
+				1: {2.0, 5.0},
+				2: {5.0, 10.0},
+			},
+			index:        2,
+			expectedWSum: 5.0,
+			expectedRanges: map[int][]float64{
+				0: {0.0, 2.0},
+				1: {2.0, 5.0},
+			},
+		},
+		{
+			name: "Remove only range",
+			wSum: 2.0,
+			ranges: map[int][]float64{
+				0: {0.0, 2.0},
+			},
+			index:          0,
+			expectedWSum:   0.0,
+			expectedRanges: map[int][]float64{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			removeAndRerange(&tt.wSum, tt.ranges, tt.index)
+			assert.Equal(t, tt.expectedWSum, tt.wSum)
+			assert.Equal(t, tt.expectedRanges, tt.ranges)
+		})
+	}
+}
+
+// Given a list of swap maps, test that the correct ranges are generated
+// This test assumes that negative values are normalized to positive values
+// using the scheme described in the function.
+func TestGenerateRanges(t *testing.T) {
+	tests := []struct {
+		name           string
+		sm             SwapMaps
+		expectedWSum   float64
+		expectedRanges map[int][]float64
+	}{
+		{
+			name: "Positive weights",
+			sm: SwapMaps{
+				0: {Index: 0, Weight: 2.0},
+				1: {Index: 1, Weight: 3.0},
+				2: {Index: 2, Weight: 5.0},
+			},
+			expectedWSum: 10.0,
+			expectedRanges: map[int][]float64{
+				0: {0.0, 2.0},
+				1: {2.0, 5.0},
+				2: {5.0, 10.0},
+			},
+		},
+		{
+			// When all weights are negative, we normalize using 1.0 as the numerator
+			name: "Negative weights",
+			sm: SwapMaps{
+				0: {Index: 0, Weight: -2.0}, // converts to -1 / (-2 - 1) = 0.3333
+				1: {Index: 1, Weight: -3.0}, // converts to -1 / (-3 - 1) = 0.25
+				2: {Index: 2, Weight: -5.0}, // converts to -1 / (-5 - 1) = 0.1667
+			},
+			expectedWSum: 0.75,
+			expectedRanges: map[int][]float64{
+				0: {0.0, 0.3333},
+				1: {0.3333, 0.5833},
+				2: {0.5833, 0.75},
+			},
+		},
+		{
+			name: "Mixed weights",
+			sm: SwapMaps{
+				0: {Index: 0, Weight: -2.0}, // converts to -3 / (-2 - 1) = 1
+				1: {Index: 1, Weight: 3.0},
+				2: {Index: 2, Weight: -5.0}, // converts to -3 / (-5 - 1) = 0.5
+			},
+			expectedWSum: 4.5,
+			expectedRanges: map[int][]float64{
+				0: {0.0, 1.0},
+				1: {1.0, 4.0},
+				2: {4.0, 4.5},
+			},
+		},
+		{
+			name: "Single weight",
+			sm: SwapMaps{
+				0: {Index: 0, Weight: 2.0},
+			},
+			expectedWSum: 2.0,
+			expectedRanges: map[int][]float64{
+				0: {0.0, 2.0},
+			},
+		},
+		{
+			name: "Zero weight",
+			sm: SwapMaps{
+				0: {Index: 0, Weight: 0.0},
+			},
+			expectedWSum: 0.0,
+			expectedRanges: map[int][]float64{
+				0: {0.0, 0.0},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wSum, ranges := generateRanges(tt.sm)
+			assert.InDelta(t, tt.expectedWSum, wSum, 0.0001) // InDelta to get around float precision
+			for key, val := range ranges {
+				assert.InDeltaSlice(t, tt.expectedRanges[key], val, 0.0001)
+			}
+		})
+	}
+}
+
 func TestStochasticSort(t *testing.T) {
 	mockSwapMaps := SwapMaps{
 		{Weight: 0.2, Index: 2},
