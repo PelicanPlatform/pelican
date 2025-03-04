@@ -175,23 +175,23 @@ type (
 	ClientRedirectInfo struct {
 		Lat           float64 `json:"lat"`
 		Lon           float64 `json:"lon"`
-		GeoIpRadiusKm uint16  `json:"geo-ip-radius-km"` // 0 will indicate no radius (i.e. no resolution)
-		Resolved      bool    `json:"resolved"`         // whether or not the client IP was resolved by MaxMind
-		FromTTLCache  bool    `json:"from-ttlcache"`    // whether we're using a cached value
-		IpAddr        string  `json:"ip-addr"`
+		GeoIpRadiusKm uint16  `json:"geoIpRadiusKm"` // 0 will indicate no radius (i.e. no resolution)
+		Resolved      bool    `json:"resolved"`      // whether or not the client IP was resolved by MaxMind
+		FromTTLCache  bool    `json:"fromTtlcache"`  // whether we're using a cached value
+		IpAddr        string  `json:"ipAddr"`
 	}
 
 	ServerRedirectInfo struct {
 		Lat        float64 `json:"lat"`
 		Lon        float64 `json:"lon"`
-		HasObject  string  `json:"has-object"`
-		LoadWeight float64 `json:"load-weight"`
+		HasObject  string  `json:"hasObject"`
+		LoadWeight float64 `json:"loadWeight"`
 	}
 
 	RedirectInfo struct {
-		ClientInfo         ClientRedirectInfo
-		ServersInfo        map[string]*ServerRedirectInfo
-		DirectorSortMethod string
+		ClientInfo         ClientRedirectInfo             `json:"clientInfo"`
+		ServersInfo        map[string]*ServerRedirectInfo `json:"serversInfo"`
+		DirectorSortMethod string                         `json:"directorSortMethod"`
 	}
 
 	DirectorResponse struct {
