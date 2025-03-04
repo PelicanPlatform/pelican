@@ -603,7 +603,9 @@ func redirectToCache(ginCtx *gin.Context) {
 	// duplicate link metadata above.  This is purposeful: the Link header might get too long if we repeat
 	// the token 20 times for 20 caches.  This means a "normal HTTP client" will correctly redirect but
 	// anything parsing the `Link` header for metalinks will need logic for redirecting appropriately.
-	ginCtx.JSON(http.StatusTemporaryRedirect, redirectInfo)
+	if ginCtx.GetHeader("X-Pelican-Debug") == "true" {
+		ginCtx.JSON(http.StatusTemporaryRedirect, redirectInfo)
+	}
 	ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
 }
 
@@ -911,7 +913,9 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 		// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
 		// not those in the `Link`.
-		ginCtx.JSON(http.StatusTemporaryRedirect, redirectInfo)
+		if ginCtx.GetHeader("X-Pelican-Debug") == "true" {
+			ginCtx.JSON(http.StatusTemporaryRedirect, redirectInfo)
+		}
 		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
 	}
 }
