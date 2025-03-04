@@ -98,7 +98,7 @@ func TestStochasticSort(t *testing.T) {
 	})
 
 	t.Run("maxOut-greater-than-length-returns-len-of-sm", func(t *testing.T) {
-		c:= stochasticSort(mockSwapMaps, len(mockSwapMaps)+1)
+		c := stochasticSort(mockSwapMaps, len(mockSwapMaps)+1)
 		assert.Len(t, c, len(mockSwapMaps))
 	})
 

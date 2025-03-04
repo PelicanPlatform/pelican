@@ -99,15 +99,15 @@ func gatedHalvingMultiplier(val float64, threshold float64, halvingFactor float6
 // Given a map of ranges and an index, remove the range at the index and shift the rest of the ranges
 // to the left.
 func removeAndRerange(wSum *float64, ranges map[int][]float64, index int) {
-    shiftVal := ranges[index][1] - ranges[index][0]
+	shiftVal := ranges[index][1] - ranges[index][0]
 	*wSum -= shiftVal
-    delete(ranges, index)
-    for i := range ranges {
-        if i > index {
-            ranges[i][0] -= shiftVal
-            ranges[i][1] -= shiftVal
-        }
-    }
+	delete(ranges, index)
+	for i := range ranges {
+		if i > index {
+			ranges[i][0] -= shiftVal
+			ranges[i][1] -= shiftVal
+		}
+	}
 }
 
 // Given a SwapMaps struct, generate the ranges for each weight and the total weight sum.

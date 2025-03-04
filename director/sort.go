@@ -340,10 +340,10 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {
 		redirectInfo.ServersInfo[ad.URL.String()] = &server_structs.ServerRedirectInfo{
-			Lat: ad.Latitude,
-			Lon: ad.Longitude,
+			Lat:        ad.Latitude,
+			Lon:        ad.Longitude,
 			LoadWeight: ad.IOLoad,
-			HasObject: "unknown",
+			HasObject:  "unknown",
 		}
 
 		switch server_structs.SortType(sortMethod) {
