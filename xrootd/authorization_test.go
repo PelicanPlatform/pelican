@@ -33,6 +33,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -76,6 +77,15 @@ var (
 
 	//go:embed resources/osdf-authfile
 	authfileOutput string
+
+	//go:embed resources/test-scitokens-origin-read.cfg
+	scitokensOriginReadOutput string
+
+	//go:embed resources/test-scitokens-origin-write.cfg
+	scitokensOriginWriteOutput string
+
+	//go:embed resources/test-scitokens-origin-read-write.cfg
+	scitokensOriginReadWriteOutput string
 
 	sampleMultilineOutput = `foo \
 	bar
@@ -556,6 +566,7 @@ func TestGenerateConfig(t *testing.T) {
 	viper.Set("Origin.ScitokensMapSubject", true)
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Server.WebPort", 8443)
+	viper.Set("Origin.EnableReads", true)
 	config.InitConfigDir(viper.GetViper())
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
@@ -568,6 +579,7 @@ func TestGenerateConfig(t *testing.T) {
 	assert.Equal(t, "/another/exported/path", issuer.BasePaths[1])
 	assert.Equal(t, "user1", issuer.DefaultUser)
 	assert.True(t, issuer.MapSubject)
+	assert.Equal(t, "read", issuer.AcceptableAuthorization)
 }
 
 func TestWriteOriginAuthFiles(t *testing.T) {
@@ -727,37 +739,86 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 }
 
 func TestWriteOriginScitokensConfig(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
+	tests := []struct {
+		Name         string
+		Capabilities []string
+		ExpectedCfg  string
+		InputCfg     string
+	}{
+		{
+			Name:         "OriginSciTokensOnlyReads",
+			Capabilities: []string{"Reads"},
+			ExpectedCfg:  string(scitokensOriginReadOutput),
+			InputCfg:     "",
+		},
+		{
+			Name:         "OriginSciTokensOnlyWrites",
+			Capabilities: []string{"Writes"},
+			ExpectedCfg:  string(scitokensOriginWriteOutput),
+			InputCfg:     "",
+		},
+		{
+			Name:         "OriginSciTokensReadsWrites",
+			Capabilities: []string{"Reads", "Writes"},
+			ExpectedCfg:  string(scitokensOriginReadWriteOutput),
+			InputCfg:     "",
+		},
+		{
+			Name:         "OriginScitokensMergeDiff",
+			Capabilities: []string{"Reads"},
+			ExpectedCfg:  string(monitoringOutput),
+			InputCfg:     string(toMergeOutput),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+			defer func() { require.NoError(t, egrp.Wait()) }()
+			defer cancel()
 
-	server_utils.ResetTestState()
-	dirname := t.TempDir()
-	os.Setenv("PELICAN_ORIGIN_RUNLOCATION", dirname)
-	defer os.Unsetenv("PELICAN_ORIGIN_RUNLOCATION")
-	config_dirname := t.TempDir()
-	viper.Set("Origin.SelfTest", true)
-	viper.Set("ConfigDir", config_dirname)
-	viper.Set("Origin.RunLocation", dirname)
-	viper.Set("Origin.Port", 8443)
-	viper.Set("Server.WebPort", 8444)
-	viper.Set("Server.Hostname", "origin.example.com")
-	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
+			server_utils.ResetTestState()
+			defer server_utils.ResetTestState()
 
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+			viper.Set("Origin.Port", 8443)
+			viper.Set("Server.WebPort", 8444)
+			viper.Set("Server.Hostname", "origin.example.com")
+			viper.Set("Server.IssuerUrl", "https://origin.issuer.com")
+			viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
 
-	scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
-	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, -1)
-	require.NoError(t, err)
-	err = os.WriteFile(scitokensCfg, []byte(toMergeOutput), 0640)
-	require.NoError(t, err)
+			dirname := t.TempDir()
+			os.Setenv("PELICAN_ORIGIN_RUNLOCATION", dirname)
+			defer os.Unsetenv("PELICAN_ORIGIN_RUNLOCATION")
+			config_dirname := t.TempDir()
 
-	err = WriteOriginScitokensConfig([]string{"/foo/bar"})
-	require.NoError(t, err)
+			viper.Set("ConfigDir", config_dirname)
+			viper.Set("Origin.RunLocation", dirname)
 
-	genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
-	require.NoError(t, err)
+			if slices.Contains(test.Capabilities, "Reads") {
+				viper.Set("Origin.EnableReads", true)
+			}
+			if slices.Contains(test.Capabilities, "Writes") {
+				viper.Set("Origin.EnableWrites", true)
+			}
 
-	assert.Equal(t, string(monitoringOutput), string(genCfg))
+			err := config.InitServer(ctx, server_structs.OriginType)
+			require.NoError(t, err)
+
+			if test.InputCfg != "" {
+				viper.Set("Server.IssuerUrl", "")
+				scitokensCfg := param.Xrootd_ScitokensConfig.GetString()
+				err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, -1)
+				require.NoError(t, err)
+				err = os.WriteFile(scitokensCfg, []byte(test.InputCfg), 0640)
+				require.NoError(t, err)
+			}
+
+			err = WriteOriginScitokensConfig([]string{"/foo/bar"})
+			require.NoError(t, err)
+
+			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
+			require.NoError(t, err)
+
+			assert.Equal(t, test.ExpectedCfg, string(genCfg))
+		})
+	}
 }
