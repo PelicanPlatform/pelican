@@ -84,6 +84,7 @@ type (
 		HealthStatus HealthTestStatus            `json:"healthStatus"`
 		IOLoad       float64                     `json:"ioLoad"`
 		Namespaces   []NamespaceAdV2Response     `json:"namespaces"`
+		Downtimes    []server_structs.Downtime   `json:"downtimes"`
 	}
 
 	// TokenIssuerResponse creates a response struct for TokenIssuer
@@ -246,6 +247,7 @@ func advertisementToServerResponse(ad *server_structs.Advertisement) serverRespo
 		FromTopology:        ad.FromTopology,
 		HealthStatus:        healthStatus,
 		IOLoad:              ad.GetIOLoad(),
+		Downtimes:           ad.Downtimes,
 	}
 	for _, ns := range ad.NamespaceAds {
 		nsRes := namespaceAdV2ToResponse(&ns)

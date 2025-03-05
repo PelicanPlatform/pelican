@@ -64,6 +64,8 @@ func (f filterType) String() string {
 		return "Permanently Disabled via the director configuration"
 	case tempFiltered:
 		return "Temporarily disabled via the admin website"
+	case serverFiltered:
+		return "Temporarily disabled by the server admin"
 	case topoFiltered:
 		return "Disabled via the Topology policy"
 	case tempAllowed:
