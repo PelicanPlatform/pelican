@@ -556,6 +556,12 @@ definitions:
         default: []
         example: ["/foo", "/bar"]
         description: The namespaces the returned server provides
+      downtime:
+        type: array
+        items:
+          type: object
+          $ref: "#/definitions/Downtime"
+        description: The active and future downtime information of the server
   OriginExportCapabilities:
     type: object
     description: The access control of an origin exported namespace
@@ -721,6 +727,54 @@ definitions:
       url:
         type: string
         default: ""
+  Downtime:
+    type: object
+    properties:
+      uuid:
+        type: string
+        description: Unique identifier for the downtime entry
+        example: "019564c2-7893-73e1-ab74-c566972cf059"
+      createdBy:
+        type: string
+        description: The person who created the downtime entry
+      class:
+        type: string
+        description: Class of downtime (SCHEDULED or UNSCHEDULED)
+        enum:
+          - SCHEDULED
+          - UNSCHEDULED
+      description:
+        type: string
+        description: Description of the downtime event
+        example: "Cooling system maintenance"
+      severity:
+        type: string
+        description: Severity of the downtime event (Outage, Severe, IntermittentOutage, NoSignificantOutageExpected)
+        enum:
+          - Outage (completely inaccessible)
+          - Severe (most services down)
+          - Intermittent Outage (may be up for some of the time)
+          - No Significant Outage Expected (you shouldn't notice)
+      startTime:
+        type: integer
+        format: int64
+        description: Start time of the downtime in milliseconds since epoch (UTC)
+        example: 1740428588000
+      endTime:
+        type: integer
+        format: int64
+        description: End time of the downtime in milliseconds since epoch (UTC).  0 indicates ongoing downtime.
+        example: 1740967199900
+      createdAt:
+        type: integer
+        format: int64
+        description: Timestamp of creation in milliseconds since epoch (UTC)
+        example: 1741152221331
+      updatedAt:
+        type: integer
+        format: int64
+        description: Timestamp of last update in milliseconds since epoch (UTC)
+        example: 1741152221331
 
 tags:
   - name: auth
@@ -737,6 +791,8 @@ tags:
     description: Non-UI facing APIs for the Director server
   - name: origin_ui
     description: APIs for the Origin server Web UI
+  - name: cache_ui
+    description: APIs for the Cache server Web UI
 paths:
   /health:
     get:
@@ -2376,4 +2432,564 @@ paths:
           description: Server error
           schema:
             type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/downtime:
+    post:
+      tags:
+        - origin_ui
+      summary: Create a new downtime entry for the origin server
+      description: >-
+        `Authentication Required` `Admin Privilege Required`
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: downtime
+          description: The downtime event to create
+          required: true
+          schema:
+            type: object
+            properties:
+              createdBy:
+                type: string
+                description: The person who created the downtime entry
+                required: true
+              class:
+                type: string
+                description: Class of downtime (SCHEDULED or UNSCHEDULED)
+                enum:
+                  - SCHEDULED
+                  - UNSCHEDULED
+                required: true
+              description:
+                type: string
+                description: Description of the downtime event
+              severity:
+                type: string
+                description: Severity of the downtime event
+                enum:
+                  - Outage (completely inaccessible)
+                  - Severe (most services down)
+                  - Intermittent Outage (may be up for some of the time)
+                  - No Significant Outage Expected (you shouldn't notice)
+                required: true
+              startTime:
+                type: integer
+                format: int64
+                description: Start time of the downtime in milliseconds since epoch (UTC)
+                required: true
+              endTime:
+                type: integer
+                format: int64
+                description: End time of the downtime in milliseconds since epoch (UTC).  0 indicates ongoing downtime.
+                required: true
+      responses:
+        "200":
+          description: Downtime created successfully
+          schema:
+            $ref: "#/definitions/Downtime"
+        "400":
+          description: Invalid request data
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    get:
+      tags:
+        - origin_ui
+      summary: Get the currently active and future downtime entries for the origin server
+      description: >-
+        `Authentication Required` `Admin Privilege Required`
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Downtime"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/downtime/all:
+    get:
+      tags:
+        - origin_ui
+      summary: Get all downtime entries for the origin server
+      description: >-
+        `Authentication Required` `Admin Privilege Required`
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Downtime"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/downtime/{uuid}:
+    get:
+      tags:
+        - origin_ui
+      summary: Get a specific downtime entry by UUID
+      description: "`Authentication Required` `Admin privilege Required`"
+      produces:
+        - application/json
+      parameters:
+        - name: uuid
+          in: path
+          description: UUID of the downtime entry
+          required: true
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/Downtime"
+        "400":
+          description: Invalid UUID
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Downtime entry not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    put:
+      tags:
+        - origin_ui
+      summary: Update a specific downtime entry by UUID
+      description: "`Authentication Required` `Admin privilege Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: uuid
+          in: path
+          description: UUID of the downtime entry
+          required: true
+          type: string
+        - in: body
+          name: downtime
+          description: The downtime data to update (only the fields that need to be updated)
+          required: true
+          schema:
+            type: object
+            properties:
+              createdBy:
+                type: string
+                description: The person who created the downtime entry
+              class:
+                type: string
+                description: Class of downtime (SCHEDULED or UNSCHEDULED)
+                enum:
+                  - SCHEDULED
+                  - UNSCHEDULED
+              description:
+                type: string
+                description: Description of the downtime event
+              severity:
+                type: string
+                description: Severity of the downtime event
+                enum:
+                  - Outage (completely inaccessible)
+                  - Severe (most services down)
+                  - Intermittent Outage (may be up for some of the time)
+                  - No Significant Outage Expected (you shouldn't notice)
+              startTime:
+                type: integer
+                format: int64
+                description: Start time of the downtime in milliseconds since epoch (UTC)
+              endTime:
+                type: integer
+                format: int64
+                description: End time of the downtime in milliseconds since epoch (UTC).  0 indicates ongoing downtime.
+      responses:
+        "200":
+          description: Downtime updated successfully
+          schema:
+            $ref: "#/definitions/Downtime"
+        "400":
+          description: Invalid request data or UUID
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Downtime entry not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - origin_ui
+      summary: Delete a specific downtime entry by UUID
+      description: "`Authentication Required` `Admin privilege Required`"
+      produces:
+        - application/json
+      parameters:
+        - name: uuid
+          in: path
+          description: UUID of the downtime entry
+          required: true
+          type: string
+      responses:
+        "200":
+          description: Downtime deleted successfully
+          schema:
+            $ref: "#/definitions/SuccessModelV2"
+        "400":
+          description: Invalid UUID
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Downtime entry not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache_ui/downtime:
+    post:
+      tags:
+        - cache_ui
+      summary: Create a new downtime entry for the cache server
+      description: >-
+        `Authentication Required` `Admin Privilege Required`
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: downtime
+          description: The downtime event to create
+          required: true
+          schema:
+            type: object
+            properties:
+              createdBy:
+                type: string
+                description: The person who created the downtime entry
+                required: true
+              class:
+                type: string
+                description: Class of downtime (SCHEDULED or UNSCHEDULED)
+                enum:
+                  - SCHEDULED
+                  - UNSCHEDULED
+                required: true
+              description:
+                type: string
+                description: Description of the downtime event
+              severity:
+                type: string
+                description: Severity of the downtime event
+                enum:
+                  - Outage (completely inaccessible)
+                  - Severe (most services down)
+                  - Intermittent Outage (may be up for some of the time)
+                  - No Significant Outage Expected (you shouldn't notice)
+                required: true
+              startTime:
+                type: integer
+                format: int64
+                description: Start time of the downtime in milliseconds since epoch (UTC)
+                required: true
+              endTime:
+                type: integer
+                format: int64
+                description: End time of the downtime in milliseconds since epoch (UTC).  0 indicates ongoing downtime.
+                required: true
+      responses:
+        "200":
+          description: Downtime created successfully
+          schema:
+            $ref: "#/definitions/Downtime"
+        "400":
+          description: Invalid request data
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    get:
+      tags:
+        - cache_ui
+      summary: Get the currently active and future downtime entries for the cache server
+      description: >-
+        `Authentication Required` `Admin Privilege Required`
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Downtime"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache_ui/downtime/all:
+    get:
+      tags:
+        - cache_ui
+      summary: Get all downtime entries for the cache server
+      description: >-
+        `Authentication Required` `Admin Privilege Required`
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Downtime"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /cache_ui/downtime/{uuid}:
+    get:
+      tags:
+        - cache_ui
+      summary: Get a specific downtime entry by UUID
+      description: "`Authentication Required` `Admin privilege Required`"
+      produces:
+        - application/json
+      parameters:
+        - name: uuid
+          in: path
+          description: UUID of the downtime entry
+          required: true
+          type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/Downtime"
+        "400":
+          description: Invalid UUID
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Downtime entry not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    put:
+      tags:
+        - cache_ui
+      summary: Update a specific downtime entry by UUID
+      description: "`Authentication Required` `Admin privilege Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: uuid
+          in: path
+          description: UUID of the downtime entry
+          required: true
+          type: string
+        - in: body
+          name: downtime
+          description: The downtime data to update (only the fields that need to be updated)
+          required: true
+          schema:
+            type: object
+            properties:
+              createdBy:
+                type: string
+                description: The person who created the downtime entry
+              class:
+                type: string
+                description: Class of downtime (SCHEDULED or UNSCHEDULED)
+                enum:
+                  - SCHEDULED
+                  - UNSCHEDULED
+              description:
+                type: string
+                description: Description of the downtime event
+              severity:
+                type: string
+                description: Severity of the downtime event
+                enum:
+                  - Outage (completely inaccessible)
+                  - Severe (most services down)
+                  - Intermittent Outage (may be up for some of the time)
+                  - No Significant Outage Expected (you shouldn't notice)
+              startTime:
+                type: integer
+                format: int64
+                description: Start time of the downtime in milliseconds since epoch (UTC)
+              endTime:
+                type: integer
+                format: int64
+                description: End time of the downtime in milliseconds since epoch (UTC).  0 indicates ongoing downtime.
+      responses:
+        "200":
+          description: Downtime updated successfully
+          schema:
+            $ref: "#/definitions/Downtime"
+        "400":
+          description: Invalid request data or UUID
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Downtime entry not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - cache_ui
+      summary: Delete a specific downtime entry by UUID
+      description: "`Authentication Required` `Admin privilege Required`"
+      produces:
+        - application/json
+      parameters:
+        - name: uuid
+          in: path
+          description: UUID of the downtime entry
+          required: true
+          type: string
+      responses:
+        "200":
+          description: Downtime deleted successfully
+          schema:
+            $ref: "#/definitions/SuccessModelV2"
+        "400":
+          description: Invalid UUID
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Permission denied. Admin privilege required.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Downtime entry not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
             $ref: "#/definitions/ErrorModelV2"
