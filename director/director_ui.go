@@ -85,6 +85,7 @@ type (
 		HealthStatus HealthTestStatus            `json:"healthStatus"`
 		IOLoad       float64                     `json:"ioLoad"`
 		Namespaces   []NamespaceAdV2Response     `json:"namespaces"`
+		Downtimes    []server_structs.Downtime   `json:"downtimes"`
 		Version      string                      `json:"version"`
 	}
 
@@ -248,6 +249,7 @@ func advertisementToServerResponse(ad *server_structs.Advertisement) serverRespo
 		FromTopology:        ad.FromTopology,
 		HealthStatus:        healthStatus,
 		IOLoad:              ad.GetIOLoad(),
+		Downtimes:           ad.Downtimes,
 		Version:             ad.Version,
 	}
 	for _, ns := range ad.NamespaceAds {
