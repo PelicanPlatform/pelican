@@ -1273,13 +1273,24 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		// Process received server(origin/cache) downtimes and toggle the director db accordingly when necessary
 		currentTime := time.Now().UTC().UnixMilli()
 		bringItDown := false
+		sn := adV2.Name
 		// Check if the server is currently in downtime
 		for _, downtime := range adV2.Downtimes {
-			if downtime.StartTime < currentTime && downtime.EndTime > currentTime {
+			if downtime.StartTime < currentTime && downtime.EndTime > currentTime || downtime.EndTime == 0 {
 				// Server is currently in downtime
-				err := setServerDowntime(adV2.Name, serverFiltered) // error-prone, TODO
+				// Backup the original filter type to revert in case of database failure
+				originalFilterType, hasOriginalFilter := filteredServers[sn]
+
+				// Set the server to downtime in the director in-memory cache and database
+				filteredServers[sn] = serverFiltered
+				err := setServerDowntime(sn, serverFiltered)
 				if err != nil {
-					log.Warningf("Failed to set downtime for server %s: %v", adV2.Name, err)
+					log.Warningf("Failed to set downtime for server %s in the director database: %v", adV2.Name, err)
+					if hasOriginalFilter {
+						filteredServers[sn] = originalFilterType
+					} else {
+						delete(filteredServers, sn)
+					}
 				}
 				bringItDown = true
 				break

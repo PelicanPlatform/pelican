@@ -143,6 +143,7 @@ func TestDowntime(t *testing.T) {
 		var resp server_structs.Downtime
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.Equal(t, activeFutureDowntime.CreatedBy, resp.CreatedBy)
+		assert.Equal(t, activeFutureDowntime.StartTime, resp.StartTime)
 	})
 
 	t.Run("get-downtime-by-uuid-and-update", func(t *testing.T) {

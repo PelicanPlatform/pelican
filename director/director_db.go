@@ -168,7 +168,12 @@ func deleteServerDowntimeSetByServerAdmin(serverName string) error {
 
 	// If the downtime was set by server admin, delete it; otherwise, do nothing
 	if serverDowntime.FilterType == serverFiltered {
-		return deleteServerDowntimeFn(serverName)
+		err := deleteServerDowntimeFn(serverName)
+		if err != nil {
+			return errors.Wrapf(err, "failed to delete downtime status for server %s in database", serverName)
+		}
+		// Delete the downtime from Director's in-memory cache too only if the database operation was successful
+		delete(filteredServers, serverName)
 	}
 
 	return nil
