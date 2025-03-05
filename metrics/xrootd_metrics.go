@@ -200,6 +200,77 @@ type (
 		IOTotal    int     `json:"io_total"`
 	}
 
+	OSSStatsGs struct {
+		Event           string  `json:"event"`
+		Reads           int     `json:"reads"`
+		Writes          int     `json:"writes"`
+		Stats           int     `json:"stats"`
+		Pgreads         int     `json:"pgreads"`
+		Pgwrites        int     `json:"pgwrites"`
+		Readvs          int     `json:"readvs"`
+		ReadvSegs       int     `json:"readv_segs"`
+		Dirlists        int     `json:"dirlists"`
+		DirlistEnts     int     `json:"dirlist_ents"`
+		Truncates       int     `json:"truncates"`
+		Unlinks         int     `json:"unlinks"`
+		Chmods          int     `json:"chmods"`
+		Opens           int     `json:"opens"`
+		Renames         int     `json:"renames"`
+		SlowReads       int     `json:"slow_reads"`
+		SlowWrites      int     `json:"slow_writes"`
+		SlowStats       int     `json:"slow_stats"`
+		SlowPgreads     int     `json:"slow_pgreads"`
+		SlowPgwrites    int     `json:"slow_pgwrites"`
+		SlowReadvs      int     `json:"slow_readvs"`
+		SlowReadvSegs   int     `json:"slow_readv_segs"`
+		SlowDirlists    int     `json:"slow_dirlists"`
+		SlowDirlistEnts int     `json:"slow_dirlist_ents"`
+		SlowTruncates   int     `json:"slow_truncates"`
+		SlowUnlinks     int     `json:"slow_unlinks"`
+		SlowChmods      int     `json:"slow_chmods"`
+		SlowOpens       int     `json:"slow_opens"`
+		SlowRenames     int     `json:"slow_renames"`
+		OpenT           float64 `json:"open_t"`
+		ReadT           float64 `json:"read_t"`
+		ReadvT          float64 `json:"readv_t"`
+		PgreadT         float64 `json:"pgread_t"`
+		WriteT          float64 `json:"write_t"`
+		PgwriteT        float64 `json:"pgwrite_t"`
+		DirlistT        float64 `json:"dirlist_t"`
+		StatT           float64 `json:"stat_t"`
+		TruncateT       float64 `json:"truncate_t"`
+		UnlinkT         float64 `json:"unlink_t"`
+		RenameT         float64 `json:"rename_t"`
+		ChmodT          float64 `json:"chmod_t"`
+		SlowOpenT       float64 `json:"slow_open_t"`
+		SlowReadT       float64 `json:"slow_read_t"`
+		SlowReadvT      float64 `json:"slow_readv_t"`
+		SlowPgreadT     float64 `json:"slow_pgread_t"`
+		SlowWriteT      float64 `json:"slow_write_t"`
+		SlowPgwriteT    float64 `json:"slow_pgwrite_t"`
+		SlowDirlistT    float64 `json:"slow_dirlist_t"`
+		SlowStatT       float64 `json:"slow_stat_t"`
+		SlowTruncateT   float64 `json:"slow_truncate_t"`
+		SlowUnlinkT     float64 `json:"slow_unlink_t"`
+		SlowRenameT     float64 `json:"slow_rename_t"`
+		SlowChmodT      float64 `json:"slow_chmod_t"`
+	}
+
+	// Common dflthdr structure
+	DfltHdr struct {
+		Code string `json:"code"`
+		Pseq int    `json:"pseq"`
+		Stod int    `json:"stod"`
+		Sid  int    `json:"sid"`
+		Gs   GSInfo `json:"gs"`
+	}
+
+	GSInfo struct {
+		Type string `json:"type"`
+		Tbeg int    `json:"tbeg"`
+		Tend int    `json:"tend"`
+	}
+
 	CacheAccessStat struct {
 		Hit    int64
 		Miss   int64
@@ -600,6 +671,32 @@ func handlePacket(packet []byte) error {
 	// XML '<' character indicates a summary packet
 	if len(packet) > 0 && packet[0] == '<' {
 		return HandleSummaryPacket(packet)
+	}
+
+	if len(packet) > 0 && packet[0] == '{' {
+		cleanPacket := bytes.Trim(packet, "\x00")
+		blobs := bytes.Split(cleanPacket, []byte("\n"))
+		var header DfltHdr
+		err := json.Unmarshal(blobs[0], &header)
+		if err != nil {
+			return errors.Wrap(err, "Failed to parse JSON monitoring packet")
+		}
+		if header.Gs.Type == "O" {
+			// OSS Packet
+			for _, blob := range blobs[1:] {
+				if len(blob) == 0 {
+					continue
+				}
+				var ossStats OSSStatsGs
+				err = json.Unmarshal(blob, &ossStats)
+				if err != nil {
+					return errors.Wrap(err, "Failed to parse monitoring packet")
+				}
+				log.Debug("handlePacket: Received an OSS packet: ", ossStats)
+			}
+			return nil
+		}
+		return nil
 	}
 
 	var header XrdXrootdMonHeader
