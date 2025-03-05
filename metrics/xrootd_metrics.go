@@ -405,7 +405,148 @@ var (
 		Help: "The aggregate time spent in storage operations in origin/cache server",
 	})
 
-	lastStats SummaryStat
+	OssReadsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_reads_total",
+		Help: "The total number of read operations on the OSS",
+	})
+
+	OssWritesCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_writes_total",
+		Help: "The total number of write operations on the OSS",
+	})
+
+	OssStatsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_stats_total",
+		Help: "The total number of stat operations on the OSS",
+	})
+
+	OssPgReadsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_pgreads_total",
+		Help: "The total number of page read operations on the OSS",
+	})
+
+	OssPgWritesCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_pgwrites_total",
+		Help: "The total number of page write operations on the OSS",
+	})
+
+	OssReadvCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_readv_total",
+		Help: "The total number of readv operations on the OSS",
+	})
+
+	OssReadvSegsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_readv_segments_total",
+		Help: "The total number of segments in readv operations on the OSS",
+	})
+
+	OssDirlistCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_dirlists_total",
+		Help: "The total number of directory list operations on the OSS",
+	})
+
+	OssDirlistEntsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_dirlist_entries_total",
+		Help: "The total number of directory list entries on the OSS",
+	})
+
+	OssTruncateCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_truncates_total",
+		Help: "The total number of truncate operations on the OSS",
+	})
+
+	OssUnlinkCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_unlinks_total",
+		Help: "The total number of unlink operations on the OSS",
+	})
+
+	OssChmodCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_chmods_total",
+		Help: "The total number of chmod operations on the OSS",
+	})
+
+	OssOpensCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_opens_total",
+		Help: "The total number of open operations on the OSS",
+	})
+
+	OssRenamesCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_renames_total",
+		Help: "The total number of rename operations on the OSS",
+	})
+
+	OssSlowReadsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_reads_total",
+		Help: "The total number of slow read operations on the OSS",
+	})
+
+	OssSlowWritesCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_writes_total",
+		Help: "The total number of slow write operations on the OSS",
+	})
+
+	OssSlowStatsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_stats_total",
+		Help: "The total number of slow stat operations on the OSS",
+	})
+
+	OssSlowPgReadsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_pgreads_total",
+		Help: "The total number of slow page read operations on the OSS",
+	})
+
+	OssSlowPgWritesCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_pgwrites_total",
+		Help: "The total number of slow page write operations on the OSS",
+	})
+
+	OssSlowReadvCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_readv_total",
+		Help: "The total number of slow readv operations on the OSS",
+	})
+
+	OssSlowReadvSegsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_readv_segments_total",
+		Help: "The total number of segments in slow readv operations on the OSS",
+	})
+
+	OssSlowDirlistCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_dirlists_total",
+		Help: "The total number of slow directory list operations on the OSS",
+	})
+
+	OssSlowDirlistEntsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_dirlist_entries_total",
+		Help: "The total number of slow directory list entries on the OSS",
+	})
+
+	OssSlowTruncateCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_truncates_total",
+		Help: "The total number of slow truncate operations on the OSS",
+	})
+
+	OssSlowUnlinkCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_unlinks_total",
+		Help: "The total number of slow unlink operations on the OSS",
+	})
+
+	OssSlowChmodCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_chmods_total",
+		Help: "The total number of slow chmod operations on the OSS",
+	})
+
+	OssSlowOpensCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_opens_total",
+		Help: "The total number of slow open operations on the OSS",
+	})
+
+	OssSlowRenamesCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_renames_total",
+		Help: "The total number of slow rename operations on the OSS",
+	})
+
+	lastStats    SummaryStat
+	lastOssStats OSSStatsGs
 
 	lastTotalIO  int     // The last total IO value
 	lastWaitTime float64 // The last IO wait time
@@ -681,20 +822,10 @@ func handlePacket(packet []byte) error {
 		if err != nil {
 			return errors.Wrap(err, "Failed to parse JSON monitoring packet")
 		}
+		// OSS Packet
 		if header.Gs.Type == "O" {
-			// OSS Packet
-			for _, blob := range blobs[1:] {
-				if len(blob) == 0 {
-					continue
-				}
-				var ossStats OSSStatsGs
-				err = json.Unmarshal(blob, &ossStats)
-				if err != nil {
-					return errors.Wrap(err, "Failed to parse monitoring packet")
-				}
-				log.Debug("handlePacket: Received an OSS packet: ", ossStats)
-			}
-			return nil
+			log.Debug("handlePacket: Received a g-stream OSS packet")
+			return handleOSSPacket(blobs[1:]) // Skip the header
 		}
 		return nil
 	}
@@ -1274,5 +1405,54 @@ func HandleSummaryPacket(packet []byte) error {
 				Set(float64(cacheStore.Size - cacheStore.Used))
 		}
 	}
+	return nil
+}
+
+func handleOSSPacket(blobs [][]byte) error {
+	finalBlob := blobs[len(blobs)-1]
+	ossStats := OSSStatsGs{}
+	if err := json.Unmarshal(finalBlob, &ossStats); err != nil {
+		return errors.Wrap(err, "failed to parse OSS stat json")
+	}
+
+	updateCounter := func(new int, old int, counter prometheus.Counter) int {
+		incBy := float64(new - old)
+		if new < old {
+			incBy = float64(new)
+		}
+		counter.Add(incBy)
+		return new
+	}
+
+	lastOssStats.Reads = updateCounter(ossStats.Reads, lastOssStats.Reads, OssReadsCounter)
+	lastOssStats.Writes = updateCounter(ossStats.Writes, lastOssStats.Writes, OssWritesCounter)
+	lastOssStats.Stats = updateCounter(ossStats.Stats, lastOssStats.Stats, OssStatsCounter)
+	lastOssStats.Pgreads = updateCounter(ossStats.Pgreads, lastOssStats.Pgreads, OssPgReadsCounter)
+	lastOssStats.Pgwrites = updateCounter(ossStats.Pgwrites, lastOssStats.Pgwrites, OssPgWritesCounter)
+	lastOssStats.Readvs = updateCounter(ossStats.Readvs, lastOssStats.Readvs, OssReadvCounter)
+	lastOssStats.ReadvSegs = updateCounter(ossStats.ReadvSegs, lastOssStats.ReadvSegs, OssReadvSegsCounter)
+	lastOssStats.Dirlists = updateCounter(ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistCounter)
+	lastOssStats.DirlistEnts = updateCounter(ossStats.DirlistEnts, lastOssStats.DirlistEnts, OssDirlistEntsCounter)
+	lastOssStats.Truncates = updateCounter(ossStats.Truncates, lastOssStats.Truncates, OssTruncateCounter)
+	lastOssStats.Unlinks = updateCounter(ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkCounter)
+	lastOssStats.Chmods = updateCounter(ossStats.Chmods, lastOssStats.Chmods, OssChmodCounter)
+	lastOssStats.Opens = updateCounter(ossStats.Opens, lastOssStats.Opens, OssOpensCounter)
+	lastOssStats.Renames = updateCounter(ossStats.Renames, lastOssStats.Renames, OssRenamesCounter)
+
+	lastOssStats.SlowReads = updateCounter(ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadsCounter)
+	lastOssStats.SlowWrites = updateCounter(ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWritesCounter)
+	lastOssStats.SlowStats = updateCounter(ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatsCounter)
+	lastOssStats.SlowPgreads = updateCounter(ossStats.SlowPgreads, lastOssStats.SlowPgreads, OssSlowPgReadsCounter)
+	lastOssStats.SlowPgwrites = updateCounter(ossStats.SlowPgwrites, lastOssStats.SlowPgwrites, OssSlowPgWritesCounter)
+	lastOssStats.SlowReadvs = updateCounter(ossStats.SlowReadvs, lastOssStats.SlowReadvs, OssSlowReadvCounter)
+	lastOssStats.SlowReadvSegs = updateCounter(ossStats.SlowReadvSegs, lastOssStats.SlowReadvSegs, OssSlowReadvSegsCounter)
+	lastOssStats.SlowDirlists = updateCounter(ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistCounter)
+	lastOssStats.SlowDirlistEnts = updateCounter(ossStats.SlowDirlistEnts, lastOssStats.SlowDirlistEnts, OssSlowDirlistEntsCounter)
+	lastOssStats.SlowTruncates = updateCounter(ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateCounter)
+	lastOssStats.SlowUnlinks = updateCounter(ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkCounter)
+	lastOssStats.SlowChmods = updateCounter(ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodCounter)
+	lastOssStats.SlowOpens = updateCounter(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter)
+	lastOssStats.SlowRenames = updateCounter(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter)
+
 	return nil
 }
