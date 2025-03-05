@@ -40,7 +40,7 @@ func createPromMetricToken() (string, error) {
 	promMetricTokCfg.Issuer = serverUrl
 	promMetricTokCfg.AddAudiences(serverUrl)
 	promMetricTokCfg.Subject = serverUrl
-	promMetricTokCfg.Claims = map[string]string{"scope": token_scopes.Monitoring_Scrape.String()}
+	promMetricTokCfg.AddScopes(token_scopes.Monitoring_Scrape)
 
 	// CreateToken also handles validation for us
 	tok, err := promMetricTokCfg.CreateToken()
