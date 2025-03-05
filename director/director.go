@@ -546,7 +546,8 @@ func redirectToCache(ginCtx *gin.Context) {
 	ctx := context.Background()
 	project := utils.ExtractProjectFromUserAgent(ginCtx.Request.Header.Values("User-Agent"))
 	ctx = context.WithValue(ctx, ProjectContextKey{}, project)
-	cacheAds, err = sortServerAds(ctx, ipAddr, cacheAds, cachesAvailabilityMap)
+	redirectInfo := server_structs.NewRedirectInfoFromIP(ipAddr.String())
+	cacheAds, err = sortServerAds(ctx, ipAddr, cacheAds, cachesAvailabilityMap, redirectInfo)
 	if err != nil {
 		log.Error("Error determining server ordering for cacheAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -602,7 +603,10 @@ func redirectToCache(ginCtx *gin.Context) {
 	// duplicate link metadata above.  This is purposeful: the Link header might get too long if we repeat
 	// the token 20 times for 20 caches.  This means a "normal HTTP client" will correctly redirect but
 	// anything parsing the `Link` header for metalinks will need logic for redirecting appropriately.
-	ginCtx.Redirect(307, getFinalRedirectURL(redirectURL, reqParams))
+	if ginCtx.GetHeader("X-Pelican-Debug") == "true" {
+		ginCtx.JSON(http.StatusTemporaryRedirect, redirectInfo)
+	}
+	ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
 }
 
 func redirectToOrigin(ginCtx *gin.Context) {
@@ -796,8 +800,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	ctx := context.Background()
 	project := utils.ExtractProjectFromUserAgent(ginCtx.Request.Header.Values("User-Agent"))
 	ctx = context.WithValue(ctx, ProjectContextKey{}, project)
-
-	availableAds, err = sortServerAds(ctx, ipAddr, availableAds, nil)
+	redirectInfo := server_structs.NewRedirectInfoFromIP(ipAddr.String())
+	availableAds, err = sortServerAds(ctx, ipAddr, availableAds, nil, redirectInfo)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -909,6 +913,9 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 		// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
 		// not those in the `Link`.
+		if ginCtx.GetHeader("X-Pelican-Debug") == "true" {
+			ginCtx.JSON(http.StatusTemporaryRedirect, redirectInfo)
+		}
 		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
 	}
 }
