@@ -152,6 +152,15 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 		return
 	}
 
+	// End time should be greater than start time
+	if downtimeInput.EndTime != 0 && downtimeInput.EndTime <= downtimeInput.StartTime {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "End time should be greater than start time",
+		})
+		return
+	}
+
 	// Only update fields provided in the request
 	if downtimeInput.CreatedBy != "" {
 		existingDowntime.CreatedBy = downtimeInput.CreatedBy

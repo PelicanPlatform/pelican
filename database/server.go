@@ -95,7 +95,7 @@ func GetActiveDowntimes() ([]server_structs.Downtime, error) {
 	var downtimes []server_structs.Downtime
 	currentTime := time.Now().UTC().UnixMilli()
 
-	err := ServerDatabase.Where("end_time > ?", currentTime).Find(&downtimes).Error
+	err := ServerDatabase.Where("end_time > ? OR end_time = 0", currentTime).Find(&downtimes).Error
 	if err != nil {
 		return nil, err
 	}
