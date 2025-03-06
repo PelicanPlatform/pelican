@@ -101,7 +101,9 @@ func (plauncher PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.C
 		attrs.Files[1] = writeStdout.Fd()
 		attrs.Files[2] = writeStderr.Fd()
 		if plauncher.fds[1] != -1 {
-			if len(attrs.Files) < 3 {
+			// Ensure at least 4 file descriptors are available, and pass the pre-opened 2nd FD (at index 1)
+			// to the child (xrootd) process as the 4th FD (at index 3)
+			if len(attrs.Files) <= 3 {
 				attrs.Files = append(attrs.Files, uintptr(plauncher.fds[1]))
 			} else {
 				attrs.Files[3] = uintptr(plauncher.fds[1])
