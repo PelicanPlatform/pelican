@@ -60,6 +60,14 @@ func checkKeys(t *testing.T, privateKey, publicKey string) {
 	assert.True(t, ok)
 	err = key.Validate()
 	assert.NoError(t, err)
+
+	// The "alg" and "kid" keys must explicitly be added to the JWK.
+	// Thus, we test that this actually happened.
+	// See also: https://github.com/PelicanPlatform/pelican/issues/2084
+	_, ok = key.Get("alg")
+	assert.True(t, ok)
+	_, ok = key.Get("kid")
+	assert.True(t, ok)
 }
 
 func TestKeygenMain(t *testing.T) {
