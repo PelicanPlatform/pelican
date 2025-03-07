@@ -84,6 +84,7 @@ type (
 		HealthStatus HealthTestStatus            `json:"healthStatus"`
 		IOLoad       float64                     `json:"ioLoad"`
 		Namespaces   []NamespaceAdV2Response     `json:"namespaces"`
+		Downtimes    []server_structs.Downtime   `json:"downtimes"`
 	}
 
 	// TokenIssuerResponse creates a response struct for TokenIssuer
@@ -246,6 +247,7 @@ func advertisementToServerResponse(ad *server_structs.Advertisement) serverRespo
 		FromTopology:        ad.FromTopology,
 		HealthStatus:        healthStatus,
 		IOLoad:              ad.GetIOLoad(),
+		Downtimes:           ad.Downtimes,
 	}
 	for _, ns := range ad.NamespaceAds {
 		nsRes := namespaceAdV2ToResponse(&ns)
@@ -569,6 +571,13 @@ func handleAllowServer(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Can't allow server %s that is disabled by the OSG Topology. Contact OSG admin at support@osg-htc.org to enable the server.", sn),
+		})
+		return
+	} else if ft == serverFiltered {
+		// Server is disabled by server admin
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Can't allow server %s that is disabled by the server admin. Contact server admin to enable the server.", sn),
 		})
 		return
 	}
