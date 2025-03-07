@@ -64,6 +64,9 @@ import (
 var (
 	//go:embed resources/test-https-origin.yml
 	httpsOriginConfig string
+
+	//go:embed resources/public-test-origin.yml
+	publicTestOrigin string
 )
 
 // TestReadMultiTransfer test if we can read multiple transfers from stdin
@@ -161,7 +164,6 @@ func (f *FedTest) Spinup() {
 
 	viper.Set("ConfigDir", tmpPath)
 
-	config.InitConfig()
 	// Create a file to capture output from commands
 	output, err := os.CreateTemp(f.T.TempDir(), "output")
 	assert.NoError(f.T, err)
@@ -495,11 +497,7 @@ func TestPluginMulti(t *testing.T) {
 
 	dirName := t.TempDir()
 
-	viper.Set("Logging.Level", "debug")
-	viper.Set("Origin.StorageType", "posix")
-	viper.Set("Origin.ExportVolumes", "/test")
-	viper.Set("Origin.EnablePublicReads", true)
-	fed := fed_test_utils.NewFedTest(t, "")
+	fed := fed_test_utils.NewFedTest(t, publicTestOrigin)
 	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 
 	// Drop the testFileContent into the origin directory
@@ -847,12 +845,7 @@ func TestPluginRecursiveDownload(t *testing.T) {
 
 	dirName := t.TempDir()
 
-	viper.Set("Logging.Level", "debug")
-	viper.Set("Origin.StorageType", "posix")
-	viper.Set("Origin.FederationPrefix", "/test")
-	viper.Set("Origin.StoragePrefix", "/<THIS WILL BE OVERRIDDEN>")
-	viper.Set("Origin.EnablePublicReads", true)
-	fed := fed_test_utils.NewFedTest(t, "")
+	fed := fed_test_utils.NewFedTest(t, publicTestOrigin)
 	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 
 	// Drop the testFileContent into the origin directory

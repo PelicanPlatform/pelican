@@ -67,7 +67,6 @@ func TestPrometheusUnprotected(t *testing.T) {
 	//Setup a private key
 	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -113,7 +112,6 @@ func TestPrometheusProtectionCookieAuth(t *testing.T) {
 	// Setup a private key directory
 	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -183,7 +181,6 @@ func TestPrometheusProtectionOriginHeaderScope(t *testing.T) {
 		os.RemoveAll(configDir)
 	})
 	viper.Set("ConfigDir", configDir)
-	config.InitConfig()
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
