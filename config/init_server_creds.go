@@ -554,7 +554,7 @@ func initKeysMap() {
 }
 
 // Helper function to load one .pem file from specified filename
-func loadSinglePEM(path string) (jwk.Key, error) {
+func LoadSinglePEM(path string) (jwk.Key, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read key file")
@@ -562,7 +562,7 @@ func loadSinglePEM(path string) (jwk.Key, error) {
 
 	key, err := jwk.ParseKey(contents, jwk.WithPEM(true))
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to parse issuer key file %v", path)
+		return nil, errors.Wrapf(err, "failed to parse key file %v", path)
 	}
 
 	// Add the algorithm to the key, needed for verifying tokens elsewhere
@@ -589,7 +589,7 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 	issuerKeyPath := param.IssuerKey.GetString()
 	if issuerKeyPath != "" {
 		if _, err := os.Stat(issuerKeyPath); err == nil {
-			issuerKey, err := loadSinglePEM(issuerKeyPath)
+			issuerKey, err := LoadSinglePEM(issuerKeyPath)
 			if err != nil {
 				log.Warnf("Failed to load key %s: %v", issuerKeyPath, err)
 			} else {
@@ -624,7 +624,7 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 			}
 			if dirEnt.Type().IsRegular() && filepath.Ext(dirEnt.Name()) == ".pem" {
 				// Parse the private key in this file and add to the in-memory keys map
-				key, err := loadSinglePEM(path)
+				key, err := LoadSinglePEM(path)
 				if err != nil {
 					log.Warnf("Failed to load key %s: %v", path, err)
 					return nil // Skip this file and continue
@@ -706,7 +706,7 @@ func GeneratePEM(dir string) (key jwk.Key, err error) {
 		return nil, errors.Wrapf(err, "failed to generate private key in file %s", fname)
 	}
 
-	if key, err = loadSinglePEM(fname); err != nil {
+	if key, err = LoadSinglePEM(fname); err != nil {
 		log.Errorf("Failed to load key %s: %v", fname, err)
 		err = errors.Wrapf(err, "failed to load key from %s", fname)
 		return

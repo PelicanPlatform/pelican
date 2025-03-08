@@ -19,7 +19,6 @@
 package main
 
 import (
-	"crypto"
 	"crypto/elliptic"
 	"encoding/json"
 	"fmt"
@@ -34,11 +33,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 )
 
-func createJWKS(privKey crypto.PrivateKey) (jwk.Set, error) {
-	key, err := jwk.FromRaw(privKey)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to generate JWK from private key")
-	}
+func createJWKS(key jwk.Key) (jwk.Set, error) {
 	jwks := jwk.NewSet()
 
 	pkey, err := jwk.PublicKeyOf(key)
@@ -47,7 +42,7 @@ func createJWKS(privKey crypto.PrivateKey) (jwk.Set, error) {
 	}
 
 	if err = jwks.AddKey(pkey); err != nil {
-		return nil, errors.Wrapf(err, "Failed to add public key %s to new JWKS", key.KeyID())
+		return nil, errors.Wrapf(err, "failed to add public key %s to new JWKS", key.KeyID())
 	}
 
 	return jwks, nil
@@ -91,7 +86,8 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 	if err := config.GeneratePrivateKey(privateKeyPath, elliptic.P256(), false); err != nil {
 		return errors.Wrapf(err, "failed to generate new private key at %s", privateKeyPath)
 	}
-	privKey, err := config.LoadPrivateKey(privateKeyPath, false)
+
+	privKey, err := config.LoadSinglePEM(privateKeyPath)
 	if err != nil {
 		return errors.Wrapf(err, "failed to load private key from %s", privateKeyPath)
 	}
@@ -100,6 +96,7 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+
 	bytes, err := json.MarshalIndent(pubJWKS, "", "	")
 	if err != nil {
 		return errors.Wrap(err, "failed to generate json from jwks")
