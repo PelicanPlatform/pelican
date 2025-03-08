@@ -168,6 +168,12 @@ nfpms:
               mode: 0755
               owner: pelican
               group: pelican
+        dependencies:
+          - "/bin/sh"
+          # for useradd and groupadd:
+          - "shadow-utils"
+          # for getent:
+          - "glibc-common"
       deb:
         contents:
           - src: LICENSE
@@ -204,6 +210,13 @@ nfpms:
               mode: 0755
               owner: pelican
               group: pelican
+        dependencies:
+          # provides /bin/sh:
+          - "dash"
+          # for useradd and groupadd:
+          - "passwd"
+          # for getent:
+          - "libc-bin"
       apk:
         contents:
           - src: LICENSE
