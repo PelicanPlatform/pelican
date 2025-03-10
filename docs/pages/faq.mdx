@@ -1,5 +1,47 @@
 # Frequently Asked Questions & Troubleshooting
 
+## Meta
+
+### Is it "Pelican" or "Pelican Platform"?
+
+"Pelican Platform" is the proper name for the software described in these documents, 
+as there are other pre-existing tech projects that use the name "Pelican". 
+
+That being said, `pelican` is the name of the command for interfacing with components of the Pelican Project,
+and we frequently refer to said components as "Pelican _____" in our documentation as a convenient shorthand.
+
+<!-- 
+### How is the Pelican Platform different from existing technologies (Globus, S3, etc.)?
+
+Answer needed from Brian B (https://github.com/PelicanPlatform/pelican/issues/1958)
+-->
+
+### How is the Pelican Platform related to the HTCondor Software Suite (HTCSS)?
+
+[Answer]
+
+### How can I contribute to the Pelican Platform?
+
+[Answer]
+
+## Data Access Model
+
+### Can I use Pelican Platform to search for the data I need?
+
+[Answer]
+
+### Can Pelican be used to satisfy "FAIR" data requirements?
+
+[Answer]
+
+## Using Pelican Platform
+
+### I am using __ computer with __ operating system - can I still use Pelican to download objects?
+
+Yes!
+
+[More info]
+
 ## Why do `osdf:///` URLs use 3 slashes instead of two slashes like regular URLs?
 
 >**TL;DR:** `osdf:///` URLs use three slashes because the `osdf` scheme inherently specifies the networked system, making the federation hostname redundant.
@@ -64,6 +106,12 @@ More information about `pelican` and `osdf` URLs can be found in our [client usa
   <a id="triple-slash-fn2">**2**</a>: For more information on the difference between URIs, URLs and URNs, see [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986#section-1.1.3).<br />
   <a id="triple-slash-fn3">**3**</a>: URLs can also contain things like ports, query parameters and "fragments," and while Pelican makes use of these, they aren't as crucial to understanding
   the question at hand.
+
+## Can I run a Pelican Origin from my laptop?
+
+[Answer]
+
+
 
 ## Why isn't Pelican using the closest cache(s) when I download objects?
 Whenever a Pelican client tries to download an object, one of its first steps is to talk to the appropriate federation's Director, where the Directors job is to
@@ -188,3 +236,4 @@ Once again, the `link` header will include an ordered list of Origins that your 
 < link: <https://chtc-osdf-origin.chtc.wisc.edu:8443/some/object>; rel="duplicate"; pri=1; depth=1
 ```
 This list is usually much shorter and likely contains a single Origin.
+
