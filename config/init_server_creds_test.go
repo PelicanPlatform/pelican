@@ -163,7 +163,6 @@ func TestMultiPrivateKey(t *testing.T) {
 		require.NotNil(t, key)
 	})
 
-	// This test also imitates the origin API endpoint "/newIssuerKey"
 	t.Run("second-private-key", func(t *testing.T) {
 		ResetConfig()
 		defer ResetConfig()
@@ -184,5 +183,42 @@ func TestMultiPrivateKey(t *testing.T) {
 		latestKey, err := GetIssuerPrivateJWK()
 		require.NoError(t, err)
 		assert.Equal(t, secondKey.KeyID(), latestKey.KeyID())
+	})
+
+	// Inmitating private key rotation
+	// See if the second key becomes the "current key" after the first key is removed
+	t.Run("remove-first-key", func(t *testing.T) {
+		ResetConfig()
+		defer ResetConfig()
+		tempDir := t.TempDir()
+		issuerKeysDir := filepath.Join(tempDir, "issuer-keys")
+
+		// Generate three keys
+		keys := []string{}
+		for i := 0; i < 3; i++ {
+			key, err := GeneratePEM(issuerKeysDir)
+			require.NoError(t, err)
+			keys = append(keys, key.KeyID())
+		}
+
+		// Load keys and verify the first key is the current key
+		firstKey, err := loadPEMFiles(issuerKeysDir)
+		require.NoError(t, err)
+		assert.Equal(t, keys[0], firstKey.KeyID())
+
+		// Remove the first key file
+		firstKeyFile := filepath.Join(issuerKeysDir, "pelican_generated_*")
+		firstKeyFiles, err := filepath.Glob(firstKeyFile)
+		require.NoError(t, err)
+		err = os.Remove(firstKeyFiles[0])
+		require.NoError(t, err)
+
+		// Reload keys and verify the second key is now the current key
+		secondKey, err := loadPEMFiles(issuerKeysDir)
+		require.NoError(t, err)
+		assert.Equal(t, keys[1], secondKey.KeyID())
+
+		allKeys := getIssuerPrivateKeysCopy()
+		assert.Len(t, allKeys, 2)
 	})
 }
