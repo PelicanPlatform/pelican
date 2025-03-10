@@ -12,7 +12,7 @@ type (
 	ApiKey struct {
 		ID          string `gorm:"primaryKey;column:id;type:text;not null;unique"`
 		Name        string `gorm:"column:name;type:text"`
-		HashedValue string `gorm:"column:hashed_value;type:text;not null"`
+		HashedValue string `gorm:"column:hashed_value;type:text;not null" json:"-"`
 		Scopes      string `gorm:"column:scopes;type:text"`
 		ExpiresAt   time.Time
 		CreatedAt   time.Time

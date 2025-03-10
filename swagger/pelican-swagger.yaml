@@ -167,6 +167,29 @@ definitions:
       expiration:
         type: string
         description: The expiration time of the token. If it is empty or "never", the token will never expire. The token should be in the RFC3339 format.
+  ListApiTokenSuccess:
+    type: object
+    properties:
+      keys:
+        type: array
+        items:
+          type: object
+          properties:
+            Name:
+              type: string
+              description: The name of the token
+            ID:
+              type: string
+              description: The ID of the token
+            CreatedBy:
+              type: string
+              description: The user who created the token
+            ExpiresAt:
+              type: string
+              description: The expiration time of the token. The token should be in the RFC3339 format.
+            Scopes:
+              type: string
+              description: The scopes of the token. Comma-separated string
   CreateApiTokenSuccess:
     type: object
     properties:
@@ -927,6 +950,25 @@ paths:
             $ref: "#/definitions/SuccessModelV2"
         "500":
           description: Failed to delete token
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /listApiTokens:
+    get:
+      tags:
+        - common
+      summary: List all API tokens for the user
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Token list retrieved successfully
+          schema:
+            type: object
+            $ref: "#/definitions/ListApiTokenSuccess"
+        "500":
+          description: Failed to list tokens
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
