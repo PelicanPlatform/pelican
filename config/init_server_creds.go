@@ -48,7 +48,7 @@ import (
 
 type IssuerKeys struct {
 	// CurrentKey is the private key used to sign tokens and payloads. It corresponds to the
-	// private key with the highest lexicographical filename among the legacy key file
+	// private key with the lowest lexicographical filename among the legacy key file
 	// (if present) and all .pem files in IssuerKeyDirectory.
 	CurrentKey jwk.Key
 
@@ -579,11 +579,12 @@ func loadSinglePEM(path string) (jwk.Key, error) {
 }
 
 // Helper function to load/refresh all key files from both legacy IssuerKey file and specified directory
-// find the most recent private key based on lexicographical order of their filenames
+// find the first private key based on lexicographical order of their filenames
 func loadPEMFiles(dir string) (jwk.Key, error) {
 	var firstKey jwk.Key
 	var firstFileName string
-	latestKeys := getIssuerPrivateKeysCopy()
+	// Create a new map to load the latest private keys from disk
+	latestKeys := make(map[string]jwk.Key)
 
 	// Load legacy private key if it exists - parsing the file at IssuerKey act as if it is included in IssuerKeysDirectory
 	issuerKeyPath := param.IssuerKey.GetString()
@@ -632,7 +633,7 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 
 				latestKeys[key.KeyID()] = key
 
-				// Update the most recent key based on lexicographical order of filenames
+				// Update the current key based on lexicographical order of filenames (use the first/lowest one)
 				if firstFileName == "" || dirEnt.Name() < firstFileName {
 					firstFileName = dirEnt.Name()
 					firstKey = key
@@ -729,7 +730,7 @@ func generatePEMandSetIssuerKey(dir string) (jwk.Key, error) {
 }
 
 // Re-scan the disk to load the current valid private keys, return the issuer key to sign tokens it issues
-// The issuer key is the key with the highest lexicographical filename
+// The issuer key is the key with the lowest lexicographical filename
 func loadIssuerPrivateKey(issuerKeysDir string) (jwk.Key, error) {
 	// Ensure initKeysMap is only called once across the program’s runtime
 	initOnce.Do(func() {
@@ -739,7 +740,7 @@ func loadIssuerPrivateKey(issuerKeysDir string) (jwk.Key, error) {
 	issuerKey, err := loadPEMFiles(issuerKeysDir)
 	if err != nil {
 		return nil, errors.Wrapf(err, `failed to re-scan %s to load .pem files and set the key file with the
-		highest lexicographical order as the current issuer key`, issuerKeysDir)
+		lowest lexicographical order as the current issuer key`, issuerKeysDir)
 	}
 
 	return issuerKey, err
