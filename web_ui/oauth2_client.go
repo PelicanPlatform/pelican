@@ -237,8 +237,8 @@ func generateUserGroupInfo(userInfo map[string]interface{}) (user string, groups
 	return
 }
 
-// Handle the callback request from CILogon when user is successfully authenticated
-// Get user info from CILogon and issue our token for user to access web UI
+// Handle the callback request when the user is successfully authenticated.
+// Get the user's info and issue our token for accessing the web UI.
 func handleOAuthCallback(ctx *gin.Context) {
 	session := sessions.Default(ctx)
 	c := context.Background()
@@ -292,9 +292,8 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	// We only need this token to grab user id from cilogon
-	// and we won't store it anywhere. We will later issue our own token
-	// for user access
+	// We need this token only to get the user's info.
+	// We will later issue our own token for user access.
 	token, err := oauthConfig.Exchange(c, req.Code)
 	if err != nil {
 		log.Errorf("Error in exchanging code for token:  %v", err)
@@ -308,23 +307,18 @@ func handleOAuthCallback(ctx *gin.Context) {
 
 	client := oauthConfig.Client(c, token)
 	client.Transport = config.GetTransport()
-	// CILogon requires token to be set as part of post form
-	data := url.Values{}
-	data.Add("access_token", token.AccessToken)
 
-	// Use access_token to get user info from CILogon
-	userInfoReq, err := http.NewRequest(http.MethodPost, oauthUserInfoUrl, strings.NewReader(data.Encode()))
+	userInfoReq, err := http.NewRequest(http.MethodGet, oauthUserInfoUrl, nil)
 	if err != nil {
 		log.Errorf("Error creating a new request for user info from auth provider at %s. %v", oauthUserInfoUrl, err)
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprint("Error requesting user info from CILogon: ", err),
+				Msg:    fmt.Sprint("Error requesting user info from auth provider: ", err),
 			})
 		return
 	}
 	userInfoReq.Header.Add("Authorization", token.TokenType+" "+token.AccessToken)
-	userInfoReq.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := client.Do(userInfoReq)
 	if err != nil {
@@ -365,7 +359,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprint("Error parsing user info from CILogon: ", err),
+				Msg:    fmt.Sprint("Error parsing user info from auth provider: ", err),
 			})
 		return
 	}
