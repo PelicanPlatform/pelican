@@ -360,6 +360,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 			})
 		return
 	}
+	log.Debugf("User info from auth provider: %v", string(body))
 
 	var userInfo map[string]interface{}
 	if err := json.Unmarshal(body, &userInfo); err != nil {
