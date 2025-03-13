@@ -569,7 +569,7 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	// Even though we prefer using this function, we'll populate the config param
 	// based on whatever we determine here.
 	defer func() {
-		if err == nil && param.Server_IssuerUrl.GetString() == "" {
+		if err == nil && param.Server_IssuerUrl.GetString() != "" {
 			viper.Set(param.Server_IssuerUrl.GetName(), issuerUrl)
 		}
 	}()
@@ -1224,7 +1224,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
 	// configuration but we don't know the origin's port until after xrootd has started), we
 	// stash a copy of its value now.
-	v.SetDefault("Origin.AudienceURL", v.GetString(param.Origin_Url.GetName()))
+	v.SetDefault(param.Origin_AudienceUrl.GetName(), v.GetString(param.Origin_Url.GetName()))
 
 	// Set defaults for Director, Registry, and Broker URLs only if the Discovery URL is not set.
 	// This is necessary because, in Viper, there is currently no way to check if a value is coming
