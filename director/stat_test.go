@@ -62,7 +62,7 @@ func initMockStatUtils() {
 			Context:  ctx,
 			Cancel:   cancel,
 			Errgroup: &utils.Group{},
-			ResultCache: ttlcache.New[string, *objectMetadata](
+			ResultCache: ttlcache.New(
 				ttlcache.WithTTL[string, *objectMetadata](300 * time.Minute),
 			),
 		}
