@@ -47,6 +47,9 @@ func hasServerAdWithName(serverAds []server_structs.ServerAd, name string) bool 
 // this really tests matchesPrefix, but we test this higher level function to
 // avoid having to mess with the cache.
 func TestGetAdsForPath(t *testing.T) {
+	t.Cleanup(func() {
+		serverAds.DeleteAll()
+	})
 	/*
 		FLOW:
 			- Set up a few dummy namespaces, origin, and cache ads
