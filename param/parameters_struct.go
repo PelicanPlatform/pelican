@@ -274,6 +274,8 @@ type Config struct {
 		RequireOriginApproval bool `mapstructure:"requireoriginapproval" yaml:"RequireOriginApproval"`
 	} `mapstructure:"registry" yaml:"Registry"`
 	Server struct {
+		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
+		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
 		DirectorURLs []string `mapstructure:"directorurls" yaml:"DirectorURLs"`
 		DropPrivileges bool `mapstructure:"dropprivileges" yaml:"DropPrivileges"`
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
@@ -613,6 +615,8 @@ type configWithType struct {
 		RequireOriginApproval struct { Type string; Value bool }
 	}
 	Server struct {
+		AdLifetime struct { Type string; Value time.Duration }
+		AdvertisementInterval struct { Type string; Value time.Duration }
 		DirectorURLs struct { Type string; Value []string }
 		DropPrivileges struct { Type string; Value bool }
 		EnablePprof struct { Type string; Value bool }

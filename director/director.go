@@ -1272,6 +1272,16 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	// Forward to other directors, if applicable
 	forwardServiceAd(engineCtx, &adV2, sType)
 
+	// Correct any clock skews detected in the client
+	now := time.Now()
+	if skew := now.Sub(adV2.Now); !adV2.Now.IsZero() && (skew > 100*time.Millisecond || skew < -100*time.Millisecond) {
+		lifetime := adV2.GetExpiration().Sub(adV2.Now)
+		if lifetime > 0 {
+			adV2.Expiration = now.Add(lifetime)
+		}
+	}
+	adV2.Now = time.Time{}
+
 	finishRegisterServeAd(engineCtx, ctx, &adV2, sType)
 }
 

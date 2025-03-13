@@ -151,6 +151,7 @@ func TestConversion(t *testing.T) {
 
 	OAdConv := ConvertOriginAdV1ToV2(oAdV1)
 	oAdV2.GenerationID = OAdConv.GenerationID
+	oAdV2.Expiration = OAdConv.Expiration
 
 	require.Equal(t, oAdV2, OAdConv)
 }

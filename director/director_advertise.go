@@ -79,6 +79,7 @@ type (
 	forwardAd struct {
 		DirectorAd *server_structs.DirectorAd        `json:"director-ad"`
 		AdType     string                            `json:"ad-type"`
+		Now        time.Time                         `json:"now"`
 		ServiceAd  *server_structs.OriginAdvertiseV2 `json:"service-ad,omitempty"`
 	}
 )
@@ -137,12 +138,36 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 	}
 	directorAd := fAd.DirectorAd
 
+	// Reset the expiration times if we detect significant skew between the claimed time sent
+	// and the current time.
+	//
+	// That is, if the ad claims to have been sent at noon and expiring at 12:15 but the server
+	// received it at 13:00, then assume the expiration time is 13:15 (since the original lifetime
+	// was set to 15 minutes).
+	now := time.Now()
+	if skew := now.Sub(fAd.Now); skew > 100*time.Millisecond || skew < -100*time.Millisecond {
+		if fAd.DirectorAd != nil {
+			lifetime := fAd.DirectorAd.Expiration.Sub(fAd.Now)
+			if lifetime > 0 {
+				fAd.DirectorAd.Expiration = now.Add(lifetime)
+			}
+		}
+		if fAd.ServiceAd != nil {
+			lifetime := fAd.ServiceAd.Expiration.Sub(fAd.Now)
+			if lifetime > 0 {
+				fAd.ServiceAd.Expiration = now.Add(lifetime)
+			}
+		}
+	}
+
 	if fAd.AdType == server_structs.DirectorType.String() {
-		func() {
-			directorAdMutex.Lock()
-			defer directorAdMutex.Unlock()
-			updateInternalDirectorCache(ctx, egrp, directorAd)
-		}()
+		if directorAd.Name != "" {
+			func() {
+				directorAdMutex.Lock()
+				defer directorAdMutex.Unlock()
+				updateInternalDirectorCache(ctx, egrp, directorAd)
+			}()
+		}
 	} else if fAd.AdType == server_structs.CacheType.String() || fAd.AdType == server_structs.OriginType.String() {
 		if fAd.ServiceAd == nil {
 			log.Debugln("Received registration of type", fAd.AdType, "with missing service ad")
@@ -428,9 +453,22 @@ func sendMyAd(ctx context.Context) {
 // MUST be called with the directorAdMutex write lock held
 func updateInternalDirectorCache(ctx context.Context, egrp *errgroup.Group, directorAd *server_structs.DirectorAd) {
 	info := &directorInfo{}
-	if item, found := directorAds.GetOrSet(directorAd.Name, info, ttlcache.WithTTL[string, *directorInfo](ttlcache.DefaultTTL)); found {
+	if directorAd.Name == "" {
+		return
+	}
+	adTTL := time.Until(directorAd.Expiration)
+	if directorAd.Expiration.IsZero() {
+		adTTL = param.Director_AdvertisementTTL.GetDuration()
+		if adTTL == 0 {
+			log.Info(param.Director_AdvertiseUrl.GetName(), "is set to 0; increasing to 15 minutes")
+			adTTL = 15 * time.Minute
+		}
+	} else if adTTL <= 0 {
+		return
+	}
+	if item, found := directorAds.GetOrSet(directorAd.Name, info, ttlcache.WithTTL[string, *directorInfo](adTTL)); found {
 		if after := directorAd.After(item.Value().ad); after == server_structs.AdAfterTrue || after == server_structs.AdAfterUnknown {
-			directorAds.Set(directorAd.Name, info, ttlcache.DefaultTTL)
+			directorAds.Set(directorAd.Name, info, adTTL)
 			if after == server_structs.AdAfterTrue {
 				directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
 					if self, err := server_utils.IsDirectorAdFromSelf(ctx, item.Value().ad); err == nil && !self {
@@ -467,7 +505,14 @@ func LaunchPeriodicAdvertise(ctx context.Context) {
 	updateDirectorAds(ctx)
 	sendMyAd(ctx)
 	egrp := ctx.Value(config.EgrpKey).(*errgroup.Group)
-	ticker := time.NewTicker(15 * time.Second)
+	adInterval := param.Server_AdvertisementInterval.GetDuration()
+	expiryTime := param.Server_AdLifetime.GetDuration()
+	if adInterval > expiryTime/3 {
+		log.Warningln("The director advertise interval", adInterval.String(), "is set to above 1/3 of the ad lifetime.  Decreasing it to", expiryTime/3)
+		adInterval = expiryTime / 3
+	}
+
+	ticker := time.NewTicker(adInterval)
 	egrp.Go(func() error {
 		defer ticker.Stop()
 		for {

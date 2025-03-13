@@ -119,6 +119,9 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 		}
 		for _, directorEndpoint := range directorResponse {
 			existingAd := endpointMap[directorEndpoint.AdvertiseUrl]
+			if directorEndpoint.Name == "" {
+				continue
+			}
 			if after := directorEndpoint.After(existingAd); existingAd.Name == "" || after == server_structs.AdAfterTrue || after == server_structs.AdAfterUnknown {
 				endpointMap[directorEndpoint.AdvertiseUrl] = directorEndpoint
 			}
@@ -163,7 +166,14 @@ func LaunchPeriodicDirectorDiscovery(ctx context.Context, isDirector bool) error
 		log.Infoln("Will advertise to director endpoints:", endpoints)
 	}
 
-	ticker := time.NewTicker(1 * time.Minute)
+	advertiseInterval := param.Server_AdvertisementInterval.GetDuration()
+	if advertiseInterval > param.Server_AdLifetime.GetDuration()/3 {
+		newInterval := param.Server_AdLifetime.GetDuration() / 3
+		log.Warningln("The periodic director discovery interval", advertiseInterval.String(), "is set to below 1/3 of the ad lifetime.  Decreasing it to", newInterval.String())
+		advertiseInterval = newInterval
+	}
+
+	ticker := time.NewTicker(advertiseInterval)
 	egrp.Go(func() error {
 		defer ticker.Stop()
 		for {

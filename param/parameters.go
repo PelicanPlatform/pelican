@@ -430,6 +430,8 @@ var (
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
 	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
+	Server_AdLifetime = DurationParam{"Server.AdLifetime"}
+	Server_AdvertisementInterval = DurationParam{"Server.AdvertisementInterval"}
 	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
 	Server_StartupTimeout = DurationParam{"Server.StartupTimeout"}
 	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}

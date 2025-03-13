@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -31,6 +31,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
 	"github.com/pelicanplatform/pelican/version"
 )
@@ -79,20 +80,22 @@ type (
 
 	// Common attributes necessary for all server ads
 	ServerBaseAd struct {
-		Name         string `json:"name"`
-		StartTime    int64  `json:"start_time"`    // The start time of the server ad.  Unix timestamp
-		InstanceID   string `json:"instance_id"`   // The instance ID of the server ad (hex-encoded UUID).
-		GenerationID uint64 `json:"generation_id"` // A monotonically-increasing counter that's incremented every time a new server ad is generated.  Will always be nonzero if known
-		Version      string `json:"version"`
+		Name         string    `json:"name"`
+		StartTime    int64     `json:"startTime"`    // The start time of the server ad.  Unix timestamp
+		InstanceID   string    `json:"instanceID"`   // The instance ID of the server ad (hex-encoded UUID).
+		GenerationID uint64    `json:"generationID"` // A monotonically-increasing counter that's incremented every time a new server ad is generated.  Will always be nonzero if known
+		Version      string    `json:"version"`      // Version of Pelican that produced the ad
+		Expiration   time.Time `json:"expiry"`       // Expiration time of the ad
 	}
 
 	// An interface for dealing with server ads
 	ServerBaseAdInterface interface {
-		GetName() string         // The name of the server ad
-		GetStartTime() int64     // The start time, in seconds, of the server ad.  Unix timestamp
-		GetInstanceID() string   // The instance ID of the server ad (currently a hex-encoded UUID; may change).
-		GetGenerationID() uint64 // The generation ID (monotonic counter) of the server ad; incremented every time a process generates a new ad.
-		GetVersion() string      // The version of the server base ad
+		GetName() string          // The name of the server ad
+		GetStartTime() int64      // The start time, in seconds, of the server ad.  Unix timestamp
+		GetInstanceID() string    // The instance ID of the server ad (currently a hex-encoded UUID; may change).
+		GetGenerationID() uint64  // The generation ID (monotonic counter) of the server ad; incremented every time a process generates a new ad.
+		GetVersion() string       // The version of the server base ad
+		GetExpiration() time.Time // Time at which the ad will expire
 	}
 
 	// A representation of a known director endpoint.
@@ -143,6 +146,7 @@ type (
 		Issuer              []TokenIssuer     `json:"token-issuer"`
 		StorageType         OriginStorageType `json:"storageType"`
 		DisableDirectorTest bool              `json:"directorTest"` // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
+		Now                 time.Time         `json:"now"`          // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
 	}
 
 	OriginAdvertiseV1 struct {
@@ -406,6 +410,13 @@ func (ad ServerBaseAd) GetName() string {
 	return ad.Name
 }
 
+// Return the ad's expiration time
+//
+// Getter for ServerAdBase to fulfill the ServerBaseAdInterface
+func (ad ServerBaseAd) GetExpiration() time.Time {
+	return ad.Expiration
+}
+
 // Returns true if `ad` was generated after `other`,
 func (ad *ServerBaseAd) After(other ServerBaseAdInterface) AdAfter {
 	// Handle the error condition -- the ad names must match.
@@ -457,6 +468,13 @@ func (ad *ServerBaseAd) Initialize(name string) {
 	ad.InstanceID = instanceID
 	ad.StartTime = startTime
 	ad.GenerationID = generationID.Add(1) + 1
+	adLifetime := param.Server_AdLifetime.GetDuration()
+	// Not all unit tests initializae the config, meaning adLifetime
+	// may be 0.
+	if adLifetime == 0 {
+		adLifetime = 15 * time.Minute
+	}
+	ad.Expiration = time.Now().Add(adLifetime)
 	ad.Version = version.GetVersion()
 }
 
@@ -467,6 +485,7 @@ func (ad *ServerBaseAd) CopyFrom(other ServerBaseAdInterface) {
 	ad.StartTime = other.GetStartTime()
 	ad.GenerationID = other.GetGenerationID()
 	ad.Version = other.GetVersion()
+	ad.Expiration = other.GetExpiration()
 }
 
 // Various getters
