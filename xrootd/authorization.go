@@ -61,14 +61,15 @@ type (
 
 	// Per-issuer configuration
 	Issuer struct {
-		Name            string
-		Issuer          string
-		BasePaths       []string
-		RestrictedPaths []string
-		MapSubject      bool
-		DefaultUser     string
-		UsernameClaim   string
-		NameMapfile     string
+		Name                    string
+		Issuer                  string
+		BasePaths               []string
+		RestrictedPaths         []string
+		MapSubject              bool
+		DefaultUser             string
+		UsernameClaim           string
+		NameMapfile             string
+		AcceptableAuthorization string
 	}
 
 	// Top-level configuration object for the template
@@ -479,6 +480,16 @@ func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
 	issuer.DefaultUser = param.Origin_ScitokensDefaultUser.GetString()
 	issuer.UsernameClaim = param.Origin_ScitokensUsernameClaim.GetString()
 
+	// This will be set to true if PublicReads are enabled as well and is slightly redundant
+	// as then a token wouldn't be needed for reads, but doesn't actually change the functionality
+	// The default if the acceptable authorization isn't set is "all", so we only care if
+	// Reads is Enabled without Writes or vice versa
+	if param.Origin_EnableReads.GetBool() && !param.Origin_EnableWrites.GetBool() {
+		issuer.AcceptableAuthorization = "read"
+	} else if param.Origin_EnableWrites.GetBool() && !param.Origin_EnableReads.GetBool() {
+		issuer.AcceptableAuthorization = "write"
+	}
+
 	return
 }
 
@@ -529,6 +540,17 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 	return cfg, nil
 }
 
+func resolveAuthorization(auth1 string, auth2 string) string {
+	if auth1 == auth2 {
+		return auth1
+	} else {
+		// Either one is read and the other is write, in which case we want the default of
+		// all, or one is all and the other is read/write, and we'd still want it to be the default
+		// of all, which is equivalent to the empty string
+		return ""
+	}
+}
+
 // Writes out the server's scitokens.cfg configuration
 func EmitScitokensConfig(server server_structs.XRootDServer) error {
 	if originServer, ok := server.(*origin.OriginServer); ok {
@@ -577,6 +599,7 @@ func WriteOriginScitokensConfig(authedPaths []string) error {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
 			val.Name += " and " + issuer.Name
+			val.AcceptableAuthorization = resolveAuthorization(val.AcceptableAuthorization, issuer.AcceptableAuthorization)
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
@@ -589,6 +612,7 @@ func WriteOriginScitokensConfig(authedPaths []string) error {
 		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
 			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
 			val.Name += " and " + issuer.Name
+			val.AcceptableAuthorization = resolveAuthorization(val.AcceptableAuthorization, issuer.AcceptableAuthorization)
 			cfg.IssuerMap[issuer.Issuer] = val
 		} else {
 			cfg.IssuerMap[issuer.Issuer] = issuer
