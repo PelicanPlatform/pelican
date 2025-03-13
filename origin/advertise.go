@@ -152,31 +152,31 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 	if len(prefixes) == 0 {
 		if isGlobusBackend {
 			activateUrl := param.Server_ExternalWebUrl.GetString() + "/view/origin/globus"
-			return nil, fmt.Errorf("failed to create advertisement: no activated Globus collection. Go to %s to activate your collection.", activateUrl)
+			return nil, fmt.Errorf("failed to create advertisement - no activated Globus collection, go to %s to activate your collection", activateUrl)
 		} else {
 			return nil, errors.New("failed to create advertisement: no valid export")
 		}
-	} else if len(prefixes) == 1 {
-		if param.Origin_EnableBroker.GetBool() {
-			var brokerUrl *url.URL
-			fedInfo, err := config.GetFederation(context.Background())
-			if err != nil {
-				return nil, err
-			}
-			brokerUrl, err = url.Parse(fedInfo.BrokerEndpoint)
-			if err != nil {
-				err = errors.Wrap(err, "Invalid Broker URL")
-				return nil, err
-			}
-			brokerUrl.Path = "/api/v1.0/broker/reverse"
-			values := brokerUrl.Query()
-			values.Set("origin", param.Server_Hostname.GetString())
-			values.Set("prefix", prefixes[0])
-			brokerUrl.RawQuery = values.Encode()
-			ad.BrokerURL = brokerUrl.String()
+	}
+	if param.Origin_EnableBroker.GetBool() {
+		var brokerUrl *url.URL
+		fedInfo, err := config.GetFederation(context.Background())
+		if err != nil {
+			return nil, err
 		}
-	} else {
-		log.Warningf("Multiple prefixes are not yet supported with the broker. Skipping broker configuration")
+		brokerUrl, err = url.Parse(fedInfo.BrokerEndpoint)
+		if err != nil {
+			err = errors.Wrap(err, "Invalid Broker URL")
+			return nil, err
+		}
+		originUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+		if err != nil {
+			return nil, err
+		}
+		brokerUrl.Path = "/api/v1.0/broker/reverse"
+		values := brokerUrl.Query()
+		values.Set("origin", originUrl.Host)
+		brokerUrl.RawQuery = values.Encode()
+		ad.BrokerURL = brokerUrl.String()
 	}
 	return &ad, nil
 }

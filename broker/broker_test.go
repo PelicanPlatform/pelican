@@ -119,10 +119,10 @@ func doRetrieveRequest(t *testing.T, ctx context.Context, dur time.Duration) (*h
 	brokerEndpoint := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/broker/retrieve"
 	originUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	require.NoError(t, err)
-
+	serverNs := "/origins/" + originUrl.Host
 	oReq := originRequest{
-		Origin: originUrl.Hostname(),
-		Prefix: param.Origin_FederationPrefix.GetString(),
+		OriginNs: serverNs,
+		ServerNs: serverNs,
 	}
 	reqBytes, err := json.Marshal(&oReq)
 	require.NoError(t, err)
@@ -202,10 +202,12 @@ func TestBroker(t *testing.T) {
 
 	brokerUrl.Path = "/api/v1.0/broker/reverse"
 	query := brokerUrl.Query()
-	query.Set("origin", param.Server_Hostname.GetString())
+	originUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	require.NoError(t, err)
+	query.Set("origin", originUrl.Host)
 	query.Set("prefix", "/foo")
 	brokerUrl.RawQuery = query.Encode()
-	clientConn, err := ConnectToOrigin(ctxQuick, brokerUrl.String(), "/foo", param.Server_Hostname.GetString())
+	clientConn, err := ConnectToOrigin(ctxQuick, brokerUrl.String(), originUrl.Host)
 	require.NoError(t, err)
 	log.Debugf("Cache got reversed client connection with cache side %s and origin side %s", clientConn.LocalAddr(), clientConn.RemoteAddr())
 
