@@ -176,7 +176,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 				Errgroup: &statErrGrp,
 				Cancel:   cancel,
 				Context:  baseCtx,
-				ResultCache: ttlcache.New[string, *objectMetadata](
+				ResultCache: ttlcache.New(
 					ttlcache.WithTTL[string, *objectMetadata](param.Director_CachePresenceTTL.GetDuration()),
 					ttlcache.WithDisableTouchOnHit[string, *objectMetadata](),
 					ttlcache.WithCapacity[string, *objectMetadata](uint64(cap)),
