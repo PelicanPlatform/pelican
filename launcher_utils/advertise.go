@@ -66,7 +66,14 @@ func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusWarning, "First attempt to advertise to the director...")
 	doAdvertise(ctx, servers)
 
-	ticker := time.NewTicker(1 * time.Minute)
+	advertiseInterval := param.Server_AdvertisementInterval.GetDuration()
+	if advertiseInterval > param.Server_AdLifetime.GetDuration()/3 {
+		newInterval := param.Server_AdLifetime.GetDuration() / 3
+		log.Warningln("The advertise interval", advertiseInterval.String(), "is set to above 1/3 of the ad lifetime.  Decreasing it to", newInterval.String())
+		advertiseInterval = newInterval
+	}
+
+	ticker := time.NewTicker(advertiseInterval)
 	egrp.Go(func() error {
 		defer ticker.Stop()
 		for {
@@ -123,6 +130,7 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	if err != nil {
 		return err
 	}
+	ad.Now = time.Now()
 
 	body, err := json.Marshal(*ad)
 	if err != nil {
