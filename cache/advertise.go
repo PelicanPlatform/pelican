@@ -210,7 +210,12 @@ func (server *CacheServer) GetAdTokCfg(ctx context.Context) (adTokCfg server_str
 	}
 	adTokCfg.Audience = directorUrl
 	adTokCfg.Subject = param.Cache_Url.GetString()
-	adTokCfg.Issuer = param.Server_IssuerUrl.GetString()
+	issuer, err := config.GetServerIssuerURL()
+	if err != nil {
+		err = errors.Wrap(err, "unable to determine server's issuer URL, needed for server advertising token")
+		return
+	}
+	adTokCfg.Issuer = issuer
 
 	return
 }
