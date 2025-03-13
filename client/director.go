@@ -107,6 +107,10 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 
+		if log.IsLevelEnabled(log.DebugLevel) {
+			req.Header.Set("X-Pelican-Debug", "true")
+		}
+
 		// Perform the HTTP request
 		resp, err = client.Do(req)
 
@@ -152,7 +156,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 	}
 
 	// The Content-Type will be alike "application/json; charset=utf-8"
-	if utils.HasContentType(resp, "application/json") {
+	if resp.StatusCode != http.StatusTemporaryRedirect && utils.HasContentType(resp, "application/json") {
 		var respErr server_structs.SimpleApiResp
 		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
 			log.Errorln("Failed to unmarshal the director's JSON response:", err)
@@ -165,6 +169,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		}
 	}
 
+	bodyString := string(body)
 	if resp.StatusCode == http.StatusMultiStatus && verb == "PROPFIND" {
 		// This is a director >7.9 proxy the PROPFIND response instead of redirect to the origin
 		return
@@ -172,8 +177,6 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 		// Attempt to query the director using the PUT HTTP method instead of DELETE,
 		// as older versions of the director may not support the DELETE endpoint.
 		if resp.StatusCode == http.StatusNotFound && verb == http.MethodDelete {
-			bodyString := string(body)
-
 			if strings.Contains(strings.ToLower(bodyString), "page not found") {
 				log.Warningf("Failed to query the DELETE endpoint; the director appears to be an older version, attempting with the PUT method")
 				return queryDirector(ctx, http.MethodPut, pUrl, token)
@@ -186,6 +189,11 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 			err = errors.Errorf("%d: %s", resp.StatusCode, errMsg)
 		}
 		return resp, err
+	}
+
+	// A 307 may come with a body that contains the redirect choice information
+	if bodyString != "" {
+		log.Debugf("Director's redirect choice information: %s", bodyString)
 	}
 
 	return
