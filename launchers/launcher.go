@@ -253,6 +253,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	if modules.IsEnabled(server_structs.CacheType) && modules.IsEnabled(server_structs.OriginType) {
 		log.Debug("Advertise Origin and Cache to the Director")
 		if err = launcher_utils.Advertise(ctx, servers); err != nil {
+			err = errors.Wrap(err, "failed to do initial advertisement to the director")
 			return
 		}
 
