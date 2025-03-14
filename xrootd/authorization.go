@@ -502,13 +502,13 @@ func GenerateOriginIssuers() (issuers []Issuer, err error) {
 			// "Origin" in the name indicates this issuer is responsible for data access at the
 			// origin on behalf of a user-generated token.
 			// Other issuers, e.g. "Director-based Monitoring" are for other Pelican services
-			Name: "Origin " + issuer,
-			Issuer: issuer,
-			BasePaths: basePaths,
+			Name:            "Origin " + issuer,
+			Issuer:          issuer,
+			BasePaths:       basePaths,
 			RestrictedPaths: param.Origin_ScitokensRestrictedPaths.GetStringSlice(),
-			MapSubject: param.Origin_ScitokensMapSubject.GetBool(),
-			DefaultUser: param.Origin_ScitokensDefaultUser.GetString(),
-			UsernameClaim: param.Origin_ScitokensUsernameClaim.GetString(),
+			MapSubject:      param.Origin_ScitokensMapSubject.GetBool(),
+			DefaultUser:     param.Origin_ScitokensDefaultUser.GetString(),
+			UsernameClaim:   param.Origin_ScitokensUsernameClaim.GetString(),
 		})
 	}
 

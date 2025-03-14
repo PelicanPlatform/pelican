@@ -126,8 +126,8 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 			},
 			Path: export.FederationPrefix,
 			Generation: []server_structs.TokenGen{{
-				Strategy:         server_structs.StrategyType("OAuth2"),
-				MaxScopeDepth:    3,
+				Strategy:      server_structs.StrategyType("OAuth2"),
+				MaxScopeDepth: 3,
 				// TODO: Is this the correct issuer URL to assign here? It's not clear what the
 				// intended difference between the "Generation" and the "Issuer" fields is...
 				CredentialIssuer: *serverIssuerUrl,
