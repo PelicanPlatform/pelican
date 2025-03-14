@@ -202,6 +202,7 @@ type Config struct {
 		UserInfoEndpoint string `mapstructure:"userinfoendpoint" yaml:"UserInfoEndpoint"`
 	} `mapstructure:"oidc" yaml:"OIDC"`
 	Origin struct {
+		AudienceUrl string `mapstructure:"audienceurl" yaml:"AudienceUrl"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
@@ -537,6 +538,7 @@ type configWithType struct {
 		UserInfoEndpoint struct { Type string; Value string }
 	}
 	Origin struct {
+		AudienceUrl struct { Type string; Value string }
 		DbLocation struct { Type string; Value string }
 		DirectorTest struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }

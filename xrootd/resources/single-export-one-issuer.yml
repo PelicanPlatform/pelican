@@ -1,0 +1,8 @@
+Origin:
+  StorageType: "posix"
+
+  Exports:
+    - StoragePrefix: /<WILL BE REPLACED IN TEST>
+      FederationPrefix: /first/namespace
+      Capabilities: ["PublicReads", "Writes", "Listings", "DirectReads"]
+      IssuerUrls: ["https://foo.com"]

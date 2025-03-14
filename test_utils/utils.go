@@ -26,6 +26,7 @@ import (
 	"crypto/rsa"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -200,4 +201,48 @@ func InitClient(t *testing.T, initCfg map[string]any) {
 
 	config.InitConfig()
 	require.NoError(t, config.InitClient())
+}
+
+// getUniqueAvailablePorts returns `count` unique, available ports.
+// **WARNING**: There is a small race condition between getting the list of available ports and
+// actually binding to them in whatever service uses these values. Be warned they may (but are
+// hopefully unlikely to) disappear before you can use them!
+func GetUniqueAvailablePorts(count int) ([]int, error) {
+	ports := make(map[int]struct{}, count) // A set for tracking unique ports
+	listeners := make([]net.Listener, 0, count)
+	// Ensure all listeners are closed at the end
+	defer func() {
+		for _, l := range listeners {
+			l.Close()
+		}
+	}()
+
+	// Gather unique ports
+	for len(ports) < count {
+		ln, err := net.Listen("tcp", "127.0.0.1:0") // Epehemeral, random, and available port handed over by the OS
+		if err != nil {
+			return nil, err
+		}
+
+		addr := ln.Addr().(*net.TCPAddr)
+		port := addr.Port
+
+		// Ensure uniqueness before adding to the list
+		if _, exists := ports[port]; exists {
+			ln.Close()
+			continue
+		}
+
+		// Store the unique port and keep its listener open
+		ports[port] = struct{}{}
+		listeners = append(listeners, ln)
+	}
+
+	// Convert map keys to a sorted slice
+	portList := make([]int, 0, count)
+	for port := range ports {
+		portList = append(portList, port)
+	}
+
+	return portList, nil
 }

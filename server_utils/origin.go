@@ -45,8 +45,9 @@ var originExports []OriginExport
 type (
 	// TODO: pull storage-specific fields into a separate struct and mixin
 	OriginExport struct {
-		StoragePrefix    string `json:"storagePrefix"`
-		FederationPrefix string `json:"federationPrefix"`
+		StoragePrefix    string   `json:"storagePrefix"`
+		FederationPrefix string   `json:"federationPrefix"`
+		IssuerUrls       []string `json:"issuerUrls"`
 
 		// Export fields specific to S3 backend. Other things like
 		// S3ServiceUrl, S3Region, etc are kept top-level in the config
@@ -94,8 +95,8 @@ func StringListToCapsHookFunc() mapstructure.DecodeHookFuncType {
 	return func(
 		from reflect.Type,
 		to reflect.Type,
-		data interface{},
-	) (interface{}, error) {
+		data any,
+	) (any, error) {
 		// Check that data is a slice of empty interfaces
 		if from.Kind() != reflect.Slice || from.Elem().Kind() != reflect.Interface {
 			return data, nil
@@ -107,7 +108,7 @@ func StringListToCapsHookFunc() mapstructure.DecodeHookFuncType {
 		}
 
 		// Convert the slice of interfaces to a slice of strings
-		interfaces := data.([]interface{})
+		interfaces := data.([]any)
 		caps := make([]string, len(interfaces))
 		for i, v := range interfaces {
 			caps[i] = v.(string)
@@ -130,12 +131,50 @@ func StringListToCapsHookFunc() mapstructure.DecodeHookFuncType {
 			case "Reads":
 				exportCaps.Reads = true
 			default:
-				return nil, errors.Errorf("Unknown capability %v", cap)
+				return nil, errors.Errorf("unknown capability %v", cap)
 			}
 		}
 
 		return exportCaps, nil
 	}
+}
+
+// Decode the issuerUrls field in the Origin.Exports block
+func IssuerUrlsHookFunc() mapstructure.DecodeHookFuncType {
+	return func(
+		from reflect.Type,
+		to reflect.Type,
+		data any,
+	) (any, error) {
+		if from.Kind() != reflect.Slice || from.Elem().Kind() != reflect.Interface {
+			return data, nil
+		}
+
+		if to != reflect.TypeOf([]string{}) {
+			return data, nil
+		}
+
+		interfaces := data.([]any)
+		issuerUrls := make([]string, len(interfaces))
+		for i, v := range interfaces {
+			issuerUrl, ok := v.(string)
+			if !ok {
+				return nil, errors.Errorf("expected string but got %T", v)
+			}
+			issuerUrls[i] = issuerUrl
+		}
+
+		return issuerUrls, nil
+	}
+}
+
+// A small convenience function for composing all the relevant decoder hooks
+// needed to work with Origin.Exports config
+func OriginExportsDecoderHook() mapstructure.DecodeHookFunc {
+	return mapstructure.ComposeDecodeHookFunc(
+		StringListToCapsHookFunc(),
+		IssuerUrlsHookFunc(),
+	)
 }
 
 func logDetectedExportVolumes() {
@@ -249,6 +288,33 @@ func validateFederationPrefix(prefix string) error {
 	return nil
 }
 
+// handleIssuersIfNeeded checks if the export has any issuer URLs configured. If not, it attempts to
+// configure one using the server's issuer URL (which may also be the server's external web URL -- see
+// config.GetServerIssuerURL()). Not all exports require an issuer, so we skip configuration if the
+// origin doesn't require one (e.g. public reads or no writes).
+func handleIssuersIfNeeded(exports []OriginExport) error {
+	for i, export := range exports {
+		// If the export doesn't have any issuers in its list, attempt to configure one using the default
+		// server issuer. Generally we shouldn't _require_ an issuer as some exports may be truly public
+		// and not require any auth
+		if len(export.IssuerUrls) == 0 && ((export.Capabilities.Reads && !export.Capabilities.PublicReads) || export.Capabilities.Writes) {
+			serverIssuerUrl, err := config.GetServerIssuerURL()
+			if err != nil {
+				return errors.Wrap(err, "failed to deduce server's issuer URL while assigning default issuer URL to exports")
+			}
+			if serverIssuerUrl == "" {
+				return errors.Errorf("failed to deduce server's issuer URL while assigning default issuer URL to exports. Is '%s' set?", param.Server_IssuerUrl.GetName())
+			}
+
+			log.Warningf("The export for '%s' has no configured Issuer URLs. Using the server's issuer URL '%s' as the default.",
+				export.FederationPrefix, serverIssuerUrl)
+			exports[i].IssuerUrls = append(exports[i].IssuerUrls, serverIssuerUrl)
+		}
+	}
+
+	return nil
+}
+
 // Handle volume mounts passed via -v. These types of exports take precedence over
 // any configured via Origin.Exports or Origin.FederationPrefix/Origin.StoragePrefix
 func (b *BaseOrigin) handleVolumeMounts(o Origin) (err error) {
@@ -313,7 +379,7 @@ func (b *BaseOrigin) handleExportsCfg(o Origin) error {
 
 	log.Infoln("Configuring multi-exports from Origin.Exports block in config file")
 	var tmpExports []OriginExport
-	if err := viper.UnmarshalKey(param.Origin_Exports.GetName(), &tmpExports, viper.DecodeHook(StringListToCapsHookFunc())); err != nil {
+	if err := viper.UnmarshalKey(param.Origin_Exports.GetName(), &tmpExports, viper.DecodeHook(OriginExportsDecoderHook())); err != nil {
 		return errors.Wrap(err, "unable to parse the Origin.Exports configuration")
 	}
 	if len(tmpExports) == 0 {
@@ -331,6 +397,10 @@ func (b *BaseOrigin) handleExportsCfg(o Origin) error {
 func (b *BaseOrigin) validateExports(o Origin) (err error) {
 	if len(b.Exports) == 0 {
 		return errors.New("no exports configured")
+	}
+
+	if err = handleIssuersIfNeeded(b.Exports); err != nil {
+		return errors.Wrap(err, "failed to validate export issuer URLs")
 	}
 
 	// Note that we assume we've already populated the origin export list

@@ -107,7 +107,11 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 
 	viper.Set(param.TLSSkipVerify.GetName(), true)
 
+	// Pre-initialize the servers, which we need to do so that `GetOriginExports()` works, as
+	// failure to pre-assign an export issuer causes the origin to deduce a default.
 	config.InitConfig()
+	err = config.InitServer(ctx, modules)
+	require.NoError(t, err)
 
 	// Read in any config we may have set
 	if originConfig != "" {
@@ -151,6 +155,16 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		require.NoError(t, err)
 	}
 
+	// Instead of using "0" as a port directly in the config, which lets XRootD find its own port,
+	// we need to know the port in advance for configuring the issuer URLs for each export. To do that
+	// without hardcoding the ports (which we can't guarantee are available in the test env), we'll
+	// get a few unique, available ports and use them for the origin, cache, and web UIs. This introduces
+	// a race condition, however, because it's possible the ports are consumed between getting them from this
+	// function and binding the servers to them
+	ports, err := test_utils.GetUniqueAvailablePorts(3)
+	require.NoError(t, err)
+	require.Len(t, ports, 3)
+
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set(param.Registry_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite"))
 	viper.Set(param.Registry_RequireOriginApproval.GetName(), false)
@@ -159,15 +173,16 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set(param.Director_DbLocation.GetName(), filepath.Join(t.TempDir(), "director.sqlite"))
 	viper.Set(param.Origin_EnableCmsd.GetName(), false)
 	viper.Set(param.Origin_EnableVoms.GetName(), false)
-	viper.Set(param.Origin_Port.GetName(), 0)
+	viper.Set(param.Origin_Port.GetName(), ports[0])
 	viper.Set(param.Origin_RunLocation.GetName(), filepath.Join(tmpPath, "origin"))
 	viper.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite"))
-	viper.Set(param.Cache_Port.GetName(), 0)
+	viper.Set(param.Origin_AudienceUrl.GetName(), "")
+	viper.Set(param.Cache_Port.GetName(), ports[1])
 	viper.Set(param.Cache_RunLocation.GetName(), filepath.Join(tmpPath, "cache"))
 	viper.Set(param.Cache_StorageLocation.GetName(), filepath.Join(tmpPath, "xcache-data"))
 	viper.Set(param.Cache_DbLocation.GetString(), filepath.Join(t.TempDir(), "cache.sqlite"))
 	viper.Set(param.Server_EnableUI.GetName(), false)
-	viper.Set(param.Server_WebPort.GetName(), 0)
+	viper.Set(param.Server_WebPort.GetName(), ports[2])
 	viper.Set(param.LocalCache_RunLocation.GetName(), filepath.Join(tmpPath, "local-cache"))
 
 	// Set the Director's start time to 6 minutes ago. This prevents it from sending an HTTP 429 for
@@ -177,6 +192,15 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
+
+	// Override the origin exports to use the correct issuers BEFORE the origin is started. Starting
+	// the origin causes XRootD to start with a specific scitokens config/authfile, and we need to
+	// make sure it has the right values ahead of time.
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+	for i := 0; i < len(ft.Exports); i++ {
+		ft.Exports[i].IssuerUrls = []string{issuer}
+	}
 
 	servers, _, err := launchers.LaunchModules(ctx, modules)
 	require.NoError(t, err)
@@ -228,7 +252,6 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, expectedResponse.Msg)
 
-	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 	tokConf := token.NewWLCGToken()
 	tokConf.Lifetime = time.Duration(time.Minute)
