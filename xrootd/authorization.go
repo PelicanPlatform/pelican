@@ -83,7 +83,7 @@ var (
 	scitokensCfgTemplate string
 )
 
-// Remove a trailing carriage return from a slice.  Used by scanLinesWithCont
+// Remove a trailing carriage return from a slice. Used by scanLinesWithCont
 func dropCR(data []byte) []byte {
 	if len(data) > 0 && data[len(data)-1] == '\r' {
 		return data[0 : len(data)-1]
@@ -91,7 +91,7 @@ func dropCR(data []byte) []byte {
 	return data
 }
 
-// Scan through the lines of a file, respecting line continuation characters.  That is,
+// Scan through the lines of a file, respecting line continuation characters. That is,
 //
 // ```
 // foo \
@@ -569,7 +569,7 @@ func WriteOriginScitokensConfig(authedPaths []string) error {
 	if err != nil {
 		return err
 	}
-	if aud := config.GetServerAudience(); !slices.Contains(cfg.Global.Audience, aud) {
+	if aud := param.Origin_AudienceUrl.GetString(); aud != "" && !slices.Contains(cfg.Global.Audience, aud) {
 		cfg.Global.Audience = append(cfg.Global.Audience, aud)
 	}
 	log.Debugln("Audience setting:", cfg.Global.Audience)

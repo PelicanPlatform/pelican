@@ -180,7 +180,7 @@ func TestOrigin(t *testing.T) {
 	issuerUrl, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
-	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, server_utils.ServerSelfTest)
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_AudienceUrl.GetString(), issuerUrl, server_utils.ServerSelfTest)
 	require.NoError(t, err)
 	require.True(t, ok)
 }
@@ -223,10 +223,8 @@ func TestMultiExportOrigin(t *testing.T) {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
 	fileTests := server_utils.TestFileTransferImpl{}
-	issuerUrl, err := config.GetServerIssuerURL()
-	require.NoError(t, err)
 
-	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, server_utils.ServerSelfTest)
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_AudienceUrl.GetString(), issuerUrl, server_utils.ServerSelfTest)
 	require.NoError(t, err)
 	require.True(t, ok)
 }
