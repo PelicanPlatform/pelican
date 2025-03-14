@@ -54,7 +54,10 @@ func TestStatMemory(t *testing.T) {
 	server_utils.ResetTestState()
 
 	viper.Set(param.Xrootd_EnableLocalMonitoring.GetName(), false)
-	viper.Set(param.Server_AdLifetime.GetName(), "100ms")
+	viper.Set(param.Server_AdLifetime.GetName(), "500ms")
+	viper.Set(param.Cache_SelfTest.GetName(), false)
+	viper.Set(param.Origin_DirectorTest.GetName(), false)
+	viper.Set(param.Origin_SelfTest.GetName(), false)
 	fed := fed_test_utils.NewFedTest(t, directorPublicCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	assert.NoError(t, err)
