@@ -72,18 +72,24 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 		} else {
 			log.Debugln("Server will advertise to itself using the configured advertise URL", adUrl)
 		}
-
-		endpointsTemp[adUrl] = true
-		// Bootstrap my own ad, even if nothing else is discovered.
-		if servers := directorEndpoints.Load(); servers == nil {
-			servers := make([]server_structs.DirectorAd, 1)
-			if name, err := GetServiceName(ctx, server_structs.DirectorType); err == nil {
-				servers[0] = server_structs.DirectorAd{
-					AdvertiseUrl: adUrl,
+		endpoint, err := url.Parse(adUrl)
+		if err == nil && endpoint.Port() != "0" {
+			endpointsTemp[adUrl] = true
+			// Bootstrap my own ad, even if nothing else is discovered.
+			if servers := directorEndpoints.Load(); servers == nil {
+				servers := make([]server_structs.DirectorAd, 1)
+				if name, err := GetServiceName(ctx, server_structs.DirectorType); err == nil {
+					servers[0] = server_structs.DirectorAd{
+						AdvertiseUrl: adUrl,
+					}
+					servers[0].Initialize(name)
+					directorEndpoints.CompareAndSwap(nil, &servers)
 				}
-				servers[0].Initialize(name)
-				directorEndpoints.CompareAndSwap(nil, &servers)
 			}
+		} else if err != nil {
+			log.Errorln("Ignoring URL", adUrl, "specified in", param.Director_AdvertiseUrl.GetName(), "due to parsing error:", err)
+		} else {
+			log.Warningln("Ignoring URL", adUrl, "specified in", param.Director_AdvertiseUrl.GetName(), "as the port is set to 0")
 		}
 	}
 
