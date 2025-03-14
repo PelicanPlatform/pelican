@@ -271,12 +271,8 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 	// If the scitokens.cfg does not exist, create one
-	if originServer, ok := server.(*origin.OriginServer); ok {
-		authedPrefixes, err := originServer.GetAuthorizedPrefixes()
-		if err != nil {
-			return err
-		}
-		err = WriteOriginScitokensConfig(authedPrefixes)
+	if _, ok := server.(*origin.OriginServer); ok {
+		err = WriteOriginScitokensConfig()
 		if err != nil {
 			return err
 		}

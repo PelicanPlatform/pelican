@@ -450,34 +450,67 @@ func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 
 // We have a special issuer just for self-monitoring the origin.
 func GenerateMonitoringIssuer() (issuer Issuer, err error) {
-	if val := param.Origin_SelfTest.GetBool(); !val {
+	if enabled := param.Origin_SelfTest.GetBool(); !enabled {
 		return
 	}
 	issuer.Name = "Built-in Monitoring"
 	// We use server local issuer regardless of Server.IssuerUrl
-	issuer.Issuer = param.Server_ExternalWebUrl.GetString()
-	issuer.BasePaths = []string{"/pelican/monitoring"}
+	builtinIssuer := param.Server_ExternalWebUrl.GetString()
+	if builtinIssuer == "" {
+		err = errors.Errorf("unable to construct built-in monitoring issuer because no external web URL could be deduced. Is '%s' set?",
+			param.Server_ExternalWebUrl.GetName())
+		return
+	}
+
+	issuer.Issuer = builtinIssuer
+	issuer.BasePaths = []string{server_utils.MonitoringBaseNs}
 	issuer.DefaultUser = "xrootd"
 
 	return
 }
 
-func GenerateOriginIssuer(exportedPaths []string) (issuer Issuer, err error) {
-	// TODO: Return to this and figure out how to get a proper unmarshal to work
-	if len(exportedPaths) == 0 {
-		return
-	}
-	issuer.Name = "Origin"
-	issuerUrl, err := config.GetServerIssuerURL()
+// Generate the scitokens issuer config for each export in the Origin.Exports block
+//
+// Exports map prefix --> issuers, but we need to remap that to issuer --> basePaths
+// here.
+// Because this function calls GetOriginExports(), anything that calls it must first
+// have called `InitServer()` with the Origin module to initialize the relevant defaults
+// for export generation.
+func GenerateOriginIssuers() (issuers []Issuer, err error) {
+	exports, err := server_utils.GetOriginExports()
 	if err != nil {
-		return
+		return nil, errors.Wrap(err, "failed to get origin exports in scitokens config")
 	}
-	issuer.Issuer = issuerUrl
-	issuer.BasePaths = exportedPaths
-	issuer.RestrictedPaths = param.Origin_ScitokensRestrictedPaths.GetStringSlice()
-	issuer.MapSubject = param.Origin_ScitokensMapSubject.GetBool()
-	issuer.DefaultUser = param.Origin_ScitokensDefaultUser.GetString()
-	issuer.UsernameClaim = param.Origin_ScitokensUsernameClaim.GetString()
+	if len(exports) == 0 {
+		return nil, errors.New("no exports found when configuring Origin scitokens config")
+	}
+
+	// Reverse the mapping from prefix --> issuer to issuer --> basePaths
+	// This isn't something we do for server advertisements, but the scitokens
+	// config does treat these issuers as global entities, and we need to do this
+	// to get the correct config.
+	var issuerMap = make(map[string][]string)
+	for _, export := range exports {
+		for _, issUrl := range export.IssuerUrls {
+			issuerMap[issUrl] = append(issuerMap[issUrl], export.FederationPrefix)
+		}
+	}
+
+	issuers = make([]Issuer, 0)
+	for issuer, basePaths := range issuerMap {
+		issuers = append(issuers, Issuer{
+			// "Origin" in the name indicates this issuer is responsible for data access at the
+			// origin on behalf of a user-generated token.
+			// Other issuers, e.g. "Director-based Monitoring" are for other Pelican services
+			Name: "Origin " + issuer,
+			Issuer: issuer,
+			BasePaths: basePaths,
+			RestrictedPaths: param.Origin_ScitokensRestrictedPaths.GetStringSlice(),
+			MapSubject: param.Origin_ScitokensMapSubject.GetBool(),
+			DefaultUser: param.Origin_ScitokensDefaultUser.GetString(),
+			UsernameClaim: param.Origin_ScitokensUsernameClaim.GetString(),
+		})
+	}
 
 	return
 }
@@ -531,19 +564,18 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 
 // Writes out the server's scitokens.cfg configuration
 func EmitScitokensConfig(server server_structs.XRootDServer) error {
-	if originServer, ok := server.(*origin.OriginServer); ok {
-		authedPrefixes, err := originServer.GetAuthorizedPrefixes()
-		if err != nil {
-			return err
-		}
-		return WriteOriginScitokensConfig(authedPrefixes)
+	if _, ok := server.(*origin.OriginServer); ok {
+		return WriteOriginScitokensConfig()
 	} else if cacheServer, ok := server.(*cache.CacheServer); ok {
 		directorAds := cacheServer.GetNamespaceAds()
 		if param.Cache_SelfTest.GetBool() {
-			localIssuer, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+			serverIssuerStr, err := config.GetServerIssuerURL()
 			if err != nil {
-				log.Error("Can't parse Server_ExternalWebUrl when generating scitokens config: ", err)
-				return errors.Wrap(err, "can't parse Server_ExternalWebUrl when generating scitokens config")
+				return errors.Wrapf(err, "could not determine server's issuer URL when generating scitokens config. Is '%s' set?", param.Server_IssuerUrl.GetName())
+			}
+			serverIssuer, err := url.Parse(serverIssuerStr)
+			if err != nil {
+				return errors.Wrap(err, "could not parse server's issuer URL when generating scitokens config")
 			}
 			cacheIssuer := server_structs.NamespaceAdV2{
 				Caps: server_structs.Capabilities{PublicReads: false, Reads: true, Writes: true},
@@ -551,7 +583,7 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 				Issuer: []server_structs.TokenIssuer{
 					{
 						BasePaths: []string{"/pelican/monitoring"},
-						IssuerUrl: *localIssuer,
+						IssuerUrl: *serverIssuer,
 					},
 				},
 			}
@@ -564,25 +596,35 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 }
 
 // Writes out the origin's scitokens.cfg configuration
-func WriteOriginScitokensConfig(authedPaths []string) error {
+func WriteOriginScitokensConfig() error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
 	}
+
+	// Construct server audience, which all incoming tokens must match in their `aud` claim. Generally
+	// this restricts tokens so that they're only respected by a single server.
 	if aud := param.Origin_AudienceUrl.GetString(); aud != "" && !slices.Contains(cfg.Global.Audience, aud) {
 		cfg.Global.Audience = append(cfg.Global.Audience, aud)
 	}
-	log.Debugln("Audience setting:", cfg.Global.Audience)
-	if issuer, err := GenerateOriginIssuer(authedPaths); err == nil && len(issuer.Name) > 0 {
-		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
-			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
-			val.Name += " and " + issuer.Name
-			cfg.IssuerMap[issuer.Issuer] = val
-		} else {
-			cfg.IssuerMap[issuer.Issuer] = issuer
+	log.Debugf("Origin is configured to use '%s' as token audience(s):", cfg.Global.Audience)
+
+	// Generate all the origin's issuers. If none are configured per export and there are
+	// no namespaces requiring an issuer, this list will be empty. If an issuer _is_ configured
+	// for a namespace that doesn't require one, it's still added to the Scitokens config, but requests
+	// with no token will fallback to the authfile for authorization.
+	if issuers, err := GenerateOriginIssuers(); err == nil && len(issuers) > 0 {
+		for _, issuer := range issuers {
+			if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+				val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+				val.Name += " and " + issuer.Name
+				cfg.IssuerMap[issuer.Issuer] = val
+			} else {
+				cfg.IssuerMap[issuer.Issuer] = issuer
+			}
 		}
 	} else if err != nil {
-		return errors.Wrap(err, "failed to generate xrootd issuer for the origin")
+		return errors.Wrap(err, "failed to generate xrootd issuers for the origin")
 	}
 
 	if issuer, err := GenerateMonitoringIssuer(); err == nil && len(issuer.Name) > 0 {

@@ -24,7 +24,6 @@ import (
 	"bufio"
 	"context"
 	_ "embed"
-	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
@@ -76,6 +75,15 @@ var (
 
 	//go:embed resources/osdf-authfile
 	authfileOutput string
+
+	//go:embed resources/multi-export-multi-issuers.yml
+	multiExportIssuers string
+
+	//go:embed resources/single-export-no-issuers.yml
+	singleExportNoIssuers string
+
+	//go:embed resources/single-export-one-issuer.yml
+	singleExportOneIssuer string
 
 	sampleMultilineOutput = `foo \
 	bar
@@ -521,53 +529,208 @@ func TestMergeConfig(t *testing.T) {
 	}))
 }
 
-func TestGenerateConfig(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
+func TestGenerateMonitoringIssuer(t *testing.T) {
 	server_utils.ResetTestState()
-
 	defer server_utils.ResetTestState()
 
-	viper.Set("Origin.SelfTest", false)
-	issuer, err := GenerateMonitoringIssuer()
-	require.NoError(t, err)
-	assert.Empty(t, issuer.Name)
+	testCases := []struct {
+		name            string
+		selfTestEnabled bool
+		externalWebUrl  string
+		expectedIssuer  Issuer
+		expectError     bool
+	}{
+		{
+			name:            "self-test enabled",
+			selfTestEnabled: true,
+			externalWebUrl: "https://my-origin.com:8443",
+			expectedIssuer: Issuer{
+				Name: 	  "Built-in Monitoring",
+				Issuer:   "https://my-origin.com:8443",
+				BasePaths: []string{server_utils.MonitoringBaseNs},
+				DefaultUser: "xrootd",
+			},
+			expectError: false,
+		},
+		{
+			name:            "self-test disabled",
+			selfTestEnabled: false,
+			externalWebUrl: "https://my-origin.com:8443",
+			expectedIssuer: Issuer{},
+			expectError: false,
+		},
+		{
+			name:            "self-test enabled, no external web URL",
+			selfTestEnabled: true,
+			externalWebUrl: "",
+			expectedIssuer: Issuer{},
+			expectError: true,
+		},
+	}
 
-	viper.Set("Origin.SelfTest", true)
-	viper.Set("Origin.Port", 8443)
-	viper.Set("Server.WebPort", 8443)
-	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
-	config.InitConfigDir(viper.GetViper())
-	err = config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
-	issuer, err = GenerateMonitoringIssuer()
-	require.NoError(t, err)
-	assert.Equal(t, "Built-in Monitoring", issuer.Name)
-	assert.Equal(t, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Origin_Port.GetInt()), issuer.Issuer)
-	require.Len(t, issuer.BasePaths, 1)
-	assert.Equal(t, "/pelican/monitoring", issuer.BasePaths[0])
-	assert.Equal(t, "xrootd", issuer.DefaultUser)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			viper.Set(param.Origin_SelfTest.GetName(), tc.selfTestEnabled)
+			viper.Set(param.Server_ExternalWebUrl.GetName(), tc.externalWebUrl)
+			issuer, err := GenerateMonitoringIssuer()
+			if tc.expectError {
+				require.Error(t, err)
+				return
+			}
 
+			require.NoError(t, err)
+			assert.Equal(t, tc.expectedIssuer, issuer)
+		})
+	}
+}
+
+func TestGenerateOriginIssuer(t *testing.T) {
 	server_utils.ResetTestState()
-	viper.Set("Origin.SelfTest", false)
-	viper.Set("Origin.ScitokensDefaultUser", "user1")
-	viper.Set("Origin.ScitokensMapSubject", true)
-	viper.Set("Origin.Port", 8443)
-	viper.Set("Server.WebPort", 8443)
-	config.InitConfigDir(viper.GetViper())
-	err = config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
-	issuer, err = GenerateOriginIssuer([]string{"/foo/bar/baz", "/another/exported/path"})
-	require.NoError(t, err)
-	assert.Equal(t, "Origin", issuer.Name)
-	assert.Equal(t, "https://"+param.Server_Hostname.GetString()+":"+fmt.Sprint(param.Origin_Port.GetInt()), issuer.Issuer)
-	require.Len(t, issuer.BasePaths, 2)
-	assert.Equal(t, "/foo/bar/baz", issuer.BasePaths[0])
-	assert.Equal(t, "/another/exported/path", issuer.BasePaths[1])
-	assert.Equal(t, "user1", issuer.DefaultUser)
-	assert.True(t, issuer.MapSubject)
+	defer server_utils.ResetTestState()
+
+	testCases := []struct {
+		name               string
+		yamlConfig         string
+		extraViperSettings map[string]string
+		expectError        bool
+		expectedIssuers    []Issuer
+	}{
+		{
+			name:       "single export default issuer",
+			yamlConfig: singleExportNoIssuers,
+			extraViperSettings: map[string]string{
+				param.Server_IssuerUrl.GetName(): "https://foo.com",
+			},
+			expectError: false,
+			expectedIssuers: []Issuer{
+				{
+					Name:             "Origin https://foo.com",
+					Issuer:           "https://foo.com",
+					BasePaths:        []string{"/first/namespace"},
+					RestrictedPaths:  nil,
+					MapSubject:       false,
+					DefaultUser:      "",
+					UsernameClaim:    "",
+				},
+			},
+		},
+		{
+			name:       "single export one issuer",
+			yamlConfig: singleExportOneIssuer,
+			expectError: false,
+			expectedIssuers: []Issuer{
+				{
+					Name:             "Origin https://foo.com",
+					Issuer:           "https://foo.com",
+					BasePaths:        []string{"/first/namespace"},
+					RestrictedPaths:  nil,
+					MapSubject:       false,
+					DefaultUser:      "",
+					UsernameClaim:    "",
+				},
+			},
+		},
+		{
+			name:       "multiple exports multiple issuers",
+			yamlConfig: multiExportIssuers,
+			extraViperSettings: map[string]string{
+				param.Server_IssuerUrl.GetName(): "https://foo99.com",
+			},
+			expectError: false,
+			expectedIssuers: []Issuer{
+				{
+					Name:             "Origin https://foo99.com",
+					Issuer:           "https://foo99.com",
+					BasePaths:        []string{"/first/namespace"},
+					RestrictedPaths:  nil,
+					MapSubject:       false,
+					DefaultUser:      "",
+					UsernameClaim:    "",
+				},
+				{
+					Name:             "Origin https://foo1.com",
+					Issuer:           "https://foo1.com",
+					BasePaths:        []string{"/second/namespace"},
+					RestrictedPaths:  nil,
+					MapSubject:       false,
+					DefaultUser:      "",
+					UsernameClaim:    "",
+				},
+				{
+					Name:             "Origin https://foo2.com",
+					Issuer:           "https://foo2.com",
+					BasePaths:        []string{"/second/namespace", "/third/namespace"},
+					RestrictedPaths:  nil,
+					MapSubject:       false,
+					DefaultUser:      "",
+					UsernameClaim:    "",
+				},
+				{
+					Name:             "Origin https://foo3.com",
+					Issuer:           "https://foo3.com",
+					BasePaths:        []string{"/third/namespace"},
+					RestrictedPaths:  nil,
+					MapSubject:       false,
+					DefaultUser:      "",
+					UsernameClaim:    "",
+				},
+			},
+		},
+		{
+			name:       "single export one issuer with all parameters",
+			yamlConfig: singleExportOneIssuer,
+			extraViperSettings: map[string]string{
+				param.Origin_ScitokensRestrictedPaths.GetName(): "/restricted/path",
+				param.Origin_ScitokensMapSubject.GetName():      "true",
+				param.Origin_ScitokensDefaultUser.GetName():     "defaultUser",
+				param.Origin_ScitokensUsernameClaim.GetName():   "usernameClaim",
+			},
+			expectError: false,
+			expectedIssuers: []Issuer{
+				{
+					Name:             "Origin https://foo.com",
+					Issuer:           "https://foo.com",
+					BasePaths:        []string{"/first/namespace"},
+					RestrictedPaths:  []string{"/restricted/path"},
+					MapSubject:       true,
+					DefaultUser:      "defaultUser",
+					UsernameClaim:    "usernameClaim",
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer server_utils.ResetTestState()
+			ctx, _, _ := test_utils.TestContext(context.Background(), t)
+			viper.Set("ConfigDir", t.TempDir())
+
+			// Load in test config
+			viper.SetConfigType("yaml")
+			err := viper.MergeConfig(strings.NewReader(tc.yamlConfig))
+			require.NoError(t, err, "error reading config")
+			config.InitConfig()
+			err = config.InitServer(ctx, server_structs.OriginType)
+			require.NoError(t, err)
+
+			// Set extra Viper settings if provided
+			for key, value := range tc.extraViperSettings {
+				viper.Set(key, value)
+			}
+
+			issuers, err := GenerateOriginIssuers()
+			if tc.expectError {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			// There are no guarantees about ordering of the issuers because
+			// of the map operation in the function, so we use ElementsMatch
+			assert.ElementsMatch(t, tc.expectedIssuers, issuers)
+		})
+	}
 }
 
 func TestWriteOriginAuthFiles(t *testing.T) {
@@ -727,23 +890,20 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 }
 
 func TestWriteOriginScitokensConfig(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
 	server_utils.ResetTestState()
-	dirname := t.TempDir()
-	os.Setenv("PELICAN_ORIGIN_RUNLOCATION", dirname)
-	defer os.Unsetenv("PELICAN_ORIGIN_RUNLOCATION")
-	config_dirname := t.TempDir()
-	viper.Set("Origin.SelfTest", true)
-	viper.Set("ConfigDir", config_dirname)
-	viper.Set("Origin.RunLocation", dirname)
-	viper.Set("Origin.Port", 8443)
-	viper.Set("Server.WebPort", 8444)
-	viper.Set("Server.Hostname", "origin.example.com")
+	defer server_utils.ResetTestState()
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	tmpDir := t.TempDir()
+	viper.Set("ConfigDir", tmpDir)
+	viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
+	viper.Set(param.Origin_SelfTest.GetName(), true)
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
+	viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
+	viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
 	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
 
+	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
@@ -753,10 +913,10 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	err = os.WriteFile(scitokensCfg, []byte(toMergeOutput), 0640)
 	require.NoError(t, err)
 
-	err = WriteOriginScitokensConfig([]string{"/foo/bar"})
+	err = WriteOriginScitokensConfig()
 	require.NoError(t, err)
 
-	genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
+	genCfg, err := os.ReadFile(filepath.Join(tmpDir, "scitokens-origin-generated.cfg"))
 	require.NoError(t, err)
 
 	assert.Equal(t, string(monitoringOutput), string(genCfg))

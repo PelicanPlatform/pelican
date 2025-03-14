@@ -107,7 +107,11 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 
 	viper.Set(param.TLSSkipVerify.GetName(), true)
 
+	// Pre-initialize the servers, which we need to do so that `GetOriginExports()` works, as
+	// failure to pre-assign an export issuer causes the origin to deduce a default.
 	config.InitConfig()
+	err = config.InitServer(ctx, modules)
+	require.NoError(t, err)
 
 	// Read in any config we may have set
 	if originConfig != "" {
@@ -229,7 +233,6 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, expectedResponse.Msg)
 
-	issuer, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 	tokConf := token.NewWLCGToken()
 	tokConf.Lifetime = time.Duration(time.Minute)
