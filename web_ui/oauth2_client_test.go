@@ -19,6 +19,7 @@
 package web_ui
 
 import (
+	"encoding/base64"
 	"net/url"
 	"testing"
 
@@ -26,23 +27,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func base64encode(s string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(s))
+}
+
 func TestGenerateOAuthState(t *testing.T) {
 	t.Run("generate-correct-state-string", func(t *testing.T) {
 		get := GenerateOAuthState(map[string]string{"key1": "val1"})
-		assert.Equal(t, "key1=val1", get)
+		assert.Equal(t, base64encode("key1=val1"), get)
 	})
 
 	t.Run("generate-url-encoded-state-string", func(t *testing.T) {
 		val1Raw := "https://example.com"
 		val1Encoded := url.QueryEscape(val1Raw)
 		get := GenerateOAuthState(map[string]string{"key1": val1Raw})
-		assert.Equal(t, "key1="+val1Encoded, get)
+		assert.Equal(t, base64encode("key1="+val1Encoded), get)
 	})
 }
 
 func TestParseOAuthState(t *testing.T) {
 	t.Run("parse-non-url-string", func(t *testing.T) {
-		get, err := ParseOAuthState("key1=val1&key2=val2")
+		get, err := ParseOAuthState(base64encode("key1=val1&key2=val2"))
 		require.NoError(t, err)
 		assert.EqualValues(t, map[string]string{"key1": "val1", "key2": "val2"}, get)
 	})
@@ -50,13 +55,13 @@ func TestParseOAuthState(t *testing.T) {
 	t.Run("parse-url-encoded-string", func(t *testing.T) {
 		val2Raw := "https://example.com"
 		val2Encoded := url.QueryEscape(val2Raw)
-		get, err := ParseOAuthState("key1=val1&key2=" + val2Encoded)
+		get, err := ParseOAuthState(base64encode("key1=val1&key2=" + val2Encoded))
 		require.NoError(t, err)
 		assert.EqualValues(t, map[string]string{"key1": "val1", "key2": val2Raw}, get)
 	})
 
 	t.Run("duplicated-keys-returns-err", func(t *testing.T) {
-		get, err := ParseOAuthState("key1=val1&key1=val2")
+		get, err := ParseOAuthState(base64encode("key1=val1&key1=val2"))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "duplicated keys")
 		assert.Nil(t, get)
