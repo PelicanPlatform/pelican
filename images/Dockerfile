@@ -418,7 +418,10 @@ ARG TARGETPLATFORM
 
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
-  dnf install -y java-17-openjdk-headless
+
+  # We need OpenJDK for OA4MP.
+  # We need sssd-client for some xrootd-multiuser setups.
+  dnf install -y java-17-openjdk-headless sssd-client
 ENDRUN
 
 # Install OA4MP. Most of the installation is in /opt, but there are
@@ -519,7 +522,6 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   # These IDs must match OSG's sssd sidecar containers.
   groupadd -r -g 990 sssd
   useradd -r -g sssd -u 990 -d / -s /usr/sbin/nologin -c "System user for sssd" sssd
-  dnf install -y sssd-client
 ENDRUN
 RUN ln -s pelican /usr/local/bin/osdf
 ENTRYPOINT ["/entrypoint.sh", "osdf", "origin"]
