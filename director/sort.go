@@ -333,6 +333,7 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 			labels := geoIPError.labels
 			setProjectLabel(ctx, &labels)
 			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
+			metrics.PelicanDirectorGeoIPErrorsTotal.With(labels).Inc()
 		}
 		log.Warningf("Error while getting the client IP address: %v", err)
 	}
