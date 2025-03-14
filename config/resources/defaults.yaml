@@ -137,6 +137,7 @@ Issuer:
   TomcatLocation: /opt/tomcat
   ScitokensServerLocation: /opt/scitokens-server
   QDLLocation: /opt/qdl
+  OIDCPreferClaimsFromIDToken: false
   OIDCAuthenticationUserClaim: sub
   OIDCGroupClaim: groups
   AuthenticationSource: OIDC
