@@ -25,10 +25,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -36,6 +38,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 
 	"github.com/pelicanplatform/pelican/config"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
@@ -179,12 +182,16 @@ func generateGroupInfo(user string) (groups []string, err error) {
 
 // Given a map from a JSON object, generate user/group information according to
 // the current policy.
-func generateUserGroupInfo(userInfo map[string]interface{}) (user string, groups []string, err error) {
+func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}) (user string, groups []string, err error) {
+	claimsSource := maps.Clone(userInfo)
+	if param.Issuer_OIDCPreferClaimsFromIDToken.GetBool() {
+		maps.Copy(claimsSource, idToken)
+	}
 	userClaim := param.Issuer_OIDCAuthenticationUserClaim.GetString()
 	if userClaim == "" {
 		userClaim = "sub"
 	}
-	userIdentifierIface, ok := userInfo[userClaim]
+	userIdentifierIface, ok := claimsSource[userClaim]
 	if !ok {
 		log.Errorln("User info endpoint did not return a value for the user claim", userClaim)
 		err = errors.New("identity provider did not return an identity for logged-in user")
@@ -211,7 +218,7 @@ func generateUserGroupInfo(userInfo map[string]interface{}) (user string, groups
 
 	if param.Issuer_GroupSource.GetString() == "oidc" {
 		groupClaim := param.Issuer_OIDCGroupClaim.GetString()
-		groupList, ok := userInfo[groupClaim]
+		groupList, ok := claimsSource[groupClaim]
 		if ok {
 			if groupsStr, ok := groupList.(string); ok {
 				groupsInfo := strings.Split(groupsStr, ",")
@@ -305,6 +312,40 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
+	var idToken map[string]interface{}
+	if idTokenRaw := token.Extra("id_token"); idTokenRaw != nil {
+		// The token's signature will show as "REDACTED" in the output.
+		log.Debugf("Found an OIDC ID token: %v", idTokenRaw)
+
+		// We were given this ID token by the authentication provider, not
+		// some third party. If we don't trust the provider, we have greater
+		// issues.
+		skew, _ := time.ParseDuration("6s")
+		idTokenJWT, err := jwt.ParseString(idTokenRaw.(string), jwt.WithVerify(false), jwt.WithAcceptableSkew(skew))
+		if err != nil {
+			log.Errorf("Error parsing OIDC ID token: %v", err)
+			ctx.JSON(http.StatusInternalServerError,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprint("Error parsing OIDC ID token: ", ctx.Request.URL),
+				})
+			return
+		}
+
+		idToken, err = idTokenJWT.AsMap(ctx)
+		if err != nil {
+			log.Errorf("Error converting OIDC ID token to a map: %v", err)
+			ctx.JSON(http.StatusInternalServerError,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprint("Error converting OIDC ID token to a map: ", ctx.Request.URL),
+				})
+			return
+		}
+	} else {
+		log.Debugf("Did not find an OIDC ID token")
+	}
+
 	client := oauthConfig.Client(c, token)
 	client.Transport = config.GetTransport()
 
@@ -364,7 +405,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	user, groups, err := generateUserGroupInfo(userInfo)
+	user, groups, err := generateUserGroupInfo(userInfo, idToken)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{

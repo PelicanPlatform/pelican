@@ -2298,9 +2298,21 @@ type: object
 default: []
 components: ["origin"]
 ---
+name: Issuer.OIDCPreferClaimsFromIDToken
+description: |+
+  If set to `true`, then the claims specified by
+  `Issuer.OIDCAuthenticationUserClaim` and `Issuer.GroupSource` will first
+  be searched for in the OIDC ID token before falling back on claims from
+  the UserInfo endpoint.
+
+  If set to `false`, then only the OIDC UserInfo endpoint will be considered.
+type: bool
+default: false  # this was the behavior prior to this parameter's introduction
+components: ["origin"]
+---
 name: Issuer.OIDCAuthenticationUserClaim
 description: |+
-  The claim in the OIDC ID token to be used as the "username" for the issuer.
+  The claim to be used as the "username" for the issuer.
 type: string
 default: sub
 components: ["origin"]
@@ -2331,7 +2343,7 @@ components: ["origin"]
 ---
 name: Issuer.OIDCGroupClaim
 description: |+
-  The claim in the OIDC ID token to be used as the group for the issuer.  If the value is a string,
+  The claim to be used as the group for the issuer.  If the value is a string,
   it is assumed that a comma is used as a group delimiter; otherwise, an array of strings is assumed.
   Check the documentation of your OIDC provider to determine the appropriate claim name.
 type: string
