@@ -80,10 +80,10 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_st
 		return nil, fmt.Errorf("issuer at %s for prefix %s does not support device flow", issuerUrl, entry.Prefix)
 	}
 
-	// Always trim the filename off the path
-	osdfPath = path.Dir(osdfPath)
-
+	// Determine the path to include in the scope that we request.
+	// It needs to be relative to some base path. Start with the prefix.
 	pathCleaned := path.Clean(osdfPath)[len(entry.Prefix):]
+
 	// The credential generation/issuer objects provide various hints and guidance about how
 	// to best create the OAuth2 credential
 	if len(dirResp.XPelTokGenHdr.Issuers) != 0 {
@@ -91,6 +91,15 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_st
 			pathCleaned = path.Clean(osdfPath)[len(dirResp.XPelTokGenHdr.BasePaths[0]):]
 		}
 	}
+
+	// If the initial path was exactly some base path,
+	// then the path in the scope that we request should be "/".
+	if pathCleaned == "" {
+		pathCleaned = "/"
+	}
+
+	// Always have the requested token refer to a directory, not some file.
+	pathCleaned = path.Dir(pathCleaned)
 
 	// Potentially increase the coarseness of the token
 	if opts.Operation != config.TokenSharedWrite && opts.Operation != config.TokenSharedRead && dirResp.XPelTokGenHdr.MaxScopeDepth > 0 {
