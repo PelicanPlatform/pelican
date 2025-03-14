@@ -603,6 +603,9 @@ description: |+
 
   - StoragePrefix: The relevant path from the object store, e.g. for posix /my/dir
   - FederationPrefix: The namespace prefix that data from StoragePrefix is made available under within the federation
+  - IssuerUrls: A list of URLs that token requests to the federation prefix can use as issuers. These issuer URLs are used
+      to craft the Origin's Scitokens configuration file. If unset, the Origin will fall back to its own external web URL and
+      assume its server keys are also used for minting data access tokens.
   - Capabilities: A list of the capabilities the origin is willing to support for the given export. Capabilities include:
       ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
       where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
@@ -614,16 +617,18 @@ description: |+
       If running in a containerized environment it should not be the name of the underlying physical host as that may change and lead to confusion.
       You need to manually create a file under path to `StoragePrefix` with the same name as `SentinelLocation`.
 
-      Note that this parameter is only available for the POSIX backend.
+      Note that this parameter is only available for POSIX and S3 backends.
 
     Example:
 
     ```yaml
-    Origin.Exports
-      - StoragePrefix: /home/foo/bar
-        FederationPrefix: /demo/project
-        Capabilities: ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
-        SentinelLocation: demoproject_origin_A
+    Origin:
+      Exports:
+        - StoragePrefix: /home/foo/bar
+          FederationPrefix: /demo/project
+          Capabilities: ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
+          SentinelLocation: demoproject_origin_A
+          IssuerUrls: ["https://issuer1.example.com", "https://issuer2.example.com"]
     ```
 
   If Origin.StorageType == "s3", the following additional fields are available:
