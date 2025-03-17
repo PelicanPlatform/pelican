@@ -33,6 +33,7 @@ import (
 )
 
 func main() {
+	logging.SetupLogBuffering()
 	defer logging.FlushLogs(false)
 	err := handleCLI(os.Args)
 	if err != nil {

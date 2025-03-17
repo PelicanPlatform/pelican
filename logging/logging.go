@@ -107,23 +107,24 @@ func FlushLogs(pushToFile bool) {
 
 			// Disable colors for log files
 			logs.SetFormatter(&logs.TextFormatter{
-				FullTimestamp: true,
-				DisableColors: true,
+				FullTimestamp:          true,
+				DisableColors:          true,
+				DisableLevelTruncation: true,
 			})
 		} else {
 			logs.SetOutput(os.Stdout)
 
 			// Restore colorized output when logging to stdout
 			logs.SetFormatter(&logs.TextFormatter{
-				FullTimestamp: true,
-				ForceColors:   true,
-				DisableColors: false,
+				FullTimestamp:          true,
+				ForceColors:            true,
+				DisableColors:          false,
+				DisableLevelTruncation: true,
 			})
 		}
 
 		// Flush buffered logs
 		if len(hook.entries) > 0 {
-			fmt.Println("\n[Buffered Logs]: Flushing logs...")
 
 			for _, entry := range hook.entries {
 				formatted, err := entry.String()
@@ -166,12 +167,11 @@ func setupAutoFlush() {
 	}()
 
 	logs.RegisterExitHandler(func() {
-		fmt.Println("\nExit handler triggered - Flushing logs...")
 		FlushLogs(false)
 	})
 }
 
-func init() {
+func SetupLogBuffering() {
 	logs.SetOutput(io.Discard) // Start by discarding logs until flush
 
 	logs.SetFormatter(&logs.TextFormatter{
