@@ -112,7 +112,7 @@ func FlushLogs(pushToFile bool) {
 				DisableLevelTruncation: true,
 			})
 		} else {
-			logs.SetOutput(os.Stdout)
+			logs.SetOutput(os.Stderr)
 
 			// Restore colorized output when logging to stdout
 			logs.SetFormatter(&logs.TextFormatter{
