@@ -515,7 +515,7 @@ func listApiTokens(ctx *gin.Context) {
 	}
 	status, ok, err := token.Verify(ctx, authOption)
 	if !ok {
-		log.Warningf("Cannot verify token: %v", err)
+		log.Warningf("Failed to verify WebUi Access Cookie: %v", err)
 		ctx.JSON(status, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    err.Error(),
