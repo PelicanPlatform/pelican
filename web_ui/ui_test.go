@@ -744,6 +744,72 @@ func TestApiToken(t *testing.T) {
 				assert.Contains(t, recorder.Body.String(), "Invalid API token")
 			},
 		},
+		{
+			name: "list-tokens",
+			run: func(t *testing.T) {
+				// we need to create a token first
+				req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
+				assert.NoError(t, err)
+				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
+
+				createTokenReq := CreateApiTokenReq{
+					Name:       "test-token",
+					CreatedBy:  "admin",
+					Expiration: "never",
+					Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
+				}
+				createTokenBody, err := json.Marshal(createTokenReq)
+				assert.NoError(t, err)
+				req.Body = io.NopCloser(bytes.NewReader(createTokenBody))
+
+				recorder := httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusOK, recorder.Code)
+
+				var createTokenResp map[string]string
+				err = json.NewDecoder(recorder.Body).Decode(&createTokenResp)
+				assert.NoError(t, err)
+				token := createTokenResp["token"]
+				tokenID := strings.Split(token, ".")[0]
+				assert.NotEmpty(t, token)
+
+				// list tokens
+				req, err = http.NewRequest("GET", "/api/v1.0/listApiTokens", nil)
+				assert.NoError(t, err)
+				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
+
+				recorder = httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusOK, recorder.Code)
+
+				var listTokensResp map[string][]server_structs.ApiKey
+				err = json.NewDecoder(recorder.Body).Decode(&listTokensResp)
+				assert.NoError(t, err)
+				keys := listTokensResp["keys"]
+				assert.NotEmpty(t, keys)
+
+				for _, apiKey := range keys {
+					if apiKey.ID == tokenID {
+						assert.Equal(t, "test-token", apiKey.Name)
+						assert.Equal(t, "admin", apiKey.CreatedBy)
+						assert.Equal(t, time.Time{}, apiKey.ExpiresAt)
+						assert.Equal(t, token_scopes.Monitoring_Scrape.String(), apiKey.Scopes)
+						return
+					}
+				}
+			},
+		},
+		{
+			name: "list-tokens-unauthorized",
+			run: func(t *testing.T) {
+				req, err := http.NewRequest("GET", "/api/v1.0/listApiTokens", nil)
+				assert.NoError(t, err)
+
+				recorder := httptest.NewRecorder()
+				route.ServeHTTP(recorder, req)
+				assert.Equal(t, http.StatusForbidden, recorder.Code)
+			},
+		},
 	}
 
 	// Run all the test cases

@@ -507,6 +507,35 @@ func deleteApiToken(ctx *gin.Context) {
 	})
 }
 
+func listApiTokens(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie},
+		Issuers: []token.TokenIssuer{token.LocalIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		log.Warningf("Failed to verify WebUi Access Cookie: %v", err)
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	apiKeys, err := database.ListApiKeys()
+	if err != nil {
+		log.Warning("Failed to list API keys: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{"keys": apiKeys})
+}
+
 func configureWebResource(engine *gin.Engine) {
 
 	// Register the MIME type for .txt files
@@ -545,6 +574,7 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	})
 	engine.POST("/api/v1.0/createApiToken", createApiToken)
 	engine.DELETE("/api/v1.0/deleteApiToken/:id", deleteApiToken)
+	engine.GET("/api/v1.0/listApiTokens", listApiTokens)
 	engine.GET("/api/v1.0/version", getVersionHandler)
 	return nil
 }
