@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package cache
+package self_monitor
 
 import (
 	"context"
@@ -34,9 +34,11 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -102,8 +104,8 @@ func generateTestFile() (string, error) {
 	now := time.Now()
 	testFileBytes := []byte(selfTestBody)
 	fileSize := len(testFileBytes)
-	cinfo := cInfo{
-		Store: store{
+	cinfo := cache.Cinfo{
+		Store: cache.Store{
 			FileSize:     int64(fileSize),
 			CreationTime: now.Unix(),
 			Status:       2, // CSChk_None = 0
@@ -272,7 +274,7 @@ func runSelfTest(ctx context.Context) (bool, error) {
 }
 
 // Run a cache self-test and log/record metrics with the test result
-func doSelfMonitor(ctx context.Context) {
+func doSelfMonitorCache(ctx context.Context) {
 	log.Debug("Starting a new self-test monitoring cycle")
 
 	ok, err := runSelfTest(ctx)
@@ -288,16 +290,40 @@ func doSelfMonitor(ctx context.Context) {
 	}
 }
 
-func PeriodicCacheSelfTest(ctx context.Context, ergp *errgroup.Group) {
+// Run an origin self-test and log/record metrics with the test result
+func doSelfMonitorOrigin(ctx context.Context) {
+	log.Debug("Starting a new self-test monitoring cycle")
+	fileTests := server_utils.TestFileTransferImpl{}
+	issuerUrl := param.Server_ExternalWebUrl.GetString()
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, server_utils.ServerSelfTest)
+	if ok && err == nil {
+		log.Debugln("Self-test monitoring cycle succeeded at", time.Now().Format(time.UnixDate))
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "Self-test monitoring cycle succeeded at "+time.Now().Format(time.RFC3339))
+	} else {
+		log.Warningln("Self-test monitoring cycle failed: ", err)
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "Self-test monitoring cycle failed: "+err.Error())
+	}
+}
+
+// Start self-test monitoring of the origin/cache.  This will upload, download, and delete
+// a generated filename every 15 seconds to the local origin.  On failure, it will
+// set the xrootd component's status to critical.
+func PeriodicCacheSelfTest(ctx context.Context, ergp *errgroup.Group, isOrigin bool) {
+	doSelfMonitor := doSelfMonitorCache
+	if isOrigin {
+		doSelfMonitor = doSelfMonitorOrigin
+	}
+
+	customInterval := param.Cache_SelfTestInterval.GetDuration()
+	if customInterval == 0 {
+		customInterval = 15 * time.Second
+		log.Error("Invalid config value: Cache.SelfTestInterval is 0. Fallback to 15s.")
+	}
+	ticker := time.NewTicker(customInterval)
+	defer ticker.Stop()
 	firstRound := time.After(5 * time.Second)
+
 	ergp.Go(func() error {
-		customInterval := param.Cache_SelfTestInterval.GetDuration()
-		if customInterval == 0 {
-			customInterval = 15 * time.Second
-			log.Error("Invalid config value: Cache.SelfTestInterval is 0. Fallback to 15s.")
-		}
-		ticker := time.NewTicker(customInterval)
-		defer ticker.Stop()
 		for {
 			select {
 			case <-firstRound:

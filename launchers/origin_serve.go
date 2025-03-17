@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/oa4mp"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/self_monitor"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
@@ -109,7 +110,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 
 	if param.Origin_SelfTest.GetBool() {
-		egrp.Go(func() error { return origin.PeriodicSelfTest(ctx) })
+		self_monitor.PeriodicCacheSelfTest(ctx, egrp, true)
 	}
 
 	privileged := param.Origin_Multiuser.GetBool()

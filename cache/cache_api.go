@@ -79,8 +79,10 @@ func LaunchDirectorTestFileCleanup(ctx context.Context) {
 				if item.IsDir() {
 					continue
 				}
-				// Ignore self tests. They should be handled automatically by self test logic
-				if strings.HasPrefix(item.Name(), selfTestPrefix) {
+				// Ignore self tests. They should be handled automatically by self test logic.
+				// "self-test-" is the prefix for self test files, specified in self_monitor.selfTestPrefix
+				// Plain text aims to avoid circular dependency
+				if strings.HasPrefix(item.Name(), "self-test-") {
 					continue
 				}
 				directorItems = append(directorItems, item)
