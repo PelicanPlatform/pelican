@@ -202,7 +202,6 @@ type Config struct {
 		UserInfoEndpoint string `mapstructure:"userinfoendpoint" yaml:"UserInfoEndpoint"`
 	} `mapstructure:"oidc" yaml:"OIDC"`
 	Origin struct {
-		AudienceUrl string `mapstructure:"audienceurl" yaml:"AudienceUrl"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
@@ -253,6 +252,7 @@ type Config struct {
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
 		StoragePrefix string `mapstructure:"storageprefix" yaml:"StoragePrefix"`
 		StorageType string `mapstructure:"storagetype" yaml:"StorageType"`
+		TokenAudience string `mapstructure:"tokenaudience" yaml:"TokenAudience"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
 		XRootServiceUrl string `mapstructure:"xrootserviceurl" yaml:"XRootServiceUrl"`
@@ -538,7 +538,6 @@ type configWithType struct {
 		UserInfoEndpoint struct { Type string; Value string }
 	}
 	Origin struct {
-		AudienceUrl struct { Type string; Value string }
 		DbLocation struct { Type string; Value string }
 		DirectorTest struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
@@ -589,6 +588,7 @@ type configWithType struct {
 		SelfTestInterval struct { Type string; Value time.Duration }
 		StoragePrefix struct { Type string; Value string }
 		StorageType struct { Type string; Value string }
+		TokenAudience struct { Type string; Value string }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 		XRootServiceUrl struct { Type string; Value string }

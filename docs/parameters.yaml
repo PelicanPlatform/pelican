@@ -939,7 +939,7 @@ type: string
 default: none
 components: ["origin"]
 ---
-name: Origin.AudienceUrl
+name: Origin.TokenAudience
 description: |+
   This parameter can be used to configure accepted audiences for the Origin's SciTokens configuration, referenced when deciding
   whether to accept a token for data access. When set, the Origin will only accept tokens with an audience that matches one of the
@@ -949,7 +949,8 @@ description: |+
   `[Global]
   audience_json = ["https://foo.com:8443"]`
 type: string
-default: ${.}
+default: ${Origin.Url}
+hidden: true
 components: ["origin"]
 ---
 name: Origin.XRootDPrefix

@@ -219,7 +219,6 @@ var (
 	OIDC_Issuer = StringParam{"OIDC.Issuer"}
 	OIDC_TokenEndpoint = StringParam{"OIDC.TokenEndpoint"}
 	OIDC_UserInfoEndpoint = StringParam{"OIDC.UserInfoEndpoint"}
-	Origin_AudienceUrl = StringParam{"Origin.AudienceUrl"}
 	Origin_DbLocation = StringParam{"Origin.DbLocation"}
 	Origin_ExportVolume = StringParam{"Origin.ExportVolume"}
 	Origin_FedTokenLocation = StringParam{"Origin.FedTokenLocation"}
@@ -246,6 +245,7 @@ var (
 	Origin_ScitokensUsernameClaim = StringParam{"Origin.ScitokensUsernameClaim"}
 	Origin_StoragePrefix = StringParam{"Origin.StoragePrefix"}
 	Origin_StorageType = StringParam{"Origin.StorageType"}
+	Origin_TokenAudience = StringParam{"Origin.TokenAudience"}
 	Origin_Url = StringParam{"Origin.Url"}
 	Origin_XRootDPrefix = StringParam{"Origin.XRootDPrefix"}
 	Origin_XRootServiceUrl = StringParam{"Origin.XRootServiceUrl"}

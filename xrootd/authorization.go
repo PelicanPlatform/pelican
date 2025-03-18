@@ -604,7 +604,7 @@ func WriteOriginScitokensConfig() error {
 
 	// Construct server audience, which all incoming tokens must match in their `aud` claim. Generally
 	// this restricts tokens so that they're only respected by a single server.
-	if aud := param.Origin_AudienceUrl.GetString(); aud != "" && !slices.Contains(cfg.Global.Audience, aud) {
+	if aud := param.Origin_TokenAudience.GetString(); aud != "" && !slices.Contains(cfg.Global.Audience, aud) {
 		cfg.Global.Audience = append(cfg.Global.Audience, aud)
 	}
 	log.Debugf("Origin is configured to use '%s' as token audience(s):", cfg.Global.Audience)

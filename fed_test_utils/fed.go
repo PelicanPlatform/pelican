@@ -128,7 +128,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set(param.Origin_Port.GetName(), ports[0])
 	viper.Set(param.Origin_RunLocation.GetName(), filepath.Join(tmpPath, "origin"))
 	viper.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite"))
-	viper.Set(param.Origin_AudienceUrl.GetName(), "")
+	viper.Set(param.Origin_TokenAudience.GetName(), "")
 	viper.Set(param.Cache_Port.GetName(), ports[1])
 	viper.Set(param.Cache_RunLocation.GetName(), filepath.Join(tmpPath, "cache"))
 	viper.Set(param.Cache_StorageLocation.GetName(), filepath.Join(tmpPath, "xcache-data"))

@@ -33,7 +33,7 @@ func doSelfMonitor(ctx context.Context) {
 	log.Debug("Starting a new self-test monitoring cycle")
 	fileTests := server_utils.TestFileTransferImpl{}
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
-	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_AudienceUrl.GetString(), issuerUrl, server_utils.ServerSelfTest)
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_TokenAudience.GetString(), issuerUrl, server_utils.ServerSelfTest)
 	if ok && err == nil {
 		log.Debugln("Self-test monitoring cycle succeeded at", time.Now().Format(time.UnixDate))
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "Self-test monitoring cycle succeeded at "+time.Now().Format(time.RFC3339))
