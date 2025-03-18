@@ -24,9 +24,20 @@ mkdir -p /tmp/pelican-test/stat_test
 mkdir -p /tmp/pelican-test/stat_test/origin
 chmod 777 /tmp/pelican-test/stat_test/origin
 
+# Helper func that finds an available port for the servers
+find_available_port() {
+    # Use Python to bind to port 0 and find an available port
+    python3 -c "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.bind(('', 0)); print(s.getsockname()[1]); s.close()"
+}
+
+# Get two random available ports
+WEBUI_PORT=$(find_available_port)
+ORIGIN_PORT=$(find_available_port)
+
 # Setup env variables needed
-export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:8444"
-export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:8444"
+export PELICAN_FEDERATION_DIRECTORURL="https://$HOSTNAME:$WEBUI_PORT"
+export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:$WEBUI_PORT"
+export PELICAN_ORIGIN_PORT=$ORIGIN_PORT
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_SERVER_ENABLEUI=false
 export PELICAN_ORIGIN_RUNLOCATION=/tmp/pelican-test/stat_test/xrootdRunLocation
@@ -50,10 +61,10 @@ cleanup() {
     local pid=$1  # Get the PID from the function argument
     echo "Cleaning up..."
     if [ ! -z "$pid" ]; then
-    echo "Sending SIGINT to PID $pid"
-    kill -SIGINT "$pid"
+        echo "Sending SIGINT to PID $pid"
+        kill -SIGINT "$pid"
     else
-    echo "No PID provided for cleanup."
+        echo "No PID provided for cleanup."
     fi
 
     # Clean up temporary files
@@ -75,15 +86,16 @@ cleanup() {
     unset PELICAN_ORIGIN_STORAGEPREFIX
     unset PELICAN_DIRECTOR_STATTIMEOUT
     unset PELICAN_LOGGING_LEVEL
+    unset PELICAN_ORIGIN_PORT
 }
 
 echo "This is some random content in the random file" > /tmp/pelican-test/stat_test/origin/input.txt
 
 # Prepare token for calling stat
-TOKEN=$(./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:8444" --scope "web_ui.access" --subject "bar" --lifetime 3600 --private-key /tmp/pelican-test/stat_test/issuer.jwk)
+TOKEN=$(./pelican origin token create --audience "https://wlcg.cern.ch/jwt/v1/any" --issuer "https://`hostname`:$WEBUI_PORT" --scope "web_ui.access" --subject "bar" --lifetime 3600 --private-key /tmp/pelican-test/stat_test/issuer.jwk)
 
 # Run federation in the background
-federationServe="./pelican serve --module director --module registry --module origin"
+federationServe="./pelican serve --module director --module registry --module origin --port $WEBUI_PORT"
 $federationServe &
 pid_federationServe=$!
 
@@ -91,7 +103,7 @@ pid_federationServe=$!
 trap 'cleanup $pid_federationServe' EXIT
 
 # Give the federation time to spin up:
-API_URL="https://$HOSTNAME:8444/api/v1.0/health"
+API_URL="https://$HOSTNAME:$WEBUI_PORT/api/v1.0/health"
 DESIRED_RESPONSE="200"
 
 # Function to check if the response indicates all servers are running
@@ -126,7 +138,7 @@ do
     fi
 done
 
-STAT_URL="https://$HOSTNAME:8444/api/v1.0/director_ui/servers/origins/stat/test/input.txt"
+STAT_URL="https://$HOSTNAME:$WEBUI_PORT/api/v1.0/director_ui/servers/origins/stat/test/input.txt"
 
 RESPONSE=$(curl -k -H "Cookie: login=$TOKEN" -H "Content-Type: application/json" "$STAT_URL")
 
