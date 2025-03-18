@@ -569,7 +569,7 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	// Even though we prefer using this function, we'll populate the config param
 	// based on whatever we determine here.
 	defer func() {
-		if err == nil && param.Server_IssuerUrl.GetString() != "" {
+		if err == nil && param.Server_IssuerUrl.GetString() == "" {
 			viper.Set(param.Server_IssuerUrl.GetName(), issuerUrl)
 		}
 	}()
@@ -580,7 +580,7 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 			return "", errors.Wrapf(err, "failed to parse '%s' as issuer URL from config param '%s'",
 				param.Server_IssuerUrl.GetString(), param.Server_IssuerUrl.GetName())
 		}
-		log.Debugf("Populating server's issuer URL as '%s' from config param '%s'", issuerUrl, param.Server_IssuerUrl.GetString())
+		log.Debugf("Populating server's issuer URL as '%s' from config param '%s'", issuerUrl, param.Server_IssuerUrl.GetName())
 		return issuerUrl, nil
 	}
 
