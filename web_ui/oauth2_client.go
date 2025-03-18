@@ -180,8 +180,8 @@ func generateGroupInfo(user string) (groups []string, err error) {
 	return
 }
 
-// Given a map from a JSON object, generate user/group information according to
-// the current policy.
+// Given the maps for the UserInfo and ID token JSON objects, generate
+// user/group information according to the current policy.
 func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}) (user string, groups []string, err error) {
 	claimsSource := maps.Clone(userInfo)
 	if param.Issuer_OIDCPreferClaimsFromIDToken.GetBool() {
@@ -312,7 +312,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	var idToken map[string]interface{}
+	var idToken = make(map[string]interface{})
 	if idTokenRaw := token.Extra("id_token"); idTokenRaw != nil {
 		// The token's signature will show as "REDACTED" in the output.
 		log.Debugf("Found an OIDC ID token: %v", idTokenRaw)

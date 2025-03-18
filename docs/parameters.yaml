@@ -2300,12 +2300,12 @@ components: ["origin"]
 ---
 name: Issuer.OIDCPreferClaimsFromIDToken
 description: |+
-  If set to `true`, then the claims specified by
-  `Issuer.OIDCAuthenticationUserClaim` and `Issuer.GroupSource` will first
-  be searched for in the OIDC ID token before falling back on claims from
-  the UserInfo endpoint.
+  This applies to the claims specified by `Issuer.OIDCAuthenticationUserClaim`
+  and `Issuer.GroupSource`.
 
-  If set to `false`, then only the OIDC UserInfo endpoint will be considered.
+  If set to `true`, then claims will be searched for in the OIDC ID token
+  before falling back on claims from the UserInfo endpoint. If set to `false`,
+  then only the UserInfo endpoint will be considered.
 type: bool
 default: false  # this was the behavior prior to this parameter's introduction
 components: ["origin"]
