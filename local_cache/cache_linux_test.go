@@ -39,7 +39,9 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
+	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/token"
@@ -197,6 +199,117 @@ func TestForcePurge(t *testing.T) {
 			log.Errorln("Failure when shutting down transfer engine:", err)
 		}
 		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		server_utils.ResetTestState()
+	})
+}
+
+// TestPurgeFirst verifies that LocalCache correctly reconstructs its in-memory state from files
+// in the data location and prioritizes purging files marked PURGEFIRST during the purge routine.
+//
+// The test creates 5 test files (2MB each) in order from file-1 through file-5. File-5 is marked PURGEFIRST
+// by manually adding a sentinel file before LocalCache is started, and file-1 is marked PURGEFIRST via the API.
+// The purge is triggered with the low water mark set at 5MB, and the test asserts that three files are purged:
+// file-1 and file-5 (PURGEFIRST), and file-2 (the oldest among the remaining non-PURGEFIRST files).
+func TestPurgeFirst(t *testing.T) {
+	server_utils.ResetTestState()
+
+	configDir := t.TempDir()
+	viper.Set("ConfigDir", configDir)
+
+	dataDir := t.TempDir()
+	viper.Set("localcache.datalocation", dataDir)
+	viper.Set("LocalCache.Size", "10MB")
+	viper.Set("LocalCache.LowWaterMarkPercentage", "50")
+
+	// Create test files and sentinel files
+	testFiles := []struct {
+		name         string
+		isPurgeFirst bool
+	}{
+		{"file1.txt", false},
+		{"file2.txt", false},
+		{"file3.txt", false},
+		{"file4.txt", false},
+		{"file5.txt", true},
+	}
+
+	testNsDir := filepath.Join(dataDir, "test")
+	require.NoError(t, os.MkdirAll(testNsDir, 0755))
+
+	twoMBData := make([]byte, 2*1024*1024) // 2 MB of zeroed bytes
+	for _, tf := range testFiles {
+		dataFilePath := filepath.Join(testNsDir, tf.name)
+		err := os.WriteFile(dataFilePath, twoMBData, 0644)
+		require.NoError(t, err)
+
+		sentinelFilePath := dataFilePath + ".DONE"
+		err = os.WriteFile(sentinelFilePath, []byte(""), 0644)
+		require.NoError(t, err)
+
+		if tf.isPurgeFirst {
+			sentinelFilePath := dataFilePath + ".PURGEFIRST"
+			err = os.WriteFile(sentinelFilePath, []byte(""), 0644)
+			require.NoError(t, err)
+		}
+	}
+
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	_, _, err := launchers.LaunchModules(ctx, server_structs.LocalCacheType)
+	require.NoError(t, err)
+	// Create token with proper scopes
+	issuer, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+	tokConf := token.NewWLCGToken()
+	tokConf.Lifetime = time.Minute
+	tokConf.Issuer = issuer
+	tokConf.Subject = "test"
+	tokConf.AddAudienceAny()
+	tokConf.AddScopes(token_scopes.Localcache_Purge)
+
+	token, err := tokConf.CreateToken()
+	require.NoError(t, err)
+
+	// Make API call to mark /test/file1.txt as purge first
+	tr := config.GetTransport()
+	body := map[string]interface{}{"Path": "/test/file1.txt"}
+
+	_, err = utils.MakeRequest(ctx, tr, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge_first", "POST", body, map[string]string{"Authorization": "Bearer " + token})
+	require.NoError(t, err)
+
+	// Verify the sentinel .PURGEFIRST file exists
+	expectedSentinel := filepath.Join(testNsDir, "file1.txt.PURGEFIRST")
+	_, statErr := os.Stat(expectedSentinel)
+	assert.NoError(t, statErr, "Expected .PURGEFIRST sentinel file not found")
+
+	_, err = utils.MakeRequest(ctx, tr, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/localcache/purge", "POST", nil, map[string]string{"Authorization": "Bearer " + token})
+	require.NoError(t, err)
+
+	deletedFiles := []string{
+		"file1.txt", "file1.txt.DONE", "file1.txt.PURGEFIRST",
+		"file5.txt", "file5.txt.DONE", "file5.txt.PURGEFIRST",
+		"file5.txt", "file2.txt.DONE",
+	}
+
+	for _, fname := range deletedFiles {
+		_, err := os.Stat(filepath.Join(testNsDir, fname))
+		assert.ErrorIs(t, err, os.ErrNotExist, "Expected %s to be deleted", fname)
+	}
+
+	existingFiles := []string{
+		"file3.txt", "file3.txt.DONE",
+		"file4.txt", "file4.txt.DONE",
+	}
+
+	for _, fname := range existingFiles {
+		_, err := os.Stat(filepath.Join(testNsDir, fname))
+		assert.NoError(t, err, "Expected %s to exist", fname)
+	}
+
+	t.Cleanup(func() {
+		cancel()
+		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
+			require.NoError(t, err)
+		}
 		server_utils.ResetTestState()
 	})
 }

@@ -693,6 +693,14 @@ func (lc *LocalCache) purge() (err error) {
 				err = rmErr
 			}
 		}
+		if rmErr := os.Remove(localPath + ".PURGEFIRST"); rmErr != nil {
+			if !os.IsNotExist(rmErr) {
+				log.Warningln("Failed to purge PURGEFIRST file:", rmErr)
+				if err == nil {
+					err = rmErr
+				}
+			}
+		}
 		if rmErr := os.Remove(localPath); rmErr != nil {
 			log.Warningln("Failed to purge file:", rmErr)
 			if err == nil {
@@ -1026,6 +1034,9 @@ func (cr *cacheReader) Close() error {
 	return nil
 }
 
+// MarkObjectPurgeFirst marks the given object path as PURGEFIRST
+// by creating the corresponding sentinel file on disk and updating
+// the in-memory data structures accordingly.
 func (lc *LocalCache) MarkObjectPurgeFirst(objectPath string) (int, error) {
 	lc.mutex.Lock()
 	defer lc.mutex.Unlock()
@@ -1084,6 +1095,8 @@ func (lc *LocalCache) getHeapIndex(entry *lruEntry, heapList lru) int {
 	return -1 // Entry not found
 }
 
+// ReconstructCache rebuilds the in-memory data structures of the LocalCache based on the files
+// present in the directory specified by "LocalCache.DataLocation".
 func (lc *LocalCache) ReconstructCache() error {
 	lc.mutex.Lock()
 	defer lc.mutex.Unlock()
@@ -1105,8 +1118,9 @@ func (lc *LocalCache) ReconstructCache() error {
 		}
 
 		// Check for sentinel files
-		if strings.HasSuffix(d.Name(), ".DONE") || strings.HasSuffix(d.Name(), ".PURGEFIRST") {
+		if strings.HasSuffix(d.Name(), ".DONE") {
 			dataFilePath := strings.TrimSuffix(filePath, filepath.Ext(filePath)) // Remove extension
+
 			fileInfo, err := os.Stat(dataFilePath)
 			if err != nil {
 				log.Warningf("File %s exists in sentinel but not on disk, skipping...", dataFilePath)
@@ -1119,17 +1133,17 @@ func (lc *LocalCache) ReconstructCache() error {
 				lastUse: fileInfo.ModTime(),
 			}
 
-			// Determine if it's purge first or normal LRU
-			if strings.HasSuffix(d.Name(), ".PURGEFIRST") {
+			lc.lru = append(lc.lru, entry)
+			lc.lruLookup[entry.path] = entry
+
+			lc.cacheSize += uint64(entry.size)
+
+			// Check if .PURGEFIRST sentinel exists
+			purgeFirstPath := dataFilePath + ".PURGEFIRST"
+			if _, err := os.Stat(purgeFirstPath); err == nil {
 				lc.purgeFirstHeap = append(lc.purgeFirstHeap, entry)
 				lc.purgeFirstLookup[entry.path] = entry
-			} else if strings.HasSuffix(d.Name(), ".DONE") {
-				lc.lru = append(lc.lru, entry)
-				lc.lruLookup[entry.path] = entry
 			}
-
-			// Update cache size
-			lc.cacheSize += uint64(entry.size)
 		}
 
 		return nil
