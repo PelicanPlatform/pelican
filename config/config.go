@@ -591,7 +591,7 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 				param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
 		}
 
-		// We assume any issuer is running https, otherwise we're crazy
+		// We assume any issuer is running https
 		issuerUrl := fmt.Sprintf("https://%s:%d", param.Server_IssuerHostname.GetString(), param.Server_IssuerPort.GetInt())
 		if _, err := url.Parse(issuerUrl); err != nil {
 			return "", errors.Wrapf(err, "failed to parse '%s' as issuer URL from config params '%s' and '%s'",
