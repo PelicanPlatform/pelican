@@ -40,6 +40,7 @@ export PELICAN_FEDERATION_REGISTRYURL="https://$HOSTNAME:$WEBUI_PORT"
 export PELICAN_ORIGIN_PORT=$ORIGIN_PORT
 export PELICAN_TLSSKIPVERIFY=true
 export PELICAN_SERVER_ENABLEUI=false
+export PELICAN_SERVER_WEBPORT=$WEBUI_PORT
 export PELICAN_ORIGIN_RUNLOCATION=/tmp/pelican-test/stat_test/xrootdRunLocation
 
 export PELICAN_CONFIGDIR=/tmp/pelican-test/stat_test
