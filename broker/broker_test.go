@@ -73,18 +73,35 @@ func getHelloWorldHandler(t *testing.T) func(resp http.ResponseWriter, req *http
 	}
 }
 
+// getFreePort returns an available port.
+// A free port is needed beforehand so that it can be used for adding
+// an origin entry in the registry database.
+func getFreePort() (int, error) {
+	l, err := net.Listen("tcp", ":0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+
+	addr := l.Addr().(*net.TCPAddr)
+	return addr.Port, nil
+}
+
 func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	dirpath := t.TempDir()
-
+	port, err := getFreePort()
+	require.NoError(t, err)
 	server_utils.ResetTestState()
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("ConfigDir", filepath.Join(dirpath, "config"))
 	config.InitConfig()
-	viper.Set("Server.WebPort", "0")
+	viper.Set("Server.WebPort", port)
 	viper.Set("Registry.DbLocation", filepath.Join(dirpath, "ns-registry.sqlite"))
-	viper.Set("Origin.FederationPrefix", "/foo")
 
-	err := config.InitServer(ctx, server_structs.BrokerType)
+	modules := server_structs.ServerType(0)
+	modules.Set(server_structs.RegistryType)
+	modules.Set(server_structs.BrokerType)
+	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
 
 	err = registry.InitializeDB()
@@ -102,9 +119,11 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 		Identity: "test_data",
 	})
 	require.NoError(t, err)
+
+	originUrl, _ := url.Parse(param.Server_ExternalWebUrl.GetString())
 	err = registry.AddNamespace(&server_structs.Namespace{
 		ID:       2,
-		Prefix:   "/foo",
+		Prefix:   "/origins/" + originUrl.Host,
 		Pubkey:   string(keysetBytes),
 		Identity: "test_data",
 	})
@@ -135,7 +154,7 @@ func doRetrieveRequest(t *testing.T, ctx context.Context, dur time.Duration) (*h
 	require.NoError(t, err)
 	brokerAud.Path = ""
 
-	token, err := createToken(param.Origin_FederationPrefix.GetString(), param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
+	token, err := createToken(serverNs, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
 	require.NoError(t, err)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", brokerEndpoint, reqReader)
@@ -191,6 +210,7 @@ func TestBroker(t *testing.T) {
 	// Launch the origin-side monitoring of requests.
 	viper.Set("Federation.BrokerURL", param.Server_ExternalWebUrl.GetString())
 	viper.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
+
 	listenerChan := make(chan any)
 	ctxQuick, deadlineCancel := context.WithTimeout(ctx, 5*time.Second) // Have shorter timeout for this handshake
 	err = LaunchRequestMonitor(ctxQuick, egrp, listenerChan)
@@ -205,7 +225,6 @@ func TestBroker(t *testing.T) {
 	originUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	require.NoError(t, err)
 	query.Set("origin", originUrl.Host)
-	query.Set("prefix", "/foo")
 	brokerUrl.RawQuery = query.Encode()
 	clientConn, err := ConnectToOrigin(ctxQuick, brokerUrl.String(), originUrl.Host)
 	require.NoError(t, err)
