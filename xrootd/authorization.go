@@ -654,22 +654,54 @@ func WriteOriginScitokensConfig() error {
 	return writeScitokensConfiguration(server_structs.OriginType, &cfg)
 }
 
+// GenerateCacheIssuers takes a slice of NamespaceAdV2 and generates a list of Issuer objects
+// for the cache's scitokens configuration. It aggregates base paths for each issuer
+// and removes duplicates, returning a slice of Issuer objects.
+// This could be easily accomplished directly in WriteCacheScitokensConfig, but this split
+// makes it slightly easier to test, as it doesn't require checking file contents for equality.
+func GenerateCacheIssuers(nsAds []server_structs.NamespaceAdV2) []Issuer {
+	// Map to aggregate base paths for each issuer
+	var issuerMap = make(map[string][]string)
+	for _, ad := range nsAds {
+		if !ad.Caps.PublicReads {
+			for _, issuer := range ad.Issuer {
+				issuerMap[issuer.IssuerUrl.String()] = append(issuerMap[issuer.IssuerUrl.String()], issuer.BasePaths...)
+			}
+		}
+	}
+
+	// Deduplicate base paths for each issuer
+	for issuer, basePaths := range issuerMap {
+		slices.Sort(basePaths)                        // Sort the base paths
+		issuerMap[issuer] = slices.Compact(basePaths) // Remove duplicates
+	}
+
+	issuers := make([]Issuer, 0, len(issuerMap))
+	for issuer, basePaths := range issuerMap {
+		issuers = append(issuers, Issuer{
+			Name:      issuer,
+			Issuer:    issuer,
+			BasePaths: basePaths,
+		})
+	}
+
+	return issuers
+}
+
 // Writes out the cache's scitokens.cfg configuration
 func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAdV2) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
 	}
-	for _, ad := range nsAds {
-		if !ad.Caps.PublicReads {
-			for _, ti := range ad.Issuer {
-				if val, ok := cfg.IssuerMap[ti.IssuerUrl.String()]; ok {
-					val.BasePaths = append(val.BasePaths, ti.BasePaths...)
-					cfg.IssuerMap[ti.IssuerUrl.String()] = val
-				} else {
-					cfg.IssuerMap[ti.IssuerUrl.String()] = Issuer{Issuer: ti.IssuerUrl.String(), BasePaths: ti.BasePaths, Name: ti.IssuerUrl.String()}
-				}
-			}
+
+	issuers := GenerateCacheIssuers(nsAds)
+	for _, issuer := range issuers {
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
 		}
 	}
 

@@ -733,6 +733,210 @@ func TestGenerateOriginIssuer(t *testing.T) {
 	}
 }
 
+// Test that, given a slice of namespace ads, the cache generates the correct
+// set of issuers for the scitokens configuration. The test cases cover
+// various combinations of public/private capabilities, multiple issuers,
+// and overlapping base paths.
+func TestGenerateCacheIssuers(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	testCases := []struct {
+		name            string
+		nsAds           []server_structs.NamespaceAdV2
+		expectedIssuers []Issuer
+	}{
+		{
+			name:            "empty namespace ads",
+			nsAds:           []server_structs.NamespaceAdV2{},
+			expectedIssuers: []Issuer{},
+		},
+		{
+			name: "single namespace ad with public capabilities",
+			nsAds: []server_structs.NamespaceAdV2{
+				{
+					Path: "/foo1",
+					Caps: server_structs.Capabilities{
+						PublicReads: true,
+						Reads:       true,
+					},
+					Issuer: []server_structs.TokenIssuer{
+						{
+							IssuerUrl: url.URL{Scheme: "https", Host: "issuer1.com"},
+							BasePaths: []string{"/foo1"},
+						},
+					},
+				},
+			},
+			expectedIssuers: []Issuer{}, // No issuers are generated because public reads are enabled. Caches don't care about writes (yet)
+		},
+		{
+			name: "single namespace ad with private capabilities",
+			nsAds: []server_structs.NamespaceAdV2{
+				{
+					Path: "/foo1",
+					Caps: server_structs.Capabilities{
+						Reads: true,
+					},
+					Issuer: []server_structs.TokenIssuer{
+						{
+							IssuerUrl: url.URL{Scheme: "https", Host: "issuer1.com"},
+							BasePaths: []string{"/foo1"},
+						},
+					},
+				},
+			},
+			expectedIssuers: []Issuer{
+				{
+					Name:      "https://issuer1.com",
+					Issuer:    "https://issuer1.com",
+					BasePaths: []string{"/foo1"},
+				},
+			},
+		},
+		{
+			name: "multiple namespace ads with the same issuer",
+			nsAds: []server_structs.NamespaceAdV2{
+				{
+					Path: "/foo1",
+					Caps: server_structs.Capabilities{
+						Reads: true,
+					},
+					Issuer: []server_structs.TokenIssuer{
+						{
+							IssuerUrl: url.URL{Scheme: "https", Host: "issuer1.com"},
+							BasePaths: []string{"/foo1"},
+						},
+					},
+				},
+				{
+					Path: "/foo2",
+					Caps: server_structs.Capabilities{
+						Reads: true,
+					},
+					Issuer: []server_structs.TokenIssuer{
+						{
+							IssuerUrl: url.URL{Scheme: "https", Host: "issuer1.com"},
+							BasePaths: []string{"/foo2"},
+						},
+					},
+				},
+			},
+			expectedIssuers: []Issuer{
+				{
+					Name:      "https://issuer1.com",
+					Issuer:    "https://issuer1.com",
+					BasePaths: []string{"/foo1", "/foo2"},
+				},
+			},
+		},
+		{
+			name: "multiple namespace ads with different issuers",
+			nsAds: []server_structs.NamespaceAdV2{
+				{
+					Path: "/foo1",
+					Caps: server_structs.Capabilities{
+						Reads: true,
+					},
+					Issuer: []server_structs.TokenIssuer{
+						{
+							IssuerUrl: url.URL{Scheme: "https", Host: "issuer1.com"},
+							BasePaths: []string{"/foo1"},
+						},
+					},
+				},
+				{
+					Path: "/foo2",
+					Caps: server_structs.Capabilities{
+						Reads: true,
+					},
+					Issuer: []server_structs.TokenIssuer{
+						{
+							IssuerUrl: url.URL{Scheme: "https", Host: "issuer2.com"},
+							BasePaths: []string{"/foo2"},
+						},
+					},
+				},
+			},
+			expectedIssuers: []Issuer{
+				{
+					Name:      "https://issuer1.com",
+					Issuer:    "https://issuer1.com",
+					BasePaths: []string{"/foo1"},
+				},
+				{
+					Name:      "https://issuer2.com",
+					Issuer:    "https://issuer2.com",
+					BasePaths: []string{"/foo2"},
+				},
+			},
+		},
+		{
+			name: "multiple namespace ads with multiple issuers",
+			nsAds: []server_structs.NamespaceAdV2{
+				{
+					Path: "/foo1",
+					Caps: server_structs.Capabilities{
+						Reads: true,
+					},
+					Issuer: []server_structs.TokenIssuer{
+						{
+							IssuerUrl: url.URL{Scheme: "https", Host: "issuer1.com"},
+							BasePaths: []string{"/foo1"},
+						},
+						{
+							IssuerUrl: url.URL{Scheme: "https", Host: "issuer2.com"},
+							BasePaths: []string{"/foo1"},
+						},
+					},
+				},
+				{
+					Path: "/foo2",
+					Caps: server_structs.Capabilities{
+						Reads: true,
+					},
+					Issuer: []server_structs.TokenIssuer{
+						{
+							IssuerUrl: url.URL{Scheme: "https", Host: "issuer2.com"},
+							BasePaths: []string{"/foo2"},
+						},
+						{
+							IssuerUrl: url.URL{Scheme: "https", Host: "issuer3.com"},
+							BasePaths: []string{"/foo2"},
+						},
+					},
+				},
+			},
+			expectedIssuers: []Issuer{
+				{
+					Name:      "https://issuer1.com",
+					Issuer:    "https://issuer1.com",
+					BasePaths: []string{"/foo1"},
+				},
+				{
+					Name:      "https://issuer2.com",
+					Issuer:    "https://issuer2.com",
+					BasePaths: []string{"/foo1", "/foo2"},
+				},
+				{
+					Name:      "https://issuer3.com",
+					Issuer:    "https://issuer3.com",
+					BasePaths: []string{"/foo2"},
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cacheServer := &cache.CacheServer{}
+			cacheServer.SetNamespaceAds(tc.nsAds)
+			issuers := GenerateCacheIssuers(tc.nsAds)
+			require.ElementsMatch(t, tc.expectedIssuers, issuers)
+		})
+	}
+}
+
 func TestWriteOriginAuthFiles(t *testing.T) {
 	server_utils.ResetTestState()
 
