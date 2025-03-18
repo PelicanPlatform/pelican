@@ -203,25 +203,6 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 	return &ad, nil
 }
 
-// Return a list of paths where the origin's issuer is authoritative.
-//
-// Used to calculate the base_paths in the scitokens.cfg, for eaxmple
-func (server *OriginServer) GetAuthorizedPrefixes() ([]string, error) {
-	var prefixes []string
-	originExports, err := server_utils.GetOriginExports()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, export := range originExports {
-		if (export.Capabilities.Reads && !export.Capabilities.PublicReads) || export.Capabilities.Writes {
-			prefixes = append(prefixes, export.FederationPrefix)
-		}
-	}
-
-	return prefixes, nil
-}
-
 // Advertisement token configuration for the origin server. Used to get Origin-specific
 // config that would differ from caches.
 func (server *OriginServer) GetAdTokCfg(ctx context.Context) (adTokCfg server_structs.AdTokCfg, err error) {
