@@ -114,7 +114,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 			return nil, err
 		}
 
-		self_monitor.PeriodicCacheSelfTest(ctx, egrp, false)
+		self_monitor.PeriodicSelfTest(ctx, egrp, false)
 	}
 
 	// Director and origin also registers this metadata URL; avoid registering twice.
