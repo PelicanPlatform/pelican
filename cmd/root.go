@@ -36,6 +36,7 @@ import (
 	"github.com/pelicanplatform/pelican/cmd/config_printer"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/launchers"
+	"github.com/pelicanplatform/pelican/logging"
 )
 
 type uint16Value uint16
@@ -93,6 +94,13 @@ func Execute() error {
 	}
 	// Wait until all goroutines in errgroup finish their clean up
 	egrpErr := egrp.Wait()
+
+	// Flush logs if necessary, after all logging and cleanup is complete
+	logging.FlushLogs(false)
+	if out, ok := log.StandardLogger().Out.(*os.File); ok {
+		_ = out.Sync()
+	}
+
 	if egrpErr == launchers.ErrExitOnSignal {
 		fmt.Println("Pelican is safely exited")
 		return nil

@@ -22,13 +22,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
-	"syscall"
 
-	logs "github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/param"
@@ -36,7 +34,7 @@ import (
 
 // BufferedLogHook buffers log entries until they are flushed
 type BufferedLogHook struct {
-	entries []*logs.Entry
+	entries []*log.Entry
 	flushed atomic.Bool
 }
 
@@ -48,12 +46,12 @@ var (
 
 func NewBufferedLogHook() *BufferedLogHook {
 	return &BufferedLogHook{
-		entries: make([]*logs.Entry, 0),
+		entries: make([]*log.Entry, 0),
 	}
 }
 
 // Fire is called on every log entry
-func (hook *BufferedLogHook) Fire(entry *logs.Entry) error {
+func (hook *BufferedLogHook) Fire(entry *log.Entry) error {
 	if hook.flushed.Load() {
 		// Do not write to logger output
 		return nil
@@ -65,13 +63,13 @@ func (hook *BufferedLogHook) Fire(entry *logs.Entry) error {
 }
 
 // Levels defines which log levels this hook applies to
-func (hook *BufferedLogHook) Levels() []logs.Level {
-	return logs.AllLevels
+func (hook *BufferedLogHook) Levels() []log.Level {
+	return log.AllLevels
 }
 
 // removeBufferedHook removes the buffered hook (used after flushing)
 func removeBufferedHook() {
-	logs.StandardLogger().ReplaceHooks(make(logs.LevelHooks))
+	log.StandardLogger().ReplaceHooks(make(log.LevelHooks))
 }
 
 // FlushLogs flushes buffered logs and switches to direct logging
@@ -103,19 +101,19 @@ func FlushLogs(pushToFile bool) {
 				cobra.CheckErr(fmt.Errorf("failed to access specified log file: %w", err))
 			}
 			fmt.Fprintf(os.Stderr, "Logging.LogLocation is set to %s. All logs are redirected to the log file.\n", logLocation)
-			logs.SetOutput(f)
+			log.SetOutput(f)
 
 			// Disable colors for log files
-			logs.SetFormatter(&logs.TextFormatter{
+			log.SetFormatter(&log.TextFormatter{
 				FullTimestamp:          true,
 				DisableColors:          true,
 				DisableLevelTruncation: true,
 			})
 		} else {
-			logs.SetOutput(os.Stderr)
+			log.SetOutput(os.Stderr)
 
-			// Restore colorized output when logging to stdout
-			logs.SetFormatter(&logs.TextFormatter{
+			// Restore colorized output when logging to stderr
+			log.SetFormatter(&log.TextFormatter{
 				FullTimestamp:          true,
 				ForceColors:            true,
 				DisableColors:          false,
@@ -129,7 +127,7 @@ func FlushLogs(pushToFile bool) {
 			for _, entry := range hook.entries {
 				formatted, err := entry.String()
 				if err == nil {
-					_, _ = logs.StandardLogger().Out.Write([]byte(formatted))
+					_, _ = log.StandardLogger().Out.Write([]byte(formatted))
 				}
 			}
 
@@ -138,51 +136,23 @@ func FlushLogs(pushToFile bool) {
 
 		removeBufferedHook()
 
-		os.Stdout.Sync()
-	})
-}
-
-// Auto-flush logs when the program exits
-func setupAutoFlush() {
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
-
-	go func() {
-		sig := <-c
-		fmt.Println("\nReceived signal:", sig, "- Flushing logs before exiting...")
-
-		FlushLogs(false)
-
-		os.Stdout.Sync()
-
-		// Determine correct exit code based on signal
-		exitCode := 0
-		if sig == syscall.SIGINT {
-			exitCode = 130
-		} else if sig == syscall.SIGTERM {
-			exitCode = 143
+		if out, ok := log.StandardLogger().Out.(*os.File); ok {
+			_ = out.Sync()
 		}
-
-		os.Exit(exitCode)
-	}()
-
-	logs.RegisterExitHandler(func() {
-		FlushLogs(false)
 	})
 }
 
 func SetupLogBuffering() {
-	logs.SetOutput(io.Discard) // Start by discarding logs until flush
+	log.SetOutput(io.Discard) // Start by discarding logs until flush
 
-	logs.SetFormatter(&logs.TextFormatter{
+	log.SetFormatter(&log.TextFormatter{
 		FullTimestamp: true,
 		DisableColors: true,
 	})
 
 	hook := NewBufferedLogHook()
 	if bufferedHook.CompareAndSwap(nil, hook) {
-		logs.AddHook(hook)
+		log.AddHook(hook)
 	}
 
-	setupAutoFlush()
 }
