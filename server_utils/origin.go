@@ -427,6 +427,13 @@ func (b *BaseOrigin) validateExports(o Origin) (err error) {
 		if err != nil {
 			return
 		}
+
+		// If the Origin specifies it does not allow direct client access, we require that no export
+		// sets Capabilities.DirectReads to true. This is a safeguard against misconfiguration.
+		if param.Origin_DisableDirectClients.GetBool() && e.Capabilities.DirectReads {
+			return errors.Errorf("config param '%s' is set to true, but one or more exports include the 'DirectReads' capability. These are incompatible",
+				param.Origin_DisableDirectClients.GetName())
+		}
 	}
 
 	return nil
