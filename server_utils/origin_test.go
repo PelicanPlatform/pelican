@@ -646,6 +646,13 @@ func TestGetExports(t *testing.T) {
 		assert.Len(t, exports, 1, "expected 1 export")
 		assert.Equal(t, expectedExport, exports[0])
 	})
+
+	t.Run("disabledDirectClientsPreventsDirectReads", func(t *testing.T) {
+		defer ResetTestState()
+		viper.Set(param.Origin_DisableDirectClients.GetName(), true)
+		// This export has DirectReads set to true, so expect failure
+		_ = setup(t, singleExportBlockConfig, true)
+	})
 }
 
 func runBucketNameTest(t *testing.T, name string, valid bool) {
