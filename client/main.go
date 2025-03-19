@@ -432,7 +432,27 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
 	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
 	// but should still send it along.
-	pUrl, err := pelican_url.Parse(remoteDestination, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
+	dOpts := []pelican_url.DiscoveryOption{}
+	rpUrl, err := url.Parse(remoteDestination)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse remote destination while performing PUT")
+	}
+	if rpUrl.Scheme == "" {
+		// If we have no scheme, we'll assume a Pelican URL and parse it as such
+		fed, err := config.GetFederation(ctx)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to determine federation info info")
+		}
+		if fed.DiscoveryEndpoint == "" {
+			return nil, errors.New("could not determine discovery URL")
+		}
+		discoveryUrl, err := url.Parse(fed.DiscoveryEndpoint)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to parse configured discovery URL")
+		}
+		dOpts = append(dOpts, pelican_url.WithDiscoveryUrl(discoveryUrl))
+	}
+	pUrl, err := pelican_url.Parse(remoteDestination, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, dOpts)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteDestination)
 	}
@@ -492,7 +512,27 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
 	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
 	// but should still send it along.
-	pUrl, err := pelican_url.Parse(remoteObject, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
+	dOpts := []pelican_url.DiscoveryOption{}
+	rpUrl, err := url.Parse(remoteObject)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse remote destination while performing GET")
+	}
+	if rpUrl.Scheme == "" {
+		// If we have no scheme, we'll assume a Pelican URL and parse it as such
+		fed, err := config.GetFederation(ctx)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to determine federation info info")
+		}
+		if fed.DiscoveryEndpoint == "" {
+			return nil, errors.New("could not determine discovery URL")
+		}
+		discoveryUrl, err := url.Parse(fed.DiscoveryEndpoint)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to parse configured discovery URL")
+		}
+		dOpts = append(dOpts, pelican_url.WithDiscoveryUrl(discoveryUrl))
+	}
+	pUrl, err := pelican_url.Parse(remoteObject, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, dOpts)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteObject)
 	}
