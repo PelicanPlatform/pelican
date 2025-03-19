@@ -1300,6 +1300,51 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		adV2.Version = "unknown"
 	}
 
+	if adV2.Downtimes != nil {
+		// Process received server(origin/cache) downtimes and toggle the director db accordingly when necessary
+		currentTime := time.Now().UTC().UnixMilli()
+		bringItDown := false // Flag to indicate if this server is put in downtime in the traversal of
+		sn := adV2.Name
+		// Check if the server is currently in downtime
+		for _, downtime := range adV2.Downtimes {
+			if downtime.StartTime < currentTime && downtime.EndTime > currentTime || downtime.EndTime == 0 {
+				// Server is currently in downtime
+
+				// If this server is already put in downtime, we don't need to do anything
+				// Retrieve the original filter type to check and backup for revert in case of database failure
+				filteredServersMutex.Lock()
+				originalFilterType, hasOriginalFilter := filteredServers[sn]
+				filteredServersMutex.Unlock()
+				if hasOriginalFilter && originalFilterType != tempAllowed {
+					break
+				}
+
+				// If the server is not in downtime, we need to set it to downtime in the director in-memory cache and database
+				filteredServers[sn] = serverFiltered
+				err := setServerDowntime(sn, serverFiltered)
+				if err != nil {
+					log.Warningf("Failed to set downtime for server %s in the director database: %v", adV2.Name, err)
+					if hasOriginalFilter {
+						filteredServers[sn] = originalFilterType
+					} else {
+						delete(filteredServers, sn)
+					}
+				}
+				bringItDown = true
+				break
+			}
+		}
+		// If the server doesn't have an active downtime, it means Director's previously
+		// recorded downtime set by the server admin is stale and should be removed.
+		// It only removes the downtime set by the server admin, not the downtime set by others.
+		if !bringItDown {
+			err := deleteServerDowntimeSetByServerAdmin(adV2.Name)
+			if err != nil {
+				log.Warningf("Failed to remove downtime for server %s: %v", adV2.Name, err)
+			}
+		}
+	}
+
 	sAd := server_structs.ServerAd{
 		Name:                adV2.Name,
 		StorageType:         st,
@@ -1310,6 +1355,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		Type:                sType.String(),
 		Caps:                adV2.Caps,
 		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
+		Downtimes:           adV2.Downtimes,
 		Version:             adV2.Version,
 	}
 
