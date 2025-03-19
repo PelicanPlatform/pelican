@@ -966,11 +966,14 @@ func handlePacket(packet []byte) error {
 		var header DfltHdr
 		err := json.Unmarshal(blobs[0], &header)
 		if err != nil {
-			return errors.Wrap(err, "Failed to parse JSON monitoring packet")
+			return errors.Wrap(err, "failed to parse JSON monitoring packet")
 		}
 		// OSS Packet
 		if header.Gs.Type == "O" {
 			log.Debug("handlePacket: Received a g-stream OSS packet")
+			if len(blobs) < 2 {
+				return errors.New("Packet is too small to be valid g-stream OSS packet")
+			}
 			return handleOSSPacket(blobs[1:]) // Skip the header
 		}
 		return nil
@@ -1555,6 +1558,9 @@ func HandleSummaryPacket(packet []byte) error {
 }
 
 func handleOSSPacket(blobs [][]byte) error {
+	if len(blobs) == 0 {
+		return errors.New("no blobs in the OSS packet")
+	}
 	finalBlob := blobs[len(blobs)-1]
 	ossStats := OSSStatsGs{}
 	if err := json.Unmarshal(finalBlob, &ossStats); err != nil {
