@@ -61,21 +61,19 @@ func (server *OriginServer) GetPids() (pids []int) {
 func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
 	isGlobusBackend := param.Origin_StorageType.GetString() == string(server_structs.OriginStorageGlobus)
 	// Here we instantiate the namespaceAd slice, but we still need to define the namespace
-	issuerUrlStr, err := config.GetServerIssuerURL()
+	serverIssuerUrlStr, err := config.GetServerIssuerURL()
 	if err != nil {
-		err = errors.Wrap(err, "Unable to get server issuer URL for the origin")
-		return nil, err
+		return nil, errors.Wrap(err, "unable to get server issuer URL for the origin")
 	}
 
-	if issuerUrlStr == "" {
-		err = errors.New("No IssuerUrl is set")
-		return nil, err
+	if serverIssuerUrlStr == "" {
+		return nil, errors.Errorf("unable to determine the server's issuer url. Is '%s' set in the configuration?",
+			param.Server_IssuerUrl.GetName())
 	}
 
-	issuerUrl, err := url.Parse(issuerUrlStr)
+	serverIssuerUrl, err := url.Parse(serverIssuerUrlStr)
 	if err != nil {
-		err = errors.Wrap(err, "Unable to parse issuer url")
-		return nil, err
+		return nil, errors.Wrap(err, "unable to parse the server's issuer url")
 	}
 
 	var nsAds []server_structs.NamespaceAdV2
@@ -99,6 +97,25 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		}
 		// PublicReads implies reads
 		reads := export.Capabilities.PublicReads || export.Capabilities.Reads
+
+		// Set up issuer URLs for the namespace. Note that this uses a single
+		// base path (the fed prefix) per issuer per export even if a single issuer
+		// at the origin is configured for multiple prefixes. This is because we have
+		// no global concept of issuers at the Director and we store this issuer info
+		// per namespace. It doesn't currently make much sense to construct the full list
+		// of potential base paths in this context.
+		issuerUrls := make([]server_structs.TokenIssuer, len(export.IssuerUrls))
+		for i, issUrlStr := range export.IssuerUrls {
+			issUrl, err := url.Parse(issUrlStr)
+			if err != nil {
+				return nil, errors.Wrap(err, "unable to parse issuer url")
+			}
+			issuerUrls[i] = server_structs.TokenIssuer{
+				IssuerUrl: *issUrl,
+				BasePaths: []string{export.FederationPrefix},
+			}
+		}
+
 		nsAds = append(nsAds, server_structs.NamespaceAdV2{
 			Caps: server_structs.Capabilities{
 				PublicReads: export.Capabilities.PublicReads,
@@ -109,14 +126,13 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 			},
 			Path: export.FederationPrefix,
 			Generation: []server_structs.TokenGen{{
-				Strategy:         server_structs.StrategyType("OAuth2"),
-				MaxScopeDepth:    3,
-				CredentialIssuer: *issuerUrl,
+				Strategy:      server_structs.StrategyType("OAuth2"),
+				MaxScopeDepth: 3,
+				// TODO: Is this the correct issuer URL to assign here? It's not clear what the
+				// intended difference between the "Generation" and the "Issuer" fields is...
+				CredentialIssuer: *serverIssuerUrl,
 			}},
-			Issuer: []server_structs.TokenIssuer{{
-				BasePaths: []string{export.FederationPrefix},
-				IssuerUrl: *issuerUrl,
-			}},
+			Issuer: issuerUrls,
 		})
 		prefixes = append(prefixes, export.FederationPrefix)
 	}
@@ -142,7 +158,13 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		},
 		Issuer: []server_structs.TokenIssuer{{
 			BasePaths: prefixes,
-			IssuerUrl: *issuerUrl,
+			// NOTE: I (Justin) am also not sure this is the correct issuer URL to assign here, but it's
+			// what we've been using so I'm moving forward with it for now. In particular, as we split
+			// data issuers from the server issuer (which is used to verify intra-federation tokens), I don't
+			// think concepts like "base paths" really carry forward. Do they make sense outside the context of
+			// reads/writes, where they're used to correctly detect token scopes? Ultimately the tokens verified
+			// using this issuer will contain scopes like `pelican.advertise` and not `storage.read:/foo`.
+			IssuerUrl: *serverIssuerUrl,
 		}},
 		StorageType:         ost,
 		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
@@ -179,25 +201,6 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		log.Warningf("Multiple prefixes are not yet supported with the broker. Skipping broker configuration")
 	}
 	return &ad, nil
-}
-
-// Return a list of paths where the origin's issuer is authoritative.
-//
-// Used to calculate the base_paths in the scitokens.cfg, for eaxmple
-func (server *OriginServer) GetAuthorizedPrefixes() ([]string, error) {
-	var prefixes []string
-	originExports, err := server_utils.GetOriginExports()
-	if err != nil {
-		return nil, err
-	}
-
-	for _, export := range originExports {
-		if (export.Capabilities.Reads && !export.Capabilities.PublicReads) || export.Capabilities.Writes {
-			prefixes = append(prefixes, export.FederationPrefix)
-		}
-	}
-
-	return prefixes, nil
 }
 
 // Advertisement token configuration for the origin server. Used to get Origin-specific

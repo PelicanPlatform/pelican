@@ -107,7 +107,44 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 
 	viper.Set(param.TLSSkipVerify.GetName(), true)
 
+	// Instead of using "0" as a port directly in the config, which lets XRootD find its own port,
+	// we need to know the port in advance for configuring the issuer URLs for each export. To do that
+	// without hardcoding the ports (which we can't guarantee are available in the test env), we'll
+	// get a few unique, available ports and use them for the origin, cache, and web UIs. This introduces
+	// a race condition, however, because it's possible the ports are consumed between getting them from this
+	// function and binding the servers to them
+	ports, err := test_utils.GetUniqueAvailablePorts(3)
+	require.NoError(t, err)
+	require.Len(t, ports, 3)
+
+	// Disable functionality we're not using (and is difficult to make work on Mac)
+	viper.Set(param.Registry_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite"))
+	viper.Set(param.Registry_RequireOriginApproval.GetName(), false)
+	viper.Set(param.Registry_RequireCacheApproval.GetName(), false)
+	viper.Set(param.Director_CacheSortMethod.GetName(), "distance")
+	viper.Set(param.Director_DbLocation.GetName(), filepath.Join(t.TempDir(), "director.sqlite"))
+	viper.Set(param.Origin_EnableCmsd.GetName(), false)
+	viper.Set(param.Origin_EnableVoms.GetName(), false)
+	viper.Set(param.Origin_Port.GetName(), ports[0])
+	viper.Set(param.Origin_RunLocation.GetName(), filepath.Join(tmpPath, "origin"))
+	viper.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite"))
+	viper.Set(param.Origin_TokenAudience.GetName(), "")
+	viper.Set(param.Cache_Port.GetName(), ports[1])
+	viper.Set(param.Cache_RunLocation.GetName(), filepath.Join(tmpPath, "cache"))
+	viper.Set(param.Cache_StorageLocation.GetName(), filepath.Join(tmpPath, "xcache-data"))
+	viper.Set(param.Cache_DbLocation.GetString(), filepath.Join(t.TempDir(), "cache.sqlite"))
+	viper.Set(param.Server_EnableUI.GetName(), false)
+	viper.Set(param.Server_WebPort.GetName(), ports[2])
+	viper.Set(param.LocalCache_RunLocation.GetName(), filepath.Join(tmpPath, "local-cache"))
+
+	// Set the Director's start time to 6 minutes ago. This prevents it from sending an HTTP 429 for
+	// unknown prefixes.
+	directorStartTime := time.Now().Add(-6 * time.Minute)
+	director.SetStartupTime(directorStartTime)
+
 	config.InitConfig()
+	err = config.InitServer(ctx, modules)
+	require.NoError(t, err)
 
 	// Read in any config we may have set
 	if originConfig != "" {
@@ -150,33 +187,6 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 		err = os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
 		require.NoError(t, err)
 	}
-
-	// Disable functionality we're not using (and is difficult to make work on Mac)
-	viper.Set(param.Registry_DbLocation.GetName(), filepath.Join(t.TempDir(), "ns-registry.sqlite"))
-	viper.Set(param.Registry_RequireOriginApproval.GetName(), false)
-	viper.Set(param.Registry_RequireCacheApproval.GetName(), false)
-	viper.Set(param.Director_CacheSortMethod.GetName(), "distance")
-	viper.Set(param.Director_DbLocation.GetName(), filepath.Join(t.TempDir(), "director.sqlite"))
-	viper.Set(param.Origin_EnableCmsd.GetName(), false)
-	viper.Set(param.Origin_EnableVoms.GetName(), false)
-	viper.Set(param.Origin_Port.GetName(), 0)
-	viper.Set(param.Origin_RunLocation.GetName(), filepath.Join(tmpPath, "origin"))
-	viper.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite"))
-	viper.Set(param.Cache_Port.GetName(), 0)
-	viper.Set(param.Cache_RunLocation.GetName(), filepath.Join(tmpPath, "cache"))
-	viper.Set(param.Cache_StorageLocation.GetName(), filepath.Join(tmpPath, "xcache-data"))
-	viper.Set(param.Cache_DbLocation.GetString(), filepath.Join(t.TempDir(), "cache.sqlite"))
-	viper.Set(param.Server_EnableUI.GetName(), false)
-	viper.Set(param.Server_WebPort.GetName(), 0)
-	viper.Set(param.LocalCache_RunLocation.GetName(), filepath.Join(tmpPath, "local-cache"))
-
-	// Set the Director's start time to 6 minutes ago. This prevents it from sending an HTTP 429 for
-	// unknown prefixes.
-	directorStartTime := time.Now().Add(-6 * time.Minute)
-	director.SetStartupTime(directorStartTime)
-
-	err = config.InitServer(ctx, modules)
-	require.NoError(t, err)
 
 	servers, _, err := launchers.LaunchModules(ctx, modules)
 	require.NoError(t, err)

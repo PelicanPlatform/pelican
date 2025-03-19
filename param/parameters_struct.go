@@ -253,6 +253,7 @@ type Config struct {
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
 		StoragePrefix string `mapstructure:"storageprefix" yaml:"StoragePrefix"`
 		StorageType string `mapstructure:"storagetype" yaml:"StorageType"`
+		TokenAudience string `mapstructure:"tokenaudience" yaml:"TokenAudience"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
 		XRootServiceUrl string `mapstructure:"xrootserviceurl" yaml:"XRootServiceUrl"`
@@ -589,6 +590,7 @@ type configWithType struct {
 		SelfTestInterval struct { Type string; Value time.Duration }
 		StoragePrefix struct { Type string; Value string }
 		StorageType struct { Type string; Value string }
+		TokenAudience struct { Type string; Value string }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 		XRootServiceUrl struct { Type string; Value string }

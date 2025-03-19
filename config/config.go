@@ -561,39 +561,56 @@ func setupTransport() {
 	}
 }
 
-// Return an audience string appropriate for the current server
-func GetServerAudience() string {
-	return viper.GetString("Origin.AudienceURL")
-}
-
-func GetServerIssuerURL() (string, error) {
-	if issuerUrl := param.Server_IssuerUrl.GetString(); issuerUrl != "" {
-		_, err := url.Parse(param.Server_IssuerUrl.GetString())
-		if err != nil {
-			return "", errors.Wrapf(err, "Failed to parse the Server.IssuerUrl %s loaded from config", param.Server_IssuerUrl.GetString())
+// GetServerIssuerURL tries to determine the correct issuer URL for the server in order of precedence:
+// - Server.IssuerUrl
+// - Server.IssuerHostname and Server.IssuerPort
+// - Server.ExternalWebUrl
+// In general, functions should avoid using `param.Server_IssuerUrl.GetString()` directly and use this function instead.
+func GetServerIssuerURL() (issuerUrl string, err error) {
+	// Even though we prefer using this function, we'll populate the config param
+	// based on whatever we determine here.
+	defer func() {
+		if err == nil && param.Server_IssuerUrl.GetString() == "" {
+			viper.Set(param.Server_IssuerUrl.GetName(), issuerUrl)
 		}
+	}()
+
+	// Prefer the concretely configured param
+	if issuerUrl = param.Server_IssuerUrl.GetString(); issuerUrl != "" {
+		if _, err := url.Parse(issuerUrl); err != nil {
+			return "", errors.Wrapf(err, "failed to parse '%s' as issuer URL from config param '%s'",
+				param.Server_IssuerUrl.GetString(), param.Server_IssuerUrl.GetName())
+		}
+		log.Debugf("Populating server's issuer URL as '%s' from config param '%s'", issuerUrl, param.Server_IssuerUrl.GetName())
 		return issuerUrl, nil
 	}
 
+	// Next, try to piece it together based on concretely configured hostname:port
 	if param.Server_IssuerHostname.GetString() != "" {
-		if param.Server_IssuerPort.GetInt() != 0 { // Will be the default if not set
-			// We assume any issuer is running https, otherwise we're crazy
-			issuerUrl := url.URL{
-				Scheme: "https",
-				Host:   fmt.Sprintf("%s:%d", param.Server_IssuerHostname.GetString(), param.Server_IssuerPort.GetInt()),
-			}
-			return issuerUrl.String(), nil
+		if param.Server_IssuerPort.GetInt() == 0 {
+			return "", errors.Errorf("if '%s' is configured, you must also configure a valid port via '%s'",
+				param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
 		}
-		return "", errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
+
+		// We assume any issuer is running https
+		issuerUrl := fmt.Sprintf("https://%s:%d", param.Server_IssuerHostname.GetString(), param.Server_IssuerPort.GetInt())
+		if _, err := url.Parse(issuerUrl); err != nil {
+			return "", errors.Wrapf(err, "failed to parse '%s' as issuer URL from config params '%s' and '%s'",
+				issuerUrl, param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
+		}
+		log.Debugf("Populating server's issuer URL as '%s' from configured values of '%s' and '%s'",
+			issuerUrl, param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
+		return issuerUrl, nil
 	}
 
-	issuerUrlStr := param.Server_ExternalWebUrl.GetString()
-	issuerUrl, err := url.Parse(issuerUrlStr)
-	log.Debugln("GetServerIssuerURL:", issuerUrlStr)
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to parse the issuer URL generated using the parsed Server.ExternalWebUrl")
+	// Finally, fall back to the external web URL
+	issuerUrl = param.Server_ExternalWebUrl.GetString()
+	if _, err := url.Parse(issuerUrl); err != nil {
+		return "", errors.Wrapf(err, "failed to parse '%s' as the issuer URL generated from config param '%s'",
+			issuerUrl, param.Server_ExternalWebUrl.GetName())
 	}
-	return issuerUrl.String(), nil
+	log.Debugf("Populating server's issuer URL as '%s' from configured value of '%s'", issuerUrl, param.Server_ExternalWebUrl.GetName())
+	return issuerUrl, nil
 }
 
 // function to get/setup the transport (only once)
@@ -1191,7 +1208,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
 	// configuration but we don't know the origin's port until after xrootd has started), we
 	// stash a copy of its value now.
-	v.SetDefault("Origin.AudienceURL", v.GetString(param.Origin_Url.GetName()))
+	v.SetDefault(param.Origin_TokenAudience.GetName(), v.GetString(param.Origin_Url.GetName()))
 
 	// Set defaults for Director, Registry, and Broker URLs only if the Discovery URL is not set.
 	// This is necessary because, in Viper, there is currently no way to check if a value is coming
