@@ -96,6 +96,62 @@ func gatedHalvingMultiplier(val float64, threshold float64, halvingFactor float6
 	}
 }
 
+// Given a map of ranges and an index, remove the range at the index and shift the rest of the ranges
+// to the left. Assumes incoming ranges are all positive values.
+func removeAndRerange(wSum *float64, ranges map[int][]float64, index int) {
+	shiftVal := ranges[index][1] - ranges[index][0]
+	*wSum -= shiftVal
+	delete(ranges, index)
+	for i := range ranges {
+		if i > index {
+			ranges[i][0] -= shiftVal
+			ranges[i][1] -= shiftVal
+		}
+	}
+}
+
+// Given a SwapMaps struct, generate the ranges for each weight and the total weight sum.
+func generateRanges(sm SwapMaps) (wSum float64, ranges map[int][]float64) {
+	wSum = 0.0
+	ranges = make(map[int][]float64, len(sm))
+	// Some incoming weights may be negative, indicating they should be sorted at the end of the list.
+	// However, this adaptive sort algorithm assumes positive weights because of the way it stochastically
+	// grabs values from ranges. To handle this, we'll normalize the negative weights by making positive and
+	// dividing by the smallest non-negative weight from the swap maps. This guarantees negative weights always
+	// have a smaller range than positive weights, and more heavily negative weights have smaller ranges than
+	// less negative weights.
+	var minWeight float64 = math.Inf(1)
+	foundNonNegative := false
+	for _, val := range sm {
+		if val.Weight >= 0 && val.Weight < minWeight {
+			minWeight = val.Weight
+			foundNonNegative = true
+		}
+	}
+	if !foundNonNegative {
+		// Handle the case where all weights are negative
+		minWeight = 1.0
+	}
+
+	// Calculate the ranges for each weight, and the total weight sum
+	for idx, val := range sm {
+		// Guarantee that any negative weights are turned into a positive range,
+		// where the more negative weights correspond to smaller ranges.
+		if val.Weight < 0 {
+			val.Weight = -1 * minWeight / (val.Weight - 1) // subtract by one to guarantee abs(denominator) > 1
+		}
+		if idx == 0 {
+			ranges[idx] = []float64{0.0, val.Weight}
+		} else {
+			prev := ranges[idx-1][1]
+			ranges[idx] = []float64{prev, prev + val.Weight}
+		}
+		wSum += val.Weight
+	}
+
+	return
+}
+
 // Given a SwapMaps struct, stochasticlly sort the weights based on the following procedure:
 //
 //  1. Create ranges [0, weight_1), [weight_1, weight_1 + weight_2), ... for each weight.
@@ -104,39 +160,28 @@ func gatedHalvingMultiplier(val float64, threshold float64, halvingFactor float6
 //
 //  3. If the number falls within the range corresponding to the weight, it is sorted to the top.
 //
-//  4. Repeat step 2-3 to select a the rest weights
+//  4. Remove the range corresponding to the selected weight and re-calculate the ranges.
 //
-// Returnss the sorted list of SwapMap.Index and the generated random weights for reference.
+//  5. Repeat step 2-4 to select a the rest weights
+//
+// Returns the sorted list of SwapMap.Index
 // You may specify the maxOut argument to limit the output.
-func stochasticSort(sm SwapMaps, maxOut int) (candidates []int, randWeights []float64) {
-	if maxOut <= 0 {
+func stochasticSort(sm SwapMaps, maxOut int) (candidates []int) {
+	if maxOut <= 0 || maxOut > len(sm) {
 		maxOut = len(sm)
 	}
-	maxOut = min(maxOut, len(sm))
 
-	wSum := 0.0
-	ranges := [][]float64{} // items in ranges should corresponds to items in sm
-	visited := make([]bool, len(sm))
-	for idx, val := range sm {
-		if idx == 0 {
-			ranges = append(ranges, []float64{0.0, val.Weight})
-		} else {
-			prev := ranges[idx-1][1]
-			ranges = append(ranges, []float64{prev, prev + val.Weight})
-		}
-		wSum += val.Weight
-		visited[idx] = false
-	}
+	wSum, ranges := generateRanges(sm)
 
 	for len(candidates) < maxOut {
 		ranNum := rand.Float64() * wSum
 		for idx, r := range ranges {
-			if ranNum >= r[0] && ranNum < r[1] && !visited[idx] {
+			if ranNum >= r[0] && ranNum < r[1] {
+				removeAndRerange(&wSum, ranges, idx)
+
 				// Here, we append Index of the SwapMaps[idx] as that's the
 				// true index to sort
 				candidates = append(candidates, sm[idx].Index)
-				randWeights = append(randWeights, ranNum)
-				visited[idx] = true
 				break
 			}
 		}

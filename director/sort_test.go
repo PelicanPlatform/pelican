@@ -194,10 +194,34 @@ func TestSortServerAdsByTopo(t *testing.T) {
 	assert.EqualValues(t, expectedList, sortedList)
 }
 
+// Helper function for adaptive sort that finds the average index of a server in a sorted list
+func calcAvgIndex(counts []int) float64 {
+	totalAppearances := 0
+	weightedSum := 0
+
+	for index, count := range counts {
+		weightedSum += index * count
+		totalAppearances += count
+	}
+
+	if totalAppearances > 0 {
+		return float64(weightedSum) / float64(totalAppearances)
+	} else {
+		return 0.0
+	}
+}
+
+// Helper func for adaptive sort to check that the calculated avg index is in the expected range
+func inRange(min float64, max float64, val float64) bool {
+	return val >= min && val <= max
+}
+
 func TestSortServerAds(t *testing.T) {
 	server_utils.ResetTestState()
+	clientIpCache.DeleteAll()
 	t.Cleanup(func() {
 		server_utils.ResetTestState()
+		clientIpCache.DeleteAll()
 		geoNetOverrides = nil
 	})
 
@@ -257,6 +281,7 @@ func TestSortServerAds(t *testing.T) {
 	// Mock servers with same geolocation but different loads
 	serverLoad1 := server_structs.ServerAd{
 		Name:      "load1",
+		URL:       url.URL{Scheme: "https", Host: "server1.org"},
 		Latitude:  43.0753,
 		Longitude: -89.4114,
 		IOLoad:    0.0,
@@ -264,6 +289,7 @@ func TestSortServerAds(t *testing.T) {
 
 	serverLoad2 := server_structs.ServerAd{
 		Name:      "load2",
+		URL:       url.URL{Scheme: "https", Host: "server2.org"},
 		Latitude:  43.0753,
 		Longitude: -89.4114,
 		IOLoad:    10.2,
@@ -271,6 +297,7 @@ func TestSortServerAds(t *testing.T) {
 
 	serverLoad3 := server_structs.ServerAd{
 		Name:      "load3",
+		URL:       url.URL{Scheme: "https", Host: "server3.org"},
 		Latitude:  43.0753,
 		Longitude: -89.4114,
 		IOLoad:    14,
@@ -278,6 +305,7 @@ func TestSortServerAds(t *testing.T) {
 
 	serverLoad4 := server_structs.ServerAd{
 		Name:      "load4",
+		URL:       url.URL{Scheme: "https", Host: "server4.org"},
 		Latitude:  43.0753,
 		Longitude: -89.4114,
 		IOLoad:    60.3,
@@ -285,6 +313,7 @@ func TestSortServerAds(t *testing.T) {
 
 	serverLoad5NullLoc := server_structs.ServerAd{
 		Name:      "load5NullLoc",
+		URL:       url.URL{Scheme: "https", Host: "server5.org"},
 		Latitude:  0.0,
 		Longitude: 0.0,
 		IOLoad:    10.0,
@@ -292,6 +321,7 @@ func TestSortServerAds(t *testing.T) {
 
 	serverLoad6NullLoc := server_structs.ServerAd{
 		Name:      "load6NullLoc",
+		URL:       url.URL{Scheme: "https", Host: "server6.org"},
 		Latitude:  0.0,
 		Longitude: 0.0,
 		IOLoad:    99.0,
@@ -315,6 +345,7 @@ func TestSortServerAds(t *testing.T) {
 	}
 	bigBenServerHighLoad := server_structs.ServerAd{
 		Name:      "big ben high load",
+		URL:       url.URL{Scheme: "https", Host: "bigben-highload.org"},
 		Latitude:  51.5103,
 		Longitude: -0.1167,
 		IOLoad:    65.7,
@@ -344,48 +375,137 @@ func TestSortServerAds(t *testing.T) {
 
 	t.Run("test-distance-sort", func(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distance")
+		rInfo := server_structs.NewRedirectInfoFromIP(clientIP.String())
 		expected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
 			daejeonServer, mcMurdoServer, nullIslandServer}
 		ctx := context.Background()
 		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
-		sorted, err := sortServerAds(ctx, clientIP, randAds, nil)
+		sorted, err := sortServerAds(ctx, clientIP, randAds, nil, rInfo)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
+		assert.True(t, rInfo.ClientInfo.Resolved)
+		assert.Equal(t, rInfo.ClientInfo.Lat, 43.073904)
+		assert.Equal(t, rInfo.ClientInfo.Lon, -89.384859)
+		assert.Equal(t, rInfo.ClientInfo.IpAddr, "128.104.153.60")
+		assert.Equal(t, len(randAds), len(rInfo.ServersInfo))
 	})
 
 	t.Run("test-distanceAndLoad-sort-distance-only", func(t *testing.T) {
 		// Should return the same ordering as the distance test
 		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
+		rInfo := server_structs.NewRedirectInfoFromIP(clientIP.String())
 		expected := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
 			daejeonServer, mcMurdoServer, nullIslandServer}
-
 		ctx := context.Background()
 		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
-		sorted, err := sortServerAds(ctx, clientIP, randAds, nil)
+		sorted, err := sortServerAds(ctx, clientIP, randAds, nil, rInfo)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
+		assert.True(t, rInfo.ClientInfo.Resolved)
+		assert.Equal(t, rInfo.ClientInfo.Lat, 43.073904)
+		assert.Equal(t, rInfo.ClientInfo.Lon, -89.384859)
+		assert.Equal(t, rInfo.ClientInfo.IpAddr, "128.104.153.60")
+		assert.Equal(t, len(randAds), len(rInfo.ServersInfo))
 	})
 
 	t.Run("test-distanceAndLoad-sort-load-only", func(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
+		rInfo := server_structs.NewRedirectInfoFromIP(clientIP.String())
 		expected := []server_structs.ServerAd{serverLoad1, serverLoad2, serverLoad3, serverLoad4, serverLoad6NullLoc}
 		ctx := context.Background()
 		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
-		sorted, err := sortServerAds(ctx, clientIP, randLoadAds, nil)
+		sorted, err := sortServerAds(ctx, clientIP, randLoadAds, nil, rInfo)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
+		assert.True(t, rInfo.ClientInfo.Resolved)
+		assert.Equal(t, rInfo.ClientInfo.Lat, 43.073904)
+		assert.Equal(t, rInfo.ClientInfo.Lon, -89.384859)
+		assert.Equal(t, rInfo.ClientInfo.IpAddr, "128.104.153.60")
+		assert.Equal(t, len(randLoadAds), len(rInfo.ServersInfo))
+		// Now that we have load information in the input servers, check
+		// that rInfo is receiving the correct values for a few of them
+		assert.Equal(t, serverLoad1.IOLoad, rInfo.ServersInfo[serverLoad1.URL.String()].LoadWeight)
+		assert.Equal(t, serverLoad2.IOLoad, rInfo.ServersInfo[serverLoad2.URL.String()].LoadWeight)
+		assert.Equal(t, serverLoad3.IOLoad, rInfo.ServersInfo[serverLoad3.URL.String()].LoadWeight)
 	})
 
 	t.Run("test-distanceAndLoad-sort-distance-and-load", func(t *testing.T) {
 		viper.Set("Director.CacheSortMethod", "distanceAndLoad")
+		rInfo := server_structs.NewRedirectInfoFromIP(clientIP.String())
 		expected := []server_structs.ServerAd{chicagoLowload, sdscServer, madisonServerHighLoad, kremlinServer,
 			daejeonServer, mcMurdoServer, bigBenServerHighLoad, serverLoad5NullLoc, serverLoad6NullLoc}
 
 		ctx := context.Background()
 		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
-		sorted, err := sortServerAds(ctx, clientIP, randDistanceLoadAds, nil)
+		sorted, err := sortServerAds(ctx, clientIP, randDistanceLoadAds, nil, rInfo)
 		require.NoError(t, err)
 		assert.EqualValues(t, expected, sorted)
+		assert.True(t, rInfo.ClientInfo.Resolved)
+		assert.Equal(t, rInfo.ClientInfo.Lat, 43.073904)
+		assert.Equal(t, rInfo.ClientInfo.Lon, -89.384859)
+		assert.Equal(t, rInfo.ClientInfo.IpAddr, "128.104.153.60")
+		assert.Equal(t, len(randDistanceLoadAds), len(rInfo.ServersInfo))
+		assert.Equal(t, chicagoLowload.IOLoad, rInfo.ServersInfo[chicagoLowload.URL.String()].LoadWeight)
+		assert.Equal(t, sdscServer.IOLoad, rInfo.ServersInfo[sdscServer.URL.String()].LoadWeight)
+		assert.Equal(t, bigBenServerHighLoad.IOLoad, rInfo.ServersInfo[bigBenServerHighLoad.URL.String()].LoadWeight)
+	})
+
+	t.Run("test-adaptive-sort", func(t *testing.T) {
+		viper.Set("Director.CacheSortMethod", "adaptive")
+		rInfo := server_structs.NewRedirectInfoFromIP(clientIP.String())
+
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
+
+		// Set up which servers are known to have the object, and which are known to not have it
+		// Servers not in the map are assumed to have an unknown status
+		availMap := map[string]bool{}
+		availMap[chicagoLowload.URL.String()] = true
+		availMap[sdscServer.URL.String()] = true
+		availMap[madisonServerHighLoad.URL.String()] = false
+		availMap[kremlinServer.URL.String()] = false
+
+		// A map for keeping track of how many times each server appears in a sorted position.
+		// This strategy lets us deal with some of the stochastic jiggle in the adaptive sort
+		// algorithm by observing trends over many iterations.
+		serverSortCounter := make(map[string][]int)
+		for _, ad := range randDistanceLoadAds {
+			serverSortCounter[ad.Name] = make([]int, serverResLimit)
+		}
+
+		// Run the sort 1000 times to get a good idea of how the servers are being sorted
+		for i := 0; i < 1000; i++ {
+			sorted, err := sortServerAds(ctx, clientIP, randDistanceLoadAds, availMap, rInfo)
+			require.NoError(t, err)
+
+			for pos, s := range sorted {
+				serverSortCounter[s.Name][pos]++
+			}
+		}
+
+		// Due to the very stochastic nature of this test, it's difficult to predict which servers will be in the
+		// output list, let alone their order. Instead, we notice that chicago and sdsc should have a strong preference
+		// for spots 1/2 because they have the object and are (relatively) close to Madison. The rest are much less predictable.
+		// Until we've convinced ourselves that we actually like the magic values in adaptive sort, I (Justin H.) don't think
+		// we should spend too much time trying to make this test more rigorous.
+		// TODO: When we understand adaptive sort better and can make assertions about how these servers should be sorted,
+		//       come back and make this test more rigorous
+		assert.True(t, inRange(0, 1, calcAvgIndex(serverSortCounter[chicagoLowload.Name])))
+		assert.True(t, inRange(1, 2, calcAvgIndex(serverSortCounter[sdscServer.Name])))
+		assert.True(t, rInfo.ClientInfo.Resolved)
+		assert.Equal(t, rInfo.ClientInfo.Lat, 43.073904)
+		assert.Equal(t, rInfo.ClientInfo.Lon, -89.384859)
+		assert.Equal(t, rInfo.ClientInfo.IpAddr, "128.104.153.60")
+		assert.Equal(t, len(randDistanceLoadAds), len(rInfo.ServersInfo))
+		assert.Equal(t, chicagoLowload.IOLoad, rInfo.ServersInfo[chicagoLowload.URL.String()].LoadWeight)
+		assert.Equal(t, sdscServer.IOLoad, rInfo.ServersInfo[sdscServer.URL.String()].LoadWeight)
+		assert.Equal(t, bigBenServerHighLoad.IOLoad, rInfo.ServersInfo[bigBenServerHighLoad.URL.String()].LoadWeight)
+		assert.Equal(t, "true", rInfo.ServersInfo[chicagoLowload.URL.String()].HasObject)
+		assert.Equal(t, "true", rInfo.ServersInfo[sdscServer.URL.String()].HasObject)
+		assert.Equal(t, "false", rInfo.ServersInfo[madisonServerHighLoad.URL.String()].HasObject)
+		assert.Equal(t, "false", rInfo.ServersInfo[kremlinServer.URL.String()].HasObject)
+		assert.Equal(t, "unknown", rInfo.ServersInfo[daejeonServer.URL.String()].HasObject)
+		assert.Equal(t, "unknown", rInfo.ServersInfo[mcMurdoServer.URL.String()].HasObject)
 	})
 
 	t.Run("test-random-sort", func(t *testing.T) {
@@ -405,7 +525,8 @@ func TestSortServerAds(t *testing.T) {
 		// of failure. If you run thrice and you still get the distance-sorted slice, you might consider buying a powerball ticket
 		// (1/292,201,338 chance of winning).
 		for i := 0; i < 3; i++ {
-			sorted, err = sortServerAds(ctx, clientIP, randAds, nil)
+			redirectInfo := server_structs.NewRedirectInfoFromIP(clientIP.String())
+			sorted, err = sortServerAds(ctx, clientIP, randAds, nil, redirectInfo)
 			require.NoError(t, err)
 
 			// If the values are not equal, break the loop
@@ -422,20 +543,20 @@ func TestSortServerAdsByAvailability(t *testing.T) {
 	firstUrl := url.URL{Host: "first.org", Scheme: "https"}
 	secondUrl := url.URL{Host: "second.org", Scheme: "https"}
 	thirdUrl := url.URL{Host: "third.org", Scheme: "https"}
-	forthUrl := url.URL{Host: "fourth.org", Scheme: "https"}
+	fourthUrl := url.URL{Host: "fourth.org", Scheme: "https"}
 
 	firstServer := server_structs.ServerAd{URL: firstUrl}
 	secondServer := server_structs.ServerAd{URL: secondUrl}
 	thirdServer := server_structs.ServerAd{URL: thirdUrl}
-	forthServer := server_structs.ServerAd{URL: forthUrl}
+	fourthServer := server_structs.ServerAd{URL: fourthUrl}
 
-	randomOrder := []server_structs.ServerAd{thirdServer, firstServer, forthServer, secondServer}
-	expected := []server_structs.ServerAd{firstServer, secondServer, thirdServer, forthServer}
+	randomOrder := []server_structs.ServerAd{thirdServer, firstServer, fourthServer, secondServer}
+	expected := []server_structs.ServerAd{firstServer, secondServer, thirdServer, fourthServer}
 	avaiMap := map[string]bool{}
 	avaiMap[firstUrl.String()] = true
 	avaiMap[secondUrl.String()] = true
 	avaiMap[thirdUrl.String()] = false
-	avaiMap[forthUrl.String()] = false
+	avaiMap[fourthUrl.String()] = false
 
 	sortServerAdsByAvailability(randomOrder, avaiMap)
 	assert.EqualValues(t, expected, randomOrder)
@@ -464,6 +585,7 @@ func TestAssignRandBoundedCoord(t *testing.T) {
 func TestGetClientLatLong(t *testing.T) {
 	// The cache may be populated from previous tests. Wipe it out and start fresh.
 	clientIpCache.DeleteAll()
+	defer clientIpCache.DeleteAll()
 	t.Run("invalid-ip", func(t *testing.T) {
 		// Capture the log and check that the correct error is logged
 		origOutput := log.StandardLogger().Out
@@ -476,17 +598,22 @@ func TestGetClientLatLong(t *testing.T) {
 
 		clientIp := netip.Addr{}
 		assert.False(t, clientIpCache.Has(clientIp))
-		coord1, _ := getClientLatLong(clientIp)
+		rInfo := server_structs.NewRedirectInfoFromIP(clientIp.String())
+		coord1, _ := getClientLatLong(clientIp, rInfo)
 
 		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
 		assert.True(t, coord1.Long <= usLongMax && coord1.Long >= usLongMin)
+		assert.False(t, rInfo.ClientInfo.Resolved)
+		assert.False(t, rInfo.ClientInfo.FromTTLCache)
 		assert.Contains(t, logOutput.String(), "Unable to sort servers based on client-server distance. Invalid client IP address")
 		assert.NotContains(t, logOutput.String(), "Using randomly-assigned lat/long")
 
 		// Get it again to make sure it's coming from the cache
-		coord2, _ := getClientLatLong(clientIp)
+		coord2, _ := getClientLatLong(clientIp, rInfo)
 		assert.Equal(t, coord1.Lat, coord2.Lat)
 		assert.Equal(t, coord1.Long, coord2.Long)
+		assert.False(t, rInfo.ClientInfo.Resolved)
+		assert.True(t, rInfo.ClientInfo.FromTTLCache)
 		assert.Contains(t, logOutput.String(), "Using randomly-assigned lat/long for unresolved client IP")
 		assert.True(t, clientIpCache.Has(clientIp))
 	})
@@ -502,17 +629,22 @@ func TestGetClientLatLong(t *testing.T) {
 
 		clientIp := netip.MustParseAddr("192.168.0.1")
 		assert.False(t, clientIpCache.Has(clientIp))
-		coord1, _ := getClientLatLong(clientIp)
+		rInfo := server_structs.NewRedirectInfoFromIP(clientIp.String())
+		coord1, _ := getClientLatLong(clientIp, rInfo)
 
 		assert.True(t, coord1.Lat <= usLatMax && coord1.Lat >= usLatMin)
 		assert.True(t, coord1.Long <= usLongMax && coord1.Long >= usLongMin)
+		assert.False(t, rInfo.ClientInfo.Resolved)
+		assert.False(t, rInfo.ClientInfo.FromTTLCache)
 		assert.Contains(t, logOutput.String(), "Client IP 192.168.0.1 has been re-assigned a random location in the contiguous US to lat/long")
 		assert.NotContains(t, logOutput.String(), "Using randomly-assigned lat/long")
 
 		// Get it again to make sure it's coming from the cache
-		coord2, _ := getClientLatLong(clientIp)
+		coord2, _ := getClientLatLong(clientIp, rInfo)
 		assert.Equal(t, coord1.Lat, coord2.Lat)
 		assert.Equal(t, coord1.Long, coord2.Long)
+		assert.False(t, rInfo.ClientInfo.Resolved)
+		assert.True(t, rInfo.ClientInfo.FromTTLCache)
 		assert.Contains(t, logOutput.String(), "Using randomly-assigned lat/long for client IP")
 		assert.True(t, clientIpCache.Has(clientIp))
 	})
