@@ -166,7 +166,7 @@ func deleteServerDowntimeSetByServerAdmin(serverName string) error {
 		return errors.Wrapf(err, "unable to retrieve downtime status for server %s", serverName)
 	}
 
-	// If the downtime was set by server admin, delete it; otherwise, do nothing
+	// If the downtime was set by server admin (they are marked by "serverFiltered"), delete it; otherwise, do nothing
 	if serverDowntime.FilterType == serverFiltered {
 		err := deleteServerDowntimeFn(serverName)
 		if err != nil {

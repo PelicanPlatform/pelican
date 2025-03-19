@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,29 +13,11 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-// Test helper functions for Downtime
-func setupMockDowntimeDB(t *testing.T) {
-	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	ServerDatabase = mockDB
-	require.NoError(t, err, "Error setting up mock downtime DB")
-	err = ServerDatabase.AutoMigrate(&server_structs.Downtime{})
-	require.NoError(t, err, "Failed to migrate DB for Downtime table")
-}
-
-func teardownMockDowntimeDB(t *testing.T) {
-	err := ServerDatabase.Migrator().DropTable(&server_structs.Downtime{})
-	require.NoError(t, err, "Error tearing down downtime DB")
-}
-
-func insertMockDowntime(d server_structs.Downtime) error {
-	return ServerDatabase.Create(&d).Error
-}
-
 func TestCreateDowntime(t *testing.T) {
 	config.ResetConfig()
-	setupMockDowntimeDB(t)
+	SetupMockDowntimeDB(t)
 	t.Cleanup(func() {
-		teardownMockDowntimeDB(t)
+		TeardownMockDowntimeDB(t)
 		config.ResetConfig()
 	})
 
@@ -50,7 +31,7 @@ func TestCreateDowntime(t *testing.T) {
 			StartTime:   time.Now().UnixMilli(),
 			EndTime:     time.Now().Add(1 * time.Hour).UnixMilli(),
 		}
-		err := createDowntime(&mockDowntime)
+		err := CreateDowntime(&mockDowntime)
 		require.NoError(t, err)
 
 		var retrieved server_structs.Downtime
@@ -63,9 +44,9 @@ func TestCreateDowntime(t *testing.T) {
 
 func TestUpdateDowntime(t *testing.T) {
 	config.ResetConfig()
-	setupMockDowntimeDB(t)
+	SetupMockDowntimeDB(t)
 	t.Cleanup(func() {
-		teardownMockDowntimeDB(t)
+		TeardownMockDowntimeDB(t)
 		config.ResetConfig()
 	})
 
@@ -78,7 +59,7 @@ func TestUpdateDowntime(t *testing.T) {
 		StartTime:   time.Now().UnixMilli(),
 		EndTime:     time.Now().Add(2 * time.Hour).UnixMilli(),
 	}
-	err := insertMockDowntime(mockDowntime)
+	err := InsertMockDowntime(mockDowntime)
 	require.NoError(t, err)
 
 	t.Run("update-existing-downtime", func(t *testing.T) {
@@ -86,7 +67,7 @@ func TestUpdateDowntime(t *testing.T) {
 			Description: "Planned upgrade",
 			Severity:    "Intermittent Outage (may be up for some of the time)",
 		}
-		err := updateDowntime(mockDowntime.UUID, &updatedFields)
+		err := UpdateDowntime(mockDowntime.UUID, &updatedFields)
 		require.NoError(t, err)
 
 		var retrieved server_structs.Downtime
@@ -97,11 +78,11 @@ func TestUpdateDowntime(t *testing.T) {
 	})
 }
 
-func TestGetActiveDowntimes(t *testing.T) {
+func TestGetIncompleteDowntimes(t *testing.T) {
 	config.ResetConfig()
-	setupMockDowntimeDB(t)
+	SetupMockDowntimeDB(t)
 	t.Cleanup(func() {
-		teardownMockDowntimeDB(t)
+		TeardownMockDowntimeDB(t)
 		config.ResetConfig()
 	})
 
@@ -125,20 +106,20 @@ func TestGetActiveDowntimes(t *testing.T) {
 		EndTime:     currentTime - 3600000, // Ended an hour ago
 	}
 
-	err := insertMockDowntime(activeDowntime)
+	err := InsertMockDowntime(activeDowntime)
 	require.NoError(t, err)
-	err = insertMockDowntime(pastDowntime)
+	err = InsertMockDowntime(pastDowntime)
 	require.NoError(t, err)
 
 	t.Run("fetch-active-downtimes", func(t *testing.T) {
-		activeEntries, err := GetActiveDowntimes()
+		activeEntries, err := GetIncompleteDowntimes()
 		require.NoError(t, err)
 		assert.Len(t, activeEntries, 1)
 		assert.Equal(t, activeDowntime.UUID, activeEntries[0].UUID)
 	})
 
 	t.Run("fetch-specific-downtime-by-uuid", func(t *testing.T) {
-		get, err := getDowntimeByUUID(activeDowntime.UUID)
+		get, err := GetDowntimeByUUID(activeDowntime.UUID)
 		require.NoError(t, err)
 		assert.Equal(t, activeDowntime.UUID, get.UUID)
 	})
@@ -146,9 +127,9 @@ func TestGetActiveDowntimes(t *testing.T) {
 
 func TestDeleteDowntime(t *testing.T) {
 	config.ResetConfig()
-	setupMockDowntimeDB(t)
+	SetupMockDowntimeDB(t)
 	t.Cleanup(func() {
-		teardownMockDowntimeDB(t)
+		TeardownMockDowntimeDB(t)
 		config.ResetConfig()
 	})
 
@@ -161,11 +142,11 @@ func TestDeleteDowntime(t *testing.T) {
 		StartTime:   time.Now().UnixMilli(),
 		EndTime:     time.Now().Add(30 * time.Minute).UnixMilli(),
 	}
-	err := insertMockDowntime(mockDowntime)
+	err := InsertMockDowntime(mockDowntime)
 	require.NoError(t, err)
 
 	t.Run("delete-existing-downtime", func(t *testing.T) {
-		err := deleteDowntime(mockDowntime.UUID)
+		err := DeleteDowntime(mockDowntime.UUID)
 		require.NoError(t, err)
 
 		var retrieved server_structs.Downtime

@@ -123,7 +123,7 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 	}
 
 	// Fetch origin's active downtimes
-	downtimes, err := database.GetActiveDowntimes()
+	downtimes, err := database.GetIncompleteDowntimes()
 	if err != nil {
 		return nil, err
 	}
