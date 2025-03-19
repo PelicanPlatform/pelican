@@ -200,6 +200,77 @@ type (
 		IOTotal    int     `json:"io_total"`
 	}
 
+	OSSStatsGs struct {
+		Event           string  `json:"event"`
+		Reads           int     `json:"reads"`
+		Writes          int     `json:"writes"`
+		Stats           int     `json:"stats"`
+		Pgreads         int     `json:"pgreads"`
+		Pgwrites        int     `json:"pgwrites"`
+		Readvs          int     `json:"readvs"`
+		ReadvSegs       int     `json:"readv_segs"`
+		Dirlists        int     `json:"dirlists"`
+		DirlistEnts     int     `json:"dirlist_ents"`
+		Truncates       int     `json:"truncates"`
+		Unlinks         int     `json:"unlinks"`
+		Chmods          int     `json:"chmods"`
+		Opens           int     `json:"opens"`
+		Renames         int     `json:"renames"`
+		SlowReads       int     `json:"slow_reads"`
+		SlowWrites      int     `json:"slow_writes"`
+		SlowStats       int     `json:"slow_stats"`
+		SlowPgreads     int     `json:"slow_pgreads"`
+		SlowPgwrites    int     `json:"slow_pgwrites"`
+		SlowReadvs      int     `json:"slow_readvs"`
+		SlowReadvSegs   int     `json:"slow_readv_segs"`
+		SlowDirlists    int     `json:"slow_dirlists"`
+		SlowDirlistEnts int     `json:"slow_dirlist_ents"`
+		SlowTruncates   int     `json:"slow_truncates"`
+		SlowUnlinks     int     `json:"slow_unlinks"`
+		SlowChmods      int     `json:"slow_chmods"`
+		SlowOpens       int     `json:"slow_opens"`
+		SlowRenames     int     `json:"slow_renames"`
+		OpenT           float64 `json:"open_t"`
+		ReadT           float64 `json:"read_t"`
+		ReadvT          float64 `json:"readv_t"`
+		PgreadT         float64 `json:"pgread_t"`
+		WriteT          float64 `json:"write_t"`
+		PgwriteT        float64 `json:"pgwrite_t"`
+		DirlistT        float64 `json:"dirlist_t"`
+		StatT           float64 `json:"stat_t"`
+		TruncateT       float64 `json:"truncate_t"`
+		UnlinkT         float64 `json:"unlink_t"`
+		RenameT         float64 `json:"rename_t"`
+		ChmodT          float64 `json:"chmod_t"`
+		SlowOpenT       float64 `json:"slow_open_t"`
+		SlowReadT       float64 `json:"slow_read_t"`
+		SlowReadvT      float64 `json:"slow_readv_t"`
+		SlowPgreadT     float64 `json:"slow_pgread_t"`
+		SlowWriteT      float64 `json:"slow_write_t"`
+		SlowPgwriteT    float64 `json:"slow_pgwrite_t"`
+		SlowDirlistT    float64 `json:"slow_dirlist_t"`
+		SlowStatT       float64 `json:"slow_stat_t"`
+		SlowTruncateT   float64 `json:"slow_truncate_t"`
+		SlowUnlinkT     float64 `json:"slow_unlink_t"`
+		SlowRenameT     float64 `json:"slow_rename_t"`
+		SlowChmodT      float64 `json:"slow_chmod_t"`
+	}
+
+	// Common dflthdr structure
+	DfltHdr struct {
+		Code string `json:"code"`
+		Pseq int    `json:"pseq"`
+		Stod int    `json:"stod"`
+		Sid  int    `json:"sid"`
+		Gs   GSInfo `json:"gs"`
+	}
+
+	GSInfo struct {
+		Type string `json:"type"`
+		Tbeg int    `json:"tbeg"`
+		Tend int    `json:"tend"`
+	}
+
 	CacheAccessStat struct {
 		Hit    int64
 		Miss   int64
@@ -334,7 +405,294 @@ var (
 		Help: "The aggregate time spent in storage operations in origin/cache server",
 	})
 
-	lastStats SummaryStat
+	OssReadsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_reads_total",
+		Help: "The total number of read operations on the OSS",
+	})
+
+	OssWritesCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_writes_total",
+		Help: "The total number of write operations on the OSS",
+	})
+
+	OssStatsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_stats_total",
+		Help: "The total number of stat operations on the OSS",
+	})
+
+	OssPgReadsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_pgreads_total",
+		Help: "The total number of page read operations on the OSS",
+	})
+
+	OssPgWritesCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_pgwrites_total",
+		Help: "The total number of page write operations on the OSS",
+	})
+
+	OssReadvCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_readv_total",
+		Help: "The total number of readv operations on the OSS",
+	})
+
+	OssReadvSegsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_readv_segments_total",
+		Help: "The total number of segments in readv operations on the OSS",
+	})
+
+	OssDirlistCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_dirlists_total",
+		Help: "The total number of directory list operations on the OSS",
+	})
+
+	OssDirlistEntsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_dirlist_entries_total",
+		Help: "The total number of directory list entries on the OSS",
+	})
+
+	OssTruncateCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_truncates_total",
+		Help: "The total number of truncate operations on the OSS",
+	})
+
+	OssUnlinkCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_unlinks_total",
+		Help: "The total number of unlink operations on the OSS",
+	})
+
+	OssChmodCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_chmods_total",
+		Help: "The total number of chmod operations on the OSS",
+	})
+
+	OssOpensCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_opens_total",
+		Help: "The total number of open operations on the OSS",
+	})
+
+	OssRenamesCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_renames_total",
+		Help: "The total number of rename operations on the OSS",
+	})
+
+	OssSlowReadsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_reads_total",
+		Help: "The total number of slow read operations on the OSS",
+	})
+
+	OssSlowWritesCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_writes_total",
+		Help: "The total number of slow write operations on the OSS",
+	})
+
+	OssSlowStatsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_stats_total",
+		Help: "The total number of slow stat operations on the OSS",
+	})
+
+	OssSlowPgReadsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_pgreads_total",
+		Help: "The total number of slow page read operations on the OSS",
+	})
+
+	OssSlowPgWritesCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_pgwrites_total",
+		Help: "The total number of slow page write operations on the OSS",
+	})
+
+	OssSlowReadvCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_readv_total",
+		Help: "The total number of slow readv operations on the OSS",
+	})
+
+	OssSlowReadvSegsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_readv_segments_total",
+		Help: "The total number of segments in slow readv operations on the OSS",
+	})
+
+	OssSlowDirlistCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_dirlists_total",
+		Help: "The total number of slow directory list operations on the OSS",
+	})
+
+	OssSlowDirlistEntsCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_dirlist_entries_total",
+		Help: "The total number of slow directory list entries on the OSS",
+	})
+
+	OssSlowTruncateCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_truncates_total",
+		Help: "The total number of slow truncate operations on the OSS",
+	})
+
+	OssSlowUnlinkCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_unlinks_total",
+		Help: "The total number of slow unlink operations on the OSS",
+	})
+
+	OssSlowChmodCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_chmods_total",
+		Help: "The total number of slow chmod operations on the OSS",
+	})
+
+	OssSlowOpensCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_opens_total",
+		Help: "The total number of slow open operations on the OSS",
+	})
+
+	OssSlowRenamesCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_slow_renames_total",
+		Help: "The total number of slow rename operations on the OSS",
+	})
+
+	TimeHistogramBuckets = prometheus.LinearBuckets(0.0001, 0.0001, 10)
+
+	OssOpenTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_open_time_seconds",
+		Help:    "The time taken for open operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssReadTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_read_time_seconds",
+		Help:    "The time taken for read operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssReadvTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_readv_time_seconds",
+		Help:    "The time taken for readv operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssPgReadTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_pgread_time_seconds",
+		Help:    "The time taken for page read operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssWriteTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_write_time_seconds",
+		Help:    "The time taken for write operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssPgWriteTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_pgwrite_time_seconds",
+		Help:    "The time taken for page write operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssDirlistTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_dirlist_time_seconds",
+		Help:    "The time taken for directory list operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssStatTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_stat_time_seconds",
+		Help:    "The time taken for stat operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssTruncateTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_truncate_time_seconds",
+		Help:    "The time taken for truncate operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssUnlinkTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_unlink_time_seconds",
+		Help:    "The time taken for unlink operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssRenameTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_rename_time_seconds",
+		Help:    "The time taken for rename operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssChmodTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_chmod_time_seconds",
+		Help:    "The time taken for chmod operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssSlowOpenTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_slow_open_time_seconds",
+		Help:    "The time taken for slow open operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssSlowReadTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_slow_read_time_seconds",
+		Help:    "The time taken for slow read operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssSlowReadvTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_slow_readv_time_seconds",
+		Help:    "The time taken for slow readv operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssSlowPgReadTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_slow_pgread_time_seconds",
+		Help:    "The time taken for slow page read operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssSlowWriteTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_slow_write_time_seconds",
+		Help:    "The time taken for slow write operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssSlowPgWriteTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_slow_pgwrite_time_seconds",
+		Help:    "The time taken for slow page write operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssSlowDirlistTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_slow_dirlist_time_seconds",
+		Help:    "The time taken for slow directory list operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssSlowStatTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_slow_stat_time_seconds",
+		Help:    "The time taken for slow stat operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssSlowTruncateTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_slow_truncate_time_seconds",
+		Help:    "The time taken for slow truncate operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssSlowUnlinkTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_slow_unlink_time_seconds",
+		Help:    "The time taken for slow unlink operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssSlowRenameTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_slow_rename_time_seconds",
+		Help:    "The time taken for slow rename operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	OssSlowChmodTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "xrootd_oss_slow_chmod_time_seconds",
+		Help:    "The time taken for slow chmod operations on the OSS",
+		Buckets: TimeHistogramBuckets,
+	})
+
+	lastStats    SummaryStat
+	lastOssStats OSSStatsGs
 
 	lastTotalIO  int     // The last total IO value
 	lastWaitTime float64 // The last IO wait time
@@ -600,6 +958,25 @@ func handlePacket(packet []byte) error {
 	// XML '<' character indicates a summary packet
 	if len(packet) > 0 && packet[0] == '<' {
 		return HandleSummaryPacket(packet)
+	}
+
+	if len(packet) > 0 && packet[0] == '{' {
+		cleanPacket := bytes.Trim(packet, "\x00")
+		blobs := bytes.Split(cleanPacket, []byte("\n"))
+		var header DfltHdr
+		err := json.Unmarshal(blobs[0], &header)
+		if err != nil {
+			return errors.Wrap(err, "failed to parse JSON monitoring packet")
+		}
+		// OSS Packet
+		if header.Gs.Type == "O" {
+			log.Debug("handlePacket: Received a g-stream OSS packet")
+			if len(blobs) < 2 {
+				return errors.New("Packet is too small to be valid g-stream OSS packet")
+			}
+			return handleOSSPacket(blobs[1:]) // Skip the header
+		}
+		return nil
 	}
 
 	var header XrdXrootdMonHeader
@@ -1177,5 +1554,124 @@ func HandleSummaryPacket(packet []byte) error {
 				Set(float64(cacheStore.Size - cacheStore.Used))
 		}
 	}
+	return nil
+}
+
+func handleOSSPacket(blobs [][]byte) error {
+	if len(blobs) == 0 {
+		return errors.New("no blobs in the OSS packet")
+	}
+	finalBlob := blobs[len(blobs)-1]
+	ossStats := OSSStatsGs{}
+	if err := json.Unmarshal(finalBlob, &ossStats); err != nil {
+		return errors.Wrap(err, "failed to parse OSS stat json")
+	}
+
+	updateCounter := func(new int, old int, counter prometheus.Counter) int {
+		incBy := float64(new - old)
+		if new < old {
+			incBy = float64(new)
+		}
+		counter.Add(incBy)
+		return new
+	}
+
+	// updateHistogram updates the histogram with the average latency per operation for the given delta.
+	// newTotalTime and oldTotalTime are the cumulative times (in seconds).
+	// newCount and oldCount are the cumulative counts.
+	// histogram is the Prometheus histogram to update.
+	updateHistogram := func(newTotalTime, oldTotalTime float64, newCount, oldCount int, histogram prometheus.Histogram) {
+		deltaTime := newTotalTime - oldTotalTime
+		deltaCount := newCount - oldCount
+		if deltaCount > 0 {
+			avgLatency := deltaTime / float64(deltaCount)
+			// Update the histogram for each operation that occurred.
+			for i := 0; i < deltaCount; i++ {
+				histogram.Observe(avgLatency)
+			}
+
+		}
+	}
+
+	updateHistogram(ossStats.ReadT, lastOssStats.ReadT, ossStats.Reads, lastOssStats.Reads, OssReadTime)
+	lastOssStats.ReadT = ossStats.ReadT
+	updateHistogram(ossStats.WriteT, lastOssStats.WriteT, ossStats.Writes, lastOssStats.Writes, OssWriteTime)
+	lastOssStats.WriteT = ossStats.WriteT
+	updateHistogram(ossStats.StatT, lastOssStats.StatT, ossStats.Stats, lastOssStats.Stats, OssStatTime)
+	lastOssStats.StatT = ossStats.StatT
+	updateHistogram(ossStats.PgreadT, lastOssStats.PgreadT, ossStats.Pgreads, lastOssStats.Pgreads, OssPgReadTime)
+	lastOssStats.PgreadT = ossStats.PgreadT
+	updateHistogram(ossStats.PgwriteT, lastOssStats.PgwriteT, ossStats.Pgwrites, lastOssStats.Pgwrites, OssPgWriteTime)
+	lastOssStats.PgwriteT = ossStats.PgwriteT
+	updateHistogram(ossStats.ReadvT, lastOssStats.ReadvT, ossStats.Readvs, lastOssStats.Readvs, OssReadvTime)
+	lastOssStats.ReadvT = ossStats.ReadvT
+	updateHistogram(ossStats.DirlistT, lastOssStats.DirlistT, ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistTime)
+	lastOssStats.DirlistT = ossStats.DirlistT
+	updateHistogram(ossStats.TruncateT, lastOssStats.TruncateT, ossStats.Truncates, lastOssStats.Truncates, OssTruncateTime)
+	lastOssStats.TruncateT = ossStats.TruncateT
+	updateHistogram(ossStats.UnlinkT, lastOssStats.UnlinkT, ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkTime)
+	lastOssStats.UnlinkT = ossStats.UnlinkT
+	updateHistogram(ossStats.ChmodT, lastOssStats.ChmodT, ossStats.Chmods, lastOssStats.Chmods, OssChmodTime)
+	lastOssStats.ChmodT = ossStats.ChmodT
+	updateHistogram(ossStats.OpenT, lastOssStats.OpenT, ossStats.Opens, lastOssStats.Opens, OssOpenTime)
+	lastOssStats.OpenT = ossStats.OpenT
+	updateHistogram(ossStats.RenameT, lastOssStats.RenameT, ossStats.Renames, lastOssStats.Renames, OssRenameTime)
+	lastOssStats.RenameT = ossStats.RenameT
+
+	updateHistogram(ossStats.SlowReadT, lastOssStats.SlowReadT, ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadTime)
+	lastOssStats.SlowReadT = ossStats.SlowReadT
+	updateHistogram(ossStats.SlowWriteT, lastOssStats.SlowWriteT, ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWriteTime)
+	lastOssStats.SlowWriteT = ossStats.SlowWriteT
+	updateHistogram(ossStats.SlowStatT, lastOssStats.SlowStatT, ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatTime)
+	lastOssStats.SlowStatT = ossStats.SlowStatT
+	updateHistogram(ossStats.SlowPgreadT, lastOssStats.SlowPgreadT, ossStats.SlowPgreads, lastOssStats.SlowPgreads, OssSlowPgReadTime)
+	lastOssStats.SlowPgreadT = ossStats.SlowPgreadT
+	updateHistogram(ossStats.SlowPgwriteT, lastOssStats.SlowPgwriteT, ossStats.SlowPgwrites, lastOssStats.SlowPgwrites, OssSlowPgWriteTime)
+	lastOssStats.SlowPgwriteT = ossStats.SlowPgwriteT
+	updateHistogram(ossStats.SlowReadvT, lastOssStats.SlowReadvT, ossStats.SlowReadvs, lastOssStats.SlowReadvs, OssSlowReadvTime)
+	lastOssStats.SlowReadvT = ossStats.SlowReadvT
+	updateHistogram(ossStats.SlowDirlistT, lastOssStats.SlowDirlistT, ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistTime)
+	lastOssStats.SlowDirlistT = ossStats.SlowDirlistT
+	updateHistogram(ossStats.SlowTruncateT, lastOssStats.SlowTruncateT, ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateTime)
+	lastOssStats.SlowTruncateT = ossStats.SlowTruncateT
+	updateHistogram(ossStats.SlowUnlinkT, lastOssStats.SlowUnlinkT, ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkTime)
+	lastOssStats.SlowUnlinkT = ossStats.SlowUnlinkT
+	updateHistogram(ossStats.SlowChmodT, lastOssStats.SlowChmodT, ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodTime)
+	lastOssStats.SlowChmodT = ossStats.SlowChmodT
+	updateHistogram(ossStats.SlowOpenT, lastOssStats.SlowOpenT, ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpenTime)
+	lastOssStats.SlowOpenT = ossStats.SlowOpenT
+	updateHistogram(ossStats.SlowRenameT, lastOssStats.SlowRenameT, ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenameTime)
+	lastOssStats.SlowRenameT = ossStats.SlowRenameT
+
+	lastOssStats.Reads = updateCounter(ossStats.Reads, lastOssStats.Reads, OssReadsCounter)
+	lastOssStats.Writes = updateCounter(ossStats.Writes, lastOssStats.Writes, OssWritesCounter)
+	lastOssStats.Stats = updateCounter(ossStats.Stats, lastOssStats.Stats, OssStatsCounter)
+	lastOssStats.Pgreads = updateCounter(ossStats.Pgreads, lastOssStats.Pgreads, OssPgReadsCounter)
+	lastOssStats.Pgwrites = updateCounter(ossStats.Pgwrites, lastOssStats.Pgwrites, OssPgWritesCounter)
+	lastOssStats.Readvs = updateCounter(ossStats.Readvs, lastOssStats.Readvs, OssReadvCounter)
+	lastOssStats.ReadvSegs = updateCounter(ossStats.ReadvSegs, lastOssStats.ReadvSegs, OssReadvSegsCounter)
+	lastOssStats.Dirlists = updateCounter(ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistCounter)
+	lastOssStats.DirlistEnts = updateCounter(ossStats.DirlistEnts, lastOssStats.DirlistEnts, OssDirlistEntsCounter)
+	lastOssStats.Truncates = updateCounter(ossStats.Truncates, lastOssStats.Truncates, OssTruncateCounter)
+	lastOssStats.Unlinks = updateCounter(ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkCounter)
+	lastOssStats.Chmods = updateCounter(ossStats.Chmods, lastOssStats.Chmods, OssChmodCounter)
+	lastOssStats.Opens = updateCounter(ossStats.Opens, lastOssStats.Opens, OssOpensCounter)
+	lastOssStats.Renames = updateCounter(ossStats.Renames, lastOssStats.Renames, OssRenamesCounter)
+
+	lastOssStats.SlowReads = updateCounter(ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadsCounter)
+	lastOssStats.SlowWrites = updateCounter(ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWritesCounter)
+	lastOssStats.SlowStats = updateCounter(ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatsCounter)
+	lastOssStats.SlowPgreads = updateCounter(ossStats.SlowPgreads, lastOssStats.SlowPgreads, OssSlowPgReadsCounter)
+	lastOssStats.SlowPgwrites = updateCounter(ossStats.SlowPgwrites, lastOssStats.SlowPgwrites, OssSlowPgWritesCounter)
+	lastOssStats.SlowReadvs = updateCounter(ossStats.SlowReadvs, lastOssStats.SlowReadvs, OssSlowReadvCounter)
+	lastOssStats.SlowReadvSegs = updateCounter(ossStats.SlowReadvSegs, lastOssStats.SlowReadvSegs, OssSlowReadvSegsCounter)
+	lastOssStats.SlowDirlists = updateCounter(ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistCounter)
+	lastOssStats.SlowDirlistEnts = updateCounter(ossStats.SlowDirlistEnts, lastOssStats.SlowDirlistEnts, OssSlowDirlistEntsCounter)
+	lastOssStats.SlowTruncates = updateCounter(ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateCounter)
+	lastOssStats.SlowUnlinks = updateCounter(ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkCounter)
+	lastOssStats.SlowChmods = updateCounter(ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodCounter)
+	lastOssStats.SlowOpens = updateCounter(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter)
+	lastOssStats.SlowRenames = updateCounter(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter)
+
 	return nil
 }
