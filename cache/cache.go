@@ -24,9 +24,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 var (
@@ -40,15 +38,5 @@ func RegisterCacheAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.Gr
 	group := router.Group("/api/v1.0/cache")
 	{
 		group.POST("/directorTest", func(ginCtx *gin.Context) { server_utils.HandleDirectorTestResponse(ginCtx, notificationChan) })
-	}
-
-	cacheDowntimeAPI := group.Group("/downtime")
-	{
-		cacheDowntimeAPI.POST("/", web_ui.AuthHandler, web_ui.AdminAuthHandler, database.HandleCreateDowntime)
-		cacheDowntimeAPI.GET("/", web_ui.AuthHandler, web_ui.AdminAuthHandler, database.HandleGetActiveDowntime)
-		cacheDowntimeAPI.GET("/all", web_ui.AuthHandler, web_ui.AdminAuthHandler, database.HandleGetAllDowntime)
-		cacheDowntimeAPI.GET("/:uuid", web_ui.AuthHandler, web_ui.AdminAuthHandler, database.HandleGetDowntimeByUUID)
-		cacheDowntimeAPI.PUT("/:uuid", web_ui.AuthHandler, web_ui.AdminAuthHandler, database.HandleUpdateDowntime)
-		cacheDowntimeAPI.DELETE("/:uuid", web_ui.AuthHandler, web_ui.AdminAuthHandler, database.HandleDeleteDowntime)
 	}
 }

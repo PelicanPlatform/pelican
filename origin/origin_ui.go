@@ -28,7 +28,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -166,16 +165,6 @@ func RegisterOriginWebAPI(engine *gin.Engine) error {
 	originWebAPI := engine.Group("/api/v1.0/origin_ui", web_ui.ServerHeaderMiddleware)
 	{
 		originWebAPI.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleExports)
-	}
-
-	originDowntimeAPI := originWebAPI.Group("/downtime")
-	{
-		originDowntimeAPI.POST("/", web_ui.AuthHandler, web_ui.AdminAuthHandler, database.HandleCreateDowntime)
-		originDowntimeAPI.GET("/", web_ui.AuthHandler, web_ui.AdminAuthHandler, database.HandleGetActiveDowntime)
-		originDowntimeAPI.GET("/all", web_ui.AuthHandler, web_ui.AdminAuthHandler, database.HandleGetAllDowntime)
-		originDowntimeAPI.GET("/:uuid", web_ui.AuthHandler, web_ui.AdminAuthHandler, database.HandleGetDowntimeByUUID)
-		originDowntimeAPI.PUT("/:uuid", web_ui.AuthHandler, web_ui.AdminAuthHandler, database.HandleUpdateDowntime)
-		originDowntimeAPI.DELETE("/:uuid", web_ui.AuthHandler, web_ui.AdminAuthHandler, database.HandleDeleteDowntime)
 	}
 
 	// Globus backend specific. Config other origin routes above this line

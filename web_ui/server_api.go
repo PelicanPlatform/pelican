@@ -15,7 +15,7 @@
  * limitations under the License.
  *
  ***************************************************************/
-package database
+package web_ui
 
 import (
 	"net/http"
@@ -23,11 +23,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 type (
-	DowntimeInput struct {
+	downtimeInput struct {
 		CreatedBy   string                  `json:"createdBy"` // Person who created this downtime
 		Class       server_structs.Class    `json:"class"`
 		Description string                  `json:"description"`
@@ -56,7 +57,7 @@ func isValidSeverity(severity server_structs.Severity) bool {
 }
 
 func HandleCreateDowntime(ctx *gin.Context) {
-	var downtimeInput DowntimeInput
+	var downtimeInput downtimeInput
 	if err := ctx.ShouldBindJSON(&downtimeInput); err != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Invalid downtime request payload"})
 		return
@@ -90,15 +91,15 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		EndTime:     downtimeInput.EndTime,
 	}
 
-	if err := createDowntime(&downtime); err != nil {
+	if err := database.CreateDowntime(&downtime); err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to create downtime: " + err.Error()})
 		return
 	}
 	ctx.JSON(http.StatusOK, downtime)
 }
 
-func HandleGetActiveDowntime(ctx *gin.Context) {
-	downtime, err := GetActiveDowntimes()
+func HandleGetIncompleteDowntime(ctx *gin.Context) {
+	downtime, err := database.GetIncompleteDowntimes()
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to get active downtime: " + err.Error()})
 		return
@@ -107,7 +108,7 @@ func HandleGetActiveDowntime(ctx *gin.Context) {
 }
 
 func HandleGetAllDowntime(ctx *gin.Context) {
-	downtime, err := getAllDowntimes()
+	downtime, err := database.GetAllDowntimes()
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to get all downtime: " + err.Error()})
 		return
@@ -117,7 +118,7 @@ func HandleGetAllDowntime(ctx *gin.Context) {
 
 func HandleGetDowntimeByUUID(ctx *gin.Context) {
 	uuid := ctx.Param("uuid")
-	downtime, err := getDowntimeByUUID(uuid)
+	downtime, err := database.GetDowntimeByUUID(uuid)
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to get downtime by UUID: " + err.Error()})
 		return
@@ -127,7 +128,7 @@ func HandleGetDowntimeByUUID(ctx *gin.Context) {
 
 func HandleUpdateDowntime(ctx *gin.Context) {
 	uuid := ctx.Param("uuid")
-	var downtimeInput DowntimeInput
+	var downtimeInput downtimeInput
 	if err := ctx.ShouldBindJSON(&downtimeInput); err != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Invalid request payload"})
 		return
@@ -143,7 +144,7 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 	}
 
 	// Retrieve existing downtime record from the database
-	existingDowntime, err := getDowntimeByUUID(uuid)
+	existingDowntime, err := database.GetDowntimeByUUID(uuid)
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -181,7 +182,7 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 		existingDowntime.EndTime = downtimeInput.EndTime
 	}
 
-	if err := updateDowntime(uuid, existingDowntime); err != nil {
+	if err := database.UpdateDowntime(uuid, existingDowntime); err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to update downtime: " + err.Error()})
 		return
 	}
@@ -190,7 +191,7 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 
 func HandleDeleteDowntime(ctx *gin.Context) {
 	uuid := ctx.Param("uuid")
-	if err := deleteDowntime(uuid); err != nil {
+	if err := database.DeleteDowntime(uuid); err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to delete downtime: " + err.Error()})
 		return
 	}

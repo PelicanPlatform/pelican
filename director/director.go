@@ -1272,16 +1272,23 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	if adV2.Downtimes != nil {
 		// Process received server(origin/cache) downtimes and toggle the director db accordingly when necessary
 		currentTime := time.Now().UTC().UnixMilli()
-		bringItDown := false
+		bringItDown := false // Flag to indicate if this server is put in downtime in the traversal of
 		sn := adV2.Name
 		// Check if the server is currently in downtime
 		for _, downtime := range adV2.Downtimes {
 			if downtime.StartTime < currentTime && downtime.EndTime > currentTime || downtime.EndTime == 0 {
 				// Server is currently in downtime
-				// Backup the original filter type to revert in case of database failure
-				originalFilterType, hasOriginalFilter := filteredServers[sn]
 
-				// Set the server to downtime in the director in-memory cache and database
+				// If this server is already put in downtime, we don't need to do anything
+				// Retrieve the original filter type to check and backup for revert in case of database failure
+				filteredServersMutex.Lock()
+				originalFilterType, hasOriginalFilter := filteredServers[sn]
+				filteredServersMutex.Unlock()
+				if hasOriginalFilter && originalFilterType != tempAllowed {
+					break
+				}
+
+				// If the server is not in downtime, we need to set it to downtime in the director in-memory cache and database
 				filteredServers[sn] = serverFiltered
 				err := setServerDowntime(sn, serverFiltered)
 				if err != nil {
@@ -1297,7 +1304,8 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 			}
 		}
 		// If the server doesn't have an active downtime, it means Director's previously
-		// recorded downtime set by the server admin is stale and should be removed
+		// recorded downtime set by the server admin is stale and should be removed.
+		// It only removes the downtime set by the server admin, not the downtime set by others.
 		if !bringItDown {
 			err := deleteServerDowntimeSetByServerAdmin(adV2.Name)
 			if err != nil {

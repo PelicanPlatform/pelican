@@ -15,7 +15,7 @@
  * limitations under the License.
  *
  ***************************************************************/
-package database
+package web_ui
 
 import (
 	"bytes"
@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -39,10 +40,10 @@ import (
 func setupRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
-	originDowntimeAPI := r.Group("/api/v1.0/origin_ui/downtime")
+	originDowntimeAPI := r.Group("/api/v1.0/downtime")
 	{
 		originDowntimeAPI.POST("/", HandleCreateDowntime)
-		originDowntimeAPI.GET("/", HandleGetActiveDowntime)
+		originDowntimeAPI.GET("/", HandleGetIncompleteDowntime)
 		originDowntimeAPI.GET("/all", HandleGetAllDowntime)
 		originDowntimeAPI.GET("/:uuid", HandleGetDowntimeByUUID)
 		originDowntimeAPI.PUT("/:uuid", HandleUpdateDowntime)
@@ -61,8 +62,8 @@ func TestDowntime(t *testing.T) {
 	})
 
 	// Initialize the mock database
-	setupMockDowntimeDB(t)
-	defer teardownMockDowntimeDB(t)
+	database.SetupMockDowntimeDB(t)
+	defer database.TeardownMockDowntimeDB(t)
 
 	viper.Set("Server.WebPort", 0)
 	viper.Set("Server.ExternalWebUrl", "https://mock-server.com")
@@ -87,7 +88,7 @@ func TestDowntime(t *testing.T) {
 	}
 	pastDowntime := server_structs.Downtime{
 		UUID:        "01952a5a-fdc4-72a7-88e7-c98aaee5278d",
-		CreatedBy:   "Miko Brando",
+		CreatedBy:   "John Doe",
 		Class:       "UNSCHEDULED",
 		Description: "Power outage",
 		Severity:    server_structs.Outage,
@@ -96,13 +97,13 @@ func TestDowntime(t *testing.T) {
 		CreatedAt:   time.Now().UTC().Add(-20 * time.Hour).UnixMilli(),
 		UpdatedAt:   time.Now().UTC().Add(-20 * time.Hour).UnixMilli(),
 	}
-	err = insertMockDowntime(activeDowntime)
+	err = database.InsertMockDowntime(activeDowntime)
 	assert.NoError(t, err)
-	err = insertMockDowntime(pastDowntime)
+	err = database.InsertMockDowntime(pastDowntime)
 	assert.NoError(t, err)
 
 	t.Run("get-active-downtime", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/api/v1.0/origin_ui/downtime/", nil)
+		req, _ := http.NewRequest("GET", "/api/v1.0/downtime/", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
@@ -111,7 +112,7 @@ func TestDowntime(t *testing.T) {
 	})
 
 	t.Run("get-all-downtime", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/api/v1.0/origin_ui/downtime/all", nil)
+		req, _ := http.NewRequest("GET", "/api/v1.0/downtime/all", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
@@ -123,17 +124,17 @@ func TestDowntime(t *testing.T) {
 	})
 
 	t.Run("create-active-downtime", func(t *testing.T) {
-		activeFutureDowntime := DowntimeInput{
-			CreatedBy:   "Pablo Afonso",
+		incompleteDowntime := downtimeInput{
+			CreatedBy:   "John Doe Jr.",
 			Class:       "SCHEDULED",
 			Description: "",
 			Severity:    "Intermittent Outage (may be up for some of the time)",
 			StartTime:   time.Now().UTC().Add(1 * time.Hour).UnixMilli(),
 			EndTime:     time.Now().UTC().Add(9 * time.Hour).UnixMilli(),
 		}
-		body, _ := json.Marshal(activeFutureDowntime)
+		body, _ := json.Marshal(incompleteDowntime)
 
-		req, _ := http.NewRequest("POST", "/api/v1.0/origin_ui/downtime/", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("POST", "/api/v1.0/downtime/", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 
 		w := httptest.NewRecorder()
@@ -142,13 +143,13 @@ func TestDowntime(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp server_structs.Downtime
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, activeFutureDowntime.CreatedBy, resp.CreatedBy)
-		assert.Equal(t, activeFutureDowntime.StartTime, resp.StartTime)
+		assert.Equal(t, incompleteDowntime.CreatedBy, resp.CreatedBy)
+		assert.Equal(t, incompleteDowntime.StartTime, resp.StartTime)
 	})
 
 	t.Run("get-downtime-by-uuid-and-update", func(t *testing.T) {
 		// Fetch a downtime by UUID
-		req, _ := http.NewRequest("GET", "/api/v1.0/origin_ui/downtime/"+activeDowntime.UUID, nil)
+		req, _ := http.NewRequest("GET", "/api/v1.0/downtime/"+activeDowntime.UUID, nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
@@ -159,12 +160,12 @@ func TestDowntime(t *testing.T) {
 		assert.Equal(t, activeDowntime.UUID, fetchedDowntime.UUID)
 
 		// Update the fetched downtime
-		updatedDowntime := DowntimeInput{
+		updatedDowntime := downtimeInput{
 			Severity: "No Significant Outage Expected (you shouldn't notice)",
 		}
 
 		body, _ := json.Marshal(updatedDowntime)
-		req, err = http.NewRequest("PUT", "/api/v1.0/origin_ui/downtime/"+fetchedDowntime.UUID, bytes.NewBuffer(body))
+		req, err = http.NewRequest("PUT", "/api/v1.0/downtime/"+fetchedDowntime.UUID, bytes.NewBuffer(body))
 		assert.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 
@@ -174,7 +175,7 @@ func TestDowntime(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		// Fetch the updated downtime to verify the update
-		req, _ = http.NewRequest("GET", "/api/v1.0/origin_ui/downtime/"+activeDowntime.UUID, nil)
+		req, _ = http.NewRequest("GET", "/api/v1.0/downtime/"+activeDowntime.UUID, nil)
 		w = httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
@@ -184,11 +185,11 @@ func TestDowntime(t *testing.T) {
 	})
 
 	t.Run("update-downtime-with-invalid-uuid", func(t *testing.T) {
-		updatedDowntime := DowntimeInput{
+		updatedDowntime := downtimeInput{
 			Severity: "Outage (completely inaccessible)",
 		}
 		body, _ := json.Marshal(updatedDowntime)
-		req, err := http.NewRequest("PUT", "/api/v1.0/origin_ui/downtime/dummy_UUID", bytes.NewBuffer(body))
+		req, err := http.NewRequest("PUT", "/api/v1.0/downtime/dummy_UUID", bytes.NewBuffer(body))
 		assert.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 
@@ -200,11 +201,11 @@ func TestDowntime(t *testing.T) {
 	})
 
 	t.Run("update-downtime-with-invalid-severity", func(t *testing.T) {
-		updatedDowntime := DowntimeInput{
+		updatedDowntime := downtimeInput{
 			Severity: "InvalidSeverity",
 		}
 		body, _ := json.Marshal(updatedDowntime)
-		req, err := http.NewRequest("PUT", "/api/v1.0/origin_ui/downtime/"+activeDowntime.UUID, bytes.NewBuffer(body))
+		req, err := http.NewRequest("PUT", "/api/v1.0/downtime/"+activeDowntime.UUID, bytes.NewBuffer(body))
 		assert.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 
@@ -216,7 +217,7 @@ func TestDowntime(t *testing.T) {
 	})
 
 	t.Run("delete-downtime", func(t *testing.T) {
-		req, _ := http.NewRequest("DELETE", "/api/v1.0/origin_ui/downtime/"+activeDowntime.UUID, nil)
+		req, _ := http.NewRequest("DELETE", "/api/v1.0/downtime/"+activeDowntime.UUID, nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
