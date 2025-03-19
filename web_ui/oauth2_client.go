@@ -64,6 +64,12 @@ func ParseOAuthState(state string) (metadata map[string]string, err error) {
 		return metadata, nil
 	}
 
+	stateBytes, err := base64.RawURLEncoding.DecodeString(state)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to base64 decode the OAuth state: %v", state)
+	}
+	state = string(stateBytes)
+
 	keyvals := strings.Split(state, "&")
 	metadata = map[string]string{}
 	for _, kvStr := range keyvals {
@@ -89,14 +95,16 @@ func ParseOAuthState(state string) (metadata map[string]string, err error) {
 //
 // key1=val1&key2=val2
 //
-// where values are url-encoded
+// where values are url-encoded. We then base64 encode the resulting string
+// in order to ensure that over-zealous providers do not treat the final URL
+// as a double-encoding attack or somesuch.
 func GenerateOAuthState(metadata map[string]string) string {
 	metaStr := ""
 	for key, val := range metadata {
 		metaStr += key + "=" + url.QueryEscape(val) + "&"
 	}
 	metaStr = strings.TrimSuffix(metaStr, "&")
-	return metaStr
+	return base64.RawURLEncoding.EncodeToString([]byte(metaStr))
 }
 
 // Generate a 16B random string and set as the value of ctx session key "oauthstate"
@@ -393,6 +401,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 			})
 		return
 	}
+	log.Debugf("User info from auth provider: %v", string(body))
 
 	var userInfo map[string]interface{}
 	if err := json.Unmarshal(body, &userInfo); err != nil {
