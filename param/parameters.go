@@ -310,7 +310,7 @@ var (
 	Origin_ExportVolumes = StringSliceParam{"Origin.ExportVolumes"}
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
-	Server_DirectorURLs = StringSliceParam{"Server.DirectorURLs"}
+	Server_DirectorUrls = StringSliceParam{"Server.DirectorUrls"}
 	Server_Modules = StringSliceParam{"Server.Modules"}
 	Server_UIAdminUsers = StringSliceParam{"Server.UIAdminUsers"}
 	Shoveler_OutputDestinations = StringSliceParam{"Shoveler.OutputDestinations"}

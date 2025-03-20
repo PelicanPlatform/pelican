@@ -57,9 +57,9 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 	} else {
 		log.Warningln("Failed to determine federation information:", err)
 	}
-	for _, endpoint := range param.Server_DirectorURLs.GetStringSlice() {
+	for _, endpoint := range param.Server_DirectorUrls.GetStringSlice() {
 		if _, err := url.Parse(endpoint); err != nil {
-			log.Errorln("Ignoring URL", endpoint, "specified in Server.DirectorURLs due to parsing error:", err)
+			log.Errorln("Ignoring URL", endpoint, "specified in", param.Server_DirectorUrls.GetName(), "due to parsing error:", err)
 			continue
 		}
 		endpointsTemp[endpoint] = true

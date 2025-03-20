@@ -70,7 +70,7 @@ func TestDirectorShutdown(t *testing.T) {
 		}
 	}))
 	dirAd.AdvertiseUrl = ts.URL
-	viper.Set(param.Server_DirectorURLs.GetName(), ts.URL)
+	viper.Set(param.Server_DirectorUrls.GetName(), ts.URL)
 	defer ts.Close()
 
 	viper.Set(param.Server_AdLifetime.GetName(), "100ms")
@@ -113,7 +113,7 @@ func TestExpirationDirector(t *testing.T) {
 		}
 	}))
 	dirAd.AdvertiseUrl = ts.URL
-	viper.Set(param.Server_DirectorURLs.GetName(), ts.URL)
+	viper.Set(param.Server_DirectorUrls.GetName(), ts.URL)
 	defer ts.Close()
 
 	viper.Set(param.Server_AdLifetime.GetName(), "100ms")
@@ -128,6 +128,7 @@ func TestExpirationDirector(t *testing.T) {
 
 func TestForwardDirector(t *testing.T) {
 	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
 
 	var listDirectorCount atomic.Int32
 	var adPostCount atomic.Int32
@@ -153,7 +154,7 @@ func TestForwardDirector(t *testing.T) {
 		}
 	}))
 	dirAd.AdvertiseUrl = ts.URL
-	viper.Set("Server.DirectorURLs", ts.URL)
+	viper.Set(param.Server_DirectorUrls.GetName(), ts.URL)
 	defer ts.Close()
 
 	fed_test_utils.NewFedTest(t, "")

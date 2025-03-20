@@ -2273,7 +2273,7 @@ type: string
 default: pelican
 components: ["*"]
 ---
-name: Server.DirectorURLs
+name: Server.DirectorUrls
 description: |+
   A list of director URLs known to the server.  These are used by the service to forward
   the advertisements to multiple directors; a director service will advertise these URLs
