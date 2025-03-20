@@ -77,7 +77,7 @@ func handleSchemelessIfNeeded(ctx context.Context, rpUrl *url.URL, dOpts *[]peli
 	var discoveryUrl *url.URL
 	if fedInfo.DiscoveryEndpoint != "" {
 		if tmpUrl, err := url.Parse(fedInfo.DiscoveryEndpoint); err != nil {
-			log.Warningf(" configured discovery endpoint: %s", fedInfo.DiscoveryEndpoint)
+			log.Warningf("Failed to parse configured discovery endpoint: %s", fedInfo.DiscoveryEndpoint)
 		} else {
 			discoveryUrl = tmpUrl
 		}
