@@ -51,6 +51,7 @@ import (
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
@@ -237,6 +238,7 @@ func (f *FedTest) Teardown() {
 	f.FedCancel()
 	assert.NoError(f.T, f.ErrGroup.Wait())
 	server_utils.ResetTestState()
+	director.ResetState()
 }
 
 // Test the main function for the pelican plugin
@@ -566,7 +568,9 @@ func TestPluginDirectRead(t *testing.T) {
 	viper.Set("Origin.StoragePrefix", "/<SOMETHING THAT WILL BE OVERRIDDEN>")
 	viper.Set("Origin.EnablePublicReads", true)
 	viper.Set("Origin.EnableDirectReads", true)
-	fed := fed_test_utils.NewFedTest(t, "")
+	// We are purposely creating a test with a config of a single-space.
+	// The empty string indicates using the default config, which we don't want.
+	fed := fed_test_utils.NewFedTest(t, " ")
 	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 
 	log.Debugln("Will create origin file at", fed.Exports[0].StoragePrefix)
@@ -852,7 +856,9 @@ func TestPluginRecursiveDownload(t *testing.T) {
 	viper.Set("Origin.FederationPrefix", "/test")
 	viper.Set("Origin.StoragePrefix", "/<THIS WILL BE OVERRIDDEN>")
 	viper.Set("Origin.EnablePublicReads", true)
-	fed := fed_test_utils.NewFedTest(t, "")
+	// We are purposely creating a test with a config of a single-space.
+	// The empty string indicates using the default config, which we don't want.
+	fed := fed_test_utils.NewFedTest(t, " ")
 	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 
 	// Drop the testFileContent into the origin directory

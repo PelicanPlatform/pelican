@@ -72,7 +72,6 @@ func TestConsolidateDupServerAd(t *testing.T) {
 
 	t.Run("take-existing-one-for-non-cap-fields", func(t *testing.T) {
 		existingAd := server_structs.ServerAd{
-			Name:         "fool",
 			AuthURL:      url.URL{Host: "example.org"},
 			BrokerURL:    url.URL{Host: "example.org"},
 			URL:          url.URL{Host: "example.org"},
@@ -80,8 +79,8 @@ func TestConsolidateDupServerAd(t *testing.T) {
 			Type:         server_structs.OriginType.String(),
 			FromTopology: true,
 		}
+		existingAd.Initialize("fool")
 		newAd := server_structs.ServerAd{
-			Name:         "bar",
 			AuthURL:      url.URL{Host: "diff.org"},
 			BrokerURL:    url.URL{Host: "diff.org"},
 			URL:          url.URL{Host: "example.org"},
@@ -89,6 +88,7 @@ func TestConsolidateDupServerAd(t *testing.T) {
 			Type:         server_structs.OriginType.String(),
 			FromTopology: false,
 		}
+		newAd.Initialize("bar")
 		get := consolidateDupServerAd(newAd, existingAd)
 		assert.Equal(t, get.AuthURL, existingAd.AuthURL)
 		assert.Equal(t, get.BrokerURL, existingAd.BrokerURL)

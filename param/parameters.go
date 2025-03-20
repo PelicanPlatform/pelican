@@ -162,6 +162,7 @@ var (
 	Cache_StorageLocation = StringParam{"Cache.StorageLocation"}
 	Cache_Url = StringParam{"Cache.Url"}
 	Cache_XRootDPrefix = StringParam{"Cache.XRootDPrefix"}
+	Director_AdvertiseUrl = StringParam{"Director.AdvertiseUrl"}
 	Director_CacheSortMethod = StringParam{"Director.CacheSortMethod"}
 	Director_DbLocation = StringParam{"Director.DbLocation"}
 	Director_DefaultResponse = StringParam{"Director.DefaultResponse"}
@@ -309,6 +310,7 @@ var (
 	Origin_ExportVolumes = StringSliceParam{"Origin.ExportVolumes"}
 	Origin_ScitokensRestrictedPaths = StringSliceParam{"Origin.ScitokensRestrictedPaths"}
 	Registry_AdminUsers = StringSliceParam{"Registry.AdminUsers"}
+	Server_DirectorUrls = StringSliceParam{"Server.DirectorUrls"}
 	Server_Modules = StringSliceParam{"Server.Modules"}
 	Server_UIAdminUsers = StringSliceParam{"Server.UIAdminUsers"}
 	Shoveler_OutputDestinations = StringSliceParam{"Shoveler.OutputDestinations"}
@@ -428,6 +430,8 @@ var (
 	Monitoring_TokenRefreshInterval = DurationParam{"Monitoring.TokenRefreshInterval"}
 	Origin_SelfTestInterval = DurationParam{"Origin.SelfTestInterval"}
 	Registry_InstitutionsUrlReloadMinutes = DurationParam{"Registry.InstitutionsUrlReloadMinutes"}
+	Server_AdLifetime = DurationParam{"Server.AdLifetime"}
+	Server_AdvertisementInterval = DurationParam{"Server.AdvertisementInterval"}
 	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
 	Server_StartupTimeout = DurationParam{"Server.StartupTimeout"}
 	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}

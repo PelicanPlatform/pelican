@@ -28,6 +28,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -113,10 +114,11 @@ func federationDiscoveryHandler(ctx *gin.Context) {
 	}
 
 	rs := pelican_url.FederationDiscovery{
-		DirectorEndpoint: directorUrl.String(),
-		RegistryEndpoint: registryUrl.String(),
-		JwksUri:          jwksUri,
-		BrokerEndpoint:   brokerUrl,
+		DirectorEndpoint:           directorUrl.String(),
+		RegistryEndpoint:           registryUrl.String(),
+		JwksUri:                    jwksUri,
+		BrokerEndpoint:             brokerUrl,
+		DirectorAdvertiseEndpoints: param.Server_DirectorUrls.GetStringSlice(),
 	}
 
 	jsonData, err := json.MarshalIndent(rs, "", "  ")

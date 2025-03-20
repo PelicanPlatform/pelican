@@ -56,6 +56,7 @@ import (
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/version"
 )
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
@@ -112,15 +113,6 @@ const (
 	TokenRead
 	TokenSharedWrite
 	TokenSharedRead
-)
-
-// This block of variables will be overwritten at build time
-var (
-	commit  = "none"
-	date    = "unknown"
-	builtBy = "unknown"
-	// Pelican version
-	version = "dev"
 )
 
 var (
@@ -216,38 +208,38 @@ func IsServerEnabled(testServer server_structs.ServerType) bool {
 
 // Returns the version of the current binary
 func GetVersion() string {
-	return version
+	return version.GetVersion()
 }
 
 // Overrides the version of the current binary
 //
 // Intended mainly for use in unit tests
 func SetVersion(newVersion string) {
-	version = newVersion
+	version.SetVersion(newVersion)
 }
 
 func GetBuiltCommit() string {
-	return commit
+	return version.GetBuiltCommit()
 }
 
 func SetBuiltCommit(newCommit string) {
-	commit = newCommit
+	version.SetBuiltCommit(newCommit)
 }
 
 func GetBuiltDate() string {
-	return date
+	return version.GetBuiltDate()
 }
 
 func SetBuiltDate(builtDate string) {
-	date = builtDate
+	version.SetBuiltDate(builtDate)
 }
 
 func GetBuiltBy() string {
-	return builtBy
+	return version.GetBuiltBy()
 }
 
 func SetBuiltBy(newBuiltBy string) {
-	builtBy = newBuiltBy
+	version.SetBuiltBy(newBuiltBy)
 }
 
 func (cp ConfigPrefix) String() string {
@@ -1777,6 +1769,9 @@ func ResetConfig() {
 	// Clear cached transport object
 	onceTransport = sync.Once{}
 	transport = nil
+
+	// Clear the instance ID information for generated server ads
+	server_structs.Reset()
 
 	// Reset federation metadata
 	fedDiscoveryOnce = &sync.Once{}

@@ -152,39 +152,39 @@ func TestSortServerAdsByTopo(t *testing.T) {
 	mock1 := server_structs.Advertisement{
 		ServerAd: server_structs.ServerAd{
 			FromTopology: true,
-			Name:         "alpha",
 		},
 	}
+	mock1.ServerAd.Initialize("alpha")
 	mock2 := server_structs.Advertisement{
 		ServerAd: server_structs.ServerAd{
 			FromTopology: true,
-			Name:         "bravo",
 		},
 	}
+	mock2.ServerAd.Initialize("bravo")
 	mock3 := server_structs.Advertisement{
 		ServerAd: server_structs.ServerAd{
 			FromTopology: true,
-			Name:         "charlie",
 		},
 	}
+	mock3.ServerAd.Initialize("charlie")
 	mock4 := server_structs.Advertisement{
 		ServerAd: server_structs.ServerAd{
 			FromTopology: false,
-			Name:         "alpha",
 		},
 	}
+	mock4.ServerAd.Initialize("alpha")
 	mock5 := server_structs.Advertisement{
 		ServerAd: server_structs.ServerAd{
 			FromTopology: false,
-			Name:         "bravo",
 		},
 	}
+	mock5.ServerAd.Initialize("bravo")
 	mock6 := server_structs.Advertisement{
 		ServerAd: server_structs.ServerAd{
 			FromTopology: false,
-			Name:         "charlie",
 		},
 	}
+	mock6.ServerAd.Initialize("charlie")
 
 	randomList := []*server_structs.Advertisement{&mock6, &mock1, &mock2, &mock4, &mock5, &mock3}
 	expectedList := []*server_structs.Advertisement{&mock4, &mock5, &mock6, &mock1, &mock2, &mock3}
@@ -236,120 +236,120 @@ func TestSortServerAds(t *testing.T) {
 
 	// These are listed in order of increasing distance from the clientIP
 	madisonServer := server_structs.ServerAd{
-		Name:      "madison server",
 		URL:       url.URL{Scheme: "https", Host: "madison-cache.org"},
 		Latitude:  43.0753,
 		Longitude: -89.4114,
 	}
+	madisonServer.Initialize("madison server")
 	sdscServer := server_structs.ServerAd{
-		Name:      "sdsc server",
 		URL:       url.URL{Scheme: "https", Host: "sdsc-cache.org"},
 		Latitude:  32.8761,
 		Longitude: -117.2318,
 	}
+	sdscServer.Initialize("sdsc server")
 	bigBenServer := server_structs.ServerAd{
-		Name:      "bigBen server",
 		URL:       url.URL{Scheme: "https", Host: "bigBen-cache.org"},
 		Latitude:  51.5103,
 		Longitude: -0.1167,
 	}
+	bigBenServer.Initialize("bigBen server")
 	kremlinServer := server_structs.ServerAd{
-		Name:      "kremlin server",
 		URL:       url.URL{Scheme: "https", Host: "kremlin-cache.org"},
 		Latitude:  55.752121,
 		Longitude: 37.617664,
 	}
+	kremlinServer.Initialize("kremlin server")
 	daejeonServer := server_structs.ServerAd{
-		Name:      "daejeon server",
 		URL:       url.URL{Scheme: "https", Host: "daejeon-cache.org"},
 		Latitude:  36.3213,
 		Longitude: 127.4200,
 	}
+	daejeonServer.Initialize("daejeon server")
 	mcMurdoServer := server_structs.ServerAd{
-		Name:      "mcMurdo server",
 		URL:       url.URL{Scheme: "https", Host: "mcMurdo-cache.org"},
 		Latitude:  -77.8500,
 		Longitude: 166.6666,
 	}
+	mcMurdoServer.Initialize("mcMurdo server")
 	nullIslandServer := server_structs.ServerAd{
-		Name:      "Null Island Server",
 		URL:       url.URL{Scheme: "https", Host: "null-cache.org"},
 		Latitude:  0.0,
 		Longitude: 0.0,
 	}
+	nullIslandServer.Initialize("Null Island Server")
 
 	// Mock servers with same geolocation but different loads
 	serverLoad1 := server_structs.ServerAd{
-		Name:      "load1",
 		URL:       url.URL{Scheme: "https", Host: "server1.org"},
 		Latitude:  43.0753,
 		Longitude: -89.4114,
 		IOLoad:    0.0,
 	}
+	serverLoad1.Initialize("load1")
 
 	serverLoad2 := server_structs.ServerAd{
-		Name:      "load2",
 		URL:       url.URL{Scheme: "https", Host: "server2.org"},
 		Latitude:  43.0753,
 		Longitude: -89.4114,
 		IOLoad:    10.2,
 	}
+	serverLoad2.Initialize("load2")
 
 	serverLoad3 := server_structs.ServerAd{
-		Name:      "load3",
 		URL:       url.URL{Scheme: "https", Host: "server3.org"},
 		Latitude:  43.0753,
 		Longitude: -89.4114,
 		IOLoad:    14,
 	}
+	serverLoad3.Initialize("load3")
 
 	serverLoad4 := server_structs.ServerAd{
-		Name:      "load4",
 		URL:       url.URL{Scheme: "https", Host: "server4.org"},
 		Latitude:  43.0753,
 		Longitude: -89.4114,
 		IOLoad:    60.3,
 	}
+	serverLoad4.Initialize("load4")
 
 	serverLoad5NullLoc := server_structs.ServerAd{
-		Name:      "load5NullLoc",
 		URL:       url.URL{Scheme: "https", Host: "server5.org"},
 		Latitude:  0.0,
 		Longitude: 0.0,
 		IOLoad:    10.0,
 	}
+	serverLoad5NullLoc.Initialize("load5NullLoc")
 
 	serverLoad6NullLoc := server_structs.ServerAd{
-		Name:      "load6NullLoc",
 		URL:       url.URL{Scheme: "https", Host: "server6.org"},
 		Latitude:  0.0,
 		Longitude: 0.0,
 		IOLoad:    99.0,
 	}
+	serverLoad6NullLoc.Initialize("load6NullLoc")
 
 	// These are listed in order of increasing distance from the clientIP
 	// However, madison server is overloaded and bigBenServer has very high load
 	madisonServerHighLoad := server_structs.ServerAd{
-		Name:      "madison high load",
 		URL:       url.URL{Scheme: "https", Host: "madison-cache.org"},
 		Latitude:  43.0753,
 		Longitude: -89.4114,
 		IOLoad:    100.4,
 	}
+	madisonServerHighLoad.Initialize("madison high load")
 	chicagoLowload := server_structs.ServerAd{
-		Name:      "chicago low load",
 		URL:       url.URL{Scheme: "https", Host: "chicago-cache.org"},
 		Latitude:  41.789722,
 		Longitude: -87.599724,
 		IOLoad:    10,
 	}
+	chicagoLowload.Initialize("chicago low load")
 	bigBenServerHighLoad := server_structs.ServerAd{
-		Name:      "big ben high load",
 		URL:       url.URL{Scheme: "https", Host: "bigben-highload.org"},
 		Latitude:  51.5103,
 		Longitude: -0.1167,
 		IOLoad:    65.7,
 	}
+	bigBenServerHighLoad.Initialize("big ben high load")
 
 	randAds := []server_structs.ServerAd{madisonServer, sdscServer, bigBenServer, kremlinServer,
 		daejeonServer, mcMurdoServer, nullIslandServer}

@@ -133,9 +133,19 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 
 	ad := server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}
 
-	customTTL := param.Director_AdvertisementTTL.GetDuration()
+	adTTL := time.Until(sAd.Expiration)
+	if sAd.Expiration.IsZero() {
+		adTTL = param.Director_AdvertisementTTL.GetDuration()
+		// Handle unit tests that do not initialize default config
+		if adTTL == 0 {
+			log.Info(param.Director_AdvertisementTTL.GetName(), "is set to 0; increasing to 15 minutes")
+			adTTL = 15 * time.Minute
+		}
+	} else if adTTL <= 0 {
+		return
+	}
 
-	serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}, customTTL)
+	serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}, adTTL)
 
 	// Prepare `stat` call utilities for all servers regardless of its source (topology or Pelican)
 	func() {
@@ -166,7 +176,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 				Errgroup: &statErrGrp,
 				Cancel:   cancel,
 				Context:  baseCtx,
-				ResultCache: ttlcache.New[string, *objectMetadata](
+				ResultCache: ttlcache.New(
 					ttlcache.WithTTL[string, *objectMetadata](param.Director_CachePresenceTTL.GetDuration()),
 					ttlcache.WithDisableTouchOnHit[string, *objectMetadata](),
 					ttlcache.WithCapacity[string, *objectMetadata](uint64(cap)),

@@ -413,3 +413,40 @@ func LookupIssuerJwksUrl(ctx context.Context, issuerUrlStr string) (jwksUrl *url
 	}
 	return
 }
+
+// Given a URL string, return the desired audience for the service
+//
+// Uses the WLCG Common JWT Profile rules to determine the audience.
+// Should be of the form:
+//
+//	`scheme://host[:port]`
+//
+// where the port is omitted if it is the default for the scheme
+// (443 for https; 80 for http)
+// Examples:
+//
+//	GetWLCGAudience("http://example.com:8080/path") -> "http://example.com:8080"
+//	GetWLCGAudience("https://example.com/path") -> https://example.com
+func GetWLCGAudience(urlStr string) (string, error) {
+	if urlStr == "" {
+		return "", errors.New("cannot determine audience; provided URL is empty")
+	}
+	urlParsed, err := url.Parse(urlStr)
+	if err != nil {
+		return "", errors.Wrap(err, "cannot determine audience for URL due to parsing error")
+	}
+	if urlParsed.Scheme == "" {
+		return "", errors.Errorf("audience calculation failed due to missing scheme in URL '%s'", urlStr)
+	}
+	if urlParsed.Host == "" {
+		return "", errors.Errorf("audience calculation failed due to missing hostname in URL '%s'", urlStr)
+	}
+	port := urlParsed.Port()
+	audiencePort := ""
+	if urlParsed.Scheme == "http" && port != "" && port != "80" {
+		audiencePort = ":" + port
+	} else if urlParsed.Scheme == "https" && port != "" && port != "443" {
+		audiencePort = ":" + port
+	}
+	return urlParsed.Scheme + "://" + urlParsed.Hostname() + audiencePort, nil
+}
