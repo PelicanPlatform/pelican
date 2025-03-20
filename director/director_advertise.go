@@ -460,7 +460,7 @@ func updateInternalDirectorCache(ctx context.Context, egrp *errgroup.Group, dire
 	if directorAd.Expiration.IsZero() {
 		adTTL = param.Director_AdvertisementTTL.GetDuration()
 		if adTTL == 0 {
-			log.Info(param.Director_AdvertiseUrl.GetName(), "is set to 0; increasing to 15 minutes")
+			log.Info(param.Director_AdvertisementTTL.GetName(), "is set to 0; increasing to 15 minutes")
 			adTTL = 15 * time.Minute
 		}
 	} else if adTTL <= 0 {

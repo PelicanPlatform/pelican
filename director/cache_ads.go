@@ -138,7 +138,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 		adTTL = param.Director_AdvertisementTTL.GetDuration()
 		// Handle unit tests that do not initialize default config
 		if adTTL == 0 {
-			log.Info(param.Director_AdvertiseUrl.GetName(), "is set to 0; increasing to 15 minutes")
+			log.Info(param.Director_AdvertisementTTL.GetName(), "is set to 0; increasing to 15 minutes")
 			adTTL = 15 * time.Minute
 		}
 	} else if adTTL <= 0 {
