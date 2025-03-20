@@ -217,9 +217,10 @@ func TestPurgeFirst(t *testing.T) {
 	viper.Set("ConfigDir", configDir)
 
 	dataDir := t.TempDir()
-	viper.Set("localcache.datalocation", dataDir)
-	viper.Set("LocalCache.Size", "10MB")
-	viper.Set("LocalCache.LowWaterMarkPercentage", "50")
+	viper.Set(param.LocalCache_DataLocation.GetName(), dataDir)
+	viper.Set(param.LocalCache_Size.GetName(), "10MB")
+	viper.Set(param.LocalCache_LowWaterMarkPercentage.GetName(), "50")
+	viper.Set(param.Server_StartupTimeout.GetName(), "10s")
 
 	// Create test files and sentinel files
 	testFiles := []struct {

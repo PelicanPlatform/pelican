@@ -37,6 +37,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/option"
 	"github.com/pkg/errors"
@@ -1057,9 +1058,13 @@ func (lc *LocalCache) MarkObjectPurgeFirst(objectPath string) (int, error) {
 	lc.purgeFirstHeap = append(lc.purgeFirstHeap, entry)
 	lc.purgeFirstLookup[objectPath] = entry
 
-	// Create sentinel file to mark it as purge first
-	localPath := filepath.Join(lc.basePath, filepath.Clean(objectPath))
-	sentinelPath := localPath + ".PURGEFIRST"
+	safePath, err := securejoin.SecureJoin(lc.basePath, objectPath)
+	if err != nil {
+		log.Warnf("Invalid path: %v", err)
+		return http.StatusBadRequest, errors.New("invalid path (outside base directory)")
+	}
+
+	sentinelPath := safePath + ".PURGEFIRST"
 
 	fp, err := os.OpenFile(sentinelPath, os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
