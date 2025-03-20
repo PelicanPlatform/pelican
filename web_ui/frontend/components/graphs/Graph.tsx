@@ -95,8 +95,6 @@ export default function Graph({
     );
   }, []);
 
-  console.log(data);
-
   return (
     <Box>
       {isLoading || !data ? (
