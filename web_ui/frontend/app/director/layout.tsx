@@ -33,7 +33,7 @@ export default function RootLayout({
 }) {
   return (
     <Navigation config={NavigationConfiguration['director']}>
-      <Main>{children}</Main>
+      <Main displayMaxmindAttribution={true}>{children}</Main>
     </Navigation>
   );
 }

@@ -41,8 +41,6 @@ const Navigation = ({
     }
   }
 
-  console.log(user);
-
   return (
     <>
       <Box
