@@ -63,8 +63,12 @@ func TestStatMemory(t *testing.T) {
 	idx := 0
 	start := time.Now()
 	dest := filepath.Join(t.TempDir(), "dest.txt")
+	cacheSize := param.Director_CachePresenceCapacity.GetInt()
 
-	for time.Since(start) < (time.Second) {
+	// Fill the cache before taking the baseline measurement. Otherwise,
+	// it might end up that increased memory usage is due to filling up the
+	// cache and not an actual memory leak.
+	for idx < cacheSize {
 		downloadURL := fmt.Sprintf("pelican://%s%s/stress/%v.txt", discoveryUrl.Host, fed.Exports[0].FederationPrefix, idx)
 		grp.Go(func() error {
 			_, err := client.DoGet(fed.Ctx, downloadURL, dest, false)
