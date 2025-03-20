@@ -55,11 +55,11 @@ type FileInfo struct {
 }
 
 // handleSchemelessIfNeeded is a helper function that updates the input discovery options to use a configured discovery
-// url for pelican URL parsing whenever the incoming path has no scheme. For example, a user command like:
+// URL for pelican URL parsing whenever the incoming path has no scheme. For example, a user command like:
 //
 //	pelican object get -f osg-htc.org /foo/bar
 //
-// results in a schemeless URL path of /foo/bar. This helper function will ad a discovery option with the discovery
+// results in a schemeless URL path of /foo/bar. This helper function will add a discovery option with the discovery
 // URL so that pelican URL parsing doesn't fail.
 func handleSchemelessIfNeeded(ctx context.Context, rpUrl *url.URL, dOpts *[]pelican_url.DiscoveryOption) error {
 	// If the incoming URL has a scheme, there's nothing to do
@@ -73,11 +73,11 @@ func handleSchemelessIfNeeded(ctx context.Context, rpUrl *url.URL, dOpts *[]peli
 	}
 
 	// Placeholder for whatever discovery URL we end up using. We prefer the configured
-	// discovery url, but we can try to fallback to the Director if needed
+	// discovery URL, but we can try to fallback to the Director if needed
 	var discoveryUrl *url.URL
 	if fedInfo.DiscoveryEndpoint != "" {
 		if tmpUrl, err := url.Parse(fedInfo.DiscoveryEndpoint); err != nil {
-			log.Warningf("Failed to parse configured discovery endpoint: %s", fedInfo.DiscoveryEndpoint)
+			log.Warningf(" configured discovery endpoint: %s", fedInfo.DiscoveryEndpoint)
 		} else {
 			discoveryUrl = tmpUrl
 		}
@@ -532,7 +532,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	dOpts := []pelican_url.DiscoveryOption{}
 	rpUrl, err := url.Parse(remoteObject)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to parse remote destination while performing GET")
+		return nil, errors.Wrap(err, "failed to parse remote source while performing GET")
 	}
 
 	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
