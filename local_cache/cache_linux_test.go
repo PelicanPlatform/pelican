@@ -221,6 +221,8 @@ func TestPurgeFirst(t *testing.T) {
 	viper.Set(param.LocalCache_Size.GetName(), "10MB")
 	viper.Set(param.LocalCache_LowWaterMarkPercentage.GetName(), "50")
 	viper.Set(param.Server_StartupTimeout.GetName(), "10s")
+	viper.Set(param.Server_AdvertisementInterval.GetName(), "10m")
+	viper.Set(param.Server_AdLifetime.GetName(), "10m")
 
 	// Create test files and sentinel files
 	testFiles := []struct {
