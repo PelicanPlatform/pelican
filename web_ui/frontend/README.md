@@ -44,14 +44,14 @@ Then run the following command to start the website and the proxy.
 
 ```shell
 docker restart pelican-dev-proxy
-docker run --name pelican-dev-proxy -it -p 8443:8443 -d pelican-api-proxy
+docker run --name pelican-dev-proxy --rm -it -p 8443:8443 -d pelican-api-proxy
 ```
 
 If you would like to proxy the prometheus requests to another service you can do so by filling out .env.template
 and placing it as .env.local. Then run the docker statement like so to add those variables to the container.
 
 ```shell
-docker run --name pelican-dev-proxy -it -p 8443:8443 --env-file dev/.env.local -d pelican-api-proxy
+docker run --name pelican-dev-proxy --rm -it -p 8443:8443 --env-file dev/.env.local -d pelican-api-proxy
 ```
 
 First make sure that the ports are correct in `dev/nginx.conf` so that they point to
