@@ -1270,7 +1270,6 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
 	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
 
-	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
