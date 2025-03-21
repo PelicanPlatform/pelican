@@ -85,7 +85,10 @@ func TestStatMemory(t *testing.T) {
 	runtime.ReadMemStats(&stats)
 	goCnt := runtime.NumGoroutine()
 
-	for time.Since(start) < 10*time.Second {
+	// Ensure that this test runs for longer than the "warm up" stage,
+	// but still bound the run time in case we're on an unusually slow
+	// test host.
+	for idx < 2*cacheSize || time.Since(start) < 10*time.Second {
 		downloadURL := fmt.Sprintf("pelican://%s%s/stress/%v.txt", discoveryUrl.Host, fed.Exports[0].FederationPrefix, idx)
 		grp.Go(func() error {
 			_, err := client.DoGet(fed.Ctx, downloadURL, dest, false)
