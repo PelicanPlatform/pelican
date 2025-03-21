@@ -21,6 +21,7 @@ import { CustomRegistrationFieldProps } from './CustomRegistrationField';
 import { alertOnError, getErrorMessage } from '@/helpers/util';
 import { optionsNamespaceRegistrationFields } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
+import { getUser } from '@/helpers/login';
 
 interface FormProps {
   namespace?: RegistryNamespace;
@@ -29,7 +30,7 @@ interface FormProps {
 
 const onChange = (
   name: string,
-  value: string | number | boolean | null,
+  value: string | number | boolean | null | undefined,
   setData: Dispatch<SetStateAction<Partial<RegistryNamespace | undefined>>>
 ) => {
   setData((prevData) => {
@@ -70,6 +71,17 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
     },
     { fallbackData: [] }
   );
+
+  // Auto-fill in the security contact if no security contact
+  const { data: user } = useSWR('getUser', getUser);
+  useEffect(() => {
+    if (
+      user !== undefined &&
+      !namespace?.admin_metadata?.security_contact_user_id
+    ) {
+      onChange('admin_metadata.security_contact_user_id', user?.user, setData);
+    }
+  }, [user]);
 
   return (
     <form
