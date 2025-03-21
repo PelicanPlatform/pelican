@@ -976,6 +976,14 @@ func handlePacket(packet []byte) error {
 			}
 			return handleOSSPacket(blobs[1:]) // Skip the header
 		}
+
+		if header.Gs.Type == "R" { // Throttle Packet
+			log.Debug("handlePacket: Received a g-stream R packet")
+			if len(blobs) < 2 {
+				return errors.New("Packet is too small to be valid g-stream R packet")
+			}
+			return handleThrottlePacket(blobs[1:]) // Skip the header
+		}
 		return nil
 	}
 
@@ -1259,31 +1267,7 @@ func handlePacket(packet []byte) error {
 				CacheAccess.WithLabelValues(prefix, "miss").Add(float64(stat.Miss))
 				CacheAccess.WithLabelValues(prefix, "bypass").Add(float64(stat.Bypass))
 			}
-		} else if providerID == 'R' { // IO activity from the throttle plugin
-			log.Debug("handlePacket: Received g-stream packet is from the throttle plugin")
-			for _, js := range strJsons {
-				throttleGS := ThrottleGS{}
-				if err := json.Unmarshal([]byte(js), &throttleGS); err != nil {
-					return errors.Wrap(err, "failed to parse throttle plugin stat json. Raw data is "+string(js))
-				}
-				totalIOInc := 0
-				if totalIOInc = throttleGS.IOTotal - lastTotalIO; totalIOInc < 0 {
-					totalIOInc = 0
-				}
-				lastTotalIO = throttleGS.IOTotal
-
-				waitTimeInc := 0.0
-				if waitTimeInc = throttleGS.IOWaitTime - lastWaitTime; waitTimeInc < 0 {
-					waitTimeInc = 0
-				}
-				lastWaitTime = throttleGS.IOWaitTime
-
-				ServerTotalIO.Add(float64(totalIOInc))
-				ServerActiveIO.Set(float64(throttleGS.IOActive))
-				ServerIOWaitTime.Add(waitTimeInc)
-			}
 		}
-
 	case 'i':
 		log.Debug("handlePacket: Received an appinfo packet")
 		infoSize := uint32(header.Plen - 12)
@@ -1673,5 +1657,34 @@ func handleOSSPacket(blobs [][]byte) error {
 	lastOssStats.SlowOpens = updateCounter(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter)
 	lastOssStats.SlowRenames = updateCounter(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter)
 
+	return nil
+}
+
+func handleThrottlePacket(blobs [][]byte) error {
+	if len(blobs) == 0 {
+		return errors.New("no blobs in the throttle packet")
+	}
+
+	for _, blob := range blobs {
+		throttleGS := ThrottleGS{}
+		if err := json.Unmarshal(blob, &throttleGS); err != nil {
+			return errors.Wrap(err, "failed to parse throttle plugin stat json")
+		}
+		totalIOInc := 0
+		if totalIOInc = throttleGS.IOTotal - lastTotalIO; totalIOInc < 0 {
+			totalIOInc = 0
+		}
+		lastTotalIO = throttleGS.IOTotal
+
+		waitTimeInc := 0.0
+		if waitTimeInc = throttleGS.IOWaitTime - lastWaitTime; waitTimeInc < 0 {
+			waitTimeInc = 0
+		}
+		lastWaitTime = throttleGS.IOWaitTime
+
+		ServerTotalIO.Add(float64(totalIOInc))
+		ServerActiveIO.Set(float64(throttleGS.IOActive))
+		ServerIOWaitTime.Add(waitTimeInc)
+	}
 	return nil
 }
