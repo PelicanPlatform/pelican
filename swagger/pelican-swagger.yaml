@@ -902,7 +902,7 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
-  /createApiToken:
+  /tokens:
     post:
       tags:
         - common
@@ -928,7 +928,25 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
-  /deleteApiToken/:id:
+    get:
+      tags:
+        - common
+      summary: List all API tokens for the user
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Token list retrieved successfully
+          schema:
+            type: object
+            $ref: "#/definitions/ListApiTokenSuccess"
+        "500":
+          description: Failed to list tokens
+          schema:
+            type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /tokens/:id:
     delete:
       tags:
         - common
@@ -950,25 +968,6 @@ paths:
             $ref: "#/definitions/SuccessModelV2"
         "500":
           description: Failed to delete token
-          schema:
-            type: object
-            $ref: "#/definitions/ErrorModelV2"
-  /listApiTokens:
-    get:
-      tags:
-        - common
-      summary: List all API tokens for the user
-      description: "`Authentication Required`"
-      produces:
-        - application/json
-      responses:
-        "200":
-          description: Token list retrieved successfully
-          schema:
-            type: object
-            $ref: "#/definitions/ListApiTokenSuccess"
-        "500":
-          description: Failed to list tokens
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
