@@ -158,6 +158,7 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 // Register the control & monitoring routines with Gin
 func (lc *LocalCache) Register(ctx context.Context, router *gin.RouterGroup) {
 	router.POST("/api/v1.0/localcache/purge", func(ginCtx *gin.Context) { lc.purgeCmd(ginCtx) })
+	router.POST("/api/v1.0/localcache/purge_first", func(ginCtx *gin.Context) { lc.purgeFirstCmd(ginCtx) })
 }
 
 // Authorize the request then trigger the purge routine
@@ -201,4 +202,49 @@ func (lc *LocalCache) purgeCmd(ginCtx *gin.Context) {
 	ginCtx.JSON(
 		http.StatusOK,
 		server_structs.SimpleApiResp{Status: server_structs.RespOK})
+}
+
+func (lc *LocalCache) purgeFirstCmd(ginCtx *gin.Context) {
+	log.Infoln("Received request to move object to purge first heap")
+	status, verified, err := token.Verify(ginCtx, token.AuthOption{
+		Sources: []token.TokenSource{token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.Localcache_Purge},
+	})
+	if err != nil {
+		if status == http.StatusOK {
+			status = http.StatusInternalServerError
+		}
+		ginCtx.AbortWithStatusJSON(
+			status,
+			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
+		return
+	} else if !verified {
+		ginCtx.AbortWithStatusJSON(
+			http.StatusInternalServerError,
+			server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Unknown verification error"})
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+
+	if err = ginCtx.ShouldBindJSON(&req); err != nil {
+		log.Warningln("Received invalid JSON request")
+		ginCtx.AbortWithStatusJSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed, Msg: "Invalid request format"})
+		return
+	}
+
+	log.Debugf("Request received to move object (path: %s)", req.Path)
+	status, err = lc.MarkObjectPurgeFirst(req.Path)
+	if err != nil {
+		log.Warningf("Failed to move object to purge first heap (path: %s, error: %v)", req.Path, err)
+		ginCtx.AbortWithStatusJSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed, Msg: err.Error()})
+		return
+	}
+
+	log.Infof("Successfully moved object to purge first heap (path: %s)", req.Path)
+	ginCtx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK})
 }
