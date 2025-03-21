@@ -542,7 +542,6 @@ func TestApiToken(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
-	config.InitConfig()
 	viper.Set(param.Server_UIPasswordFile.GetName(), tempFile.Name())
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
