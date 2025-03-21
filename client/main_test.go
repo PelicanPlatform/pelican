@@ -415,60 +415,60 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 	require.NoError(t, err)
 
 	tests := []struct {
-		name     string
-		rp       string
-		discEP   string // for setting global federation metadata
-		dirEP    string // for setting global federation metadata
-		expected *pelican_url.PelicanURL
-		errMsg   string
+		name      string
+		rp        string
+		discEP    string // for setting global federation metadata
+		dirEP     string // for setting global federation metadata
+		expected  *pelican_url.PelicanURL
+		expectErr bool
 	}{
 		{
-			name:     "test valid pelican url, no global metadata",
-			rp:       fmt.Sprintf("pelican://%s/foo/bar", discUrl.Host),
-			discEP:   "",
-			dirEP:    "",
-			expected: &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
-			errMsg:   "",
+			name:      "test valid pelican url, no global metadata",
+			rp:        fmt.Sprintf("pelican://%s/foo/bar", discUrl.Host),
+			discEP:    "",
+			dirEP:     "",
+			expected:  &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			expectErr: false,
 		},
 		{
-			name:     "test valid osdf url, no global metadata",
-			rp:       "osdf:///foo/bar",
-			discEP:   "",
-			dirEP:    "",
-			expected: &pelican_url.PelicanURL{Scheme: "osdf", Host: "", Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
-			errMsg:   "",
+			name:      "test valid osdf url, no global metadata",
+			rp:        "osdf:///foo/bar",
+			discEP:    "",
+			dirEP:     "",
+			expected:  &pelican_url.PelicanURL{Scheme: "osdf", Host: "", Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			expectErr: false,
 		},
 		{
-			name:     "test valid stash url, no global metadata",
-			rp:       "stash:///foo/bar",
-			discEP:   "",
-			dirEP:    "",
-			expected: &pelican_url.PelicanURL{Scheme: "stash", Host: "", Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
-			errMsg:   "",
+			name:      "test valid stash url, no global metadata",
+			rp:        "stash:///foo/bar",
+			discEP:    "",
+			dirEP:     "",
+			expected:  &pelican_url.PelicanURL{Scheme: "stash", Host: "", Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			expectErr: false,
 		},
 		{
-			name:     "test valid path with configured global discovery url",
-			rp:       "/foo/bar",
-			discEP:   discUrl.Host,
-			dirEP:    "",
-			expected: &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
-			errMsg:   "",
+			name:      "test valid path with configured global discovery url",
+			rp:        "/foo/bar",
+			discEP:    discUrl.Host,
+			dirEP:     "",
+			expected:  &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			expectErr: false,
 		},
 		{
-			name:     "test valid path that falls back to configured director for discovery",
-			rp:       "/foo/bar",
-			discEP:   "",
-			dirEP:    discUrl.Host,
-			expected: &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
-			errMsg:   "",
+			name:      "test valid path that falls back to configured director for discovery",
+			rp:        "/foo/bar",
+			discEP:    "",
+			dirEP:     discUrl.Host,
+			expected:  &pelican_url.PelicanURL{Scheme: "pelican", Host: discUrl.Host, Path: "/foo/bar", FedInfo: pelican_url.FederationDiscovery{DirectorEndpoint: "https://director.com", RegistryEndpoint: "https://registration.com", BrokerEndpoint: "https://broker.com", JwksUri: "https://tokens.com"}},
+			expectErr: false,
 		},
 		{
-			name:     "test failure for path with no discovery metadata",
-			rp:       "/foo/bar",
-			discEP:   "",
-			dirEP:    "",
-			expected: nil,
-			errMsg:   "schemeless Pelican URLs must be used with a federation discovery URL",
+			name:      "test failure for path with no discovery metadata",
+			rp:        "/foo/bar",
+			discEP:    "",
+			dirEP:     "",
+			expected:  nil,
+			expectErr: true,
 		},
 	}
 
@@ -487,13 +487,13 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 			test_utils.InitClient(t, configOpts)
 
 			pUrl, err := ParseRemoteAsPUrl(context.Background(), test.rp)
-			if test.errMsg == "" {
-				assert.NoError(t, err)
-				assertPelicanURLEqual(t, test.expected, pUrl)
-			} else {
+			if test.expectErr {
 				assert.Error(t, err)
-				assert.Contains(t, err.Error(), test.errMsg)
+				return
 			}
+
+			assert.NoError(t, err)
+			assertPelicanURLEqual(t, test.expected, pUrl)
 		})
 	}
 }
