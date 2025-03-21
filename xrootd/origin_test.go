@@ -217,7 +217,6 @@ func TestMultiExportOrigin(t *testing.T) {
 
 	// Initialize the origin before getting origin exports
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
