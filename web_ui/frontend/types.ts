@@ -31,6 +31,7 @@ export interface DirectorNamespace {
 
 interface ServerBase {
   name: string;
+  version: string;
   storageType: string;
   disableDirectorTest: boolean;
   authUrl: string;
