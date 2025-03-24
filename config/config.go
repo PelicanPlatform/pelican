@@ -795,9 +795,9 @@ func InitConfigDir(v *viper.Viper) {
 	v.SetConfigName("pelican")
 }
 
-// InitConfig sets up the global Viper instance by loading defaults and
+// InitConfigInternal sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
-func InitConfig() {
+func InitConfigInternal() {
 
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
@@ -1250,7 +1250,7 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
-	InitConfig()
+	InitConfigInternal()
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
@@ -1749,7 +1749,7 @@ func SetClientDefaults(v *viper.Viper) error {
 }
 
 func InitClient() error {
-	InitConfig()
+	InitConfigInternal()
 	logging.FlushLogs(true)
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
