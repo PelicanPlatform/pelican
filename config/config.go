@@ -23,7 +23,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -49,6 +48,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
+	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/docs"
 	"github.com/pelicanplatform/pelican/logging"
@@ -878,19 +878,19 @@ func printConfigHelper(bytes []byte) {
 		ForceColors:            isStdout,
 	})
 
-	// Log the formatted JSON
+	// Log the formatted YAML
 	log.Info("\n================ Pelican Configuration ================\n" +
 		string(bytes) +
-		"\n============= End of Pelican Configuration ============")
+		"============= End of Pelican Configuration ============")
 }
 
-// PrintConfig logs the full config dump in JSON format.
+// PrintConfig logs the full config dump in YAML format.
 func PrintConfig() error {
 	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil {
 		return err
 	}
-	bytes, err := json.MarshalIndent(*rawConfig, "", "  ")
+	bytes, err := yaml.Marshal(rawConfig)
 	if err != nil {
 		return err
 	}
@@ -942,7 +942,7 @@ func filterConfigRecursive(v reflect.Value, currentPath string, component string
 				continue
 			}
 
-			fieldName := strings.ToLower(fieldType.Name)
+			fieldName := fieldType.Name
 
 			var newPath string
 			if currentPath == "" {
@@ -974,14 +974,14 @@ func filterConfigRecursive(v reflect.Value, currentPath string, component string
 	}
 }
 
-// PrintClientConfig logs the client config in JSON format.
+// PrintClientConfig logs the client config in YAML format.
 func PrintClientConfig() error {
 	clientConfig, err := GetComponentConfig("client")
 	if err != nil {
 		return err
 	}
 
-	bytes, err := json.MarshalIndent(clientConfig, "", "  ")
+	bytes, err := yaml.Marshal(clientConfig)
 	if err != nil {
 		return err
 	}
