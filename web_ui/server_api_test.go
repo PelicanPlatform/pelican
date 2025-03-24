@@ -124,7 +124,7 @@ func TestDowntime(t *testing.T) {
 	})
 
 	t.Run("create-active-downtime", func(t *testing.T) {
-		incompleteDowntime := downtimeInput{
+		incompleteDowntime := DowntimeInput{
 			CreatedBy:   "John Doe Jr.",
 			Class:       "SCHEDULED",
 			Description: "",
@@ -160,7 +160,7 @@ func TestDowntime(t *testing.T) {
 		assert.Equal(t, activeDowntime.UUID, fetchedDowntime.UUID)
 
 		// Update the fetched downtime
-		updatedDowntime := downtimeInput{
+		updatedDowntime := DowntimeInput{
 			Severity: "No Significant Outage Expected (you shouldn't notice)",
 		}
 
@@ -185,7 +185,7 @@ func TestDowntime(t *testing.T) {
 	})
 
 	t.Run("update-downtime-with-invalid-uuid", func(t *testing.T) {
-		updatedDowntime := downtimeInput{
+		updatedDowntime := DowntimeInput{
 			Severity: "Outage (completely inaccessible)",
 		}
 		body, _ := json.Marshal(updatedDowntime)
@@ -201,7 +201,7 @@ func TestDowntime(t *testing.T) {
 	})
 
 	t.Run("update-downtime-with-invalid-severity", func(t *testing.T) {
-		updatedDowntime := downtimeInput{
+		updatedDowntime := DowntimeInput{
 			Severity: "InvalidSeverity",
 		}
 		body, _ := json.Marshal(updatedDowntime)

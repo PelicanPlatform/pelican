@@ -28,7 +28,7 @@ import (
 )
 
 type (
-	downtimeInput struct {
+	DowntimeInput struct {
 		CreatedBy   string                  `json:"createdBy"` // Person who created this downtime
 		Class       server_structs.Class    `json:"class"`
 		Description string                  `json:"description"`
@@ -57,7 +57,7 @@ func isValidSeverity(severity server_structs.Severity) bool {
 }
 
 func HandleCreateDowntime(ctx *gin.Context) {
-	var downtimeInput downtimeInput
+	var downtimeInput DowntimeInput
 	if err := ctx.ShouldBindJSON(&downtimeInput); err != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Invalid downtime request payload"})
 		return
@@ -128,7 +128,7 @@ func HandleGetDowntimeByUUID(ctx *gin.Context) {
 
 func HandleUpdateDowntime(ctx *gin.Context) {
 	uuid := ctx.Param("uuid")
-	var downtimeInput downtimeInput
+	var downtimeInput DowntimeInput
 	if err := ctx.ShouldBindJSON(&downtimeInput); err != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Invalid request payload"})
 		return
