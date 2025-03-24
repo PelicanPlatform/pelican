@@ -161,6 +161,7 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 
 	// Now ask the Director if it has the downtime we just set
 	getSpecificServerAdPath, err := url.JoinPath("api", "v1.0", "director_ui", "servers", cacheServerName)
+	require.NoError(t, err, "Failed to join specific server ad path")
 	directorUrl.Path = getSpecificServerAdPath
 	specificServerAdRequest, err := http.NewRequest("GET", directorUrl.String(), nil)
 	require.NoError(t, err, "Failed to create HTTP request against a specific server")

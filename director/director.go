@@ -1383,7 +1383,6 @@ func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, adV2 *se
 		Caps:                adV2.Caps,
 		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
 		Downtimes:           adV2.Downtimes,
-		Version:             adV2.Version,
 	}
 	sAd.CopyFrom(adV2)
 

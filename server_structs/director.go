@@ -137,7 +137,6 @@ type (
 		FromTopology        bool              `json:"from_topology"`
 		IOLoad              float64           `json:"io_load"`
 		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
-		Version             string            `json:"version"`
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
@@ -165,7 +164,6 @@ type (
 		DisableDirectorTest bool              `json:"directorTest"`        // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
 		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
 		Now                 time.Time         `json:"now"`                 // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
-		Version             string            `json:"version"`
 	}
 
 	OriginAdvertiseV1 struct {

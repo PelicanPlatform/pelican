@@ -177,7 +177,6 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		StorageType:         ost,
 		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
 		Downtimes:           downtimes,
-		Version:             config.GetVersion(),
 	}
 	ad.Initialize(name)
 
