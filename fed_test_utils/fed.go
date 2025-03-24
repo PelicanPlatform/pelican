@@ -178,6 +178,9 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	directorStartTime := time.Now().Add(-6 * time.Minute)
 	director.SetStartupTime(directorStartTime)
 
+	err = config.InitServer(ctx, modules)
+	require.NoError(t, err)
+
 	// Read in any config we may have set
 	if originConfig != "" {
 		viper.SetConfigType("yaml")
