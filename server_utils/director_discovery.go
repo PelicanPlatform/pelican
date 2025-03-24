@@ -102,9 +102,24 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 			lastError = err
 			continue
 		}
+
+		versionUrl := &url.URL{
+			Scheme: directorUrl.Scheme,
+			Host:   directorUrl.Host,
+		}
+		versionUrl.Path, _ = url.JoinPath(directorUrl.Path, "api", "v1.0", "version")
 		directorUrl.Path, _ = url.JoinPath(directorUrl.Path, "api", "v1.0", "director", "directors")
 
 		client := &http.Client{Transport: config.GetTransport()}
+		versionInfo, _ := client.Get(versionUrl.String())
+		if err != nil {
+			// Director is older than 7.15, so doesn't support directorads
+			if versionInfo.StatusCode == http.StatusNotFound {
+				continue
+			}
+		}
+		defer versionInfo.Body.Close()
+
 		directorInfo, err := client.Get(directorUrl.String())
 		if err != nil {
 			lastError = errors.Wrapf(err, "failed to contact director at %s", directorUrl.String())
