@@ -113,7 +113,6 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	viper.Set("ConfigDir", dirname)
-	config.InitConfig()
 	viper.Set("Server.UILoginRateLimit", 100)
 
 	if err := config.InitServer(ctx, server_structs.OriginType); err != nil {
@@ -543,7 +542,6 @@ func TestApiToken(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
-	config.InitConfig()
 	viper.Set(param.Server_UIPasswordFile.GetName(), tempFile.Name())
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
