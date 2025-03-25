@@ -73,7 +73,7 @@ func ServerHeaderMiddleware(ctx *gin.Context) {
 
 type CreateApiTokenReq struct {
 	Name       string   `json:"name"`
-	CreatedBy  string   `json:"created_by"`
+	CreatedBy  string   `json:"createdBy"`
 	Expiration string   `json:"expiration"` // RFC3339 format, if not provided or "never" or "", token will not expire
 	Scopes     []string `json:"scopes"`
 }
