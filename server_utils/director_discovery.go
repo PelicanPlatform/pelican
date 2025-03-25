@@ -111,7 +111,7 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 		directorUrl.Path, _ = url.JoinPath(directorUrl.Path, "api", "v1.0", "director", "directors")
 
 		client := &http.Client{Transport: config.GetTransport()}
-		versionInfo, _ := client.Get(versionUrl.String())
+		versionInfo, err := client.Get(versionUrl.String())
 		if err != nil {
 			// Director is older than 7.15, so doesn't support directorads
 			if versionInfo.StatusCode == http.StatusNotFound {
