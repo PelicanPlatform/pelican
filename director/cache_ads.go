@@ -33,6 +33,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -414,4 +415,14 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 		)
 	}
 	return
+}
+
+// Clears the in-memory cache of server ads
+func ClearServerAds() {
+	serverAds.DeleteAll()
+}
+
+// init registers the director ClearServerAds function with the config package
+func init() {
+	config.ClearServerAdsCallback = ClearServerAds
 }
