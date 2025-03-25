@@ -161,12 +161,17 @@ definitions:
       name:
         type: string
         description: The name of the token
-      created_by:
+      createdBy:
         type: string
         description: The user who created the token
       expiration:
         type: string
         description: The expiration time of the token. If it is empty or "never", the token will never expire. The token should be in the RFC3339 format.
+      scopes:
+        type: array
+        items:
+          type: string
+        description: Token scopes, complete list can be found at https://github.com/PelicanPlatform/pelican/blob/main/token_scopes/token_scopes.go
   ListApiTokenSuccess:
     type: object
     properties:
@@ -175,21 +180,21 @@ definitions:
         items:
           type: object
           properties:
-            Name:
+            name:
               type: string
               description: The name of the token
-            ID:
+            id:
               type: string
               description: The ID of the token
-            CreatedBy:
+            createdBy:
               type: string
               description: The user who created the token
-            ExpiresAt:
+            expiresAt:
               type: string
-              description: The expiration time of the token. The token should be in the RFC3339 format.
-            Scopes:
+              description: The expiration time of the token. If it is empty or "never", the token will never expire. The token should be in the RFC3339 format.
+            scopes:
               type: string
-              description: The scopes of the token. Comma-separated string
+              description: Token scopes, complete list can be found at https://github.com/PelicanPlatform/pelican/blob/main/token_scopes/token_scopes.go
   CreateApiTokenSuccess:
     type: object
     properties:
@@ -946,7 +951,7 @@ paths:
           schema:
             type: object
             $ref: "#/definitions/ErrorModelV2"
-  /tokens/:id:
+  /tokens/{id}:
     delete:
       tags:
         - common
