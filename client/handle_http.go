@@ -2481,6 +2481,7 @@ Loop:
 		}
 	}
 
+	transferResult.TransferStartTime = transferStartTime
 	transferEndTime := time.Now()
 	uploaded = reader.BytesComplete()
 	transferResult.TransferredBytes = uploaded
