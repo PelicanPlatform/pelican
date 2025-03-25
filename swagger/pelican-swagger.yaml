@@ -180,16 +180,16 @@ definitions:
         items:
           type: object
           properties:
-            name:
-              type: string
-              description: The name of the token
             id:
               type: string
               description: The ID of the token
+            name:
+              type: string
+              description: The name of the token
             createdBy:
               type: string
               description: The user who created the token
-            expiresAt:
+            expiration:
               type: string
               description: The expiration time of the token. If it is empty or "never", the token will never expire. The token should be in the RFC3339 format.
             scopes:
