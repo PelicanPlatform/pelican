@@ -118,7 +118,7 @@ const TokenForm = () => {
                   <span
                     style={{ display: 'inline', textDecoration: 'underline' }}
                   >
-                    Github
+                    GitHub
                   </span>
                 </a>
               </p>
