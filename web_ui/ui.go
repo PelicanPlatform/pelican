@@ -533,7 +533,20 @@ func listApiTokens(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"keys": apiKeys})
+	// Convert the API keys to the response format
+	apiKeysResponse := make([]server_structs.ApiKeyResponse, len(apiKeys))
+	for i, apiKey := range apiKeys {
+		apiKeysResponse[i] = server_structs.ApiKeyResponse{
+			ID:        apiKey.ID,
+			Name:      apiKey.Name,
+			Scopes:    strings.Split(apiKey.Scopes, ","),
+			ExpiresAt: apiKey.ExpiresAt,
+			CreatedAt: apiKey.CreatedAt,
+			CreatedBy: apiKey.CreatedBy,
+		}
+	}
+
+	ctx.JSON(http.StatusOK, apiKeysResponse)
 }
 
 func configureWebResource(engine *gin.Engine) {
