@@ -34,7 +34,7 @@ const Page = () => {
               metric={'xrootd_server_bytes{direction="tx"}'}
               title={'Bytes Transferred'}
               color={green[300]}
-            />
+            />,
           ].map((component, index) => (
             <Grid key={index} item xs={12} display={'flex'} height={'21vh'}>
               <Paper sx={{ width: '100%' }}>{component}</Paper>
