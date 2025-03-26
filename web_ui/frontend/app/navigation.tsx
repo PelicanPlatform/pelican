@@ -84,6 +84,7 @@ const NavigationConfig: NavigationConfiguration = {
   ],
   cache: [
     { title: 'Dashboard', href: '/cache/', icon: <Dashboard /> },
+    { title: 'Metrics', href: '/cache/metrics/', icon: <Equalizer /> },
     { title: 'Config', href: '/config/', icon: <Build /> },
   ],
   shared: [

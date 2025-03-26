@@ -8,7 +8,7 @@ import {
   StorageGraph,
   TransferRateGraph,
   CPUGraph,
-  MemoryGraph
+  MemoryGraph,
 } from '@/components/metrics';
 
 const Page = () => {

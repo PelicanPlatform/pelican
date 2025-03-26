@@ -8,9 +8,8 @@ import {
   StorageGraph,
   TransferRateGraph,
   CPUGraph,
-  MemoryGraph
+  MemoryGraph,
 } from '@/components/metrics';
-
 
 const Page = () => {
   return (
@@ -35,8 +34,7 @@ const Page = () => {
               metric={'xrootd_server_bytes{direction="tx"}'}
               title={'Bytes Transferred'}
               color={green[300]}
-            />,
-            <StorageGraph key={'storage-graph'} />,
+            />
           ].map((component, index) => (
             <Grid key={index} item xs={12} display={'flex'} height={'21vh'}>
               <Paper sx={{ width: '100%' }}>{component}</Paper>
