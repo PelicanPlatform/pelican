@@ -34,7 +34,7 @@ const TokenList = () => {
 
   const { data, mutate } = useSWR<GetToken[]>(
     'getTokens',
-    () => alertOnError(getTokens, 'Failed to tokens', dispatch),
+    () => alertOnError(getTokens, 'Failed to load tokens', dispatch),
     {
       fallbackData: [],
     }
