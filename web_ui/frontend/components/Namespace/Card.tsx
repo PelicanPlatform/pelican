@@ -1,3 +1,5 @@
+'use client';
+
 import { Alert, Alert as AlertType, RegistryNamespace } from '@/index';
 import React, { useContext, useRef, useState } from 'react';
 import {
