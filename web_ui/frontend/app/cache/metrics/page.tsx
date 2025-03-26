@@ -111,7 +111,7 @@ const Page = () => {
                   <Grid item xs={4}>
                     <BigBytesMetric
                       metric={'xrootd_transfer_bytes{type="readv"}'}
-                      title={'Bytes `readv'}
+                      title={'Bytes `readv`'}
                       finalType={'sum'}
                       color={green[300]}
                     />
