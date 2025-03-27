@@ -2,16 +2,14 @@ import React, { useCallback } from 'react';
 import { Box, Button } from '@mui/material';
 
 import {
-  FormProps,
-  PolicyDefinition,
-  Lot,
-  StringSliceField,
-} from '@/components/configuration';
-import {
-  StringField,
   BooleanField,
-  ObjectField,
+  FormProps,
+  Lot,
   LotForm,
+  ObjectField,
+  PolicyDefinition,
+  StringField,
+  StringSliceField,
 } from '@/components/configuration';
 
 const verifyForm = (x: PolicyDefinition) => {

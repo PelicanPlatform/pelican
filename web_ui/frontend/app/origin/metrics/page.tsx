@@ -1,5 +1,5 @@
-import { Box, Grid, Paper, Typography } from '@mui/material';
-import { green, grey, blue } from '@mui/material/colors';
+import { Box, Grid, Paper } from '@mui/material';
+import { blue, green, grey } from '@mui/material/colors';
 
 import {
   ProjectTable,
@@ -10,7 +10,6 @@ import { MemoryGraph } from '@/app/origin/metrics/components/MemoryGraph';
 import {
   BigBytesMetric,
   BigMetric,
-  BigNumber,
 } from '@/app/origin/metrics/components/BigNumber';
 import { StorageGraph } from '@/app/origin/metrics/components/StorageGraph';
 

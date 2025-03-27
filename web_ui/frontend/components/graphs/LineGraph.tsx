@@ -20,21 +20,13 @@
 
 import dynamic from 'next/dynamic';
 import React, { useCallback, useState } from 'react';
-import { ChartOptions, ChartDataset } from 'chart.js';
-import { ChartData } from 'chart.js';
+import { ChartData, ChartDataset, ChartOptions } from 'chart.js';
 import { DateTime } from 'luxon';
 import { BoxProps, Grid } from '@mui/material';
 
-import {
-  query_basic,
-  query_rate,
-  TimeDuration,
-} from '@/components/graphs/prometheus';
-import {
-  GraphDrawer,
-  RateInput,
-  ResolutionInput,
-} from '@/components/graphs/Drawer';
+import { query_basic, TimeDuration } from '@/components/graphs/prometheus';
+import { GraphDrawer, ResolutionInput } from '@/components/graphs/Drawer';
+
 const Graph = dynamic(() => import('@/components/graphs/Graph'), {
   ssr: false,
 });

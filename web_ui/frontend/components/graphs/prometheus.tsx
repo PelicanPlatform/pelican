@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-import { ChartData, ChartDataset } from 'chart.js';
+import { ChartDataset } from 'chart.js';
 
 import { DateTime, Duration } from 'luxon';
 import { TypeOrTypeFunction } from '@/helpers/util';

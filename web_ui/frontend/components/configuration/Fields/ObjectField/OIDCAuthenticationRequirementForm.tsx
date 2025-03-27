@@ -1,12 +1,11 @@
 import React, { useCallback } from 'react';
-import { Box, Button, TextField } from '@mui/material';
+import { Box, Button } from '@mui/material';
 
 import {
   FormProps,
   OIDCAuthenticationRequirement,
   StringField,
 } from '@/components/configuration';
-import { String } from 'ts-toolbelt';
 
 const verifyForm = (x: OIDCAuthenticationRequirement) => {
   return x.claim != '' && x.value != '';

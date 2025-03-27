@@ -1,11 +1,5 @@
-import React, {
-  ComponentType,
-  FunctionComponent,
-  useMemo,
-  useState,
-  JSX,
-} from 'react';
-import { Box, Pagination, TextField, Typography } from '@mui/material';
+import React, { ComponentType, useState } from 'react';
+import { Box, TextField } from '@mui/material';
 
 import { CardList } from '@/components';
 import useFuse from '@/helpers/useFuse';

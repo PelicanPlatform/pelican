@@ -1,13 +1,5 @@
 import React from 'react';
-import {
-  IconButton,
-  Modal,
-  Portal,
-  Typography,
-  Box,
-  Button,
-  TextField,
-} from '@mui/material';
+import { Box, IconButton, Modal, Typography } from '@mui/material';
 import { Close } from '@mui/icons-material';
 
 import { ModalProps } from '@/components/configuration';

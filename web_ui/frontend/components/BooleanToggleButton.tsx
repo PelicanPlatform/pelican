@@ -1,4 +1,4 @@
-import { Button, ButtonGroup, IconButton, Tooltip } from '@mui/material';
+import { Button, ButtonGroup, Tooltip } from '@mui/material';
 import { Check, DoNotDisturb, HorizontalRule } from '@mui/icons-material';
 
 interface BooleanToggleButtonProps {

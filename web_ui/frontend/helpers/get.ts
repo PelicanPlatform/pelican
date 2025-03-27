@@ -6,16 +6,15 @@
 
 import { Config, ParameterValueRecord } from '@/components/configuration';
 import {
+  getConfig as getConfigResponse,
   getDirectorNamespaces as getDirectorNamespacesResponse,
   getDirectorServers as getDirectorServersResponse,
-  getConfig as getConfigResponse,
   getNamespaces,
 } from '@/helpers/api';
 import { flattenObject } from '@/app/config/util';
-import { DirectorNamespace } from '@/types';
+import { DirectorNamespace, ServerGeneral } from '@/types';
 import { RegistryNamespace } from '@/index';
 import { getObjectValue } from '@/helpers/util';
-import { ServerGeneral } from '@/types';
 
 /**
  * Director Getters

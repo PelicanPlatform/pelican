@@ -7,7 +7,6 @@
 import { secureFetch } from '@/helpers/login';
 import { getErrorMessage } from '@/helpers/util';
 import { RegistryNamespace } from '@/index';
-import { ServerGeneral } from '@/types';
 
 /**
  * Wraps an api request with error handling for both the request and the response if error
