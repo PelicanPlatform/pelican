@@ -583,7 +583,7 @@ func TestApiToken(t *testing.T) {
 			name: "create-and-delete-token",
 			run: func(t *testing.T) {
 				// Create a token
-				req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
+				req, err := http.NewRequest("POST", "/api/v1.0/tokens", nil)
 				assert.NoError(t, err)
 				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
 
@@ -610,7 +610,7 @@ func TestApiToken(t *testing.T) {
 
 				// Delete the token using its ID (the part before the dot)
 				tokenID := strings.Split(tokenStr, ".")[0]
-				endpoint := fmt.Sprintf("/api/v1.0/deleteApiToken/%s", tokenID)
+				endpoint := fmt.Sprintf("/api/v1.0/tokens/%s", tokenID)
 				req, err = http.NewRequest("DELETE", endpoint, nil)
 				assert.NoError(t, err)
 				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
@@ -623,7 +623,7 @@ func TestApiToken(t *testing.T) {
 		{
 			name: "unauthorized-create",
 			run: func(t *testing.T) {
-				req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
+				req, err := http.NewRequest("POST", "/api/v1.0/tokens", nil)
 				assert.NoError(t, err)
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
@@ -633,7 +633,7 @@ func TestApiToken(t *testing.T) {
 		{
 			name: "unauthorized-delete",
 			run: func(t *testing.T) {
-				req, err := http.NewRequest("DELETE", "/api/v1.0/deleteApiToken/123", nil)
+				req, err := http.NewRequest("DELETE", "/api/v1.0/tokens/123", nil)
 				assert.NoError(t, err)
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
@@ -654,7 +654,7 @@ func TestApiToken(t *testing.T) {
 			name: "authorized-privileged-route",
 			run: func(t *testing.T) {
 				// First, create a token to use for authorization
-				req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
+				req, err := http.NewRequest("POST", "/api/v1.0/tokens", nil)
 				assert.NoError(t, err)
 				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
 
@@ -691,7 +691,7 @@ func TestApiToken(t *testing.T) {
 			name: "correct-id-wrong-secret",
 			run: func(t *testing.T) {
 				// Create a token
-				req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
+				req, err := http.NewRequest("POST", "/api/v1.0/tokens", nil)
 				assert.NoError(t, err)
 				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
 
@@ -733,7 +733,7 @@ func TestApiToken(t *testing.T) {
 			name: "list-tokens",
 			run: func(t *testing.T) {
 				// we need to create a token first
-				req, err := http.NewRequest("POST", "/api/v1.0/createApiToken", nil)
+				req, err := http.NewRequest("POST", "/api/v1.0/tokens", nil)
 				assert.NoError(t, err)
 				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
 
@@ -759,7 +759,7 @@ func TestApiToken(t *testing.T) {
 				assert.NotEmpty(t, token)
 
 				// list tokens
-				req, err = http.NewRequest("GET", "/api/v1.0/listApiTokens", nil)
+				req, err = http.NewRequest("GET", "/api/v1.0/tokens", nil)
 				assert.NoError(t, err)
 				req.AddCookie(&http.Cookie{Name: "login", Value: cookieValue})
 
@@ -767,18 +767,17 @@ func TestApiToken(t *testing.T) {
 				route.ServeHTTP(recorder, req)
 				assert.Equal(t, http.StatusOK, recorder.Code)
 
-				var listTokensResp map[string][]server_structs.ApiKey
+				var listTokensResp []server_structs.ApiKeyResponse
 				err = json.NewDecoder(recorder.Body).Decode(&listTokensResp)
 				assert.NoError(t, err)
-				keys := listTokensResp["keys"]
-				assert.NotEmpty(t, keys)
+				assert.NotEmpty(t, listTokensResp)
 
-				for _, apiKey := range keys {
+				for _, apiKey := range listTokensResp {
 					if apiKey.ID == tokenID {
 						assert.Equal(t, "test-token", apiKey.Name)
 						assert.Equal(t, "admin", apiKey.CreatedBy)
 						assert.Equal(t, time.Time{}, apiKey.ExpiresAt)
-						assert.Equal(t, token_scopes.Monitoring_Scrape.String(), apiKey.Scopes)
+						assert.Equal(t, []string([]string{"monitoring.scrape"}), apiKey.Scopes)
 						return
 					}
 				}
@@ -787,7 +786,7 @@ func TestApiToken(t *testing.T) {
 		{
 			name: "list-tokens-unauthorized",
 			run: func(t *testing.T) {
-				req, err := http.NewRequest("GET", "/api/v1.0/listApiTokens", nil)
+				req, err := http.NewRequest("GET", "/api/v1.0/tokens", nil)
 				assert.NoError(t, err)
 
 				recorder := httptest.NewRecorder()

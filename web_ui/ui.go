@@ -73,7 +73,7 @@ func ServerHeaderMiddleware(ctx *gin.Context) {
 
 type CreateApiTokenReq struct {
 	Name       string   `json:"name"`
-	CreatedBy  string   `json:"created_by"`
+	CreatedBy  string   `json:"createdBy"`
 	Expiration string   `json:"expiration"` // RFC3339 format, if not provided or "never" or "", token will not expire
 	Scopes     []string `json:"scopes"`
 }
@@ -533,7 +533,20 @@ func listApiTokens(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{"keys": apiKeys})
+	// Convert the API keys to the response format
+	apiKeysResponse := make([]server_structs.ApiKeyResponse, len(apiKeys))
+	for i, apiKey := range apiKeys {
+		apiKeysResponse[i] = server_structs.ApiKeyResponse{
+			ID:        apiKey.ID,
+			Name:      apiKey.Name,
+			Scopes:    strings.Split(apiKey.Scopes, ","),
+			ExpiresAt: apiKey.ExpiresAt,
+			CreatedAt: apiKey.CreatedAt,
+			CreatedBy: apiKey.CreatedBy,
+		}
+	}
+
+	ctx.JSON(http.StatusOK, apiKeysResponse)
 }
 
 func configureWebResource(engine *gin.Engine) {
@@ -572,9 +585,9 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Web Engine Running. Time: %s", time.Now().String())})
 	})
-	engine.POST("/api/v1.0/createApiToken", AuthHandler, AdminAuthHandler, createApiToken)
-	engine.DELETE("/api/v1.0/deleteApiToken/:id", AuthHandler, AdminAuthHandler, deleteApiToken)
-	engine.GET("/api/v1.0/listApiTokens", AuthHandler, AdminAuthHandler, listApiTokens)
+	engine.POST("/api/v1.0/tokens", AuthHandler, AdminAuthHandler, createApiToken)
+	engine.DELETE("/api/v1.0/tokens/:id", AuthHandler, AdminAuthHandler, deleteApiToken)
+	engine.GET("/api/v1.0/tokens", AuthHandler, AdminAuthHandler, listApiTokens)
 	engine.GET("/api/v1.0/version", getVersionHandler)
 	return nil
 }
