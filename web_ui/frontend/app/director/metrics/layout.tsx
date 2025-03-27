@@ -2,6 +2,10 @@ import { ReactNode } from 'react';
 import { PaddedContent } from '@/components/layout';
 import dynamic from 'next/dynamic';
 
+export const metadata = {
+  title: 'Metrics',
+};
+
 const GraphProvider = dynamic(
   () => import('../../../components/graphs/GraphContext'),
   { ssr: false }
