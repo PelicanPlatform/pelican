@@ -504,6 +504,27 @@ func TestServerHostRestart(t *testing.T) {
 	})
 }
 
+// Create an authentication token for testing purpose. This token can pass AuthHandler and AdminAuthHandler,
+// allowing tests to proceed without authentication constraints
+func generateTestAdminUserToken(ctx context.Context) (string, error) {
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return "", err
+	}
+	// Create token for admin user in test
+	tk := token.NewWLCGToken()
+	tk.Issuer = fedInfo.DiscoveryEndpoint
+	tk.Subject = "admin-user"
+	tk.Lifetime = 5 * time.Minute
+	tk.AddAudiences(fedInfo.DiscoveryEndpoint)
+	tk.AddScopes(token_scopes.WebUi_Access)
+	tok, err := tk.CreateToken()
+	if err != nil {
+		return "", err
+	}
+	return tok, nil
+}
+
 func TestApiToken(t *testing.T) {
 	route := gin.New()
 	err := configureCommonEndpoints(route)
@@ -535,54 +556,18 @@ func TestApiToken(t *testing.T) {
 	defer func() { require.NoError(t, egrp.Wait()) }()
 	defer cancel()
 
-	passwordTempDir := t.TempDir()
-	tempFile, err := os.CreateTemp(passwordTempDir, "web-ui-passwd-api-token")
-	require.NoError(t, err)
-
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
+	viper.Set(param.Server_UIAdminUsers.GetName(), "admin-user")
 	config.InitConfig()
-	viper.Set(param.Server_UIPasswordFile.GetName(), tempFile.Name())
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
-	content := "admin:password\n"
-	_, err = tempFile.WriteString(content)
-	require.NoError(t, err, "Error writing to temp password file")
-
-	err = tempFile.Sync()
+	//Create a token to pass auth middlewares
+	cookieValue, err := generateTestAdminUserToken(ctx)
 	require.NoError(t, err)
-
-	//Configure UI
-	err = configureAuthDB()
-	require.NoError(t, err)
-
-	//Create a user for testing
-	err = WritePasswordEntry("user", "password")
-	require.NoError(t, err, "error writing a user")
-	password := "password"
-	user := "user"
-
-	payload := fmt.Sprintf(`{"user": "%s", "password": "%s"}`, user, password)
-
-	//Create a request
-	req, err := http.NewRequest("POST", "/api/v1.0/auth/login", strings.NewReader(payload))
-	require.NoError(t, err)
-
-	req.Header.Set("Content-Type", "application/json")
-
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, req)
-
-	//Check ok http response
-	assert.Equal(t, http.StatusOK, recorder.Code)
-	//Check that success message returned
-	require.JSONEq(t, `{"msg":"success", "status":"success"}`, recorder.Body.String())
-	//Get the cookie to pass to password reset
-	loginCookie := recorder.Result().Cookies()
-	cookieValue := loginCookie[0].Value
 
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	database.DirectorDB = mockDB
@@ -642,7 +627,7 @@ func TestApiToken(t *testing.T) {
 				assert.NoError(t, err)
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusForbidden, recorder.Code)
+				assert.Equal(t, http.StatusUnauthorized, recorder.Code)
 			},
 		},
 		{
@@ -652,7 +637,7 @@ func TestApiToken(t *testing.T) {
 				assert.NoError(t, err)
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusForbidden, recorder.Code)
+				assert.Equal(t, http.StatusUnauthorized, recorder.Code)
 			},
 		},
 		{
@@ -807,7 +792,7 @@ func TestApiToken(t *testing.T) {
 
 				recorder := httptest.NewRecorder()
 				route.ServeHTTP(recorder, req)
-				assert.Equal(t, http.StatusForbidden, recorder.Code)
+				assert.Equal(t, http.StatusUnauthorized, recorder.Code)
 			},
 		},
 	}

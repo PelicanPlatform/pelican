@@ -585,9 +585,9 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Web Engine Running. Time: %s", time.Now().String())})
 	})
-	engine.POST("/api/v1.0/tokens", createApiToken)
-	engine.DELETE("/api/v1.0/tokens/:id", deleteApiToken)
-	engine.GET("/api/v1.0/tokens", listApiTokens)
+	engine.POST("/api/v1.0/tokens", AuthHandler, AdminAuthHandler, createApiToken)
+	engine.DELETE("/api/v1.0/tokens/:id", AuthHandler, AdminAuthHandler, deleteApiToken)
+	engine.GET("/api/v1.0/tokens", AuthHandler, AdminAuthHandler, listApiTokens)
 	engine.GET("/api/v1.0/version", getVersionHandler)
 	return nil
 }

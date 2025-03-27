@@ -1,5 +1,19 @@
 name: Build and Test
 
+# This workflow is responsible for building Pelican's container images and
+# running the test suite. Much of its length and complexity is a consequence
+# of trying to keep build times short by taking advantage of caching.
+#
+# The intended behavior is that all container images are always built.
+# However:
+#
+#   - For pull requests: We never push images to a registry. In fact,
+#     we can't, because the credentials aren't available.
+#
+#   - Pushes to main: We push only pelican-test and pelican-dev.
+#
+#   - Pushes to semvar tags: We push pelican-test and all the "server" images.
+
 on:
   pull_request:
   push:
@@ -161,6 +175,8 @@ jobs:
           - osdf-cache
           - osdf-director
           - osdf-registry
+          # For release candidates, this is where we build and push the testing container.
+          - pelican-test
     runs-on: ubuntu-latest
 
     steps:
