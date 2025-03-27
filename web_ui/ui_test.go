@@ -767,18 +767,17 @@ func TestApiToken(t *testing.T) {
 				route.ServeHTTP(recorder, req)
 				assert.Equal(t, http.StatusOK, recorder.Code)
 
-				var listTokensResp map[string][]server_structs.ApiKey
+				var listTokensResp []server_structs.ApiKeyResponse
 				err = json.NewDecoder(recorder.Body).Decode(&listTokensResp)
 				assert.NoError(t, err)
-				keys := listTokensResp["keys"]
-				assert.NotEmpty(t, keys)
+				assert.NotEmpty(t, listTokensResp)
 
-				for _, apiKey := range keys {
+				for _, apiKey := range listTokensResp {
 					if apiKey.ID == tokenID {
 						assert.Equal(t, "test-token", apiKey.Name)
 						assert.Equal(t, "admin", apiKey.CreatedBy)
 						assert.Equal(t, time.Time{}, apiKey.ExpiresAt)
-						assert.Equal(t, token_scopes.Monitoring_Scrape.String(), apiKey.Scopes)
+						assert.Equal(t, []string([]string{"monitoring.scrape"}), apiKey.Scopes)
 						return
 					}
 				}
