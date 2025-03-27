@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 
@@ -54,7 +55,9 @@ func isValidFD(fd int) (bool, error) {
 	return true, err
 }
 
-func mockXRootDProcess(t *testing.T, fds [2]int, ready chan<- struct{}) {
+func mockXRootDProcess(t *testing.T, fds [2]int, ready chan<- struct{}, wg *sync.WaitGroup) {
+	defer wg.Done() // Signal that the mockXRootDProcess has finished
+
 	t.Logf("Mock XRootD Process started. FDs: %v", fds)
 	close(ready) // Signal that mockXRootDProcess is ready
 
@@ -82,7 +85,7 @@ func mockXRootDProcess(t *testing.T, fds [2]int, ready chan<- struct{}) {
 	}
 }
 
-func startMockXrootdProcess(t *testing.T, isOrigin bool) (ready <-chan struct{}) {
+func startMockXrootdProcess(t *testing.T, isOrigin bool, wg *sync.WaitGroup) (ready <-chan struct{}) {
 	readyChan := make(chan struct{})
 	ready = readyChan
 
@@ -101,7 +104,9 @@ func startMockXrootdProcess(t *testing.T, isOrigin bool) (ready <-chan struct{})
 	require.True(t, isValidFD, "Write file descriptor is not valid (os.Stat err)")
 	require.NoError(t, err)
 
-	go mockXRootDProcess(t, *targetFds, readyChan)
+	wg.Add(1)
+
+	go mockXRootDProcess(t, *targetFds, readyChan, wg)
 
 	return ready
 }
@@ -146,6 +151,10 @@ func TestDropPrivilegeSignaling(t *testing.T) {
 	server_utils.ResetTestState()
 	_, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
+		// Clean up global FDs state
+		g_origin_fds = [2]int{-1, -1}
+		g_cache_fds = [2]int{-1, -1}
+
 		cancel()
 		require.NoError(t, egrp.Wait())
 		server_utils.ResetTestState()
@@ -178,10 +187,14 @@ func TestDropPrivilegeSignaling(t *testing.T) {
 	require.NoError(t, err, "Failed to open CA bundle file")
 	defer caBundle.Close()
 
+	var wg sync.WaitGroup
+
 	isOrigin := true
 	// Start mock XRootD (sets up the IPC)
-	ready := startMockXrootdProcess(t, isOrigin)
+	ready := startMockXrootdProcess(t, isOrigin, &wg)
 	defer func() {
+		// Wait for the mock XRootD process to finish
+		wg.Wait() // Block until wg.Done() is called in the mock XRootD process
 		err := closeChildSocket(isOrigin)
 		require.NoError(t, err, "Failed to close child socket")
 	}()
