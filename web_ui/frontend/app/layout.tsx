@@ -20,8 +20,13 @@ import { LocalizationProvider } from '@/clientComponents';
 import { ThemeProviderClient } from '@/components/ThemeProvider';
 import { AlertProvider } from '@/components/AlertProvider';
 import './globals.css';
-export const metadata = {
-  title: 'Pelican Platform',
+import { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: {
+    template: '%s | Pelican Platform',
+    default: 'Pelican Platform',
+  },
   description: 'Software designed to make data distribution easy',
 };
 

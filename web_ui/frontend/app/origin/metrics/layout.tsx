@@ -1,6 +1,10 @@
 import { ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 
+export const metadata = {
+  title: 'Service Metrics',
+};
+
 const GraphProvider = dynamic(
   () => import('../../../components/graphs/GraphContext'),
   { ssr: false }

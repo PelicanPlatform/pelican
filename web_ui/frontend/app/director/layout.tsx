@@ -22,8 +22,10 @@ import { Navigation } from '@/components/layout/Navigation';
 import NavigationConfiguration from '@/app/navigation';
 
 export const metadata = {
-  title: 'Pelican Director',
-  description: 'Software designed to make data distribution easy',
+  title: {
+    template: '%s | Director',
+    default: 'Director',
+  },
 };
 
 export default function RootLayout({
