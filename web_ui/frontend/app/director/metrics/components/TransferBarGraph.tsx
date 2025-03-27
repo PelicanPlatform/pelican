@@ -55,7 +55,7 @@ const TransferBarGraph = () => {
 
   const { data } = useSWR<ChartDataset<any, any>>(
     [
-      'transferRateGraph',
+      'transferBarGraph',
       graphContext.rate,
       graphContext.range,
       graphContext.resolution,
@@ -72,6 +72,8 @@ const TransferBarGraph = () => {
       fallbackData: { datasets: [] },
     }
   );
+
+  console.log(data);
 
   return (
     <Bar

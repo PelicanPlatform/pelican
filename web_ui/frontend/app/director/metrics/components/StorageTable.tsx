@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import {
   Box,
   Table,
@@ -86,7 +87,13 @@ export const StorageTable = () => {
                   })
                   .map((d) => (
                     <TableRow key={d.serverName}>
-                      <TableCell>{d.serverName}</TableCell>
+                      <TableCell>
+                        <Link
+                          href={`/director/metrics/origin/?server_name=${d.serverName}`}
+                        >
+                          {d.serverName}
+                        </Link>
+                      </TableCell>
                       <TableCell
                         sx={{
                           bgcolor: chroma
