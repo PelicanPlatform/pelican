@@ -18,31 +18,29 @@
 
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import {
-  Chart as ChartJS,
   CategoryScale,
-  LinearScale,
-  TimeScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
+  Chart as ChartJS,
   ChartOptions,
   Colors,
+  Legend,
+  LinearScale,
+  LineElement,
+  PointElement,
+  TimeScale,
+  Title,
+  Tooltip,
 } from 'chart.js';
 
 import zoomPlugin from 'chartjs-plugin-zoom';
 import 'chartjs-adapter-luxon';
 
-import { BoxProps } from '@mui/material';
+import { Box, BoxProps, Skeleton, Typography } from '@mui/material';
 
 import { Line } from 'react-chartjs-2';
-import { Box, Skeleton, Typography } from '@mui/material';
 
 import { getDataWrapperFunction } from '@/components/graphs/prometheus';
-import { ChartData } from 'chart.js';
 import useSWR from 'swr';
 
 const defaultOptions: Partial<ChartOptions<'line'>> = {

@@ -28,7 +28,7 @@ import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { PaddedContent } from '@/components/layout';
 import { DirectorNamespace, ServerGeneral } from '@/types';
 import { NamespaceCardList } from './components/NamespaceCardList';
-import { getDirectorServers, getDirectorNamespaces } from '@/helpers/get';
+import { getDirectorNamespaces, getDirectorServers } from '@/helpers/get';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 

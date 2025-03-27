@@ -1,8 +1,8 @@
-import { Box, Button, Paper } from '@mui/material';
+import { Button } from '@mui/material';
 import { Replay } from '@mui/icons-material';
 
 import { AlertDispatchContext } from '@/components/AlertProvider';
-import { useCallback, useContext } from 'react';
+import { useContext } from 'react';
 import { alertOnError } from '@/helpers/util';
 import { restartServer } from '@/helpers/api';
 

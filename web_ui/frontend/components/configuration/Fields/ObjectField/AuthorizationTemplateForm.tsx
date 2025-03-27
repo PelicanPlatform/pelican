@@ -2,11 +2,12 @@ import React, { useCallback } from 'react';
 import { Box, Button } from '@mui/material';
 
 import {
-  FormProps,
   Action,
   AuthorizationTemplate,
+  FormProps,
+  MultiSelectField,
+  StringField,
 } from '@/components/configuration';
-import { StringField, MultiSelectField } from '@/components/configuration';
 
 const verifyForm = (x: AuthorizationTemplate) => {
   return x.prefix != '' && x.actions.length > 0;

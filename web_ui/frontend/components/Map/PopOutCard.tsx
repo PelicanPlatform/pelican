@@ -1,4 +1,4 @@
-import React, { FC, ReactNode, useEffect } from 'react';
+import React, { ReactNode, useEffect } from 'react';
 import { Box, Grow, IconButton, Typography } from '@mui/material';
 import { Close } from '@mui/icons-material';
 

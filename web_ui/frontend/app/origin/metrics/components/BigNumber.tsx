@@ -6,13 +6,12 @@
  * Optionally superimposed over a line graph filled in with a color
  */
 
-import React, { useContext, useEffect, useMemo, useState } from 'react';
-import { Box, Typography, Grid } from '@mui/material';
+import React, { useContext, useMemo } from 'react';
+import { Box, Grid, Typography } from '@mui/material';
 import { Line } from 'react-chartjs-2';
 import {
   CategoryScale,
   Chart as ChartJS,
-  ChartDataset,
   Colors,
   Filler,
   Legend,
@@ -25,20 +24,10 @@ import {
 } from 'chart.js';
 import { default as chroma } from 'chroma-js';
 import { GraphContext } from '@/components/graphs/GraphContext';
-import {
-  getRateDataFunction,
-  getRateDataProps,
-  MatrixResponseData,
-  query_raw,
-  VectorResponseData,
-} from '@/components';
+import { getRateDataProps, MatrixResponseData, query_raw } from '@/components';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import useSWR from 'swr';
-import {
-  convertToBiggestBytes,
-  getSmallestByteCategory,
-  toBytes,
-} from '@/helpers/bytes';
+import { convertToBiggestBytes, toBytes } from '@/helpers/bytes';
 
 ChartJS.register(
   TimeScale,

@@ -1,7 +1,10 @@
 import {
   Add,
+  AppRegistration,
+  AssistantDirection,
   Block,
   Build,
+  Cached,
   Dashboard,
   Equalizer,
   FolderOpen,
@@ -10,9 +13,6 @@ import {
   Public,
   Storage,
   TripOrigin,
-  AssistantDirection,
-  AppRegistration,
-  Cached,
 } from '@mui/icons-material';
 import { NavigationConfiguration } from '@/components/layout/Navigation';
 

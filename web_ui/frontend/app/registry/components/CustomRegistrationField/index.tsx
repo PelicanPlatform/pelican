@@ -5,8 +5,8 @@ import PubkeyField from './PubkeyField';
 
 import EpochTimeField from '@/app/registry/components/CustomRegistrationField/EpochTimeField';
 import EnumerationField from '@/app/registry/components/CustomRegistrationField/EnumerationField';
-import { CustomRegistrationField as CustomRegistrationFieldConfiguration } from '@/components/configuration';
 import type { CustomRegistrationField } from '@/components/configuration';
+import { CustomRegistrationField as CustomRegistrationFieldConfiguration } from '@/components/configuration';
 
 export type CustomRegistrationFieldProps =
   | (BaseCustomRegistrationFieldProps<number> & { type: 'int' })

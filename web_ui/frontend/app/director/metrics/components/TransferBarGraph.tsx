@@ -3,8 +3,11 @@
 import { Bar } from 'react-chartjs-2';
 import { DateTime } from 'luxon';
 import {
+  BarController,
+  BarElement,
   CategoryScale,
   Chart as ChartJS,
+  ChartData,
   ChartDataset,
   Colors,
   Legend,
@@ -14,9 +17,6 @@ import {
   TimeScale,
   Title,
   Tooltip,
-  BarController,
-  BarElement,
-  ChartData,
 } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
 

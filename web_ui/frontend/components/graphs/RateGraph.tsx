@@ -20,8 +20,8 @@
 
 import dynamic from 'next/dynamic';
 
-import React, { useEffect, useState } from 'react';
-import { ChartOptions, ChartDataset, ChartData } from 'chart.js';
+import React, { useState } from 'react';
+import { ChartData, ChartDataset, ChartOptions } from 'chart.js';
 
 import { DateTime } from 'luxon';
 
@@ -30,14 +30,12 @@ import 'chartjs-adapter-luxon';
 import { BoxProps, Grid } from '@mui/material';
 
 import {
+  prometheusResultToDataPoints,
   query_rate,
   TimeDuration,
-  DurationType,
-  PrometheusQuery,
-  prometheusResultToDataPoints,
 } from '@/components/graphs/prometheus';
 
-import { GraphDrawer, ResolutionInput, RateInput } from './Drawer';
+import { GraphDrawer, RateInput, ResolutionInput } from './Drawer';
 
 const Graph = dynamic(() => import('@/components/graphs/Graph'), {
   ssr: false,

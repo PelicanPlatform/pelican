@@ -10,7 +10,6 @@ import {
   TableRow,
 } from '@mui/material';
 import {
-  MatrixResponseData,
   query_raw,
   TimeDuration,
   VectorResponseData,

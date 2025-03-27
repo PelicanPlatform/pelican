@@ -9,19 +9,14 @@ import {
   TableHead,
   TableRow,
 } from '@mui/material';
-import {
-  MatrixResponseData,
-  query_raw,
-  TimeDuration,
-  VectorResponseData,
-} from '@/components/graphs/prometheus';
+import { query_raw, VectorResponseData } from '@/components/graphs/prometheus';
 
 import useSWR from 'swr';
 import { useContext, useMemo } from 'react';
 import { GraphContext } from '@/components/graphs/GraphContext';
 import { DateTime } from 'luxon';
 import chroma from 'chroma-js';
-import { convertToBiggestBytes, toBytes, toBytesString } from '@/helpers/bytes';
+import { toBytesString } from '@/helpers/bytes';
 
 export const StorageTable = () => {
   const { rate, time, range, resolution } = useContext(GraphContext);

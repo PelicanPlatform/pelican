@@ -1,15 +1,8 @@
 import React, { useContext, useMemo, useState } from 'react';
-import {
-  AttributionControl,
-  LngLat,
-  LngLatLike,
-  Marker,
-  Popup,
-} from 'react-map-gl/maplibre';
-import { TripOrigin, Storage } from '@mui/icons-material';
+import { Marker } from 'react-map-gl/maplibre';
+import { Storage, TripOrigin } from '@mui/icons-material';
 
 import { DefaultMap, PopOutCard, ServerCard } from '@/components/Map';
-import { Server } from '@/index';
 
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { alertOnError } from '@/helpers/util';
