@@ -42,9 +42,8 @@ func setupRouter() *gin.Engine {
 	r := gin.Default()
 	originDowntimeAPI := r.Group("/api/v1.0/downtime")
 	{
-		originDowntimeAPI.POST("/", HandleCreateDowntime)
-		originDowntimeAPI.GET("/", HandleGetIncompleteDowntime)
-		originDowntimeAPI.GET("/all", HandleGetAllDowntime)
+		originDowntimeAPI.POST("", HandleCreateDowntime)
+		originDowntimeAPI.GET("", HandleGetDowntime)
 		originDowntimeAPI.GET("/:uuid", HandleGetDowntimeByUUID)
 		originDowntimeAPI.PUT("/:uuid", HandleUpdateDowntime)
 		originDowntimeAPI.DELETE("/:uuid", HandleDeleteDowntime)
@@ -103,7 +102,7 @@ func TestDowntime(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("get-active-downtime", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/api/v1.0/downtime/", nil)
+		req, _ := http.NewRequest("GET", "/api/v1.0/downtime", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
@@ -112,7 +111,7 @@ func TestDowntime(t *testing.T) {
 	})
 
 	t.Run("get-all-downtime", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/api/v1.0/downtime/all", nil)
+		req, _ := http.NewRequest("GET", "/api/v1.0/downtime?status=all", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
@@ -134,7 +133,7 @@ func TestDowntime(t *testing.T) {
 		}
 		body, _ := json.Marshal(incompleteDowntime)
 
-		req, _ := http.NewRequest("POST", "/api/v1.0/downtime/", bytes.NewBuffer(body))
+		req, _ := http.NewRequest("POST", "/api/v1.0/downtime", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 
 		w := httptest.NewRecorder()

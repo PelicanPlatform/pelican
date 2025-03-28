@@ -98,22 +98,34 @@ func HandleCreateDowntime(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, downtime)
 }
 
-func HandleGetIncompleteDowntime(ctx *gin.Context) {
-	downtime, err := database.GetIncompleteDowntimes()
+func HandleGetDowntime(ctx *gin.Context) {
+	status := ctx.Query("status")
+	// if "status" query param is not provided, set status to "incomplete" by default
+	if status == "" {
+		status = "incomplete"
+	}
+	var downtimes []server_structs.Downtime
+	var err error
+
+	switch status {
+	case "incomplete":
+		// "incomplete" includes active and future downtimes
+		downtimes, err = database.GetIncompleteDowntimes()
+	case "all":
+		downtimes, err = database.GetAllDowntimes()
+	default:
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid 'status' query parameter. Must be 'incomplete' or 'all'.",
+		})
+		return
+	}
+
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to get active downtime: " + err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, downtime)
-}
-
-func HandleGetAllDowntime(ctx *gin.Context) {
-	downtime, err := database.GetAllDowntimes()
-	if err != nil {
-		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to get all downtime: " + err.Error()})
-		return
-	}
-	ctx.JSON(http.StatusOK, downtime)
+	ctx.JSON(http.StatusOK, downtimes)
 }
 
 func HandleGetDowntimeByUUID(ctx *gin.Context) {
@@ -178,9 +190,7 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 	if downtimeInput.StartTime != 0 {
 		existingDowntime.StartTime = downtimeInput.StartTime
 	}
-	if downtimeInput.EndTime != 0 {
-		existingDowntime.EndTime = downtimeInput.EndTime
-	}
+	existingDowntime.EndTime = downtimeInput.EndTime
 
 	if err := database.UpdateDowntime(uuid, existingDowntime); err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to update downtime: " + err.Error()})

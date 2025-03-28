@@ -1276,25 +1276,30 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		sn := adV2.Name
 		// Check if the server is currently in downtime
 		for _, downtime := range adV2.Downtimes {
-			if downtime.StartTime < currentTime && downtime.EndTime > currentTime || downtime.EndTime == 0 {
+			if downtime.StartTime < currentTime && (downtime.EndTime > currentTime || downtime.EndTime == 0) {
 				// Server is currently in downtime
 
 				// If this server is already put in downtime, we don't need to do anything
 				// Retrieve the original filter type to check and backup for revert in case of database failure
-				filteredServersMutex.Lock()
+				filteredServersMutex.RLock()
 				originalFilterType, hasOriginalFilter := filteredServers[sn]
-				filteredServersMutex.Unlock()
+				filteredServersMutex.RUnlock()
 				if hasOriginalFilter && originalFilterType != tempAllowed {
 					break
 				}
 
 				// If the server is not in downtime, we need to set it to downtime in the director in-memory cache and database
+				filteredServersMutex.Lock()
 				filteredServers[sn] = serverFiltered
+				filteredServersMutex.Unlock()
+
 				err := setServerDowntime(sn, serverFiltered)
 				if err != nil {
 					log.Warningf("Failed to set downtime for server %s in the director database: %v", adV2.Name, err)
 					if hasOriginalFilter {
+						filteredServersMutex.Lock()
 						filteredServers[sn] = originalFilterType
+						filteredServersMutex.Unlock()
 					} else {
 						delete(filteredServers, sn)
 					}
