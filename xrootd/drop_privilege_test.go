@@ -22,7 +22,6 @@ package xrootd
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -58,13 +57,14 @@ func isValidFD(fd int) (bool, error) {
 func mockXRootDProcess(t *testing.T, fds [2]int, ready chan<- struct{}, wg *sync.WaitGroup) {
 	defer wg.Done() // Signal that the mockXRootDProcess has finished
 
-	t.Logf("Mock XRootD Process started. FDs: %v", fds)
+	readFD := fds[0]
+	t.Logf("Mock XRootD Process started. FDs: %d", readFD)
 	close(ready) // Signal that mockXRootDProcess is ready
 
 	commandBuf := make([]byte, 1)
 
 	// Read the command byte sent by the another process
-	n, err := syscall.Read(fds[0], commandBuf)
+	n, err := syscall.Read(readFD, commandBuf)
 	if err != nil {
 		t.Errorf("Mock XRootD: Error receiving command: %v", err)
 		return
@@ -109,24 +109,6 @@ func startMockXrootdProcess(t *testing.T, isOrigin bool, wg *sync.WaitGroup) (re
 	go mockXRootDProcess(t, *targetFds, readyChan, wg)
 
 	return ready
-}
-
-// receiveFD reads the file descriptor from its global variable
-func receiveFD(isOrigin bool) (int, error) {
-	var readFD int
-
-	if isOrigin {
-		readFD = g_origin_fds[0]
-	} else {
-		readFD = g_cache_fds[0]
-	}
-
-	isValid, err := isValidFD(readFD)
-	if !isValid || err != nil {
-		return -1, fmt.Errorf("invalid FD: %d %w", readFD, err)
-	}
-
-	return readFD, nil
 }
 
 // generateTestCert generates a self-signed certificate and key for testing
@@ -224,13 +206,18 @@ func TestDropPrivilegeSignaling(t *testing.T) {
 		require.NoError(t, err, "Failed to send command byte")
 	}
 
-	// Call the function under test
-	t.Logf("Before dropPrivilegeCopy, g_origin_fds: %v", g_origin_fds)
 	err = dropPrivilegeCopy(&origin.OriginServer{})
 	require.NoError(t, err, "dropPrivilegeCopy failed")
-	t.Logf("After dropPrivilegeCopy, g_origin_fds: %v", g_origin_fds)
 
-	// Get the file descriptor sent by dropPrivilegeCopy
-	_, err = receiveFD(isOrigin)
-	require.NoError(t, err)
+	// Verify the caBundleFile has been transferred in dropPrivilegeCopy func
+	expectedTransferredCAFileLocation := filepath.Join(runDir, "pelican", "copied-tls-creds.crt")
+	_, err = os.Stat(expectedTransferredCAFileLocation)
+	require.NoError(t, err, "Expected CA file does not exist")
+
+	// Verify the contents of the transferred CA file
+	transferredData, err := os.ReadFile(expectedTransferredCAFileLocation)
+	require.NoError(t, err, "Failed to read transferred CA file")
+	transferredContents := string(transferredData)
+	require.Contains(t, transferredContents, "-----BEGIN CERTIFICATE-----", "Certificate header missing from transferred CA file")
+	require.Contains(t, transferredContents, "-----BEGIN PRIVATE KEY-----", "Private key header missing from transferred CA file")
 }
