@@ -88,7 +88,6 @@ function ReportPeriodInput({
             label={'Report End'}
             value={time}
             onChange={(d) => {
-              console.log(d);
               setTime(d);
             }}
           />
