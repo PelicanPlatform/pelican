@@ -139,7 +139,20 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 
 	egrp := &errgroup.Group{}
 	successCount := atomic.Int32{}
-	for _, directorAd := range server_utils.GetDirectorAds() {
+	directorAds := server_utils.GetDirectorAds()
+
+	// Potentially occurs when dealing with older directors
+	if len(directorAds) == 0 {
+		if fed, err := config.GetFederation(ctx); err == nil {
+			directorAds = []server_structs.DirectorAd{
+				{
+					ServerBaseAd: server_structs.ServerBaseAd{}, // Initialize with empty struct
+					AdvertiseUrl: fed.DirectorEndpoint,
+				},
+			}
+		}
+	}
+	for _, directorAd := range directorAds {
 		adCopy := directorAd
 		egrp.Go(func() error {
 			directorUrlStr := adCopy.AdvertiseUrl
