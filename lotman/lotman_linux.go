@@ -969,8 +969,23 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	purego.RegisterLibFunc(&LotmanGetLotParents, lotmanLib, "lotman_get_parent_names")
 	purego.RegisterLibFunc(&LotmanGetLotsFromDir, lotmanLib, "lotman_get_lots_from_dir")
 
-	// Set the lot_home context -- where the db lives
+	// Create the lot home dir (where lotman's sqlite db lives) and set the lot_home context
 	lotHome := param.Lotman_LotHome.GetString()
+	uid, err := config.GetDaemonUID()
+	if err != nil {
+		log.Errorf("Error getting daemon UID, needed to create `Lotman.LotHome` directory: %v", err)
+		return false
+	}
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		log.Errorf("Error getting daemon GID, needed to create `Lotman.LotHome` directory: %v", err)
+		return false
+	}
+	err = config.MkdirAll(lotHome, 0755, uid, gid)
+	if err != nil {
+		log.Errorf("Error creating lot home directory: %v", err)
+		return false
+	}
 
 	errMsg := make([]byte, 2048)
 
