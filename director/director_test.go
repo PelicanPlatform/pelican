@@ -1729,9 +1729,13 @@ func TestRedirectMiddleware(t *testing.T) {
 
 }
 func TestRedirects(t *testing.T) {
+	server_utils.ResetTestState()
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
+	t.Cleanup(func() {
+		cancel()
+		assert.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
+	})
 
 	// Use ads generated via mock topology for generating list of caches
 	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
@@ -1739,9 +1743,6 @@ func TestRedirects(t *testing.T) {
 	viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
 	err := AdvertiseOSDF(ctx)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		serverAds.DeleteAll()
-	})
 
 	router := gin.Default()
 	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
@@ -1760,11 +1761,6 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("redirect-link-header-length", func(t *testing.T) {
-		server_utils.ResetTestState()
-		t.Cleanup(func() {
-			server_utils.ResetTestState()
-		})
-
 		viper.Set("Director.CacheSortMethod", "random")
 
 		req, _ := http.NewRequest("GET", "/my/server", nil)
@@ -1794,11 +1790,6 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("no-redirect-to-topology-cache-public-reads", func(t *testing.T) {
-		server_utils.ResetTestState()
-		t.Cleanup(func() {
-			server_utils.ResetTestState()
-		})
-
 		viper.Set("Director.CacheSortMethod", "random")
 
 		// Make sure the http cache from topology isn't included in the cache list
@@ -1841,11 +1832,6 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("redirect-to-topology-caches-auth-reads", func(t *testing.T) {
-		server_utils.ResetTestState()
-		t.Cleanup(func() {
-			server_utils.ResetTestState()
-		})
-
 		viper.Set("Director.CacheSortMethod", "random")
 
 		// Make sure the http cache from topology isn't included in the cache list
@@ -1865,11 +1851,6 @@ func TestRedirects(t *testing.T) {
 
 	// Make sure collections-url is correctly populated when the ns/origin comes from topology
 	t.Run("collections-url-from-topology", func(t *testing.T) {
-		server_utils.ResetTestState()
-		t.Cleanup(func() {
-			server_utils.ResetTestState()
-		})
-
 		viper.Set("Director.CacheSortMethod", "random")
 
 		// This one should have a collections url because it has a dirlisthost
@@ -1892,11 +1873,6 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("origin-endpoint-returns-all-headers", func(t *testing.T) {
-		server_utils.ResetTestState()
-		t.Cleanup(func() {
-			server_utils.ResetTestState()
-		})
-
 		viper.Set("Director.CacheSortMethod", "random")
 
 		req, _ := http.NewRequest("GET", "/my/server", nil)

@@ -96,6 +96,8 @@ type (
 
 	// Custom goose logger
 	CustomGooseLogger struct{}
+
+	ClearServerAdsFunc func()
 )
 
 const (
@@ -167,6 +169,9 @@ var (
 
 	clientInitialized     = false
 	printClientConfigOnce sync.Once
+
+	// This variable will be set by another package (director) to clear the server ads
+	ClearServerAdsCallback ClearServerAdsFunc
 )
 
 func init() {
@@ -1759,6 +1764,16 @@ func InitClient() error {
 	return nil
 }
 
+// Clear all in-memory server ads in the Director. It delegates the call to the registered callback.
+// The real implementation is in the Director package. This design is to avoid circular dependencies.
+func ClearServerAds() {
+	if ClearServerAdsCallback != nil {
+		ClearServerAdsCallback()
+	} else {
+		log.Info("Unable to clear server ads: no callback registered")
+	}
+}
+
 // This function resets most states for test cases, including 1. viper settings, 2. preferred prefix, 3. transport object, 4. Federation metadata back to their default
 func ResetConfig() {
 	viper.Reset()
@@ -1772,6 +1787,9 @@ func ResetConfig() {
 
 	// Clear the instance ID information for generated server ads
 	server_structs.Reset()
+
+	// Clear out director's ad cache
+	ClearServerAds()
 
 	// Reset federation metadata
 	fedDiscoveryOnce = &sync.Once{}
