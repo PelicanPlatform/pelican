@@ -96,6 +96,9 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 	broker.RegisterBrokerCallback(ctx, engine.Group("/", web_ui.ServerHeaderMiddleware))
 	broker.LaunchNamespaceKeyMaintenance(ctx, egrp)
+	if err = cache.LaunchRequestListener(ctx, egrp); err != nil {
+		return nil, err
+	}
 	configPath, err := xrootd.ConfigXrootd(ctx, false)
 	if err != nil {
 		return nil, err
