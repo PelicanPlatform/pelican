@@ -1586,6 +1586,7 @@ func getHealthTestFile(ctx *gin.Context) {
 func collectClientVersionMetric(reqVer *version.Version, service string) {
 	if reqVer == nil || service == "" {
 		metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": "other", "service": "other"}).Inc()
+		metrics.PelicanDirectorClientRequestsTotal.With(prometheus.Labels{"version": "other", "service": "other"}).Inc()
 		return
 	}
 
@@ -1596,6 +1597,7 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 
 	if reqVer.GreaterThan(directorVersion) {
 		metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": "pelican-future", "service": service}).Inc()
+		metrics.PelicanDirectorClientRequestsTotal.With(prometheus.Labels{"version": "pelican-future", "service": service}).Inc()
 	}
 
 	versionSegments := reqVer.Segments()
@@ -1611,6 +1613,7 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 	shortenedVersion := strings.Join(strSegments, ".")
 
 	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": shortenedVersion, "service": service}).Inc()
+	metrics.PelicanDirectorClientRequestsTotal.With(prometheus.Labels{"version": shortenedVersion, "service": service}).Inc()
 }
 
 func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
@@ -1639,6 +1642,7 @@ func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
 		labels["network"] = "unknown"
 	}
 	metrics.PelicanDirectorRedirectionsTotal.With(labels).Inc()
+	metrics.PelicanDirectorRedirectsTotal.With(labels).Inc()
 }
 
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {

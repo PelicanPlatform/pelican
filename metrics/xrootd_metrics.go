@@ -350,13 +350,28 @@ var (
 		Help: "The total number of monitoring UDP packets received",
 	})
 
+	PacketsReceivedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_monitoring_packets_received_total",
+		Help: "The total number of monitoring UDP packets received",
+	})
+
 	TransferReadvSegs = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_readv_segments_count",
 		Help: "Number of segments in readv operations",
 	}, []string{"path", "ap", "dn", "role", "org", "proj", "network"})
 
+	TransferReadvSegsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_transfer_readv_segments_toal",
+		Help: "Number of segments in readv operations",
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "network"})
+
 	TransferOps = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_operations_count",
+		Help: "Number of transfer operations performed",
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "type", "network"})
+
+	TransferOpsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_transfer_operations_total",
 		Help: "Number of transfer operations performed",
 	}, []string{"path", "ap", "dn", "role", "org", "proj", "type", "network"})
 
@@ -375,8 +390,18 @@ var (
 		Help: "Aggregate number of server connections",
 	})
 
+	ConnectionsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_server_connections_total",
+		Help: "Aggregate number of server connections",
+	})
+
 	BytesXfer = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_server_bytes",
+		Help: "Number of bytes read into the server",
+	}, []string{"direction"})
+
+	BytesXferTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_server_bytes_total",
 		Help: "Number of bytes read into the server",
 	}, []string{"direction"})
 
@@ -402,6 +427,11 @@ var (
 
 	ServerIOWaitTime = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "xrootd_server_io_wait_time",
+		Help: "The aggregate time spent in storage operations in origin/cache server",
+	})
+
+	ServerIOWaitTimeTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_server_io_wait_seconds_total",
 		Help: "The aggregate time spent in storage operations in origin/cache server",
 	})
 
@@ -775,6 +805,7 @@ func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error)
 					continue
 				}
 				PacketsReceived.Inc()
+				PacketsReceivedTotal.Inc()
 				if !enableHandlePacket {
 					continue
 				}
@@ -1076,18 +1107,37 @@ func handlePacket(packet []byte) error {
 					counter.Add(float64(int64(binary.BigEndian.Uint64(
 						packet[offset+opsOffset+16:offset+opsOffset+24]) -
 						oldReadvSegs)))
+					counter = TransferReadvSegsTotal.With(labels)
+					counter.Add(float64(int64(binary.BigEndian.Uint64(
+						packet[offset+opsOffset+16:offset+opsOffset+24]) -
+						oldReadvSegs)))
+
 					labels["type"] = "read"
 					counter = TransferOps.With(labels)
 					counter.Add(float64(int32(binary.BigEndian.Uint32(
 						packet[offset+opsOffset:offset+opsOffset+4]) -
 						oldReadOps)))
+					counter = TransferOpsTotal.With(labels)
+					counter.Add(float64(int32(binary.BigEndian.Uint32(
+						packet[offset+opsOffset:offset+opsOffset+4]) -
+						oldReadOps)))
+
 					labels["type"] = "readv"
 					counter = TransferOps.With(labels)
 					counter.Add(float64(int32(binary.BigEndian.Uint32(
 						packet[offset+opsOffset+4:offset+opsOffset+8]) -
 						oldReadvOps)))
+					counter = TransferOpsTotal.With(labels)
+					counter.Add(float64(int32(binary.BigEndian.Uint32(
+						packet[offset+opsOffset+4:offset+opsOffset+8]) -
+						oldReadvOps)))
+
 					labels["type"] = "write"
 					counter = TransferOps.With(labels)
+					counter.Add(float64(int32(binary.BigEndian.Uint32(
+						packet[offset+opsOffset+8:offset+opsOffset+12]) -
+						oldWriteOps)))
+					counter = TransferOpsTotal.With(labels)
 					counter.Add(float64(int32(binary.BigEndian.Uint32(
 						packet[offset+opsOffset+8:offset+opsOffset+12]) -
 						oldWriteOps)))
@@ -1281,6 +1331,7 @@ func handlePacket(packet []byte) error {
 				ServerTotalIO.Add(float64(totalIOInc))
 				ServerActiveIO.Set(float64(throttleGS.IOActive))
 				ServerIOWaitTime.Add(waitTimeInc)
+				ServerIOWaitTimeTotal.Add(waitTimeInc)
 			}
 		}
 
@@ -1518,6 +1569,7 @@ func HandleSummaryPacket(packet []byte) error {
 				incBy = float64(stat.Total)
 			}
 			Connections.Add(incBy)
+			ConnectionsTotal.Add(incBy)
 			lastStats.Total = stat.Total
 
 			incBy = float64(stat.In - lastStats.In)
@@ -1525,6 +1577,7 @@ func HandleSummaryPacket(packet []byte) error {
 				incBy = float64(stat.In)
 			}
 			BytesXfer.With(prometheus.Labels{"direction": "rx"}).Add(incBy)
+			BytesXferTotal.With(prometheus.Labels{"direction": "rx"}).Add(incBy)
 			lastStats.In = stat.In
 
 			incBy = float64(stat.Out - lastStats.Out)
@@ -1532,6 +1585,7 @@ func HandleSummaryPacket(packet []byte) error {
 				incBy = float64(stat.Out)
 			}
 			BytesXfer.With(prometheus.Labels{"direction": "tx"}).Add(incBy)
+			BytesXferTotal.With(prometheus.Labels{"direction": "tx"}).Add(incBy)
 			lastStats.Out = stat.Out
 		case SchedStat:
 			Threads.With(prometheus.Labels{"state": "idle"}).Set(float64(stat.Idle))

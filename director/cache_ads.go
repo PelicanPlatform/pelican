@@ -86,6 +86,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 		if geoIPError, ok := err.(geoIPError); ok {
 			labels := geoIPError.labels
 			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
+			metrics.PelicanDirectorGeoIPErrorsTotal.With(labels).Inc()
 		}
 		log.Debugln("Failed to lookup GeoIP coordinates for host", sAd.URL.Host)
 	}
