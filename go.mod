@@ -9,6 +9,7 @@ require (
 	github.com/JGLTechnologies/gin-rate-limit v1.5.4
 	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137
 	github.com/charmbracelet/glamour v0.8.0
+	github.com/cyphar/filepath-securejoin v0.4.1
 	github.com/ebitengine/purego v0.6.0
 	github.com/fatih/color v1.15.0
 	github.com/gin-gonic/gin v1.9.1
