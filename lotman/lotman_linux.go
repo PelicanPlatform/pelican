@@ -973,15 +973,15 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	lotHome := param.Lotman_LotHome.GetString()
 	uid, err := config.GetDaemonUID()
 	if err != nil {
-		log.Errorf("Error getting daemon UID, needed to create `Lotman.LotHome` directory: %v", err)
+		log.Errorf("Error getting daemon UID, needed to create '%s' directory: %v", param.Lotman_LotHome.GetName(), err)
 		return false
 	}
 	gid, err := config.GetDaemonGID()
 	if err != nil {
-		log.Errorf("Error getting daemon GID, needed to create `Lotman.LotHome` directory: %v", err)
+		log.Errorf("Error getting daemon GID, needed to create '%s' directory: %v", param.Lotman_LotHome.GetName(), err)
 		return false
 	}
-	err = config.MkdirAll(lotHome, 0755, uid, gid)
+	err = config.MkdirAll(lotHome, 0777, uid, gid)
 	if err != nil {
 		log.Errorf("Error creating lot home directory: %v", err)
 		return false
