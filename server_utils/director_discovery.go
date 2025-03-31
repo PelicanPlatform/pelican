@@ -21,12 +21,13 @@ package server_utils
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sync/atomic"
 	"time"
 
-	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
@@ -43,6 +44,9 @@ var (
 )
 
 // Query all known directors & metadata, return a list of unique director ads
+// If no director ads are found, default back to the federation director endpoint
+// If that endpoint doesn't exist, then all the errors encountered during the director
+// ad discovery will be returned
 func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_structs.DirectorAd, err error) {
 	endpointMap := make(map[string]server_structs.DirectorAd)
 
@@ -94,12 +98,12 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 	}
 
 	// For each statically-defined endpoint, query it for all its known directors
-	var lastError error = nil
+	var allErrors error = nil
 	for endpoint := range endpointsTemp {
 		var directorUrl *url.URL
 		directorUrl, err = url.Parse(endpoint)
 		if err != nil {
-			lastError = err
+			allErrors = errors.Join(allErrors, err)
 			continue
 		}
 		directorUrl.Path, _ = url.JoinPath(directorUrl.Path, "api", "v1.0", "director", "directors")
@@ -107,20 +111,23 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 		client := &http.Client{Transport: config.GetTransport()}
 		directorInfo, err := client.Get(directorUrl.String())
 		if err != nil {
-			lastError = errors.Wrapf(err, "failed to contact director at %s", directorUrl.String())
+			newError := fmt.Errorf("failed to contact director at %s: %w", directorUrl.String(), err)
+			allErrors = errors.Join(allErrors, newError)
 			continue
 		}
 		defer directorInfo.Body.Close()
 
 		if directorInfo.StatusCode != http.StatusOK {
-			lastError = errors.Errorf("director at %s responded to 'list directors' API with status code %d", directorUrl.String(), directorInfo.StatusCode)
-			log.Warningln("Remote director responded with a failure:", lastError)
+			newError := fmt.Errorf("director at %s responded to 'list directors' API with status code %d", directorUrl.String(), directorInfo.StatusCode)
+			allErrors = errors.Join(allErrors, newError)
+			log.Warningln("Remote director responded with a failure:", newError)
 			continue
 		}
 
 		var directorResponse []server_structs.DirectorAd
-		if lastError = json.NewDecoder(directorInfo.Body).Decode(&directorResponse); lastError != nil {
-			log.Warningln("Failed to decode response from director:", lastError)
+		if err = json.NewDecoder(directorInfo.Body).Decode(&directorResponse); err != nil {
+			log.Warningln("Failed to decode response from director:", err)
+			allErrors = errors.Join(allErrors, err)
 			continue
 		}
 		for _, directorEndpoint := range directorResponse {
@@ -133,14 +140,24 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 			}
 		}
 	}
-	if lastError != nil {
-		err = lastError
+
+	// No endpoints were found and the federation director endpoint is nil
+	if len(endpointMap) == 0 && fed.DirectorEndpoint == "" {
+		newError := errors.New("failed to find director endpoint")
+		err = errors.Join(newError, allErrors)
+	} else if len(endpointMap) == 0 { // Fall back to director endpoint
+		endpoints = []server_structs.DirectorAd{
+			{
+				AdvertiseUrl: fed.DirectorEndpoint,
+			},
+		}
+	} else { // ad discovery succeeded, so use that
+		endpoints = make([]server_structs.DirectorAd, 0, len(endpointMap))
+		for _, ad := range endpointMap {
+			endpoints = append(endpoints, ad)
+		}
 	}
 
-	endpoints = make([]server_structs.DirectorAd, 0, len(endpointMap))
-	for _, ad := range endpointMap {
-		endpoints = append(endpoints, ad)
-	}
 	return
 }
 
