@@ -87,6 +87,8 @@ var (
 		Help: "The number of servers currently recognized by the Director, delineated by pelican/non-pelican and origin/cache",
 	}, []string{"server_name", "server_type", "from_topology"})
 
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	PelicanDirectorClientVersionTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_client_version_total",
 		Help: "The total number of requests from client versions.",
@@ -97,6 +99,8 @@ var (
 		Help: "The total number of requests from clients.",
 	}, []string{"version", "service"})
 
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	PelicanDirectorRedirectionsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_redirections_total",
 		Help: "The total number of redirections the director issued.",
@@ -107,6 +111,8 @@ var (
 		Help: "The total number of redirects the director issued.",
 	}, []string{"destination", "status_code", "version", "network"})
 
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	PelicanDirectorGeoIPErrors = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_geoip_errors",
 		Help: "The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database",

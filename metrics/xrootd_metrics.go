@@ -345,6 +345,8 @@ const (
 )
 
 var (
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	PacketsReceived = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "xrootd_monitoring_packets_received",
 		Help: "The total number of monitoring UDP packets received",
@@ -355,6 +357,8 @@ var (
 		Help: "The total number of monitoring UDP packets received",
 	})
 
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	TransferReadvSegs = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_readv_segments_count",
 		Help: "Number of segments in readv operations",
@@ -365,6 +369,8 @@ var (
 		Help: "Number of segments in readv operations",
 	}, []string{"path", "ap", "dn", "role", "org", "proj", "network"})
 
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	TransferOps = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_operations_count",
 		Help: "Number of transfer operations performed",
@@ -385,6 +391,8 @@ var (
 		Help: "Number of scheduler threads",
 	}, []string{"state"})
 
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	Connections = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "xrootd_server_connection_count",
 		Help: "Aggregate number of server connections",
@@ -400,6 +408,8 @@ var (
 		Help: "Number of bytes read into the server",
 	}, []string{"direction"})
 
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	BytesXferTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_server_bytes_total",
 		Help: "Number of bytes read into the server",
@@ -425,6 +435,8 @@ var (
 		Help: "Number of ongoing storage operations in origin/cache server",
 	})
 
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	ServerIOWaitTime = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "xrootd_server_io_wait_time",
 		Help: "The aggregate time spent in storage operations in origin/cache server",
@@ -804,6 +816,8 @@ func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error)
 					log.Errorln("Failed to read from UDP connection while aggregating monitoring packet from XRootD:", err)
 					continue
 				}
+				// TODO: Remove this metric (the line directly below)
+				// The renamed metric was added in v7.16
 				PacketsReceived.Inc()
 				PacketsReceivedTotal.Inc()
 				if !enableHandlePacket {
@@ -1103,6 +1117,8 @@ func handlePacket(packet []byte) error {
 				if fileHdr.RecFlag&0x02 == 0x02 { // XrdXrootdMonFileHdr::hasOPS
 					// sizeof(XrdXrootdMonFileHdr) + sizeof(XrdXrootdMonStatXFR)
 					opsOffset := uint32(8 + 24)
+					// TODO: Remove this metric (the 2 lines directly below)
+					// The renamed metric was added in v7.16
 					counter := TransferReadvSegs.With(labels)
 					counter.Add(float64(int64(binary.BigEndian.Uint64(
 						packet[offset+opsOffset+16:offset+opsOffset+24]) -
@@ -1113,6 +1129,8 @@ func handlePacket(packet []byte) error {
 						oldReadvSegs)))
 
 					labels["type"] = "read"
+					// TODO: Remove this metric (the 2 lines directly below)
+					// The renamed metric was added in v7.16
 					counter = TransferOps.With(labels)
 					counter.Add(float64(int32(binary.BigEndian.Uint32(
 						packet[offset+opsOffset:offset+opsOffset+4]) -
@@ -1123,6 +1141,8 @@ func handlePacket(packet []byte) error {
 						oldReadOps)))
 
 					labels["type"] = "readv"
+					// TODO: Remove this metric (the 2 lines directly below)
+					// The renamed metric was added in v7.16
 					counter = TransferOps.With(labels)
 					counter.Add(float64(int32(binary.BigEndian.Uint32(
 						packet[offset+opsOffset+4:offset+opsOffset+8]) -
@@ -1133,6 +1153,8 @@ func handlePacket(packet []byte) error {
 						oldReadvOps)))
 
 					labels["type"] = "write"
+					// TODO: Remove this metric (the 2 lines directly below)
+					// The renamed metric was added in v7.16
 					counter = TransferOps.With(labels)
 					counter.Add(float64(int32(binary.BigEndian.Uint32(
 						packet[offset+opsOffset+8:offset+opsOffset+12]) -

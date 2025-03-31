@@ -85,6 +85,8 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	if err := updateLatLong(&sAd); err != nil {
 		if geoIPError, ok := err.(geoIPError); ok {
 			labels := geoIPError.labels
+			// TODO: Remove this metric (the line directly below)
+			// The renamed metric was added in v7.16
 			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 			metrics.PelicanDirectorGeoIPErrorsTotal.With(labels).Inc()
 		}

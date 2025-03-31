@@ -332,6 +332,8 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 		if geoIPError, ok := err.(geoIPError); ok {
 			labels := geoIPError.labels
 			setProjectLabel(ctx, &labels)
+			// TODO: Remove this metric (the line directly below)
+			// The renamed metric was added in v7.16
 			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
 			metrics.PelicanDirectorGeoIPErrorsTotal.With(labels).Inc()
 		}
