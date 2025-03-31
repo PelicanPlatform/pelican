@@ -44,7 +44,7 @@ var (
 )
 
 // Query all known directors & metadata, return a list of unique director ads
-// If all no director ads are found, default back to the federation director endpoint
+// If no director ads are found, default back to the federation director endpoint
 // If that endpoint doesn't exist, then all the errors encountered during the director
 // ad discovery will be returned
 func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_structs.DirectorAd, err error) {
@@ -146,13 +146,10 @@ func doDiscovery(ctx context.Context, isDirector bool) (endpoints []server_struc
 		newError := errors.New("failed to find director endpoint")
 		err = errors.Join(newError, allErrors)
 	} else if len(endpointMap) == 0 { // Fall back to director endpoint
-		endpoints = make([]server_structs.DirectorAd, 0, 1)
-		if fed, err := config.GetFederation(ctx); err == nil {
-			endpoints = []server_structs.DirectorAd{
-				{
-					AdvertiseUrl: fed.DirectorEndpoint,
-				},
-			}
+		endpoints = []server_structs.DirectorAd{
+			{
+				AdvertiseUrl: fed.DirectorEndpoint,
+			},
 		}
 	} else { // ad discovery succeeded, so use that
 		endpoints = make([]server_structs.DirectorAd, 0, len(endpointMap))
@@ -178,7 +175,7 @@ func LaunchPeriodicDirectorDiscovery(ctx context.Context, isDirector bool) error
 	egrp := ctx.Value(config.EgrpKey).(*errgroup.Group)
 	servers, err := doDiscovery(ctx, isDirector)
 	if err != nil {
-		log.Warningln("Failure to discover available director endpoints:", err)
+		log.Warningln("Failed to discover available director endpoints:", err)
 	} else {
 		directorEndpoints.Store(&servers)
 	}
