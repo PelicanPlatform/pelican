@@ -345,18 +345,39 @@ const (
 )
 
 var (
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	PacketsReceived = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "xrootd_monitoring_packets_received",
 		Help: "The total number of monitoring UDP packets received",
 	})
 
+	PacketsReceivedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_monitoring_packets_received_total",
+		Help: "The total number of monitoring UDP packets received",
+	})
+
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	TransferReadvSegs = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_readv_segments_count",
 		Help: "Number of segments in readv operations",
 	}, []string{"path", "ap", "dn", "role", "org", "proj", "network"})
 
+	TransferReadvSegsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_transfer_readv_segments_toal",
+		Help: "Number of segments in readv operations",
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "network"})
+
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	TransferOps = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_transfer_operations_count",
+		Help: "Number of transfer operations performed",
+	}, []string{"path", "ap", "dn", "role", "org", "proj", "type", "network"})
+
+	TransferOpsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_transfer_operations_total",
 		Help: "Number of transfer operations performed",
 	}, []string{"path", "ap", "dn", "role", "org", "proj", "type", "network"})
 
@@ -370,13 +391,27 @@ var (
 		Help: "Number of scheduler threads",
 	}, []string{"state"})
 
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	Connections = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "xrootd_server_connection_count",
 		Help: "Aggregate number of server connections",
 	})
 
+	ConnectionsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_server_connections_total",
+		Help: "Aggregate number of server connections",
+	})
+
 	BytesXfer = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "xrootd_server_bytes",
+		Help: "Number of bytes read into the server",
+	}, []string{"direction"})
+
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
+	BytesXferTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_server_bytes_total",
 		Help: "Number of bytes read into the server",
 	}, []string{"direction"})
 
@@ -400,8 +435,15 @@ var (
 		Help: "Number of ongoing storage operations in origin/cache server",
 	})
 
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	ServerIOWaitTime = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "xrootd_server_io_wait_time",
+		Help: "The aggregate time spent in storage operations in origin/cache server",
+	})
+
+	ServerIOWaitTimeTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_server_io_wait_seconds_total",
 		Help: "The aggregate time spent in storage operations in origin/cache server",
 	})
 
@@ -774,7 +816,10 @@ func ConfigureMonitoring(ctx context.Context, egrp *errgroup.Group) (int, error)
 					log.Errorln("Failed to read from UDP connection while aggregating monitoring packet from XRootD:", err)
 					continue
 				}
+				// TODO: Remove this metric (the line directly below)
+				// The renamed metric was added in v7.16
 				PacketsReceived.Inc()
+				PacketsReceivedTotal.Inc()
 				if !enableHandlePacket {
 					continue
 				}
@@ -1072,22 +1117,49 @@ func handlePacket(packet []byte) error {
 				if fileHdr.RecFlag&0x02 == 0x02 { // XrdXrootdMonFileHdr::hasOPS
 					// sizeof(XrdXrootdMonFileHdr) + sizeof(XrdXrootdMonStatXFR)
 					opsOffset := uint32(8 + 24)
+					// TODO: Remove this metric (the 2 lines directly below)
+					// The renamed metric was added in v7.16
 					counter := TransferReadvSegs.With(labels)
 					counter.Add(float64(int64(binary.BigEndian.Uint64(
 						packet[offset+opsOffset+16:offset+opsOffset+24]) -
 						oldReadvSegs)))
+					counter = TransferReadvSegsTotal.With(labels)
+					counter.Add(float64(int64(binary.BigEndian.Uint64(
+						packet[offset+opsOffset+16:offset+opsOffset+24]) -
+						oldReadvSegs)))
+
 					labels["type"] = "read"
+					// TODO: Remove this metric (the 2 lines directly below)
+					// The renamed metric was added in v7.16
 					counter = TransferOps.With(labels)
 					counter.Add(float64(int32(binary.BigEndian.Uint32(
 						packet[offset+opsOffset:offset+opsOffset+4]) -
 						oldReadOps)))
+					counter = TransferOpsTotal.With(labels)
+					counter.Add(float64(int32(binary.BigEndian.Uint32(
+						packet[offset+opsOffset:offset+opsOffset+4]) -
+						oldReadOps)))
+
 					labels["type"] = "readv"
+					// TODO: Remove this metric (the 2 lines directly below)
+					// The renamed metric was added in v7.16
 					counter = TransferOps.With(labels)
 					counter.Add(float64(int32(binary.BigEndian.Uint32(
 						packet[offset+opsOffset+4:offset+opsOffset+8]) -
 						oldReadvOps)))
+					counter = TransferOpsTotal.With(labels)
+					counter.Add(float64(int32(binary.BigEndian.Uint32(
+						packet[offset+opsOffset+4:offset+opsOffset+8]) -
+						oldReadvOps)))
+
 					labels["type"] = "write"
+					// TODO: Remove this metric (the 2 lines directly below)
+					// The renamed metric was added in v7.16
 					counter = TransferOps.With(labels)
+					counter.Add(float64(int32(binary.BigEndian.Uint32(
+						packet[offset+opsOffset+8:offset+opsOffset+12]) -
+						oldWriteOps)))
+					counter = TransferOpsTotal.With(labels)
 					counter.Add(float64(int32(binary.BigEndian.Uint32(
 						packet[offset+opsOffset+8:offset+opsOffset+12]) -
 						oldWriteOps)))
@@ -1281,6 +1353,7 @@ func handlePacket(packet []byte) error {
 				ServerTotalIO.Add(float64(totalIOInc))
 				ServerActiveIO.Set(float64(throttleGS.IOActive))
 				ServerIOWaitTime.Add(waitTimeInc)
+				ServerIOWaitTimeTotal.Add(waitTimeInc)
 			}
 		}
 
@@ -1518,6 +1591,7 @@ func HandleSummaryPacket(packet []byte) error {
 				incBy = float64(stat.Total)
 			}
 			Connections.Add(incBy)
+			ConnectionsTotal.Add(incBy)
 			lastStats.Total = stat.Total
 
 			incBy = float64(stat.In - lastStats.In)
@@ -1525,6 +1599,7 @@ func HandleSummaryPacket(packet []byte) error {
 				incBy = float64(stat.In)
 			}
 			BytesXfer.With(prometheus.Labels{"direction": "rx"}).Add(incBy)
+			BytesXferTotal.With(prometheus.Labels{"direction": "rx"}).Add(incBy)
 			lastStats.In = stat.In
 
 			incBy = float64(stat.Out - lastStats.Out)
@@ -1532,6 +1607,7 @@ func HandleSummaryPacket(packet []byte) error {
 				incBy = float64(stat.Out)
 			}
 			BytesXfer.With(prometheus.Labels{"direction": "tx"}).Add(incBy)
+			BytesXferTotal.With(prometheus.Labels{"direction": "tx"}).Add(incBy)
 			lastStats.Out = stat.Out
 		case SchedStat:
 			Threads.With(prometheus.Labels{"state": "idle"}).Set(float64(stat.Idle))
