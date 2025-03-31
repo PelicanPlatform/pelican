@@ -36,7 +36,7 @@ const Page = () => {
               color={green[300]}
             />,
           ].map((component, index) => (
-            <Grid key={index} item xs={12} display={'flex'} height={'21vh'}>
+            <Grid key={index} item xs={12} display={'flex'} height={'28vh'}>
               <Paper sx={{ width: '100%' }}>{component}</Paper>
             </Grid>
           ))}
