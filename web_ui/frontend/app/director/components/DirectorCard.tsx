@@ -1,27 +1,21 @@
-import { Authenticated, secureFetch } from '@/helpers/login';
-import React, { useContext, useEffect, useRef, useState } from 'react';
+import React, { useContext, useState } from 'react';
 import {
-  Avatar,
   Box,
+  FormControlLabel,
+  FormGroup,
   IconButton,
   Paper,
+  Switch,
   Tooltip,
   Typography,
-  Switch,
-  Snackbar,
-  FormGroup,
-  FormControlLabel,
-  Portal,
-  Alert,
 } from '@mui/material';
-import { red, grey } from '@mui/material/colors';
-import { Server } from '@/index';
+import { grey, red } from '@mui/material/colors';
+import { Server, User } from '@/index';
 import { Language } from '@mui/icons-material';
 import { NamespaceIcon } from '@/components/Namespace/index';
 import useSWR from 'swr';
 import Link from 'next/link';
-import { User } from '@/index';
-import { alertOnError, getErrorMessage } from '@/helpers/util';
+import { alertOnError } from '@/helpers/util';
 import { DirectorDropdown } from '@/app/director/components/DirectorDropdown';
 import { ServerDetailed, ServerGeneral } from '@/types';
 import { allowServer, filterServer, getDirectorServer } from '@/helpers/api';

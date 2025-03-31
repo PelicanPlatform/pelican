@@ -1,5 +1,5 @@
-import { TextField } from '@mui/material';
 import type { StandardTextFieldProps } from '@mui/material';
+import { TextField } from '@mui/material';
 import React from 'react';
 
 import type { BaseCustomRegistrationFieldProps } from './index';

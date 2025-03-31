@@ -1,7 +1,4 @@
-import React from 'react';
-import { secureFetch } from '@/helpers/login';
-import { Alert, RegistryNamespace } from '@/index';
-import { getErrorMessage } from '@/helpers/util';
+import { RegistryNamespace } from '@/index';
 
 export const populateKey = (o: any, key: string[], value: any) => {
   let i = 0;

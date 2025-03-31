@@ -1,5 +1,3 @@
-import { TypeFunction, TypeOrTypeFunction } from '@/helpers/util';
-
 export type ByteType =
   | 'B'
   | 'KB'

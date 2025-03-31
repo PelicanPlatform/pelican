@@ -1,13 +1,8 @@
 'use client';
 
 import LaunchIcon from '@mui/icons-material/Launch';
-import { useEffect, useState } from 'react';
-import { Config } from './configuration';
 import { Box, Typography } from '@mui/material';
-import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import Link from 'next/link';
-import { getErrorMessage, getObjectValue } from '@/helpers/util';
-import { getConfig } from '@/helpers/api';
 import { getFederationUrls } from '@/helpers/get';
 import useSWR from 'swr';
 

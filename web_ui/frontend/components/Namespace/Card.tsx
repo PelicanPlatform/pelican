@@ -1,4 +1,4 @@
-import { Alert, Alert as AlertType, RegistryNamespace } from '@/index';
+import { RegistryNamespace, User } from '@/index';
 import React, { useContext, useRef, useState } from 'react';
 import {
   Avatar,
@@ -14,11 +14,9 @@ import Link from 'next/link';
 
 import InformationDropdown from './InformationDropdown';
 import { NamespaceIcon } from '@/components/Namespace/index';
-import { User } from '@/index';
 import { deleteNamespace } from '@/helpers/api';
 import { useSWRConfig } from 'swr';
 import { AlertDispatchContext } from '@/components/AlertProvider';
-import CodeBlock from '@/components/CodeBlock';
 import { alertOnError } from '@/helpers/util';
 import { Theme } from '@mui/system';
 

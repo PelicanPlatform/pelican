@@ -1,7 +1,6 @@
 import React from 'react';
 import Markdown from 'react-markdown';
-import { useTheme } from '@mui/material';
-import { Typography, List, ListItem, Box } from '@mui/material';
+import { Box, List, ListItem, Typography, useTheme } from '@mui/material';
 import SyntaxHighlighter from 'react-syntax-highlighter';
 import { stackoverflowLight } from 'react-syntax-highlighter/dist/cjs/styles/hljs';
 

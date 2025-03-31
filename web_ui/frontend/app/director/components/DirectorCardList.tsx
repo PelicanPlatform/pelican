@@ -1,13 +1,6 @@
-import React, {
-  ComponentType,
-  FunctionComponent,
-  useMemo,
-  useState,
-  JSX,
-} from 'react';
-import { Box, Grid, Pagination, TextField, Typography } from '@mui/material';
+import React, { useMemo, useState } from 'react';
+import { Box, Grid, TextField } from '@mui/material';
 import { DirectorCard, DirectorCardProps } from './';
-import { Server } from '@/index';
 import { BooleanToggleButton, CardList } from '@/components';
 import useFuse from '@/helpers/useFuse';
 import { ServerGeneral } from '@/types';
