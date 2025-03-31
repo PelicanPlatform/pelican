@@ -285,6 +285,13 @@ func validateFederationPrefix(prefix string) error {
 		return errors.Wrapf(ErrInvalidOriginConfig, "prefix %s is a reserved prefix for cache/origin server registration", prefix)
 	}
 
+	illegalPrefixes := []string{"/pelican", "/view"}
+	for _, illegalPrefix := range illegalPrefixes {
+		if prefix == illegalPrefix || strings.HasPrefix(prefix, illegalPrefix+"/") {
+			return errors.Wrapf(ErrInvalidOriginConfig, "prefix '%s' is a reserved prefix and cannot be registered to your Origin", prefix)
+		}
+	}
+
 	return nil
 }
 
