@@ -204,12 +204,12 @@ const Field = ({
             />
           );
         default:
-          console.log('Unknown type: ' + props.type);
+          console.error('Unknown type: ' + props.type);
       }
       break;
 
     default:
-      console.log('Unknown type: ' + props.type);
+      console.error('Unknown type: ' + props.type);
   }
 };
 

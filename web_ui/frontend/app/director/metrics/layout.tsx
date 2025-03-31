@@ -4,12 +4,12 @@ import dynamic from 'next/dynamic';
 
 const GraphProvider = dynamic(
   () => import('../../../components/graphs/GraphContext'),
-  { ssr: false }
+  { ssr: !!false }
 );
 
 const GraphOverlay = dynamic(
   () => import('../../../components/graphs/GraphOverlay'),
-  { ssr: false }
+  { ssr: !!false }
 );
 
 const Layout = ({ children }: { children: ReactNode }) => {
