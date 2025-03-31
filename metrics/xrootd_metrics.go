@@ -1023,9 +1023,9 @@ func handlePacket(packet []byte) error {
 		}
 
 		if header.Gs.Type == "R" { // Throttle Packet
-			log.Debug("handlePacket: Received a g-stream R packet")
+			log.Trace("handlePacket: Received a g-stream R packet")
 			if len(blobs) < 2 {
-				return errors.New("Packet is too small to be valid g-stream R packet")
+				return errors.New("packet is too small to be valid g-stream R packet")
 			}
 			return handleThrottlePacket(blobs[1:]) // Skip the header
 		}
@@ -1736,6 +1736,19 @@ func handleOSSPacket(blobs [][]byte) error {
 	return nil
 }
 
+// handleThrottlePacket processes the throttle plugin stats
+// It expects the blobs to be in JSON format and will update the metrics accordingly
+// It also handles the case where the total IO or wait time is less than the previous value
+// by resetting the increment to 0
+// It returns an error if the blobs are empty or if there is an error in unmarshalling
+// the JSON data
+// It expects that the JSON data is in the format:
+//
+//	{
+//	  "io_wait": 0.12345,
+//	  "io_active": 67890,
+//	  "io_total": 1
+//	}
 func handleThrottlePacket(blobs [][]byte) error {
 	if len(blobs) == 0 {
 		return errors.New("no blobs in the throttle packet")
