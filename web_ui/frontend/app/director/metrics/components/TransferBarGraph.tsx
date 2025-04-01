@@ -73,8 +73,6 @@ const TransferBarGraph = () => {
     }
   );
 
-  console.log(data);
-
   return (
     <Bar
       data={data}

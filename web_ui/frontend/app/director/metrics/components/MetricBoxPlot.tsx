@@ -304,8 +304,7 @@ export const getMetricData = async (
     return result?.metric?.server_name || 'Missing Server Name';
   });
 
-  console.log(data);
-
+  // console.log(data);
   return {
     data,
     labels,
