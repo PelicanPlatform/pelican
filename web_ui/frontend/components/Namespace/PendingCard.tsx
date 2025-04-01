@@ -1,4 +1,4 @@
-'use client'
+'use client';
 
 import React, { useContext, useMemo, useRef, useState } from 'react';
 import { Authenticated, secureFetch } from '@/helpers/login';
