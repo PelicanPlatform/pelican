@@ -21,8 +21,7 @@ import { PaddedContent, Main } from '@/components/layout';
 import { Navigation } from '@/components/layout/Navigation';
 
 export const metadata = {
-  title: 'Pelican Configuration',
-  description: 'Software designed to make data distribution easy',
+  title: 'Configuration',
 };
 
 export default function RootLayout({
