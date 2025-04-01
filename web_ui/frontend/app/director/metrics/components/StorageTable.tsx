@@ -23,6 +23,7 @@ import { GraphContext } from '@/components/graphs/GraphContext';
 import { DateTime } from 'luxon';
 import chroma from 'chroma-js';
 import { convertToBiggestBytes, toBytes, toBytesString } from '@/helpers/bytes';
+import { ServerType } from '@/types';
 
 export const StorageTable = () => {
   const { rate, time, range, resolution } = useContext(GraphContext);
@@ -89,7 +90,7 @@ export const StorageTable = () => {
                     <TableRow key={d.serverName}>
                       <TableCell>
                         <Link
-                          href={`/director/metrics/origin/?server_name=${d.serverName}`}
+                          href={`/director/metrics/${d.serverType.toLowerCase()}/?server_name=${d.serverName}`}
                         >
                           {d.serverName}
                         </Link>
@@ -131,30 +132,40 @@ export const StorageTable = () => {
   );
 };
 
+interface StorageMetric {
+  serverName: string;
+  serverType: ServerType;
+  free: number;
+  total: number;
+}
+
 const getStorageData = async (
   time: DateTime
-): Promise<
-  Record<string, { serverName: string; free: number; total: number }>
-> => {
+): Promise<Record<string, StorageMetric>> => {
   const query = `xrootd_storage_volume_bytes`;
   const response = await query_raw<VectorResponseData>(query, time.toSeconds());
 
   const result = response.data.result;
 
-  return result.reduce((acc: Record<string, any>, r) => {
-    const serverName = r.metric.server_name;
-    const type = r.metric.type;
+  return result.reduce(
+    (acc: Record<string, any>, r): Record<string, StorageMetric> => {
+      const serverName = r.metric.server_name;
+      const serverType = (r.metric?.server_type || 'Cache') as ServerType; // Default to Cache which subsets the Origin metrics
+      const type = r.metric.type;
 
-    if (serverName === undefined) {
+      if (serverName === undefined) {
+        return acc;
+      }
+
+      acc[serverName] = {
+        ...acc?.[serverName],
+        [type]: Number(r.value[1]),
+        serverName,
+        serverType,
+      };
+
       return acc;
-    }
-
-    acc[serverName] = {
-      ...acc?.[serverName],
-      serverName: serverName,
-      [type]: Number(r.value[1]),
-    };
-
-    return acc;
-  }, {});
+    },
+    {}
+  );
 };

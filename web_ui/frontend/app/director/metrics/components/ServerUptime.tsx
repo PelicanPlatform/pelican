@@ -31,6 +31,8 @@ import {
 } from '@mui/material';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
+import Link from 'next/link';
+import { ServerType } from '@/types';
 
 const ServerUptime = () => {
   const dispatch = useContext(AlertDispatchContext);
@@ -70,7 +72,11 @@ const ServerUptime = () => {
             {data.map((d) => (
               <TableRow key={d.serverName}>
                 <TableCell sx={{ maxWidth: '120px', overflow: 'hidden' }}>
-                  {d.serverName}
+                  <Link
+                    href={`/director/metrics/${d.serverType.toLowerCase()}/?server_name=${d.serverName}`}
+                  >
+                    {d.serverName}
+                  </Link>
                 </TableCell>
                 <TableCell>
                   <TimeBar
@@ -94,6 +100,7 @@ const ServerUptime = () => {
 
 interface ServerUptimeData {
   serverName: string;
+  serverType: ServerType;
   ranges: Range[];
   points: Point[];
 }
@@ -133,16 +140,18 @@ export const getMetricData = async (
 
   let uptimes: ServerUptimeData[] = countResponseFilled.result.map((result) => {
     const serverName = result.metric.server_name;
+    const serverType = (result.metric.server_type || 'Cache') as ServerType; // Default to Cache which subsets the Origin metrics
     const ranges = countResponseToRanges(result);
     const restartServer = restartResponse.data.result.filter(
       (r) => r.metric.server_name === serverName
     );
     if (restartServer.length === 0) {
-      return { serverName, ranges, points: [] };
+      return { serverName, serverType, ranges, points: [] };
     }
 
     return {
       serverName,
+      serverType,
       ranges,
       points: restartResponseToPoints(restartServer[0]),
     };

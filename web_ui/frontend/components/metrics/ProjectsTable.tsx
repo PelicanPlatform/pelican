@@ -28,7 +28,7 @@ interface ProjectData {
   bytesAccessed: string;
 }
 
-export const ProjectTable = ({
+const ProjectTable = ({
   server_name = undefined,
 }: {
   server_name?: string;

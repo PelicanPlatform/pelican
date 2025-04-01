@@ -2,18 +2,17 @@ import { Box, Grid, Paper, Typography } from '@mui/material';
 import { green, grey, blue } from '@mui/material/colors';
 
 import {
+  BigMetric,
   ProjectTable,
+  BigBytesMetric,
   TransferRateGraph,
   CPUGraph,
   MemoryGraph,
-  BigBytesMetric,
-  BigMetric,
   StorageGraph,
 } from '@/components/metrics';
+import { buildMetric as bm } from '@/components';
 
-import { buildMetric as bm } from '@/components/graphs/prometheus';
-
-export const OriginMetricPage = ({
+export const CacheMetricPage = ({
   server_name = undefined,
 }: {
   server_name?: string;
@@ -47,9 +46,8 @@ export const OriginMetricPage = ({
               title={'Bytes Transferred'}
               color={green[300]}
             />,
-            <StorageGraph key={'storage-graph'} />,
           ].map((component, index) => (
-            <Grid key={index} item xs={12} display={'flex'} height={'21vh'}>
+            <Grid key={index} item xs={12} display={'flex'} height={'28vh'}>
               <Paper sx={{ width: '100%' }}>{component}</Paper>
             </Grid>
           ))}
@@ -178,4 +176,4 @@ export const OriginMetricPage = ({
   );
 };
 
-export default OriginMetricPage;
+export default CacheMetricPage;

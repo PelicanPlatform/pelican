@@ -44,8 +44,15 @@ import {
   toBytes,
   toBytesString,
 } from '@/helpers/bytes';
-import { evaluateOrReturn, TypeOrTypeFunction } from '@/helpers/util';
+import {
+  alertOnError,
+  evaluateOrReturn,
+  TypeOrTypeFunction,
+} from '@/helpers/util';
 import { useRouter } from 'next/navigation';
+import { ServerGeneral, ServerType } from '@/types';
+import { getDirectorServers } from '@/helpers/get';
+import { AlertDispatchContext } from '@/components/AlertProvider';
 
 ChartJS.register(
   BoxPlotController,
@@ -175,6 +182,7 @@ export const MetricBoxPlot = ({
 }) => {
   const router = useRouter();
   const { rate, time, resolution, range } = useContext(GraphContext);
+  const dispatch = useContext(AlertDispatchContext);
 
   const { data } = useSWR(
     [metric, rate, time, resolution, range],
@@ -182,6 +190,16 @@ export const MetricBoxPlot = ({
     {
       fallbackData: { data: [], labels: [] },
     }
+  );
+
+  const { data: servers } = useSWR<ServerGeneral[] | undefined>(
+    'getDirectorServers',
+    async () =>
+      await alertOnError(
+        getDirectorServers,
+        'Failed to fetch servers',
+        dispatch
+      )
   );
 
   const chartData = useMemo(() => {
@@ -217,8 +235,16 @@ export const MetricBoxPlot = ({
             const serverName =
               position.chart.tooltip.body[0].lines[0].split(':')[0];
             if (serverName != 'Missing Server Name') {
+              let serverType: ServerType = 'Cache';
+              if (servers) {
+                const server = servers.find((s) => s.name == serverName);
+                if (server) {
+                  serverType = server.type;
+                }
+              }
+
               router.push(
-                '/director/metrics/origin/?server_name=' +
+                `/director/metrics/${serverType.toLowerCase()}/?server_name=` +
                   position.chart.tooltip.body[0].lines[0].split(':')[0]
               );
             }
@@ -277,6 +303,8 @@ export const getMetricData = async (
   const labels = result.map((result) => {
     return result?.metric?.server_name || 'Missing Server Name';
   });
+
+  console.log(data);
 
   return {
     data,
