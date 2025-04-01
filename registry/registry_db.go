@@ -133,7 +133,7 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 	// Check if any registered namespaces already superspace the incoming namespace,
 	// eg if /foo is already registered, this will be true for an incoming /foo/bar because
 	// /foo is logically above /foo/bar (according to my logic, anyway)
-	superspaceQuery := `SELECT prefix FROM namespace WHERE (? || '/') LIKE (prefix || '/%')`
+	superspaceQuery := `SELECT prefix FROM namespace WHERE (?) LIKE (prefix || '/%')`
 	err = db.Raw(superspaceQuery, prefix).Scan(&superspaces).Error
 	if err != nil {
 		return
@@ -142,7 +142,7 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 	// Check if any registered namespaces already subspace the incoming namespace,
 	// eg if /foo/bar is already registered, this will be true for an incoming /foo because
 	// /foo/bar is logically below /foo
-	subspaceQuery := `SELECT prefix FROM namespace WHERE (prefix || '/') LIKE (? || '/%')`
+	subspaceQuery := `SELECT prefix FROM namespace WHERE (prefix) LIKE (? || '/%')`
 	err = db.Raw(subspaceQuery, prefix).Scan(&subspaces).Error
 	if err != nil {
 		return
