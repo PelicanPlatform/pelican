@@ -33,6 +33,7 @@ import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 import Link from 'next/link';
 import { ServerType } from '@/types';
+import StyledTableCell from '@/components/StyledHeadTableCell';
 
 const ServerUptime = () => {
   const dispatch = useContext(AlertDispatchContext);
@@ -55,17 +56,17 @@ const ServerUptime = () => {
   data = useMemo(() => (data ? data : []), [data]);
 
   return (
-    <Box overflow={'scroll'} height={'100%'}>
+    <>
       {data.length === 0 && !isLoading && !isValidating && (
         <Alert severity='warning'>No data available</Alert>
       )}
-      <TableContainer>
-        <Table size={'small'}>
+      <TableContainer sx={{ maxHeight: '100%' }}>
+        <Table stickyHeader size={'small'}>
           <TableHead>
             <TableRow>
-              <TableCell>Server</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Restarts</TableCell>
+              <StyledTableCell>Server</StyledTableCell>
+              <StyledTableCell>Status</StyledTableCell>
+              <StyledTableCell>Restarts</StyledTableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -94,7 +95,7 @@ const ServerUptime = () => {
           </TableBody>
         </Table>
       </TableContainer>
-    </Box>
+    </>
   );
 };
 

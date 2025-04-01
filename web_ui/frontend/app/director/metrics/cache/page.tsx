@@ -5,7 +5,7 @@ import { Suspense } from 'react';
 import { Skeleton } from '@mui/material';
 import { useSearchParams } from 'next/navigation';
 
-const RemoteOriginPage = () => {
+const RemoteCachePage = () => {
   const params = useSearchParams();
   const serverName = params.get('server_name') || undefined;
 
@@ -15,7 +15,7 @@ const RemoteOriginPage = () => {
 const Page = () => {
   return (
     <Suspense fallback={<Skeleton />}>
-      <RemoteOriginPage />
+      <RemoteCachePage />
     </Suspense>
   );
 };

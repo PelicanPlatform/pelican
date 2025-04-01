@@ -9,6 +9,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  styled,
 } from '@mui/material';
 import {
   MatrixResponseData,
@@ -18,12 +19,14 @@ import {
 } from '@/components/graphs/prometheus';
 
 import useSWR from 'swr';
-import { useContext, useMemo } from 'react';
+import { ReactNode, useContext, useMemo } from 'react';
 import { GraphContext } from '@/components/graphs/GraphContext';
 import { DateTime } from 'luxon';
 import chroma from 'chroma-js';
 import { convertToBiggestBytes, toBytes, toBytesString } from '@/helpers/bytes';
 import { ServerType } from '@/types';
+import { tableCellClasses } from '@mui/material/TableCell';
+import StyledTableCell from '@/components/StyledHeadTableCell';
 
 export const StorageTable = () => {
   const { rate, time, range, resolution } = useContext(GraphContext);
@@ -69,64 +72,62 @@ export const StorageTable = () => {
   return (
     <>
       {storageData !== undefined && (
-        <Box overflow={'scroll'} height={'100%'}>
-          <TableContainer>
-            <Table size={'small'}>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Server</TableCell>
-                  <TableCell>Used ({totalUsedByteString})</TableCell>
-                  <TableCell>Free ({totalFreeByteString})</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {Object.values(storageData)
-                  .sort((a, b) => {
-                    const nameA = a.serverName.toUpperCase();
-                    const nameB = b.serverName.toUpperCase();
-                    return nameA > nameB ? 1 : nameA < nameB ? -1 : 0;
-                  })
-                  .map((d) => (
-                    <TableRow key={d.serverName}>
-                      <TableCell>
-                        <Link
-                          href={`/director/metrics/${d.serverType.toLowerCase()}/?server_name=${d.serverName}`}
-                        >
-                          {d.serverName}
-                        </Link>
-                      </TableCell>
-                      <TableCell
-                        sx={{
-                          bgcolor: chroma
-                            .scale(['#f7f7f7', '#8bb7ff'])
-                            .mode('lab')(
-                              (d.total - d.free - minUsedBytes) /
-                                (maxUsedBytes - minUsedBytes)
-                            )
-                            .hex(),
-                        }}
+        <TableContainer sx={{ maxHeight: '100%' }}>
+          <Table stickyHeader size={'small'}>
+            <TableHead>
+              <TableRow>
+                <StyledTableCell>Server</StyledTableCell>
+                <StyledTableCell>Used ({totalUsedByteString})</StyledTableCell>
+                <StyledTableCell>Free ({totalFreeByteString})</StyledTableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {Object.values(storageData)
+                .sort((a, b) => {
+                  const nameA = a.serverName.toUpperCase();
+                  const nameB = b.serverName.toUpperCase();
+                  return nameA > nameB ? 1 : nameA < nameB ? -1 : 0;
+                })
+                .map((d) => (
+                  <TableRow key={d.serverName}>
+                    <TableCell>
+                      <Link
+                        href={`/director/metrics/${d.serverType.toLowerCase()}/?server_name=${d.serverName}`}
                       >
-                        {toBytesString(d.total - d.free)}
-                      </TableCell>
-                      <TableCell
-                        sx={{
-                          bgcolor: chroma
-                            .scale(['#f7f7f7', '#8bb7ff'])
-                            .mode('lab')(
-                              (d.free - minFreeBytes) /
-                                (maxFreeBytes - minFreeBytes)
-                            )
-                            .hex(),
-                        }}
-                      >
-                        {toBytesString(d.free)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Box>
+                        {d.serverName}
+                      </Link>
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: chroma
+                          .scale(['#f7f7f7', '#8bb7ff'])
+                          .mode('lab')(
+                            (d.total - d.free - minUsedBytes) /
+                              (maxUsedBytes - minUsedBytes)
+                          )
+                          .hex(),
+                      }}
+                    >
+                      {toBytesString(d.total - d.free)}
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        bgcolor: chroma
+                          .scale(['#f7f7f7', '#8bb7ff'])
+                          .mode('lab')(
+                            (d.free - minFreeBytes) /
+                              (maxFreeBytes - minFreeBytes)
+                          )
+                          .hex(),
+                      }}
+                    >
+                      {toBytesString(d.free)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
     </>
   );

@@ -1,3 +1,5 @@
+'use client'
+
 import React, { useContext, useMemo, useRef, useState } from 'react';
 import { Authenticated, secureFetch } from '@/helpers/login';
 import { Avatar, Box, IconButton, Tooltip, Typography } from '@mui/material';

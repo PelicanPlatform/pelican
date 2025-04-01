@@ -22,6 +22,7 @@ import { useContext } from 'react';
 import { GraphContext } from '@/components/graphs/GraphContext';
 import { DateTime } from 'luxon';
 import { convertToBiggestBytes } from '@/helpers/bytes';
+import StyledTableCell from '@/components/StyledHeadTableCell';
 
 interface ProjectData {
   name: string;
@@ -43,28 +44,26 @@ const ProjectTable = ({
   return (
     <>
       {projectData !== undefined && (
-        <Box overflow={'scroll'} height={'100%'}>
-          <TableContainer>
-            <Table size={'small'}>
-              <TableHead>
-                <TableRow>
-                  <TableCell>Project</TableCell>
-                  <TableCell>Bytes Accessed</TableCell>
+        <TableContainer sx={{ maxHeight: '100%' }}>
+          <Table stickyHeader size={'small'}>
+            <TableHead>
+              <TableRow>
+                <StyledTableCell>Project</StyledTableCell>
+                <StyledTableCell>Bytes Accessed</StyledTableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {projectData.map((project) => (
+                <TableRow key={project.name}>
+                  <TableCell>{project.name}</TableCell>
+                  <TableCell>
+                    {project.bytesAccessed.toLocaleString()}
+                  </TableCell>
                 </TableRow>
-              </TableHead>
-              <TableBody>
-                {projectData.map((project) => (
-                  <TableRow key={project.name}>
-                    <TableCell>{project.name}</TableCell>
-                    <TableCell>
-                      {project.bytesAccessed.toLocaleString()}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Box>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
     </>
   );

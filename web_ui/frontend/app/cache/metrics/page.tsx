@@ -1,2 +1,3 @@
-import CacheMetricPage from '@/components/graphs/CacheMetricPage';
-export default CacheMetricPage;
+import CacheMetricPage from '@/components/graphs/OriginMetricPage';
+const Page = () => <CacheMetricPage />;
+export default Page;
