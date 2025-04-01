@@ -13,13 +13,12 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { objectToDeterministicString } from '@/helpers/util';
 
 interface CardListProps<T> {
   data?: Partial<T>[];
   Card: ComponentType<any>;
   cardProps?: Partial<T>;
-  keyGetter: (o: Partial<T>) => string;
+  keyGetter: (o: T) => string;
 }
 
 export function CardList<T>({
@@ -56,7 +55,7 @@ export function CardList<T>({
           } as T;
 
           return (
-            <Box pb={1} key={keyGetter(o)}>
+            <Box pb={1} key={keyGetter(props)}>
               <Card {...props} />
             </Box>
           );

@@ -88,7 +88,7 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
         data={filteredData}
         Card={DirectorCard}
         cardProps={cardProps}
-        keyGetter={(o) => o?.server?.name || 'undefined'}
+        keyGetter={(o) => o.server.name}
       />
     </Box>
   );
