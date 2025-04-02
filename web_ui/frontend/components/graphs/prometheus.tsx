@@ -329,6 +329,10 @@ export const fillArrayNulls = (
   });
 };
 
+/**
+ * Build a prometheus metric string from a metric name and a set of key value pairs
+ * Results in something like: metric{key1="value1",key2="value2"}
+ */
 export const buildMetric = (
   metric: string,
   args: Record<
@@ -336,16 +340,32 @@ export const buildMetric = (
     string | { comparator: '=' | '!='; value: string } | undefined
   >
 ) => {
-  return `${metric}{${Object.entries(args)
-    .reduce((acc: string[], [key, value]) => {
-      if (typeof value === 'string') {
-        acc.push(`${key}="${value}"`);
-      } else if (value === undefined) {
-      } else {
-        acc.push(`${key}${value.comparator}"${value.value}"`);
-      }
+  // Verify the metric name is valid
+  if (!metric.match(/^[a-zA-Z_:][a-zA-Z0-9_:]*$/)) {
+    throw new Error(`Invalid metric name: ${metric}`);
+  }
 
-      return acc;
-    }, [])
-    .join(',')}}`;
+  // Verify the key names are valid
+  if (
+    !Object.keys(args).every((key) => key.match(/^[a-zA-Z_][a-zA-Z0-9_]*$/))
+  ) {
+    throw new Error(`Invalid key name in metric: ${metric}`);
+  }
+
+  const labels = Object.entries(args).reduce((acc: string[], [key, value]) => {
+    if (typeof value === 'string') {
+      acc.push(`${key}="${value}"`);
+    } else if (value === undefined) {
+    } else {
+      acc.push(`${key}${value.comparator}"${value.value}"`);
+    }
+    return acc;
+  }, []);
+
+  let labelString = '';
+  if (labels.length > 0) {
+    labelString = `{${labels.join(',')}}`;
+  }
+
+  return metric + labelString;
 };
