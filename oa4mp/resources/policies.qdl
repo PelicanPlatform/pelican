@@ -21,7 +21,7 @@ access_token.'sub' := claims.'sub';
 group_list. := claims.groups;
 remove(claims.groups);
 
-{{ if .GroupRequirements }}
+{{ if .GroupRequirements -}}
 if [0 == size(|^group_list. /\ { {{- range $idx, $grp := .GroupRequirements -}}{{- if eq $idx 0 -}}'{{- $grp -}}'{{else}}, '{{- $grp -}}'{{- end -}}{{- end -}} })] then
 [
     sys_err.ok := false;
@@ -32,22 +32,48 @@ if [0 == size(|^group_list. /\ { {{- range $idx, $grp := .GroupRequirements -}}{
 
 scopes := {};
 {{ range .GroupAuthzTemplates }}
+{{ if eq 0 (len .Groups) -}}
 while [has_value(key, group_list.)]
+{{- else -}}
+while [has_value(key, |^group_list. /\ { {{- range $idx, $grp := .Groups -}}{{- if eq $idx 0 -}}'{{- $grp -}}'{{else}}, '{{- $grp -}}'{{- end -}}{{- end -}} })]
+{{- end }}
 [
-    group_scopes := { {{- range $idx, $action := .Actions }}{{- if eq $idx 0 -}}'{{- $action -}}:'{{else}}, '{{- $action -}}:'{{- end -}}{{ end -}} } + '{{- .Prefix -}}';
-    scopes := scopes \/ |^replace(~group_scopes, '$GROUP', encode(key, 1)); /* 1 = URL-encode (RFC 3986) */
+    {{ if eq 0 (len .Users) -}}
+    if [true] then
+    {{- else -}}
+    if [0 != size({claims.'sub'} /\ { {{- range $idx, $user := .Users -}}{{- if eq $idx 0 -}}'{{- $user -}}'{{else}}, '{{- $user -}}'{{- end -}}{{- end -}} })] then
+    {{- end }}
+    [
+        group_scopes := { {{- range $idx, $action := .Actions }}{{- if eq $idx 0 -}}'{{- $action -}}:'{{else}}, '{{- $action -}}:'{{- end -}}{{- end -}} } + '{{- .Prefix -}}';
+        scopes := scopes \/ |^replace(~group_scopes, '$GROUP', encode(key, 1)); /* 1 = URL-encode (RFC 3986) */
+    ];
+];
+{{- end -}}
+{{ range .UserAuthzTemplates }}
+{{ if eq 0 (len .Users) -}}
+if [true] then
+{{- else -}}
+if [0 != size({claims.'sub'} /\ { {{- range $idx, $user := .Users -}}{{- if eq $idx 0 -}}'{{- $user -}}'{{else}}, '{{- $user -}}'{{- end -}}{{- end -}} })] then
+{{- end }}
+[
+    {{ if eq 0 (len .Groups) -}}
+    if [true] then
+    {{- else -}}
+    if [0 != size(|^group_list. /\ { {{- range $idx, $grp := .Groups -}}{{- if eq $idx 0 -}}'{{- $grp -}}'{{else}}, '{{- $grp -}}'{{- end -}}{{- end -}} })] then
+    {{- end }}
+    [
+        user_scopes := { {{- range $idx, $action := .Actions }}{{- if eq $idx 0 -}}'{{- $action -}}:'{{else}}, '{{- $action -}}:'{{- end -}}{{- end -}} } + '{{- .Prefix -}}';
+        scopes := scopes \/ |^replace(~user_scopes, '$USER', encode(claims.'sub', 1)); /* 1 = URL-encode (RFC 3986) */
+    ];
 ];
 {{- end }}
-{{ range .UserAuthzTemplates }}
-user_scopes := { {{- range $idx, $action := .Actions }}{{- if eq $idx 0 -}}'{{- $action -}}:'{{else}}, '{{- $action -}}:'{{- end -}}{{ end -}} } + '{{- .Prefix -}}';
-scopes := scopes \/ |^replace(~user_scopes, '$USER', encode(claims.'sub', 1)); /* 1 = URL-encode (RFC 3986) */
-{{ end }}
-access_token.'scope' := detokenize(scopes, ' ', 2);
 
+access_token.'scope' := detokenize(sort(scopes), ' ', 2);
 access_token.iss := '{{- .OIDCIssuerURL -}}';
 
-/* Pelican generates WLCG-style token scopes; convert the
-   resulting access token to a WLCG token.
+/*
+ * Pelican generates WLCG-style token scopes,
+ * so convert the resulting access token to a WLCG token.
  */
 remove(access_token.ver);
 access_token.'wlcg.ver' := '1.0';
