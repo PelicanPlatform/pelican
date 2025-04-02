@@ -730,7 +730,7 @@ definitions:
   Downtime:
     type: object
     properties:
-      uuid:
+      id:
         type: string
         description: Unique identifier for the downtime entry
         example: "019564c2-7893-73e1-ab74-c566972cf059"
@@ -2516,6 +2516,14 @@ paths:
         `Authentication Required` `Admin Privilege Required`
       produces:
         - application/json
+      parameters:
+      - in: query
+        name: status
+        type: string
+        description: Filter downtime entries by status. "incomplete" includes active and future downtimes
+      enum:
+        - incomplete
+        - all
       responses:
         "200":
           description: OK
@@ -2535,48 +2543,19 @@ paths:
           description: Internal server error
           schema:
             $ref: "#/definitions/ErrorModelV2"
-  /downtime/all:
+  /downtime/{id}:
     get:
       tags:
         - origin_ui
         - cache_ui
-      summary: Get all downtime entries for the origin/cache server
-      description: >-
-        `Authentication Required` `Admin Privilege Required`
-      produces:
-        - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: array
-            items:
-              $ref: "#/definitions/Downtime"
-        "401":
-          description: Authentication required
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "403":
-          description: Permission denied. Admin privilege required.
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-        "500":
-          description: Internal server error
-          schema:
-            $ref: "#/definitions/ErrorModelV2"
-  /downtime/{uuid}:
-    get:
-      tags:
-        - origin_ui
-        - cache_ui
-      summary: Get a specific downtime entry by UUID
+      summary: Get a specific downtime entry by ID
       description: "`Authentication Required` `Admin privilege Required`"
       produces:
         - application/json
       parameters:
-        - name: uuid
+        - name: id
           in: path
-          description: UUID of the downtime entry
+          description: ID of the downtime entry
           required: true
           type: string
       responses:
@@ -2585,7 +2564,7 @@ paths:
           schema:
             $ref: "#/definitions/Downtime"
         "400":
-          description: Invalid UUID
+          description: Invalid ID
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "401":
@@ -2608,16 +2587,16 @@ paths:
       tags:
         - origin_ui
         - cache_ui
-      summary: Update a specific downtime entry by UUID
+      summary: Update a specific downtime entry by ID
       description: "`Authentication Required` `Admin privilege Required`"
       consumes:
         - application/json
       produces:
         - application/json
       parameters:
-        - name: uuid
+        - name: id
           in: path
-          description: UUID of the downtime entry
+          description: ID of the downtime entry
           required: true
           type: string
         - in: body
@@ -2661,7 +2640,7 @@ paths:
           schema:
             $ref: "#/definitions/Downtime"
         "400":
-          description: Invalid request data or UUID
+          description: Invalid request data or ID
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "401":
@@ -2684,14 +2663,14 @@ paths:
       tags:
         - origin_ui
         - cache_ui
-      summary: Delete a specific downtime entry by UUID
+      summary: Delete a specific downtime entry by ID
       description: "`Authentication Required` `Admin privilege Required`"
       produces:
         - application/json
       parameters:
-        - name: uuid
+        - name: id
           in: path
-          description: UUID of the downtime entry
+          description: ID of the downtime entry
           required: true
           type: string
       responses:
@@ -2700,7 +2679,7 @@ paths:
           schema:
             $ref: "#/definitions/SuccessModelV2"
         "400":
-          description: Invalid UUID
+          description: Invalid ID
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "401":

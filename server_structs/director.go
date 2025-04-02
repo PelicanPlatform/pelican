@@ -82,7 +82,7 @@ type (
 	Class    string
 	Severity string
 	Downtime struct {
-		UUID        string   `json:"uuid" gorm:"primaryKey"`
+		UUID        string   `json:"id" gorm:"primaryKey"`
 		CreatedBy   string   `json:"createdBy" gorm:"not null"` // Person who created this downtime
 		Class       Class    `json:"class" gorm:"not null"`     // SCHEDULED or UNSCHEDULED
 		Description string   `json:"description" gorm:"type:text"`

@@ -40,6 +40,13 @@ import (
 func setupRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.Default()
+
+	// Middleware to inject a test user
+	r.Use(func(c *gin.Context) {
+		c.Set("User", "testuser")
+		c.Next()
+	})
+
 	originDowntimeAPI := r.Group("/api/v1.0/downtime")
 	{
 		originDowntimeAPI.POST("", HandleCreateDowntime)
@@ -102,7 +109,7 @@ func TestDowntime(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("get-active-downtime", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "/api/v1.0/downtime", nil)
+		req, _ := http.NewRequest("GET", "/api/v1.0/downtime?status=incomplete", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
@@ -124,7 +131,6 @@ func TestDowntime(t *testing.T) {
 
 	t.Run("create-active-downtime", func(t *testing.T) {
 		incompleteDowntime := DowntimeInput{
-			CreatedBy:   "John Doe Jr.",
 			Class:       "SCHEDULED",
 			Description: "",
 			Severity:    "Intermittent Outage (may be up for some of the time)",
@@ -142,7 +148,7 @@ func TestDowntime(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		var resp server_structs.Downtime
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.Equal(t, incompleteDowntime.CreatedBy, resp.CreatedBy)
+		assert.Equal(t, "testuser", resp.CreatedBy)
 		assert.Equal(t, incompleteDowntime.StartTime, resp.StartTime)
 	})
 

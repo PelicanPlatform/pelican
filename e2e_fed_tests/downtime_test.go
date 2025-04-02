@@ -119,7 +119,6 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	// ads := originServer.GetNamespaceAds()
 	// Assemble a downtime creation request to the cache server
 	incompleteDowntime := web_ui.DowntimeInput{
-		CreatedBy:   "John Doe Jr.",
 		Class:       "SCHEDULED",
 		Description: "",
 		Severity:    "Intermittent Outage (may be up for some of the time)",
@@ -180,5 +179,5 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 
 	require.Len(t, serverAd.Downtimes, 1, "Downtime not found in server ad")
 	require.Equal(t, incompleteDowntime.Severity, serverAd.Downtimes[0].Severity, "Downtime severity mismatch")
-	require.Equal(t, incompleteDowntime.CreatedBy, serverAd.Downtimes[0].CreatedBy, "Downtime creator mismatch")
+	require.Equal(t, "admin-user", serverAd.Downtimes[0].CreatedBy, "Downtime creator mismatch")
 }

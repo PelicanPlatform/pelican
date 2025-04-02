@@ -22,6 +22,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"google.golang.org/appengine/log"
 
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -81,9 +82,17 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		return
 	}
 
+	user, _, err := GetUserGroups(ctx)
+	if user == "" || err != nil {
+		user = ctx.GetString("User")
+		if user == "" {
+			user = "unknown"
+			log.Warningf(ctx, "Failed to get user from context")
+		}
+	}
 	downtime := server_structs.Downtime{
 		UUID:        id.String(),
-		CreatedBy:   downtimeInput.CreatedBy,
+		CreatedBy:   user,
 		Class:       downtimeInput.Class,
 		Description: downtimeInput.Description,
 		Severity:    downtimeInput.Severity,
@@ -100,10 +109,6 @@ func HandleCreateDowntime(ctx *gin.Context) {
 
 func HandleGetDowntime(ctx *gin.Context) {
 	status := ctx.Query("status")
-	// if "status" query param is not provided, set status to "incomplete" by default
-	if status == "" {
-		status = "incomplete"
-	}
 	var downtimes []server_structs.Downtime
 	var err error
 
