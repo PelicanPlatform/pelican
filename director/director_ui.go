@@ -60,6 +60,7 @@ type (
 		HealthStatus      HealthTestStatus            `json:"healthStatus"`
 		IOLoad            float64                     `json:"ioLoad"`
 		NamespacePrefixes []string                    `json:"namespacePrefixes"`
+		Downtimes         []server_structs.Downtime   `json:"downtimes"`
 		Version           string                      `json:"version"`
 	}
 
@@ -279,6 +280,7 @@ func serverResponseToListServerResponse(res serverResponse) listServerResponse {
 		HealthStatus:        res.HealthStatus,
 		IOLoad:              res.IOLoad,
 		Version:             res.Version,
+		Downtimes:           res.Downtimes,
 	}
 	for _, ns := range res.Namespaces {
 		listRes.NamespacePrefixes = append(listRes.NamespacePrefixes, ns.Path)
