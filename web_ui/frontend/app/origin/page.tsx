@@ -29,7 +29,6 @@ import {
 } from '@mui/material';
 import { Key, CheckCircle } from '@mui/icons-material';
 
-import RateGraph from '@/components/graphs/RateGraph';
 import StatusBox from '@/components/StatusBox';
 import { DataExportTable } from '@/components/DataExportTable';
 import { TimeDuration } from '@/components/graphs/prometheus';

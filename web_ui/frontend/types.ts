@@ -29,6 +29,8 @@ export interface DirectorNamespace {
   origins: string[];
 }
 
+export type ServerType = 'Origin' | 'Cache';
+
 interface ServerBase {
   name: string;
   version: string;
@@ -38,7 +40,7 @@ interface ServerBase {
   brokerUrl: string;
   url: string;
   webUrl: string;
-  type: 'Origin' | 'Cache';
+  type: ServerType;
   latitude: number;
   longitude: number;
   capabilities: Capabilities;

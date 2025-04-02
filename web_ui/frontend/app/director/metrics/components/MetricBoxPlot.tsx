@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Chart } from 'react-chartjs-2';
 import {
   CategoryScale,
@@ -19,6 +20,7 @@ import {
   TooltipLabelStyle,
   TooltipItem,
 } from 'chart.js';
+import { getRelativePosition } from 'chart.js/helpers';
 import { useContext, useEffect, useMemo, useState } from 'react';
 import {
   BoxAndWiskers,
@@ -42,7 +44,15 @@ import {
   toBytes,
   toBytesString,
 } from '@/helpers/bytes';
-import { evaluateOrReturn, TypeOrTypeFunction } from '@/helpers/util';
+import {
+  alertOnError,
+  evaluateOrReturn,
+  TypeOrTypeFunction,
+} from '@/helpers/util';
+import { useRouter } from 'next/navigation';
+import { ServerGeneral, ServerType } from '@/types';
+import { getDirectorServers } from '@/helpers/get';
+import { AlertDispatchContext } from '@/components/AlertProvider';
 
 ChartJS.register(
   BoxPlotController,
@@ -69,6 +79,7 @@ export const BytesMetricBoxPlot = ({
   title: string;
   options?: ChartOptions;
 }) => {
+  const router = useRouter();
   const { rate, time, resolution, range } = useContext(GraphContext);
 
   const { data } = useSWR(
@@ -118,6 +129,22 @@ export const BytesMetricBoxPlot = ({
             type: 'logarithmic',
           },
         },
+        onClick: function (evt: any, item: any) {
+          if (item.length === 0) {
+            return;
+          }
+          const position = getRelativePosition(evt, evt.Chart) as any; // Typing is wrong
+          try {
+            const serverName =
+              position.chart.tooltip.body[0].lines[0].split(':')[0];
+            if (serverName != 'Missing Server Name') {
+              router.push(
+                '/director/metrics/origin/?server_name=' +
+                  position.chart.tooltip.body[0].lines[0].split(':')[0]
+              );
+            }
+          } catch {}
+        },
         plugins: {
           tooltip: {
             callbacks: {
@@ -153,7 +180,9 @@ export const MetricBoxPlot = ({
   title: string;
   options?: ChartOptions;
 }) => {
+  const router = useRouter();
   const { rate, time, resolution, range } = useContext(GraphContext);
+  const dispatch = useContext(AlertDispatchContext);
 
   const { data } = useSWR(
     [metric, rate, time, resolution, range],
@@ -161,6 +190,16 @@ export const MetricBoxPlot = ({
     {
       fallbackData: { data: [], labels: [] },
     }
+  );
+
+  const { data: servers } = useSWR<ServerGeneral[] | undefined>(
+    'getDirectorServers',
+    async () =>
+      await alertOnError(
+        getDirectorServers,
+        'Failed to fetch servers',
+        dispatch
+      )
   );
 
   const chartData = useMemo(() => {
@@ -186,6 +225,30 @@ export const MetricBoxPlot = ({
           y: {
             type: 'logarithmic',
           },
+        },
+        onClick: function (evt: any, item: any) {
+          if (item.length === 0) {
+            return;
+          }
+          const position = getRelativePosition(evt, evt.Chart) as any; // Typing is broken here for the Chartjs library
+          try {
+            const serverName =
+              position.chart.tooltip.body[0].lines[0].split(':')[0];
+            if (serverName != 'Missing Server Name') {
+              let serverType: ServerType = 'Cache';
+              if (servers) {
+                const server = servers.find((s) => s.name == serverName);
+                if (server) {
+                  serverType = server.type;
+                }
+              }
+
+              router.push(
+                `/director/metrics/${serverType.toLowerCase()}/?server_name=` +
+                  position.chart.tooltip.body[0].lines[0].split(':')[0]
+              );
+            }
+          } catch {}
         },
         plugins: {
           tooltip: {
@@ -241,6 +304,7 @@ export const getMetricData = async (
     return result?.metric?.server_name || 'Missing Server Name';
   });
 
+  // console.log(data);
   return {
     data,
     labels,

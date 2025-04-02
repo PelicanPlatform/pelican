@@ -20,11 +20,9 @@
 
 import { Box, Grid, Typography } from '@mui/material';
 
-import RateGraph from '@/components/graphs/RateGraph';
 import StatusBox from '@/components/StatusBox';
 import { DataPoint, TimeDuration } from '@/components/graphs/prometheus';
 import FederationOverview from '@/components/FederationOverview';
-import LineGraph from '@/components/graphs/LineGraph';
 
 export default function Home() {
   return (

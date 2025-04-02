@@ -154,10 +154,19 @@ function graphReducer(state: GraphContextType, action: GraphReducerAction) {
 
   // Update the current windows url to reflect the new state
   if (window !== undefined) {
+    // Read in the current url params
+    const urlParams = new URLSearchParams(window.location.search);
+    // Update the time and range params
+    let time = newState.time.toISO();
+    if (time) {
+      urlParams.set('time', time);
+    }
+    urlParams.set('range', newState.range.toString());
+
     window.history.pushState(
       {},
       '',
-      `?time=${newState.time.toISO()}&range=${newState.range.toString()}`
+      urlParams.toString() ? `?${urlParams.toString()}` : ''
     );
   }
 
