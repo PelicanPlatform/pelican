@@ -17,6 +17,7 @@
  ***************************************************************/
 
 access_token.'sub' := claims.'sub';
+access_token.'iss' := '{{- .OIDCIssuerURL -}}';
 
 group_list. := claims.groups;
 remove(claims.groups);
@@ -30,7 +31,7 @@ if [0 == size(|^group_list. /\ { {{- range $idx, $grp := .GroupRequirements -}}{
 ];
 {{- end }}
 
-scopes := {};
+default_scopes := {};
 {{ range .GroupAuthzTemplates }}
 {{ if eq 0 (len .Groups) -}}
 while [has_value(key, group_list.)]
@@ -45,7 +46,7 @@ while [has_value(key, |^group_list. /\ { {{- range $idx, $grp := .Groups -}}{{- 
     {{- end }}
     [
         group_scopes := { {{- range $idx, $action := .Actions }}{{- if eq $idx 0 -}}'{{- $action -}}:'{{else}}, '{{- $action -}}:'{{- end -}}{{- end -}} } + '{{- .Prefix -}}';
-        scopes := scopes \/ |^replace(~group_scopes, '$GROUP', encode(key, 1)); /* 1 = URL-encode (RFC 3986) */
+        default_scopes := default_scopes \/ |^replace(~group_scopes, '$GROUP', encode(key, 1)); /* 1 = URL-encode (RFC 3986) */
     ];
 ];
 {{- end -}}
@@ -63,13 +64,24 @@ if [0 != size({claims.'sub'} /\ { {{- range $idx, $user := .Users -}}{{- if eq $
     {{- end }}
     [
         user_scopes := { {{- range $idx, $action := .Actions }}{{- if eq $idx 0 -}}'{{- $action -}}:'{{else}}, '{{- $action -}}:'{{- end -}}{{- end -}} } + '{{- .Prefix -}}';
-        scopes := scopes \/ |^replace(~user_scopes, '$USER', encode(claims.'sub', 1)); /* 1 = URL-encode (RFC 3986) */
+        default_scopes := default_scopes \/ |^replace(~user_scopes, '$USER', encode(claims.'sub', 1)); /* 1 = URL-encode (RFC 3986) */
     ];
 ];
 {{- end }}
 
-access_token.'scope' := detokenize(sort(scopes), ' ', 2);
-access_token.iss := '{{- .OIDCIssuerURL -}}';
+/*
+ * If the requested scope is a tighter requirement than what is permitted,
+ * then grant the tighter requirement.
+ */
+user_scopes. := mask(scopes., -1 < starts_with(scopes., ~default_scopes));
+
+/*
+ * If the requested scope is a looser requirement than what is permitted,
+ * then grant based on the default scopes.
+ */
+user_scopes_loose. := mask(~default_scopes, -1 < starts_with(~default_scopes, scopes.));
+
+access_token.'scope' := detokenize(sort(|^user_scopes. \/ |^user_scopes_loose.), ' ', 2);
 
 /*
  * Pelican generates WLCG-style token scopes,
