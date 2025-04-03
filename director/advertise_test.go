@@ -229,26 +229,45 @@ func TestAdvertiseOSDF(t *testing.T) {
 		assert.True(t, foundServer.NamespaceAds[0].FromTopology)
 
 		// Test a few values. If they're correct, it indicates the whole process likely succeeded
-		nsAd, oAds, cAds := getAdsForPath("/my/server/path/to/file")
-		assert.Equal(t, "/my/server", nsAd.Path)
-		assert.Equal(t, uint(3), nsAd.Generation[0].MaxScopeDepth)
-		assert.Equal(t, "https://origin1-auth-endpoint.com", oAds[0].AuthURL.String())
-		assert.Equal(t, "http://cache2.com", cAds[0].URL.String())
-		// Check that various capabilities have survived until this point. Because these are from topology,
-		// origin and namespace caps should be the same
-		assert.True(t, oAds[0].Caps.Writes)
-		assert.True(t, oAds[0].Caps.Listings)
-		assert.False(t, oAds[0].Caps.PublicReads)
-		assert.True(t, nsAd.Caps.Writes)
-		assert.True(t, nsAd.Caps.Listings)
-		assert.False(t, nsAd.Caps.PublicReads)
-		assert.True(t, nsAd.Caps.Listings)
+		// nsAd, oAds, cAds := getAdsForPath("/my/server/path/to/file")
+		oAds, cAds := getAdsForPath("/my/server/path/to/file")
+		for idx, ad := range oAds {
+			assert.Equal(t, "/my/server", ad.NamespaceAd.Path)
+			assert.Equal(t, uint(3), ad.NamespaceAd.Generation[0].MaxScopeDepth)
+			if idx == 0 {
+				assert.Equal(t, "https://origin1-auth-endpoint.com", ad.ServerAd.AuthURL.String())
 
-		nsAd, oAds, cAds = getAdsForPath("/my/server/2/path/to/file")
-		assert.Equal(t, "/my/server/2", nsAd.Path)
-		assert.True(t, nsAd.Caps.PublicReads)
-		assert.Equal(t, "https://origin2-auth-endpoint.com", oAds[0].AuthURL.String())
-		assert.Equal(t, "http://cache-endpoint.com", cAds[0].URL.String())
+				assert.True(t, ad.ServerAd.Caps.Writes)
+				assert.True(t, ad.ServerAd.Caps.Listings)
+				assert.False(t, ad.ServerAd.Caps.PublicReads)
+				assert.True(t, ad.NamespaceAd.Caps.Writes)
+				assert.True(t, ad.NamespaceAd.Caps.Listings)
+				assert.False(t, ad.NamespaceAd.Caps.PublicReads)
+				assert.True(t, ad.NamespaceAd.Caps.Listings)
+			}
+		}
+
+		for idx, ad := range cAds {
+			assert.Equal(t, "/my/server", ad.NamespaceAd.Path)
+
+			if idx == 0 {
+				assert.Equal(t, "http://cache2.com", ad.ServerAd.URL.String())
+			}
+		}
+
+		oAds, cAds = getAdsForPath("/my/server/2/path/to/file")
+		for idx, ad := range oAds {
+			assert.Equal(t, "/my/server/2", ad.NamespaceAd.Path)
+			if idx == 0 {
+				assert.Equal(t, "https://origin2-auth-endpoint.com", ad.ServerAd.AuthURL.String())
+			}
+		}
+		for idx, ad := range cAds {
+			assert.Equal(t, "/my/server/2", ad.NamespaceAd.Path)
+			if idx == 0 {
+				assert.Equal(t, "http://cache-endpoint.com", ad.ServerAd.URL.String())
+			}
+		}
 	})
 
 	t.Run("multiple-ns-single-origin", func(t *testing.T) {

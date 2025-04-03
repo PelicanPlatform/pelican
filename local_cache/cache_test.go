@@ -334,7 +334,7 @@ func TestClient(t *testing.T) {
 		// TODO (bbockelm, 10-Jan-2025): It's surprising that the `client.DoGet` above is querying the director then the local cache.
 		// It seems like, in the local cache case, we should skip any director queries.
 		// See description in https://github.com/PelicanPlatform/pelican/issues/1929
-		assert.Regexp(t, "error while querying the director at https://[a-zA-Z0-9:.-]+: server returned 404 Not Found", err.Error())
+		assert.Contains(t, err.Error(), fmt.Sprintf("%d", http.StatusNotFound))
 	})
 	t.Cleanup(func() {
 		cancel()

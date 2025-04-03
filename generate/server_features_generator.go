@@ -103,7 +103,7 @@ import (
 
 // Feature represents a server feature with its versions.
 type Feature struct {
-	Name   string
+	Name     string
 	Origin   map[string]FeatureVersionInfo
 	Cache    map[string]FeatureVersionInfo
 	Director map[string]FeatureVersionInfo

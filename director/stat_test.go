@@ -1,20 +1,20 @@
 /***************************************************************
- *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- ***************************************************************/
+*
+* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+*
+* Licensed under the Apache License, Version 2.0 (the "License"); you
+* may not use this file except in compliance with the License.  You may
+* obtain a copy of the License at
+*
+*    http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*
+***************************************************************/
 
 package director
 
@@ -231,7 +231,12 @@ func TestQueryServersForObject(t *testing.T) {
 		defer cancel()
 		cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/foo/bar/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -243,7 +248,12 @@ func TestQueryServersForObject(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 3, 1)
+		oAds, _ := getAdsForPath("/foo/bar/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 3, 1, withOriginAds(oServerAds))
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -258,7 +268,12 @@ func TestQueryServersForObject(t *testing.T) {
 		mockTTLCache()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/dne/random.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/dne/random.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/dne/random.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -273,7 +288,12 @@ func TestQueryServersForObject(t *testing.T) {
 		mockTTLCache()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/foo/bar/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, queryFailed, result.Status)
 		assert.Equal(t, queryInsufficientResErr, result.ErrorType)
@@ -289,7 +309,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/foo/bar/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -310,7 +335,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/foo/cache/only/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -326,7 +356,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/barz/test.txt", server_structs.CacheType, 0, 0)
+		_, cAds := getAdsForPath("/foo/bar/barz/test.txt")
+		cServerAds := make([]server_structs.ServerAd, 0, len(cAds))
+		for _, ad := range cAds {
+			cServerAds = append(cServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/bar/barz/test.txt", server_structs.CacheType, 0, 0, withCacheAds(cServerAds))
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -342,7 +377,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", server_structs.CacheType, 0, 0)
+		_, cAds := getAdsForPath("/foo/cache/only/test.txt")
+		cServerAds := make([]server_structs.ServerAd, 0, len(cAds))
+		for _, ad := range cAds {
+			cServerAds = append(cServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", server_structs.CacheType, 0, 0, withCacheAds(cServerAds))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -366,7 +406,16 @@ func TestQueryServersForObject(t *testing.T) {
 		sType := server_structs.CacheType
 		sType.Set(server_structs.OriginType)
 
-		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", sType, 0, 0)
+		oAds, cAds := getAdsForPath("/foo/cache/only/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		cServerAds := make([]server_structs.ServerAd, 0, len(cAds))
+		for _, ad := range cAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		for _, ad := range cAds {
+			cServerAds = append(cServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/cache/only/test.txt", sType, 0, 0, withOriginAds(oServerAds), withCacheAds(cServerAds))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -465,7 +514,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/foo/bar/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -486,7 +540,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/foo/bar/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -510,7 +569,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/foo/bar/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, queryFailed, result.Status)
 		require.NotEmpty(t, result.Msg)
@@ -530,7 +594,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 1, 1)
+		oAds, _ := getAdsForPath("/foo/bar/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 1, 1, withOriginAds(oServerAds))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -556,10 +625,16 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
+		oAds, _ := getAdsForPath("/foo/bar/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+
 		msgChan := make(chan string)
 
 		go func() {
-			result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
+			result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 			msgChan <- result.Msg
 		}()
 
@@ -605,7 +680,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/foo/bar/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/foo/bar/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, queryFailed, result.Status)
 		assert.Equal(t, "Number of success response: 0 is less than MinStatResponse (1) required.", result.Msg)
@@ -620,7 +700,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/protected/topology/test.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/protected/topology/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/protected/topology/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -639,7 +724,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/public/topology/test.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/public/topology/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/public/topology/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -658,7 +748,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/protected/topology/noauth/test.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/protected/topology/noauth/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/protected/topology/noauth/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -677,7 +772,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/mix/protected/test.txt", server_structs.OriginType, 0, 0, withAuth(true))
+		oAds, _ := getAdsForPath("/mix/protected/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/mix/protected/test.txt", server_structs.OriginType, 0, 0, withAuth(true), withOriginAds(oServerAds))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -696,7 +796,12 @@ func TestQueryServersForObject(t *testing.T) {
 		initMockStatUtils()
 		defer cleanupMock()
 
-		result := stat.queryServersForObject(ctx, "/mix/public/test.txt", server_structs.OriginType, 0, 0)
+		oAds, _ := getAdsForPath("/mix/public/test.txt")
+		oServerAds := make([]server_structs.ServerAd, 0, len(oAds))
+		for _, ad := range oAds {
+			oServerAds = append(oServerAds, ad.ServerAd)
+		}
+		result := stat.queryServersForObject(ctx, "/mix/public/test.txt", server_structs.OriginType, 0, 0, withOriginAds(oServerAds))
 
 		assert.Equal(t, querySuccessful, result.Status)
 		assert.Empty(t, result.ErrorType)
@@ -761,14 +866,19 @@ func TestCache(t *testing.T) {
 
 		stat := NewObjectStat()
 
+		_, cAds := getAdsForPath("/foo/test.txt")
+		cServerAds := make([]server_structs.ServerAd, 0, len(cAds))
+		for _, ad := range cAds {
+			cServerAds = append(cServerAds, ad.ServerAd)
+		}
 		startCtr := reqCounter.Load()
-		qResult := stat.queryServersForObject(ctx, "/foo/test.txt", server_structs.CacheType, 1, 1)
+		qResult := stat.queryServersForObject(ctx, "/foo/test.txt", server_structs.CacheType, 1, 1, withCacheAds(cServerAds))
 		assert.Equal(t, querySuccessful, qResult.Status)
 		require.Len(t, qResult.Objects, 1)
 		assert.Equal(t, 1, qResult.Objects[0].ContentLength)
 		require.Equal(t, startCtr+1, reqCounter.Load())
 
-		qResult = stat.queryServersForObject(ctx, "/foo/test.txt", server_structs.CacheType, 1, 1)
+		qResult = stat.queryServersForObject(ctx, "/foo/test.txt", server_structs.CacheType, 1, 1, withCacheAds(cServerAds))
 		assert.Equal(t, querySuccessful, qResult.Status)
 		require.Len(t, qResult.Objects, 1)
 		assert.Equal(t, 1, qResult.Objects[0].ContentLength)
@@ -780,15 +890,20 @@ func TestCache(t *testing.T) {
 		defer cancel()
 
 		stat := NewObjectStat()
+		_, cAds := getAdsForPath("/foo/notfound.txt")
+		cServerAds := make([]server_structs.ServerAd, 0, len(cAds))
+		for _, ad := range cAds {
+			cServerAds = append(cServerAds, ad.ServerAd)
+		}
 
 		startCtr := reqCounter.Load()
-		qResult := stat.queryServersForObject(ctx, "/foo/notfound.txt", server_structs.CacheType, 1, 1)
+		qResult := stat.queryServersForObject(ctx, "/foo/notfound.txt", server_structs.CacheType, 1, 1, withCacheAds(cServerAds))
 		assert.Equal(t, queryFailed, qResult.Status)
 		assert.Len(t, qResult.Objects, 0)
 		assert.Equal(t, queryNoSourcesErr, qResult.ErrorType)
 		require.Equal(t, startCtr+1, reqCounter.Load())
 
-		qResult = stat.queryServersForObject(ctx, "/foo/notfound.txt", server_structs.CacheType, 1, 1)
+		qResult = stat.queryServersForObject(ctx, "/foo/notfound.txt", server_structs.CacheType, 1, 1, withCacheAds(cServerAds))
 		assert.Equal(t, queryFailed, qResult.Status)
 		assert.Len(t, qResult.Objects, 0)
 		assert.Equal(t, queryNoSourcesErr, qResult.ErrorType)

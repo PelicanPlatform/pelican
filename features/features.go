@@ -27,9 +27,9 @@ import (
 
 // Feature represents a server feature with its versions.
 type Feature struct {
-	Name   string
-	Origin map[string]FeatureVersionInfo
-	Cache  map[string]FeatureVersionInfo
+	Name     string
+	Origin   map[string]FeatureVersionInfo
+	Cache    map[string]FeatureVersionInfo
 	Director map[string]FeatureVersionInfo
 	Registry map[string]FeatureVersionInfo
 }
