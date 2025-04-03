@@ -78,6 +78,21 @@ type (
 		DirlistHost   string       `json:"dirlisthost"`
 	}
 
+	// Downtime represents a server downtime event
+	Class    string
+	Severity string
+	Downtime struct {
+		UUID        string   `json:"id" gorm:"primaryKey"`
+		CreatedBy   string   `json:"createdBy" gorm:"not null"` // Person who created this downtime
+		Class       Class    `json:"class" gorm:"not null"`     // SCHEDULED or UNSCHEDULED
+		Description string   `json:"description" gorm:"type:text"`
+		Severity    Severity `json:"severity" gorm:"type:varchar(80);not null"`
+		StartTime   int64    `json:"startTime" gorm:"not null;index"` // Epoch UTC
+		EndTime     int64    `json:"endTime" gorm:"not null;index"`   // Epoch UTC
+		CreatedAt   int64    `json:"createdAt" gorm:"autoCreateTime:milli"`
+		UpdatedAt   int64    `json:"updatedAt" gorm:"autoUpdateTime:milli"`
+	}
+
 	// Common attributes necessary for all server ads
 	ServerBaseAd struct {
 		Name         string    `json:"name"`
@@ -121,6 +136,7 @@ type (
 		Caps                Capabilities      `json:"capabilities"`
 		FromTopology        bool              `json:"from_topology"`
 		IOLoad              float64           `json:"io_load"`
+		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
@@ -145,8 +161,9 @@ type (
 		Namespaces          []NamespaceAdV2   `json:"namespaces"`
 		Issuer              []TokenIssuer     `json:"token-issuer"`
 		StorageType         OriginStorageType `json:"storageType"`
-		DisableDirectorTest bool              `json:"directorTest"` // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
-		Now                 time.Time         `json:"now"`          // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
+		DisableDirectorTest bool              `json:"directorTest"`        // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
+		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
+		Now                 time.Time         `json:"now"`                 // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
 	}
 
 	OriginAdvertiseV1 struct {
@@ -246,6 +263,18 @@ var (
 
 	// Counter for the current server ad generation ID
 	generationID atomic.Uint64
+)
+
+const (
+	SCHEDULED   Class = "SCHEDULED"
+	UNSCHEDULED Class = "UNSCHEDULED"
+)
+
+const (
+	Outage                      Severity = "Outage (completely inaccessible)"
+	Severe                      Severity = "Severe (most services down)"
+	IntermittentOutage          Severity = "Intermittent Outage (may be up for some of the time)"
+	NoSignificantOutageExpected Severity = "No Significant Outage Expected (you shouldn't notice)"
 )
 
 func (x XPelNs) GetName() string {

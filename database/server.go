@@ -3,6 +3,7 @@ package database
 import (
 	"embed"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -65,4 +66,61 @@ func CreateOrUpdateCounter(key string, value int) error {
 		Value: value,
 	}
 	return ServerDatabase.Save(&counter).Error
+}
+
+// CRUD operations for downtimes table
+// Create a new downtime entry
+func CreateDowntime(downtime *server_structs.Downtime) error {
+	if err := ServerDatabase.Create(downtime).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// Update an existing downtime entry by UUID
+func UpdateDowntime(uuid string, updatedDowntime *server_structs.Downtime) error {
+	if err := ServerDatabase.Model(&server_structs.Downtime{}).Where("uuid = ?", uuid).Updates(updatedDowntime).Error; err != nil {
+		return err
+	}
+	return nil
+}
+
+// Delete a downtime entry by UUID (hard delete)
+func DeleteDowntime(uuid string) error {
+	return ServerDatabase.Delete(&server_structs.Downtime{}, "uuid = ?", uuid).Error
+}
+
+// Retrieve all downtime entries where EndTime is later than the current UTC time.
+func GetIncompleteDowntimes() ([]server_structs.Downtime, error) {
+	var downtimes []server_structs.Downtime
+	currentTime := time.Now().UTC().UnixMilli()
+
+	err := ServerDatabase.Where("end_time > ? OR end_time = 0", currentTime).Find(&downtimes).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return downtimes, nil
+}
+
+// Retrieve all downtime entries
+func GetAllDowntimes() ([]server_structs.Downtime, error) {
+	var downtimes []server_structs.Downtime
+
+	err := ServerDatabase.Find(&downtimes).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return downtimes, nil
+}
+
+// Retrieve a downtime entry by UUID
+func GetDowntimeByUUID(uuid string) (*server_structs.Downtime, error) {
+	var downtime server_structs.Downtime
+	err := ServerDatabase.First(&downtime, "uuid = ?", uuid).Error
+	if err != nil {
+		return nil, err
+	}
+	return &downtime, nil
 }
