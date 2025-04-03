@@ -24,16 +24,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/option"
 	"github.com/pkg/errors"
@@ -72,6 +76,10 @@ type (
 		hitChan   chan lruEntry // Notifies the central handler the cache has been used
 		lru       lru           // Manages a LRU of cache entries
 		lruLookup map[string]*lruEntry
+
+		purgeFirstHeap   lru
+		purgeFirstLookup map[string]*lruEntry
+
 		cacheSize uint64 // Total cache size
 	}
 
@@ -244,10 +252,9 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 		err = errors.New("LocalCache.DataLocation is not set; cannot determine where to place file cache's data")
 		return
 	}
-	if err = os.RemoveAll(cacheDir); err != nil {
-		return
-	}
-	if err = os.MkdirAll(cacheDir, os.FileMode(0700)); err != nil {
+
+	err = ensureDir(cacheDir)
+	if err != nil {
 		return
 	}
 
@@ -281,20 +288,31 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 		return nil, err
 	}
 
+	// Allocate lc and initialize all fields, including empty heaps and lookup maps
 	lc = &LocalCache{
-		ctx:         ctx,
-		egrp:        egrp,
-		te:          te,
-		downloads:   make(map[string]*activeDownload),
-		hitChan:     make(chan lruEntry, 64),
-		highWater:   (cacheSize / 100) * uint64(highWaterPercentage),
-		lowWater:    (cacheSize / 100) * uint64(lowWaterPercentage),
-		cacheSize:   0,
-		basePath:    cacheDir,
-		ac:          newAuthConfig(ctx, egrp),
-		sizeReq:     make(chan availSizeReq),
-		directorURL: directorUrl,
-		lruLookup:   make(map[string]*lruEntry),
+		ctx:              ctx,
+		egrp:             egrp,
+		te:               te,
+		downloads:        make(map[string]*activeDownload),
+		hitChan:          make(chan lruEntry, 64),
+		highWater:        (cacheSize / 100) * uint64(highWaterPercentage),
+		lowWater:         (cacheSize / 100) * uint64(lowWaterPercentage),
+		cacheSize:        0,
+		basePath:         cacheDir,
+		ac:               newAuthConfig(ctx, egrp),
+		sizeReq:          make(chan availSizeReq),
+		directorURL:      directorUrl,
+		lruLookup:        make(map[string]*lruEntry),
+		purgeFirstLookup: make(map[string]*lruEntry),
+	}
+
+	// Initialize heaps before reconstructing cache
+	heap.Init(&lc.lru)
+	heap.Init(&lc.purgeFirstHeap)
+
+	// Reconstruct in-memory structures from sentinel files
+	if err := lc.ReconstructCache(); err != nil {
+		log.Warningf("Cache reconstruction failed: %v", err)
 	}
 
 	lc.tc, err = lc.te.NewClient(client.WithAcquireToken(false), client.WithCallback(lc.callback))
@@ -315,6 +333,42 @@ func NewLocalCache(ctx context.Context, egrp *errgroup.Group, options ...LocalCa
 
 	log.Debugln("Successfully created a new local cache object")
 	return
+}
+
+// ensureDir checks if the directory exists and is accessible (read, write, execute).
+// If it doesn't exist, it creates the directory with appropriate permissions.
+func ensureDir(cacheDir string) error {
+	info, err := os.Stat(cacheDir)
+	if err == nil {
+		// Directory exists, check if it's accessible
+		if info.IsDir() {
+			testFile := filepath.Join(cacheDir, ".perm_test")
+			file, err := os.Create(testFile)
+			if err != nil {
+				err = errors.New("directory is not fully accessible (write permission missing)")
+				log.WithError(err).Error("Directory permission issue")
+				return err
+			}
+			file.Close()
+			os.Remove(testFile)
+			return nil
+		} else {
+			err = errors.New("path exists but is not a directory: " + cacheDir)
+			log.WithError(err).Error("Invalid directory path")
+			return err
+		}
+	} else if !os.IsNotExist(err) {
+		log.WithError(err).Error("Error checking directory")
+		return err
+	}
+
+	// Directory does not exist, create it
+	if err = os.MkdirAll(cacheDir, 0700); err != nil {
+		log.WithError(err).Error("Error creating directory")
+		return err
+	}
+
+	return nil
 }
 
 // Try to configure the local cache and launch the reconfigure goroutine
@@ -612,9 +666,71 @@ func (lc *LocalCache) purge() (err error) {
 	log.Debugln("Starting purge routine")
 	lc.purgeMutex.Lock()
 	defer lc.purgeMutex.Unlock()
-	heap.Init(&lc.lru)
+
 	start := time.Now()
-	log.Debugf("Purge running with cache size %d and low watermark of %d", lc.cacheSize, lc.lowWater)
+
+	// Purge purgeFirstHeap first
+	heap.Init(&lc.purgeFirstHeap)
+	log.Debugf("Purging `PURGEFIRST` objects first; cache size is %d, low watermark is %d", lc.cacheSize, lc.lowWater)
+	for lc.cacheSize > lc.lowWater {
+		if len(lc.purgeFirstHeap) == 0 {
+			log.Debugln("Purge first heap is empty, moving to main LRU heap")
+			break
+		}
+		entry := heap.Pop(&lc.purgeFirstHeap).(*lruEntry)
+		if entry == nil {
+			log.Warningln("Consistency error: purge ran but no entry provided")
+			continue
+		}
+		if entry.path == "" {
+			log.Warningln("Consistency error: purge ran on an empty path")
+			continue
+		}
+
+		localPath := path.Join(lc.basePath, path.Clean(entry.path))
+		if rmErr := os.Remove(localPath + ".DONE"); rmErr != nil {
+			log.Warningln("Failed to purge DONE file:", rmErr)
+			if err == nil {
+				err = rmErr
+			}
+		}
+		if rmErr := os.Remove(localPath + ".PURGEFIRST"); rmErr != nil {
+			if !os.IsNotExist(rmErr) {
+				log.Warningln("Failed to purge PURGEFIRST file:", rmErr)
+				if err == nil {
+					err = rmErr
+				}
+			}
+		}
+		if rmErr := os.Remove(localPath); rmErr != nil {
+			log.Warningln("Failed to purge file:", rmErr)
+			if err == nil {
+				err = rmErr
+			}
+		} else {
+			log.Debugf("Successfully purged file %s", localPath)
+		}
+
+		// Remove from lruHeap as well
+		if lruIndex := lc.getHeapIndex(entry, lc.lru); lruIndex != -1 {
+			heap.Remove(&lc.lru, lruIndex)
+			delete(lc.lruLookup, entry.path)
+			log.Debugf("Purged file %s from both purge first and LRU heap", entry.path)
+		}
+
+		delete(lc.purgeFirstLookup, entry.path)
+		lc.cacheSize -= uint64(entry.size)
+
+		if time.Since(start) > 3*time.Second {
+			err = purgeTimeout
+			log.Warningln("Purge timeout while clearing purge first objects")
+			return
+		}
+	}
+
+	// Now purge from the main LRU heap if lowWater is still not reached
+	heap.Init(&lc.lru)
+	log.Debugf("Purging main cache; cache size is %d, low watermark is %d", lc.cacheSize, lc.lowWater)
 	for lc.cacheSize > lc.lowWater {
 		if len(lc.lru) == 0 {
 			err = errors.New("purge ran until cache was empty")
@@ -623,13 +739,14 @@ func (lc *LocalCache) purge() (err error) {
 		}
 		entry := heap.Pop(&lc.lru).(*lruEntry)
 		if entry == nil {
-			log.Warningln("Consistency error: purge run but no entry provided")
+			log.Warningln("Consistency error: purge ran but no entry provided")
 			continue
 		}
 		if entry.path == "" {
 			log.Warningln("Consistency error: purge ran on an empty path")
 			continue
 		}
+
 		localPath := path.Join(lc.basePath, path.Clean(entry.path))
 		if rmErr := os.Remove(localPath + ".DONE"); rmErr != nil {
 			log.Warningln("Failed to purge DONE file:", rmErr)
@@ -642,15 +759,20 @@ func (lc *LocalCache) purge() (err error) {
 			if err == nil {
 				err = rmErr
 			}
+		} else {
+			log.Debugf("Successfully purged file %s", localPath)
 		}
+		delete(lc.lruLookup, entry.path)
 		lc.cacheSize -= uint64(entry.size)
-		// Since purge is called from the mux thread, blocking can cause
-		// other failures; do a time-based break even if we've not hit the low-water
+
+		// Ensure purge does not block for too long
 		if time.Since(start) > 3*time.Second {
 			err = purgeTimeout
+			log.Warningln("Purge timeout while clearing main LRU heap")
 			break
 		}
 	}
+
 	return
 }
 
@@ -910,5 +1032,164 @@ func (cr *cacheReader) readRaw(ctx context.Context, p []byte) (n int, err error)
 }
 
 func (cr *cacheReader) Close() error {
+	return nil
+}
+
+// MarkObjectPurgeFirst marks the given object path as PURGEFIRST
+// by creating the corresponding sentinel file on disk and updating
+// the in-memory data structures accordingly.
+func (lc *LocalCache) MarkObjectPurgeFirst(objectPath string) (int, error) {
+	lc.mutex.Lock()
+	defer lc.mutex.Unlock()
+
+	entry, exists := lc.lruLookup[objectPath]
+	if !exists {
+		log.Warningf("Object not found in cache (path: %s)", objectPath)
+		return http.StatusNotFound, errors.New("object not found in cache")
+	}
+
+	// Check if already in purgeFirstHeap to prevent duplicates
+	if _, isPurgeFirst := lc.purgeFirstLookup[objectPath]; isPurgeFirst {
+		log.Debugf("Object already in purge first heap (path: %s)", objectPath)
+		return http.StatusOK, nil
+	}
+
+	// Add to purge first heap but DO NOT remove from lruHeap
+	lc.purgeFirstHeap = append(lc.purgeFirstHeap, entry)
+	lc.purgeFirstLookup[objectPath] = entry
+
+	safePath, err := securejoin.SecureJoin(lc.basePath, objectPath)
+	if err != nil {
+		log.Warnf("Invalid path: %v", err)
+		return http.StatusBadRequest, errors.New("invalid path (outside base directory)")
+	}
+
+	sentinelPath := safePath + ".PURGEFIRST"
+
+	fp, err := os.OpenFile(sentinelPath, os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		log.Errorf("Failed to create sentinel file %s: %v", sentinelPath, err)
+		return http.StatusInternalServerError, errors.New("failed to create sentinel file")
+	}
+	fp.Close()
+	log.Debugf("Created sentinel file %s", sentinelPath)
+
+	// Print full purgeFirstHeap contents
+	var heapEntries []string
+	for _, e := range lc.purgeFirstHeap {
+		heapEntries = append(heapEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", e.path, e.size, e.lastUse))
+	}
+	log.Debugf("Current purgeFirstHeap: %v", heapEntries)
+
+	// Print full purgeFirstLookup contents
+	var lookupEntries []string
+	for k, v := range lc.purgeFirstLookup {
+		lookupEntries = append(lookupEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", k, v.size, v.lastUse))
+	}
+	log.Debugf("Current purgeFirstLookup: %v", lookupEntries)
+
+	return http.StatusOK, nil
+}
+
+func (lc *LocalCache) getHeapIndex(entry *lruEntry, heapList lru) int {
+	for i, e := range heapList {
+		if e == entry {
+			return i
+		}
+	}
+	return -1 // Entry not found
+}
+
+// ReconstructCache rebuilds the in-memory data structures of the LocalCache based on the files
+// present in the directory specified by "LocalCache.DataLocation".
+func (lc *LocalCache) ReconstructCache() error {
+	lc.mutex.Lock()
+	defer lc.mutex.Unlock()
+
+	log.Info("Reconstructing cache from sentinel files...")
+
+	// Reset in-memory structures
+	lc.lru = nil
+	lc.lruLookup = make(map[string]*lruEntry)
+	lc.purgeFirstHeap = nil
+	lc.purgeFirstLookup = make(map[string]*lruEntry)
+	lc.cacheSize = 0
+
+	// Scan basePath directory
+	err := filepath.WalkDir(lc.basePath, func(filePath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			log.Errorf("Error scanning directory %s: %v", filePath, err)
+			return nil
+		}
+
+		// Check for sentinel files
+		if strings.HasSuffix(d.Name(), ".DONE") {
+			dataFilePath := strings.TrimSuffix(filePath, filepath.Ext(filePath)) // Remove extension
+
+			fileInfo, err := os.Stat(dataFilePath)
+			if err != nil {
+				log.Warningf("File %s exists in sentinel but not on disk, skipping...", dataFilePath)
+				return nil
+			}
+
+			entry := &lruEntry{
+				path:    strings.TrimPrefix(dataFilePath, lc.basePath),
+				size:    fileInfo.Size(),
+				lastUse: fileInfo.ModTime(),
+			}
+
+			lc.lru = append(lc.lru, entry)
+			lc.lruLookup[entry.path] = entry
+
+			lc.cacheSize += uint64(entry.size)
+
+			// Check if .PURGEFIRST sentinel exists
+			purgeFirstPath := dataFilePath + ".PURGEFIRST"
+			if _, err := os.Stat(purgeFirstPath); err == nil {
+				lc.purgeFirstHeap = append(lc.purgeFirstHeap, entry)
+				lc.purgeFirstLookup[entry.path] = entry
+			}
+		}
+
+		return nil
+	})
+
+	// Initialize heaps after loading entries
+	heap.Init(&lc.lru)
+	heap.Init(&lc.purgeFirstHeap)
+
+	if err != nil {
+		log.Errorf("Error reconstructing cache: %v", err)
+		return err
+	}
+
+	// Log the final reconstructed structures
+	var lruEntries []string
+	for _, e := range lc.lru {
+		lruEntries = append(lruEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", e.path, e.size, e.lastUse))
+	}
+	log.Debugf("Final LRU heap: %v", lruEntries)
+
+	var lruLookupEntries []string
+	for k, v := range lc.lruLookup {
+		lruLookupEntries = append(lruLookupEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", k, v.size, v.lastUse))
+	}
+	log.Debugf("Final LRU lookup: %v", lruLookupEntries)
+
+	var purgeFirstEntries []string
+	for _, e := range lc.purgeFirstHeap {
+		purgeFirstEntries = append(purgeFirstEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", e.path, e.size, e.lastUse))
+	}
+	log.Debugf("Final purge first heap: %v", purgeFirstEntries)
+
+	var purgeFirstLookupEntries []string
+	for k, v := range lc.purgeFirstLookup {
+		purgeFirstLookupEntries = append(purgeFirstLookupEntries, fmt.Sprintf("{path: %s, size: %d, lastUse: %s}", k, v.size, v.lastUse))
+	}
+	log.Debugf("Final purge first lookup: %v", purgeFirstLookupEntries)
+
+	log.Infof("Reconstruction complete: %d cache entries, %d purge first entries, total cache size: %d bytes",
+		len(lc.lru), len(lc.purgeFirstHeap), lc.cacheSize)
+
 	return nil
 }
