@@ -67,7 +67,8 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 
 	// Spin up a federation and get the Director's URL
 	viper.Set(param.Server_UIAdminUsers.GetName(), "admin-user")
-	viper.Set(param.Server_AdvertisementInterval.GetName(), 1*time.Second) // was 1 minute by default
+	customAdvertisementInterval := 100 * time.Millisecond
+	viper.Set(param.Server_AdvertisementInterval.GetName(), customAdvertisementInterval) // was 1 minute by default
 	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
 	fedInfo, err := config.GetFederation(ctx)
 	require.NoError(t, err, "Failed to get federation service info")
@@ -115,8 +116,6 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	cacheWebUrl, err := url.Parse(cacheWebUrlStr)
 	require.NoError(t, err, "Failed to parse cache URL")
 
-	// originServer := origin.OriginServer{}
-	// ads := originServer.GetNamespaceAds()
 	// Assemble a downtime creation request to the cache server
 	incompleteDowntime := web_ui.DowntimeInput{
 		Class:       "SCHEDULED",
@@ -155,28 +154,45 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	require.NoError(t, err, "Failed to read downtime creation response body")
 	t.Log("Downtime Creation Response: ", string(downtimeCreationRespBody))
 
-	// Sleep for 2 seconds so the cache server has time to propagate the advertisement
-	time.Sleep(2 * time.Second)
-
-	// Now ask the Director if it has the downtime we just set
+	// Now ask the Director for the downtime we just set
 	getSpecificServerAdPath, err := url.JoinPath("api", "v1.0", "director_ui", "servers", cacheServerName)
 	require.NoError(t, err, "Failed to join specific server ad path")
 	directorUrl.Path = getSpecificServerAdPath
-	specificServerAdRequest, err := http.NewRequest("GET", directorUrl.String(), nil)
-	require.NoError(t, err, "Failed to create HTTP request against a specific server")
 
-	specificServerAdResp, err := client.Do(specificServerAdRequest)
-	require.NoError(t, err, "Failed to get response from specific server request")
-	defer specificServerAdResp.Body.Close()
-	require.Equal(t, resp.StatusCode, http.StatusOK, "Failed to get the advertisement of a specific server from director")
-	adBody, err := io.ReadAll(specificServerAdResp.Body)
-	require.NoError(t, err, "Failed to read server ad body")
+	// Poll for the downtime advertisement
+	timeout := time.After(5 * time.Second)
+	ticker := time.NewTicker(customAdvertisementInterval)
+	defer ticker.Stop()
+
+	var serverAd serverAdUnmarshalCustom
+	var foundDowntime bool
+LOOP:
+	for {
+		select {
+		case <-timeout:
+			t.Fatal("Timed out waiting for downtime propagation")
+		case <-ticker.C:
+			// Re-fetch the server advertisement from the Director
+			specificServerAdRequest, err := http.NewRequest("GET", directorUrl.String(), nil)
+			require.NoError(t, err, "Failed to create HTTP request against a specific server")
+			specificServerAdResp, err := client.Do(specificServerAdRequest)
+			require.NoError(t, err, "Failed to get response from specific server request")
+			adBody, err := io.ReadAll(specificServerAdResp.Body)
+			require.NoError(t, err, "Failed to read server ad body")
+			specificServerAdResp.Body.Close()
+			err = json.Unmarshal(adBody, &serverAd)
+			require.NoError(t, err, "Failed to unmarshal server ad")
+
+			// Check if downtime is present
+			if len(serverAd.Downtimes) > 0 {
+				foundDowntime = true
+				break LOOP // Exit the outer loop if downtime is found
+			}
+		}
+	}
+	require.True(t, foundDowntime, "Downtime not found in server ad")
 
 	// Verify the downtime we just set is in the server ad
-	var serverAd serverAdUnmarshalCustom
-	err = json.Unmarshal(adBody, &serverAd)
-	require.NoError(t, err, "Failed to unmarshal server ad")
-
 	require.Len(t, serverAd.Downtimes, 1, "Downtime not found in server ad")
 	require.Equal(t, incompleteDowntime.Severity, serverAd.Downtimes[0].Severity, "Downtime severity mismatch")
 	require.Equal(t, "admin-user", serverAd.Downtimes[0].CreatedBy, "Downtime creator mismatch")
