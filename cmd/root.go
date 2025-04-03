@@ -144,6 +144,7 @@ func init() {
 	rootCmd.AddCommand(rootPluginCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(generateCmd)
+	rootCmd.AddCommand(downtimeCmd)
 	rootCmd.AddCommand(config_printer.ConfigCmd)
 	preferredPrefix := config.GetPreferredPrefix()
 	rootCmd.Use = strings.ToLower(preferredPrefix.String())
