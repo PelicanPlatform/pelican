@@ -28,6 +28,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
+	"github.com/pelicanplatform/pelican/features"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -58,6 +59,21 @@ func (server *OriginServer) GetPids() (pids []int) {
 	pids = make([]int, len(server.pids))
 	copy(pids, server.pids)
 	return
+}
+
+// Use what we know about the current origin to determine which "features"
+// it requires. This gets put into the origin's advertisement to be used
+// during director matchmaking.
+func (server *OriginServer) GetRequiredFeatures() []features.Feature {
+	var requiredFeatures []features.Feature
+
+	// This feature was introduced in v7.16, and all origins/caches after that
+	// should be able to support it.
+	if param.Origin_DisableDirectClients.GetBool() {
+		requiredFeatures = append(requiredFeatures, features.CacheAuthz)
+	}
+
+	return requiredFeatures
 }
 
 func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
@@ -145,6 +161,14 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		return nil, err
 	}
 
+	// Determine whether this origin requires any special features that may place
+	// limitations on the other servers (e.g. caches) it can work with.
+	requiredFeatures := server.GetRequiredFeatures()
+	featureNames := make([]string, len(requiredFeatures))
+	for i, feature := range requiredFeatures {
+		featureNames[i] = feature.GetName()
+	}
+
 	// PublicReads implies reads
 	reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
 	extUrlStr := param.Server_ExternalWebUrl.GetString()
@@ -177,6 +201,7 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		StorageType:         ost,
 		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
 		Downtimes:           downtimes,
+		RequiredFeatures:    featureNames,
 	}
 	ad.Initialize(name)
 
