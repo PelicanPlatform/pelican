@@ -108,6 +108,15 @@ func TestDowntime(t *testing.T) {
 	err = database.InsertMockDowntime(pastDowntime)
 	assert.NoError(t, err)
 
+	t.Run("get-downtime-no-query-param", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/api/v1.0/downtime", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), activeDowntime.UUID)
+	})
+
 	t.Run("get-active-downtime", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", "/api/v1.0/downtime?status=incomplete", nil)
 		w := httptest.NewRecorder()

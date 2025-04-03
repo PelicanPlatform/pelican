@@ -173,7 +173,9 @@ func deleteServerDowntimeSetByServerAdmin(serverName string) error {
 			return errors.Wrapf(err, "failed to delete downtime status for server %s in database", serverName)
 		}
 		// Delete the downtime from Director's in-memory cache too only if the database operation was successful
+		filteredServersMutex.Lock()
 		delete(filteredServers, serverName)
+		filteredServersMutex.Unlock()
 	}
 
 	return nil

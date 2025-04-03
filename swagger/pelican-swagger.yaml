@@ -763,7 +763,7 @@ definitions:
       endTime:
         type: integer
         format: int64
-        description: End time of the downtime in milliseconds since epoch (UTC).  0 indicates ongoing downtime.
+        description: End time of the downtime in milliseconds since epoch (UTC). -1 indicates the downtime is ongoing indefinitely.
         example: 1740967199900
       createdAt:
         type: integer
@@ -2453,10 +2453,6 @@ paths:
           schema:
             type: object
             properties:
-              createdBy:
-                type: string
-                description: The person who created the downtime entry
-                required: true
               class:
                 type: string
                 description: Class of downtime (SCHEDULED or UNSCHEDULED)
@@ -2484,7 +2480,7 @@ paths:
               endTime:
                 type: integer
                 format: int64
-                description: End time of the downtime in milliseconds since epoch (UTC).  0 indicates ongoing downtime.
+                description: End time of the downtime in milliseconds since epoch (UTC). -1 indicates the downtime is ongoing indefinitely.
                 required: true
       responses:
         "200":
@@ -2606,9 +2602,6 @@ paths:
           schema:
             type: object
             properties:
-              createdBy:
-                type: string
-                description: The person who created the downtime entry
               class:
                 type: string
                 description: Class of downtime (SCHEDULED or UNSCHEDULED)
@@ -2633,7 +2626,7 @@ paths:
               endTime:
                 type: integer
                 format: int64
-                description: End time of the downtime in milliseconds since epoch (UTC).  0 indicates ongoing downtime.
+                description: End time of the downtime in milliseconds since epoch (UTC). -1 indicates the downtime is ongoing indefinitely.
       responses:
         "200":
           description: Downtime updated successfully

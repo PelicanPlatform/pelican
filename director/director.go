@@ -1272,7 +1272,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	if adV2.Downtimes != nil {
 		// Process received server(origin/cache) downtimes and toggle the director db accordingly when necessary
 		currentTime := time.Now().UTC().UnixMilli()
-		bringItDown := false // Flag to indicate if this server is put in downtime in the traversal of
+		bringItDown := false // Flag to indicate if this server is put in downtime during the traversal of the downtimes in this server ad
 		sn := adV2.Name
 		// Check if the server is currently in downtime
 		for _, downtime := range adV2.Downtimes {
@@ -1301,7 +1301,9 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 						filteredServers[sn] = originalFilterType
 						filteredServersMutex.Unlock()
 					} else {
+						filteredServersMutex.Lock()
 						delete(filteredServers, sn)
+						filteredServersMutex.Unlock()
 					}
 				}
 				bringItDown = true

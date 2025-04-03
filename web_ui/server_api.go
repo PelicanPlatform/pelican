@@ -22,6 +22,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/pkg/errors"
 	"google.golang.org/appengine/log"
 
 	"github.com/pelicanplatform/pelican/database"
@@ -38,6 +39,10 @@ type (
 		EndTime     int64                   `json:"endTime"`   // Epoch UTC in seconds
 	}
 )
+
+// Indicate the downtime is ongoing indefinitely.
+// We chose -1 to avoid the default value (0) of the int64 type
+const indefiniteEndTime int64 = -1
 
 func isValidClass(class server_structs.Class) bool {
 	validClasses := map[server_structs.Class]bool{
@@ -57,6 +62,29 @@ func isValidSeverity(severity server_structs.Severity) bool {
 	return validSeverities[severity]
 }
 
+func isValidTimeRange(startTime, endTime int64) bool {
+	// When endTime is indefinite, the downtime is considered ongoing forever
+	// Note: when you do a partial update and not provide startTime/endTime,
+	// they are 0 by default and should be considered as valid input
+	if endTime == indefiniteEndTime {
+		return startTime >= 0
+	}
+	return startTime <= endTime
+}
+
+func validateDowntimeInput(downtimeInput DowntimeInput) error {
+	if downtimeInput.Class != "" && !isValidClass(downtimeInput.Class) {
+		return errors.New("Invalid input downtime class")
+	}
+	if downtimeInput.Severity != "" && !isValidSeverity(downtimeInput.Severity) {
+		return errors.New("Invalid input downtime severity")
+	}
+	if !isValidTimeRange(downtimeInput.StartTime, downtimeInput.EndTime) {
+		return errors.New("Invalid downtime time range")
+	}
+	return nil
+}
+
 func HandleCreateDowntime(ctx *gin.Context) {
 	var downtimeInput DowntimeInput
 	if err := ctx.ShouldBindJSON(&downtimeInput); err != nil {
@@ -73,12 +101,8 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		return
 	}
 
-	if !isValidClass(downtimeInput.Class) {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Invalid downtime class"})
-		return
-	}
-	if !isValidSeverity(downtimeInput.Severity) {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Invalid downtime severity"})
+	if err = validateDowntimeInput(downtimeInput); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
 		return
 	}
 
@@ -113,17 +137,11 @@ func HandleGetDowntime(ctx *gin.Context) {
 	var err error
 
 	switch status {
-	case "incomplete":
-		// "incomplete" includes active and future downtimes
-		downtimes, err = database.GetIncompleteDowntimes()
 	case "all":
 		downtimes, err = database.GetAllDowntimes()
 	default:
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Invalid 'status' query parameter. Must be 'incomplete' or 'all'.",
-		})
-		return
+		// "incomplete" includes active and future downtimes
+		downtimes, err = database.GetIncompleteDowntimes()
 	}
 
 	if err != nil {
@@ -151,12 +169,8 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 		return
 	}
 
-	if downtimeInput.Class != "" && !isValidClass(downtimeInput.Class) {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Invalid input downtime class"})
-		return
-	}
-	if downtimeInput.Severity != "" && !isValidSeverity(downtimeInput.Severity) {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Invalid input downtime severity"})
+	if err := validateDowntimeInput(downtimeInput); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: err.Error()})
 		return
 	}
 
@@ -170,16 +184,7 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 		return
 	}
 
-	// End time should be greater than start time
-	if downtimeInput.EndTime != 0 && downtimeInput.EndTime <= downtimeInput.StartTime {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "End time should be greater than start time",
-		})
-		return
-	}
-
-	// Only update fields provided in the request
+	// Only update fields provided in the request (different from default values)
 	if downtimeInput.CreatedBy != "" {
 		existingDowntime.CreatedBy = downtimeInput.CreatedBy
 	}
@@ -195,7 +200,9 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 	if downtimeInput.StartTime != 0 {
 		existingDowntime.StartTime = downtimeInput.StartTime
 	}
-	existingDowntime.EndTime = downtimeInput.EndTime
+	if downtimeInput.EndTime != 0 {
+		existingDowntime.EndTime = downtimeInput.EndTime
+	}
 
 	if err := database.UpdateDowntime(uuid, existingDowntime); err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to update downtime: " + err.Error()})
