@@ -23,10 +23,20 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	// "github.com/hashicorp/go-version"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
 )
+
+// Helper func to produce server ads for tests
+func produceAd(name, adType, vString string) server_structs.ServerAd {
+	ad := server_structs.ServerAd{
+		ServerBaseAd: server_structs.ServerBaseAd{},
+		Type:         adType,
+	}
+	ad.Initialize(name)
+	ad.Version = vString
+	return ad
+}
 
 func TestServerSupportsFeature(t *testing.T) {
 	mockFeature := Feature{
@@ -51,84 +61,48 @@ func TestServerSupportsFeature(t *testing.T) {
 		expectedResult utils.Ternary
 	}{
 		{
-			name: "Origin server supports feature within range",
-			serverAd: server_structs.ServerAd{
-				Name:    "OriginServer",
-				Type:    server_structs.OriginType.String(),
-				Version: "v7.15",
-			},
+			name:           "Origin server supports feature within range",
+			serverAd:       produceAd("OriginServer", server_structs.OriginType.String(), "v7.15"),
 			expectedResult: utils.Tern_True,
 		},
 		{
-			name: "Origin server does not support feature (below range)",
-			serverAd: server_structs.ServerAd{
-				Name:    "OriginServer",
-				Type:    server_structs.OriginType.String(),
-				Version: "v7.05",
-			},
+			name:           "Origin server does not support feature (below range)",
+			serverAd:       produceAd("OriginServer", server_structs.OriginType.String(), "v7.05"),
 			expectedResult: utils.Tern_False,
 		},
 		{
-			name: "Origin server does not support feature (above range)",
-			serverAd: server_structs.ServerAd{
-				Name:    "OriginServer",
-				Type:    server_structs.OriginType.String(),
-				Version: "v7.99",
-			},
+			name:           "Origin server does not support feature (above range)",
+			serverAd:       produceAd("OriginServer", server_structs.OriginType.String(), "v7.25"),
 			expectedResult: utils.Tern_False,
 		},
 		{
-			name: "Cache server supports feature within range",
-			serverAd: server_structs.ServerAd{
-				Name:    "CacheServer",
-				Type:    server_structs.CacheType.String(),
-				Version: "v7.20",
-			},
+			name:           "Cache server supports feature within range",
+			serverAd:       produceAd("CacheServer", server_structs.CacheType.String(), "v7.20"),
 			expectedResult: utils.Tern_True,
 		},
 		{
-			name: "Cache server does not support feature (below range)",
-			serverAd: server_structs.ServerAd{
-				Name:    "CacheServer",
-				Type:    server_structs.CacheType.String(),
-				Version: "v7.0",
-			},
+			name:           "Cache server does not support feature (below range)",
+			serverAd:       produceAd("CacheServer", server_structs.CacheType.String(), "v7.0"),
 			expectedResult: utils.Tern_False,
 		},
 		{
-			name: "Cache server does not support feature (above range)",
-			serverAd: server_structs.ServerAd{
-				Name:    "CacheServer",
-				Type:    server_structs.CacheType.String(),
-				Version: "v7.30",
-			},
+			name:           "Cache server does not support feature (above range)",
+			serverAd:       produceAd("CacheServer", server_structs.CacheType.String(), "v7.30"),
 			expectedResult: utils.Tern_False,
 		},
 		{
-			name: "Unknown server type",
-			serverAd: server_structs.ServerAd{
-				Name:    "UnknownServer",
-				Type:    "UnknownType",
-				Version: "v7.15",
-			},
+			name:           "Unknown server type",
+			serverAd:       produceAd("UnknownServer", "UnknownType", "v7.15"),
 			expectedResult: utils.Tern_Unknown,
 		},
 		{
-			name: "Missing version information",
-			serverAd: server_structs.ServerAd{
-				Name:    "NoVersionServer",
-				Type:    server_structs.OriginType.String(),
-				Version: "",
-			},
+			name:           "Missing version information",
+			serverAd:       produceAd("NoVersionServer", server_structs.OriginType.String(), ""),
 			expectedResult: utils.Tern_Unknown,
 		},
 		{
-			name: "Invalid version format",
-			serverAd: server_structs.ServerAd{
-				Name:    "InvalidVersionServer",
-				Type:    server_structs.CacheType.String(),
-				Version: "invalid_version",
-			},
+			name:           "Invalid version format",
+			serverAd:       produceAd("InvalidVersionServer", server_structs.CacheType.String(), "invalid_version"),
 			expectedResult: utils.Tern_Unknown,
 		},
 	}
