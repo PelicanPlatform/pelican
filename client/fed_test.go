@@ -664,7 +664,7 @@ func TestDirectReads(t *testing.T) {
 		// Download the file with GET. Shouldn't need a token to succeed
 		_, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "No origins on specified endpoint have direct reads enabled")
+		assert.Contains(t, err.Error(), fmt.Sprintf("%d", http.StatusMethodNotAllowed))
 	})
 
 	// Test that direct reads fail if DirectReads=false is set for namespace/export config but true for origin
@@ -695,7 +695,7 @@ func TestDirectReads(t *testing.T) {
 		// Download the file with GET. Shouldn't need a token to succeed
 		_, err = client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "No origins on specified endpoint have direct reads enabled")
+		assert.Contains(t, err.Error(), fmt.Sprintf("%d", http.StatusMethodNotAllowed))
 	})
 }
 
@@ -837,7 +837,7 @@ func TestObjectList(t *testing.T) {
 
 		_, err := client.DoList(fed.Ctx, listURL, nil, client.WithTokenLocation(tempToken.Name()))
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "404: No namespace found for prefix. Either it doesn't exist, or the Director is experiencing problems")
+		require.Contains(t, err.Error(), fmt.Sprintf("%d", http.StatusNotFound))
 	})
 }
 

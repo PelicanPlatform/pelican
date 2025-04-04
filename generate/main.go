@@ -31,4 +31,5 @@ func main() {
 	GenSwaggerDoc()
 	GenTokenScope()
 	GenErrorCodes()
+	GenServerFeatures()
 }

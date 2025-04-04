@@ -1,20 +1,20 @@
 /***************************************************************
- *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- ***************************************************************/
+*
+* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+*
+* Licensed under the Apache License, Version 2.0 (the "License"); you
+* may not use this file except in compliance with the License.  You may
+* obtain a copy of the License at
+*
+*    http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*
+***************************************************************/
 
 package director
 
@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -36,6 +37,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -299,22 +301,12 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 
 	ads := []server_structs.ServerAd{}
 
-	// Only fetch origin/cacheAds if it's not provided AND the sType has the corresponding server type
-	if sType.IsEnabled(server_structs.OriginType) {
-		if !cfg.originAdsProvided {
-			_, originAds, _ := getAdsForPath(objectName)
-			ads = append(ads, originAds...)
-		} else {
-			ads = append(ads, cfg.originAds...)
-		}
+	// Use the provided originAds and cacheAds if available
+	if sType.IsEnabled(server_structs.OriginType) && cfg.originAdsProvided {
+		ads = append(ads, cfg.originAds...)
 	}
-	if sType.IsEnabled(server_structs.CacheType) {
-		if !cfg.cacheAdsProvided {
-			_, _, cacheAds := getAdsForPath(objectName)
-			ads = append(ads, cacheAds...)
-		} else {
-			ads = append(ads, cfg.cacheAds...)
-		}
+	if sType.IsEnabled(server_structs.CacheType) && cfg.cacheAdsProvided {
+		ads = append(ads, cfg.cacheAds...)
 	}
 
 	minReq := param.Director_MinStatResponse.GetInt()
@@ -541,4 +533,137 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 			}
 		}
 	}
+}
+
+// Generate the availability maps for origins and caches based on the stat query results. Used in redirection sorting.
+// The function should determine whether it needs to stat the origins and caches based on the request parameters.
+// If stat checks are skipped for both origins and caches, assume all are available.
+func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2) (map[string]bool, map[string]bool, error) {
+	reqPath := getObjectPathFromRequest(ctx)
+	reqParams := getRequestParameters(ctx.Request)
+
+	originAvailabilityMap := make(map[string]bool, len(origins))
+	cacheAvailabilityMap := make(map[string]bool, len(caches))
+
+	// Determine whether to skip stat for origins and caches
+	shouldStatOrigins := !reqParams.Has(pelican_url.QuerySkipStat) && param.Director_CheckOriginPresence.GetBool()
+	shouldStatCaches := (!reqParams.Has(pelican_url.QuerySkipStat) && param.Director_CheckCachePresence.GetBool()) || requiresCacheChaining(ctx, origins)
+
+	if param.Director_AssumePresenceAtSingleOrigin.GetBool() && len(origins) == 1 {
+		shouldStatOrigins = false
+	}
+
+	// However, if we detect the namespace requires token auth and there's no incoming token, skip all stats
+	if !bestNSAd.Caps.PublicReads && reqParams.Get("authz") == "" {
+		shouldStatOrigins = false
+		shouldStatCaches = false
+	}
+
+	// Skip stats based on the request method
+	if ctx.Request.Method == http.MethodPut || ctx.Request.Method == http.MethodDelete || ctx.Request.Method == "PROPFIND" {
+		shouldStatOrigins = false
+		shouldStatCaches = false
+	}
+
+	if len(caches) == 0 {
+		shouldStatCaches = false
+	}
+	if len(origins) == 0 {
+		shouldStatOrigins = false
+	}
+
+	// If stat checks are skipped for both origins and caches, assume all are available
+	if !shouldStatOrigins {
+		for _, origin := range origins {
+			originAvailabilityMap[origin.URL.String()] = true
+		}
+	}
+	if !shouldStatCaches {
+		for _, cache := range caches {
+			cacheAvailabilityMap[cache.URL.String()] = true
+		}
+	}
+	if !shouldStatOrigins && !shouldStatCaches {
+		return originAvailabilityMap, cacheAvailabilityMap, nil
+	}
+
+	// Perform stat query
+	q := NewObjectStat()
+	st := server_structs.NewServerType()
+
+	sTypes := []server_structs.ServerType{}
+	if shouldStatOrigins {
+		sTypes = append(sTypes, server_structs.OriginType)
+	}
+	if shouldStatCaches {
+		sTypes = append(sTypes, server_structs.CacheType)
+	}
+	st.SetList(sTypes)
+
+	// Filter the ads to include only the relevant types
+	oAdsToQuery := origins
+	cAdsToQuery := caches
+	if !shouldStatOrigins {
+		oAdsToQuery = nil
+	}
+	if !shouldStatCaches {
+		cAdsToQuery = nil
+	}
+
+	qr := q.Query(context.Background(), reqPath, st, 1, len(oAdsToQuery)+len(cAdsToQuery),
+		withOriginAds(oAdsToQuery), withCacheAds(cAdsToQuery), WithToken(reqParams.Get("authz")))
+
+	if qr.Status == queryFailed {
+		if qr.ErrorType != queryNoSourcesErr && qr.ErrorType != queryInsufficientResErr {
+			return nil, nil, errors.Errorf("stat query failed: %s", qr.Msg)
+		}
+	}
+
+	// Populate availability maps based on stat results
+	for _, obj := range qr.Objects {
+		serverHost := obj.URL.Host
+		for _, origin := range origins {
+			if origin.URL.Host == serverHost || origin.AuthURL.Host == serverHost {
+				originAvailabilityMap[origin.URL.String()] = true
+			}
+		}
+		for _, cache := range caches {
+			if cache.URL.Host == serverHost || cache.AuthURL.Host == serverHost {
+				cacheAvailabilityMap[cache.URL.String()] = true
+			}
+		}
+	}
+
+	// Handle denied servers
+	for _, ds := range qr.DeniedServers {
+		for _, origin := range origins {
+			if origin.AuthURL.String() == ds {
+				originAvailabilityMap[origin.URL.String()] = true
+			}
+		}
+		for _, cache := range caches {
+			if cache.AuthURL.String() == ds {
+				cacheAvailabilityMap[cache.URL.String()] = true
+			}
+		}
+	}
+
+	// If we issued stat requests against the Origin but none have the object,
+	// it likely doesn't exist. This constitutes an actual error that we can propagate
+	// back to the client.
+	if shouldStatOrigins && len(origins) > 0 {
+		found := false
+		for _, origin := range origins {
+			if originAvailabilityMap[origin.URL.String()] {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			return nil, nil, objectNotFoundErr{msg: "no queried origins possess the object", object: reqPath}
+		}
+	}
+
+	return originAvailabilityMap, cacheAvailabilityMap, nil
 }

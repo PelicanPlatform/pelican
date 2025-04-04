@@ -121,6 +121,7 @@ type (
 		Caps                Capabilities      `json:"capabilities"`
 		FromTopology        bool              `json:"from_topology"`
 		IOLoad              float64           `json:"io_load"`
+		RequiredFeatures    []string          `json:"requiredFeatures"` // A list of feature names required by this server
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
@@ -137,16 +138,20 @@ type (
 		ServerBaseAd
 		// The namespace prefix to register/look up the server in the registry.
 		// The value is /caches/{Xrootd.Sitename} for cache servers and /origins/{Xrootd.Sitename} for the origin servers
-		RegistryPrefix      string            `json:"registry-prefix"`
-		BrokerURL           string            `json:"broker-url,omitempty"`
-		DataURL             string            `json:"data-url" binding:"required"`
-		WebURL              string            `json:"web-url,omitempty"`
+		RegistryPrefix string `json:"registry-prefix"`
+		BrokerURL      string `json:"broker-url,omitempty"`
+		DataURL        string `json:"data-url" binding:"required"`
+		WebURL         string `json:"web-url,omitempty"`
+		// TODO: Deprecate top level "Origin" caps -- each namespace should have its own caps that
+		// express what the origin is willing to do on the namespace's behalf. This helps us work
+		// around the lack of a concept for "globally-defined" namespaces.
 		Caps                Capabilities      `json:"capabilities"`
 		Namespaces          []NamespaceAdV2   `json:"namespaces"`
 		Issuer              []TokenIssuer     `json:"token-issuer"`
 		StorageType         OriginStorageType `json:"storageType"`
 		DisableDirectorTest bool              `json:"directorTest"` // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
 		Now                 time.Time         `json:"now"`          // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
+		RequiredFeatures    []string          `json:"requiredFeatures"`
 	}
 
 	OriginAdvertiseV1 struct {
