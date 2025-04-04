@@ -715,9 +715,7 @@ func cacheSupportsFeature(requiredFeatures map[string]features.Feature) AdPredic
 			return true
 		}
 		for _, feature := range requiredFeatures {
-			val := features.ServerSupportsFeature(feature, ad.ServerAd)
-			// if features.ServerSupportsFeature(feature, ad.ServerAd) == utils.Tern_True {
-			if val == utils.Tern_True {
+			if features.ServerSupportsFeature(feature, ad.ServerAd) == utils.Tern_True {
 				return true
 			}
 		}

@@ -152,7 +152,6 @@ type (
 		DisableDirectorTest bool              `json:"directorTest"` // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
 		Now                 time.Time         `json:"now"`          // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
 		RequiredFeatures    []string          `json:"requiredFeatures"`
-		Version             string            `json:"version"`
 	}
 
 	OriginAdvertiseV1 struct {
