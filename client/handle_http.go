@@ -2232,6 +2232,16 @@ Loop:
 			resp.HTTPResponse.StatusCode, resp.Err().Error())}
 	}
 
+	// By now, we think the download succeeded. If we know how large the file was supposed to
+	// be based on the Content-Length header, we can check that the grab client witnessed
+	// the correct number of bytes. If totalSize is <= 0, it indicates we don't know how large
+	// the transfer was supposed to be in the first place.
+	if totalSize > 0 && downloaded != totalSize {
+		log.WithFields(fields).Debugf("Download completed but received size '%db' does not match expected size '%db'", downloaded, totalSize)
+		err = errors.Errorf("download completed but received size '%db' does not match expected size '%db'", downloaded, totalSize)
+		return
+	}
+
 	if unpacker != nil {
 		unpacker.Close()
 		if err = unpacker.Error(); err != nil {
