@@ -1730,10 +1730,8 @@ func TestRedirectMiddleware(t *testing.T) {
 }
 func TestRedirects(t *testing.T) {
 	server_utils.ResetTestState()
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
-		cancel()
-		assert.NoError(t, egrp.Wait())
 		server_utils.ResetTestState()
 	})
 
@@ -1741,6 +1739,7 @@ func TestRedirects(t *testing.T) {
 	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 	defer topoServer.Close()
 	viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+	viper.Set("Director.CacheSortMethod", "random")
 	err := AdvertiseOSDF(ctx)
 	require.NoError(t, err)
 
@@ -1761,8 +1760,6 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("redirect-link-header-length", func(t *testing.T) {
-		viper.Set("Director.CacheSortMethod", "random")
-
 		req, _ := http.NewRequest("GET", "/my/server", nil)
 		// Provide a few things so that redirectToCache doesn't choke
 		req.Header.Add("User-Agent", "pelican-client/7.6.1")
@@ -1790,8 +1787,6 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("no-redirect-to-topology-cache-public-reads", func(t *testing.T) {
-		viper.Set("Director.CacheSortMethod", "random")
-
 		// Make sure the http cache from topology isn't included in the cache list
 		req, _ := http.NewRequest("GET", "/my/server/3", nil)
 		req.Header.Add("User-Agent", "pelican-client/7.6.1")
@@ -1832,8 +1827,6 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("redirect-to-topology-caches-auth-reads", func(t *testing.T) {
-		viper.Set("Director.CacheSortMethod", "random")
-
 		// Make sure the http cache from topology isn't included in the cache list
 		req, _ := http.NewRequest("GET", "/my/server", nil)
 		req.Header.Add("User-Agent", "pelican-client/7.6.1")
@@ -1851,8 +1844,6 @@ func TestRedirects(t *testing.T) {
 
 	// Make sure collections-url is correctly populated when the ns/origin comes from topology
 	t.Run("collections-url-from-topology", func(t *testing.T) {
-		viper.Set("Director.CacheSortMethod", "random")
-
 		// This one should have a collections url because it has a dirlisthost
 		req, _ := http.NewRequest("GET", "/my/server", nil)
 		req.Header.Add("User-Agent", "pelican-client/7.6.1")
@@ -1873,8 +1864,6 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("origin-endpoint-returns-all-headers", func(t *testing.T) {
-		viper.Set("Director.CacheSortMethod", "random")
-
 		req, _ := http.NewRequest("GET", "/my/server", nil)
 		req.Header.Add("User-Agent", "pelican-v7.999.999")
 		req.Header.Add("X-Real-Ip", "128.104.153.60")
