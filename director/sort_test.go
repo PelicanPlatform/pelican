@@ -723,43 +723,42 @@ func TestGetAdsForPath(t *testing.T) {
 	}
 
 	cacheAd1 := server_structs.ServerAd{
-		Name: "cache1",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "cache1.wisc.edu",
 		},
 		Type: server_structs.CacheType.String(),
 	}
+	cacheAd1.Initialize("cache1")
 
 	cacheAd2 := server_structs.ServerAd{
-		Name: "cache2",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "cache2.wisc.edu",
 		},
 		Type: server_structs.CacheType.String(),
 	}
+	cacheAd2.Initialize("cache2")
 
 	originAd1 := server_structs.ServerAd{
-		Name: "origin1",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "origin1.wisc.edu",
 		},
 		Type: server_structs.OriginType.String(),
 	}
+	originAd1.Initialize("origin1")
 
 	originAd2 := server_structs.ServerAd{
-		Name: "origin2",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "origin2.wisc.edu",
 		},
 		Type: server_structs.OriginType.String(),
 	}
+	originAd2.Initialize("origin2")
 
 	originAdTopo1 := server_structs.ServerAd{
-		Name: "topology origin 1",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "topology.wisc.edu",
@@ -767,6 +766,7 @@ func TestGetAdsForPath(t *testing.T) {
 		Type:         server_structs.OriginType.String(),
 		FromTopology: true,
 	}
+	originAdTopo1.Initialize("topology origin 1")
 
 	o1Slice := []server_structs.NamespaceAdV2{nsAd1}
 	o2Slice := []server_structs.NamespaceAdV2{nsAd2, nsAd3}
@@ -1152,6 +1152,20 @@ func TestComputeFeaturesUnion(t *testing.T) {
 	}
 }
 
+// Helper func to produce named ads in the following tests
+func produceAd(name, adType, vString string) copyAd {
+	ad := server_structs.ServerAd{
+		ServerBaseAd: server_structs.ServerBaseAd{},
+		Type:         adType,
+	}
+	ad.Initialize(name)
+	ad.Version = vString
+	copyAd := copyAd{
+		ServerAd: ad,
+	}
+	return copyAd
+}
+
 func TestFilterOrigins(t *testing.T) {
 	testCases := []struct {
 		name          string
@@ -1162,16 +1176,8 @@ func TestFilterOrigins(t *testing.T) {
 		{
 			name: "No predicates passes all origins",
 			origins: []copyAd{
-				{
-					ServerAd: server_structs.ServerAd{
-						Name: "origin1",
-					},
-				},
-				{
-					ServerAd: server_structs.ServerAd{
-						Name: "origin2",
-					},
-				},
+				produceAd("origin1", server_structs.OriginType.String(), ""),
+				produceAd("origin2", server_structs.OriginType.String(), ""),
 			},
 			predicates:    []AdPredicate{},
 			expectedNames: []string{"origin1", "origin2"},
@@ -1179,16 +1185,8 @@ func TestFilterOrigins(t *testing.T) {
 		{
 			name: "Single predicate filters out one origin",
 			origins: []copyAd{
-				{
-					ServerAd: server_structs.ServerAd{
-						Name: "origin1",
-					},
-				},
-				{
-					ServerAd: server_structs.ServerAd{
-						Name: "origin2",
-					},
-				},
+				produceAd("origin1", server_structs.OriginType.String(), ""),
+				produceAd("origin2", server_structs.OriginType.String(), ""),
 			},
 			predicates: []AdPredicate{
 				func(ctx *gin.Context, ad copyAd) bool {
@@ -1200,16 +1198,8 @@ func TestFilterOrigins(t *testing.T) {
 		{
 			name: "Single predicate filters out all origins",
 			origins: []copyAd{
-				{
-					ServerAd: server_structs.ServerAd{
-						Name: "origin1",
-					},
-				},
-				{
-					ServerAd: server_structs.ServerAd{
-						Name: "origin2",
-					},
-				},
+				produceAd("origin1", server_structs.OriginType.String(), ""),
+				produceAd("origin2", server_structs.OriginType.String(), ""),
 			},
 			predicates: []AdPredicate{
 				func(ctx *gin.Context, ad copyAd) bool {
@@ -1221,16 +1211,8 @@ func TestFilterOrigins(t *testing.T) {
 		{
 			name: "Single predicate keeps all origins",
 			origins: []copyAd{
-				{
-					ServerAd: server_structs.ServerAd{
-						Name: "origin1",
-					},
-				},
-				{
-					ServerAd: server_structs.ServerAd{
-						Name: "origin2",
-					},
-				},
+				produceAd("origin1", server_structs.OriginType.String(), ""),
+				produceAd("origin2", server_structs.OriginType.String(), ""),
 			},
 			predicates: []AdPredicate{
 				func(ctx *gin.Context, ad copyAd) bool {
@@ -1242,16 +1224,8 @@ func TestFilterOrigins(t *testing.T) {
 		{
 			name: "Origins filtered out by different predicates",
 			origins: []copyAd{
-				{
-					ServerAd: server_structs.ServerAd{
-						Name: "origin1",
-					},
-				},
-				{
-					ServerAd: server_structs.ServerAd{
-						Name: "origin2",
-					},
-				},
+				produceAd("origin1", server_structs.OriginType.String(), ""),
+				produceAd("origin2", server_structs.OriginType.String(), ""),
 			},
 			predicates: []AdPredicate{
 				func(ctx *gin.Context, ad copyAd) bool {
@@ -1286,59 +1260,39 @@ func TestCacheSupportsFeature(t *testing.T) {
 		supported        bool
 	}{
 		{
-			name: "CacheAuthz required and supported",
-			ad: copyAd{
-				ServerAd: server_structs.ServerAd{
-					// The underlying compatibility check needs to know the server type
-					Type:    server_structs.CacheType.String(),
-					Version: "v7.16.0",
-				},
-			},
+			name:             "CacheAuthz required and supported",
+			ad:               produceAd("", server_structs.CacheType.String(), "v7.16.0"),
 			requiredFeatures: []string{features.CacheAuthz.GetName()},
 			supported:        true,
 		},
 		{
-			name: "CacheAuthz required but support unknown",
-			ad: copyAd{
-				// No version in server ad will trigger Tern_Unknown
-				ServerAd: server_structs.ServerAd{
-					Type: server_structs.CacheType.String(),
-				},
-			},
+			name:             "Unknown server type not marked as supported",
+			ad:               produceAd("", "", "v7.16.0"),
+			requiredFeatures: []string{features.CacheAuthz.GetName()},
+			supported:        false,
+		},
+		{
+			name:             "CacheAuthz required but support unknown",
+			ad:               produceAd("", server_structs.CacheType.String(), ""),
 			requiredFeatures: []string{features.CacheAuthz.GetName()},
 			// Technically unknown, but this predicate only checks true/false
 			supported: false,
 		},
 		{
-			name: "CacheAuthz required but not supported",
-			ad: copyAd{
-				ServerAd: server_structs.ServerAd{
-					Type:    server_structs.CacheType.String(),
-					Version: "v7.15.999",
-				},
-			},
+			name:             "CacheAuthz required but not supported",
+			ad:               produceAd("", server_structs.CacheType.String(), "v7.15.999"),
 			requiredFeatures: []string{features.CacheAuthz.GetName()},
 			supported:        false,
 		},
 		{
-			name: "CacheAuthz not required but supported",
-			ad: copyAd{
-				ServerAd: server_structs.ServerAd{
-					Type:    server_structs.CacheType.String(),
-					Version: "v7.16.0",
-				},
-			},
+			name:             "CacheAuthz not required but supported",
+			ad:               produceAd("", server_structs.CacheType.String(), "v7.16.0"),
 			requiredFeatures: []string{},
 			supported:        true,
 		},
 		{
-			name: "CacheAuthz not required and not supported",
-			ad: copyAd{
-				ServerAd: server_structs.ServerAd{
-					Type:    server_structs.CacheType.String(),
-					Version: "v7.15.999",
-				},
-			},
+			name:             "CacheAuthz not required and not supported",
+			ad:               produceAd("", server_structs.CacheType.String(), "v7.15.999"),
 			requiredFeatures: []string{},
 			supported:        true,
 		},
@@ -1347,7 +1301,6 @@ func TestCacheSupportsFeature(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := &gin.Context{}
-
 			featureMap := make(map[string]features.Feature, len(tc.requiredFeatures))
 			for _, featureName := range tc.requiredFeatures {
 				feature, err := features.GetFeature(featureName)
@@ -1367,24 +1320,14 @@ func TestCacheMightSupportFeature(t *testing.T) {
 		mightSupport     bool
 	}{
 		{
-			name: "Missing server type means might be supported",
-			ad: copyAd{
-				ServerAd: server_structs.ServerAd{
-					// unknown server type --> unknown support
-					Version: "v7.16.0",
-				},
-			},
+			name:             "Missing server type means might be supported",
+			ad:               produceAd("", "", "v7.16.0"), // unknown server type --> unknown support
 			requiredFeatures: []string{features.CacheAuthz.GetName()},
 			mightSupport:     true,
 		},
 		{
-			name: "Missing version means might be supported",
-			ad: copyAd{
-				ServerAd: server_structs.ServerAd{
-					// unknown version --> unknown support
-					Type: server_structs.CacheType.String(),
-				},
-			},
+			name:             "Missing version means might be supported",
+			ad:               produceAd("", server_structs.CacheType.String(), ""), // unknown version --> unknown support
 			requiredFeatures: []string{features.CacheAuthz.GetName()},
 			mightSupport:     true,
 		},
@@ -1470,8 +1413,8 @@ func TestFilterCaches(t *testing.T) {
 		{
 			name: "All ads pass common and supported predicates",
 			ads: []copyAd{
-				{ServerAd: server_structs.ServerAd{Name: "ad1"}},
-				{ServerAd: server_structs.ServerAd{Name: "ad2"}},
+				produceAd("ad1", server_structs.CacheType.String(), ""),
+				produceAd("ad2", server_structs.CacheType.String(), ""),
 			},
 			commonPred: func(ctx *gin.Context, ad copyAd) bool { return true },
 			supportedPreds: []AdPredicate{
@@ -1484,8 +1427,8 @@ func TestFilterCaches(t *testing.T) {
 		{
 			name: "All ads pass common but only some pass supported predicates",
 			ads: []copyAd{
-				{ServerAd: server_structs.ServerAd{Name: "ad1"}},
-				{ServerAd: server_structs.ServerAd{Name: "ad2"}},
+				produceAd("ad1", server_structs.CacheType.String(), ""),
+				produceAd("ad2", server_structs.CacheType.String(), ""),
 			},
 			commonPred: func(ctx *gin.Context, ad copyAd) bool { return true },
 			supportedPreds: []AdPredicate{
@@ -1500,8 +1443,8 @@ func TestFilterCaches(t *testing.T) {
 		{
 			name: "Ads pass common but only some pass unknown predicates",
 			ads: []copyAd{
-				{ServerAd: server_structs.ServerAd{Name: "ad1"}},
-				{ServerAd: server_structs.ServerAd{Name: "ad2"}},
+				produceAd("ad1", server_structs.CacheType.String(), ""),
+				produceAd("ad2", server_structs.CacheType.String(), ""),
 			},
 			commonPred: func(ctx *gin.Context, ad copyAd) bool { return true },
 			supportedPreds: []AdPredicate{
@@ -1516,8 +1459,8 @@ func TestFilterCaches(t *testing.T) {
 		{
 			name: "Ads fail common predicate",
 			ads: []copyAd{
-				{ServerAd: server_structs.ServerAd{Name: "ad1"}},
-				{ServerAd: server_structs.ServerAd{Name: "ad2"}},
+				produceAd("ad1", server_structs.CacheType.String(), ""),
+				produceAd("ad2", server_structs.CacheType.String(), ""),
 			},
 			commonPred: func(ctx *gin.Context, ad copyAd) bool { return false },
 			supportedPreds: []AdPredicate{
@@ -1532,9 +1475,9 @@ func TestFilterCaches(t *testing.T) {
 		{
 			name: "Ads split between supported and unknown groups",
 			ads: []copyAd{
-				{ServerAd: server_structs.ServerAd{Name: "ad1"}},
-				{ServerAd: server_structs.ServerAd{Name: "ad2"}},
-				{ServerAd: server_structs.ServerAd{Name: "ad3"}},
+				produceAd("ad1", server_structs.CacheType.String(), ""),
+				produceAd("ad2", server_structs.CacheType.String(), ""),
+				produceAd("ad3", server_structs.CacheType.String(), ""),
 			},
 			commonPred: func(ctx *gin.Context, ad copyAd) bool { return true },
 			supportedPreds: []AdPredicate{
