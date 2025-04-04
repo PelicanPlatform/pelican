@@ -730,7 +730,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// /pelican/monitoring is the path for director-based health test
 	// where we have /director/healthTest API to mock a test object for caches to pull (as if it's from an origin)
-	reqPath := strings.TrimPrefix(path.Clean("/"+ginCtx.Request.URL.Path), "/api/v1.0/director/origin")
+	reqPath := getObjectPathFromRequest(ginCtx)
 	if strings.HasPrefix(reqPath, server_utils.MonitoringBaseNs+"/") {
 		redirectSucceeded = true
 		ginCtx.Redirect(http.StatusTemporaryRedirect, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/director/healthTest"+reqPath)
