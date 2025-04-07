@@ -3,13 +3,13 @@ package database
 import (
 	"embed"
 	"fmt"
-	"errors"
 	"time"
 
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/database/utils"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 var ServerDatabase *gorm.DB
