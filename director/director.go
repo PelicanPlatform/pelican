@@ -34,6 +34,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+	"github.com/google/uuid"
 	"github.com/hashicorp/go-version"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
@@ -416,6 +417,12 @@ func generateXBrokerHeader(ginCtx *gin.Context, oAds []server_structs.ServerAd) 
 	}
 }
 
+// Populate the X-Pelican-JobId header with the request ID. This is used for tracking
+// requests through the system.
+func generateXJobIdHeader(ginCtx *gin.Context, requestId uuid.UUID) {
+	ginCtx.Writer.Header()["X-Pelican-JobId"] = []string{requestId.String()}
+}
+
 // Given a URL and a set of query params, add the query params to the URL. This is
 // used in Director's redirect logic, where we only populate the final redirect URL
 // with query params (and not the URLs generated for metalink headers).
@@ -575,12 +582,12 @@ func mapQueriesToCaps(ctx *gin.Context) string {
 	return capsStr
 }
 
-func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.ServerAd, oAds []server_structs.ServerAd, nsAd server_structs.NamespaceAdV2) {
+func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.ServerAd, oAds []server_structs.ServerAd, nsAd server_structs.NamespaceAdV2, requestId uuid.UUID) {
 	reqPath := getObjectPathFromRequest(ctx)
 	if len(chosenAds) == 0 {
 		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("No servers found for the requested path '%s' ", reqPath),
+			Msg:    fmt.Sprintf("No servers found for the requested path '%s': Request ID: %s", reqPath, requestId.String()),
 		})
 		return
 	}
@@ -591,6 +598,7 @@ func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.Serve
 	generateXTokenGenHeader(ctx, nsAd)
 	generateXNamespaceHeader(ctx, oAds, nsAd)
 	generateXBrokerHeader(ctx, chosenAds)
+	generateXJobIdHeader(ctx, requestId)
 
 	redirectURL := getRedirectURL(reqPath, chosenAds[0], !nsAd.Caps.PublicReads)
 	reqParams := getRequestParameters(ctx.Request)
@@ -617,6 +625,21 @@ func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.Serve
 	ctx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
 }
 
+// Get or create a taint we can use for tracking the behavior of this request
+// through the system.
+func getRequestID(ctx *gin.Context) uuid.UUID {
+	// Canonicalize the header key to avoid any issues with case sensitivity
+	canonicalKey := http.CanonicalHeaderKey("X-Pelican-JobId")
+	if jobID := ctx.Request.Header[canonicalKey]; len(jobID) > 0 {
+		if id, err := uuid.Parse(jobID[0]); err == nil {
+			return id
+		}
+	}
+
+	// If request doesn't tell us its identity, assign one
+	return uuid.New()
+}
+
 func redirectToCache(ginCtx *gin.Context) {
 	// Later we'll collect metrics for which service we sent the user to. For now, assume
 	// we're sending them to a cache.
@@ -626,46 +649,50 @@ func redirectToCache(ginCtx *gin.Context) {
 		collectRedirectMetrics(ginCtx, *chosenService, *redirectSucceeded)
 	}(&chosenService, &redirectSucceeded)
 
+	// Assign this request an ID (which may come from the client) so we can use it to track
+	// the request through the Director.
+	requestId := getRequestID(ginCtx)
+
 	// Make sure the user hasn't asked us to do anything too goofy
 	if err := validateIncomingRequest(ginCtx); err != nil {
 		log.Debugf("Failed to validate incoming request: %v", err)
 		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to validate incoming request: %v", err),
+			Msg:    fmt.Sprintf("Failed to validate incoming request: %v: Request ID: %s", err, requestId.String()),
 		})
 		return
 	}
 
 	// Get the sorted origins/caches for the request. All returned ads should be capable of serving the request,
 	// as matchmaking is handled within.
-	oAds, cAds, err := getSortedAds(ginCtx)
+	oAds, cAds, err := getSortedAds(ginCtx, requestId)
 	if err != nil {
 		switch err.(type) {
 		case noOriginsForNsErr:
 			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("No sources found for the requested path: %v", err),
+				Msg:    fmt.Sprintf("No sources found for the requested path: %v: Request ID: %s", err, requestId.String()),
 			})
 		case noOriginsForReqErr:
 			ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg: fmt.Sprintf("Discovered sources for the namespace, but none support the request: %v: "+
-					"See '%s' to troubleshoot available origins/caches and their capabilities", err, param.Server_ExternalWebUrl.GetString()),
+					"See '%s' to troubleshoot available origins/caches and their capabilities: Request ID: %s", err, param.Server_ExternalWebUrl.GetString(), requestId.String()),
 			})
 		case objectNotFoundErr:
 			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("No sources reported possession of the object: %v: Are you sure it exists?", err),
+				Msg:    fmt.Sprintf("No sources reported possession of the object: %v: Are you sure it exists?: Request ID: %s", err, requestId.String()),
 			})
 		case directorStartupErr:
 			ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("%v", err),
+				Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
 			})
 		default:
 			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Failed to get/sort server ads for the requested path: %v", err),
+				Msg:    fmt.Sprintf("Failed to get/sort server ads for the requested path: %v: Request ID: %s", err, requestId.String()),
 			})
 		}
 
@@ -685,7 +712,7 @@ func redirectToCache(ginCtx *gin.Context) {
 		if len(cAds) == 0 {
 			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "No caches can fulfill this request and no fallback origins with the 'DirectReads' capability found for this object.",
+				Msg:    "No caches can fulfill this request and no fallback origins with the 'DirectReads' capability found for this object. Request ID: " + requestId.String(),
 			})
 			return
 		}
@@ -708,7 +735,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	}
 
 	redirectSucceeded = true
-	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd)
+	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd, requestId)
 }
 
 func redirectToOrigin(ginCtx *gin.Context) {
@@ -718,12 +745,16 @@ func redirectToOrigin(ginCtx *gin.Context) {
 		collectRedirectMetrics(ginCtx, *chosenService, *redirectSucceeded)
 	}(&chosenService, &redirectSucceeded)
 
+	// Assign this request an ID (which may come from the client) so we can use it to track
+	// the request through the Director.
+	requestId := getRequestID(ginCtx)
+
 	// Make sure the user hasn't asked us to do anything too goofy
 	if err := validateIncomingRequest(ginCtx); err != nil {
 		log.Debugf("Failed to validate incoming request: %v", err)
 		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to validate incoming request: %v", err),
+			Msg:    fmt.Sprintf("Failed to validate incoming request: %v: Request ID: %s", err, requestId.String()),
 		})
 		return
 	}
@@ -739,34 +770,34 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 	// Get the sorted origins/caches for the request. All returned ads should be capable of serving the request,
 	// as matchmaking is handled here.
-	oAds, cAds, err := getSortedAds(ginCtx)
+	oAds, cAds, err := getSortedAds(ginCtx, requestId)
 	if err != nil {
 		switch err.(type) {
 		case noOriginsForNsErr:
 			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("No origins found for the requested path: %v", err),
+				Msg:    fmt.Sprintf("No origins found for the requested path: %v: Request ID: %s", err, requestId.String()),
 			})
 		case noOriginsForReqErr:
 			ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg: fmt.Sprintf("Discovered origins for the namespace, but none support the request: %v: "+
-					"See '%s' to troubleshoot available origins and their capabilities", err, param.Server_ExternalWebUrl.GetString()),
+					"See '%s' to troubleshoot available origins and their capabilities: Request ID: %s", err, param.Server_ExternalWebUrl.GetString(), requestId.String()),
 			})
 		case objectNotFoundErr:
 			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("No origins reported possession of the object: %v: Are you sure it exists?", err),
+				Msg:    fmt.Sprintf("No origins reported possession of the object: %v: Are you sure it exists? Request ID: %s", err, requestId.String()),
 			})
 		case directorStartupErr:
 			ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("%v", err),
+				Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
 			})
 		default:
 			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Failed to get/sort server ads for the requested path: %v", err),
+				Msg:    fmt.Sprintf("Failed to get/sort server ads for the requested path: %v: Request ID: %s", err, requestId.String()),
 			})
 		}
 
@@ -797,7 +828,7 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	}
 
 	redirectSucceeded = true
-	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd)
+	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd, requestId)
 }
 
 func checkHostnameRedirects(c *gin.Context, incomingHost string) {
