@@ -217,6 +217,7 @@ func getLinkDepth(filepath, prefix string) (int, error) {
 func getObjectPathFromRequest(ctx *gin.Context) (oPath string) {
 	objectPath := "/api/v1.0/director/object"
 	originPath := "/api/v1.0/director/origin"
+	statPath := "/api/v1.0/director_ui/servers/origins/stat"
 
 	oPath = path.Clean("/" + ctx.Request.URL.Path)
 	// Trim prefixes as needed to get the actual object path
@@ -226,6 +227,10 @@ func getObjectPathFromRequest(ctx *gin.Context) (oPath string) {
 
 	if strings.HasPrefix(oPath, originPath) {
 		return strings.TrimPrefix(oPath, originPath)
+	}
+
+	if strings.HasPrefix(oPath, statPath) {
+		return strings.TrimPrefix(oPath, statPath)
 	}
 
 	return oPath
@@ -238,7 +243,8 @@ func isCacheRequest(ctx *gin.Context) bool {
 
 // Given a raw gin request, determine whether it's a source/origin request
 func isOriginRequest(ctx *gin.Context) bool {
-	return strings.HasPrefix(ctx.Request.URL.Path, "/api/v1.0/director/origin")
+	return strings.HasPrefix(ctx.Request.URL.Path, "/api/v1.0/director/origin") ||
+		strings.HasPrefix(ctx.Request.URL.Path, "/api/v1.0/director_ui/servers/origins/stat")
 }
 
 // Aggregate various request parameters from header and query to a single url.Values struct
