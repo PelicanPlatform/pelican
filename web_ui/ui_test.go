@@ -589,7 +589,6 @@ func TestApiToken(t *testing.T) {
 
 				createTokenReq := CreateApiTokenReq{
 					Name:       "test-token",
-					CreatedBy:  "admin",
 					Expiration: "never",
 					Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
 				}
@@ -660,7 +659,6 @@ func TestApiToken(t *testing.T) {
 
 				createTokenReq := CreateApiTokenReq{
 					Name:       "test-token",
-					CreatedBy:  "admin",
 					Expiration: "never",
 					Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
 				}
@@ -697,7 +695,6 @@ func TestApiToken(t *testing.T) {
 
 				createTokenReq := CreateApiTokenReq{
 					Name:       "test-token",
-					CreatedBy:  "admin",
 					Expiration: "never",
 					Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
 				}
@@ -739,7 +736,6 @@ func TestApiToken(t *testing.T) {
 
 				createTokenReq := CreateApiTokenReq{
 					Name:       "test-token",
-					CreatedBy:  "admin",
 					Expiration: "never",
 					Scopes:     []string{token_scopes.Monitoring_Scrape.String()},
 				}
@@ -775,7 +771,7 @@ func TestApiToken(t *testing.T) {
 				for _, apiKey := range listTokensResp {
 					if apiKey.ID == tokenID {
 						assert.Equal(t, "test-token", apiKey.Name)
-						assert.Equal(t, "admin", apiKey.CreatedBy)
+						assert.Equal(t, "admin-user", apiKey.CreatedBy)
 						assert.Equal(t, time.Time{}, apiKey.ExpiresAt)
 						assert.Equal(t, []string([]string{"monitoring.scrape"}), apiKey.Scopes)
 						return
