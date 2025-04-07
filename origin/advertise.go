@@ -27,6 +27,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -138,6 +139,12 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		prefixes = append(prefixes, export.FederationPrefix)
 	}
 
+	// Fetch origin's active downtimes
+	downtimes, err := database.GetIncompleteDowntimes()
+	if err != nil {
+		return nil, err
+	}
+
 	// PublicReads implies reads
 	reads := param.Origin_EnableReads.GetBool() || param.Origin_EnablePublicReads.GetBool()
 	extUrlStr := param.Server_ExternalWebUrl.GetString()
@@ -169,6 +176,7 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		}},
 		StorageType:         ost,
 		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
+		Downtimes:           downtimes,
 	}
 	ad.Initialize(name)
 
