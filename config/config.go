@@ -744,6 +744,10 @@ func setWebConfigOverride(v *viper.Viper, configPath string) error {
 		v.Set(key, tempV.Get(key))
 	}
 
+	// Use any new viper keys to re-set
+	// the logging level.
+	setLoggingInternal()
+
 	return nil
 }
 
@@ -769,6 +773,20 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 		}
 	}
 
+}
+
+// Helper func that uses configured params to toggle the correct logging level
+// in the log library
+func setLoggingInternal() {
+	if param.Debug.GetBool() {
+		SetLogging(log.DebugLevel)
+		log.Warnf("Debug is set as a flag or in config, this will override anything set for '%s' within your configuration", param.Logging_Level.GetName())
+	} else {
+		logLevel := param.Logging_Level.GetString()
+		level, err := log.ParseLevel(logLevel)
+		cobra.CheckErr(err)
+		SetLogging(level)
+	}
 }
 
 // For the given Viper instance, set the default config directory.
@@ -823,15 +841,9 @@ func InitConfig() {
 		cobra.CheckErr(err)
 	}
 
-	if param.Debug.GetBool() {
-		SetLogging(log.DebugLevel)
-		log.Warnln("Debug is set as a flag or in config, this will override anything set for Logging.Level within your configuration")
-	} else {
-		logLevel := param.Logging_Level.GetString()
-		level, err := log.ParseLevel(logLevel)
-		cobra.CheckErr(err)
-		SetLogging(level)
-	}
+	// Use configuration to set the logging level, which must be fed to
+	// the logging library and isn't accessed directly through viper
+	setLoggingInternal()
 
 	goose.SetLogger(CustomGooseLogger{})
 
@@ -1241,7 +1253,6 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
-	logging.FlushLogs(true)
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
@@ -1271,6 +1282,10 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	if err := setWebConfigOverride(viper.GetViper(), webConfigPath); err != nil {
 		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
 	}
+
+	// Flush logs only after we potentially ingest changes from the web UI. This must
+	// be done in sequence because the web UI may change the log location.
+	logging.FlushLogs(true)
 
 	if !IsRootExecution() {
 		var runtimeDir string
