@@ -154,3 +154,29 @@ type deleteServerDowntimeFunc func(string) error
 
 // Make the function a variable so it can be mocked in tests
 var deleteServerDowntimeFn deleteServerDowntimeFunc = deleteServerDowntime
+
+// Delete the downtime info of a given server from the Director's sqlite database when it was set by server admin
+func deleteServerDowntimeSetByServerAdmin(serverName string) error {
+	var serverDowntime ServerDowntime
+	err := database.DirectorDB.First(&serverDowntime, "name = ?", serverName).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return errors.Wrapf(err, "unable to retrieve downtime status for server %s", serverName)
+	}
+
+	// If the downtime was set by server admin (they are marked by "serverFiltered"), delete it; otherwise, do nothing
+	if serverDowntime.FilterType == serverFiltered {
+		err := deleteServerDowntimeFn(serverName)
+		if err != nil {
+			return errors.Wrapf(err, "failed to delete downtime status for server %s in database", serverName)
+		}
+		// Delete the downtime from Director's in-memory cache too only if the database operation was successful
+		filteredServersMutex.Lock()
+		delete(filteredServers, serverName)
+		filteredServersMutex.Unlock()
+	}
+
+	return nil
+}

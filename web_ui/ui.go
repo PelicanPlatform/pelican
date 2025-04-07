@@ -590,6 +590,19 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.DELETE("/api/v1.0/tokens/:id", AuthHandler, AdminAuthHandler, deleteApiToken)
 	engine.GET("/api/v1.0/tokens", AuthHandler, AdminAuthHandler, listApiTokens)
 	engine.GET("/api/v1.0/version", getVersionHandler)
+
+	isOriginOrCache := config.IsServerEnabled(server_structs.OriginType) || config.IsServerEnabled(server_structs.CacheType)
+	if isOriginOrCache {
+		downtimeAPI := engine.Group("/api/v1.0/downtime")
+		{
+			downtimeAPI.POST("", AuthHandler, AdminAuthHandler, HandleCreateDowntime)
+			downtimeAPI.GET("", AuthHandler, AdminAuthHandler, HandleGetDowntime)
+			downtimeAPI.GET("/:uuid", AuthHandler, AdminAuthHandler, HandleGetDowntimeByUUID)
+			downtimeAPI.PUT("/:uuid", AuthHandler, AdminAuthHandler, HandleUpdateDowntime)
+			downtimeAPI.DELETE("/:uuid", AuthHandler, AdminAuthHandler, HandleDeleteDowntime)
+		}
+	}
+
 	return nil
 }
 
