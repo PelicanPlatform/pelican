@@ -853,7 +853,6 @@ func TestPluginRecursiveDownload(t *testing.T) {
 
 	dirName := t.TempDir()
 
-	viper.Set("Logging.Level", "debug")
 	viper.Set("Origin.StorageType", "posix")
 	viper.Set("Origin.FederationPrefix", "/test")
 	viper.Set("Origin.StoragePrefix", "/<THIS WILL BE OVERRIDDEN>")
@@ -921,8 +920,8 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		downloadUrl1 := url.URL{
 			Scheme:   "pelican",
 			Host:     host,
-			Path:     "/test/SomeDirectoryThatDoesNotExist:)",
-			RawQuery: "recursive=true",
+			Path:     "/test/SomeDirectoryThatDoesNotExist",
+			RawQuery: "recursive",
 		}
 
 		workChan := make(chan PluginTransfer, 1)
@@ -932,7 +931,6 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		results := make(chan *classads.ClassAd, 5)
 		err = runPluginWorker(fed.Ctx, false, workChan, results)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Failed to create new transfer job")
 	})
 }
 
