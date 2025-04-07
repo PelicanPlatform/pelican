@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -780,7 +781,7 @@ func filterCaches(
 
 // Find and return a sorted list of all the origins/caches that may
 // be able to fulfill the request.
-func getSortedAds(ctx *gin.Context) (sortedOrigins, sortedCaches []copyAd, err error) {
+func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedCaches []copyAd, err error) {
 	// Start off by getting all ads that support the given request path. In this case, an "ad" is a struct
 	// containing the server ad and the namespace ad for the request path. We track both to treat matchmaking
 	// as a function over the coupling of server+namespace.
@@ -819,6 +820,7 @@ func getSortedAds(ctx *gin.Context) (sortedOrigins, sortedCaches []copyAd, err e
 	// of knowing which Origin a specific cache miss might be sent to, we restrict potential caches to
 	// only those that support the union of all required features for all Origins.
 	requiredFeatures := computeFeaturesUnion(sortedOrigins)
+	log.Tracef("Request %s for path %s requires features %v", requestId, reqPath, requiredFeatures)
 
 	// Now use predicate filtering against caches. This is more nuanced than origins,
 	// and the predicates are broken into three groups:
@@ -851,11 +853,12 @@ func getSortedAds(ctx *gin.Context) (sortedOrigins, sortedCaches []copyAd, err e
 	}
 
 	if requiresCacheChaining(ctx, oServAds) {
+		log.Tracef("The Director determine cache chaining was needed for request %s for path %s", requestId.String(), reqPath)
 		shouldSortCaches = true
 	}
 
 	// Generate availability maps for origins and caches by performing stat queries
-	originAvailabilityMap, cacheAvailabilityMap, err := generateAvailabilityMaps(ctx, oServAds, cServAds, sortedOrigins[0].NamespaceAd)
+	originAvailabilityMap, cacheAvailabilityMap, err := generateAvailabilityMaps(ctx, oServAds, cServAds, sortedOrigins[0].NamespaceAd, requestId)
 	if err != nil {
 		if _, ok := err.(objectNotFoundErr); ok {
 			return nil, nil, err
@@ -871,6 +874,7 @@ func getSortedAds(ctx *gin.Context) (sortedOrigins, sortedCaches []copyAd, err e
 	var lastError error
 	redirectInfo := server_structs.NewRedirectInfoFromIP(utils.ClientIPAddr(ctx).String())
 	if shouldSortOrigins {
+		log.Tracef("Sorting origins for request %s for path %s", requestId.String(), reqPath)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -898,6 +902,7 @@ func getSortedAds(ctx *gin.Context) (sortedOrigins, sortedCaches []copyAd, err e
 	}
 
 	if shouldSortCaches {
+		log.Tracef("Sorting caches for request %s for path %s", requestId.String(), reqPath)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

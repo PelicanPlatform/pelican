@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
@@ -535,10 +536,41 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 	}
 }
 
+// Helper function to check whether we should stat caches when generating availability maps
+func shouldStatCaches(ctx *gin.Context, cAds, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2) bool {
+	reqParams := getRequestParameters(ctx.Request)
+	if reqParams.Has(pelican_url.QuerySkipStat) || // The client indicates they want to avoid stats
+		!param.Director_CheckCachePresence.GetBool() || // The Director is configured to not to stat caches
+		len(cAds) == 0 || // There are no caches to stat
+		ctx.Request.Method == http.MethodPut || ctx.Request.Method == http.MethodDelete || ctx.Request.Method == "PROPFIND" || // The request is of a type where stats are irrelevant
+		!bestNSAd.Caps.PublicReads && reqParams.Get("authz") == "" || // We lack auth to succeed in stating caches
+		(isOriginRequest(ctx) && !requiresCacheChaining(ctx, oAds)) { // The request is an origin request and we don't need to chain caches
+		return false
+	}
+
+	return true
+}
+
+// Helper function to check whether we should stat origins when generating availability maps
+func shouldStatOrigins(ctx *gin.Context, cAds, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2) bool {
+	reqParams := getRequestParameters(ctx.Request)
+	if reqParams.Has(pelican_url.QuerySkipStat) || // The client indicates they want to avoid stats
+		!param.Director_CheckOriginPresence.GetBool() || // The Director is configured to not to stat origins
+		len(oAds) == 0 || // There are no origins to stat
+		ctx.Request.Method == http.MethodPut || ctx.Request.Method == http.MethodDelete || ctx.Request.Method == "PROPFIND" || // The request is of a type where stats are irrelevant
+		param.Director_AssumePresenceAtSingleOrigin.GetBool() && len(oAds) == 1 || // The Director is configured to assume presence at a single origin
+		!bestNSAd.Caps.PublicReads && reqParams.Get("authz") == "" || // We lack auth to succeed in stating origins
+		(isCacheRequest(ctx) && len(cAds) > 0) { // The incoming request is for a cache, and we won't need to fall back to origins because of missing caches
+		return false
+	}
+
+	return true
+}
+
 // Generate the availability maps for origins and caches based on the stat query results. Used in redirection sorting.
 // The function should determine whether it needs to stat the origins and caches based on the request parameters.
 // If stat checks are skipped for both origins and caches, assume all are available.
-func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2) (map[string]bool, map[string]bool, error) {
+func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2, requestId uuid.UUID) (map[string]bool, map[string]bool, error) {
 	reqPath := getObjectPathFromRequest(ctx)
 	reqParams := getRequestParameters(ctx.Request)
 
@@ -546,44 +578,33 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 	cacheAvailabilityMap := make(map[string]bool, len(caches))
 
 	// Determine whether to skip stat for origins and caches
-	shouldStatOrigins := !reqParams.Has(pelican_url.QuerySkipStat) && param.Director_CheckOriginPresence.GetBool()
-	shouldStatCaches := (!reqParams.Has(pelican_url.QuerySkipStat) && param.Director_CheckCachePresence.GetBool()) || requiresCacheChaining(ctx, origins)
-
-	if param.Director_AssumePresenceAtSingleOrigin.GetBool() && len(origins) == 1 {
-		shouldStatOrigins = false
+	// shouldStatOrigins := !reqParams.Has(pelican_url.QuerySkipStat) && param.Director_CheckOriginPresence.GetBool()
+	// shouldStatCaches := (!reqParams.Has(pelican_url.QuerySkipStat) && param.Director_CheckCachePresence.GetBool()) || requiresCacheChaining(ctx, origins)
+	statOrigins := shouldStatOrigins(ctx, caches, origins, bestNSAd)
+	statCaches := shouldStatCaches(ctx, caches, origins, bestNSAd)
+	if statOrigins {
+		log.Tracef("Request %s will trigger a stat against origins: %+v", requestId, origins)
+	} else {
+		log.Tracef("Request %s will skip origin stats", requestId)
 	}
-
-	// However, if we detect the namespace requires token auth and there's no incoming token, skip all stats
-	if !bestNSAd.Caps.PublicReads && reqParams.Get("authz") == "" {
-		shouldStatOrigins = false
-		shouldStatCaches = false
-	}
-
-	// Skip stats based on the request method
-	if ctx.Request.Method == http.MethodPut || ctx.Request.Method == http.MethodDelete || ctx.Request.Method == "PROPFIND" {
-		shouldStatOrigins = false
-		shouldStatCaches = false
-	}
-
-	if len(caches) == 0 {
-		shouldStatCaches = false
-	}
-	if len(origins) == 0 {
-		shouldStatOrigins = false
+	if statCaches {
+		log.Tracef("Request %s will trigger a stat against caches: %+v", requestId, caches)
+	} else {
+		log.Tracef("Request %s will skip cache stats", requestId)
 	}
 
 	// If stat checks are skipped for both origins and caches, assume all are available
-	if !shouldStatOrigins {
+	if !statOrigins {
 		for _, origin := range origins {
 			originAvailabilityMap[origin.URL.String()] = true
 		}
 	}
-	if !shouldStatCaches {
+	if !statCaches {
 		for _, cache := range caches {
 			cacheAvailabilityMap[cache.URL.String()] = true
 		}
 	}
-	if !shouldStatOrigins && !shouldStatCaches {
+	if !statOrigins && !statCaches {
 		return originAvailabilityMap, cacheAvailabilityMap, nil
 	}
 
@@ -592,10 +613,10 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 	st := server_structs.NewServerType()
 
 	sTypes := []server_structs.ServerType{}
-	if shouldStatOrigins {
+	if statOrigins {
 		sTypes = append(sTypes, server_structs.OriginType)
 	}
-	if shouldStatCaches {
+	if statCaches {
 		sTypes = append(sTypes, server_structs.CacheType)
 	}
 	st.SetList(sTypes)
@@ -603,10 +624,10 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 	// Filter the ads to include only the relevant types
 	oAdsToQuery := origins
 	cAdsToQuery := caches
-	if !shouldStatOrigins {
+	if !statOrigins {
 		oAdsToQuery = nil
 	}
-	if !shouldStatCaches {
+	if !statCaches {
 		cAdsToQuery = nil
 	}
 
@@ -651,7 +672,7 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 	// If we issued stat requests against the Origin but none have the object,
 	// it likely doesn't exist. This constitutes an actual error that we can propagate
 	// back to the client.
-	if shouldStatOrigins && len(origins) > 0 {
+	if statOrigins && len(origins) > 0 {
 		found := false
 		for _, origin := range origins {
 			if originAvailabilityMap[origin.URL.String()] {
