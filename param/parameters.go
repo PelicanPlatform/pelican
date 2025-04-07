@@ -253,6 +253,7 @@ var (
 	Plugin_Token = StringParam{"Plugin.Token"}
 	Registry_DbLocation = StringParam{"Registry.DbLocation"}
 	Registry_InstitutionsUrl = StringParam{"Registry.InstitutionsUrl"}
+	Server_DbLocation = StringParam{"Server.DbLocation"}
 	Server_ExternalWebUrl = StringParam{"Server.ExternalWebUrl"}
 	Server_Hostname = StringParam{"Server.Hostname"}
 	Server_IssuerHostname = StringParam{"Server.IssuerHostname"}

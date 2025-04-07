@@ -276,6 +276,7 @@ type Config struct {
 	Server struct {
 		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
 		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
+		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorUrls []string `mapstructure:"directorurls" yaml:"DirectorUrls"`
 		DropPrivileges bool `mapstructure:"dropprivileges" yaml:"DropPrivileges"`
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
@@ -617,6 +618,7 @@ type configWithType struct {
 	Server struct {
 		AdLifetime struct { Type string; Value time.Duration }
 		AdvertisementInterval struct { Type string; Value time.Duration }
+		DbLocation struct { Type string; Value string }
 		DirectorUrls struct { Type string; Value []string }
 		DropPrivileges struct { Type string; Value bool }
 		EnablePprof struct { Type string; Value bool }
