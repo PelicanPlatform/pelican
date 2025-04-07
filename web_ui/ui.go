@@ -462,7 +462,7 @@ func createApiToken(ctx *gin.Context) {
 		expirationTime = expirationTime.UTC()
 	}
 	scopes := strings.Join(req.Scopes, ",")
-	token, err := database.CreateApiKey(database.DirectorDB, req.Name, req.CreatedBy, scopes, expirationTime)
+	token, err := database.CreateApiKey(database.ServerDatabase, req.Name, req.CreatedBy, scopes, expirationTime)
 	if err != nil {
 		log.Warning("Failed to create API key: ", err)
 		ctx.JSON(status, server_structs.SimpleApiResp{
@@ -491,7 +491,7 @@ func deleteApiToken(ctx *gin.Context) {
 		return
 	}
 	id := ctx.Param("id")
-	err = database.DeleteApiKey(database.DirectorDB, id, token.VerifiedKeysCache)
+	err = database.DeleteApiKey(database.ServerDatabase, id, token.VerifiedKeysCache)
 	if err != nil {
 		log.Warning("Failed to delete API key: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -523,7 +523,7 @@ func listApiTokens(ctx *gin.Context) {
 		return
 	}
 
-	apiKeys, err := database.ListApiKeys(database.DirectorDB)
+	apiKeys, err := database.ListApiKeys(database.ServerDatabase)
 	if err != nil {
 		log.Warning("Failed to list API keys: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
