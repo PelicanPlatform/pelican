@@ -164,6 +164,10 @@ func generateTestFile() (string, error) {
 	}
 	baseUrl.Path = extFilePath
 
+	if baseUrl.String() == "" {
+		return "", errors.New("generated self-test file URL is empty")
+	}
+
 	return baseUrl.String(), nil
 }
 
@@ -228,16 +232,16 @@ func deleteTestFile(fileUrlStr string) error {
 	basePath := param.Cache_NamespaceLocation.GetString()
 	fileUrl, err := url.Parse(fileUrlStr)
 	if err != nil {
-		return errors.Wrap(err, "invalid file url to remove the test file")
+		return errors.Wrap(err, "unable to delete self-test file due to invalid URL")
 	}
 	relativePath := fileUrl.Path
 	if !strings.HasPrefix(relativePath, selfTestDir) {
-		return fmt.Errorf("delete request to %q is forbidden, not a self-test path", relativePath)
+		return fmt.Errorf("unable to delete file '%s' because it's not a valid self-test path", relativePath)
 	}
 	filePath := path.Join(basePath, relativePath)
 	// remove .cinfo file first
 	if err := os.Remove(filePath + ".cinfo"); err != nil {
-		return errors.Wrap(err, "fail to remove the self-test file")
+		return errors.Wrap(err, "failed to delete the self-test file's cinfo file")
 	}
 	// remove the self-test file
 	if err := os.Remove(filePath); err != nil {
@@ -249,20 +253,20 @@ func deleteTestFile(fileUrlStr string) error {
 
 func runSelfTest(ctx context.Context) (bool, error) {
 	fileUrl, err := generateTestFile()
-	if err != nil {
+	if err != nil || fileUrl == "" {
 		return false, errors.Wrap(err, "self-test failed when generating the file")
 	}
 	err = downloadTestFile(ctx, fileUrl)
 	if err != nil {
 		errDel := deleteTestFile(fileUrl)
 		if errDel != nil {
-			return false, errors.Wrap(errDel, "self-test failed during delete")
+			return false, errors.Wrap(errDel, "self-test failed during automatic cleanup")
 		}
-		return false, errors.Wrap(err, "self-test failed during download. File is cleaned up at "+fileUrl)
+		return false, errors.Wrapf(err, "self-test failed during download. Automatic cleanup of file at '%s' has completed", fileUrl)
 	}
 	err = deleteTestFile(fileUrl)
 	if err != nil {
-		return false, errors.Wrap(err, "self-test failed during delete")
+		return false, errors.Wrap(err, "self-test failed during automatic cleanup")
 	}
 	return true, nil
 }
