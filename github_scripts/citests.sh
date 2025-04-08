@@ -62,10 +62,12 @@ EOF
 SOCKET_DIR="`mktemp -d -t pelican-citest-XXXXXX`"
 export PELICAN_LOCALCACHE_SOCKET=$SOCKET_DIR/socket
 export PELICAN_LOCALCACHE_DATALOCATION=$SOCKET_DIR/data
+export PELICAN_CONFIG=${SOCKET_DIR}/pelican.yaml
 export PELICAN_SERVER_ENABLEUI=false
 export PELICAN_TLSSKIPVERIFY=true
+touch ${PELICAN_CONFIG}
 
-./pelican serve -d -f osg-htc.org --module localcache &
+./pelican serve --config ${PELICAN_CONFIG} -d -f osg-htc.org --module localcache &
 PELICAN_PID=$!
 
 cleanup() {
