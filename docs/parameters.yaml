@@ -814,6 +814,15 @@ type: bool
 default: false
 components: ["origin"]
 ---
+name: Origin.Concurrency
+description: |+
+  This value represents the maximum number of connections to an Origin for XRootD throttling.
+  When this value is set, it enables the XRootD throttling plugin and will set the maximum
+  number of connections to this value.
+type: int
+default: none
+components: ["origin"]
+---
 name: Origin.DirectorTest
 description: |+
   A bool indicating whether the director should send file transfer tests to the origin.

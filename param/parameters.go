@@ -337,6 +337,7 @@ var (
 	Monitoring_PortHigher = IntParam{"Monitoring.PortHigher"}
 	Monitoring_PortLower = IntParam{"Monitoring.PortLower"}
 	Monitoring_SampleLimit = IntParam{"Monitoring.SampleLimit"}
+	Origin_Concurrency = IntParam{"Origin.Concurrency"}
 	Origin_Port = IntParam{"Origin.Port"}
 	Server_IssuerPort = IntParam{"Server.IssuerPort"}
 	Server_UILoginRateLimit = IntParam{"Server.UILoginRateLimit"}
