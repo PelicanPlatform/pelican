@@ -42,7 +42,7 @@ import (
 )
 
 const (
-	// Define the specific API path for downtime management
+	// The API path for downtime management
 	serverDowntimeAPIPath = "/api/v1.0/downtime"
 )
 
@@ -90,7 +90,7 @@ func listDowntimeFunc(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := config.InitClient(); err != nil {
-		log.Errorln("Failed to initialize client configuration:", err)
+		log.Errorln("Failed to initialize client:", err)
 	}
 
 	// Get Flag Values
@@ -125,40 +125,9 @@ func listDowntimeFunc(cmd *cobra.Command, args []string) error {
 		return errors.New("Invalid output format: must be 'table', 'json', or 'yaml'")
 	}
 
-	// Load Token
-	var tok string
-	// Prioritize using a token from a file if one is provided.
-	if tokenLocation != "" {
-		if _, err := os.Stat(tokenLocation); errors.Is(err, os.ErrNotExist) {
-			return errors.Errorf("Token file not found at: %s", tokenLocation)
-		} else if err != nil {
-			return errors.Wrapf(err, "Error checking token file: %s", tokenLocation)
-		}
-		tokenBytes, err := os.ReadFile(tokenLocation)
-		if err != nil {
-			return errors.Wrapf(err, "Failed to read token file: %s", tokenLocation)
-		}
-		tok = strings.TrimSpace(string(tokenBytes))
-	}
-	// If no token is provided, generate a new one with current issuer key
-	if tok == "" {
-		tc := token.NewWLCGToken()
-		tc.Lifetime = 5 * time.Minute
-		tc.Subject = "admin"
-		tc.Issuer = serverURLStr
-		tc.AddAudienceAny()
-		tc.AddScopes(token_scopes.WebUi_Access)
-		tok, err = tc.CreateToken()
-		if err != nil {
-			log.Debugln("Token Configuration (partial):")
-			log.Debugln("  Issuer:", tc.Issuer)
-			log.Debugln("  Subject:", tc.Subject)
-			log.Debugln("  Claims:")
-			for key, value := range tc.Claims {
-				log.Debugf("    %s: %s\n", key, value)
-			}
-			return errors.Wrap(err, "Failed to create downtime listing token")
-		}
+	tok, err := getToken(serverURLStr, tokenLocation)
+	if err != nil {
+		return err
 	}
 
 	// Prepare HTTP Request
@@ -216,6 +185,42 @@ func listDowntimeFunc(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// Helper function to load or generate token
+func getToken(serverURLStr, tokenLocation string) (string, error) {
+	var tok string
+	// Prioritize using a token from a file if one is provided.
+	if tokenLocation != "" {
+		if _, err := os.Stat(tokenLocation); errors.Is(err, os.ErrNotExist) {
+			return "", errors.Errorf("Token file not found at: %s", tokenLocation)
+		} else if err != nil {
+			return "", errors.Wrapf(err, "Error checking token file: %s", tokenLocation)
+		}
+		tokenBytes, err := os.ReadFile(tokenLocation)
+		if err != nil {
+			return "", errors.Wrapf(err, "Failed to read token file: %s", tokenLocation)
+		}
+		tok = strings.TrimSpace(string(tokenBytes))
+	}
+	// If no token is provided, generate a new one with current issuer key
+	if tok == "" {
+		tc := token.NewWLCGToken()
+		tc.Lifetime = 5 * time.Minute
+		tc.Subject = "admin"
+		tc.Issuer = serverURLStr
+		tc.AddAudienceAny()
+		tc.AddScopes(token_scopes.WebUi_Access)
+		tok, err := tc.CreateToken()
+		if err != nil {
+			log.Debugln("Token Configuration (partial):")
+			log.Debugln("  Issuer:", tc.Issuer)
+			log.Debugln("  Subject:", tc.Subject)
+			return "", errors.Wrap(err, "Failed to create the downtime operation token")
+		}
+		return tok, nil
+	}
+	return tok, nil
 }
 
 // handleAdminApiResponse checks the HTTP status code for API calls
