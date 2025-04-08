@@ -2,3 +2,98 @@
 
 ## Passing Configuration for the Pelican Plugin via HTCondor Job Submission
 
+[HTCondor](https://htcondor.readthedocs.io/en/latest/) 
+has tight integration with Pelican for managing data transfers 
+as part of running jobs on a High Throughput Computing (HTC) system.
+The user simply lists the Pelican address for the object(s) they want transferred as part of the HTCondor job,
+and HTCondor is responsible for transferring the object(s) at the appropriate points in the job lifecycle.
+
+For example, including the following line within the HTCondor job submit file will cause HTCondor to transfer
+the corresponding object to the job's scratch directory before execution:
+
+```
+transfer_input_files = pelican://osg-htc.org/pelicanplatform/test/hello-world.txt
+```
+
+For more information about data transfers in HTCondor, 
+see the HTCondor manual page about its [File Transfer Mechanism](https://htcondor.readthedocs.io/en/latest/users-manual/file-transfer.html),
+especially the section on [File Transfer Using a URL](https://htcondor.readthedocs.io/en/latest/users-manual/file-transfer.html#file-transfer-using-a-url).
+
+Pelican object transfers as part of an HTCondor job occur at the Execution Point (EP) -
+the machine where the job is executing.
+The transfers use the Pelican Plugin at the EP
+as configured by the EP owner.
+Currently, there is no way to pass additional arguments to the `pelican object` command-equivalent used at the EP.
+
+There is, however, a way to modify the environment variables that are set prior to the object transfer command.
+That means as long as the `pelican object` command respects the specific environment variable(s), 
+the user submitting the HTCondor job can modify the Plugin's transfers as desired.
+
+### Pelican environment variables
+
+Configuration options listed in the [configuration parameters table](/parameters) are typically set via the `pelican.yaml` file.
+If, however, there is a corresponding environment variable set in the shell where the command is executed,
+that will override the configuration provided in the `pelican.yaml` file.
+To demonstrate the syntax for setting the environment variable, 
+consider the following example.
+
+To set the logging level for a Pelican component to "Debug" in the `pelican.yaml` file, 
+you would use the following:
+
+```yaml
+# /etc/pelican/pelican.yaml
+Logging:
+  Level: Debug
+```
+
+To set the logging level for a Pelican component to "Debug" via an environment variable, 
+you would use
+
+```bash
+export PELICAN_LOGGING_LEVEL=Debug
+```
+
+Note that the environment variable is prefixed by `PELICAN_` and
+that the nested keys are capitalized and separated by underscores (`_`).
+
+### Setting environment variables for the Plugin as part of HTCondor job
+
+To set a Pelican environment variable to affect the Plugin transfers in an HTCondor job,
+declare the environment variables using the `environment` option in the submit file.
+
+```
+environment = "PELICAN_OPTION1=value1 PELICAN_OPTION2=value2"
+```
+
+> Note that there are a variety of subtleties in how the `environment` value is interpreted;
+> it is recommended that you read the corresponding section in the 
+> [HTCondor manual](https://htcondor.readthedocs.io/en/latest/man-pages/condor_submit.html#environment)
+> for all but the simplest definitions.
+
+For example, to configure the Plugin to transfer objects only via a specific cache, 
+you would use the following line:
+
+```
+environment = "PELICAN_NEAREST_CACHE=https://address.to.desired.cache:port"
+```
+
+> This particular example would be useful for testing that a specific cache is operational
+> and accessible from the EP the job is running at.
+> Use of `PELICAN_NEAREST_CACHE`,  though, bypasses the Director 
+> and its logic that helps prevent any one Pelican component in the Federation from being overwhelmed.
+>
+> For production, it would be better to use the `PELICAN_PREFERRED_CACHE` configuration.
+> The cache specified using this option is always tried first, 
+> but if there is an issue the Plugin will fall back to the Director for a list of other caches to try.
+
+A couple of things to note about this methodology for configuring the Plugin:
+
+* The configuration is overridden for *all* transfers involving the Plugin within the job.
+  This could be especially problematic if transferring objects via different federations within the same job.
+
+* The configuration for the Plugin set by the EP owner is likely optimized for that EP.
+  Overriding that configuration could result in performance or network issues.
+
+* Environment variables set using the `environment` option will persist into the job execution environment.
+  If additional Pelican transfers are run within the job's executable script, 
+  the environment variables will affect those transfers unless unset by the executable script.
