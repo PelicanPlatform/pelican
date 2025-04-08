@@ -787,7 +787,7 @@ func setLoggingInternal() error {
 		logLevel := param.Logging_Level.GetString()
 		level, err := log.ParseLevel(logLevel)
 		if err != nil {
-			return errors.Wrapf(err, "failed to parse logging level '%s'", logLevel)
+			return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
 		}
 		SetLogging(level)
 	}

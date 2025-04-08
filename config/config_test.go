@@ -79,6 +79,7 @@ func TestMain(m *testing.M) {
 	viper.Set("Transport.Dialer.Timeout", time.Second*1)
 	viper.Set("Transport.Dialer.KeepAlive", time.Second*30)
 	viper.Set("TLSSkipVerify", true)
+	viper.Set(param.Logging_Level.GetName(), "debug")
 	server.StartTLS()
 	defer server.Close()
 	exitCode := m.Run()
@@ -578,20 +579,18 @@ func TestInitServerUrl(t *testing.T) {
 	}
 
 	t.Run("web-url-defaults-to-hostname-port", func(t *testing.T) {
-		ResetConfig()
+		initDirectoryConfig()
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mockNon443Port)
-		InitConfigDir(viper.GetViper())
 		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWNon443Port, param.Server_ExternalWebUrl.GetString())
 	})
 
 	t.Run("default-web-url-removes-443-port", func(t *testing.T) {
-		ResetConfig()
+		initDirectoryConfig()
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mock443Port)
-		InitConfigDir(viper.GetViper())
 		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
@@ -599,9 +598,8 @@ func TestInitServerUrl(t *testing.T) {
 
 	t.Run("remove-443-port-for-set-web-url", func(t *testing.T) {
 		// We respect the URL value set directly by others. Won't remove 443 port
-		ResetConfig()
+		initDirectoryConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
-		InitConfigDir(viper.GetViper())
 		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
