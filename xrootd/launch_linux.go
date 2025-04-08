@@ -95,6 +95,10 @@ func (plauncher PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.C
 	if plauncher.fds[1] != -1 {
 		env = []string{"XRDHTTP_PELICAN_INFO_FD=3"}
 	}
+	// Set the directory where the SciTokens library should cache public keys.
+	if xdg_cache_home, ok := os.LookupEnv("XDG_CACHE_HOME"); ok {
+		env = append(env, "XDG_CACHE_HOME="+xdg_cache_home)
+	}
 
 	launcher := cap.NewLauncher(executable, []string{plauncher.Name(), "-f", "-s", pidFile, "-c", plauncher.configPath}, env)
 	launcher.Callback(func(attrs *syscall.ProcAttr, _ interface{}) error {
