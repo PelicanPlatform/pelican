@@ -44,6 +44,8 @@ var (
 	flushOnce    sync.Once
 )
 
+// Reset function intended for unit tests to be able to
+// reset log flush state.
 func ResetLogFlush() {
 	flushOnce = sync.Once{}
 }
