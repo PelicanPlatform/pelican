@@ -1201,6 +1201,15 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.Set(param.Server_ExternalWebUrl.GetName(), parsedExtAdd.String())
 	}
 
+	if originConcurrency := v.GetInt(param.Origin_Concurrency.GetName()); originConcurrency < 0 {
+		return errors.Errorf("invalid value of '%d' for config param %s; must be greater than or equal to 0, where 0 disables the feature",
+			originConcurrency, param.Origin_Concurrency.GetName())
+	}
+	if cacheConcurrency := v.GetInt(param.Cache_Concurrency.GetName()); cacheConcurrency < 0 {
+		return errors.Errorf("invalid value of '%d' for config param %s; must be greater than or equal to 0, where 0 disables the feature",
+			cacheConcurrency, param.Cache_Concurrency.GetName())
+	}
+
 	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
 	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
 	// configuration but we don't know the origin's port until after xrootd has started), we
