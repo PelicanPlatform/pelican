@@ -568,6 +568,7 @@ func TestInitServerUrl(t *testing.T) {
 		ResetConfig()
 		tempDir := t.TempDir()
 		viper.Set("ConfigDir", tempDir)
+		viper.Set(param.Logging_Level.GetName(), "debug")
 	}
 
 	initDirectoryConfig := func() {
