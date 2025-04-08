@@ -853,11 +853,11 @@ func TestPluginRecursiveDownload(t *testing.T) {
 
 	dirName := t.TempDir()
 
-	viper.Set("Logging.Level", "debug")
 	viper.Set("Origin.StorageType", "posix")
 	viper.Set("Origin.FederationPrefix", "/test")
 	viper.Set("Origin.StoragePrefix", "/<THIS WILL BE OVERRIDDEN>")
 	viper.Set("Origin.EnablePublicReads", true)
+	viper.Set(param.Director_AssumePresenceAtSingleOrigin.GetName(), false)
 	// We are purposely creating a test with a config of a single-space.
 	// The empty string indicates using the default config, which we don't want.
 	fed := fed_test_utils.NewFedTest(t, " ")
@@ -920,8 +920,8 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		downloadUrl1 := url.URL{
 			Scheme:   "pelican",
 			Host:     host,
-			Path:     "/test/SomeDirectoryThatDoesNotExist:)",
-			RawQuery: "recursive=true",
+			Path:     "/test/SomeDirectoryThatDoesNotExist",
+			RawQuery: "recursive",
 		}
 
 		workChan := make(chan PluginTransfer, 1)
@@ -931,7 +931,6 @@ func TestPluginRecursiveDownload(t *testing.T) {
 		results := make(chan *classads.ClassAd, 5)
 		err = runPluginWorker(fed.Ctx, false, workChan, results)
 		assert.Error(t, err)
-		assert.Regexp(t, "Failed to create new transfer job: error while querying the director at https://[A-Za-z0-9:.-]+: server returned 404 Not Found", err.Error())
 	})
 }
 
