@@ -91,6 +91,7 @@ type (
 		EnablePublicReads bool
 		EnableListings    bool
 		SelfTest          bool
+		Concurrency       int
 		CalculatedPort    string
 		FederationPrefix  string
 		HttpServiceUrl    string
