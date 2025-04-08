@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { red, grey } from '@mui/material/colors';
 import { Server } from '@/index';
-import { Language } from '@mui/icons-material';
+import { Equalizer, Language } from '@mui/icons-material';
 import { NamespaceIcon } from '@/components/Namespace/index';
 import useSWR from 'swr';
 import Link from 'next/link';
@@ -80,7 +80,10 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
             <NamespaceIcon
               serverType={server.type.toLowerCase() as 'cache' | 'origin'}
             />
-            <Typography sx={{ pt: '2px' }}>{server.name}</Typography>
+            <Typography sx={{ pt: '2px' }}>
+              {server.name}
+              {server?.version && <> &#x2022; {server.version}</>}
+            </Typography>
           </Box>
           <Box display={'flex'} flexDirection={'row'}>
             <Box my={'auto'} display={'flex'}>
@@ -136,6 +139,22 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
                   </Link>
                 </Box>
               )}
+              {authenticated &&
+                authenticated.role == 'admin' &&
+                server?.webUrl && (
+                  <Box ml={1}>
+                    <Link
+                      href={`/director/metrics/${server.type.toLowerCase()}/?server_name=${server.name}`}
+                      target={'_blank'}
+                    >
+                      <Tooltip title={'View Server Metrics'}>
+                        <IconButton size={'small'}>
+                          <Equalizer />
+                        </IconButton>
+                      </Tooltip>
+                    </Link>
+                  </Box>
+                )}
             </Box>
           </Box>
         </Box>
