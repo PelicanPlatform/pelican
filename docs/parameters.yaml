@@ -3250,3 +3250,11 @@ description: |+
 type: duration
 default: 4032h
 components: ["cache"]
+---
+name: Topology.DisableDowntime
+description: |+
+  When enabled, no longer retrieve downtime information for origins and caches from Topology
+type: bool
+hidden: true
+default: false
+components: ["cache", "origin", "registry", "director"]

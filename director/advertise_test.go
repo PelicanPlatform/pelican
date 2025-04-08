@@ -352,6 +352,16 @@ func mockTopoDowntimeXMLHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestUpdateDowntimeFromTopology(t *testing.T) {
+	server_utils.ResetTestState()
+	serverAds.DeleteAll()
+	defer func() {
+		server_utils.ResetTestState()
+		serverAds.DeleteAll()
+		filteredServersMutex.Lock()
+		defer filteredServersMutex.Unlock()
+		filteredServers = map[string]filterType{}
+	}()
+
 	// Create a buffer to capture log output
 	var logBuffer bytes.Buffer
 	originalOutput := logrus.StandardLogger().Out
@@ -385,4 +395,64 @@ func TestUpdateDowntimeFromTopology(t *testing.T) {
 	assert.False(t, keyExists, "DENVER_INTERNET2_OSDF_CACHE should not be in filteredServers")
 	_, keyExists = filteredServers["HOW_MUCH_CASH_COULD_A_STASHCACHE_STASH"]
 	assert.False(t, keyExists, "HOW_MUCH_CASH_COULD_A_STASHCACHE_STASH should not be in filteredServers")
+}
+
+func TestDisableTopologyDowntime(t *testing.T) {
+	t.Run("disable-topology-downtime", func(t *testing.T) {
+		server_utils.ResetTestState()
+		serverAds.DeleteAll()
+		viper.Set("Topology.DisableDowntime", true)
+		defer func() {
+			server_utils.ResetTestState()
+			serverAds.DeleteAll()
+			filteredServersMutex.Lock()
+			defer filteredServersMutex.Unlock()
+			filteredServers = map[string]filterType{}
+		}()
+
+		assert.Len(t, filteredServers, 0)
+		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
+		defer topoServer.Close()
+		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+
+		downtimeServer := httptest.NewServer(http.HandlerFunc(mockTopoDowntimeXMLHandler))
+		t.Cleanup(func() {
+			downtimeServer.Close()
+		})
+		viper.Set("Federation.TopologyDowntimeUrl", downtimeServer.URL)
+
+		err := AdvertiseOSDF(context.Background())
+		require.NoError(t, err)
+
+		assert.Len(t, filteredServers, 0)
+	})
+
+	t.Run("enable-topology-downtime", func(t *testing.T) {
+		server_utils.ResetTestState()
+		serverAds.DeleteAll()
+		viper.Set("Topology.DisableDowntime", false)
+		defer func() {
+			server_utils.ResetTestState()
+			serverAds.DeleteAll()
+			filteredServersMutex.Lock()
+			defer filteredServersMutex.Unlock()
+			filteredServers = map[string]filterType{}
+		}()
+
+		assert.Len(t, filteredServers, 0)
+		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
+		defer topoServer.Close()
+		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+
+		downtimeServer := httptest.NewServer(http.HandlerFunc(mockTopoDowntimeXMLHandler))
+		t.Cleanup(func() {
+			downtimeServer.Close()
+		})
+		viper.Set("Federation.TopologyDowntimeUrl", downtimeServer.URL)
+
+		err := AdvertiseOSDF(context.Background())
+		require.NoError(t, err)
+
+		assert.Len(t, filteredServers, 1)
+	})
 }

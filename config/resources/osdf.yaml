@@ -27,3 +27,5 @@ Federation:
 Registry:
   RequireCacheApproval: true
   RequireOriginApproval: true
+Topology:
+  DisableDowntime: false

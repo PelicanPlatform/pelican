@@ -175,7 +175,9 @@ func AdvertiseOSDF(ctx context.Context) error {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
 
-	err = updateDowntimeFromTopology(ctx)
+	if !param.Topology_DisableDowntime.GetBool() {
+		err = updateDowntimeFromTopology(ctx)
+	}
 	if err != nil {
 		// Don't treat this as a fatal error, but log it in a loud way.
 		log.Errorf("Unable to generate downtime list for servers from topology: %v", err)
