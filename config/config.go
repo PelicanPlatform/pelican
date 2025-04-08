@@ -746,7 +746,9 @@ func setWebConfigOverride(v *viper.Viper, configPath string) error {
 
 	// Use any new viper keys to re-set
 	// the logging level.
-	setLoggingInternal()
+	if err = setLoggingInternal(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -777,16 +779,20 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 
 // Helper func that uses configured params to toggle the correct logging level
 // in the log library
-func setLoggingInternal() {
+func setLoggingInternal() error {
 	if param.Debug.GetBool() {
 		SetLogging(log.DebugLevel)
 		log.Warnf("Debug is set as a flag or in config, this will override anything set for '%s' within your configuration", param.Logging_Level.GetName())
 	} else {
 		logLevel := param.Logging_Level.GetString()
 		level, err := log.ParseLevel(logLevel)
-		cobra.CheckErr(err)
+		if err != nil {
+			return errors.Wrapf(err, "failed to parse logging level '%s'", logLevel)
+		}
 		SetLogging(level)
 	}
+
+	return nil
 }
 
 // For the given Viper instance, set the default config directory.
@@ -843,7 +849,10 @@ func InitConfig() {
 
 	// Use configuration to set the logging level, which must be fed to
 	// the logging library and isn't accessed directly through viper
-	setLoggingInternal()
+	err = setLoggingInternal()
+	if err != nil {
+		cobra.CheckErr(err)
+	}
 
 	goose.SetLogger(CustomGooseLogger{})
 
