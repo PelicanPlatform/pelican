@@ -1279,16 +1279,19 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if err := SetServerDefaults(viper.GetViper()); err != nil {
+		logging.FlushLogs(true)
 		return err
 	}
 
 	webConfigPath := param.Server_WebConfigFile.GetString()
 	if webConfigPath != "" {
 		if err := os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
+			logging.FlushLogs(true)
 			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
 		}
 	}
 	if err := setWebConfigOverride(viper.GetViper(), webConfigPath); err != nil {
+		logging.FlushLogs(true)
 		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
 	}
 
