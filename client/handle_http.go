@@ -1903,6 +1903,32 @@ func parseTransferStatus(status string) (int, string) {
 	return statusCode, strings.TrimSpace(parts[1])
 }
 
+// Verify that a file on disk matches the expected size. We ignore directories
+// and generic stat failures unless the file doesn't exist.
+func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
+	fi, err := os.Stat(dest)
+	if err != nil { // Don't treat stat failure as fatal unless it indicates the file doesn't exist
+		if os.IsNotExist(err) {
+			return errors.Errorf("file does not exist: %s", dest)
+		}
+
+		log.WithFields(fields).Debugf("Error checking size of %s on disk: %v", dest, err)
+		return nil
+	}
+
+	if fi.IsDir() {
+		log.WithFields(fields).Debugf("Skipping size check for directory: %s", dest)
+		return nil
+	}
+
+	sizeOnDisk := fi.Size()
+	if sizeOnDisk != expectedSize {
+		return errors.Errorf("file size on disk %db does not match expected size %db", sizeOnDisk, expectedSize)
+	}
+
+	return nil
+}
+
 // Perform the actual download of the file
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
@@ -1977,6 +2003,15 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	log.WithFields(fields).Debugln("Transfer URL String:", transferUrl.String())
 	var req *grab.Request
 	var unpacker *autoUnpacker
+	defer func() {
+		if unpacker != nil {
+			unpacker.Close()
+			if unpackerErr := unpacker.Error(); unpackerErr != nil {
+				log.WithFields(fields).Errorln("Failed to close unpacker:", err)
+				return
+			}
+		}
+	}()
 	if transfer.PackOption != "" {
 		behavior, err := GetBehavior(transfer.PackOption)
 		if err != nil {
@@ -2233,18 +2268,22 @@ Loop:
 	}
 
 	// By now, we think the download succeeded. If we know how large the file was supposed to
-	// be based on the Content-Length header, we can check that the grab client witnessed
-	// the correct number of bytes. If totalSize is <= 0, it indicates we don't know how large
-	// the transfer was supposed to be in the first place.
-	if totalSize > 0 && downloaded != totalSize {
-		log.WithFields(fields).Debugf("Download completed but received size '%db' does not match expected size '%db'", downloaded, totalSize)
-		err = errors.Errorf("download completed but received size '%db' does not match expected size '%db'", downloaded, totalSize)
-		return
-	}
+	// be based on the Content-Length header, we can check that a) the grab client witnessed
+	// the correct number of bytes and b) the file on disk is the correct size. If totalSize is
+	// <= 0, it indicates we don't know how large the transfer was supposed to be in the first
+	// place.
+	// NOTE: We can probably remove this when we have true checksumming
+	// if unpacker == nil && totalSize > 0 {
+	if totalSize > 0 {
+		if downloaded != totalSize {
+			log.WithFields(fields).Debugf("Download completed but received size %db does not match expected size '%db'", downloaded, totalSize)
+			err = errors.Errorf("download completed but received size %db does not match expected size '%db'", downloaded, totalSize)
+			return
+		}
 
-	if unpacker != nil {
-		unpacker.Close()
-		if err = unpacker.Error(); err != nil {
+		// Second sanity check to verify the file size as it appears on disk.
+		if err = verifyFileSize(dest, totalSize, fields); err != nil {
+			err = errors.Wrap(err, "failed to verify size of downloaded file on disk")
 			return
 		}
 	}
