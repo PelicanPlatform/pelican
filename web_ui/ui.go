@@ -73,7 +73,7 @@ func ServerHeaderMiddleware(ctx *gin.Context) {
 
 type CreateApiTokenReq struct {
 	Name       string   `json:"name"`
-	CreatedBy  string   `json:"created_by"`
+	CreatedBy  string   `json:"createdBy"`
 	Expiration string   `json:"expiration"` // RFC3339 format, if not provided or "never" or "", token will not expire
 	Scopes     []string `json:"scopes"`
 }
@@ -507,6 +507,48 @@ func deleteApiToken(ctx *gin.Context) {
 	})
 }
 
+func listApiTokens(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie},
+		Issuers: []token.TokenIssuer{token.LocalIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		log.Warningf("Failed to verify WebUi Access Cookie: %v", err)
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	apiKeys, err := database.ListApiKeys()
+	if err != nil {
+		log.Warning("Failed to list API keys: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	// Convert the API keys to the response format
+	apiKeysResponse := make([]server_structs.ApiKeyResponse, len(apiKeys))
+	for i, apiKey := range apiKeys {
+		apiKeysResponse[i] = server_structs.ApiKeyResponse{
+			ID:        apiKey.ID,
+			Name:      apiKey.Name,
+			Scopes:    strings.Split(apiKey.Scopes, ","),
+			ExpiresAt: apiKey.ExpiresAt,
+			CreatedAt: apiKey.CreatedAt,
+			CreatedBy: apiKey.CreatedBy,
+		}
+	}
+
+	ctx.JSON(http.StatusOK, apiKeysResponse)
+}
+
 func configureWebResource(engine *gin.Engine) {
 
 	// Register the MIME type for .txt files
@@ -543,9 +585,23 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	engine.GET("/api/v1.0/health", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Web Engine Running. Time: %s", time.Now().String())})
 	})
-	engine.POST("/api/v1.0/createApiToken", createApiToken)
-	engine.DELETE("/api/v1.0/deleteApiToken/:id", deleteApiToken)
+	engine.POST("/api/v1.0/tokens", AuthHandler, AdminAuthHandler, createApiToken)
+	engine.DELETE("/api/v1.0/tokens/:id", AuthHandler, AdminAuthHandler, deleteApiToken)
+	engine.GET("/api/v1.0/tokens", AuthHandler, AdminAuthHandler, listApiTokens)
 	engine.GET("/api/v1.0/version", getVersionHandler)
+
+	isOriginOrCache := config.IsServerEnabled(server_structs.OriginType) || config.IsServerEnabled(server_structs.CacheType)
+	if isOriginOrCache {
+		downtimeAPI := engine.Group("/api/v1.0/downtime")
+		{
+			downtimeAPI.POST("", AuthHandler, AdminAuthHandler, HandleCreateDowntime)
+			downtimeAPI.GET("", AuthHandler, AdminAuthHandler, HandleGetDowntime)
+			downtimeAPI.GET("/:uuid", AuthHandler, AdminAuthHandler, HandleGetDowntimeByUUID)
+			downtimeAPI.PUT("/:uuid", AuthHandler, AdminAuthHandler, HandleUpdateDowntime)
+			downtimeAPI.DELETE("/:uuid", AuthHandler, AdminAuthHandler, HandleDeleteDowntime)
+		}
+	}
+
 	return nil
 }
 

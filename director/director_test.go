@@ -322,12 +322,12 @@ func TestDirectorRegistration(t *testing.T) {
 		ad := server_structs.OriginAdvertiseV2{
 			BrokerURL: "https://broker-url.org",
 			DataURL:   "https://or-url.org",
-			Name:      "test",
 			Namespaces: []server_structs.NamespaceAdV2{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
 		}
+		ad.Initialize("test")
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -401,10 +401,11 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl := url.URL{}
 		isurl.Path = ts.URL
 
-		ad := server_structs.OriginAdvertiseV2{Name: "test", DataURL: "https://or-url.org", Namespaces: []server_structs.NamespaceAdV2{{
+		ad := server_structs.OriginAdvertiseV2{DataURL: "https://or-url.org", Namespaces: []server_structs.NamespaceAdV2{{
 			Path:   "/foo/bar",
 			Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 		}}}
+		ad.Initialize("test")
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -552,12 +553,12 @@ func TestDirectorRegistration(t *testing.T) {
 		ad := server_structs.OriginAdvertiseV2{
 			DataURL:   "https://or-url.org",
 			BrokerURL: brokerUrl,
-			Name:      "test",
 			Namespaces: []server_structs.NamespaceAdV2{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
 		}
+		ad.Initialize("test")
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -597,14 +598,14 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertiseV2{
-			Name:           "Human-readable name", // This is for web UI to display
-			RegistryPrefix: "/caches/test",        // This one should be used to look up status at the registry
+			RegistryPrefix: "/caches/test", // This one should be used to look up status at the registry
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
 			Namespaces: []server_structs.NamespaceAdV2{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}}}
+		ad.Initialize("Human-readable name")
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -644,7 +645,6 @@ func TestDirectorRegistration(t *testing.T) {
 		allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
 
 		ad := server_structs.OriginAdvertiseV2{
-			Name:           "Human-readable name",
 			RegistryPrefix: "/caches/test",
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
@@ -659,6 +659,7 @@ func TestDirectorRegistration(t *testing.T) {
 				},
 			},
 		}
+		ad.Initialize("Human-readable name")
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -704,14 +705,14 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertiseV2{
-			Name:           "Human-readable name", // This is for web UI to display
-			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			RegistryPrefix: "/origins/test", // This one should be used to look up status at the registry
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
 			Namespaces: []server_structs.NamespaceAdV2{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}}}
+		ad.Initialize("Human-readable name")
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -737,14 +738,14 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertiseV2{
-			Name:           "test", // XrootD.Sitename
-			RegistryPrefix: "",     // For Pelican <7.8.1, there's no such field
+			RegistryPrefix: "", // For Pelican <7.8.1, there's no such field
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
 			Namespaces: []server_structs.NamespaceAdV2{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}}}
+		ad.Initialize("test")
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -771,8 +772,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertiseV2{
-			Name:           "Human-readable name", // This is for web UI to display
-			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			RegistryPrefix: "/origins/test", // This one should be used to look up status at the registry
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
 			Namespaces: []server_structs.NamespaceAdV2{{
@@ -782,6 +782,7 @@ func TestDirectorRegistration(t *testing.T) {
 			StorageType:         "s3",
 			DisableDirectorTest: true,
 		}
+		ad.Initialize("Human-readable name")
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -812,8 +813,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertiseV2{
-			Name:           "Human-readable name", // This is for web UI to display
-			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			RegistryPrefix: "/origins/test", // This one should be used to look up status at the registry
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
 			Namespaces: []server_structs.NamespaceAdV2{{
@@ -822,6 +822,7 @@ func TestDirectorRegistration(t *testing.T) {
 			}},
 			StorageType: "s3",
 		}
+		ad.Initialize("Human-readable name")
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -852,8 +853,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertiseV2{
-			Name:           "Human-readable name", // This is for web UI to display
-			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			RegistryPrefix: "/origins/test", // This one should be used to look up status at the registry
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
 			Namespaces: []server_structs.NamespaceAdV2{{
@@ -862,6 +862,7 @@ func TestDirectorRegistration(t *testing.T) {
 			}},
 			StorageType: "posix",
 		}
+		ad.Initialize("Human-readable name")
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -892,8 +893,7 @@ func TestDirectorRegistration(t *testing.T) {
 		isurl.Path = ts.URL
 
 		ad := server_structs.OriginAdvertiseV2{
-			Name:           "Human-readable name", // This is for web UI to display
-			RegistryPrefix: "/origins/test",       // This one should be used to look up status at the registry
+			RegistryPrefix: "/origins/test", // This one should be used to look up status at the registry
 			DataURL:        "https://data-url.org",
 			WebURL:         "https://localhost:8844",
 			Namespaces: []server_structs.NamespaceAdV2{{
@@ -903,6 +903,7 @@ func TestDirectorRegistration(t *testing.T) {
 			StorageType:         "posix",
 			DisableDirectorTest: true,
 		}
+		ad.Initialize("Human-readable name")
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -963,13 +964,13 @@ func TestDirectorRegistration(t *testing.T) {
 		ad := server_structs.OriginAdvertiseV2{
 			BrokerURL: "https://broker-url.org",
 			DataURL:   "https://or-url.org",
-			Name:      "test",
 			Namespaces: []server_structs.NamespaceAdV2{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
-			Version: "7.0.0",
 		}
+		ad.Initialize("test")
+		ad.Version = "7.0.0"
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -1000,12 +1001,12 @@ func TestDirectorRegistration(t *testing.T) {
 		ad := server_structs.OriginAdvertiseV2{
 			BrokerURL: "https://broker-url.org",
 			DataURL:   "https://or-url.org",
-			Name:      "test",
 			Namespaces: []server_structs.NamespaceAdV2{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
 		}
+		ad.Initialize("test")
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -1036,12 +1037,13 @@ func TestDirectorRegistration(t *testing.T) {
 		ad := server_structs.OriginAdvertiseV2{
 			BrokerURL: "https://broker-url.org",
 			DataURL:   "https://or-url.org",
-			Name:      "test",
 			Namespaces: []server_structs.NamespaceAdV2{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
 		}
+		ad.Initialize("test")
+		ad.Version = ""
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -1110,13 +1112,13 @@ func TestDirectorRegistration(t *testing.T) {
 		ad := server_structs.OriginAdvertiseV2{
 			BrokerURL: "https://broker-url.org",
 			DataURL:   "https://or-url.org",
-			Name:      "test",
 			Namespaces: []server_structs.NamespaceAdV2{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
 			}},
-			Version: "7.0.0",
 		}
+		ad.Initialize("test")
+		ad.Version = "7.0.0"
 
 		jsonad, err := json.Marshal(ad)
 		assert.NoError(t, err, "Error marshalling OriginAdvertise")
@@ -1283,7 +1285,6 @@ func TestCheckRedirectQuery(t *testing.T) {
 
 func TestDiscoverOriginCache(t *testing.T) {
 	mockPelicanOriginServerAd := server_structs.ServerAd{
-		Name: "1-test-origin-server",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "fake-origin.org:8443",
@@ -1296,9 +1297,9 @@ func TestDiscoverOriginCache(t *testing.T) {
 		Latitude:  123.05,
 		Longitude: 456.78,
 	}
+	mockPelicanOriginServerAd.Initialize("1-test-origin-server")
 
 	mockTopoOriginServerAd := server_structs.ServerAd{
-		Name: "test-topology-origin-server",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "fake-topology-origin.org:8443",
@@ -1307,9 +1308,9 @@ func TestDiscoverOriginCache(t *testing.T) {
 		Latitude:  123.05,
 		Longitude: 456.78,
 	}
+	mockTopoOriginServerAd.Initialize("test-topology-origin-server")
 
 	mockCacheServerAd := server_structs.ServerAd{
-		Name: "2-test-cache-server",
 		URL: url.URL{
 			Scheme: "https",
 			Host:   "fake-cache.org:8443",
@@ -1322,6 +1323,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		Latitude:  45.67,
 		Longitude: 123.05,
 	}
+	mockCacheServerAd.Initialize("2-test-cache-server")
 
 	mockNamespaceAd := server_structs.NamespaceAdV2{
 		Caps: server_structs.Capabilities{
@@ -1727,19 +1729,19 @@ func TestRedirectMiddleware(t *testing.T) {
 
 }
 func TestRedirects(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
+	server_utils.ResetTestState()
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
 
 	// Use ads generated via mock topology for generating list of caches
 	topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
 	defer topoServer.Close()
 	viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+	viper.Set("Director.CacheSortMethod", "random")
 	err := AdvertiseOSDF(ctx)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		serverAds.DeleteAll()
-	})
 
 	router := gin.Default()
 	router.GET("/api/v1.0/director/origin/*any", redirectToOrigin)
@@ -1758,13 +1760,6 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("redirect-link-header-length", func(t *testing.T) {
-		server_utils.ResetTestState()
-		t.Cleanup(func() {
-			server_utils.ResetTestState()
-		})
-
-		viper.Set("Director.CacheSortMethod", "random")
-
 		req, _ := http.NewRequest("GET", "/my/server", nil)
 		// Provide a few things so that redirectToCache doesn't choke
 		req.Header.Add("User-Agent", "pelican-client/7.6.1")
@@ -1792,26 +1787,19 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("no-redirect-to-topology-cache-public-reads", func(t *testing.T) {
-		server_utils.ResetTestState()
-		t.Cleanup(func() {
-			server_utils.ResetTestState()
-		})
-
-		viper.Set("Director.CacheSortMethod", "random")
-
 		// Make sure the http cache from topology isn't included in the cache list
 		req, _ := http.NewRequest("GET", "/my/server/3", nil)
 		req.Header.Add("User-Agent", "pelican-client/7.6.1")
 		req.Header.Add("X-Real-Ip", "128.104.153.60")
 
 		pelCacheAd := server_structs.ServerAd{
-			Name: "pel-cache",
 			URL: url.URL{
 				Scheme: "https",
 				Host:   "pelcache.test.edu",
 			},
 			Type: server_structs.CacheType.String(),
 		}
+		pelCacheAd.Initialize("pel-cache")
 
 		nsAd := server_structs.NamespaceAdV2{
 			Caps: server_structs.Capabilities{PublicReads: true},
@@ -1839,13 +1827,6 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("redirect-to-topology-caches-auth-reads", func(t *testing.T) {
-		server_utils.ResetTestState()
-		t.Cleanup(func() {
-			server_utils.ResetTestState()
-		})
-
-		viper.Set("Director.CacheSortMethod", "random")
-
 		// Make sure the http cache from topology isn't included in the cache list
 		req, _ := http.NewRequest("GET", "/my/server", nil)
 		req.Header.Add("User-Agent", "pelican-client/7.6.1")
@@ -1863,13 +1844,6 @@ func TestRedirects(t *testing.T) {
 
 	// Make sure collections-url is correctly populated when the ns/origin comes from topology
 	t.Run("collections-url-from-topology", func(t *testing.T) {
-		server_utils.ResetTestState()
-		t.Cleanup(func() {
-			server_utils.ResetTestState()
-		})
-
-		viper.Set("Director.CacheSortMethod", "random")
-
 		// This one should have a collections url because it has a dirlisthost
 		req, _ := http.NewRequest("GET", "/my/server", nil)
 		req.Header.Add("User-Agent", "pelican-client/7.6.1")
@@ -1890,13 +1864,6 @@ func TestRedirects(t *testing.T) {
 	})
 
 	t.Run("origin-endpoint-returns-all-headers", func(t *testing.T) {
-		server_utils.ResetTestState()
-		t.Cleanup(func() {
-			server_utils.ResetTestState()
-		})
-
-		viper.Set("Director.CacheSortMethod", "random")
-
 		req, _ := http.NewRequest("GET", "/my/server", nil)
 		req.Header.Add("User-Agent", "pelican-v7.999.999")
 		req.Header.Add("X-Real-Ip", "128.104.153.60")

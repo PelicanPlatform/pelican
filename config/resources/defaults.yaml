@@ -22,6 +22,8 @@ Client:
   StoppedTransferTimeout: 100s
   WorkerCount: 5
 Server:
+  AdLifetime: 10m
+  AdvertisementInterval: 1m
   WebPort: 8444
   WebHost: "0.0.0.0"
   EnableUI: true
@@ -137,6 +139,7 @@ Issuer:
   TomcatLocation: /opt/tomcat
   ScitokensServerLocation: /opt/scitokens-server
   QDLLocation: /opt/qdl
+  OIDCPreferClaimsFromIDToken: false
   OIDCAuthenticationUserClaim: sub
   OIDCGroupClaim: groups
   AuthenticationSource: OIDC

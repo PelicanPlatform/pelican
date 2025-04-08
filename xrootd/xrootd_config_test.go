@@ -36,7 +36,6 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
@@ -47,56 +46,23 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-type xrootdTest struct {
-	T   *testing.T
-	ctx context.Context
-}
+func setupXrootd(t *testing.T) {
+	tmpDir := t.TempDir()
 
-func (x *xrootdTest) setup() {
-	server_utils.ResetTestState()
-
-	dirname, err := os.MkdirTemp("", "tmpDir")
-	require.NoError(x.T, err)
-	x.T.Cleanup(func() {
-		os.RemoveAll(dirname)
-	})
-	viper.Set("ConfigDir", dirname)
-	viper.Set("Xrootd.RunLocation", dirname)
-	viper.Set("Cache.RunLocation", dirname)
-	viper.Set("Origin.RunLocation", dirname)
+	viper.Set("ConfigDir", tmpDir)
+	viper.Set("Xrootd.RunLocation", tmpDir)
+	viper.Set("Cache.RunLocation", tmpDir)
+	viper.Set("Origin.RunLocation", tmpDir)
 	viper.Set("Origin.StoragePrefix", "/")
 	viper.Set("Origin.FederationPrefix", "/")
+	viper.Set("Server.IssuerUrl", "https://my-xrootd.com:8444")
 	config.InitConfig()
-	var cancel context.CancelFunc
-	var egrp *errgroup.Group
-	x.ctx, cancel, egrp = test_utils.TestContext(context.Background(), x.T)
-	defer func() { require.NoError(x.T, egrp.Wait()) }()
-	defer cancel()
 }
 
 func TestXrootDOriginConfig(t *testing.T) {
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	dirname, err := os.MkdirTemp("", "tmpDir")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		os.RemoveAll(dirname)
-	})
 	server_utils.ResetTestState()
-
 	defer server_utils.ResetTestState()
-
-	viper.Set("Configdir", dirname)
-	viper.Set("Origin.RunLocation", dirname)
-	viper.Set("Xrootd.RunLocation", dirname)
-	viper.Set("Origin.StoragePrefix", "/")
-	viper.Set("Origin.FederationPrefix", "/")
-	config.InitConfig()
-	configPath, err := ConfigXrootd(ctx, true)
-	require.NoError(t, err)
-	assert.NotNil(t, configPath)
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	tests := []struct {
 		name            string
@@ -118,9 +84,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			defer server_utils.ResetTestState()
-
-			xrootd := xrootdTest{T: t}
-			xrootd.setup()
+			setupXrootd(t)
 
 			if tt.configKey != "" {
 				viper.Set(tt.configKey, tt.configValue)
@@ -129,27 +93,29 @@ func TestXrootDOriginConfig(t *testing.T) {
 			configPath, err := ConfigXrootd(ctx, true)
 			if tt.shouldError {
 				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				assert.NotNil(t, configPath)
-
-				file, err := os.Open(configPath)
-				assert.NoError(t, err)
-				defer file.Close()
-
-				content, err := io.ReadAll(file)
-				assert.NoError(t, err)
-				if tt.expectedContent != "" {
-					assert.Contains(t, string(content), tt.expectedContent)
-				}
+				return
 			}
+
+			require.NoError(t, err)
+			assert.NotNil(t, configPath)
+
+			file, err := os.Open(configPath)
+			assert.NoError(t, err)
+			defer file.Close()
+
+			content, err := io.ReadAll(file)
+			assert.NoError(t, err)
+			if tt.expectedContent != "" {
+				assert.Contains(t, string(content), tt.expectedContent)
+			}
+
 		})
 	}
 
+	// Additional configuration tests
 	t.Run("TestOsdfWithXRDHOSTAndPort", func(t *testing.T) {
-		xrootd := xrootdTest{T: t}
 		defer os.Unsetenv("XRDHOST")
-		xrootd.setup()
+		setupXrootd(t)
 
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to OSDF")
@@ -164,9 +130,8 @@ func TestXrootDOriginConfig(t *testing.T) {
 	})
 
 	t.Run("TestOsdfWithXRDHOSTAndNoPort", func(t *testing.T) {
-		xrootd := xrootdTest{T: t}
 		defer os.Unsetenv("XRDHOST")
-		xrootd.setup()
+		setupXrootd(t)
 
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to OSDF")
@@ -181,9 +146,10 @@ func TestXrootDOriginConfig(t *testing.T) {
 	})
 
 	t.Run("TestPelicanWithXRDHOST", func(t *testing.T) {
-		// We don't expect XRDHOST to be set for Pelican proper
-		xrootd := xrootdTest{T: t}
-		xrootd.setup()
+		// We don't expect XRDHOST to be set for Pelican proper. However, if it is set,
+		// we must unset it on test failure.
+		defer os.Unsetenv("XRDHOST")
+		setupXrootd(t)
 
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to Pelican")
@@ -245,9 +211,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			defer server_utils.ResetTestState()
-
-			xrootd := xrootdTest{T: t}
-			xrootd.setup()
+			setupXrootd(t)
 
 			if tt.configKey != "" {
 				viper.Set(tt.configKey, tt.configValue)
@@ -494,7 +458,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
 		viper.Set("Xrootd.AuthRefreshInterval", "5m")
-		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
+		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 300, xrdConfig.Xrootd.AuthRefreshInterval)
 	})
@@ -503,7 +467,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
 		viper.Set("Xrootd.AuthRefreshInterval", "24h")
-		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
+		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 86400, xrdConfig.Xrootd.AuthRefreshInterval)
 	})
@@ -512,7 +476,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
 		viper.Set("Xrootd.AuthRefreshInterval", "100s")
-		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
+		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 100, xrdConfig.Xrootd.AuthRefreshInterval)
 	})
@@ -521,7 +485,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
 		viper.Set("Xrootd.AuthRefreshInterval", "10")
-		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
+		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		// Should fall back to 5m, or 300s
 		assert.Equal(t, 300, xrdConfig.Xrootd.AuthRefreshInterval)
@@ -531,7 +495,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
 		viper.Set("Xrootd.AuthRefreshInterval", "99")
-		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
+		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 99, xrdConfig.Xrootd.AuthRefreshInterval)
 	})
@@ -540,7 +504,7 @@ func TestAuthIntervalUnmarshal(t *testing.T) {
 		server_utils.ResetTestState()
 		var xrdConfig XrootdConfig
 		viper.Set("Xrootd.AuthRefreshInterval", "0.5s")
-		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc()))
+		err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook()))
 		assert.NoError(t, err)
 		assert.Equal(t, 300, xrdConfig.Xrootd.AuthRefreshInterval)
 	})

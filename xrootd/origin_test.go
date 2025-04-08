@@ -156,23 +156,28 @@ func TestOrigin(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	viper.Set("Origin.StoragePrefix", t.TempDir())
-	viper.Set("Origin.FederationPrefix", "/test")
-	viper.Set("Origin.StorageType", "posix")
+	// Get available, unique ports
+	ports, err := test_utils.GetUniqueAvailablePorts(2)
+	require.NoError(t, err)
+	require.Len(t, ports, 2)
+
+	viper.Set(param.Origin_StoragePrefix.GetName(), t.TempDir())
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/test")
+	viper.Set(param.Origin_StorageType.GetName(), "posix")
 	// Disable functionality we're not using (and is difficult to make work on Mac)
-	viper.Set("Origin.EnableCmsd", false)
-	viper.Set("Origin.EnableMacaroons", false)
-	viper.Set("Origin.EnableVoms", false)
-	viper.Set("Origin.Port", 0)
-	viper.Set("Server.WebPort", 0)
-	viper.Set("TLSSkipVerify", true)
-	viper.Set("Logging.Origin.Scitokens", "debug")
+	viper.Set(param.Origin_EnableCmsd.GetName(), false)
+	viper.Set(param.Origin_EnableMacaroons.GetName(), false)
+	viper.Set(param.Origin_EnableVoms.GetName(), false)
+	viper.Set(param.Origin_Port.GetName(), ports[0])
+	viper.Set(param.Server_WebPort.GetName(), ports[1])
+	viper.Set(param.TLSSkipVerify.GetName(), true)
+	viper.Set(param.Logging_Origin_Scitokens.GetName(), "debug")
 
 	mockupCancel := originMockup(ctx, egrp, t)
 	defer mockupCancel()
 
 	// In this case a 403 means its running
-	err := server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, false)
+	err = server_utils.WaitUntilWorking(ctx, "GET", param.Origin_Url.GetString(), "xrootd", 403, false)
 	if err != nil {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
@@ -180,7 +185,7 @@ func TestOrigin(t *testing.T) {
 	issuerUrl, err := config.GetServerIssuerURL()
 	require.NoError(t, err)
 
-	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, server_utils.ServerSelfTest)
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_TokenAudience.GetString(), issuerUrl, server_utils.ServerSelfTest)
 	require.NoError(t, err)
 	require.True(t, ok)
 }
@@ -198,21 +203,35 @@ func TestMultiExportOrigin(t *testing.T) {
 	err := viper.ReadConfig(strings.NewReader(multiExportOriginConfig))
 	require.NoError(t, err, "error reading config")
 
+	// Get available, unique ports and pre-allocate for xrootd startup.
+	ports, err := test_utils.GetUniqueAvailablePorts(2)
+	require.NoError(t, err)
+	require.Len(t, ports, 2)
+
+	// Disable functionality we're not using for the tests
+	viper.Set(param.Origin_EnableCmsd.GetName(), false)
+	viper.Set(param.Origin_EnableVoms.GetName(), false)
+	viper.Set(param.Origin_Port.GetName(), ports[0])
+	viper.Set(param.Server_WebPort.GetName(), ports[1])
+	viper.Set(param.TLSSkipVerify.GetName(), true)
+	viper.Set(param.Logging_Origin_Scitokens.GetName(), "debug")
+
+	// Initialize the origin before getting origin exports
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	err = config.InitServer(ctx, server_structs.OriginType)
+	require.NoError(t, err)
+
 	exports, err := server_utils.GetOriginExports()
 	require.NoError(t, err)
 	require.Len(t, exports, 2)
-	// Override the object store prefix to a temp directory
-	exports[0].StoragePrefix = t.TempDir()
-	exports[1].StoragePrefix = t.TempDir()
 
-	// Disable functionality we're not using (and is difficult to make work on Mac)
-	viper.Set("Origin.EnableCmsd", false)
-	viper.Set("Origin.EnableMacaroons", false)
-	viper.Set("Origin.EnableVoms", false)
-	viper.Set("Origin.Port", 0)
-	viper.Set("Server.WebPort", 0)
-	viper.Set("TLSSkipVerify", true)
-	viper.Set("Logging.Origin.Scitokens", "debug")
+	// Override the object store prefix to a temp directory
+	issuerUrl, err := config.GetServerIssuerURL()
+	require.NoError(t, err)
+	for i := range exports {
+		exports[i].StoragePrefix = t.TempDir()
+	}
 
 	mockupCancel := originMockup(ctx, egrp, t)
 	defer mockupCancel()
@@ -223,10 +242,8 @@ func TestMultiExportOrigin(t *testing.T) {
 		t.Fatalf("Unsuccessful test: Server encountered an error: %v", err)
 	}
 	fileTests := server_utils.TestFileTransferImpl{}
-	issuerUrl, err := config.GetServerIssuerURL()
-	require.NoError(t, err)
 
-	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), config.GetServerAudience(), issuerUrl, server_utils.ServerSelfTest)
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_TokenAudience.GetString(), issuerUrl, server_utils.ServerSelfTest)
 	require.NoError(t, err)
 	require.True(t, ok)
 }
@@ -242,13 +259,17 @@ func mockupS3Origin(ctx context.Context, egrp *errgroup.Group, t *testing.T, fed
 	viper.Set("Origin.StorageType", "s3")
 	viper.Set("Origin.EnablePublicReads", true)
 
+	ports, err := test_utils.GetUniqueAvailablePorts(2)
+	require.NoError(t, err)
+	require.Len(t, ports, 2)
+
 	// Disable functionality we're not using (and is difficult to make work on Mac)
 	viper.Set("Origin.EnableCmsd", false)
 	viper.Set("Origin.EnableMacaroons", false)
 	viper.Set("Origin.EnableVoms", false)
 	viper.Set("Origin.SelfTest", false)
-	viper.Set("Origin.Port", 0)
-	viper.Set("Server.WebPort", 0)
+	viper.Set("Origin.Port", ports[0])
+	viper.Set("Server.WebPort", ports[1])
 	viper.Set("TLSSkipVerify", true)
 
 	return originMockup(ctx, egrp, t)
@@ -384,6 +405,10 @@ func TestPosixOriginWithSentinel(t *testing.T) {
 	err = os.Chmod(tmpPath, 0755)
 	require.NoError(t, err)
 
+	ports, err := test_utils.GetUniqueAvailablePorts(2)
+	require.NoError(t, err)
+	require.Len(t, ports, 2)
+
 	viper.Set("Origin.StoragePrefix", tmpPath)
 	viper.Set("Origin.FederationPrefix", "/test")
 	viper.Set("Origin.StorageType", "posix")
@@ -391,8 +416,8 @@ func TestPosixOriginWithSentinel(t *testing.T) {
 	viper.Set("Origin.EnableCmsd", false)
 	viper.Set("Origin.EnableMacaroons", false)
 	viper.Set("Origin.EnableVoms", false)
-	viper.Set("Origin.Port", 0)
-	viper.Set("Server.WebPort", 0)
+	viper.Set("Origin.Port", ports[0])
+	viper.Set("Server.WebPort", ports[1])
 	viper.Set("TLSSkipVerify", true)
 	viper.Set("Logging.Origin.Scitokens", "trace")
 

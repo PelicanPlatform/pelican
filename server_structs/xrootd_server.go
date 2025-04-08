@@ -19,7 +19,6 @@
 package server_structs
 
 import (
-	"context"
 	"strings"
 )
 
@@ -30,7 +29,7 @@ type (
 		GetNamespaceAds() []NamespaceAdV2
 		CreateAdvertisement(name string, serverUrl string, serverWebUrl string) (*OriginAdvertiseV2, error)
 		GetNamespaceAdsFromDirector() error
-		GetAdTokCfg(context.Context) (AdTokCfg, error)
+		GetAdTokCfg(string) (AdTokCfg, error) // Given a director URL, configuration a token for advertising
 		GetFedTokLocation() string
 
 		// Return the PIDs corresponding to the running process(es) for the XRootD

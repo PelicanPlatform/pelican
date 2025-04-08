@@ -22,7 +22,9 @@ All of the Pelican servers have the following metrics:
 
 ### `process_start_time_seconds`
 
-The UNIX epoch time in seconds since the Pelican process started. To get the duration of the Pelican server running time, use the following PromQL:
+The UNIX epoch time in seconds when the Pelican process started.
+
+To get the duration of the Pelican server running time, use the following PromQL:
 
 ```plaintext filename="PromQL" copy
 time() - process_start_time_seconds
@@ -330,3 +332,22 @@ With the `up` metric, it is possible to count number of active origin and cache 
   |--------------|--------------------------------------------------------------------|
   | `Success`    | The reporting to the origin of test run status succeeded           |
   | `Failed`     | The reporting to the origin of test run status failed              |
+
+
+### `pelican_director_geoip_errors`
+
+  The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database
+
+  #### Label: `network`
+  A \24 bit mask of the network address that was being resolved
+
+  #### Label: `source`
+
+  | Label Values | Description     |
+  |--------------|-----------------|
+  | `server`    |  Indicates a server-side issue, such as the unavailability of the GeoIP database or an error while retrieving the city record.  |
+  | `client`    |  Indicates a client-side issue, such as the IP address being from a private range or the GeoIP database providing unreliable data  |
+
+  #### Label: `proj`
+
+  The project of the client that was being resolved. This comes from the `User-Agent` header of the client's request.

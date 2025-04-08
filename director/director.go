@@ -546,7 +546,8 @@ func redirectToCache(ginCtx *gin.Context) {
 	ctx := context.Background()
 	project := utils.ExtractProjectFromUserAgent(ginCtx.Request.Header.Values("User-Agent"))
 	ctx = context.WithValue(ctx, ProjectContextKey{}, project)
-	cacheAds, err = sortServerAds(ctx, ipAddr, cacheAds, cachesAvailabilityMap)
+	redirectInfo := server_structs.NewRedirectInfoFromIP(ipAddr.String())
+	cacheAds, err = sortServerAds(ctx, ipAddr, cacheAds, cachesAvailabilityMap, redirectInfo)
 	if err != nil {
 		log.Error("Error determining server ordering for cacheAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -602,7 +603,10 @@ func redirectToCache(ginCtx *gin.Context) {
 	// duplicate link metadata above.  This is purposeful: the Link header might get too long if we repeat
 	// the token 20 times for 20 caches.  This means a "normal HTTP client" will correctly redirect but
 	// anything parsing the `Link` header for metalinks will need logic for redirecting appropriately.
-	ginCtx.Redirect(307, getFinalRedirectURL(redirectURL, reqParams))
+	if ginCtx.GetHeader("X-Pelican-Debug") == "true" {
+		ginCtx.JSON(http.StatusTemporaryRedirect, redirectInfo)
+	}
+	ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
 }
 
 func redirectToOrigin(ginCtx *gin.Context) {
@@ -796,8 +800,8 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	ctx := context.Background()
 	project := utils.ExtractProjectFromUserAgent(ginCtx.Request.Header.Values("User-Agent"))
 	ctx = context.WithValue(ctx, ProjectContextKey{}, project)
-
-	availableAds, err = sortServerAds(ctx, ipAddr, availableAds, nil)
+	redirectInfo := server_structs.NewRedirectInfoFromIP(ipAddr.String())
+	availableAds, err = sortServerAds(ctx, ipAddr, availableAds, nil, redirectInfo)
 	if err != nil {
 		log.Error("Error determining server ordering for originAds: ", err)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -909,6 +913,9 @@ func redirectToOrigin(ginCtx *gin.Context) {
 
 		// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
 		// not those in the `Link`.
+		if ginCtx.GetHeader("X-Pelican-Debug") == "true" {
+			ginCtx.JSON(http.StatusTemporaryRedirect, redirectInfo)
+		}
 		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
 	}
 }
@@ -1075,8 +1082,9 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	if err != nil {
 		// Failed binding to a V1 type, so should now check to see if it's a V2 type
 		adV2 = server_structs.OriginAdvertiseV2{}
-		err = ctx.ShouldBindBodyWith(&adV2, binding.JSON)
-		if err != nil {
+		err2 := ctx.ShouldBindBodyWith(&adV2, binding.JSON)
+		if err2 != nil {
+			log.Debugln("Failed to parse ad of type", sType.String(), "due to error:", err, "original V1 error is", err)
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    fmt.Sprintf("Invalid %s registration", sType),
@@ -1094,6 +1102,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		// Parse URL to extract hostname
 		parsedURL, err := url.Parse(adV2.DataURL)
 		if err != nil {
+			log.Debugln("Failed to parse data URL for cache:", err)
 			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
 				Msg:    fmt.Sprintf("Invalid Cache URL %s (config parameter: Cache.Url): %s", adV2.DataURL, err.Error()),
@@ -1151,35 +1160,6 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	}
 	namespacePaths = strings.TrimSpace(namespacePaths)
 	ctx.Set("namespacePaths", namespacePaths)
-
-	adUrl, err := url.Parse(adV2.DataURL)
-	if err != nil {
-		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. %s.URL %s is not a valid URL", sType, sType, adV2.DataURL), // Origin.URL / Cache.URL
-		})
-		return
-	}
-
-	adWebUrl, err := url.Parse(adV2.WebURL)
-	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
-		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. Server.ExternalWebUrl %s is not a valid URL", sType, adV2.WebURL),
-		})
-		return
-	}
-
-	brokerUrl, err := url.Parse(adV2.BrokerURL)
-	if err != nil {
-		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Invalid %s registration. BrokerURL %s is not a valid URL", sType, adV2.BrokerURL),
-		})
-	}
 
 	// Verify server registration
 	token := strings.TrimPrefix(tokens[0], "Bearer ")
@@ -1271,17 +1251,6 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		}
 	}
 
-	st := adV2.StorageType
-	// Defaults to POSIX
-	if st == "" {
-		st = server_structs.OriginStoragePosix
-	}
-	// Disable director test if the server isn't POSIX
-	if st != server_structs.OriginStoragePosix && !adV2.DisableDirectorTest {
-		log.Warningf("%s server %s with storage type %s enabled director test. This is not supported.", sType, adV2.Name, string(st))
-		adV2.DisableDirectorTest = true
-	}
-
 	// if we didn't receive a version from the ad but we were able to extract the request version from the user agent,
 	// then we can fallback to the request version
 	// otherwise, we set the version to unknown because our sources of truth are not available
@@ -1300,8 +1269,118 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		adV2.Version = "unknown"
 	}
 
+	if adV2.Downtimes != nil {
+		// Process received server(origin/cache) downtimes and toggle the director db accordingly when necessary
+		currentTime := time.Now().UTC().UnixMilli()
+		bringItDown := false // Flag to indicate if this server is put in downtime during the traversal of the downtimes in this server ad
+		sn := adV2.Name
+		// Check if the server is currently in downtime
+		for _, downtime := range adV2.Downtimes {
+			if downtime.StartTime < currentTime && (downtime.EndTime > currentTime || downtime.EndTime == 0) {
+				// Server is currently in downtime
+
+				// If this server is already put in downtime, we don't need to do anything
+				// Retrieve the original filter type to check and backup for revert in case of database failure
+				filteredServersMutex.RLock()
+				originalFilterType, hasOriginalFilter := filteredServers[sn]
+				filteredServersMutex.RUnlock()
+				if hasOriginalFilter && originalFilterType != tempAllowed {
+					break
+				}
+
+				// If the server is not in downtime, we need to set it to downtime in the director in-memory cache and database
+				filteredServersMutex.Lock()
+				filteredServers[sn] = serverFiltered
+				filteredServersMutex.Unlock()
+
+				err := setServerDowntime(sn, serverFiltered)
+				if err != nil {
+					log.Warningf("Failed to set downtime for server %s in the director database: %v", adV2.Name, err)
+					if hasOriginalFilter {
+						filteredServersMutex.Lock()
+						filteredServers[sn] = originalFilterType
+						filteredServersMutex.Unlock()
+					} else {
+						filteredServersMutex.Lock()
+						delete(filteredServers, sn)
+						filteredServersMutex.Unlock()
+					}
+				}
+				bringItDown = true
+				break
+			}
+		}
+		// If the server doesn't have an active downtime, it means Director's previously
+		// recorded downtime set by the server admin is stale and should be removed.
+		// It only removes the downtime set by the server admin, not the downtime set by others.
+		if !bringItDown {
+			err := deleteServerDowntimeSetByServerAdmin(adV2.Name)
+			if err != nil {
+				log.Warningf("Failed to remove downtime for server %s: %v", adV2.Name, err)
+			}
+		}
+	}
+
+	// Forward to other directors, if applicable
+	forwardServiceAd(engineCtx, &adV2, sType)
+
+	// Correct any clock skews detected in the client
+	now := time.Now()
+	if skew := now.Sub(adV2.Now); !adV2.Now.IsZero() && (skew > 100*time.Millisecond || skew < -100*time.Millisecond) {
+		lifetime := adV2.GetExpiration().Sub(adV2.Now)
+		if lifetime > 0 {
+			adV2.Expiration = now.Add(lifetime)
+		}
+	}
+	adV2.Now = time.Time{}
+
+	finishRegisterServeAd(engineCtx, ctx, &adV2, sType)
+}
+
+// Finish registering the provided service ad (cache or origin) after authorization was completed.
+func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, adV2 *server_structs.OriginAdvertiseV2, sType server_structs.ServerType) {
+	log.Debugf("finishRegisterServeAd received %+v", adV2)
+	st := adV2.StorageType
+	// Defaults to POSIX
+	if st == "" {
+		st = server_structs.OriginStoragePosix
+	}
+	// Disable director test if the server isn't POSIX
+	if st != server_structs.OriginStoragePosix && !adV2.DisableDirectorTest {
+		log.Warningf("%s server '%s' with storage type '%s' enabled director test. This is not supported.", sType, adV2.Name, string(st))
+		adV2.DisableDirectorTest = true
+	}
+
+	adUrl, err := url.Parse(adV2.DataURL)
+	if err != nil {
+		log.Warningf("Failed to parse %s URL %v: %v\n", sType, adV2.DataURL, err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid %s registration. %s.URL %s is not a valid URL", sType, sType, adV2.DataURL), // Origin.URL / Cache.URL
+		})
+		return
+	}
+
+	adWebUrl, err := url.Parse(adV2.WebURL)
+	if err != nil && adV2.WebURL != "" { // We allow empty WebURL string for backward compatibility
+		log.Warningf("Failed to parse server Web URL %v: %v\n", adV2.WebURL, err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid %s registration. %s %s is not a valid URL", param.Server_ExternalWebUrl.GetName(), sType, adV2.WebURL),
+		})
+		return
+	}
+
+	brokerUrl, err := url.Parse(adV2.BrokerURL)
+	if err != nil {
+		log.Warningf("Failed to parse broker URL %s: %s", adV2.BrokerURL, err)
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid %s registration. BrokerURL %s is not a valid URL", sType, adV2.BrokerURL),
+		})
+	}
+
 	sAd := server_structs.ServerAd{
-		Name:                adV2.Name,
 		StorageType:         st,
 		DisableDirectorTest: adV2.DisableDirectorTest,
 		URL:                 *adUrl,
@@ -1310,8 +1389,9 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		Type:                sType.String(),
 		Caps:                adV2.Caps,
 		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
-		Version:             adV2.Version,
+		Downtimes:           adV2.Downtimes,
 	}
+	sAd.CopyFrom(adV2)
 
 	recordAd(engineCtx, sAd, &adV2.Namespaces)
 
@@ -1558,7 +1638,10 @@ func getHealthTestFile(ctx *gin.Context) {
 // In the case that parser fails, then metric is not updated
 func collectClientVersionMetric(reqVer *version.Version, service string) {
 	if reqVer == nil || service == "" {
+		// TODO: Remove this metric (the line directly below)
+		// The renamed metric was added in v7.16
 		metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": "other", "service": "other"}).Inc()
+		metrics.PelicanDirectorClientRequestsTotal.With(prometheus.Labels{"version": "other", "service": "other"}).Inc()
 		return
 	}
 
@@ -1568,7 +1651,10 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 	}
 
 	if reqVer.GreaterThan(directorVersion) {
+		// TODO: Remove this metric (the line directly below)
+		// The renamed metric was added in v7.16
 		metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": "pelican-future", "service": service}).Inc()
+		metrics.PelicanDirectorClientRequestsTotal.With(prometheus.Labels{"version": "pelican-future", "service": service}).Inc()
 	}
 
 	versionSegments := reqVer.Segments()
@@ -1583,7 +1669,10 @@ func collectClientVersionMetric(reqVer *version.Version, service string) {
 
 	shortenedVersion := strings.Join(strSegments, ".")
 
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	metrics.PelicanDirectorClientVersionTotal.With(prometheus.Labels{"version": shortenedVersion, "service": service}).Inc()
+	metrics.PelicanDirectorClientRequestsTotal.With(prometheus.Labels{"version": shortenedVersion, "service": service}).Inc()
 }
 
 func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
@@ -1611,10 +1700,15 @@ func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
 	} else {
 		labels["network"] = "unknown"
 	}
+	// TODO: Remove this metric (the line directly below)
+	// The renamed metric was added in v7.16
 	metrics.PelicanDirectorRedirectionsTotal.With(labels).Inc()
+	metrics.PelicanDirectorRedirectsTotal.With(labels).Inc()
 }
 
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
+	egrp := ctx.Value(config.EgrpKey).(*errgroup.Group)
+
 	directorAPIV1 := router.Group("/api/v1.0/director", web_ui.ServerHeaderMiddleware)
 	{
 		// Establish the routes used for cache/origin redirection
@@ -1625,6 +1719,8 @@ func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
 		directorAPIV1.DELETE("/origin/*any", redirectToOrigin)
 		directorAPIV1.Handle("PROPFIND", "/origin/*any", redirectToOrigin)
+		directorAPIV1.GET("/directors", listDirectors)
+		directorAPIV1.POST("/registerDirector", serverAdMetricMiddleware, func(gctx *gin.Context) { registerDirectorAd(ctx, egrp, gctx) })
 		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServerAd(ctx, gctx, server_structs.OriginType) })
 		directorAPIV1.POST("/registerCache", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServerAd(ctx, gctx, server_structs.CacheType) })
 		directorAPIV1.GET("/getFedToken", getFedToken)

@@ -43,7 +43,7 @@ builds:
     tags:
       - forceposix
     ldflags:
-      - -s -w -X github.com/pelicanplatform/pelican/config.commit={{.Commit}} -X github.com/pelicanplatform/pelican/config.date={{.Date}} -X github.com/pelicanplatform/pelican/config.builtBy=goreleaser -X github.com/pelicanplatform/pelican/config.version={{.Version}}
+      - -s -w -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version={{.Version}}
     ignore:
       - goos: windows
         goarch: arm64
@@ -67,7 +67,7 @@ builds:
       - forceposix
       - lotman
     ldflags:
-      - -s -w -X github.com/pelicanplatform/pelican/config.commit={{.Commit}} -X github.com/pelicanplatform/pelican/config.date={{.Date}} -X github.com/pelicanplatform/pelican/config.builtBy=goreleaser -X github.com/pelicanplatform/pelican/config.version={{.Version}}
+      - -s -w -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version={{.Version}}
 # Goreleaser complains if there's a different number of binaries built for different architectures
 # in the same archive. Instead of plopping pelican-server in the same archive as pelican, split the
 # builds into separate archives.
@@ -168,6 +168,12 @@ nfpms:
               mode: 0755
               owner: pelican
               group: pelican
+        dependencies:
+          - "/bin/sh"
+          # for useradd and groupadd:
+          - "shadow-utils"
+          # for getent:
+          - "glibc-common"
       deb:
         contents:
           - src: LICENSE
@@ -204,6 +210,13 @@ nfpms:
               mode: 0755
               owner: pelican
               group: pelican
+        dependencies:
+          # provides /bin/sh:
+          - "dash"
+          # for useradd and groupadd:
+          - "passwd"
+          # for getent:
+          - "libc-bin"
       apk:
         contents:
           - src: LICENSE

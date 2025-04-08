@@ -79,6 +79,8 @@ func checkFilter(serverName string) (bool, filterType) {
 			return true, tempFiltered
 		case topoFiltered:
 			return true, topoFiltered
+		case serverFiltered:
+			return true, serverFiltered
 		case tempAllowed:
 			return false, tempAllowed
 		default:
@@ -96,6 +98,7 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 	go serverAds.Start()
 	go namespaceKeys.Start()
 	go clientIpCache.Start()
+	go directorAds.Start()
 
 	serverAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *server_structs.Advertisement]) {
 		serverAd := i.Value().ServerAd
@@ -150,6 +153,13 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		}
 	})
 
+	directorAds.OnEviction(func(ctx context.Context, er ttlcache.EvictionReason, i *ttlcache.Item[string, *directorInfo]) {
+		info := i.Value()
+		if info.cancel != nil {
+			info.cancel()
+		}
+	})
+
 	// Put stop logic in a separate goroutine so that parent function is not blocking
 	egrp.Go(func() error {
 		<-ctx.Done()
@@ -160,6 +170,8 @@ func LaunchTTLCache(ctx context.Context, egrp *errgroup.Group) {
 		namespaceKeys.Stop()
 		clientIpCache.DeleteAll()
 		clientIpCache.Stop()
+		directorAds.DeleteAll()
+		directorAds.Stop()
 		log.Info("Director TTL cache eviction has been stopped")
 		return nil
 	})

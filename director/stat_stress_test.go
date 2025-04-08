@@ -54,6 +54,10 @@ func TestStatMemory(t *testing.T) {
 	server_utils.ResetTestState()
 
 	viper.Set(param.Xrootd_EnableLocalMonitoring.GetName(), false)
+	viper.Set(param.Server_AdLifetime.GetName(), "500ms")
+	viper.Set(param.Cache_SelfTest.GetName(), false)
+	viper.Set(param.Origin_DirectorTest.GetName(), false)
+	viper.Set(param.Origin_SelfTest.GetName(), false)
 	fed := fed_test_utils.NewFedTest(t, directorPublicCfg)
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	assert.NoError(t, err)
@@ -63,8 +67,12 @@ func TestStatMemory(t *testing.T) {
 	idx := 0
 	start := time.Now()
 	dest := filepath.Join(t.TempDir(), "dest.txt")
+	cacheSize := param.Director_CachePresenceCapacity.GetInt()
 
-	for time.Since(start) < (time.Second) {
+	// Fill the cache before taking the baseline measurement. Otherwise,
+	// it might end up that increased memory usage is due to filling up the
+	// cache and not an actual memory leak.
+	for idx < cacheSize {
 		downloadURL := fmt.Sprintf("pelican://%s%s/stress/%v.txt", discoveryUrl.Host, fed.Exports[0].FederationPrefix, idx)
 		grp.Go(func() error {
 			_, err := client.DoGet(fed.Ctx, downloadURL, dest, false)
@@ -81,7 +89,10 @@ func TestStatMemory(t *testing.T) {
 	runtime.ReadMemStats(&stats)
 	goCnt := runtime.NumGoroutine()
 
-	for time.Since(start) < 10*time.Second {
+	// Now, do enough work to fully evict and replace the cache's
+	// contents from the "warm up" stage. If we're on an unusually
+	// fast host, keep going until "enough" time has elapsed.
+	for idx < 2*cacheSize || time.Since(start) < 10*time.Second {
 		downloadURL := fmt.Sprintf("pelican://%s%s/stress/%v.txt", discoveryUrl.Host, fed.Exports[0].FederationPrefix, idx)
 		grp.Go(func() error {
 			_, err := client.DoGet(fed.Ctx, downloadURL, dest, false)

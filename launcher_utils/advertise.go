@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -42,7 +43,6 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 type directorResponse struct {
@@ -66,7 +66,14 @@ func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers 
 	metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusWarning, "First attempt to advertise to the director...")
 	doAdvertise(ctx, servers)
 
-	ticker := time.NewTicker(1 * time.Minute)
+	advertiseInterval := param.Server_AdvertisementInterval.GetDuration()
+	if advertiseInterval > param.Server_AdLifetime.GetDuration()/3 {
+		newInterval := param.Server_AdLifetime.GetDuration() / 3
+		log.Warningln("The advertise interval", advertiseInterval.String(), "is set to above 1/3 of the ad lifetime.  Decreasing it to", newInterval.String())
+		advertiseInterval = newInterval
+	}
+
+	ticker := time.NewTicker(advertiseInterval)
 	egrp.Go(func() error {
 		defer ticker.Stop()
 		for {
@@ -103,68 +110,14 @@ func Advertise(ctx context.Context, servers []server_structs.XRootDServer) error
 	return firstErr
 }
 
-// Get the site name from the registry given a namespace prefix
-func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, err error) {
-	fed, err := config.GetFederation(ctx)
-	if err != nil {
-		return
-	}
-	if fed.RegistryEndpoint == "" {
-		err = fmt.Errorf("unable to fetch site name from the registry. Federation.RegistryUrl or Federation.DiscoveryUrl is unset")
-		return
-	}
-	requestUrl, err := url.JoinPath(fed.RegistryEndpoint, "api/v1.0/registry", prefix)
-	if err != nil {
-		return
-	}
-	tr := config.GetTransport()
-	res, err := utils.MakeRequest(context.Background(), tr, requestUrl, http.MethodGet, nil, nil)
-	if err != nil {
-		return
-	}
-	ns := server_structs.Namespace{}
-	err = json.Unmarshal(res, &ns)
-	if err != nil {
-		return
-	}
-	sitename = ns.AdminMetadata.SiteName
-	return
-}
-
 func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) error {
-	name := ""
-	var err error
-	// Fetch site name from the registry, if not, fall back to Xrootd.Sitename.
-	if server.GetServerType().IsEnabled(server_structs.OriginType) {
-		// Note we use Server_ExternalWebUrl as the origin prefix
-		// But caches still use Xrootd_Sitename, which will be changed to Server_ExternalWebUrl in
-		// https://github.com/PelicanPlatform/pelican/issues/1351
-		extUrlStr := param.Server_ExternalWebUrl.GetString()
-		extUrl, _ := url.Parse(extUrlStr)
-		// Only use hostname:port
-		originPrefix := server_structs.GetOriginNs(extUrl.Host)
-		name, err = getSitenameFromReg(ctx, originPrefix)
-		if err != nil {
-			log.Errorf("Failed to get sitename from the registry for the origin. Will fallback to use Xrootd.Sitename: %v", err)
-		}
-	} else if server.GetServerType().IsEnabled(server_structs.CacheType) {
-		cachePrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
-		name, err = getSitenameFromReg(ctx, cachePrefix)
-		if err != nil {
-			log.Errorf("Failed to get sitename from the registry for the cache. Will fallback to use Xrootd.Sitename: %v", err)
-		}
-	}
-
-	if name == "" {
-		log.Infof("Sitename from the registry is empty, fall back to Xrootd.Sitename: %s", param.Xrootd_Sitename.GetString())
-		name = param.Xrootd_Sitename.GetString()
-	}
-	if name == "" {
-		return errors.New(fmt.Sprintf("%s name isn't set. Please set the name via Xrootd.Sitename", server.GetServerType()))
+	name, err := server_utils.GetServiceName(ctx, server.GetServerType())
+	if err != nil {
+		return errors.Wrap(err, "failed to determine service name for advertising to director")
 	}
 
 	if err = server.GetNamespaceAdsFromDirector(); err != nil {
-		return errors.Wrap(err, fmt.Sprintf("%s failed to get namespaceAds from the director", server.GetServerType()))
+		return errors.Wrapf(err, "%s failed to get namespaceAds from the director", server.GetServerType())
 	}
 	serverUrl := param.Origin_Url.GetString()
 	webUrl := param.Server_ExternalWebUrl.GetString()
@@ -177,68 +130,84 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	if err != nil {
 		return err
 	}
+	ad.Now = time.Now()
 
 	body, err := json.Marshal(*ad)
 	if err != nil {
 		return errors.Wrap(err, fmt.Sprintf("failed to generate JSON description of %s", server.GetServerType()))
 	}
 
-	fedInfo, err := config.GetFederation(ctx)
-	if err != nil {
-		return err
-	}
-	directorUrlStr := fedInfo.DirectorEndpoint
-	if directorUrlStr == "" {
-		return errors.New("Director endpoint URL is not known")
-	}
-	directorUrl, err := url.Parse(directorUrlStr)
-	if err != nil {
-		return errors.Wrap(err, "failed to parse Federation.DirectorURL")
-	}
+	egrp := &errgroup.Group{}
+	successCount := atomic.Int32{}
+	for _, directorAd := range server_utils.GetDirectorAds() {
+		adCopy := directorAd
+		egrp.Go(func() error {
+			directorUrlStr := adCopy.AdvertiseUrl
+			if directorUrlStr == "" {
+				return errors.New("Director endpoint URL is not known")
+			}
+			directorUrl, err := url.Parse(directorUrlStr)
+			if err != nil {
+				return errors.Wrap(err, "failed to parse Federation.DirectorURL")
+			}
 
-	directorUrl.Path = "/api/v1.0/director/register" + server.GetServerType().String()
+			directorUrl.Path = "/api/v1.0/director/register" + server.GetServerType().String()
 
-	tok, err := server_utils.GetAdvertisementTok(ctx, server)
-	if err != nil {
-		return errors.Wrap(err, "failed to get advertisement token")
+			tok, err := server_utils.GetAdvertisementTok(server, directorUrlStr)
+			if err != nil {
+				return errors.Wrap(err, "failed to get advertisement token")
+			}
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, directorUrl.String(), bytes.NewBuffer(body))
+			if err != nil {
+				return errors.Wrap(err, "failed to create a POST request for director advertisement")
+			}
+
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+tok)
+			userAgent := "pelican-" + strings.ToLower(server.GetServerType().String()) + "/" + config.GetVersion()
+			req.Header.Set("User-Agent", userAgent)
+
+			tr := config.GetTransport()
+			client := http.Client{Transport: tr}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				return errors.Wrap(err, "failed to start the request for director advertisement")
+			}
+			defer resp.Body.Close()
+
+			respbody, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return errors.Wrap(err, "failed to read the response body for director advertisement")
+			}
+			if resp.StatusCode > 299 {
+				var respErr directorResponse
+				if unmarshalErr := json.Unmarshal(respbody, &respErr); unmarshalErr != nil { // Error creating json
+					return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(body))
+				}
+				if respErr.ApprovalError {
+					// Removed the "Please contact admin..." section since the director now provides contact information
+					return fmt.Errorf("the director rejected the server advertisement: %s", respErr.Error)
+				}
+				if respErr.Error != "" {
+					return errors.Errorf("error during director advertisement: %v", respErr.Error)
+				}
+				var respSimpleError server_structs.SimpleApiResp
+				if unmarshalErr := json.Unmarshal(respbody, &respSimpleError); unmarshalErr != nil { // Error creating json
+					return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(body))
+				}
+				log.Warningln("Error response from", directorUrl.String(), "status:", resp.StatusCode, "message:", respSimpleError.Msg)
+				return errors.Errorf("error during director advertisement: %v", respSimpleError.Msg)
+			}
+			successCount.Add(1)
+			return nil
+		})
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, directorUrl.String(), bytes.NewBuffer(body))
-	if err != nil {
-		return errors.Wrap(err, "failed to create a POST request for director advertisement")
+	// If at least one advertise succeeded, we're good
+	err = egrp.Wait()
+	if successCount.Load() > 0 {
+		return nil
 	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+tok)
-	userAgent := "pelican-" + strings.ToLower(server.GetServerType().String()) + "/" + config.GetVersion()
-	req.Header.Set("User-Agent", userAgent)
-
-	// We should switch this over to use the common transport, but for that to happen
-	// that function needs to be exported from pelican
-	tr := config.GetTransport()
-	client := http.Client{Transport: tr}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return errors.Wrap(err, "failed to start the request for director advertisement")
-	}
-	defer resp.Body.Close()
-
-	body, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return errors.Wrap(err, "failed to read the response body for director advertisement")
-	}
-	if resp.StatusCode > 299 {
-		var respErr directorResponse
-		if unmarshalErr := json.Unmarshal(body, &respErr); unmarshalErr != nil { // Error creating json
-			return errors.Wrapf(unmarshalErr, "could not decode the director's response, which responded %v from director advertisement: %s", resp.StatusCode, string(body))
-		}
-		if respErr.ApprovalError {
-			// Removed the "Please contact admin..." section since the director now provides contact information
-			return fmt.Errorf("the director rejected the server advertisement: %s", respErr.Error)
-		}
-		return errors.Errorf("error during director advertisement: %v", respErr.Error)
-	}
-
-	return nil
+	return err
 }

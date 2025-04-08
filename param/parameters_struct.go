@@ -73,6 +73,7 @@ type Config struct {
 	ConfigLocations []string `mapstructure:"configlocations" yaml:"ConfigLocations"`
 	Debug bool `mapstructure:"debug" yaml:"Debug"`
 	Director struct {
+		AdvertiseUrl string `mapstructure:"advertiseurl" yaml:"AdvertiseUrl"`
 		AdvertisementTTL time.Duration `mapstructure:"advertisementttl" yaml:"AdvertisementTTL"`
 		AssumePresenceAtSingleOrigin bool `mapstructure:"assumepresenceatsingleorigin" yaml:"AssumePresenceAtSingleOrigin"`
 		CachePresenceCapacity int `mapstructure:"cachepresencecapacity" yaml:"CachePresenceCapacity"`
@@ -125,6 +126,7 @@ type Config struct {
 		OIDCAuthenticationRequirements interface{} `mapstructure:"oidcauthenticationrequirements" yaml:"OIDCAuthenticationRequirements"`
 		OIDCAuthenticationUserClaim string `mapstructure:"oidcauthenticationuserclaim" yaml:"OIDCAuthenticationUserClaim"`
 		OIDCGroupClaim string `mapstructure:"oidcgroupclaim" yaml:"OIDCGroupClaim"`
+		OIDCPreferClaimsFromIDToken bool `mapstructure:"oidcpreferclaimsfromidtoken" yaml:"OIDCPreferClaimsFromIDToken"`
 		QDLLocation string `mapstructure:"qdllocation" yaml:"QDLLocation"`
 		ScitokensServerLocation string `mapstructure:"scitokensserverlocation" yaml:"ScitokensServerLocation"`
 		TomcatLocation string `mapstructure:"tomcatlocation" yaml:"TomcatLocation"`
@@ -202,6 +204,7 @@ type Config struct {
 		UserInfoEndpoint string `mapstructure:"userinfoendpoint" yaml:"UserInfoEndpoint"`
 	} `mapstructure:"oidc" yaml:"OIDC"`
 	Origin struct {
+		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
@@ -252,6 +255,7 @@ type Config struct {
 		SelfTestInterval time.Duration `mapstructure:"selftestinterval" yaml:"SelfTestInterval"`
 		StoragePrefix string `mapstructure:"storageprefix" yaml:"StoragePrefix"`
 		StorageType string `mapstructure:"storagetype" yaml:"StorageType"`
+		TokenAudience string `mapstructure:"tokenaudience" yaml:"TokenAudience"`
 		Url string `mapstructure:"url" yaml:"Url"`
 		XRootDPrefix string `mapstructure:"xrootdprefix" yaml:"XRootDPrefix"`
 		XRootServiceUrl string `mapstructure:"xrootserviceurl" yaml:"XRootServiceUrl"`
@@ -271,6 +275,9 @@ type Config struct {
 		RequireOriginApproval bool `mapstructure:"requireoriginapproval" yaml:"RequireOriginApproval"`
 	} `mapstructure:"registry" yaml:"Registry"`
 	Server struct {
+		AdLifetime time.Duration `mapstructure:"adlifetime" yaml:"AdLifetime"`
+		AdvertisementInterval time.Duration `mapstructure:"advertisementinterval" yaml:"AdvertisementInterval"`
+		DirectorUrls []string `mapstructure:"directorurls" yaml:"DirectorUrls"`
 		DropPrivileges bool `mapstructure:"dropprivileges" yaml:"DropPrivileges"`
 		EnablePprof bool `mapstructure:"enablepprof" yaml:"EnablePprof"`
 		EnableUI bool `mapstructure:"enableui" yaml:"EnableUI"`
@@ -408,6 +415,7 @@ type configWithType struct {
 	ConfigLocations struct { Type string; Value []string }
 	Debug struct { Type string; Value bool }
 	Director struct {
+		AdvertiseUrl struct { Type string; Value string }
 		AdvertisementTTL struct { Type string; Value time.Duration }
 		AssumePresenceAtSingleOrigin struct { Type string; Value bool }
 		CachePresenceCapacity struct { Type string; Value int }
@@ -460,6 +468,7 @@ type configWithType struct {
 		OIDCAuthenticationRequirements struct { Type string; Value interface{} }
 		OIDCAuthenticationUserClaim struct { Type string; Value string }
 		OIDCGroupClaim struct { Type string; Value string }
+		OIDCPreferClaimsFromIDToken struct { Type string; Value bool }
 		QDLLocation struct { Type string; Value string }
 		ScitokensServerLocation struct { Type string; Value string }
 		TomcatLocation struct { Type string; Value string }
@@ -537,6 +546,7 @@ type configWithType struct {
 		UserInfoEndpoint struct { Type string; Value string }
 	}
 	Origin struct {
+		Concurrency struct { Type string; Value int }
 		DbLocation struct { Type string; Value string }
 		DirectorTest struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
@@ -587,6 +597,7 @@ type configWithType struct {
 		SelfTestInterval struct { Type string; Value time.Duration }
 		StoragePrefix struct { Type string; Value string }
 		StorageType struct { Type string; Value string }
+		TokenAudience struct { Type string; Value string }
 		Url struct { Type string; Value string }
 		XRootDPrefix struct { Type string; Value string }
 		XRootServiceUrl struct { Type string; Value string }
@@ -606,6 +617,9 @@ type configWithType struct {
 		RequireOriginApproval struct { Type string; Value bool }
 	}
 	Server struct {
+		AdLifetime struct { Type string; Value time.Duration }
+		AdvertisementInterval struct { Type string; Value time.Duration }
+		DirectorUrls struct { Type string; Value []string }
 		DropPrivileges struct { Type string; Value bool }
 		EnablePprof struct { Type string; Value bool }
 		EnableUI struct { Type string; Value bool }

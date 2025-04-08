@@ -1,0 +1,13 @@
+# A default configuration of a simple federation test
+#
+# Intended for unit tests that don't care about the configuration
+# of the origin/cache (typically director/registry tests).
+
+Origin:
+  # Things that configure the origin itself
+  StorageType: "posix"
+  # The actual namespaces we export
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /test-namespace
+      Capabilities: ["Reads", "Writes", "DirectReads", "Listings"]

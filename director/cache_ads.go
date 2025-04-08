@@ -33,6 +33,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -42,10 +43,11 @@ import (
 type filterType string
 
 const (
-	permFiltered filterType = "permFiltered"     // Read from Director.FilteredServers
-	tempFiltered filterType = "tempFiltered"     // Filtered by web UI, e.g. the server is put in downtime via the director website
-	topoFiltered filterType = "topologyFiltered" // Filtered by Topology, e.g. the server is put in downtime via the OSDF Topology change
-	tempAllowed  filterType = "tempAllowed"      // Read from Director.FilteredServers but mutated by web UI
+	permFiltered   filterType = "permFiltered"     // Read from Director.FilteredServers
+	tempFiltered   filterType = "tempFiltered"     // Filtered by web UI, e.g. the server is put in downtime via the director website
+	serverFiltered filterType = "serverFiltered"   // Filtered by the server itself, e.g. the server is put in downtime by the server admin
+	topoFiltered   filterType = "topologyFiltered" // Filtered by Topology, e.g. the server is put in downtime via the OSDF Topology change
+	tempAllowed    filterType = "tempAllowed"      // Read from Director.FilteredServers but mutated by web UI
 )
 
 var (
@@ -63,6 +65,8 @@ func (f filterType) String() string {
 		return "Permanently Disabled via the director configuration"
 	case tempFiltered:
 		return "Temporarily disabled via the admin website"
+	case serverFiltered:
+		return "Temporarily disabled by the server admin"
 	case topoFiltered:
 		return "Disabled via the Topology policy"
 	case tempAllowed:
@@ -85,7 +89,10 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	if err := updateLatLong(&sAd); err != nil {
 		if geoIPError, ok := err.(geoIPError); ok {
 			labels := geoIPError.labels
+			// TODO: Remove this metric (the line directly below)
+			// The renamed metric was added in v7.16
 			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
+			metrics.PelicanDirectorGeoIPErrorsTotal.With(labels).Inc()
 		}
 		log.Debugln("Failed to lookup GeoIP coordinates for host", sAd.URL.Host)
 	}
@@ -133,9 +140,19 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 
 	ad := server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}
 
-	customTTL := param.Director_AdvertisementTTL.GetDuration()
+	adTTL := time.Until(sAd.Expiration)
+	if sAd.Expiration.IsZero() {
+		adTTL = param.Director_AdvertisementTTL.GetDuration()
+		// Handle unit tests that do not initialize default config
+		if adTTL == 0 {
+			log.Info(param.Director_AdvertisementTTL.GetName(), "is set to 0; increasing to 15 minutes")
+			adTTL = 15 * time.Minute
+		}
+	} else if adTTL <= 0 {
+		return
+	}
 
-	serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}, customTTL)
+	serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}, adTTL)
 
 	// Prepare `stat` call utilities for all servers regardless of its source (topology or Pelican)
 	func() {
@@ -166,7 +183,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 				Errgroup: &statErrGrp,
 				Cancel:   cancel,
 				Context:  baseCtx,
-				ResultCache: ttlcache.New[string, *objectMetadata](
+				ResultCache: ttlcache.New(
 					ttlcache.WithTTL[string, *objectMetadata](param.Director_CachePresenceTTL.GetDuration()),
 					ttlcache.WithDisableTouchOnHit[string, *objectMetadata](),
 					ttlcache.WithCapacity[string, *objectMetadata](uint64(cap)),
@@ -277,7 +294,7 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 	}
 	// NOTE: If GeoIP resolution of this address fails, lat/long are set to 0.0 (the null lat/long)
 	// This causes the server to be sorted to the end of the list whenever the Director requires distance-aware sorting.
-	lat, long, err := getLatLong(addr)
+	lat, long, _, err := getLatLong(addr)
 	if err != nil {
 		return err
 	}
@@ -404,4 +421,14 @@ func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2
 		)
 	}
 	return
+}
+
+// Clears the in-memory cache of server ads
+func ClearServerAds() {
+	serverAds.DeleteAll()
+}
+
+// init registers the director ClearServerAds function with the config package
+func init() {
+	config.ClearServerAdsCallback = ClearServerAds
 }

@@ -30,22 +30,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-var mockOriginServerAd server_structs.ServerAd = server_structs.ServerAd{
-	Name:      "test-origin-server",
-	URL:       url.URL{Host: "origin.com", Scheme: "https"},
-	Type:      server_structs.OriginType.String(),
-	Latitude:  123.05,
-	Longitude: 456.78,
-}
-
-var mockCacheServerAd server_structs.ServerAd = server_structs.ServerAd{
-	Name:      "test-cache-server",
-	URL:       url.URL{Host: "cache.com", Scheme: "https"},
-	Type:      server_structs.CacheType.String(),
-	Latitude:  45.67,
-	Longitude: 123.05,
-}
-
 const mockPathPreix string = "/foo/bar/"
 
 func mockNamespaceAds(size int, serverPrefix string) []server_structs.NamespaceAdV2 {
@@ -82,6 +66,22 @@ func TestListNamespaces(t *testing.T) {
 	setup := func() {
 		serverAds.DeleteAll()
 	}
+
+	mockOriginServerAd := server_structs.ServerAd{
+		URL:       url.URL{Host: "origin.com", Scheme: "https"},
+		Type:      server_structs.OriginType.String(),
+		Latitude:  123.05,
+		Longitude: 456.78,
+	}
+	mockOriginServerAd.Initialize("test-origin-server")
+
+	mockCacheServerAd := server_structs.ServerAd{
+		URL:       url.URL{Host: "cache.com", Scheme: "https"},
+		Type:      server_structs.CacheType.String(),
+		Latitude:  45.67,
+		Longitude: 123.05,
+	}
+	mockCacheServerAd.Initialize("test-cache-server")
 
 	t.Run("empty-entry", func(t *testing.T) {
 		setup()
@@ -149,6 +149,22 @@ func TestListNamespaces(t *testing.T) {
 }
 
 func TestListServerAds(t *testing.T) {
+
+	mockOriginServerAd := server_structs.ServerAd{
+		URL:       url.URL{Host: "origin.com", Scheme: "https"},
+		Type:      server_structs.OriginType.String(),
+		Latitude:  123.05,
+		Longitude: 456.78,
+	}
+	mockOriginServerAd.Initialize("test-origin-server")
+
+	mockCacheServerAd := server_structs.ServerAd{
+		URL:       url.URL{Host: "cache.com", Scheme: "https"},
+		Type:      server_structs.CacheType.String(),
+		Latitude:  45.67,
+		Longitude: 123.05,
+	}
+	mockCacheServerAd.Initialize("test-cache-server")
 
 	t.Run("empty-cache", func(t *testing.T) {
 		func() {

@@ -211,7 +211,7 @@ func (m *mockServer) CreateAdvertisement(name, serverUrl, serverWebUrl string) (
 	return nil, nil
 }
 func (m *mockServer) GetNamespaceAdsFromDirector() error { return nil }
-func (m *mockServer) GetAdTokCfg(ctx context.Context) (server_structs.AdTokCfg, error) {
+func (m *mockServer) GetAdTokCfg(directorUrl string) (server_structs.AdTokCfg, error) {
 	return server_structs.AdTokCfg{}, nil
 }
 func (m *mockServer) GetFedTokLocation() string { return m.tokenLoc }

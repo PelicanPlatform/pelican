@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2024, University of Nebraska-Lincoln
+* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -42,11 +42,12 @@ type (
 	}
 
 	FederationDiscovery struct {
-		DiscoveryEndpoint string `json:"discovery_endpoint"`
-		DirectorEndpoint  string `json:"director_endpoint"`
-		RegistryEndpoint  string `json:"namespace_registration_endpoint"`
-		JwksUri           string `json:"jwks_uri"`
-		BrokerEndpoint    string `json:"broker_endpoint"`
+		DiscoveryEndpoint          string   `json:"discovery_endpoint"`
+		DirectorEndpoint           string   `json:"director_endpoint"`
+		DirectorAdvertiseEndpoints []string `json:"director_advertise_endpoints,omitempty"`
+		RegistryEndpoint           string   `json:"namespace_registration_endpoint"`
+		JwksUri                    string   `json:"jwks_uri"`
+		BrokerEndpoint             string   `json:"broker_endpoint"`
 	}
 
 	discoveryOptions struct {

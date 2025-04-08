@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -85,6 +86,8 @@ var (
 
 	//go:embed resources/xroot-origins/single-export-valid.yml
 	xrootSingleExportValid string
+
+	defaultIssuerUrl = "https://foo-issuer.com"
 )
 
 func getTmpFile(t *testing.T) string {
@@ -135,6 +138,9 @@ func setup(t *testing.T, config string, shouldError bool) []OriginExport {
 		}
 	}
 
+	// Provide an issuer URL that exports will use as a fallback
+	viper.Set(param.Server_IssuerUrl.GetName(), defaultIssuerUrl)
+
 	// Now call GetOriginExports and check the struct
 	exports, err := GetOriginExports()
 	if shouldError {
@@ -180,6 +186,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		expectedExport2 := OriginExport{
@@ -192,6 +199,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       false,
 				DirectReads: false,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		assert.Len(t, exports, 2, "expected 2 exports")
@@ -213,6 +221,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		expectedExport2 := OriginExport{
@@ -225,6 +234,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		assert.Len(t, exports, 2, "expected 2 exports")
@@ -248,6 +258,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: false,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		assert.Len(t, exports, 1, "expected 1 export")
@@ -277,6 +288,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			// No issuer is populated because there are no namespaces requiring it
 		}
 
 		assert.Len(t, exports, 1, "expected 1 export")
@@ -349,6 +361,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		expectedExport2 := OriginExport{
@@ -361,6 +374,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       false,
 				DirectReads: false,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		assert.Len(t, exports, 2, "expected 2 exports")
@@ -371,6 +385,7 @@ func TestGetExports(t *testing.T) {
 		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", exports[1].S3AccessKeyfile)
 		assert.NotEmpty(t, exports[1].S3SecretKeyfile)
 		assert.NotEqual(t, "SHOULD-OVERRIDE-TEMPFILE", exports[1].S3SecretKeyfile)
+		assert.Equal(t, expectedExport2.IssuerUrls, exports[1].IssuerUrls)
 
 		// Check the rest of the fields
 		assert.Equal(t, expectedExport2.S3Bucket, exports[1].S3Bucket)
@@ -393,6 +408,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		expectedExport2 := OriginExport{
@@ -406,6 +422,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		assert.Len(t, exports, 2, "expected 2 exports")
@@ -428,6 +445,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: false,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		assert.Len(t, exports, 1, "expected 1 export")
@@ -439,6 +457,7 @@ func TestGetExports(t *testing.T) {
 		assert.Equal(t, expectedExport.Capabilities.Listings, exports[0].Capabilities.Listings)
 		assert.Equal(t, expectedExport.Capabilities.Reads, exports[0].Capabilities.Reads)
 		assert.Equal(t, expectedExport.Capabilities.DirectReads, exports[0].Capabilities.DirectReads)
+		assert.Equal(t, expectedExport.IssuerUrls, exports[0].IssuerUrls)
 
 		// Now check that we properly set the other viper vars we should have
 		assert.Equal(t, "", viper.GetString("Origin.S3Bucket"))
@@ -469,6 +488,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			// No issuer is populated because there are no namespaces requiring it
 		}
 
 		assert.Len(t, exports, 1, "expected 1 export")
@@ -509,6 +529,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			// No issuer is populated because there are no namespaces requiring it
 		}
 
 		assert.Len(t, exports, 1, "expected 1 export")
@@ -543,6 +564,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		assert.Len(t, exports, 1, "expected 1 export")
@@ -571,6 +593,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		expectedExport2 := OriginExport{
@@ -585,6 +608,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			// No issuer is populated because there are no namespaces requiring it
 		}
 
 		assert.Len(t, exports, 2, "expected 2 exports")
@@ -616,6 +640,7 @@ func TestGetExports(t *testing.T) {
 				Reads:       true,
 				DirectReads: true,
 			},
+			IssuerUrls: []string{defaultIssuerUrl},
 		}
 
 		assert.Len(t, exports, 1, "expected 1 export")

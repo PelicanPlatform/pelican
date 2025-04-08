@@ -160,3 +160,13 @@ func DeleteApiKey(id string, verifiedKeysCache *ttlcache.Cache[string, server_st
 	verifiedKeysCache.Delete(id)
 	return nil
 }
+
+func ListApiKeys() ([]server_structs.ApiKey, error) {
+	var apiKeys []server_structs.ApiKey
+	result := DirectorDB.Select([]string{"id", "name", "created_at", "created_by", "expires_at", "scopes"}).Find(&apiKeys)
+	if result.Error != nil {
+		return nil, errors.Wrap(result.Error, "failed to list API keys")
+	}
+
+	return apiKeys, nil
+}

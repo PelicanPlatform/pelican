@@ -1,8 +1,8 @@
 import { Grid, Paper } from '@mui/material';
 import { green } from '@mui/material/colors';
 
-import { ProjectTable } from '@/app/origin/metrics/components';
-import { BigBytesMetric } from '@/app/origin/metrics/components/BigNumber';
+import { ProjectTable, BigBytesMetric } from '@/components/metrics';
+
 import {
   BytesMetricBoxPlot,
   MetricBoxPlot,
@@ -25,6 +25,7 @@ const Page = () => {
             {[
               <ServerUptime key={'server-count-var-graph'} />,
               <StorageTable key={'storage-table'} />,
+              <ProjectTable key={'project-table'} />,
             ].map((component, index) => (
               <Grid key={index} item xs={12} display={'flex'} height={'45vh'}>
                 <Paper sx={{ width: '100%' }}>{component}</Paper>
@@ -37,6 +38,16 @@ const Page = () => {
             <Grid item xs={12} display={'flex'}>
               <Grid container spacing={1}>
                 {[
+                  <MetricBoxPlot
+                    key={'transfer-bytes'}
+                    metric={`sum by (server_name) (increase(xrootd_transfer_bytes[$\{range}]))`}
+                    title={'XRootD Transfer Bytes'}
+                  />,
+                  <MetricBoxPlot
+                    key={'transfer-operations'}
+                    metric={`sum by (server_name) (increase(xrootd_transfer_operations_count[$\{range}]))`}
+                    title={'XRootD Transfer Operations'}
+                  />,
                   <BytesMetricBoxPlot
                     key={'bytes'}
                     metric={'go_memstats_alloc_bytes'}

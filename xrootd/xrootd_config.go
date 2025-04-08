@@ -91,6 +91,7 @@ type (
 		EnablePublicReads bool
 		EnableListings    bool
 		SelfTest          bool
+		Concurrency       int
 		CalculatedPort    string
 		FederationPrefix  string
 		HttpServiceUrl    string
@@ -271,12 +272,8 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 			" to desired daemon group %v", macaroonsSecret, groupname)
 	}
 	// If the scitokens.cfg does not exist, create one
-	if originServer, ok := server.(*origin.OriginServer); ok {
-		authedPrefixes, err := originServer.GetAuthorizedPrefixes()
-		if err != nil {
-			return err
-		}
-		err = WriteOriginScitokensConfig(authedPrefixes)
+	if _, ok := server.(*origin.OriginServer); ok {
+		err = WriteOriginScitokensConfig()
 		if err != nil {
 			return err
 		}
@@ -754,14 +751,11 @@ func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
 }
 
 // A wrapper to combine multiple decoder hook functions for XRootD cfg unmarshalling
-func combinedDecodeHookFunc() mapstructure.DecodeHookFuncType {
-	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
-		data, err := authRefreshStrToSecondsHookFunc()(f, t, data)
-		if err != nil {
-			return data, err
-		}
-		return server_utils.StringListToCapsHookFunc()(f, t, data)
-	}
+func xrootdDecodeHook() mapstructure.DecodeHookFunc {
+	return mapstructure.ComposeDecodeHookFunc(
+		authRefreshStrToSecondsHookFunc(),
+		server_utils.OriginExportsDecoderHook(),
+	)
 }
 
 func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
@@ -772,7 +766,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 
 	var xrdConfig XrootdConfig
 	xrdConfig.Xrootd.LocalMonitoringPort = -1
-	if err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(combinedDecodeHookFunc())); err != nil {
+	if err := viper.Unmarshal(&xrdConfig, viper.DecodeHook(xrootdDecodeHook())); err != nil {
 		return "", errors.Wrap(err, "failed to unmarshal xrootd config")
 	}
 

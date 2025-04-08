@@ -7,7 +7,6 @@ import {
   Chart as ChartJS,
   ChartDataset,
   Colors,
-  Filler,
   Legend,
   LinearScale,
   LineElement,
@@ -23,6 +22,7 @@ import {
   GraphDispatchContext,
 } from '@/components/graphs/GraphContext';
 import {
+  buildMetric,
   MatrixResponseData,
   query_raw,
   TimeDuration,
@@ -41,16 +41,15 @@ ChartJS.register(
   Tooltip,
   Legend,
   zoomPlugin,
-  Colors,
-  Filler
+  Colors
 );
 
-const CPUGraph = () => {
+const MemoryGraph = ({ server_name }: { server_name?: string }) => {
   const graphContext = useContext(GraphContext);
 
   const { data: datasets } = useSWR<ChartDataset<any, any>>(
     [
-      'cpuGraph',
+      'memoryGraph',
       graphContext.rate,
       graphContext.range,
       graphContext.resolution,
@@ -58,6 +57,7 @@ const CPUGraph = () => {
     ],
     () =>
       getData(
+        buildMetric('go_memstats_alloc_bytes', { server_name }),
         graphContext.rate,
         graphContext.range,
         graphContext.resolution,
@@ -96,10 +96,10 @@ const CPUGraph = () => {
             },
           },
           y: {
-            suggestedMax: 1, // Set the maximum value for the y-axis to 100%
+            suggestedMax: 1000, // Set the minimum value for the y-axis
             title: {
               display: true,
-              text: 'CPU Usage by Core',
+              text: 'Memory Usage (MB)',
             },
           },
         },
@@ -114,30 +114,29 @@ const CPUGraph = () => {
 };
 
 const getData = async (
+  metric: string,
   rate: TimeDuration,
   range: TimeDuration,
   resolution: TimeDuration,
   time: DateTime
 ): Promise<ChartDataset<any, any>> => {
-  const query = `avg by (instance) (irate(process_cpu_seconds_total[${rate}]))[${range}:${resolution}]`;
+  const query = `(${metric} / 1024 / 1024)[${range}:${resolution}]`;
   const dataResponse = await query_raw<MatrixResponseData>(
     query,
     time.toSeconds()
   );
   const datasets = dataResponse.data.result.map((result) => {
     return {
-      id: 'CPU Usage By Core',
-      label: 'CPU Usage By Core',
+      id: 'Memory Usage',
+      label: 'Memory Usage (MB)',
       data: result.values.map((value) => {
-        return {
-          x: value[0] * 1000,
-          y: parseFloat(value[1]),
-        };
+        return { x: value[0] * 1000, y: parseFloat(value[1]) };
       }),
+      borderColor: 'green',
     };
   });
 
   return datasets;
 };
 
-export { CPUGraph };
+export { MemoryGraph };

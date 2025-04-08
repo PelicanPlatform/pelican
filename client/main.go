@@ -54,6 +54,53 @@ type FileInfo struct {
 	IsCollection bool
 }
 
+// handleSchemelessIfNeeded is a helper function that updates the input discovery options to use a configured discovery
+// URL for pelican URL parsing whenever the incoming path has no scheme. For example, a user command like:
+//
+//	pelican object get -f osg-htc.org /foo/bar
+//
+// results in a schemeless URL path of /foo/bar. This helper function will add a discovery option with the discovery
+// URL so that pelican URL parsing doesn't fail.
+func handleSchemelessIfNeeded(ctx context.Context, rpUrl *url.URL, dOpts *[]pelican_url.DiscoveryOption) error {
+	// If the incoming URL has a scheme, there's nothing to do
+	if rpUrl.Scheme != "" {
+		return nil
+	}
+
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil {
+		return errors.Wrap(err, "failed to get configured federation info")
+	}
+
+	// Placeholder for whatever discovery URL we end up using. We prefer the configured
+	// discovery URL, but we can try to fallback to the Director if needed
+	var discoveryUrl *url.URL
+	if fedInfo.DiscoveryEndpoint != "" {
+		if tmpUrl, err := url.Parse(fedInfo.DiscoveryEndpoint); err != nil {
+			log.Warningf("Failed to parse configured discovery endpoint: %s", fedInfo.DiscoveryEndpoint)
+		} else {
+			discoveryUrl = tmpUrl
+		}
+	}
+
+	if discoveryUrl == nil && fedInfo.DirectorEndpoint != "" {
+		if tmpUrl, err := url.Parse(fedInfo.DirectorEndpoint); err != nil {
+			log.Warningf("Failed to parse configured director endpoint: %s", fedInfo.DirectorEndpoint)
+		} else {
+			discoveryUrl = tmpUrl
+		}
+	}
+
+	// If we still don't have a discovery URL, we can't proceed
+	if discoveryUrl == nil {
+		return errors.New("could not determine which discovery URL to use")
+	}
+
+	// If we have a discovery URL, add it to the discovery options
+	*dOpts = append(*dOpts, pelican_url.WithDiscoveryUrl(discoveryUrl))
+	return nil
+}
+
 // Given a remote path, use the client's wisdom to parse it as a Pelican URL, including metadata discovery.
 //
 // This will handle setting up the URL cache, passing along contexts to discovery, and passing the client context/user agent.
@@ -69,29 +116,8 @@ func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL,
 	pOptions := []pelican_url.ParseOption{pelican_url.ShouldDiscover(true), pelican_url.ValidateQueryParams(true)}
 	dOptions := []pelican_url.DiscoveryOption{pelican_url.UseCached(true), pelican_url.WithContext(ctx), pelican_url.WithClient(client), pelican_url.WithUserAgent(getUserAgent(""))}
 
-	// If we have no scheme, we'll end up assuming a Pelican url. We need to figure out which discovery endpoint to use.
-	if rpUrl.Scheme == "" {
-		fedInfo, err := config.GetFederation(ctx)
-		if err != nil {
-			return nil, errors.Wrap(err, "failed to get configured federation info")
-		}
-
-		// First try to use the configured discovery endpoint
-		if fedInfo.DiscoveryEndpoint != "" {
-			discoveryUrl, err := url.Parse(fedInfo.DiscoveryEndpoint)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to parse federation discovery endpoint")
-			}
-
-			dOptions = append(dOptions, pelican_url.WithDiscoveryUrl(discoveryUrl))
-		} else if fedInfo.DirectorEndpoint != "" {
-			discoveryUrl, err := url.Parse(fedInfo.DirectorEndpoint)
-			if err != nil {
-				return nil, errors.Wrap(err, "failed to parse federation discovery endpoint")
-			}
-
-			dOptions = append(dOptions, pelican_url.WithDiscoveryUrl(discoveryUrl))
-		}
+	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOptions); err != nil {
+		return nil, errors.Wrap(err, "failed to handle schemeless URL")
 	}
 
 	pUrl, err := pelican_url.Parse(
@@ -432,7 +458,18 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
 	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
 	// but should still send it along.
-	pUrl, err := pelican_url.Parse(remoteDestination, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
+	dOpts := []pelican_url.DiscoveryOption{}
+	rpUrl, err := url.Parse(remoteDestination)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse remote destination while performing PUT")
+	}
+
+	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
+	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {
+		return nil, errors.Wrap(err, "failed to handle schemeless URL")
+	}
+
+	pUrl, err := pelican_url.Parse(remoteDestination, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, dOpts)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteDestination)
 	}
@@ -492,7 +529,18 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	// We do this to handle URL validation early, and we allow unknown query params to be passed through so that old
 	// clients may continue to function with newer directors/origins/caches. This will generate a warning about the query
 	// but should still send it along.
-	pUrl, err := pelican_url.Parse(remoteObject, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, nil)
+	dOpts := []pelican_url.DiscoveryOption{}
+	rpUrl, err := url.Parse(remoteObject)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse remote source while performing GET")
+	}
+
+	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
+	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {
+		return nil, errors.Wrap(err, "failed to handle schemeless URL")
+	}
+
+	pUrl, err := pelican_url.Parse(remoteObject, []pelican_url.ParseOption{pelican_url.ValidateQueryParams(true), pelican_url.AllowUnknownQueryParams(true)}, dOpts)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to parse remote object: %s", remoteObject)
 	}

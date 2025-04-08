@@ -60,6 +60,8 @@ type (
 		HealthStatus      HealthTestStatus            `json:"healthStatus"`
 		IOLoad            float64                     `json:"ioLoad"`
 		NamespacePrefixes []string                    `json:"namespacePrefixes"`
+		Downtimes         []server_structs.Downtime   `json:"downtimes"`
+		Version           string                      `json:"version"`
 	}
 
 	// A response struct for a server Ad that provides a detailed view into the servers data
@@ -84,6 +86,8 @@ type (
 		HealthStatus HealthTestStatus            `json:"healthStatus"`
 		IOLoad       float64                     `json:"ioLoad"`
 		Namespaces   []NamespaceAdV2Response     `json:"namespaces"`
+		Downtimes    []server_structs.Downtime   `json:"downtimes"`
+		Version      string                      `json:"version"`
 	}
 
 	// TokenIssuerResponse creates a response struct for TokenIssuer
@@ -246,6 +250,8 @@ func advertisementToServerResponse(ad *server_structs.Advertisement) serverRespo
 		FromTopology:        ad.FromTopology,
 		HealthStatus:        healthStatus,
 		IOLoad:              ad.GetIOLoad(),
+		Downtimes:           ad.Downtimes,
+		Version:             ad.Version,
 	}
 	for _, ns := range ad.NamespaceAds {
 		nsRes := namespaceAdV2ToResponse(&ns)
@@ -273,6 +279,8 @@ func serverResponseToListServerResponse(res serverResponse) listServerResponse {
 		FromTopology:        res.FromTopology,
 		HealthStatus:        res.HealthStatus,
 		IOLoad:              res.IOLoad,
+		Version:             res.Version,
+		Downtimes:           res.Downtimes,
 	}
 	for _, ns := range res.Namespaces {
 		listRes.NamespacePrefixes = append(listRes.NamespacePrefixes, ns.Path)
@@ -569,6 +577,13 @@ func handleAllowServer(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Can't allow server %s that is disabled by the OSG Topology. Contact OSG admin at support@osg-htc.org to enable the server.", sn),
+		})
+		return
+	} else if ft == serverFiltered {
+		// Server is disabled by server admin
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Can't allow server %s that is disabled by the server admin. Contact server admin to enable the server.", sn),
 		})
 		return
 	}

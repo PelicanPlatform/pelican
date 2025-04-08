@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -23,7 +23,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -49,12 +48,15 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/sync/errgroup"
+	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/docs"
+	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/version"
 )
 
 // Structs holding the OAuth2 state (and any other OSDF config needed)
@@ -94,6 +96,8 @@ type (
 
 	// Custom goose logger
 	CustomGooseLogger struct{}
+
+	ClearServerAdsFunc func()
 )
 
 const (
@@ -111,15 +115,6 @@ const (
 	TokenRead
 	TokenSharedWrite
 	TokenSharedRead
-)
-
-// This block of variables will be overwritten at build time
-var (
-	commit  = "none"
-	date    = "unknown"
-	builtBy = "unknown"
-	// Pelican version
-	version = "dev"
 )
 
 var (
@@ -174,6 +169,9 @@ var (
 
 	clientInitialized     = false
 	printClientConfigOnce sync.Once
+
+	// This variable will be set by another package (director) to clear the server ads
+	ClearServerAdsCallback ClearServerAdsFunc
 )
 
 func init() {
@@ -215,38 +213,38 @@ func IsServerEnabled(testServer server_structs.ServerType) bool {
 
 // Returns the version of the current binary
 func GetVersion() string {
-	return version
+	return version.GetVersion()
 }
 
 // Overrides the version of the current binary
 //
 // Intended mainly for use in unit tests
 func SetVersion(newVersion string) {
-	version = newVersion
+	version.SetVersion(newVersion)
 }
 
 func GetBuiltCommit() string {
-	return commit
+	return version.GetBuiltCommit()
 }
 
 func SetBuiltCommit(newCommit string) {
-	commit = newCommit
+	version.SetBuiltCommit(newCommit)
 }
 
 func GetBuiltDate() string {
-	return date
+	return version.GetBuiltDate()
 }
 
 func SetBuiltDate(builtDate string) {
-	date = builtDate
+	version.SetBuiltDate(builtDate)
 }
 
 func GetBuiltBy() string {
-	return builtBy
+	return version.GetBuiltBy()
 }
 
 func SetBuiltBy(newBuiltBy string) {
-	builtBy = newBuiltBy
+	version.SetBuiltBy(newBuiltBy)
 }
 
 func (cp ConfigPrefix) String() string {
@@ -560,39 +558,56 @@ func setupTransport() {
 	}
 }
 
-// Return an audience string appropriate for the current server
-func GetServerAudience() string {
-	return viper.GetString("Origin.AudienceURL")
-}
-
-func GetServerIssuerURL() (string, error) {
-	if issuerUrl := param.Server_IssuerUrl.GetString(); issuerUrl != "" {
-		_, err := url.Parse(param.Server_IssuerUrl.GetString())
-		if err != nil {
-			return "", errors.Wrapf(err, "Failed to parse the Server.IssuerUrl %s loaded from config", param.Server_IssuerUrl.GetString())
+// GetServerIssuerURL tries to determine the correct issuer URL for the server in order of precedence:
+// - Server.IssuerUrl
+// - Server.IssuerHostname and Server.IssuerPort
+// - Server.ExternalWebUrl
+// In general, functions should avoid using `param.Server_IssuerUrl.GetString()` directly and use this function instead.
+func GetServerIssuerURL() (issuerUrl string, err error) {
+	// Even though we prefer using this function, we'll populate the config param
+	// based on whatever we determine here.
+	defer func() {
+		if err == nil && param.Server_IssuerUrl.GetString() == "" {
+			viper.Set(param.Server_IssuerUrl.GetName(), issuerUrl)
 		}
+	}()
+
+	// Prefer the concretely configured param
+	if issuerUrl = param.Server_IssuerUrl.GetString(); issuerUrl != "" {
+		if _, err := url.Parse(issuerUrl); err != nil {
+			return "", errors.Wrapf(err, "failed to parse '%s' as issuer URL from config param '%s'",
+				param.Server_IssuerUrl.GetString(), param.Server_IssuerUrl.GetName())
+		}
+		log.Debugf("Populating server's issuer URL as '%s' from config param '%s'", issuerUrl, param.Server_IssuerUrl.GetName())
 		return issuerUrl, nil
 	}
 
+	// Next, try to piece it together based on concretely configured hostname:port
 	if param.Server_IssuerHostname.GetString() != "" {
-		if param.Server_IssuerPort.GetInt() != 0 { // Will be the default if not set
-			// We assume any issuer is running https, otherwise we're crazy
-			issuerUrl := url.URL{
-				Scheme: "https",
-				Host:   fmt.Sprintf("%s:%d", param.Server_IssuerHostname.GetString(), param.Server_IssuerPort.GetInt()),
-			}
-			return issuerUrl.String(), nil
+		if param.Server_IssuerPort.GetInt() == 0 {
+			return "", errors.Errorf("if '%s' is configured, you must also configure a valid port via '%s'",
+				param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
 		}
-		return "", errors.New("If Server.IssuerHostname is configured, you must provide a valid port")
+
+		// We assume any issuer is running https
+		issuerUrl := fmt.Sprintf("https://%s:%d", param.Server_IssuerHostname.GetString(), param.Server_IssuerPort.GetInt())
+		if _, err := url.Parse(issuerUrl); err != nil {
+			return "", errors.Wrapf(err, "failed to parse '%s' as issuer URL from config params '%s' and '%s'",
+				issuerUrl, param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
+		}
+		log.Debugf("Populating server's issuer URL as '%s' from configured values of '%s' and '%s'",
+			issuerUrl, param.Server_IssuerHostname.GetName(), param.Server_IssuerPort.GetName())
+		return issuerUrl, nil
 	}
 
-	issuerUrlStr := param.Server_ExternalWebUrl.GetString()
-	issuerUrl, err := url.Parse(issuerUrlStr)
-	log.Debugln("GetServerIssuerURL:", issuerUrlStr)
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to parse the issuer URL generated using the parsed Server.ExternalWebUrl")
+	// Finally, fall back to the external web URL
+	issuerUrl = param.Server_ExternalWebUrl.GetString()
+	if _, err := url.Parse(issuerUrl); err != nil {
+		return "", errors.Wrapf(err, "failed to parse '%s' as the issuer URL generated from config param '%s'",
+			issuerUrl, param.Server_ExternalWebUrl.GetName())
 	}
-	return issuerUrl.String(), nil
+	log.Debugf("Populating server's issuer URL as '%s' from configured value of '%s'", issuerUrl, param.Server_ExternalWebUrl.GetName())
+	return issuerUrl, nil
 }
 
 // function to get/setup the transport (only once)
@@ -807,23 +822,6 @@ func InitConfig() {
 	if err != nil {
 		cobra.CheckErr(err)
 	}
-	logLocation := param.Logging_LogLocation.GetString()
-	if logLocation != "" {
-		dir := filepath.Dir(logLocation)
-		if dir != "" {
-			if err := os.MkdirAll(dir, 0640); err != nil {
-				cobra.CheckErr(fmt.Errorf("failed to access/create specified directory: %w", err))
-			}
-		}
-
-		// Note: logrus handles file closure, so no need to close manually
-		f, err := os.OpenFile(logLocation, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
-		if err != nil {
-			cobra.CheckErr(fmt.Errorf("failed to access specified log file: %w", err))
-		}
-		fmt.Fprintf(os.Stderr, "Logging.LogLocation is set to %s. All logs are redirected to the log file.\n", logLocation)
-		log.SetOutput(f)
-	}
 
 	if param.Debug.GetBool() {
 		SetLogging(log.DebugLevel)
@@ -885,19 +883,19 @@ func printConfigHelper(bytes []byte) {
 		ForceColors:            isStdout,
 	})
 
-	// Log the formatted JSON
+	// Log the formatted YAML
 	log.Info("\n================ Pelican Configuration ================\n" +
 		string(bytes) +
-		"\n============= End of Pelican Configuration ============")
+		"============= End of Pelican Configuration ============")
 }
 
-// PrintConfig logs the full config dump in JSON format.
+// PrintConfig logs the full config dump in YAML format.
 func PrintConfig() error {
 	rawConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil {
 		return err
 	}
-	bytes, err := json.MarshalIndent(*rawConfig, "", "  ")
+	bytes, err := yaml.Marshal(rawConfig)
 	if err != nil {
 		return err
 	}
@@ -949,7 +947,7 @@ func filterConfigRecursive(v reflect.Value, currentPath string, component string
 				continue
 			}
 
-			fieldName := strings.ToLower(fieldType.Name)
+			fieldName := fieldType.Name
 
 			var newPath string
 			if currentPath == "" {
@@ -981,14 +979,14 @@ func filterConfigRecursive(v reflect.Value, currentPath string, component string
 	}
 }
 
-// PrintClientConfig logs the client config in JSON format.
+// PrintClientConfig logs the client config in YAML format.
 func PrintClientConfig() error {
 	clientConfig, err := GetComponentConfig("client")
 	if err != nil {
 		return err
 	}
 
-	bytes, err := json.MarshalIndent(clientConfig, "", "  ")
+	bytes, err := yaml.Marshal(clientConfig)
 	if err != nil {
 		return err
 	}
@@ -1203,11 +1201,20 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.Set(param.Server_ExternalWebUrl.GetName(), parsedExtAdd.String())
 	}
 
+	if originConcurrency := v.GetInt(param.Origin_Concurrency.GetName()); originConcurrency < 0 {
+		return errors.Errorf("invalid value of '%d' for config param %s; must be greater than or equal to 0, where 0 disables the feature",
+			originConcurrency, param.Origin_Concurrency.GetName())
+	}
+	if cacheConcurrency := v.GetInt(param.Cache_Concurrency.GetName()); cacheConcurrency < 0 {
+		return errors.Errorf("invalid value of '%d' for config param %s; must be greater than or equal to 0, where 0 disables the feature",
+			cacheConcurrency, param.Cache_Concurrency.GetName())
+	}
+
 	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
 	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
 	// configuration but we don't know the origin's port until after xrootd has started), we
 	// stash a copy of its value now.
-	v.SetDefault("Origin.AudienceURL", v.GetString(param.Origin_Url.GetName()))
+	v.SetDefault(param.Origin_TokenAudience.GetName(), v.GetString(param.Origin_Url.GetName()))
 
 	// Set defaults for Director, Registry, and Broker URLs only if the Discovery URL is not set.
 	// This is necessary because, in Viper, there is currently no way to check if a value is coming
@@ -1234,7 +1241,7 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
-
+	logging.FlushLogs(true)
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
@@ -1733,6 +1740,7 @@ func SetClientDefaults(v *viper.Viper) error {
 }
 
 func InitClient() error {
+	logging.FlushLogs(true)
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
 	}
@@ -1765,6 +1773,16 @@ func InitClient() error {
 	return nil
 }
 
+// Clear all in-memory server ads in the Director. It delegates the call to the registered callback.
+// The real implementation is in the Director package. This design is to avoid circular dependencies.
+func ClearServerAds() {
+	if ClearServerAdsCallback != nil {
+		ClearServerAdsCallback()
+	} else {
+		log.Info("Unable to clear server ads: no callback registered")
+	}
+}
+
 // This function resets most states for test cases, including 1. viper settings, 2. preferred prefix, 3. transport object, 4. Federation metadata back to their default
 func ResetConfig() {
 	viper.Reset()
@@ -1775,6 +1793,12 @@ func ResetConfig() {
 	// Clear cached transport object
 	onceTransport = sync.Once{}
 	transport = nil
+
+	// Clear the instance ID information for generated server ads
+	server_structs.Reset()
+
+	// Clear out director's ad cache
+	ClearServerAds()
 
 	// Reset federation metadata
 	fedDiscoveryOnce = &sync.Once{}

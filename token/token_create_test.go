@@ -335,3 +335,72 @@ func TestLookupIssuerJwksUrl(t *testing.T) {
 		}
 	}
 }
+func TestGetWLCGAudience(t *testing.T) {
+	tests := []struct {
+		name        string
+		urlStr      string
+		expectedAud string
+		expectError bool
+	}{
+		{
+			name:        "valid-http-url-with-port",
+			urlStr:      "http://example.com:8080/path",
+			expectedAud: "http://example.com:8080",
+			expectError: false,
+		},
+		{
+			name:        "valid-https-url-without-port",
+			urlStr:      "https://example.com/path",
+			expectedAud: "https://example.com",
+			expectError: false,
+		},
+		{
+			name:        "valid-http-url-with-default-port",
+			urlStr:      "http://example.com:80/path",
+			expectedAud: "http://example.com",
+			expectError: false,
+		},
+		{
+			name:        "valid-https-url-with-default-port",
+			urlStr:      "https://example.com:443/path",
+			expectedAud: "https://example.com",
+			expectError: false,
+		},
+		{
+			name:        "valid-https-url-with-nondefault-port",
+			urlStr:      "https://example.com:8443/path",
+			expectedAud: "https://example.com:8443",
+			expectError: false,
+		},
+		{
+			name:        "invalid-url",
+			urlStr:      "http_blah://example.com/path",
+			expectedAud: "",
+			expectError: true,
+		},
+		{
+			name:        "url-without-scheme",
+			urlStr:      "example.com/path",
+			expectedAud: "",
+			expectError: true,
+		},
+		{
+			name:        "url-without-host",
+			urlStr:      "http:///path",
+			expectedAud: "",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			aud, err := GetWLCGAudience(tt.urlStr)
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedAud, aud)
+			}
+		})
+	}
+}

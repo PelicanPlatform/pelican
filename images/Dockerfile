@@ -213,8 +213,8 @@ RUN groupadd -g 10940 xrootd \
 
 # We need to pin the install for many of the RPMs to "Koji" until all of
 # Pelican's patches are ingested into the OSG repositories.
-ARG XROOTD_VER="5.7.2"
-ARG XROOTD_RELEASE="1.5.purge.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_VER="5.7.3"
+ARG XROOTD_RELEASE="1.5.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
 # The packages from Koji need to be installed in a single dnf command in
@@ -418,7 +418,10 @@ ARG TARGETPLATFORM
 
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
-  dnf install -y java-17-openjdk-headless
+
+  # We need OpenJDK for OA4MP.
+  # We need sssd-client for some xrootd-multiuser setups.
+  dnf install -y java-17-openjdk-headless sssd-client
 ENDRUN
 
 # Install OA4MP. Most of the installation is in /opt, but there are
@@ -519,7 +522,6 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   # These IDs must match OSG's sssd sidecar containers.
   groupadd -r -g 990 sssd
   useradd -r -g sssd -u 990 -d / -s /usr/sbin/nologin -c "System user for sssd" sssd
-  dnf install -y sssd-client
 ENDRUN
 RUN ln -s pelican /usr/local/bin/osdf
 ENTRYPOINT ["/entrypoint.sh", "osdf", "origin"]

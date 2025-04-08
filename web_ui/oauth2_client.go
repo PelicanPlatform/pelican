@@ -25,10 +25,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -36,6 +38,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 
 	"github.com/pelicanplatform/pelican/config"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
@@ -60,6 +63,12 @@ func ParseOAuthState(state string) (metadata map[string]string, err error) {
 	if state == "" {
 		return metadata, nil
 	}
+
+	stateBytes, err := base64.RawURLEncoding.DecodeString(state)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to base64 decode the OAuth state: %v", state)
+	}
+	state = string(stateBytes)
 
 	keyvals := strings.Split(state, "&")
 	metadata = map[string]string{}
@@ -86,14 +95,16 @@ func ParseOAuthState(state string) (metadata map[string]string, err error) {
 //
 // key1=val1&key2=val2
 //
-// where values are url-encoded
+// where values are url-encoded. We then base64 encode the resulting string
+// in order to ensure that over-zealous providers do not treat the final URL
+// as a double-encoding attack or somesuch.
 func GenerateOAuthState(metadata map[string]string) string {
 	metaStr := ""
 	for key, val := range metadata {
 		metaStr += key + "=" + url.QueryEscape(val) + "&"
 	}
 	metaStr = strings.TrimSuffix(metaStr, "&")
-	return metaStr
+	return base64.RawURLEncoding.EncodeToString([]byte(metaStr))
 }
 
 // Generate a 16B random string and set as the value of ctx session key "oauthstate"
@@ -177,14 +188,18 @@ func generateGroupInfo(user string) (groups []string, err error) {
 	return
 }
 
-// Given a map from a JSON object, generate user/group information according to
-// the current policy.
-func generateUserGroupInfo(userInfo map[string]interface{}) (user string, groups []string, err error) {
+// Given the maps for the UserInfo and ID token JSON objects, generate
+// user/group information according to the current policy.
+func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]interface{}) (user string, groups []string, err error) {
+	claimsSource := maps.Clone(userInfo)
+	if param.Issuer_OIDCPreferClaimsFromIDToken.GetBool() {
+		maps.Copy(claimsSource, idToken)
+	}
 	userClaim := param.Issuer_OIDCAuthenticationUserClaim.GetString()
 	if userClaim == "" {
 		userClaim = "sub"
 	}
-	userIdentifierIface, ok := userInfo[userClaim]
+	userIdentifierIface, ok := claimsSource[userClaim]
 	if !ok {
 		log.Errorln("User info endpoint did not return a value for the user claim", userClaim)
 		err = errors.New("identity provider did not return an identity for logged-in user")
@@ -211,7 +226,7 @@ func generateUserGroupInfo(userInfo map[string]interface{}) (user string, groups
 
 	if param.Issuer_GroupSource.GetString() == "oidc" {
 		groupClaim := param.Issuer_OIDCGroupClaim.GetString()
-		groupList, ok := userInfo[groupClaim]
+		groupList, ok := claimsSource[groupClaim]
 		if ok {
 			if groupsStr, ok := groupList.(string); ok {
 				groupsInfo := strings.Split(groupsStr, ",")
@@ -237,8 +252,8 @@ func generateUserGroupInfo(userInfo map[string]interface{}) (user string, groups
 	return
 }
 
-// Handle the callback request from CILogon when user is successfully authenticated
-// Get user info from CILogon and issue our token for user to access web UI
+// Handle the callback request when the user is successfully authenticated.
+// Get the user's info and issue our token for accessing the web UI.
 func handleOAuthCallback(ctx *gin.Context) {
 	session := sessions.Default(ctx)
 	c := context.Background()
@@ -292,9 +307,8 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
-	// We only need this token to grab user id from cilogon
-	// and we won't store it anywhere. We will later issue our own token
-	// for user access
+	// We need this token only to get the user's info.
+	// We will later issue our own token for user access.
 	token, err := oauthConfig.Exchange(c, req.Code)
 	if err != nil {
 		log.Errorf("Error in exchanging code for token:  %v", err)
@@ -306,25 +320,54 @@ func handleOAuthCallback(ctx *gin.Context) {
 		return
 	}
 
+	var idToken = make(map[string]interface{})
+	if idTokenRaw := token.Extra("id_token"); idTokenRaw != nil {
+		// The token's signature will show as "REDACTED" in the output.
+		log.Debugf("Found an OIDC ID token: %v", idTokenRaw)
+
+		// We were given this ID token by the authentication provider, not
+		// some third party. If we don't trust the provider, we have greater
+		// issues.
+		skew, _ := time.ParseDuration("6s")
+		idTokenJWT, err := jwt.ParseString(idTokenRaw.(string), jwt.WithVerify(false), jwt.WithAcceptableSkew(skew))
+		if err != nil {
+			log.Errorf("Error parsing OIDC ID token: %v", err)
+			ctx.JSON(http.StatusInternalServerError,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprint("Error parsing OIDC ID token: ", ctx.Request.URL),
+				})
+			return
+		}
+
+		idToken, err = idTokenJWT.AsMap(ctx)
+		if err != nil {
+			log.Errorf("Error converting OIDC ID token to a map: %v", err)
+			ctx.JSON(http.StatusInternalServerError,
+				server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprint("Error converting OIDC ID token to a map: ", ctx.Request.URL),
+				})
+			return
+		}
+	} else {
+		log.Debugf("Did not find an OIDC ID token")
+	}
+
 	client := oauthConfig.Client(c, token)
 	client.Transport = config.GetTransport()
-	// CILogon requires token to be set as part of post form
-	data := url.Values{}
-	data.Add("access_token", token.AccessToken)
 
-	// Use access_token to get user info from CILogon
-	userInfoReq, err := http.NewRequest(http.MethodPost, oauthUserInfoUrl, strings.NewReader(data.Encode()))
+	userInfoReq, err := http.NewRequest(http.MethodGet, oauthUserInfoUrl, nil)
 	if err != nil {
 		log.Errorf("Error creating a new request for user info from auth provider at %s. %v", oauthUserInfoUrl, err)
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprint("Error requesting user info from CILogon: ", err),
+				Msg:    fmt.Sprint("Error requesting user info from auth provider: ", err),
 			})
 		return
 	}
 	userInfoReq.Header.Add("Authorization", token.TokenType+" "+token.AccessToken)
-	userInfoReq.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := client.Do(userInfoReq)
 	if err != nil {
@@ -358,6 +401,7 @@ func handleOAuthCallback(ctx *gin.Context) {
 			})
 		return
 	}
+	log.Debugf("User info from auth provider: %v", string(body))
 
 	var userInfo map[string]interface{}
 	if err := json.Unmarshal(body, &userInfo); err != nil {
@@ -365,12 +409,12 @@ func handleOAuthCallback(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprint("Error parsing user info from CILogon: ", err),
+				Msg:    fmt.Sprint("Error parsing user info from auth provider: ", err),
 			})
 		return
 	}
 
-	user, groups, err := generateUserGroupInfo(userInfo)
+	user, groups, err := generateUserGroupInfo(userInfo, idToken)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError,
 			server_structs.SimpleApiResp{

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -25,10 +25,15 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/utils"
+	"github.com/pelicanplatform/pelican/version"
 )
 
 type (
@@ -73,8 +78,52 @@ type (
 		DirlistHost   string       `json:"dirlisthost"`
 	}
 
+	// Downtime represents a server downtime event
+	Class    string
+	Severity string
+	Downtime struct {
+		UUID        string   `json:"id" gorm:"primaryKey"`
+		CreatedBy   string   `json:"createdBy" gorm:"not null"` // Person who created this downtime
+		Class       Class    `json:"class" gorm:"not null"`     // SCHEDULED or UNSCHEDULED
+		Description string   `json:"description" gorm:"type:text"`
+		Severity    Severity `json:"severity" gorm:"type:varchar(80);not null"`
+		StartTime   int64    `json:"startTime" gorm:"not null;index"` // Epoch UTC
+		EndTime     int64    `json:"endTime" gorm:"not null;index"`   // Epoch UTC
+		CreatedAt   int64    `json:"createdAt" gorm:"autoCreateTime:milli"`
+		UpdatedAt   int64    `json:"updatedAt" gorm:"autoUpdateTime:milli"`
+	}
+
+	// Common attributes necessary for all server ads
+	ServerBaseAd struct {
+		Name         string    `json:"name"`
+		StartTime    int64     `json:"startTime"`    // The start time of the server ad.  Unix timestamp
+		InstanceID   string    `json:"instanceID"`   // The instance ID of the server ad (hex-encoded UUID).
+		GenerationID uint64    `json:"generationID"` // A monotonically-increasing counter that's incremented every time a new server ad is generated.  Will always be nonzero if known
+		Version      string    `json:"version"`      // Version of Pelican that produced the ad
+		Expiration   time.Time `json:"expiry"`       // Expiration time of the ad
+	}
+
+	// An interface for dealing with server ads
+	ServerBaseAdInterface interface {
+		GetName() string          // The name of the server ad
+		GetStartTime() int64      // The start time, in seconds, of the server ad.  Unix timestamp
+		GetInstanceID() string    // The instance ID of the server ad (currently a hex-encoded UUID; may change).
+		GetGenerationID() uint64  // The generation ID (monotonic counter) of the server ad; incremented every time a process generates a new ad.
+		GetVersion() string       // The version of the server base ad
+		GetExpiration() time.Time // Time at which the ad will expire
+	}
+
+	// A representation of a known director endpoint.
+	//
+	// Intended for building an in-memory table of known directors
+	// so services can advertise to all directors in a federation
+	DirectorAd struct {
+		ServerBaseAd
+		AdvertiseUrl string `json:"advertise_url"` // The URL / endpoint where the director expects ads to be POST'd
+	}
+
 	ServerAd struct {
-		Name                string            `json:"name"`
+		ServerBaseAd
 		StorageType         OriginStorageType `json:"storageType"` // Always POSIX for caches
 		DisableDirectorTest bool              `json:"directorTest"`
 		AuthURL             url.URL           `json:"auth_url"`
@@ -87,7 +136,7 @@ type (
 		Caps                Capabilities      `json:"capabilities"`
 		FromTopology        bool              `json:"from_topology"`
 		IOLoad              float64           `json:"io_load"`
-		Version             string            `json:"version"`
+		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
@@ -101,9 +150,7 @@ type (
 	SortType     string
 
 	OriginAdvertiseV2 struct {
-		// The displayed name of the server.
-		// The value is from the Sitename of the server registration in the registry if set, or Xrootd.Sitename if not
-		Name string `json:"name"`
+		ServerBaseAd
 		// The namespace prefix to register/look up the server in the registry.
 		// The value is /caches/{Xrootd.Sitename} for cache servers and /origins/{Xrootd.Sitename} for the origin servers
 		RegistryPrefix      string            `json:"registry-prefix"`
@@ -114,8 +161,9 @@ type (
 		Namespaces          []NamespaceAdV2   `json:"namespaces"`
 		Issuer              []TokenIssuer     `json:"token-issuer"`
 		StorageType         OriginStorageType `json:"storageType"`
-		DisableDirectorTest bool              `json:"directorTest"` // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
-		Version             string            `json:"version"`
+		DisableDirectorTest bool              `json:"directorTest"`        // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
+		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
+		Now                 time.Time         `json:"now"`                 // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
 	}
 
 	OriginAdvertiseV1 struct {
@@ -172,6 +220,28 @@ type (
 		VaultServer   *url.URL
 	}
 
+	ClientRedirectInfo struct {
+		Lat           float64 `json:"lat"`
+		Lon           float64 `json:"lon"`
+		GeoIpRadiusKm uint16  `json:"geoIpRadiusKm"` // 0 will indicate no radius (i.e. no resolution)
+		Resolved      bool    `json:"resolved"`      // whether or not the client IP was resolved by MaxMind
+		FromTTLCache  bool    `json:"fromTtlcache"`  // whether we're using a cached value
+		IpAddr        string  `json:"ipAddr"`
+	}
+
+	ServerRedirectInfo struct {
+		Lat        float64 `json:"lat"`
+		Lon        float64 `json:"lon"`
+		HasObject  string  `json:"hasObject"`
+		LoadWeight float64 `json:"loadWeight"`
+	}
+
+	RedirectInfo struct {
+		ClientInfo         ClientRedirectInfo             `json:"clientInfo"`
+		ServersInfo        map[string]*ServerRedirectInfo `json:"serversInfo"`
+		DirectorSortMethod string                         `json:"directorSortMethod"`
+	}
+
 	DirectorResponse struct {
 		ObjectServers []*url.URL // List of servers provided in Link header
 		Location      *url.URL   // URL content of the location header
@@ -179,6 +249,32 @@ type (
 		XPelNsHdr     XPelNs
 		XPelTokGenHdr XPelTokGen
 	}
+
+	AdAfter int // Ternary logic for the `Ad.After` function
+)
+
+var (
+	// Instance ID and "startup" time.
+	// Both of these can be reset by unit tests so the startup
+	// time might not be the actual process launch time.
+	instanceOnce sync.Once
+	instanceID   string
+	startTime    int64
+
+	// Counter for the current server ad generation ID
+	generationID atomic.Uint64
+)
+
+const (
+	SCHEDULED   Class = "SCHEDULED"
+	UNSCHEDULED Class = "UNSCHEDULED"
+)
+
+const (
+	Outage                      Severity = "Outage (completely inaccessible)"
+	Severe                      Severity = "Severe (most services down)"
+	IntermittentOutage          Severity = "Intermittent Outage (may be up for some of the time)"
+	NoSignificantOutageExpected Severity = "No Significant Outage Expected (you shouldn't notice)"
 )
 
 func (x XPelNs) GetName() string {
@@ -273,6 +369,15 @@ func (x *XPelTokGen) ParseRawResponse(resp *http.Response) error {
 	return nil
 }
 
+func NewRedirectInfoFromIP(ipAddr string) *RedirectInfo {
+	return &RedirectInfo{
+		ClientInfo: ClientRedirectInfo{
+			IpAddr: ipAddr,
+		},
+		ServersInfo: map[string]*ServerRedirectInfo{},
+	}
+}
+
 const (
 	OAuthStrategy StrategyType = "OAuth2"
 	VaultStrategy StrategyType = "Vault"
@@ -284,6 +389,10 @@ const (
 	DistanceAndLoadType SortType = "distanceAndLoad"
 	RandomType          SortType = "random"
 	AdaptiveType        SortType = "adaptive"
+
+	AdAfterFalse   AdAfter = 0 // The ad was *not* generated after the compared one
+	AdAfterTrue    AdAfter = 1 // The ad was generated after the compared one
+	AdAfterUnknown AdAfter = 2 // One of the ads in the comparison is missing necessary attributes to determine when it was generated
 )
 
 func IsValidStrategy(strategy string) bool {
@@ -294,6 +403,121 @@ func IsValidStrategy(strategy string) bool {
 		return false
 	}
 }
+
+// Return the version of the `ad`
+//
+// Getter for ServerAdBase to fulfill the ServerBaseAdInterface
+func (ad ServerBaseAd) GetVersion() string {
+	return ad.Version
+}
+
+// Return the instance ID of the `ad`
+//
+// Getter for ServerAdBase to fulfill the ServerBaseAdInterface
+func (ad ServerBaseAd) GetInstanceID() string {
+	return ad.InstanceID
+}
+
+// Return the generation ID of the `ad`
+//
+// Getter for ServerAdBase to fulfill the ServerBaseAdInterface
+func (ad ServerBaseAd) GetGenerationID() uint64 {
+	return ad.GenerationID
+}
+
+// Return the start time of the `ad`
+//
+// Getter for ServerAdBase to fulfill the ServerBaseAdInterface
+func (ad ServerBaseAd) GetStartTime() int64 {
+	return ad.StartTime
+}
+
+// Return the name of the `ad`
+//
+// Getter for ServerAdBase to fulfill the ServerBaseAdInterface
+func (ad ServerBaseAd) GetName() string {
+	return ad.Name
+}
+
+// Return the ad's expiration time
+//
+// Getter for ServerAdBase to fulfill the ServerBaseAdInterface
+func (ad ServerBaseAd) GetExpiration() time.Time {
+	return ad.Expiration
+}
+
+// Returns true if `ad` was generated after `other`,
+func (ad *ServerBaseAd) After(other ServerBaseAdInterface) AdAfter {
+	// Handle the error condition -- the ad names must match.
+	if ad.Name != other.GetName() {
+		return AdAfterUnknown
+	}
+
+	// Next, see if there's any ad metadata missing or unset.
+	if ad.StartTime == 0 || other.GetStartTime() == 0 {
+		return AdAfterUnknown
+	}
+	if ad.InstanceID == "" || other.GetInstanceID() == "" {
+		return AdAfterUnknown
+	}
+	if ad.GenerationID == 0 || other.GetGenerationID() == 0 {
+		return AdAfterUnknown
+	}
+
+	// We've determined the two ads are from a server with the
+	// same name.  However, if the server had restarted recently,
+	// they might be from distinct instances of that server (e.g.,
+	// different PIDs on the same host).  Detect that by looking at
+	// the start time and the randomly-generated instance ID.
+	if ad.StartTime > other.GetStartTime() {
+		return AdAfterTrue
+	} else if ad.StartTime < other.GetStartTime() {
+		return AdAfterFalse
+	} else if ad.InstanceID > other.GetInstanceID() {
+		return AdAfterTrue
+	} else if ad.InstanceID < other.GetInstanceID() {
+		return AdAfterFalse
+	}
+
+	// The ads were generated by the same process; compare the monotonically
+	// increasing counter!
+	if ad.GenerationID > other.GetGenerationID() {
+		return AdAfterTrue
+	}
+	return AdAfterFalse
+}
+
+// Set the common defaults for the server ad
+//
+// Defaults include the generation and instance IDs, allowing
+// remote services to determine "when" the ad was generated
+func (ad *ServerBaseAd) Initialize(name string) {
+	ad.Name = name
+	instanceID, startTime := getInstanceID()
+	ad.InstanceID = instanceID
+	ad.StartTime = startTime
+	ad.GenerationID = generationID.Add(1) + 1
+	adLifetime := param.Server_AdLifetime.GetDuration()
+	// Not all unit tests initializae the config, meaning adLifetime
+	// may be 0.
+	if adLifetime == 0 {
+		adLifetime = 15 * time.Minute
+	}
+	ad.Expiration = time.Now().Add(adLifetime)
+	ad.Version = version.GetVersion()
+}
+
+// Copy the base attributes from a given `other` ad to `ad`
+func (ad *ServerBaseAd) CopyFrom(other ServerBaseAdInterface) {
+	ad.Name = other.GetName()
+	ad.InstanceID = other.GetInstanceID()
+	ad.StartTime = other.GetStartTime()
+	ad.GenerationID = other.GetGenerationID()
+	ad.Version = other.GetVersion()
+	ad.Expiration = other.GetExpiration()
+}
+
+// Various getters
 
 func (ad *ServerAd) MarshalJSON() ([]byte, error) {
 	type Alias ServerAd
@@ -501,13 +725,13 @@ func ConvertOriginAdV1ToV2(oAd1 OriginAdvertiseV1) OriginAdvertiseV2 {
 	}
 
 	oAd2 := OriginAdvertiseV2{
-		Name:       oAd1.Name,
 		DataURL:    oAd1.URL,
 		WebURL:     oAd1.WebURL,
 		Caps:       caps,
 		Namespaces: nsAdsV2,
 		Issuer:     tokIssuers,
 	}
+	oAd2.Initialize(oAd1.Name)
 	return oAd2
 }
 
@@ -516,4 +740,27 @@ func ServerAdsToServerNameURL(ads []ServerAd) (output string) {
 		output += ad.Name + ":" + ad.URL.String() + "\n"
 	}
 	return
+}
+
+// Reset the state of the server ad tracking for the process
+//
+// Will cause newly-generated server ads to appear to be from a new process.
+// Intended for unit tests; is not thread-safe
+func Reset() {
+	instanceOnce = sync.Once{}
+}
+
+// Get the "instance ID" of the running process
+//
+// The instance ID is a randomly-generated UUID, hex-encoded, identifying
+// the currently-running process.  The intent is external entities (i.e.,
+// the director), can differentiate between different server instances with
+// the same name by seeing if they claim to have different instance IDs.
+func getInstanceID() (string, int64) {
+	instanceOnce.Do(func() {
+		instanceID = uuid.New().String()
+		startTime = time.Now().Unix()
+	})
+
+	return instanceID, startTime
 }

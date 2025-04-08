@@ -35,6 +35,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -284,6 +285,10 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 func ResetTestState() {
 	config.ResetConfig()
 	ResetOriginExports()
+	baseAdOnce = sync.Once{}
+	baseAd = server_structs.ServerBaseAd{}
+	baseAdErr = nil
+	directorEndpoints.Store(nil)
 }
 
 // Given a slice of NamespaceAdV2 objects, return a slice of unique top-level prefixes.
@@ -330,8 +335,8 @@ func FilterTopLevelPrefixes(nsAds []server_structs.NamespaceAdV2) []server_struc
 // Get an advertisement token for the given server. Advertisement tokens are signed by the server
 // and passed to the Director, which can then use them to check the server's identity. Tokens are
 // valid when the Director can query the public key for the given server from the Registry.
-func GetAdvertisementTok(ctx context.Context, server server_structs.XRootDServer) (tok string, err error) {
-	tokCfg, err := server.GetAdTokCfg(ctx)
+func GetAdvertisementTok(server server_structs.XRootDServer, directorUrl string) (tok string, err error) {
+	tokCfg, err := server.GetAdTokCfg(directorUrl)
 	if err != nil {
 		err = errors.Wrap(err, "failed to get advertisement token configuration")
 		return
@@ -356,83 +361,91 @@ func GetAdvertisementTok(ctx context.Context, server server_structs.XRootDServer
 
 // GetFedTok retrieves a federation token from the Director, which can be passed to other
 // federation services as proof of federation membership.
-func CreateFedTok(ctx context.Context, server server_structs.XRootDServer) (string, error) {
-	// Set up the request to the Director
-	fInfo, err := config.GetFederation(ctx)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get federation info")
-	}
-	directorUrl := fInfo.DirectorEndpoint
-	if directorUrl == "" {
-		return "", errors.New("unable to determine Director's URL")
-	}
-	directorEndpoint, err := url.JoinPath(directorUrl, "api", "v1.0", "director", "getFedToken")
-	if err != nil {
-		return "", errors.Wrap(err, "unable to join director url")
-	}
-	query, err := url.Parse(directorEndpoint)
-	if err != nil {
-		return "", errors.Wrap(err, "the configured Director URL appears malformed")
-	}
-
-	host := param.Server_Hostname.GetString()
-	adTok, err := GetAdvertisementTok(ctx, server)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to get advertisement token")
-	}
-
-	// The fed token endpoint wants to know the host and server type,
-	// which it needs to verify the token
-	params := url.Values{}
-	params.Add("host", host)
-	params.Add("sType", server.GetServerType().String())
-	query.RawQuery = params.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, "GET", query.String(), nil)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to create the request to get a federation token")
-	}
-	req.Header.Set("Authorization", "Bearer "+adTok)
-	userAgent := "pelican-" + strings.ToLower(server.GetServerType().String()) + "/" + config.GetVersion()
-	req.Header.Set("User-Agent", userAgent)
-
-	tr := config.GetTransport()
-	client := http.Client{Transport: tr}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to start the request for director advertisement")
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", errors.Wrap(err, "failed to read the response body for director advertisement")
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		// Unmarshal the body as a simple api response
-		var apiResp server_structs.SimpleApiResp
-		if err := json.Unmarshal(body, &apiResp); err != nil {
-			return "", errors.Wrap(err, "failed to unmarshal error response from Director's federation token endpoint")
+func CreateFedTok(ctx context.Context, server server_structs.XRootDServer) (tok string, err error) {
+	for _, ad := range GetDirectorAds() {
+		directorUrl := ad.AdvertiseUrl
+		var directorEndpoint string
+		if directorEndpoint, err = url.JoinPath(directorUrl, "api", "v1.0", "director", "getFedToken"); err != nil {
+			err = errors.Wrap(err, "unable to join director url")
+			continue
+		}
+		var query *url.URL
+		if query, err = url.Parse(directorEndpoint); err != nil {
+			err = errors.Wrap(err, "the configured Director URL appears malformed")
+			continue
 		}
 
-		return "", errors.New(apiResp.Msg)
-	}
-
-	// Attempt to unmarshal the body into our token struct
-	var tokResponse server_structs.TokenResponse
-	if err := json.Unmarshal(body, &tokResponse); err != nil {
-		// Check for a simple api error response
-		var apiResp server_structs.SimpleApiResp
-		if err := json.Unmarshal(body, &apiResp); err == nil {
-			return "", errors.New(apiResp.Msg)
+		host := param.Server_Hostname.GetString()
+		var adTok string
+		if adTok, err = GetAdvertisementTok(server, directorUrl); err != nil {
+			err = errors.Wrap(err, "failed to get advertisement token")
+			continue
 		}
 
-		return "", errors.Wrap(err, "failed to unmarshal the response body for director advertisement")
-	}
+		// The fed token endpoint wants to know the host and server type,
+		// which it needs to verify the token
+		params := url.Values{}
+		params.Add("host", host)
+		params.Add("sType", server.GetServerType().String())
+		query.RawQuery = params.Encode()
 
-	return tokResponse.AccessToken, nil
+		var req *http.Request
+		if req, err = http.NewRequestWithContext(ctx, "GET", query.String(), nil); err != nil {
+			err = errors.Wrap(err, "failed to create the request to get a federation token")
+			continue
+		}
+		req.Header.Set("Authorization", "Bearer "+adTok)
+		userAgent := "pelican-" + strings.ToLower(server.GetServerType().String()) + "/" + config.GetVersion()
+		req.Header.Set("User-Agent", userAgent)
+
+		tr := config.GetTransport()
+		client := http.Client{Transport: tr}
+
+		var resp *http.Response
+		if resp, err = client.Do(req); err != nil {
+			err = errors.Wrap(err, "failed to start the request for director advertisement")
+			continue
+		}
+		defer resp.Body.Close()
+
+		var body []byte
+		if body, err = io.ReadAll(resp.Body); err != nil {
+			err = errors.Wrap(err, "failed to read the response body for director advertisement")
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			// Unmarshal the body as a simple api response
+			var apiResp server_structs.SimpleApiResp
+			if err = json.Unmarshal(body, &apiResp); err != nil {
+				err = errors.Wrap(err, "failed to unmarshal error response from Director's federation token endpoint")
+				continue
+			}
+
+			err = errors.New(apiResp.Msg)
+			continue
+		}
+
+		// Attempt to unmarshal the body into our token struct
+		var tokResponse server_structs.TokenResponse
+		if err = json.Unmarshal(body, &tokResponse); err != nil {
+			// Check for a simple api error response
+			var apiResp server_structs.SimpleApiResp
+			if err = json.Unmarshal(body, &apiResp); err == nil {
+				err = errors.New(apiResp.Msg)
+				continue
+			}
+
+			err = errors.Wrap(err, "failed to unmarshal the response body for director advertisement")
+			continue
+		}
+
+		return tokResponse.AccessToken, nil
+	}
+	if err == nil {
+		err = errors.New("unknown error when retrieving a federation token")
+	}
+	return
 }
 
 // SetFedTok does an atomic write of a federation token to the server's token location.
