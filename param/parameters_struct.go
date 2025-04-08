@@ -332,7 +332,9 @@ type Config struct {
 	} `mapstructure:"stageplugin" yaml:"StagePlugin"`
 	TLSSkipVerify bool `mapstructure:"tlsskipverify" yaml:"TLSSkipVerify"`
 	Topology struct {
+		DisableCacheX509 bool `mapstructure:"disablecachex509" yaml:"DisableCacheX509"`
 		DisableDowntime bool `mapstructure:"disabledowntime" yaml:"DisableDowntime"`
+		DisableOriginX509 bool `mapstructure:"disableoriginx509" yaml:"DisableOriginX509"`
 	} `mapstructure:"topology" yaml:"Topology"`
 	Transport struct {
 		DialerKeepAlive time.Duration `mapstructure:"dialerkeepalive" yaml:"DialerKeepAlive"`
@@ -676,7 +678,9 @@ type configWithType struct {
 	}
 	TLSSkipVerify struct { Type string; Value bool }
 	Topology struct {
+		DisableCacheX509 struct { Type string; Value bool }
 		DisableDowntime struct { Type string; Value bool }
+		DisableOriginX509 struct { Type string; Value bool }
 	}
 	Transport struct {
 		DialerKeepAlive struct { Type string; Value time.Duration }

@@ -407,7 +407,9 @@ var (
 	Shoveler_VerifyHeader = BoolParam{"Shoveler.VerifyHeader"}
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}
 	TLSSkipVerify = BoolParam{"TLSSkipVerify"}
+	Topology_DisableCacheX509 = BoolParam{"Topology.DisableCacheX509"}
 	Topology_DisableDowntime = BoolParam{"Topology.DisableDowntime"}
+	Topology_DisableOriginX509 = BoolParam{"Topology.DisableOriginX509"}
 	Xrootd_EnableLocalMonitoring = BoolParam{"Xrootd.EnableLocalMonitoring"}
 )
 

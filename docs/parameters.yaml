@@ -3257,4 +3257,20 @@ description: |+
 type: bool
 hidden: true
 default: false
-components: ["cache", "origin", "registry", "director"]
+components: ["director"]
+---
+name: Topology.DisableCacheX509
+description: |+
+  When enabled, no longer retrieve x509 certification authfiles for caches from Topology
+type: bool
+hidden: true
+default: false
+components: ["cache"]
+---
+name: Topology.DisableOriginX509
+description: |+
+  When enabled, no longer retrieve x509 certification authfiles for origins from Topology
+type: bool
+hidden: true
+default: false
+components: ["origin"]
