@@ -44,6 +44,10 @@ var (
 	flushOnce    sync.Once
 )
 
+func ResetLogFlush() {
+	flushOnce = sync.Once{}
+}
+
 func NewBufferedLogHook() *BufferedLogHook {
 	return &BufferedLogHook{
 		entries: make([]*log.Entry, 0),

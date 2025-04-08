@@ -1816,6 +1816,7 @@ func ResetConfig() {
 
 	// Clear cached preferred prefix
 	testingPreferredPrefix = ""
+	logging.ResetLogFlush()
 
 	// Clear cached transport object
 	onceTransport = sync.Once{}
