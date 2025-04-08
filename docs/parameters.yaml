@@ -3274,3 +3274,11 @@ type: bool
 hidden: true
 default: false
 components: ["origin"]
+---
+name: Topology.DisableCaches
+description: |+
+  When enabled, no longer retrieve caches from Topology
+type: bool
+hidden: true
+default: false
+components: ["director"]

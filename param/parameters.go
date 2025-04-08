@@ -408,6 +408,7 @@ var (
 	StagePlugin_Hook = BoolParam{"StagePlugin.Hook"}
 	TLSSkipVerify = BoolParam{"TLSSkipVerify"}
 	Topology_DisableCacheX509 = BoolParam{"Topology.DisableCacheX509"}
+	Topology_DisableCaches = BoolParam{"Topology.DisableCaches"}
 	Topology_DisableDowntime = BoolParam{"Topology.DisableDowntime"}
 	Topology_DisableOriginX509 = BoolParam{"Topology.DisableOriginX509"}
 	Xrootd_EnableLocalMonitoring = BoolParam{"Xrootd.EnableLocalMonitoring"}

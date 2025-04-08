@@ -333,6 +333,7 @@ type Config struct {
 	TLSSkipVerify bool `mapstructure:"tlsskipverify" yaml:"TLSSkipVerify"`
 	Topology struct {
 		DisableCacheX509 bool `mapstructure:"disablecachex509" yaml:"DisableCacheX509"`
+		DisableCaches bool `mapstructure:"disablecaches" yaml:"DisableCaches"`
 		DisableDowntime bool `mapstructure:"disabledowntime" yaml:"DisableDowntime"`
 		DisableOriginX509 bool `mapstructure:"disableoriginx509" yaml:"DisableOriginX509"`
 	} `mapstructure:"topology" yaml:"Topology"`
@@ -679,6 +680,7 @@ type configWithType struct {
 	TLSSkipVerify struct { Type string; Value bool }
 	Topology struct {
 		DisableCacheX509 struct { Type string; Value bool }
+		DisableCaches struct { Type string; Value bool }
 		DisableDowntime struct { Type string; Value bool }
 		DisableOriginX509 struct { Type string; Value bool }
 	}

@@ -302,6 +302,44 @@ func TestAdvertiseOSDF(t *testing.T) {
 		assert.Equal(t, server_structs.CacheType.String(), foundAd.Type)
 		assert.Len(t, foundAd.NamespaceAds, 2)
 	})
+
+	t.Run("disable-caches-from-topology", func(t *testing.T) {
+		server_utils.ResetTestState()
+		serverAds.DeleteAll()
+		defer func() {
+			server_utils.ResetTestState()
+			serverAds.DeleteAll()
+		}()
+
+		viper.Set("Topology.DisableCaches", true)
+		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
+		defer topoServer.Close()
+		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+
+		err := AdvertiseOSDF(context.Background())
+		require.NoError(t, err)
+
+		var foundServer *server_structs.Advertisement
+		for _, item := range serverAds.Items() {
+			if item.Value().URL.Host == "origin1-endpoint.com" {
+				foundServer = item.Value()
+				break
+			}
+		}
+		require.NotNil(t, foundServer)
+		assert.True(t, foundServer.FromTopology)
+		require.NotNil(t, foundServer.NamespaceAds)
+		assert.True(t, foundServer.NamespaceAds[0].FromTopology)
+
+		// Test a few values. If they're correct, it indicates the whole process likely succeeded
+		_, oAds, cAds := getAdsForPath("/my/server/path/to/file")
+		assert.Len(t, cAds, 0)
+		assert.Len(t, oAds, 1)
+
+		_, oAds, cAds = getAdsForPath("/my/server/2/path/to/file")
+		assert.Len(t, cAds, 0)
+		assert.Len(t, oAds, 1)
+	})
 }
 
 func mockTopoDowntimeXMLHandler(w http.ResponseWriter, r *http.Request) {
