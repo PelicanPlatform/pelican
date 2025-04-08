@@ -258,15 +258,17 @@ func AdvertiseOSDF(ctx context.Context) error {
 		// We further assume that with this legacy code handling, each origin exporting a given namespace
 		// will have the same set of capabilities as the namespace itself. Pelican has teased apart origins
 		// and namespaces, so this isn't true outside this limited context.
-		for _, origin := range ns.Origins {
-			originAd := parseServerAdFromTopology(origin, server_structs.OriginType, caps)
-			if existingAd, ok := originAdMap[originAd.URL.String()]; ok {
-				existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
-				consolidatedAd := consolidateDupServerAd(originAd, existingAd.ServerAd)
-				existingAd.ServerAd = consolidatedAd
-			} else {
-				// New entry
-				originAdMap[originAd.URL.String()] = &server_structs.Advertisement{ServerAd: originAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+		if !param.Topology_DisableOrigins.GetBool() {
+			for _, origin := range ns.Origins {
+				originAd := parseServerAdFromTopology(origin, server_structs.OriginType, caps)
+				if existingAd, ok := originAdMap[originAd.URL.String()]; ok {
+					existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
+					consolidatedAd := consolidateDupServerAd(originAd, existingAd.ServerAd)
+					existingAd.ServerAd = consolidatedAd
+				} else {
+					// New entry
+					originAdMap[originAd.URL.String()] = &server_structs.Advertisement{ServerAd: originAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+				}
 			}
 		}
 

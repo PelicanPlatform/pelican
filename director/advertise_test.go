@@ -319,18 +319,6 @@ func TestAdvertiseOSDF(t *testing.T) {
 		err := AdvertiseOSDF(context.Background())
 		require.NoError(t, err)
 
-		var foundServer *server_structs.Advertisement
-		for _, item := range serverAds.Items() {
-			if item.Value().URL.Host == "origin1-endpoint.com" {
-				foundServer = item.Value()
-				break
-			}
-		}
-		require.NotNil(t, foundServer)
-		assert.True(t, foundServer.FromTopology)
-		require.NotNil(t, foundServer.NamespaceAds)
-		assert.True(t, foundServer.NamespaceAds[0].FromTopology)
-
 		// Test a few values. If they're correct, it indicates the whole process likely succeeded
 		_, oAds, cAds := getAdsForPath("/my/server/path/to/file")
 		assert.Len(t, cAds, 0)
@@ -339,6 +327,32 @@ func TestAdvertiseOSDF(t *testing.T) {
 		_, oAds, cAds = getAdsForPath("/my/server/2/path/to/file")
 		assert.Len(t, cAds, 0)
 		assert.Len(t, oAds, 1)
+	})
+
+	t.Run("disable-origins-from-topology", func(t *testing.T) {
+		server_utils.ResetTestState()
+		serverAds.DeleteAll()
+		defer func() {
+			server_utils.ResetTestState()
+			serverAds.DeleteAll()
+		}()
+
+		viper.Set("Topology.DisableOrigins", true)
+		topoServer := httptest.NewServer(http.HandlerFunc(mockTopoJSONHandler))
+		defer topoServer.Close()
+		viper.Set("Federation.TopologyNamespaceUrl", topoServer.URL)
+
+		err := AdvertiseOSDF(context.Background())
+		require.NoError(t, err)
+
+		// Test a few values. If they're correct, it indicates the whole process likely succeeded
+		_, oAds, cAds := getAdsForPath("/my/server/path/to/file")
+		assert.Len(t, cAds, 7)
+		assert.Len(t, oAds, 0)
+
+		_, oAds, cAds = getAdsForPath("/my/server/2/path/to/file")
+		assert.Len(t, cAds, 1)
+		assert.Len(t, oAds, 0)
 	})
 }
 

@@ -32,3 +32,4 @@ Topology:
   DisableCacheX509: false
   DisableOriginX509: false
   DisableCaches: false
+  DisableOrigins: false

@@ -3282,3 +3282,11 @@ type: bool
 hidden: true
 default: false
 components: ["director"]
+---
+name: Topology.DisableOrigins
+description: |+
+  When enabled, no longer retrieve origins from Topology
+type: bool
+hidden: true
+default: false
+components: ["director", "registry"]

@@ -411,6 +411,7 @@ var (
 	Topology_DisableCaches = BoolParam{"Topology.DisableCaches"}
 	Topology_DisableDowntime = BoolParam{"Topology.DisableDowntime"}
 	Topology_DisableOriginX509 = BoolParam{"Topology.DisableOriginX509"}
+	Topology_DisableOrigins = BoolParam{"Topology.DisableOrigins"}
 	Xrootd_EnableLocalMonitoring = BoolParam{"Xrootd.EnableLocalMonitoring"}
 )
 
