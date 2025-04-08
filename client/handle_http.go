@@ -1906,6 +1906,11 @@ func parseTransferStatus(status string) (int, string) {
 // Verify that a file on disk matches the expected size. We ignore directories
 // and generic stat failures unless the file doesn't exist.
 func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
+	if dest == "/dev/null" {
+		log.WithFields(fields).Debugf("Skipping size check because destination /dev/null")
+		return nil
+	}
+
 	fi, err := os.Stat(dest)
 	if err != nil { // Don't treat stat failure as fatal unless it indicates the file doesn't exist
 		if os.IsNotExist(err) {
