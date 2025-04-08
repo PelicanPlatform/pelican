@@ -26,9 +26,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
-
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

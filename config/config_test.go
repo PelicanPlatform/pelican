@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -703,4 +704,30 @@ func TestInitServerUrl(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "https://example-registry.com", fedInfo.BrokerEndpoint)
 	})
+}
+
+// Test that the web config override can correctly set the logfile location.
+func TestWebConfigSetsLogFile(t *testing.T) {
+	ResetConfig()
+	defer ResetConfig()
+	configDir := t.TempDir()
+	viper.Set("ConfigDir", configDir)
+	viper.Set(param.Logging_Level.GetName(), "debug")
+	webConfigFile := filepath.Join(configDir, "web-config.yaml")
+	viper.Set(param.Server_WebConfigFile.GetName(), webConfigFile)
+	logFile := filepath.Join(configDir, "test-log.txt")
+
+	yamlContent := fmt.Sprintf(`
+Logging:
+  LogLocation: %s
+`, logFile)
+	require.NoError(t, os.WriteFile(webConfigFile, []byte(yamlContent), 0777))
+
+	logging.SetupLogBuffering()
+	err := InitServer(context.Background(), server_structs.OriginType)
+	require.NoError(t, err)
+
+	// Stat the file -- that it was created is sufficient evidence of success
+	_, err = os.Stat(logFile)
+	require.NoError(t, err)
 }
