@@ -813,6 +813,11 @@ func InitConfigDir(v *viper.Viper) {
 // InitConfig sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
 func InitConfig() {
+	// Set a prefix so Viper knows how to parse PELICAN_* env vars
+	// This must happen before config dir initialization so that Pelican
+	// can pick up setting the config dir with PELICAN_CONFIGDIR
+	viper.SetEnvPrefix("pelican")
+	viper.AutomaticEnv()
 
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
@@ -830,9 +835,6 @@ func InitConfig() {
 
 	// Load environment variables into the config
 	bindNonPelicanEnv() // Deprecate OSDF env prefix but be compatible for now
-
-	viper.SetEnvPrefix("pelican")
-	viper.AutomaticEnv()
 
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))

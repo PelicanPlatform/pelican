@@ -144,6 +144,11 @@ func TestHandleCLIVersionFlag(t *testing.T) {
 func TestHandleCLIExecutableAlias(t *testing.T) {
 	aliasTestMutex := sync.Mutex{} // Lock to ensure each t.Run goroutine have consistent access to binary
 
+	// Isolate the test from system config
+	configDir := t.TempDir()
+	os.Setenv("PELICAN_CONFIGDIR", configDir)
+	defer os.Unsetenv("PELICAN_CONFIGDIR")
+
 	// If we're in the process started by exec.Command, run the handleCLI function.
 	if os.Getenv("BE_CRASHER") == "1" {
 		err := handleCLI(os.Args[1:])
