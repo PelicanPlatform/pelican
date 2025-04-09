@@ -11,6 +11,7 @@ import { Box, Pagination, TextField, Typography } from '@mui/material';
 
 import { CardList } from '@/components';
 import useFuse from '@/helpers/useFuse';
+import { CardProps } from '@/components/Namespace/Card';
 
 interface CardListProps<T> {
   data: Partial<T>[];
@@ -18,7 +19,11 @@ interface CardListProps<T> {
   cardProps: Partial<T>;
 }
 
-function NamespaceCardList<T>({ data, Card, cardProps }: CardListProps<T>) {
+function NamespaceCardList<T extends CardProps>({
+  data,
+  Card,
+  cardProps,
+}: CardListProps<T>) {
   const [search, setSearch] = useState<string>('');
   const filteredObjects = useFuse<Partial<T>>(data, search);
 
@@ -36,7 +41,12 @@ function NamespaceCardList<T>({ data, Card, cardProps }: CardListProps<T>) {
           }
         />
       </Box>
-      <CardList<T> Card={Card} cardProps={cardProps} data={filteredObjects} />
+      <CardList<T>
+        Card={Card}
+        cardProps={cardProps}
+        data={filteredObjects}
+        keyGetter={(o) => o?.namespace?.prefix || 'undefined'}
+      />
     </Box>
   );
 }
