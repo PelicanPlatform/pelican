@@ -727,6 +727,11 @@ Logging:
 	err := InitServer(context.Background(), server_structs.OriginType)
 	require.NoError(t, err)
 
+	// Manually close the logger's file handle -- this happens automatically
+	// when running Pelican proper, but the file lingers in test code and Windows
+	// won't be able to close the file because it's in use.
+	logging.CloseLogger()
+
 	// Stat the file -- that it was created is sufficient evidence of success
 	_, err = os.Stat(logFile)
 	require.NoError(t, err)

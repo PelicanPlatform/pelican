@@ -42,6 +42,7 @@ type BufferedLogHook struct {
 var (
 	bufferedHook atomic.Pointer[BufferedLogHook]
 	flushOnce    sync.Once
+	logFHandle   *os.File
 )
 
 // Reset function intended for unit tests to be able to
@@ -106,6 +107,7 @@ func FlushLogs(pushToFile bool) {
 			if err != nil {
 				cobra.CheckErr(fmt.Errorf("failed to access specified log file: %w", err))
 			}
+			logFHandle = f
 			fmt.Fprintf(os.Stderr, "Logging.LogLocation is set to %s. All logs are redirected to the log file.\n", logLocation)
 			log.SetOutput(f)
 
@@ -146,6 +148,16 @@ func FlushLogs(pushToFile bool) {
 			_ = out.Sync()
 		}
 	})
+}
+
+// For unit tests, guarantees the filehandle is closed so tests can clean up
+// after themselves. Generally not needed in production code because the OS
+// should clean up the file handle when the process exits. Invoking this outside
+// a test will prevent the log file from being written to!!
+func CloseLogger() {
+	if logFHandle != nil {
+		_ = logFHandle.Close()
+	}
 }
 
 func SetupLogBuffering() {
