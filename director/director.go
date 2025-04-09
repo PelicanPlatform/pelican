@@ -1382,7 +1382,7 @@ func serverAdMetricMiddleware(ctx *gin.Context) {
 func discoverOriginCache(ctx *gin.Context) {
 	authOption := token.AuthOption{
 		Sources: []token.TokenSource{token.Header},
-		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer, token.FederationIssuer},
 		Scopes:  []token_scopes.TokenScope{token_scopes.Pelican_DirectorServiceDiscovery},
 	}
 
