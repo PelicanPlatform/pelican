@@ -70,6 +70,8 @@ type (
 	authzTemplate struct {
 		Actions []string `mapstructure:"actions"`
 		Prefix  string   `mapstructure:"prefix"`
+		Users   []string `mapstructure:"users"`
+		Groups  []string `mapstructure:"groups"`
 	}
 )
 
