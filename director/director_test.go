@@ -1284,6 +1284,13 @@ func TestCheckRedirectQuery(t *testing.T) {
 }
 
 func TestDiscoverOriginCache(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Isolate the test so it doesn't use system config
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+
 	mockPelicanOriginServerAd := server_structs.ServerAd{
 		URL: url.URL{
 			Scheme: "https",
@@ -1336,47 +1343,29 @@ func TestDiscoverOriginCache(t *testing.T) {
 		}},
 	}
 
-	mockDirectorUrl := "https://fake-director.org:8888"
-
-	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
-	defer func() { require.NoError(t, egrp.Wait()) }()
-	defer cancel()
-
-	server_utils.ResetTestState()
-	// Direcor SD will only be used for director's Prometheus scraper to get available origins,
-	// so the token issuer is issentially the director server itself
-	// There's no need to rely on Federation.DirectorUrl as token issuer in this case
-	viper.Set("Server.ExternalWebUrl", mockDirectorUrl)
-
-	tDir := t.TempDir()
-	kDir := filepath.Join(tDir, "testKeyDir")
-	viper.Set(param.IssuerKeysDirectory.GetName(), kDir)
-
-	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
-	err := config.InitServer(ctx, server_structs.DirectorType)
-	require.NoError(t, err)
-
-	// Generate a private key to use for the test
-	_, err = config.GetIssuerPublicJWKS()
-	assert.NoError(t, err, "Error generating private key")
-	// Get private key
+	// Generate the keys we need for the test
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+	viper.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(t.TempDir(), "testKeyDir"))
+	pKeySet, err := config.GetIssuerPublicJWKS()
+	assert.NoError(t, err, "Error fetching public key for test")
 	privateKey, err := config.GetIssuerPrivateJWK()
-	assert.NoError(t, err, "Error loading private key")
+	assert.NoError(t, err, "Error fetching private key for test")
+
+	// Set up the mock federation, which must exist for the auth handler to fetch federation keys
+	test_utils.MockFederationRoot(t, nil, &pKeySet)
+	fedInfo, err := config.GetFederation(ctx)
+	assert.NoError(t, err, "Error fetching federation info for test")
+
+	// The Director's service discovery endpoint should accept tokens from the local issuer,
+	// the API token issuer or the federation issuer. Configure the URL to be used for local
+	// issuer scenarios. To be as realistic as possible, make the local issuer URL look like
+	// this mock federation's Director.
+	viper.Set("Server.ExternalWebUrl", fedInfo.DirectorEndpoint)
 
 	// Batch set up different tokens
-	setupToken := func(wrongIssuer string) []byte {
-		issuerURL, err := url.Parse(mockDirectorUrl)
-		assert.NoError(t, err, "Error parsing director's URL")
-		tokenIssuerString := ""
-		if wrongIssuer != "" {
-			tokenIssuerString = wrongIssuer
-		} else {
-			tokenIssuerString = issuerURL.String()
-		}
-
+	setupToken := func(issuer string) []byte {
 		tok, err := jwt.NewBuilder().
-			Issuer(tokenIssuerString).
+			Issuer(issuer).
 			Claim("scope", token_scopes.Pelican_DirectorServiceDiscovery).
 			Audience([]string{"director.test"}).
 			Subject("director").
@@ -1433,32 +1422,49 @@ func TestDiscoverOriginCache(t *testing.T) {
 		assert.Equal(t, 403, w.Code)
 		assert.Equal(t, `{"status":"error","msg":"Authentication is required but no token is present."}`, w.Body.String())
 	})
-	t.Run("token-present-with-wrong-issuer-should-give-403", func(t *testing.T) {
+	t.Run("token-present-with-unknown-issuer-should-give-403", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
 		if err != nil {
 			t.Fatalf("Could not make a GET request: %v", err)
 		}
 
-		req.Header.Set("Authorization", "Bearer "+string(setupToken("https://wrong-issuer.org")))
+		unknownIssuer := "https://unknown-issuer.org"
+		req.Header.Set("Authorization", "Bearer "+string(setupToken(unknownIssuer)))
 
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
-		assert.Equal(t, 403, w.Code)
-		assert.Equal(t, `{"status":"error","msg":"Cannot verify token: Cannot verify token with server issuer:  Token issuer https://wrong-issuer.org does not match the local issuer on the current server. Expecting https://fake-director.org:8888\nCannot verify token with API token issuer:  Invalid API token format\n"}`, w.Body.String())
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		assert.Contains(t, w.Body.String(), fmt.Sprintf("Token issuer %s does not match the local issuer on the current server. Expecting %s", unknownIssuer, fedInfo.DirectorEndpoint))
+		assert.Contains(t, w.Body.String(), fmt.Sprintf("Token issuer %s does not match the issuer from the federation. Expecting the issuer to be %s", unknownIssuer, fedInfo.DiscoveryEndpoint))
 	})
-	t.Run("token-present-valid-should-give-200-and-empty-array", func(t *testing.T) {
+	t.Run("token-present-fed-issuer-should-give-200-and-empty-array", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodGet, "/test", nil)
 		if err != nil {
 			t.Fatalf("Could not make a GET request: %v", err)
 		}
 
-		req.Header.Set("Authorization", "Bearer "+string(setupToken("")))
+		req.Header.Set("Authorization", "Bearer "+string(setupToken(fedInfo.DiscoveryEndpoint)))
 
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
-		assert.Equal(t, 200, w.Code)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, `[]`, w.Body.String())
+	})
+	t.Run("token-present-local-issuer-should-give-200-and-empty-array", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "/test", nil)
+		if err != nil {
+			t.Fatalf("Could not make a GET request: %v", err)
+		}
+
+		// Here, the local issuer should be the same as the federation director
+		req.Header.Set("Authorization", "Bearer "+string(setupToken(fedInfo.DirectorEndpoint)))
+
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, `[]`, w.Body.String())
 	})
 	t.Run("response-should-match-serverAds", func(t *testing.T) {
@@ -1506,12 +1512,12 @@ func TestDiscoverOriginCache(t *testing.T) {
 			},
 		}}
 
-		req.Header.Set("Authorization", "Bearer "+string(setupToken("")))
+		req.Header.Set("Authorization", "Bearer "+string(setupToken(fedInfo.DiscoveryEndpoint)))
 
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
-		require.Equal(t, 200, w.Code)
+		require.Equal(t, http.StatusOK, w.Code)
 
 		var resMarshalled []PromDiscoveryItem
 		err = json.Unmarshal(w.Body.Bytes(), &resMarshalled)
@@ -1562,12 +1568,12 @@ func TestDiscoverOriginCache(t *testing.T) {
 		resStr, err := json.Marshal(expectedRes)
 		assert.NoError(t, err, "Could not marshal json response")
 
-		req.Header.Set("Authorization", "Bearer "+string(setupToken("")))
+		req.Header.Set("Authorization", "Bearer "+string(setupToken(fedInfo.DiscoveryEndpoint)))
 
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
-		assert.Equal(t, 200, w.Code)
+		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, string(resStr), w.Body.String(), "Response doesn't match expected")
 	})
 }

@@ -25,11 +25,13 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"testing"
 
 	"github.com/lestrrat-go/jwx/v2/jwa"
@@ -40,6 +42,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
 func TestContext(ictx context.Context, t *testing.T) (ctx context.Context, cancel context.CancelFunc, egrp *errgroup.Group) {
@@ -245,4 +249,103 @@ func GetUniqueAvailablePorts(count int) ([]int, error) {
 	}
 
 	return portList, nil
+}
+
+// Create a mock federation root that can respond to requests for metadata and federation keys
+func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kSet *jwk.Set) { // *httptest.Server {
+	// Set up the keys to use in our response jwks
+	var pKeySetInternal jwk.Set
+	var err error
+	if kSet == nil {
+		keysDir := filepath.Join(t.TempDir(), "testKeyDir")
+		viper.Set(param.IssuerKeysDirectory.GetName(), keysDir)
+		pKeySetInternal, err = config.GetIssuerPublicJWKS()
+		require.NoError(t, err, "Failed to load public JWKS while creating mock federation root")
+	} else {
+		pKeySetInternal = *kSet
+	}
+	kSetBytes, err := json.Marshal(pKeySetInternal)
+	require.NoError(t, err, "Failed to marshal public JWKS while creating mock federation root")
+
+	// Mock the JSON responses. Values get populated at query time using the getInternalFInfo function
+	var getInternalFInfo func() pelican_url.FederationDiscovery
+	responseHandler := func(w http.ResponseWriter, r *http.Request) {
+		// We only understand GET requests
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			_, err := w.Write([]byte("I only understand GET requests, but you sent me " + r.Method))
+			require.NoError(t, err)
+			return
+		}
+
+		path := r.URL.Path
+		switch path {
+		// Provide base fed root metadata
+		case "/.well-known/pelican-configuration":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+
+			discoveryMetadata := pelican_url.FederationDiscovery{
+				DirectorEndpoint:           getInternalFInfo().DirectorEndpoint,
+				RegistryEndpoint:           getInternalFInfo().RegistryEndpoint,
+				BrokerEndpoint:             getInternalFInfo().BrokerEndpoint,
+				JwksUri:                    getInternalFInfo().JwksUri,
+				DirectorAdvertiseEndpoints: getInternalFInfo().DirectorAdvertiseEndpoints,
+			}
+
+			discoveryJSONBytes, err := json.Marshal(discoveryMetadata)
+			require.NoError(t, err, "Failed to marshal discovery metadata")
+			_, err = w.Write(discoveryJSONBytes)
+			require.NoError(t, err)
+		// If someone follows the jwks_uri value, return the keys
+		case "/.well-known/issuer.jwks":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(kSetBytes))
+			require.NoError(t, err)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, err := w.Write([]byte("I don't understand this path: " + path))
+			require.NoError(t, err)
+		}
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(responseHandler))
+	serverUrl := server.URL
+	getInternalFInfo = func() pelican_url.FederationDiscovery {
+		// Pre-populate some fed metadata values
+		internalFInfo := pelican_url.FederationDiscovery{
+			DirectorEndpoint: "https://fake-director.com",
+			RegistryEndpoint: "https://fake-registry.com",
+			BrokerEndpoint:   "https://fake-broker.com",
+			JwksUri:          fmt.Sprintf("%s/.well-known/issuer.jwks", serverUrl),
+		}
+
+		// Override as needed based on the passed in fInfo
+		if fInfo != nil {
+			if fInfo.DirectorEndpoint != "" {
+				internalFInfo.DirectorEndpoint = fInfo.DirectorEndpoint
+			}
+			if fInfo.RegistryEndpoint != "" {
+				internalFInfo.RegistryEndpoint = fInfo.RegistryEndpoint
+			}
+			if fInfo.BrokerEndpoint != "" {
+				internalFInfo.BrokerEndpoint = fInfo.BrokerEndpoint
+			}
+			if fInfo.JwksUri != "" {
+				internalFInfo.JwksUri = fInfo.JwksUri
+			}
+			if fInfo.DirectorAdvertiseEndpoints != nil {
+				internalFInfo.DirectorAdvertiseEndpoints = fInfo.DirectorAdvertiseEndpoints
+			}
+		}
+		return internalFInfo
+	}
+
+	// Cleanup, cleanup, everybody do your share!
+	t.Cleanup(server.Close)
+
+	// Finally, set this as the federation discovery URL so tests
+	// can "discover" the info
+	viper.Set(param.Federation_DiscoveryUrl.GetName(), serverUrl)
 }
