@@ -40,10 +40,6 @@ type (
 	}
 )
 
-// Indicate the downtime is ongoing indefinitely.
-// We chose -1 to avoid the default value (0) of the int64 type
-const indefiniteEndTime int64 = -1
-
 func isValidClass(class server_structs.Class) bool {
 	validClasses := map[server_structs.Class]bool{
 		server_structs.SCHEDULED:   true,
@@ -66,7 +62,7 @@ func isValidTimeRange(startTime, endTime int64) bool {
 	// When endTime is indefinite, the downtime is considered ongoing forever
 	// Note: when you do a partial update and not provide startTime/endTime,
 	// they are 0 by default and should be considered as valid input
-	if endTime == indefiniteEndTime {
+	if endTime == server_structs.IndefiniteEndTime {
 		return startTime >= 0
 	}
 	return startTime <= endTime

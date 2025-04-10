@@ -277,6 +277,10 @@ const (
 	NoSignificantOutageExpected Severity = "No Significant Outage Expected (you shouldn't notice)"
 )
 
+// Indicate the downtime is ongoing indefinitely.
+// We chose -1 to avoid the default value (0) of the int64 type
+const IndefiniteEndTime int64 = -1
+
 func (x XPelNs) GetName() string {
 	return "X-Pelican-Namespace"
 }
