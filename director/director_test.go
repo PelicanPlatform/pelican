@@ -1363,18 +1363,9 @@ func TestDiscoverOriginCache(t *testing.T) {
 	viper.Set("Server.ExternalWebUrl", fedInfo.DirectorEndpoint)
 
 	// Batch set up different tokens
-	setupToken := func(wrongIssuer string) []byte {
-		issuerURL, err := url.Parse(fedInfo.DiscoveryEndpoint)
-		assert.NoError(t, err, "Error parsing director's URL")
-		tokenIssuerString := ""
-		if wrongIssuer != "" {
-			tokenIssuerString = wrongIssuer
-		} else {
-			tokenIssuerString = issuerURL.String()
-		}
-
+	setupToken := func(issuer string) []byte {
 		tok, err := jwt.NewBuilder().
-			Issuer(tokenIssuerString).
+			Issuer(issuer).
 			Claim("scope", token_scopes.Pelican_DirectorServiceDiscovery).
 			Audience([]string{"director.test"}).
 			Subject("director").
@@ -1521,7 +1512,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 			},
 		}}
 
-		req.Header.Set("Authorization", "Bearer "+string(setupToken("")))
+		req.Header.Set("Authorization", "Bearer "+string(setupToken(fedInfo.DiscoveryEndpoint)))
 
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
@@ -1577,7 +1568,7 @@ func TestDiscoverOriginCache(t *testing.T) {
 		resStr, err := json.Marshal(expectedRes)
 		assert.NoError(t, err, "Could not marshal json response")
 
-		req.Header.Set("Authorization", "Bearer "+string(setupToken("")))
+		req.Header.Set("Authorization", "Bearer "+string(setupToken(fedInfo.DiscoveryEndpoint)))
 
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
