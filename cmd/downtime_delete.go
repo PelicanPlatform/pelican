@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -46,13 +45,9 @@ func deleteDowntimeFunc(cmd *cobra.Command, args []string) error {
 	tokenLocation, _ := cmd.Flags().GetString("token")
 
 	// Basic validation of the input
-	if serverURLStr == "" {
-		return errors.New("The --server flag is required")
-	}
-	serverURLStr = strings.TrimSuffix(serverURLStr, "/")
-	baseURL, err := url.Parse(serverURLStr)
+	apiURL, err := constructDowntimeApiURL(serverURLStr)
 	if err != nil {
-		return errors.Wrapf(err, "Invalid server URL: %s", serverURLStr)
+		return err
 	}
 
 	tok, err := getToken(serverURLStr, tokenLocation)
@@ -60,8 +55,8 @@ func deleteDowntimeFunc(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Build the API URL for deletion.
-	targetURL, err := baseURL.Parse(serverDowntimeAPIPath + "/" + downtimeUUID)
+	// Build the API URL for deletion
+	targetURL, err := url.Parse(apiURL.String() + "/" + downtimeUUID)
 	if err != nil {
 		return errors.Wrap(err, "Failed to build delete API URL")
 	}

@@ -100,19 +100,9 @@ func listDowntimeFunc(cmd *cobra.Command, args []string) error {
 	outputFormat, _ := cmd.Flags().GetString("output")
 
 	// Basic validation of the input
-	if serverURLStr == "" {
-		return errors.New("The --server flag providing the target server's base URL is required")
-	}
-	serverURLStr = strings.TrimSuffix(serverURLStr, "/") // Normalize URL
-	baseURL, err := url.Parse(serverURLStr)
+	targetURL, err := constructDowntimeApiURL(serverURLStr)
 	if err != nil {
-		return errors.Wrapf(err, "Invalid server URL format: %s", serverURLStr)
-	}
-	if baseURL.Scheme != "http" && baseURL.Scheme != "https" {
-		return errors.Errorf("Server URL must have an http or https scheme: %s", serverURLStr)
-	}
-	if baseURL.Host == "" {
-		return errors.Errorf("Server URL must include a hostname: %s", serverURLStr)
+		return err
 	}
 
 	statusFilter = strings.ToLower(statusFilter)
@@ -131,11 +121,6 @@ func listDowntimeFunc(cmd *cobra.Command, args []string) error {
 	}
 
 	// Prepare HTTP Request
-	// Construct the full API endpoint URL
-	targetURL, err := baseURL.Parse(serverDowntimeAPIPath)
-	if err != nil {
-		return errors.Wrap(err, "Failed to construct downtime API URL")
-	}
 
 	// Add query parameter
 	query := targetURL.Query()
@@ -161,7 +146,7 @@ func listDowntimeFunc(cmd *cobra.Command, args []string) error {
 		if errors.Is(err, context.Canceled) {
 			return errors.New("Request cancelled")
 		}
-		return errors.Wrapf(err, "Failed to execute request to server %s", baseURL.Host)
+		return errors.Wrapf(err, "Failed to execute request to %s", targetURL.String())
 	}
 	defer resp.Body.Close()
 
@@ -185,6 +170,30 @@ func listDowntimeFunc(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// Helper function to validate the server URL and construct the full API endpoint URL
+func constructDowntimeApiURL(serverURLStr string) (*url.URL, error) {
+	if serverURLStr == "" {
+		return nil, errors.New("The --server flag providing the target server's base URL is required")
+	}
+	serverURLStr = strings.TrimSuffix(serverURLStr, "/") // Normalize URL
+	baseURL, err := url.Parse(serverURLStr)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Invalid server URL format: %s", serverURLStr)
+	}
+	if baseURL.Scheme != "http" && baseURL.Scheme != "https" {
+		return nil, errors.Errorf("Server URL must have an http or https scheme: %s", serverURLStr)
+	}
+	if baseURL.Host == "" {
+		return nil, errors.Errorf("Server URL must include a hostname: %s", serverURLStr)
+	}
+	// Construct the full API endpoint URL
+	targetURL, err := baseURL.Parse(serverDowntimeAPIPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to construct downtime API URL")
+	}
+	return targetURL, nil
 }
 
 // Helper function to load or generate token
