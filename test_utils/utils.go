@@ -285,15 +285,17 @@ func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kS
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 
-			_, err := w.Write([]byte(fmt.Sprintf(`{
-				"director_endpoint": "%s",
-				"director_advertise_endpoints": %s,
-				"namespace_registration_endpoint": "%s",
-				"broker_endpoint": "%s",
-				"jwks_uri": "%s"
-			}`, getInternalFInfo().DirectorEndpoint, getInternalFInfo().DirectorAdvertiseEndpoints, getInternalFInfo().RegistryEndpoint,
-				getInternalFInfo().BrokerEndpoint, getInternalFInfo().JwksUri)))
+			discoveryMetadata := pelican_url.FederationDiscovery{
+				DirectorEndpoint:           getInternalFInfo().DirectorEndpoint,
+				RegistryEndpoint:           getInternalFInfo().RegistryEndpoint,
+				BrokerEndpoint:             getInternalFInfo().BrokerEndpoint,
+				JwksUri:                    getInternalFInfo().JwksUri,
+				DirectorAdvertiseEndpoints: getInternalFInfo().DirectorAdvertiseEndpoints,
+			}
 
+			discoveryJSONBytes, err := json.Marshal(discoveryMetadata)
+			require.NoError(t, err, "Failed to marshal discovery metadata")
+			_, err = w.Write(discoveryJSONBytes)
 			require.NoError(t, err)
 		// If someone follows the jwks_uri value, return the keys
 		case "/.well-known/issuer.jwks":
