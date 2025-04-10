@@ -71,6 +71,7 @@ func TestListNamespaces(t *testing.T) {
 
 	dirName := t.TempDir()
 	viper.Set("ConfigDir", dirName)
+	viper.Set(param.Logging_Level.GetName(), "debug")
 	viper.Set("Origin.Port", 0)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)

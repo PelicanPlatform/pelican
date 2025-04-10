@@ -27,6 +27,8 @@ import (
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 // Test that Pelican notifies users about unrecognized configuration keys.
@@ -36,7 +38,7 @@ func TestBadConfigKeys(t *testing.T) {
 	setupFunc := func() *test.Hook {
 		ResetConfig()
 		viper.Set("ConfigDir", t.TempDir())
-		viper.Set("Debug", true)
+		viper.Set(param.Debug.GetName(), true)
 		hook := test.NewLocal(logrus.StandardLogger())
 		return hook
 	}

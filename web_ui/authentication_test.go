@@ -161,6 +161,7 @@ func TestPasswordResetAPI(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
 	viper.Set("ConfigDir", dirName)
+	viper.Set(param.Logging_Level.GetName(), "debug")
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, server_structs.OriginType)

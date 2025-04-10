@@ -117,6 +117,7 @@ func TestForcePurge(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
 	viper.Set("LocalCache.Size", "5MB")
 	// Decrease the low water mark so invoking purge will result in 3 files in the cache.
 	viper.Set("LocalCache.LowWaterMarkPercentage", "80")
@@ -217,6 +218,7 @@ func TestPurgeFirst(t *testing.T) {
 	viper.Set("ConfigDir", configDir)
 
 	dataDir := t.TempDir()
+	viper.Set(param.Logging_Level.GetName(), "debug")
 	viper.Set(param.LocalCache_DataLocation.GetName(), dataDir)
 	viper.Set(param.LocalCache_Size.GetName(), "10MB")
 	viper.Set(param.LocalCache_LowWaterMarkPercentage.GetName(), "50")

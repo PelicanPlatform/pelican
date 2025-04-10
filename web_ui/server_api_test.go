@@ -33,6 +33,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -76,6 +77,7 @@ func TestDowntime(t *testing.T) {
 
 	dirName := t.TempDir()
 	viper.Set("ConfigDir", dirName)
+	viper.Set(param.Logging_Level.GetName(), "debug")
 	viper.Set("Origin.Port", 0)
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)

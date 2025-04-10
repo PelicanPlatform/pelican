@@ -270,7 +270,6 @@ func TestOSDFAuthCreation(t *testing.T) {
 		t.Run(testInput.desc, func(t *testing.T) {
 			dirName := t.TempDir()
 			server_utils.ResetTestState()
-
 			defer server_utils.ResetTestState()
 
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
@@ -308,7 +307,6 @@ func TestOSDFAuthCreation(t *testing.T) {
 			require.NoError(t, err, "Error reading generated authfile")
 
 			require.Equal(t, testInput.authOut, string(genAuth))
-			server_utils.ResetTestState()
 		})
 	}
 }
@@ -487,9 +485,9 @@ func TestLoadScitokensConfig(t *testing.T) {
 func TestMergeConfig(t *testing.T) {
 	dirname := t.TempDir()
 	server_utils.ResetTestState()
-
 	defer server_utils.ResetTestState()
 
+	viper.Set(param.Logging_Level.GetName(), "debug")
 	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.Port", 8443)
 	viper.Set("Origin.StoragePrefix", "/")
@@ -705,6 +703,7 @@ func TestGenerateOriginIssuer(t *testing.T) {
 			defer server_utils.ResetTestState()
 			ctx, _, _ := test_utils.TestContext(context.Background(), t)
 			viper.Set("ConfigDir", t.TempDir())
+			viper.Set(param.Logging_Level.GetName(), "debug")
 
 			// Load in test config
 			viper.SetConfigType("yaml")
@@ -1100,6 +1099,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	viper.Set("ConfigDir", tmpDir)
+	viper.Set(param.Logging_Level.GetName(), "debug")
 	viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
 	viper.Set(param.Origin_SelfTest.GetName(), true)
 	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
