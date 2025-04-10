@@ -69,12 +69,8 @@ var (
 func init() {
 	// Add flags specific to the list command
 	flags := downtimeListCmd.Flags()
-	// Required Flags
-	flags.StringP("server", "s", "", "Base URL of the target Pelican server's web interface (e.g., https://my-origin.com:8447)")
-	downtimeListCmd.MarkFlagRequired("server")
 
 	// Optional Flags
-	flags.StringP("token", "t", "", "Path to the admin token file for authenticating with the server")
 	flags.String("status", "incomplete", "Filter downtimes by status ('incomplete' shows active/future, 'all' shows all history)")
 	flags.StringP("output", "o", "table", "Output format (table, json, yaml)")
 
@@ -93,9 +89,7 @@ func listDowntimeFunc(cmd *cobra.Command, args []string) error {
 		log.Errorln("Failed to initialize client:", err)
 	}
 
-	// Get Flag Values
-	serverURLStr, _ := cmd.Flags().GetString("server")
-	tokenLocation, _ := cmd.Flags().GetString("token")
+	// Get additional flag Values
 	statusFilter, _ := cmd.Flags().GetString("status")
 	outputFormat, _ := cmd.Flags().GetString("output")
 
@@ -175,7 +169,7 @@ func listDowntimeFunc(cmd *cobra.Command, args []string) error {
 // Helper function to validate the server URL and construct the full API endpoint URL
 func constructDowntimeApiURL(serverURLStr string) (*url.URL, error) {
 	if serverURLStr == "" {
-		return nil, errors.New("The --server flag providing the target server's base URL is required")
+		return nil, errors.New("The --server flag providing the server's web URL is required")
 	}
 	serverURLStr = strings.TrimSuffix(serverURLStr, "/") // Normalize URL
 	baseURL, err := url.Parse(serverURLStr)

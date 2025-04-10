@@ -30,4 +30,15 @@ var (
 for Pelican servers (Origins/Caches). These commands interact with the server's
 administrative API endpoint.`,
 	}
+
+	serverURLStr  string
+	tokenLocation string
 )
+
+func init() {
+	// Add the server URL as a REQUIRED persistent flag to all subcommands of downtimeCmd
+	downtimeCmd.PersistentFlags().StringVarP(&serverURLStr, "server", "s", "", "Web URL of the Pelican server (e.g. https://my-origin.com:8447)")
+
+	// Optional persistent flag
+	downtimeCmd.PersistentFlags().StringVarP(&tokenLocation, "token", "t", "", "Path to the admin token file")
+}
