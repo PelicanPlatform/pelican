@@ -58,3 +58,18 @@ export interface ServerDetailed extends ServerBase {
 export interface ServerGeneral extends ServerBase {
   namespacePrefixes: string[];
 }
+
+/**
+ * Token Types
+ */
+
+export interface BaseToken {
+  name: string;
+  createdBy: string;
+  expiration: string;
+  scopes: string[];
+}
+
+export interface GetToken extends BaseToken {
+  id: string;
+}

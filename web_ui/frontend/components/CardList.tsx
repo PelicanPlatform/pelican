@@ -20,25 +20,30 @@ interface CardListProps<T> {
   data?: Partial<T>[];
   Card: ComponentType<any>;
   cardProps?: Partial<T>;
+  pageSize?: number;
 }
 
-export function CardList<T>({ data, Card, cardProps }: CardListProps<T>) {
-  const PAGE_SIZE = 10;
+export function CardList<T>({
+  data,
+  Card,
+  cardProps,
+  pageSize = 10,
+}: CardListProps<T>) {
   const [page, setPage] = useState<number>(1);
 
   // Minus the page if the data length changes
   useEffect(() => {
-    if (data?.length && page > Math.ceil(data.length / PAGE_SIZE)) {
-      setPage(Math.max(1, Math.ceil(data.length / PAGE_SIZE)));
+    if (data?.length && page > Math.ceil(data.length / pageSize)) {
+      setPage(Math.max(1, Math.ceil(data.length / pageSize)));
     }
   }, [data?.length]);
 
   const count = useMemo(() => {
-    return Math.ceil((data?.length || 0) / PAGE_SIZE);
+    return Math.ceil((data?.length || 0) / pageSize);
   }, [data]);
 
   const slicedObjects = useMemo(() => {
-    return (data || []).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    return (data || []).slice((page - 1) * pageSize, page * pageSize);
   }, [data, page]);
 
   return (
