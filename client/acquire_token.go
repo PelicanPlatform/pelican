@@ -21,7 +21,6 @@ package client
 import (
 	"context"
 	"crypto/ecdsa"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -47,6 +46,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type (
@@ -134,33 +134,6 @@ func (tg *tokenGenerator) Copy() *tokenGenerator {
 	}
 }
 
-// Read a token from a file; ensure
-func getTokenFromFile(tokenLocation string) (string, error) {
-	//Read in the JSON
-	log.Debug("Opening token file: " + tokenLocation)
-	tokenContents, err := os.ReadFile(tokenLocation)
-	if err != nil {
-		log.Errorln("Error reading from token file:", err)
-		return "", err
-	}
-
-	type tokenJson struct {
-		AccessKey string `json:"access_token"`
-		ExpiresIn int    `json:"expires_in"`
-	}
-
-	tokenStr := strings.TrimSpace(string(tokenContents))
-	if len(tokenStr) > 0 && tokenStr[0] == '{' {
-		tokenParsed := tokenJson{}
-		if err := json.Unmarshal(tokenContents, &tokenParsed); err != nil {
-			log.Debugf("Unable to unmarshal file %s as JSON (assuming it is a token instead): %v", tokenLocation, err)
-			return tokenStr, nil
-		}
-		return tokenParsed.AccessKey, nil
-	}
-	return tokenStr, nil
-}
-
 func (tci *tokenContentIterator) discoverHTCondorTokenLocations(tokenName string) (tokenLocations []string) {
 	tokenLocations = make([]string, 0)
 
@@ -233,7 +206,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 			log.Debugln("Using API-specified token location", tci.Location)
 			if _, err := os.Stat(tci.Location); err != nil {
 				log.Warningln("Client was asked to read token from location", tci.Location, "but it is not readable:", err)
-			} else if jwtSerialized, err := getTokenFromFile(tci.Location); err == nil {
+			} else if jwtSerialized, err := utils.GetTokenFromFile(tci.Location); err == nil {
 				return jwtSerialized, true
 			}
 		}
@@ -252,7 +225,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 			log.Debugln("Using token from BEARER_TOKEN_FILE environment variable")
 			if _, err := os.Stat(bearerTokenFile); err != nil {
 				log.Warningln("Environment variable BEARER_TOKEN_FILE is set, but file being point to does not exist:", err)
-			} else if jwtSerialized, err := getTokenFromFile(bearerTokenFile); err == nil {
+			} else if jwtSerialized, err := utils.GetTokenFromFile(bearerTokenFile); err == nil {
 				return jwtSerialized, true
 			}
 		}
@@ -265,7 +238,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 			tmpTokenPath := filepath.Join(xdgRuntimeDir, "bt_u"+strconv.Itoa(uid))
 			if _, err := os.Stat(tmpTokenPath); err == nil {
 				log.Debugln("Using token from XDG_RUNTIME_DIR")
-				if jwtSerialized, err := getTokenFromFile(tmpTokenPath); err == nil {
+				if jwtSerialized, err := utils.GetTokenFromFile(tmpTokenPath); err == nil {
 					return jwtSerialized, true
 				}
 			}
@@ -278,7 +251,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 		tmpTokenPath := "/tmp/bt_u" + strconv.Itoa(uid)
 		if _, err := os.Stat(tmpTokenPath); err == nil {
 			log.Debugln("Using token from", tmpTokenPath)
-			if jwtSerialized, err := getTokenFromFile(tmpTokenPath); err == nil {
+			if jwtSerialized, err := utils.GetTokenFromFile(tmpTokenPath); err == nil {
 				return jwtSerialized, true
 			}
 		}
@@ -290,7 +263,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 		if tokenFile, isTokenSet := os.LookupEnv("TOKEN"); isTokenSet {
 			if _, err := os.Stat(tokenFile); err != nil {
 				log.Warningln("Environment variable TOKEN is set, but file being point to does not exist:", err)
-			} else if jwtSerialized, err := getTokenFromFile(tokenFile); err == nil {
+			} else if jwtSerialized, err := utils.GetTokenFromFile(tokenFile); err == nil {
 				log.Debugln("Using token from TOKEN environment variable")
 				return jwtSerialized, true
 			}
@@ -309,7 +282,7 @@ func (tci *tokenContentIterator) next() (string, bool) {
 				log.Debugln("Out of token locations to search")
 				return "", false
 			}
-			if jwtSerialized, err := getTokenFromFile(tci.CredLocations[idx]); err == nil {
+			if jwtSerialized, err := utils.GetTokenFromFile(tci.CredLocations[idx]); err == nil {
 				return jwtSerialized, true
 			}
 		}

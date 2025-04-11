@@ -19,8 +19,10 @@
 package utils
 
 import (
+	"encoding/json"
 	"net"
 	"net/url"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -211,4 +213,31 @@ func ValidateWatermark(paramName string, requireSuffix bool) (wm float64, isAbso
 	}
 
 	return wm, false, nil
+}
+
+// Read a token from a file
+func GetTokenFromFile(tokenLocation string) (string, error) {
+	//Read in the JSON
+	log.Debug("Opening token file: " + tokenLocation)
+	tokenContents, err := os.ReadFile(tokenLocation)
+	if err != nil {
+		log.Errorln("Error reading from token file:", err)
+		return "", err
+	}
+
+	type tokenJson struct {
+		AccessKey string `json:"access_token"`
+		ExpiresIn int    `json:"expires_in"`
+	}
+
+	tokenStr := strings.TrimSpace(string(tokenContents))
+	if len(tokenStr) > 0 && tokenStr[0] == '{' {
+		tokenParsed := tokenJson{}
+		if err := json.Unmarshal(tokenContents, &tokenParsed); err != nil {
+			log.Debugf("Unable to unmarshal file %s as JSON (assuming it is a token instead): %v", tokenLocation, err)
+			return tokenStr, nil
+		}
+		return tokenParsed.AccessKey, nil
+	}
+	return tokenStr, nil
 }
