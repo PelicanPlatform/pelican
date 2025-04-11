@@ -31,7 +31,9 @@ import (
 
 type (
 	DowntimeInput struct {
-		CreatedBy   string                  `json:"createdBy"` // Person who created this downtime
+		CreatedBy   string                  `json:"createdBy"`  // Person who created this downtime
+		UpdatedBy   string                  `json:"updatedBy"`  // Person who last updated this downtime
+		ServerName  string                  `json:"serverName"` // Null for Origin/Cache input; Not null for Registry input
 		Class       server_structs.Class    `json:"class"`
 		Description string                  `json:"description"`
 		Severity    server_structs.Severity `json:"severity"`
@@ -106,13 +108,13 @@ func HandleCreateDowntime(ctx *gin.Context) {
 	if user == "" || err != nil {
 		user = ctx.GetString("User")
 		if user == "" {
-			user = "unknown"
 			log.Warningf(ctx, "Failed to get user from context")
 		}
 	}
 	downtime := server_structs.Downtime{
 		UUID:        id.String(),
 		CreatedBy:   user,
+		UpdatedBy:   user,
 		Class:       downtimeInput.Class,
 		Description: downtimeInput.Description,
 		Severity:    downtimeInput.Severity,
@@ -180,6 +182,14 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 		return
 	}
 
+	user, _, err := GetUserGroups(ctx)
+	if user == "" || err != nil {
+		user = ctx.GetString("User")
+		if user == "" {
+			log.Warningf(ctx, "Failed to get user from context")
+		}
+	}
+	downtimeInput.UpdatedBy = user
 	// Only update fields provided in the request (different from default values)
 	if downtimeInput.CreatedBy != "" {
 		existingDowntime.CreatedBy = downtimeInput.CreatedBy
