@@ -26,7 +26,6 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -34,6 +33,7 @@ import (
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 const (
@@ -140,10 +140,10 @@ func TestFederationDiscoveryHandler(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			server_utils.ResetTestState()
-			viper.Set("ConfigDir", t.TempDir())
-			viper.Set("Federation.DirectorUrl", tc.dirUrl)
-			viper.Set("Federation.RegistryUrl", tc.regUrl)
-			require.NoError(t, config.InitClient())
+			test_utils.InitClient(t, map[string]any{
+				"Federation.DirectorUrl": tc.dirUrl,
+				"Federation.RegistryUrl": tc.regUrl,
+			})
 
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("GET", "/test", nil)
@@ -212,8 +212,9 @@ func TestOidcDiscoveryHandler(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			server_utils.ResetTestState()
-			viper.Set("ConfigDir", t.TempDir())
-			viper.Set("Federation.DirectorUrl", tc.dirUrl)
+			test_utils.InitClient(t, map[string]any{
+				"Federation.DirectorUrl": tc.dirUrl,
+			})
 			require.NoError(t, config.InitClient())
 
 			w := httptest.NewRecorder()
