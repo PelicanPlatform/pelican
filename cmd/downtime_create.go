@@ -43,14 +43,14 @@ var downtimeCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new downtime period for the server",
 	Long:  "Interactively prompt for downtime fields and send a POST request to create a new downtime period.",
-	RunE:  createDowntimeFunc,
+	RunE:  createDowntime,
 }
 
 func init() {
 	downtimeCmd.AddCommand(downtimeCreateCmd)
 }
 
-func createDowntimeFunc(cmd *cobra.Command, args []string) error {
+func createDowntime(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
@@ -176,7 +176,7 @@ func createDowntimeFunc(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get token using the provided helper.
-	tok, err := getToken(serverURLStr, tokenLocation)
+	tok, err := fetchOrGenerateWebAPIAdminToken(serverURLStr, tokenLocation)
 	if err != nil {
 		return err
 	}

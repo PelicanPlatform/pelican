@@ -36,14 +36,14 @@ var downtimeDeleteCmd = &cobra.Command{
 	Short: "Delete a downtime period",
 	Long:  "Delete the specified downtime period by UUID. Sends a DELETE request to the downtime API.",
 	Args:  cobra.ExactArgs(1),
-	RunE:  deleteDowntimeFunc,
+	RunE:  deleteDowntime,
 }
 
 func init() {
 	downtimeCmd.AddCommand(downtimeDeleteCmd)
 }
 
-func deleteDowntimeFunc(cmd *cobra.Command, args []string) error {
+func deleteDowntime(cmd *cobra.Command, args []string) error {
 	downtimeUUID := args[0]
 	ctx := cmd.Context()
 	if ctx == nil {
@@ -60,7 +60,7 @@ func deleteDowntimeFunc(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	tok, err := getToken(serverURLStr, tokenLocation)
+	tok, err := fetchOrGenerateWebAPIAdminToken(serverURLStr, tokenLocation)
 	if err != nil {
 		return err
 	}

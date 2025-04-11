@@ -45,14 +45,14 @@ var downtimeUpdateCmd = &cobra.Command{
 	Short: "Update an existing downtime period",
 	Long:  "Interactively prompt for downtime fields and send a PUT request to update the specified downtime period. Press Enter without typing anything to leave a field unchanged.",
 	Args:  cobra.ExactArgs(1),
-	RunE:  updateDowntimeFunc,
+	RunE:  updateDowntime,
 }
 
 func init() {
 	downtimeCmd.AddCommand(downtimeUpdateCmd)
 }
 
-func updateDowntimeFunc(cmd *cobra.Command, args []string) error {
+func updateDowntime(cmd *cobra.Command, args []string) error {
 	downtimeUUID := args[0]
 	ctx := cmd.Context()
 	if ctx == nil {
@@ -188,8 +188,7 @@ func updateDowntimeFunc(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "Failed to marshal update payload")
 	}
 
-	// Get token using your provided helper.
-	tok, err := getToken(serverURLStr, tokenLocation)
+	tok, err := fetchOrGenerateWebAPIAdminToken(serverURLStr, tokenLocation)
 	if err != nil {
 		return err
 	}
