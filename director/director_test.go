@@ -1526,10 +1526,6 @@ func TestDiscoverOriginCache(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	// Isolate the test so it doesn't use system config
-	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
-
 	mockPelicanOriginServerAd := server_structs.ServerAd{
 		URL: url.URL{
 			Scheme: "https",
@@ -1583,8 +1579,8 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 
 	// Generate the keys we need for the test
-	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	viper.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(t.TempDir(), "testKeyDir"))
+
 	pKeySet, err := config.GetIssuerPublicJWKS()
 	assert.NoError(t, err, "Error fetching public key for test")
 
@@ -1595,12 +1591,15 @@ func TestDiscoverOriginCache(t *testing.T) {
 
 	// Set up the mock federation, which must exist for the auth handler to fetch federation keys
 	test_utils.MockFederationRoot(t, nil, &pKeySet)
-	fedInfo, err := config.GetFederation(ctx)
-	assert.NoError(t, err, "Error fetching federation info for test")
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
+	// Isolate the test so it doesn't use system config
 	viper.Set("ConfigDir", t.TempDir())
 	err = config.InitServer(ctx, server_structs.DirectorType)
 	require.NoError(t, err)
+
+	fedInfo, err := config.GetFederation(ctx)
+	assert.NoError(t, err, "Error fetching federation info for test")
 
 	// The Director's service discovery endpoint should accept tokens from the local issuer,
 	// the API token issuer or the federation issuer. Configure the URL to be used for local
