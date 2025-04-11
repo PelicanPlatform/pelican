@@ -65,6 +65,9 @@ type (
 	}
 
 	// A response struct for a server Ad that provides a detailed view into the servers data
+	// ** BE WARNED **
+	// This struct and associated functions need to be kept in sync with BOTH the listServerResponse
+	// and the server_structs.ServerAd.
 	serverResponse struct {
 		Name                string                           `json:"name"`
 		StorageType         server_structs.OriginStorageType `json:"storageType"`
