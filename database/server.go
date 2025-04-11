@@ -2,7 +2,7 @@ package database
 
 import (
 	"embed"
-	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -14,7 +14,7 @@ import (
 
 var ServerDatabase *gorm.DB
 
-//go:embed migrations/*.sql
+//go:embed universal_migrations/*.sql
 var embedMigrations embed.FS
 
 type Counter struct {
@@ -22,16 +22,9 @@ type Counter struct {
 	Value int    `gorm:"not null;default:0"`
 }
 
-func InitServerDatabase(serverType server_structs.ServerType) error {
-	if serverType != server_structs.OriginType && serverType != server_structs.CacheType {
-		return errors.New("invalid server type")
-	}
-	var dbPath string
-	if serverType == server_structs.OriginType {
-		dbPath = param.Origin_DbLocation.GetString()
-	} else {
-		dbPath = param.Cache_DbLocation.GetString()
-	}
+func InitServerDatabase() error {
+	dbPath := param.Server_DbLocation.GetString()
+	fmt.Println("Initializing server database: ", dbPath)
 
 	tdb, err := utils.InitSQLiteDB(dbPath)
 	if err != nil {
@@ -45,7 +38,7 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 	}
 
 	// run migrations
-	if err := utils.MigrateDB(sqlDB, embedMigrations); err != nil {
+	if err := utils.MigrateDB(sqlDB, embedMigrations, "universal_migrations"); err != nil {
 		return err
 	}
 

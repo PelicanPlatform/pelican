@@ -27,6 +27,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
@@ -40,6 +41,11 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	err := registry.InitializeDB()
 	if err != nil {
 		return errors.Wrap(err, "Unable to initialize the namespace registry database")
+	}
+
+	err = database.InitServerDatabase()
+	if err != nil {
+		return errors.Wrap(err, "Unable to initialize the server database")
 	}
 
 	if param.Server_EnableUI.GetBool() {

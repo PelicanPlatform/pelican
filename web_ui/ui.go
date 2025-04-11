@@ -73,7 +73,6 @@ func ServerHeaderMiddleware(ctx *gin.Context) {
 
 type CreateApiTokenReq struct {
 	Name       string   `json:"name"`
-	CreatedBy  string   `json:"createdBy"`
 	Expiration string   `json:"expiration"` // RFC3339 format, if not provided or "never" or "", token will not expire
 	Scopes     []string `json:"scopes"`
 }
@@ -431,13 +430,6 @@ func createApiToken(ctx *gin.Context) {
 		})
 		return
 	}
-	if req.CreatedBy == "" {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "CreatedBy is required",
-		})
-		return
-	}
 	if len(req.Scopes) == 0 {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -462,7 +454,16 @@ func createApiToken(ctx *gin.Context) {
 		expirationTime = expirationTime.UTC()
 	}
 	scopes := strings.Join(req.Scopes, ",")
-	token, err := database.CreateApiKey(req.Name, req.CreatedBy, scopes, expirationTime)
+	user, _, err := GetUserGroups(ctx)
+	if err != nil {
+		log.Warn("Failed to get user from context")
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No user found when creating API key",
+		})
+		return
+	}
+	token, err := database.CreateApiKey(database.ServerDatabase, req.Name, user, scopes, expirationTime)
 	if err != nil {
 		log.Warning("Failed to create API key: ", err)
 		ctx.JSON(status, server_structs.SimpleApiResp{
@@ -491,7 +492,7 @@ func deleteApiToken(ctx *gin.Context) {
 		return
 	}
 	id := ctx.Param("id")
-	err = database.DeleteApiKey(id, token.VerifiedKeysCache)
+	err = database.DeleteApiKey(database.ServerDatabase, id, token.VerifiedKeysCache)
 	if err != nil {
 		log.Warning("Failed to delete API key: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -523,7 +524,7 @@ func listApiTokens(ctx *gin.Context) {
 		return
 	}
 
-	apiKeys, err := database.ListApiKeys()
+	apiKeys, err := database.ListApiKeys(database.ServerDatabase)
 	if err != nil {
 		log.Warning("Failed to list API keys: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{

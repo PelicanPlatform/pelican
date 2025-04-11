@@ -1079,6 +1079,7 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Registry_DbLocation.GetName(), "/var/lib/pelican/registry.sqlite")
 		v.SetDefault(param.Director_DbLocation.GetName(), "/var/lib/pelican/director.sqlite")
 		v.SetDefault(param.Cache_DbLocation.GetName(), "/var/lib/pelican/cache.sqlite")
+		v.SetDefault(param.Server_DbLocation.GetName(), "/var/lib/pelican/pelican.sqlite")
 		// The lotman db will actually take this path and create the lot at /path/.lot/lotman_cpp.sqlite
 		v.SetDefault(param.Lotman_LotHome.GetName(), "/var/lib/pelican")
 		v.SetDefault(param.Monitoring_DataLocation.GetName(), "/var/lib/pelican/monitoring/data")
@@ -1091,6 +1092,7 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Registry_DbLocation.GetName(), filepath.Join(configDir, "ns-registry.sqlite"))
 		v.SetDefault(param.Director_DbLocation.GetName(), filepath.Join(configDir, "director.sqlite"))
 		v.SetDefault(param.Cache_DbLocation.GetName(), filepath.Join(configDir, "cache.sqlite"))
+		v.SetDefault(param.Server_DbLocation.GetName(), filepath.Join(configDir, "pelican.sqlite"))
 		// Lotdb will live at <configDir>/.lot/lotman_cpp.sqlite
 		v.SetDefault(param.Lotman_LotHome.GetName(), configDir)
 		v.SetDefault(param.Monitoring_DataLocation.GetName(), filepath.Join(configDir, "monitoring/data"))

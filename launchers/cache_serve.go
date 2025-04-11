@@ -56,7 +56,7 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		return nil, err
 	}
 
-	if err := database.InitServerDatabase(server_structs.CacheType); err != nil {
+	if err := database.InitServerDatabase(); err != nil {
 		return nil, err
 	}
 

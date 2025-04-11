@@ -63,14 +63,14 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 	return db, nil
 }
 
-func MigrateDB(sqldb *sql.DB, migrationFS embed.FS) error {
+func MigrateDB(sqldb *sql.DB, migrationFS embed.FS, migrationPath string) error {
 	goose.SetBaseFS(migrationFS)
 
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		return err
 	}
 
-	if err := goose.Up(sqldb, "migrations"); err != nil {
+	if err := goose.Up(sqldb, migrationPath); err != nil {
 		return err
 	}
 	return nil

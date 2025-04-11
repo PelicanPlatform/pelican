@@ -2315,6 +2315,14 @@ default: 1m
 hidden: true
 components: ["cache", "origin", "director"]
 ---
+name: Server.DbLocation
+description: |+
+  A filepath to the intended location of the server's database.
+type: filename
+root_default: /var/lib/pelican/pelican.sqlite
+default: $ConfigBase/pelican.sqlite
+components: ["cache", "director", "origin", "registry"]
+---
 ################################
 #   Issuer's Configurations    #
 ################################

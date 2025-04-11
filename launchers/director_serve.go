@@ -29,6 +29,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
@@ -43,6 +44,11 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	if err := director.InitializeDB(); err != nil {
 		return errors.Wrap(err, "failed to initialize director sqlite database")
 	}
+
+	if err := database.InitServerDatabase(); err != nil {
+		return errors.Wrap(err, "failed to initialize server database")
+	}
+
 	director.ConfigFilteredServers()
 
 	director.LaunchTTLCache(ctx, egrp)
