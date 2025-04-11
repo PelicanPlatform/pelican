@@ -375,13 +375,13 @@ func TestEmitCfg(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	viper.Set("Origin.RunLocation", dirname)
-	err := config.InitClient()
-	assert.Nil(t, err)
+	test_utils.InitClient(t, map[string]any{
+		"Origin.RunLocation": dirname,
+	})
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
-			err = writeScitokensConfiguration(server_structs.OriginType, cfg)
+			err := writeScitokensConfiguration(server_structs.OriginType, cfg)
 			assert.NoError(t, err)
 
 			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -455,9 +455,9 @@ func TestLoadScitokensConfig(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	viper.Set("Origin.RunLocation", dirname)
-	err := config.InitClient()
-	assert.Nil(t, err)
+	test_utils.InitClient(t, map[string]any{
+		"Origin.RunLocation": dirname,
+	})
 
 	configTester := func(configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -510,7 +510,6 @@ func TestMergeConfig(t *testing.T) {
 			err := os.WriteFile(scitokensConfigFile, []byte(configInput), fs.FileMode(0600))
 			require.NoError(t, err)
 
-			config.InitConfigDir(viper.GetViper())
 			err = config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
@@ -710,7 +709,6 @@ func TestGenerateOriginIssuer(t *testing.T) {
 			viper.SetConfigType("yaml")
 			err := viper.MergeConfig(strings.NewReader(tc.yamlConfig))
 			require.NoError(t, err, "error reading config")
-			config.InitConfig()
 			err = config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
@@ -1107,7 +1105,6 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
 	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
 
-	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
