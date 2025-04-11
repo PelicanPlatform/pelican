@@ -175,7 +175,9 @@ func AdvertiseOSDF(ctx context.Context) error {
 		return errors.Wrapf(err, "Failed to get topology JSON")
 	}
 
-	err = updateDowntimeFromTopology(ctx)
+	if !param.Topology_DisableDowntime.GetBool() {
+		err = updateDowntimeFromTopology(ctx)
+	}
 	if err != nil {
 		// Don't treat this as a fatal error, but log it in a loud way.
 		log.Errorf("Unable to generate downtime list for servers from topology: %v", err)
@@ -256,27 +258,31 @@ func AdvertiseOSDF(ctx context.Context) error {
 		// We further assume that with this legacy code handling, each origin exporting a given namespace
 		// will have the same set of capabilities as the namespace itself. Pelican has teased apart origins
 		// and namespaces, so this isn't true outside this limited context.
-		for _, origin := range ns.Origins {
-			originAd := parseServerAdFromTopology(origin, server_structs.OriginType, caps)
-			if existingAd, ok := originAdMap[originAd.URL.String()]; ok {
-				existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
-				consolidatedAd := consolidateDupServerAd(originAd, existingAd.ServerAd)
-				existingAd.ServerAd = consolidatedAd
-			} else {
-				// New entry
-				originAdMap[originAd.URL.String()] = &server_structs.Advertisement{ServerAd: originAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+		if !param.Topology_DisableOrigins.GetBool() {
+			for _, origin := range ns.Origins {
+				originAd := parseServerAdFromTopology(origin, server_structs.OriginType, caps)
+				if existingAd, ok := originAdMap[originAd.URL.String()]; ok {
+					existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
+					consolidatedAd := consolidateDupServerAd(originAd, existingAd.ServerAd)
+					existingAd.ServerAd = consolidatedAd
+				} else {
+					// New entry
+					originAdMap[originAd.URL.String()] = &server_structs.Advertisement{ServerAd: originAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+				}
 			}
 		}
 
-		for _, cache := range ns.Caches {
-			cacheAd := parseServerAdFromTopology(cache, server_structs.CacheType, server_structs.Capabilities{})
-			if existingAd, ok := cacheAdMap[cacheAd.URL.String()]; ok {
-				existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
-				consolidatedAd := consolidateDupServerAd(cacheAd, existingAd.ServerAd)
-				existingAd.ServerAd = consolidatedAd
-			} else {
-				// New entry
-				cacheAdMap[cacheAd.URL.String()] = &server_structs.Advertisement{ServerAd: cacheAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+		if !param.Topology_DisableCaches.GetBool() {
+			for _, cache := range ns.Caches {
+				cacheAd := parseServerAdFromTopology(cache, server_structs.CacheType, server_structs.Capabilities{})
+				if existingAd, ok := cacheAdMap[cacheAd.URL.String()]; ok {
+					existingAd.NamespaceAds = append(existingAd.NamespaceAds, nsAd)
+					consolidatedAd := consolidateDupServerAd(cacheAd, existingAd.ServerAd)
+					existingAd.ServerAd = consolidatedAd
+				} else {
+					// New entry
+					cacheAdMap[cacheAd.URL.String()] = &server_structs.Advertisement{ServerAd: cacheAd, NamespaceAds: []server_structs.NamespaceAdV2{nsAd}}
+				}
 			}
 		}
 	}

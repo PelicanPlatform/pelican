@@ -270,15 +270,18 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 	output := new(bytes.Buffer)
 	foundPublicLine := false
 	if config.GetPreferredPrefix() == config.OsdfPrefix {
-		log.Debugln("Retrieving OSDF Authfile for server")
-		bytes, err := getOSDFAuthFiles(server)
-		if err != nil {
-			return errors.Wrapf(err, "Failed to fetch osdf authfile from topology")
-		}
+		if (server.GetServerType().IsEnabled(server_structs.OriginType) && !param.Topology_DisableOriginX509.GetBool()) ||
+			(server.GetServerType().IsEnabled(server_structs.CacheType) && !param.Topology_DisableCacheX509.GetBool()) {
+			log.Debugln("Retrieving OSDF Authfile for server")
+			bytes, err := getOSDFAuthFiles(server)
+			if err != nil {
+				return errors.Wrapf(err, "Failed to fetch osdf authfile from topology")
+			}
 
-		log.Debugln("Parsing OSDF Authfile")
-		if bytes != nil {
-			output.Write(bytes)
+			log.Debugln("Parsing OSDF Authfile")
+			if bytes != nil {
+				output.Write(bytes)
+			}
 		}
 	}
 

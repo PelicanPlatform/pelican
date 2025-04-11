@@ -185,53 +185,76 @@ func TestOSDFAuthRetrieval(t *testing.T) {
 
 func TestOSDFAuthCreation(t *testing.T) {
 	tests := []struct {
-		desc     string
-		authIn   string
-		authOut  string
-		server   server_structs.XRootDServer
-		hostname string
+		desc        string
+		authIn      string
+		authOut     string
+		server      server_structs.XRootDServer
+		hostname    string
+		disableX509 bool
 	}{
 		{
-			desc:     "osdf-origin-auth-no-merge",
-			authIn:   "",
-			authOut:  mergedAuthfileEntries,
-			server:   &origin.OriginServer{},
-			hostname: "origin-test",
+			desc:        "osdf-origin-auth-no-merge",
+			authIn:      "",
+			authOut:     mergedAuthfileEntries,
+			server:      &origin.OriginServer{},
+			hostname:    "origin-test",
+			disableX509: false,
 		},
 		{
-			desc:     "osdf-origin-auth-merge",
-			authIn:   cacheAuthfileMultilineInput,
-			authOut:  otherMergedAuthfileEntries,
-			server:   &origin.OriginServer{},
-			hostname: "origin-test",
+			desc:        "osdf-origin-auth-merge",
+			authIn:      cacheAuthfileMultilineInput,
+			authOut:     otherMergedAuthfileEntries,
+			server:      &origin.OriginServer{},
+			hostname:    "origin-test",
+			disableX509: false,
 		},
 		{
-			desc:     "osdf-cache-auth-no-merge",
-			authIn:   "",
-			authOut:  cacheAuthfileEntries,
-			server:   &cache.CacheServer{},
-			hostname: "cache-test",
+			desc:        "osdf-cache-auth-no-merge",
+			authIn:      "",
+			authOut:     cacheAuthfileEntries,
+			server:      &cache.CacheServer{},
+			hostname:    "cache-test",
+			disableX509: false,
 		},
 		{
-			desc:     "osdf-cache-auth-merge",
-			authIn:   cacheAuthfileMultilineInput,
-			authOut:  cacheMergedAuthfileEntries,
-			server:   &cache.CacheServer{},
-			hostname: "cache-test",
+			desc:        "osdf-cache-auth-merge",
+			authIn:      cacheAuthfileMultilineInput,
+			authOut:     cacheMergedAuthfileEntries,
+			server:      &cache.CacheServer{},
+			hostname:    "cache-test",
+			disableX509: false,
 		},
 		{
-			desc:     "osdf-origin-no-authfile",
-			authIn:   "",
-			authOut:  "u * /.well-known lr\n",
-			server:   &origin.OriginServer{},
-			hostname: "origin-test-empty",
+			desc:        "osdf-origin-no-authfile",
+			authIn:      "",
+			authOut:     "u * /.well-known lr\n",
+			server:      &origin.OriginServer{},
+			hostname:    "origin-test-empty",
+			disableX509: false,
 		},
 		{
-			desc:     "osdf-cache-no-authfile",
-			authIn:   "",
-			authOut:  "",
-			server:   &cache.CacheServer{},
-			hostname: "cache-test-empty",
+			desc:        "osdf-cache-no-authfile",
+			authIn:      "",
+			authOut:     "",
+			server:      &cache.CacheServer{},
+			hostname:    "cache-test-empty",
+			disableX509: false,
+		},
+		{
+			desc:        "osdf-cache-disable-auth",
+			authIn:      cacheAuthfileMultilineInput,
+			authOut:     "u * /user/ligo -rl /Gluex rl /NSG/PUBLIC rl /VDC/PUBLIC rl ",
+			server:      &cache.CacheServer{},
+			hostname:    "cache-test",
+			disableX509: true,
+		},
+		{
+			desc:        "osdf-origin-disable-auth",
+			authIn:      "",
+			authOut:     "u * /.well-known lr\n",
+			server:      &origin.OriginServer{},
+			hostname:    "origin-test",
+			disableX509: true,
 		},
 	}
 
@@ -276,6 +299,10 @@ func TestOSDFAuthCreation(t *testing.T) {
 			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
 			viper.Set("Federation.TopologyUrl", ts.URL)
 			viper.Set("Server.Hostname", testInput.hostname)
+			if testInput.disableX509 {
+				viper.Set("Topology.DisableCacheX509", true)
+				viper.Set("Topology.DisableOriginX509", true)
+			}
 			var xrootdRun string
 			if strings.Contains(testInput.hostname, "cache") {
 				viper.Set("Cache.RunLocation", dirName)

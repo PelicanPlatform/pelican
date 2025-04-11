@@ -332,6 +332,13 @@ type Config struct {
 		ShadowOriginPrefix string `mapstructure:"shadoworiginprefix" yaml:"ShadowOriginPrefix"`
 	} `mapstructure:"stageplugin" yaml:"StagePlugin"`
 	TLSSkipVerify bool `mapstructure:"tlsskipverify" yaml:"TLSSkipVerify"`
+	Topology struct {
+		DisableCacheX509 bool `mapstructure:"disablecachex509" yaml:"DisableCacheX509"`
+		DisableCaches bool `mapstructure:"disablecaches" yaml:"DisableCaches"`
+		DisableDowntime bool `mapstructure:"disabledowntime" yaml:"DisableDowntime"`
+		DisableOriginX509 bool `mapstructure:"disableoriginx509" yaml:"DisableOriginX509"`
+		DisableOrigins bool `mapstructure:"disableorigins" yaml:"DisableOrigins"`
+	} `mapstructure:"topology" yaml:"Topology"`
 	Transport struct {
 		DialerKeepAlive time.Duration `mapstructure:"dialerkeepalive" yaml:"DialerKeepAlive"`
 		DialerTimeout time.Duration `mapstructure:"dialertimeout" yaml:"DialerTimeout"`
@@ -674,6 +681,13 @@ type configWithType struct {
 		ShadowOriginPrefix struct { Type string; Value string }
 	}
 	TLSSkipVerify struct { Type string; Value bool }
+	Topology struct {
+		DisableCacheX509 struct { Type string; Value bool }
+		DisableCaches struct { Type string; Value bool }
+		DisableDowntime struct { Type string; Value bool }
+		DisableOriginX509 struct { Type string; Value bool }
+		DisableOrigins struct { Type string; Value bool }
+	}
 	Transport struct {
 		DialerKeepAlive struct { Type string; Value time.Duration }
 		DialerTimeout struct { Type string; Value time.Duration }

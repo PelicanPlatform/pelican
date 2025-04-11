@@ -3259,3 +3259,43 @@ description: |+
 type: duration
 default: 4032h
 components: ["cache"]
+---
+name: Topology.DisableDowntime
+description: |+
+  When enabled, no longer retrieve downtime information for origins and caches from Topology
+type: bool
+hidden: true
+default: false
+components: ["director"]
+---
+name: Topology.DisableCacheX509
+description: |+
+  When enabled, no longer retrieve x509 certification authfiles for caches from Topology
+type: bool
+hidden: true
+default: false
+components: ["cache"]
+---
+name: Topology.DisableOriginX509
+description: |+
+  When enabled, no longer retrieve x509 certification authfiles for origins from Topology
+type: bool
+hidden: true
+default: false
+components: ["origin"]
+---
+name: Topology.DisableCaches
+description: |+
+  When enabled, no longer retrieve caches from Topology
+type: bool
+hidden: true
+default: false
+components: ["director"]
+---
+name: Topology.DisableOrigins
+description: |+
+  When enabled, no longer retrieve origins from Topology
+type: bool
+hidden: true
+default: false
+components: ["director", "registry"]

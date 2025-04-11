@@ -27,3 +27,9 @@ Federation:
 Registry:
   RequireCacheApproval: true
   RequireOriginApproval: true
+Topology:
+  DisableDowntime: false
+  DisableCacheX509: false
+  DisableOriginX509: false
+  DisableCaches: false
+  DisableOrigins: false
