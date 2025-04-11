@@ -14,7 +14,7 @@ import (
 
 var ServerDatabase *gorm.DB
 
-//go:embed server_migrations/*.sql
+//go:embed universal_migrations/*.sql
 var embedMigrations embed.FS
 
 type Counter struct {
@@ -38,7 +38,7 @@ func InitServerDatabase() error {
 	}
 
 	// run migrations
-	if err := utils.MigrateDB(sqlDB, embedMigrations, "server_migrations"); err != nil {
+	if err := utils.MigrateDB(sqlDB, embedMigrations, "universal_migrations"); err != nil {
 		return err
 	}
 
