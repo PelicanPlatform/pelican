@@ -30,12 +30,12 @@ import (
 	"testing"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestSharingUrl(t *testing.T) {
@@ -93,16 +93,15 @@ func TestSharingUrl(t *testing.T) {
 
 	_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 	assert.NoError(t, err)
-	viper.Set("ConfigDir", t.TempDir())
-	viper.Set("Logging.Level", "debug")
-	viper.Set("TLSSkipVerify", true)
 
 	os.Setenv("PELICAN_SKIP_TERMINAL_CHECK", "password")
 	defer os.Unsetenv("PELICAN_SKIP_TERMINAL_CHECK")
-	viper.Set("Federation.DiscoveryUrl", server.URL)
-	viper.Set("ConfigDir", t.TempDir())
-	err = config.InitClient()
-	assert.NoError(t, err)
+
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level":           "debug",
+		"TLSSkipVerify":           true,
+		"Federation.DiscoveryUrl": server.URL,
+	})
 
 	// Call QueryDirector with the test server URL and a source path
 	testObj, err := url.Parse("/test/foo/bar")

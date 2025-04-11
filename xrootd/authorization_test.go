@@ -478,13 +478,13 @@ func TestEmitCfg(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	viper.Set("Origin.RunLocation", dirname)
-	err := config.InitClient()
-	assert.Nil(t, err)
+	test_utils.InitClient(t, map[string]any{
+		"Origin.RunLocation": dirname,
+	})
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
-			err = writeScitokensConfiguration(server_structs.OriginType, cfg)
+			err := writeScitokensConfiguration(server_structs.OriginType, cfg)
 			assert.NoError(t, err)
 
 			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -558,9 +558,9 @@ func TestLoadScitokensConfig(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	viper.Set("Origin.RunLocation", dirname)
-	err := config.InitClient()
-	assert.Nil(t, err)
+	test_utils.InitClient(t, map[string]any{
+		"Origin.RunLocation": dirname,
+	})
 
 	configTester := func(configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
