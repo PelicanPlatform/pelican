@@ -1,3 +1,4 @@
 {
-  "server": "Server"
+  "server": "Server",
+  "plugin": "Plugin"
 }
