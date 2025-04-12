@@ -100,7 +100,7 @@ func (plauncher PrivilegedXrootdLauncher) Launch(ctx context.Context) (context.C
 		env = append(env, "XDG_CACHE_HOME="+xdgCacheHome)
 	}
 
-	launcher := cap.NewLauncher(executable, []string{plauncher.Name(), "-f", "-s", pidFile, "-c", plauncher.configPath}, env)
+	launcher := cap.NewLauncher(executable, []string{plauncher.Name(), "-f", "-s", pidFile, "-c", plauncher.configPath, "-n", "origin"}, env)
 	launcher.Callback(func(attrs *syscall.ProcAttr, _ interface{}) error {
 		attrs.Files[1] = writeStdout.Fd()
 		attrs.Files[2] = writeStderr.Fd()
