@@ -624,6 +624,10 @@ func TestSyncUpload(t *testing.T) {
 		_, err = smallTestFile.WriteString(smallTestFileContent)
 		require.NoError(t, err, "Error writing to small test file")
 
+		// WORKAROUND: XRootD appears to not clear out the checksum calculation when overwriting files.
+		// For now, delete from the origin and then re-upload
+		require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, false, client.WithTokenLocation(tempToken.Name())))
+
 		//Upload the file into the same location as the previous test file - should overwrite
 		transferDetailsUpload, err = client.DoPut(fed.Ctx, smallTestFile.Name(), uploadUrl, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
 		require.NoError(t, err)
