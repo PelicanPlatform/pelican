@@ -21,9 +21,16 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"hash"
+	"hash/crc32"
 	"io"
 	"io/fs"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -43,7 +50,6 @@ import (
 	"github.com/VividCortex/ewma"
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/option"
-	"github.com/opensaucerer/grab/v3"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/studio-b12/gowebdav"
@@ -65,14 +71,25 @@ var (
 	stoppedTransferDebugLine sync.Once
 
 	PelicanError error_codes.PelicanError
+
+	// Regex to match the class ad lines
+	adLineRegex *regexp.Regexp = regexp.MustCompile(`^\s*([A-Za-z0-9]+)\s=\s"(.*)"\n?$`)
 )
 
 type (
 	logFields string
 
-	classAd string
+	classAdAttr string
 
 	transferType int
+
+	ChecksumType int
+
+	// Value of one checksum calculation
+	ChecksumInfo struct {
+		Algorithm ChecksumType
+		Value     []byte
+	}
 
 	// Error type for when the transfer started to return data then completely stopped
 	StoppedTransferError struct {
@@ -109,6 +126,13 @@ type (
 		Err error
 	}
 
+	// A writer that discards all data written to it at a provided rate limit
+	rateLimitWriter struct {
+		ctx         context.Context
+		rateLimiter *rate.Limiter
+		writer      io.Writer
+	}
+
 	// Transfer attempt error wraps an error with information about the service/proxy used
 	TransferAttemptError struct {
 		serviceHost string
@@ -118,12 +142,11 @@ type (
 		err         error
 	}
 
-	// StatusCodeError is a wrapper around grab.StatusCodeError that indicates the server returned
-	// a non-200 code.
+	// StatusCodeError indicates the server returned a non-200 code.
 	//
 	// The wrapper is done to provide a Pelican-based error hierarchy in case we ever decide to have
 	// a different underlying download package.
-	StatusCodeError grab.StatusCodeError
+	StatusCodeError int
 
 	// Represents the results of a single object transfer,
 	// potentially across multiple attempts / retries.
@@ -132,6 +155,7 @@ type (
 		job               *TransferJob
 		Error             error
 		TransferredBytes  int64
+		Checksums         []ChecksumInfo
 		TransferStartTime time.Time
 		Scheme            string
 		Attempts          []TransferResult
@@ -177,18 +201,20 @@ type (
 
 	// A structure representing a single file to transfer.
 	transferFile struct {
-		ctx        context.Context
-		engine     *TransferEngine
-		job        *TransferJob
-		callback   TransferCallbackFunc
-		remoteURL  *url.URL
-		localPath  string
-		token      *tokenGenerator
-		xferType   transferType
-		packOption string
-		attempts   []transferAttemptDetails
-		project    string
-		err        error
+		ctx                context.Context
+		engine             *TransferEngine
+		job                *TransferJob
+		callback           TransferCallbackFunc
+		remoteURL          *url.URL
+		localPath          string
+		token              *tokenGenerator
+		xferType           transferType
+		packOption         string
+		attempts           []transferAttemptDetails
+		project            string
+		requireChecksum    bool
+		requestedChecksums []ChecksumType
+		err                error
 	}
 
 	// A representation of a "transfer job".  The job
@@ -279,26 +305,46 @@ type (
 		setupResults   sync.Once
 	}
 
-	TransferOption                    = option.Interface
-	identTransferOptionCaches         struct{}
-	identTransferOptionCallback       struct{}
-	identTransferOptionTokenLocation  struct{}
-	identTransferOptionAcquireToken   struct{}
-	identTransferOptionToken          struct{}
-	identTransferOptionSynchronize    struct{}
-	identTransferOptionCollectionsUrl struct{}
+	TransferOption                     = option.Interface
+	identTransferOptionCaches          struct{}
+	identTransferOptionCallback        struct{}
+	identTransferOptionTokenLocation   struct{}
+	identTransferOptionAcquireToken    struct{}
+	identTransferOptionToken           struct{}
+	identTransferOptionSynchronize     struct{}
+	identTransferOptionCollectionsUrl  struct{}
+	identTransferOptionChecksums       struct{}
+	identTransferOptionRequireChecksum struct{}
 
 	transferDetailsOptions struct {
 		NeedsToken bool
 		PackOption string
+	}
+
+	// progressWriter is the same idea as ProgressReader but in reverse
+	// -- periodically updates the byte count such that it can be used
+	// by the main go routine doing the download
+	progressWriter struct {
+		writer         io.Writer
+		bytesWritten   atomic.Int64
+		firstByteTime  time.Time
+		closed         atomic.Bool
+		bytesPerSecond atomic.Int64
+		lastRateSample time.Time
 	}
 )
 
 const (
 	ewmaInterval = 15 * time.Second
 
-	projectName classAd = "ProjectName"
-	jobId       classAd = "GlobalJobId"
+	attrProjectName classAdAttr = "ProjectName"
+	attrJobId       classAdAttr = "GlobalJobId"
+
+	AlgMD5     = iota // Checksum is using the MD5 algorithm
+	AlgCRC32C         // Checksum is using the CRC32C algorithm
+	AlgCRC32          // Checksum is using the CRC32 algorithm
+	AlgSHA1           // Checksum is using the SHA-2 algorithm
+	AlgUnknown        // Unknown checksum algorithm
 
 	SyncNone  = iota // When synchronizing, always re-transfer, regardless of existence at destination.
 	SyncExist        // Skip synchronization transfer if the destination exists
@@ -308,6 +354,75 @@ const (
 	transferTypeUpload                       // Transfer is uploading to the federation
 	transferTypePrestage                     // Transfer is staging at a federation cache
 )
+
+var (
+	jobAdOnce sync.Once         // Synchronize access to the process's job ad
+	jobAd     map[string]string // String version of the key/values of job ad
+
+	// The parameter table for crc32c
+	crc32cTable *crc32.Table = crc32.MakeTable(crc32.Castagnoli)
+
+	// Error condition indicating that the progress writer was externally closed
+	// before the transfer was completed
+	progressWriterClosed error = errors.New("progress writer closed")
+)
+
+func checksumFromHttpDigest(httpDigest string) ChecksumType {
+	switch httpDigest {
+	case "md5":
+		return AlgMD5
+	case "crc32c":
+		return AlgCRC32C
+	case "crc32":
+		return AlgCRC32
+	case "sha":
+		return AlgSHA1
+	}
+	return AlgUnknown
+}
+
+func httpDigestFromChecksum(checksumType ChecksumType) string {
+	switch checksumType {
+	case AlgCRC32:
+		return "crc32"
+	case AlgCRC32C:
+		return "crc32c"
+	case AlgMD5:
+		return "md5"
+	case AlgSHA1:
+		return "sha"
+	}
+	return ""
+}
+
+// Write data to the rateLimitDiscarder; after applying the built-in
+// rate limit, it'll ignore the written data
+func (r *rateLimitWriter) Write(p []byte) (n int, err error) {
+	bytesSoFar := 0
+	if r.rateLimiter == nil {
+		return r.writer.Write(p)
+	}
+	for len(p) > 0 {
+		if len(p) > 64*1024 {
+			if err = r.rateLimiter.WaitN(r.ctx, 64*1024); err != nil {
+				return bytesSoFar, err
+			}
+			if n, err = r.writer.Write(p[:64*1024]); err != nil {
+				return n, err
+			}
+			p = p[64*1024:]
+			bytesSoFar += n
+		} else {
+			if err = r.rateLimiter.WaitN(r.ctx, len(p)); err != nil {
+				return bytesSoFar, err
+			}
+			n, err = r.writer.Write(p)
+			bytesSoFar += n
+			return bytesSoFar, err
+		}
+	}
+	return bytesSoFar, nil
+}
 
 // The progress container object creates several
 // background goroutines.  Instead of creating the object
@@ -465,7 +580,7 @@ func (e *StatusCodeError) Error() string {
 	if int(*e) == http.StatusGatewayTimeout {
 		return "cache timed out waiting on origin"
 	}
-	return (*grab.StatusCodeError)(e).Error()
+	return fmt.Sprintf("server returned %d %s", int(*e), http.StatusText(int(*e)))
 }
 
 func (e *StatusCodeError) Is(target error) bool {
@@ -536,12 +651,6 @@ func newTransferAttemptError(service string, proxy string, isProxyErr bool, isUp
 		err:         err,
 	}
 	return
-}
-
-// hasPort test the host if it includes a port
-func hasPort(host string) bool {
-	var checkPort = regexp.MustCompile("^.*:[0-9]+$")
-	return checkPort.MatchString(host)
 }
 
 // Create a new transfer results object
@@ -639,6 +748,17 @@ func WithTokenLocation(location string) TransferOption {
 // The contents of the token will be used as part of the HTTP request
 func WithToken(token string) TransferOption {
 	return option.New(identTransferOptionToken{}, token)
+}
+
+// Create an option to specify the checksums to request for a given
+// transfer
+func WithRequestChecksums(types []ChecksumType) TransferOption {
+	return option.New(identTransferOptionChecksums{}, types)
+}
+
+// Indicate that checksum verification is required
+func WithRequireChecksum() TransferOption {
+	return option.New(identTransferOptionRequireChecksum{}, true)
 }
 
 // Create an option to specify the token acquisition logic
@@ -1025,7 +1145,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	}
 
 	// See if we have a projectName defined
-	project := searchJobAd(projectName)
+	project, _ := searchJobAd(attrProjectName)
 	copyUrl := *pUrl // Make a copy of the input URL to avoid concurrent issues.
 	if _, exists := copyUrl.Query()[pelican_url.QueryRecursive]; exists {
 		recursive = true
@@ -1141,7 +1261,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 	}
 
 	// See if we have a projectName defined
-	project := searchJobAd(projectName)
+	project, _ := searchJobAd(attrProjectName)
 
 	pelicanURL, err := ParseRemoteAsPUrl(ctx, remoteUrl.String())
 	if err != nil {
@@ -1782,14 +1902,79 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	log.Debugln("Downloading object from", transfer.remoteURL, "to", transfer.localPath)
 	var downloaded int64
 	localPath := transfer.localPath
+
+	// Create a checksum hash instance for each requested checksum; these will all be
+	// joined together into a single writer interface with the output file
+	hashes := make([]io.Writer, 0, 1)
+	for _, requestedChecksum := range transfer.requestedChecksums {
+		switch requestedChecksum {
+		case AlgCRC32:
+			hashes = append(hashes, crc32.NewIEEE())
+		case AlgCRC32C:
+			hashes = append(hashes, crc32.New(crc32cTable))
+		case AlgMD5:
+			hashes = append(hashes, md5.New())
+		case AlgSHA1:
+			hashes = append(hashes, sha1.New())
+		}
+	}
+	if len(hashes) == 0 {
+		hashes = append(hashes, crc32.New(crc32cTable))
+	}
+	hashesWriter := io.MultiWriter(hashes...)
+
+	// Prepare the local path for transfer; create the directory (as necessary) and remove
+	// any pre-existing file or failed attempt.
+	// By time this block has finished, we have a writer interface representing the transfer
+	// destination (could be io.Discard!) that we'll join with the hashesWriter.
+	var fileWriter io.Writer
 	if transfer.xferType == transferTypeDownload {
-		directory := path.Dir(localPath)
-		if err = os.MkdirAll(directory, 0700); err != nil {
-			return
+		var info os.FileInfo
+		if info, err = os.Stat(localPath); err != nil {
+			if os.IsNotExist(err) {
+				directory := path.Dir(localPath)
+				if err = os.MkdirAll(directory, 0700); err != nil {
+					return
+				}
+			} else {
+				return
+			}
+		}
+		if transfer.packOption != "" {
+			var behavior packerBehavior
+			if behavior, err = GetBehavior(transfer.packOption); err != nil {
+				return
+			}
+			if !info.IsDir() {
+				err = errors.New("destination path is not a directory; must be a directory for unpacking")
+				return
+			}
+			if localPath == "." {
+				localPath, err = os.Getwd()
+				if err != nil {
+					return
+				}
+			}
+			fileWriter = newAutoUnpacker(localPath, behavior)
+		} else {
+			if info != nil && info.IsDir() {
+				localPath = path.Join(localPath, path.Base(transfer.remoteURL.Path))
+			}
+			// If the destination is something strange, like a block device, then the OpenFile below
+			// will create the appropriate error message
+			var fp *os.File
+			if fp, err = os.OpenFile(localPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644); err == nil {
+				fileWriter = fp
+				defer fp.Close()
+			} else {
+				return
+			}
 		}
 	} else {
 		localPath = "/dev/null"
+		fileWriter = io.Discard
 	}
+	fileWriter = io.MultiWriter(fileWriter, hashesWriter)
 
 	size, attempts := sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token)
 
@@ -1799,6 +1984,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	// transferStartTime is the start time of the last transfer attempt
 	// we create a var here and update it in the loop
 	var transferStartTime time.Time
+	transferUrls := make([]*url.URL, len(attempts))
 	for idx, transferEndpoint := range attempts { // For each transfer attempt (usually 3), try to download via HTTP
 		var attempt TransferResult
 		attempt.CacheAge = -1
@@ -1812,6 +1998,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		transferEndpointUrl := *transferEndpoint.Url
 		transferEndpointUrl.Path = transfer.remoteURL.Path
 		transferEndpoint.Url = &transferEndpointUrl
+		transferUrls[idx] = transferEndpoint.Url
 		fields := log.Fields{
 			"url": transferEndpoint.Url.String(),
 			"job": transfer.job.ID(),
@@ -1823,7 +2010,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			tokenContents, _ = transfer.token.get()
 		}
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, err := downloadHTTP(
-			ctx, transfer.engine, transfer.callback, transferEndpoint, localPath, size, tokenContents, transfer.project,
+			ctx, transfer.engine, transfer.callback, transferEndpoint, localPath, fileWriter, downloaded, size, tokenContents, transfer.project,
 		)
 		endTime := time.Now()
 		if cacheAge >= 0 {
@@ -1881,9 +2068,91 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			break
 		}
 	}
+
 	transferResults.TransferStartTime = transferStartTime
 	transferResults.TransferredBytes = downloaded
-	if !success {
+	if success {
+		// Fetch checksum of the downloaded file, compare it to the calculated.
+		attemptCnt := len(transferResults.Attempts)
+		gotChecksum := false
+		// Iterate through the various sources to fetch the checksums, starting with the successful one.
+		for idx := 0; idx < attemptCnt; idx++ {
+			url := transferUrls[attemptCnt-idx-1]
+			fields := log.Fields{
+				"url": url.String(),
+				"job": transfer.job.ID(),
+			}
+			ctx := context.WithValue(transfer.ctx, logFields("fields"), fields)
+			tokenContents := ""
+			if transfer.token != nil {
+				tokenContents, _ = transfer.token.get()
+			}
+			if checksums, err := fetchChecksum(ctx, transfer.requestedChecksums, url, tokenContents, transfer.project); err == nil {
+				transferResults.Checksums = checksums
+			}
+		}
+		if !gotChecksum && transfer.requireChecksum {
+			transferResults.Error = errors.New("checksum is required but no endpoints were able to provide it")
+		}
+
+		// Compare the checksum values sent by the server versus the computed local values
+		checksumHashes := transfer.requestedChecksums
+		if len(checksumHashes) == 0 {
+			// Added to make sure the list of checksum types are consistent with the logic
+			// when we created the hashes []io.Writer previously.
+			checksumHashes = []ChecksumType{AlgCRC32C}
+		}
+		fields := log.Fields{
+			"url": transfer.remoteURL.String(),
+			"job": transfer.job.ID(),
+		}
+		successCtr := 0
+		for idx, checksum := range checksumHashes {
+			computedValue := hashes[idx].(hash.Hash).Sum(nil)
+			found := false
+			for _, checksumInfo := range transferResults.Checksums {
+				if checksumInfo.Algorithm == checksum {
+					found = true
+					if !bytes.Equal(checksumInfo.Value, computedValue) {
+						transferResults.Error = errors.Errorf("checksum mismatch for %s: server sent '%s', client computed '%s'",
+							httpDigestFromChecksum(checksumInfo.Algorithm), hex.EncodeToString(checksumInfo.Value),
+							hex.EncodeToString(computedValue),
+						)
+						log.WithFields(fields).Errorln(transferResults.Error)
+					} else {
+						successCtr++
+						log.WithFields(fields).Debugf("Checksum %s matches: %s", httpDigestFromChecksum(checksumInfo.Algorithm), hex.EncodeToString(checksumInfo.Value))
+					}
+					break
+				}
+			}
+			if !found {
+				log.WithFields(fields).Debugf("Client requested checksum %s but server did not provide it", httpDigestFromChecksum(checksum))
+			}
+		}
+		// Can happen if all the checksum values we received are not known checksum algorithms
+		// we computed (the server can ignore our requested checksums and send its preferred ones)
+		if successCtr == 0 && transfer.requireChecksum {
+			if len(transfer.requestedChecksums) == 0 {
+				log.WithFields(fields).Errorln("Client requires checksum to succeed and it was not provided by server; client computed crc32c value is", hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)))
+			} else {
+				log.WithFields(fields).Errorln("Client requires checksum to succeed and it was not provided by server; client computed", httpDigestFromChecksum(transfer.requestedChecksums[0]), "value as", hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)))
+			}
+			transferResults.Error = errors.New("no checksum information was returned but checksums are required")
+			// Otherwise, it's not an error so we should log what we did
+		} else if successCtr == 0 && len(transferResults.Checksums) == 0 {
+			log.WithFields(fields).Debugln("Client computed crc32c value is", hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)), "(server did not provide any checksum values to compare)")
+		} else if successCtr == 0 {
+			for _, checksumInfo := range transferResults.Checksums {
+				log.WithFields(fields).Debugf("Server provided checksum not requested by client (cannot compare to local) %s=%x", httpDigestFromChecksum(checksumInfo.Algorithm), hex.EncodeToString(checksumInfo.Value))
+			}
+			if len(transfer.requestedChecksums) == 0 {
+				log.WithFields(fields).Debugln("Checksum algorithms provided by server were not the requested crc32c; client computed crc32c value is", hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)))
+			} else {
+				log.WithFields(fields).Debugln("Checksum algorithms provided by server were not the requested ones; client computed", httpDigestFromChecksum(transfer.requestedChecksums[0]), "value as", hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)))
+			}
+		}
+	} else {
 		transferResults.Error = xferErrors
 	}
 	return
@@ -1901,6 +2170,117 @@ func parseTransferStatus(status string) (int, string) {
 	}
 
 	return statusCode, strings.TrimSpace(parts[1])
+}
+
+// Fetch the checksum of a remote object
+func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, token string, project string) (result []ChecksumInfo, err error) {
+	fields, ok := ctx.Value(logFields("fields")).(log.Fields)
+	if !ok {
+		fields = log.Fields{}
+	}
+	log.WithFields(fields).Debugln("Fetching checksum for", url.String())
+	var request *http.Request
+	if request, err = http.NewRequestWithContext(ctx, "HEAD", url.String(), nil); err != nil {
+		return
+	}
+	// Set the authorization header as well as other headers
+	if token != "" {
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	request.Header.Set("User-Agent", getUserAgent(project))
+	if val, found := searchJobAd(attrJobId); found {
+		request.Header.Set("X-Pelican-JobId", val)
+	}
+	if len(types) == 0 {
+		request.Header.Set("Want-Digest", httpDigestFromChecksum(AlgCRC32C))
+	} else {
+		multiple := false
+		val := ""
+		for _, cksum := range types {
+			if multiple {
+				val += ","
+			}
+			val += httpDigestFromChecksum(cksum)
+			multiple = true
+		}
+		request.Header.Set("Want-Digest", val)
+	}
+	transport := config.GetTransport()
+	client := &http.Client{Transport: transport}
+	response, err := client.Do(request)
+	if err != nil {
+		return
+	}
+	// Always ignore any body coming back from a HEAD
+	if response.Body != nil {
+		response.Body.Close()
+	}
+	if response.StatusCode != 200 {
+		sce := StatusCodeError(200)
+		err = &sce
+		return
+	}
+	ctr := 0
+	var val string
+	for _, val = range response.Header.Values("Digest") {
+		for _, entry := range strings.Split(val, ",") {
+			ctr++
+			info := strings.SplitN(entry, "=", 2)
+			if len(info) != 2 {
+				continue
+			}
+			log.WithFields(fields).Debugf("Server reported object has checksum %s=%s", info[0], info[1])
+			checksumInfo := ChecksumInfo{}
+			if checksumInfo.Algorithm = checksumFromHttpDigest(info[0]); checksumInfo.Algorithm == AlgUnknown {
+				continue
+			}
+			val := make([]byte, 32)
+			switch info[0] {
+			case "crc32c":
+				// XRootD has a bug where crc32c is base64 encoded instead (per the spec)
+				// hex encoded.  Accept this case.  We've reported this as a bug so ideally
+				// future versions use hex instead.  Note: 0x3d is the = character.
+				if len(info[1]) == 8 && info[1][6] == 0x3d && info[1][7] == 0x3d {
+					decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewReader([]byte(info[1])))
+					if _, err := decoder.Read(val); err == nil {
+						checksumInfo.Value = val[:4]
+						break
+					} else {
+						log.WithFields(fields).Errorf("Failed to parse base64-encoded checksum value (%s): %s", info[1], err)
+					}
+				}
+				fallthrough
+			case "crc32":
+				if intVal, err := strconv.Atoi(info[1]); err == nil {
+					val[0] = byte((intVal >> 24) & 0xff)
+					val[1] = byte((intVal >> 16) & 0xff)
+					val[2] = byte((intVal >> 8) & 0xff)
+					val[3] = byte(intVal & 0xff)
+					checksumInfo.Value = val[:4]
+				} else {
+					log.WithFields(fields).Errorf("Failed to parse %s checksum value (%s): %s", info[0], info[1], err)
+					continue
+				}
+			case "md5":
+				fallthrough
+			case "sha":
+				decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewReader([]byte(info[1])))
+				if _, err := decoder.Read(val); err != nil {
+					log.WithFields(fields).Errorf("Failed to parse %s checksum value (%s): %s", info[0], info[1], err)
+					continue
+				}
+				checksumInfo.Value = val
+			default:
+				log.WithFields(fields).Warningf("Unknown checksum algorithm: %s", info[0])
+				continue
+			}
+			result = append(result, checksumInfo)
+		}
+	}
+	if ctr == 0 {
+		log.WithFields(fields).Debugln("Server returned no checksum information")
+	}
+	return
 }
 
 // Verify that a file on disk matches the expected size. We ignore directories
@@ -1934,10 +2314,22 @@ func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
 	return nil
 }
 
-// Perform the actual download of the file
+// Download a single object from a single HTTP server with no retries.
+//
+// The following information is required:
+//   - ctx: the context to use for the request and cancellation
+//   - te: the transfer engine to use for the request.  downloadHttp provides the transfer engine with information
+//     about overall transfer speed which is then used to report engine-wide averages.
+//   - callback: periodically invoked with progress information about the transfer.
+//   - transfer: contains the URL used for downloading the object.
+//   - dest: the destination file to write the object to.
+//   - totalSize: the expected size of the object.  If this is -1, the size is unknown.
+//   - token: the token to use for authoriation.
+//   - project: the project name to be used in the header identifying the transfer to the server.
+//   - hashes: the list of hashes to be used for checksum verification.
 //
 // Returns the downloaded size, time to 1st byte downloaded, serverVersion and an error if there is one
-func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, totalSize int64, token string, project string) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, err error) {
+func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCallbackFunc, transfer transferAttemptDetails, dest string, writer io.Writer, bytesSoFar int64, totalSize int64, token string, project string) (downloaded int64, timeToFirstByte time.Duration, cacheAge time.Duration, serverVersion string, err error) {
 	fields, ok := ctx.Value(logFields("fields")).(log.Fields)
 	if !ok {
 		fields = log.Fields{}
@@ -1953,6 +2345,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Negative cache age indicates no Age response header was received
 	cacheAge = -1
 
+	// Ensure we always invoke the callback at the start and the deferred
+	// function will invoke it at the end.
 	lastUpdate := time.Now()
 	if callback != nil {
 		callback(dest, 0, 0, false)
@@ -1971,8 +2365,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}()
 
 	// Create the client, request, and context
-	client := grab.NewClient()
-	client.UserAgent = getUserAgent(project)
+	client := http.Client{}
 	transport := config.GetTransport()
 	if !transfer.Proxy {
 		transport.Proxy = nil
@@ -1990,11 +2383,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		// in debug messages to see that this went to the local cache.
 		transferUrl.Host = "localhost"
 	}
-	httpClient, ok := client.HTTPClient.(*http.Client)
-	if !ok {
-		return 0, 0, -1, "", errors.New("Internal error: implementation is not a http.Client type")
-	}
-	httpClient.Transport = transport
+	client.Transport = transport
 	headerTimeout := transport.ResponseHeaderTimeout
 	if headerTimeout > time.Second {
 		headerTimeout -= 500 * time.Millisecond
@@ -2006,7 +2395,13 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	defer cancel()
 	log.WithFields(fields).Debugln("Attempting to download from:", transferUrl.Host)
 	log.WithFields(fields).Debugln("Transfer URL String:", transferUrl.String())
-	var req *grab.Request
+
+	// Create the request
+	var req *http.Request
+	if req, err = http.NewRequestWithContext(ctx, http.MethodGet, transferUrl.String(), nil); err != nil {
+		return
+	}
+
 	var unpacker *autoUnpacker
 	defer func() {
 		if unpacker != nil {
@@ -2017,47 +2412,33 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			}
 		}
 	}()
-	if transfer.PackOption != "" {
-		behavior, err := GetBehavior(transfer.PackOption)
-		if err != nil {
-			return 0, 0, -1, "", err
-		}
-		if dest == "." {
-			dest, err = os.Getwd()
-			if err != nil {
-				return 0, 0, -1, "", errors.Wrap(err, "Failed to get current directory for destination")
-			}
-		}
-		unpacker = newAutoUnpacker(dest, behavior)
-		if req, err = grab.NewRequestToWriter(unpacker, transferUrl.String()); err != nil {
-			return 0, 0, -1, "", errors.Wrap(err, "Failed to create new download request")
-		}
-	} else if dest == "/dev/null" {
-		if req, err = grab.NewRequestToWriter(io.Discard, transferUrl.String()); err != nil {
-			return 0, 0, -1, "", errors.Wrap(err, "Failed to create new prestage request")
-		}
-	} else if req, err = grab.NewRequest(dest, transferUrl.String()); err != nil {
-		return 0, 0, -1, "", errors.Wrap(err, "Failed to create new download request")
-	}
 
 	rateLimit := param.Client_MaximumDownloadSpeed.GetInt()
 	if rateLimit > 0 {
-		req.RateLimiter = rate.NewLimiter(rate.Limit(rateLimit), 64*1024)
+		writer = &rateLimitWriter{
+			writer:      writer,
+			rateLimiter: rate.NewLimiter(rate.Limit(rateLimit), 64*1024),
+			ctx:         ctx,
+		}
 	}
 
 	if token != "" {
-		req.HTTPRequest.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	// Set the headers
-	req.HTTPRequest.Header.Set("X-Transfer-Status", "true")
-	req.HTTPRequest.Header.Set("X-Pelican-Timeout", headerTimeout.Round(time.Millisecond).String())
-	if searchJobAd(jobId) != "" {
-		req.HTTPRequest.Header.Set("X-Pelican-JobId", searchJobAd(jobId))
+	userAgent := getUserAgent(project)
+	jobId, found := searchJobAd(attrJobId)
+	if found {
+		req.Header.Set("X-Pelican-JobId", jobId)
 	}
-	req.HTTPRequest.Header.Set("TE", "trailers")
-	req.HTTPRequest.Header.Set("User-Agent", getUserAgent(project))
+	req.Header.Set("X-Transfer-Status", "true")
+	req.Header.Set("X-Pelican-Timeout", headerTimeout.Round(time.Millisecond).String())
+	if bytesSoFar > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", bytesSoFar))
+	}
+	req.Header.Set("TE", "trailers")
+	req.Header.Set("User-Agent", userAgent)
 
-	req.NoResume = true
 	req = req.WithContext(ctx)
 
 	// Test the transfer speed every 0.5 seconds
@@ -2072,31 +2453,22 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Start the transfer
 	log.WithFields(fields).Debugln("Starting the HTTP transfer...")
 	downloadStart := time.Now()
-	resp := client.Do(req)
-	// Check the error real quick
-	if resp.IsComplete() {
-		if err = resp.Err(); err != nil {
-			var sce grab.StatusCodeError
-			var cam syscall.Errno
-			if errors.Is(err, grab.ErrBadLength) {
-				err = fmt.Errorf("local copy of file is larger than remote copy %w", grab.ErrBadLength)
-			} else if errors.As(err, &sce) {
-				log.WithFields(fields).Debugln("Creating a client status code error")
-				sce2 := StatusCodeError(sce)
-				err = &sce2
-			} else if errors.As(err, &cam) && cam == syscall.ENOMEM {
-				// ENOMEM is error from os for unable to allocate memory
-				err = &allocateMemoryError{Err: err}
-			} else {
-				err = &ConnectionSetupError{Err: err}
-			}
-			log.WithFields(fields).Errorln("Failed to download:", err)
-			return
+	var resp *http.Response
+	if resp, err = client.Do(req); err != nil {
+		var cam syscall.Errno
+		if errors.As(err, &cam) && cam == syscall.ENOMEM {
+			// ENOMEM is error from os for unable to allocate memory
+			err = &allocateMemoryError{Err: err}
+		} else {
+			err = &ConnectionSetupError{Err: err}
 		}
+		log.WithFields(fields).Errorln("Failed to download:", err)
+		return
 	}
-	serverVersion = resp.HTTPResponse.Header.Get("Server")
 
-	if ageStr := resp.HTTPResponse.Header.Get("Age"); ageStr != "" {
+	serverVersion = resp.Header.Get("Server")
+
+	if ageStr := resp.Header.Get("Age"); ageStr != "" {
 		if ageSec, err := strconv.Atoi(ageStr); err == nil {
 			cacheAge = time.Duration(ageSec) * time.Second
 		} else {
@@ -2110,13 +2482,38 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}
 
 	// Size of the download
-	totalSize = resp.Size()
-	// Do a head request for content length if resp.Size is unknown
-	if totalSize <= 0 && !resp.IsComplete() {
+	totalSize = resp.ContentLength
+	if bytesSoFar > 0 && resp.StatusCode == http.StatusPartialContent {
+		// In this case, totalSize is the size of the response, not the object
+		if totalSize < 0 {
+			rangeStr := resp.Header.Get("Content-Range")
+			if rangeStr != "" {
+				parts := strings.SplitN(rangeStr, "/", 2)
+				if len(parts) == 2 {
+					if size, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+						totalSize = size
+					}
+				} else {
+					log.WithFields(fields).Debugln("Error parsing Content-Range header:", rangeStr)
+				}
+			} else {
+				log.WithFields(fields).Debugln("Content-Range header is missing; unable to determine size of object")
+			}
+		} else {
+			totalSize += bytesSoFar
+		}
+	}
+	// Worst case: do a separate HEAD request to get the size
+	if totalSize <= 0 && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusPartialContent) {
+		// If the size is unknown, we can try to get it via a HEAD request
 		headClient := &http.Client{Transport: transport}
 		headRequest, _ := http.NewRequest(http.MethodHead, transferUrl.String(), nil)
 		if token != "" {
 			headRequest.Header.Set("Authorization", "Bearer "+token)
+		}
+		headRequest.Header.Set("User-Agent", userAgent)
+		if jobId != "" {
+			headRequest.Header.Set("X-Pelican-JobId", jobId)
 		}
 		var headResponse *http.Response
 		headResponse, err = headClient.Do(headRequest)
@@ -2136,31 +2533,40 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		}
 	}
 	if callback != nil {
-		callback(dest, 0, totalSize, false)
+		callback(dest, bytesSoFar, totalSize, false)
 	}
 
 	stoppedTransferTimeout := compatToDuration(param.Client_StoppedTransferTimeout.GetDuration(), "Client.StoppedTransferTimeout")
 	slowTransferRampupTime := compatToDuration(param.Client_SlowTransferRampupTime.GetDuration(), "Client.SlowTransferRampupTime")
 	slowTransferWindow := compatToDuration(param.Client_SlowTransferWindow.GetDuration(), "Client.SlowTransferWindow")
 	stoppedTransferDebugLine.Do(func() {
-		log.WithFields(fields).Debugf("Stopped transfer timeout is %s; slow transfer ramp-up is %s; slow transfer look-back window is %s",
+		log.WithFields(fields).Debugf("Configuration values for stopped transfer timeout: %s; slow transfer ramp-up: %s; slow transfer look-back window: %s",
 			stoppedTransferTimeout.String(), slowTransferRampupTime.String(), slowTransferWindow.String())
 	})
 	startBelowLimit := time.Time{}
 	var noProgressStartTime time.Time
 	var lastBytesComplete int64
-	timeToFirstByteRecorded := false
+
+	// Run the GET request, reading from the response body, in a separate goroutine.
+	// The main go routine will wait for the download to finish and send out progress
+	// updates.
+	done := make(chan error)
+	pw := &progressWriter{
+		writer: writer,
+	}
+	go func() {
+		_, err := io.Copy(pw, resp.Body)
+		done <- err
+		close(done)
+	}()
+	defer pw.Close()
+
 	// Loop of the download
 Loop:
 	for {
-		if !timeToFirstByteRecorded && resp.BytesComplete() > 1 {
-			// Convert to seconds
-			timeToFirstByte = time.Since(downloadStart)
-			timeToFirstByteRecorded = true
-		}
 		select {
 		case <-progressTicker.C:
-			downloaded = resp.BytesComplete()
+			downloaded = pw.BytesComplete()
 			currentTime := time.Now()
 			if te != nil {
 				te.ewmaCtr.Add(int64(currentTime.Sub(lastUpdate)))
@@ -2172,7 +2578,7 @@ Loop:
 
 		case <-t.C:
 			// Check that progress is being made and that it is not too slow
-			downloaded = resp.BytesComplete()
+			downloaded = pw.BytesComplete()
 			if downloaded == lastBytesComplete {
 				if noProgressStartTime.IsZero() {
 					noProgressStartTime = time.Now()
@@ -2188,20 +2594,21 @@ Loop:
 			} else {
 				noProgressStartTime = time.Time{}
 			}
-			lastBytesComplete = resp.BytesComplete()
+			lastBytesComplete = downloaded
 
 			// Check if we are downloading fast enough
-			limit := float64(downloadLimit)
+			limit := int64(downloadLimit)
 			var concurrency float64 = 1
 			if te != nil {
 				concurrency = float64(te.ewmaVal.Load()) / float64(ewmaInterval)
 			}
 			if concurrency > 1 {
-				limit /= concurrency
+				limit = int64(float64(limit) / concurrency)
 			}
-			if resp.BytesPerSecond() < limit {
+			transferRate := pw.BytesPerSecond()
+			if transferRate < limit {
 				// Give the download `slowTransferRampupTime` (default 120) seconds to start
-				if resp.Duration() < slowTransferRampupTime {
+				if time.Since(downloadStart) < slowTransferRampupTime {
 					continue
 				} else if startBelowLimit.IsZero() {
 					warning := []byte("Warning! Downloading too slow...\n")
@@ -2219,12 +2626,12 @@ Loop:
 				// The download is below the threshold for more than `SlowTransferWindow` seconds, cancel the download
 				cancel()
 
-				log.WithFields(fields).Errorf("Cancelled: Download speed of %s/s is below the limit of %s/s", ByteCountSI(int64(resp.BytesPerSecond())), ByteCountSI(int64(downloadLimit)))
+				log.WithFields(fields).Errorf("Cancelled: Download speed of %s/s is below the limit of %s/s", ByteCountSI(transferRate), ByteCountSI(int64(downloadLimit)))
 
 				err = &SlowTransferError{
-					BytesTransferred: resp.BytesComplete(),
-					BytesPerSecond:   int64(resp.BytesPerSecond()),
-					Duration:         resp.Duration(),
+					BytesTransferred: pw.BytesComplete(),
+					BytesPerSecond:   transferRate,
+					Duration:         time.Since(downloadStart),
 					BytesTotal:       totalSize,
 					CacheAge:         cacheAge,
 				}
@@ -2236,25 +2643,24 @@ Loop:
 				startBelowLimit = time.Time{}
 			}
 
-		case <-resp.Done:
-			downloaded = resp.BytesComplete()
+		case err = <-done:
+			downloaded = pw.BytesComplete()
 			break Loop
 		}
 	}
-	err = resp.Err()
 	if err != nil {
 		// Connection errors
 		if errors.Is(err, syscall.ECONNREFUSED) ||
 			errors.Is(err, syscall.ECONNRESET) ||
 			errors.Is(err, syscall.ECONNABORTED) {
-			err = &ConnectionSetupError{URL: resp.Request.URL().String()}
+			err = &ConnectionSetupError{URL: req.URL.String()}
 			return
 		}
 		log.WithFields(fields).Debugln("Got error from HTTP download", err)
 		return
 	} else {
 		// Check the trailers for any error information
-		trailer := resp.HTTPResponse.Trailer
+		trailer := resp.Trailer
 		if errorStatus := trailer.Get("X-Transfer-Status"); errorStatus != "" {
 			statusCode, statusText := parseTransferStatus(errorStatus)
 			if statusCode != http.StatusOK {
@@ -2266,19 +2672,17 @@ Loop:
 	}
 	// Valid responses include 200 and 206.  The latter occurs if the download was resumed after a
 	// prior attempt.
-	if resp.HTTPResponse.StatusCode != http.StatusOK && resp.HTTPResponse.StatusCode != http.StatusPartialContent {
-		log.WithFields(fields).Debugln("Got failure status code:", resp.HTTPResponse.StatusCode)
-		return 0, 0, -1, serverVersion, &HttpErrResp{resp.HTTPResponse.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s",
-			resp.HTTPResponse.StatusCode, resp.Err().Error())}
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		log.WithFields(fields).Debugln("Got failure status code:", resp.StatusCode)
+		return 0, 0, -1, serverVersion, &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s",
+			resp.StatusCode, err)}
 	}
 
 	// By now, we think the download succeeded. If we know how large the file was supposed to
-	// be based on the Content-Length header, we can check that a) the grab client witnessed
+	// be based on the Content-Length header, we can check that a) the HTTP client witnessed
 	// the correct number of bytes and b) the file on disk is the correct size. If totalSize is
 	// <= 0, it indicates we don't know how large the transfer was supposed to be in the first
 	// place.
-	// NOTE: We can probably remove this when we have true checksumming
-	// if unpacker == nil && totalSize > 0 {
 	if totalSize > 0 {
 		if downloaded != totalSize {
 			log.WithFields(fields).Debugf("Download completed but received size %db does not match expected size '%db'", downloaded, totalSize)
@@ -2315,16 +2719,16 @@ func (cs *ConstantSizer) BytesComplete() int64 {
 	return cs.read.Load()
 }
 
-// ProgressReader wraps the io.Reader to get progress
+// progressReader wraps the io.Reader to get progress
 // Adapted from https://stackoverflow.com/questions/26050380/go-tracking-post-request-progress
-type ProgressReader struct {
+type progressReader struct {
 	reader io.ReadCloser
 	sizer  Sizer
 	closed chan bool
 }
 
 // Read implements the common read function for io.Reader
-func (pr *ProgressReader) Read(p []byte) (n int, err error) {
+func (pr *progressReader) Read(p []byte) (n int, err error) {
 	n, err = pr.reader.Read(p)
 	if cs, ok := pr.sizer.(*ConstantSizer); ok {
 		cs.read.Add(int64(n))
@@ -2333,19 +2737,60 @@ func (pr *ProgressReader) Read(p []byte) (n int, err error) {
 }
 
 // Close implements the close function of io.Closer
-func (pr *ProgressReader) Close() error {
+func (pr *progressReader) Close() error {
 	err := pr.reader.Close()
 	// Also, send the closed channel a message
 	pr.closed <- true
 	return err
 }
 
-func (pr *ProgressReader) BytesComplete() int64 {
+func (pr *progressReader) BytesComplete() int64 {
 	return pr.sizer.BytesComplete()
 }
 
-func (pr *ProgressReader) Size() int64 {
+func (pr *progressReader) Size() int64 {
 	return pr.sizer.Size()
+}
+
+// Write to the underlying writer object, updating the progress
+func (pw *progressWriter) Write(p []byte) (n int, err error) {
+	if pw.closed.Load() {
+		return 0, progressWriterClosed
+	}
+	if pw.firstByteTime.IsZero() && len(p) > 0 {
+		pw.firstByteTime = time.Now()
+	}
+	now := time.Now()
+	elapsed := now.Sub(pw.firstByteTime)
+	elapsedUS := elapsed.Microseconds()
+	if elapsed < 5*time.Second && elapsedUS > 0 {
+		pw.bytesPerSecond.Store(1000000 * pw.bytesWritten.Load() / elapsedUS)
+	} else if elapsedUS > 0 {
+		oldBytesPerSecond := pw.bytesPerSecond.Load()
+		elapsed = now.Sub(pw.lastRateSample)
+		alpha := math.Exp(-1 * float64(elapsed) / float64(10*time.Second))
+		recentRate := 1000000 * int64(len(p)) / elapsedUS
+		pw.bytesPerSecond.Store(int64(float64(oldBytesPerSecond)*alpha + float64(recentRate)*(1-alpha)))
+	}
+	n, err = pw.writer.Write(p)
+	pw.bytesWritten.Add(int64(n))
+	return n, err
+}
+
+func (pw *progressWriter) BytesComplete() int64 {
+	return pw.bytesWritten.Load()
+}
+
+func (pw *progressWriter) FirstByteTime() time.Time {
+	return pw.firstByteTime
+}
+
+func (pw *progressWriter) Close() {
+	pw.closed.Store(true)
+}
+
+func (pw *progressWriter) BytesPerSecond() int64 {
+	return pw.bytesPerSecond.Load()
 }
 
 // Upload a single object to the origin
@@ -2429,7 +2874,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	closed := make(chan bool, 1)
 	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
-	reader := &ProgressReader{ioreader, sizer, closed}
+	reader := &progressReader{ioreader, sizer, closed}
 	putContext, cancel := context.WithCancel(transfer.ctx)
 	transferStartTime := time.Now()
 	defer cancel()
@@ -2453,8 +2898,8 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		}
 	}
 	request.Header.Set("User-Agent", getUserAgent(transfer.project))
-	if searchJobAd(jobId) != "" {
-		request.Header.Set("X-Pelican-JobId", searchJobAd(jobId))
+	if result, found := searchJobAd(attrJobId); found {
+		request.Header.Set("X-Pelican-JobId", result)
 	}
 	var lastKnownWritten int64
 	uploadStart := time.Now()
@@ -2878,7 +3323,10 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 	}
 	log.Debugln("Collections URL: ", collectionsUrl.String())
 
-	project := searchJobAd(projectName)
+	project, found := searchJobAd(attrProjectName)
+	if !found {
+		project = ""
+	}
 	client := createWebDavClient(collectionsUrl, token, project)
 	remotePath := remoteUrl.Path
 
@@ -2935,26 +3383,25 @@ func listHttp(remoteUrl *pelican_url.PelicanURL, dirResp server_structs.Director
 // This limitation exists because the object delete command is not openly supported and is intended to remain hidden.
 // Adding concurrency would require integrating the delete command into the transfer engine logic,
 // which would involve significant and complex changes. As the command is not fully supported, concurrency is deferred.
-func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp server_structs.DirectorResponse, token *tokenGenerator) (err error) {
+func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp server_structs.DirectorResponse, token *tokenGenerator) (err error) {
 	log.Debugln("Attempting to delete:", remoteUrl.Path)
-	project := searchJobAd(projectName)
+	project, found := searchJobAd(attrProjectName)
+	if !found {
+		project = ""
+	}
 
 	if dirResp.XPelNsHdr.CollectionsUrl == nil || dirResp.XPelNsHdr.CollectionsUrl.String() == "" {
 		log.Info("Collections URL not received in director response, attempting to delete directly using HTTP DELETE.")
-
-		client := grab.NewClient()
-		client.UserAgent = getUserAgent(project)
-
-		transport := config.GetTransport()
-		httpClient, ok := client.HTTPClient.(*http.Client)
-		if !ok {
-			return errors.New("internal error: implementation is not a http.Client type")
+		if len(dirResp.ObjectServers) == 0 {
+			return errors.New("no object servers found in director response; cannot delete object")
 		}
-		httpClient.Transport = transport
+
+		client := &http.Client{}
+		client.Transport = config.GetTransport()
 
 		// Object deletion command only works for a single origin in a prefix setup.
 		serverUrl := dirResp.ObjectServers[0].String()
-		req, err := http.NewRequest("DELETE", serverUrl, nil)
+		req, err := http.NewRequestWithContext(ctx, "DELETE", serverUrl, nil)
 		if err != nil {
 			return fmt.Errorf("failed to create HTTP DELETE request: %w", err)
 		}
@@ -2962,17 +3409,22 @@ func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp serve
 		if err != nil || tokenContents == "" {
 			return errors.Wrap(err, "failed to get token for transfer")
 		}
+		req.Header.Set("User-Agent", getUserAgent(project))
+		if jobId, found := searchJobAd(attrJobId); found {
+			req.Header.Set("X-Pelican-JobId", jobId)
+		}
 		req.Header.Set("Authorization", "Bearer "+tokenContents)
 		req.Header.Set("X-Transfer-Status", "true")
 
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			return fmt.Errorf("HTTP DELETE request failed: %w", err)
+		var resp *http.Response
+		if resp, err = client.Do(req); err != nil {
+			return errors.Wrap(err, "HTTP DELETE request failed")
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-			return fmt.Errorf("HTTP DELETE request returned unexpected status: %s", resp.Status)
+			sce := StatusCodeError(resp.StatusCode)
+			return errors.Wrap(&sce, "HTTP DELETE request returned unexpected status")
 		}
 
 		log.Debugln("Successfully deleted:", remoteUrl.Path)
@@ -3004,7 +3456,7 @@ func deleteHttp(remoteUrl *pelican_url.PelicanURL, recursive bool, dirResp serve
 		if recursive {
 			for _, child := range children {
 				childPath := remotePath + "/" + child.Name()
-				err = deleteHttp(&pelican_url.PelicanURL{Path: childPath}, recursive, dirResp, token)
+				err = deleteHttp(ctx, &pelican_url.PelicanURL{Path: childPath}, recursive, dirResp, token)
 				if err != nil {
 					return errors.Wrapf(err, "failed to delete child object %s", childPath)
 				}
@@ -3080,7 +3532,6 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 				fsinfo, err := client.Stat(endpoint.Path)
 				if err == nil {
 					info = FileInfo{
-						Name:         endpoint.Path,
 						Size:         fsinfo.Size(),
 						IsCollection: fsinfo.IsDir(),
 						ModTime:      fsinfo.ModTime(),
@@ -3233,74 +3684,41 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 	return
 }
 
-// This function searches the condor job ad for a specific classad and returns the value of that classad
-func searchJobAd(classad classAd) string {
-
-	// Look for the condor job ad file
-	condorJobAd, isPresent := os.LookupEnv("_CONDOR_JOB_AD")
-	var filename string
-	if isPresent {
-		filename = condorJobAd
-	} else if _, err := os.Stat(".job.ad"); err == nil {
-		filename = ".job.ad"
-	} else {
-		return ""
-	}
-
-	b, err := os.ReadFile(filename)
-	if err != nil {
-		log.Warningln("Can not read .job.ad file", err)
-	}
-
-	switch classad {
-	// The regex sections of the code below come partially from:
-	// https://stackoverflow.com/questions/28574609/how-to-apply-regexp-to-content-in-file-go
-	case projectName:
-		// Get all matches from file
-		// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
-		classadRegex, e := regexp.Compile(`^*\s*(ProjectName)\s=\s"*(.*)"*`)
-		if e != nil {
-			log.Fatal(e)
+// This function searches the condor job ad for a specific classad attribute
+// and returns the value.
+func searchJobAd(attribute classAdAttr) (value string, found bool) {
+	jobAdOnce.Do(func() {
+		jobAd = make(map[string]string)
+		// Look for the condor job ad file
+		condorJobAd, isPresent := os.LookupEnv("_CONDOR_JOB_AD")
+		var filename string
+		if isPresent {
+			filename = condorJobAd
+		} else if _, err := os.Stat(".job.ad"); err == nil {
+			filename = ".job.ad"
+		} else {
+			return
 		}
 
-		matches := classadRegex.FindAll(b, -1)
-		for _, match := range matches {
-			matchString := strings.TrimSpace(string(match))
-			if strings.HasPrefix(matchString, "ProjectName") {
-				matchParts := strings.Split(strings.TrimSpace(matchString), "=")
-
-				if len(matchParts) == 2 { // just confirm we get 2 parts of the string
-					matchValue := strings.TrimSpace(matchParts[1])
-					matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
-					return matchValue
-				}
+		b, err := os.ReadFile(filename)
+		if err != nil {
+			log.Warningln("Can not read .job.ad file", err)
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			matches := adLineRegex.FindStringSubmatch(line)
+			if len(matches) != 3 {
+				continue
 			}
+			jobAd[matches[1]] = matches[2]
 		}
-	case jobId:
-		// Get all matches from file
-		// Note: This appears to be invalid regex but is the only thing that appears to work. This way it successfully finds our matches
-		classadRegex, e := regexp.Compile(`^*\s*(GlobalJobId)\s=\s"*(.*)"*`)
-		if e != nil {
-			log.Fatal(e)
-		}
+	})
 
-		matches := classadRegex.FindAll(b, -1)
-		for _, match := range matches {
-			matchString := strings.TrimSpace(string(match))
-			if strings.HasPrefix(matchString, "GlobalJobId") {
-				matchParts := strings.Split(strings.TrimSpace(matchString), "=")
-
-				if len(matchParts) == 2 { // just confirm we get 2 parts of the string
-					matchValue := strings.TrimSpace(matchParts[1])
-					matchValue = strings.Trim(matchValue, "\"") //trim any "" around the match if present
-					return matchValue
-				}
-			}
-		}
-	default:
-		log.Errorln("Invalid classad requested")
-		return ""
+	switch attribute {
+	case attrProjectName:
+		value, found = jobAd[string(attrProjectName)]
+		return
+	case attrJobId:
+		value, found = jobAd[string(attrJobId)]
 	}
-
-	return ""
+	return
 }
