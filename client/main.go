@@ -428,12 +428,7 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 		return errors.Wrap(err, "failed to retrieve token for delete operation")
 	}
 
-	err = deleteHttp(pUrl, recursive, dirResp, token)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return deleteHttp(ctx, pUrl, recursive, dirResp, token)
 }
 
 /*
@@ -610,7 +605,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	if success {
 		// Get the final size of the download file
 	} else {
-		log.Error("Http GET failed! Unable to download file:", err)
+		log.Errorln("Http GET failed! Unable to download file:", err)
 	}
 
 	if !success {

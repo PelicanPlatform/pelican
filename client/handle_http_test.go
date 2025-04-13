@@ -31,7 +31,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,6 +49,12 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
+
+// hasPort test the host if it includes a port
+func hasPort(host string) bool {
+	var checkPort = regexp.MustCompile("^.*:[0-9]+$")
+	return checkPort.MatchString(host)
+}
 
 func TestMain(m *testing.M) {
 	server_utils.ResetTestState()
@@ -202,7 +210,12 @@ func TestSlowTransfers(t *testing.T) {
 	var err error
 	// Do a quick timeout
 	go func() {
-		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+		fname := filepath.Join(t.TempDir(), "test.txt")
+		var writer *os.File
+		writer, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+		assert.NoError(t, err)
+		defer writer.Close()
+		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
 		finishedChannel <- true
 	}()
 
@@ -284,7 +297,13 @@ func TestStoppedTransfer(t *testing.T) {
 	var err error
 
 	go func() {
-		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+		fname := filepath.Join(t.TempDir(), "test.txt")
+		var writer *os.File
+		writer, err = os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+		assert.NoError(t, err)
+		defer writer.Close()
+
+		_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
 		finishedChannel <- true
 	}()
 
@@ -317,7 +336,15 @@ func TestConnectionError(t *testing.T) {
 	addr := l.Addr().String()
 	l.Close()
 
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	assert.NoError(t, err)
+	defer writer.Close()
+
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil,
+		transferAttemptDetails{Url: &url.URL{Host: addr, Scheme: "http"}, Proxy: false},
+		fname, writer, 0, -1, "", "",
+	)
 
 	assert.IsType(t, &ConnectionSetupError{}, err)
 
@@ -353,7 +380,12 @@ func TestTrailerError(t *testing.T) {
 	assert.Equal(t, svr.URL, transfers[0].Url.String())
 
 	// Call DownloadHTTP and check if the error is returned correctly
-	_, _, _, _, err := downloadHTTP(ctx, nil, nil, transfers[0], filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	assert.NoError(t, err)
+	defer writer.Close()
+
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
 
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
@@ -509,7 +541,13 @@ func TestTimeoutHeaderSetForDownload(t *testing.T) {
 
 	serverURL, err := url.Parse(server.URL)
 	assert.NoError(t, err)
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	assert.NoError(t, err)
+	defer writer.Close()
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
+		fname, writer, 0, -1, "", "",
+	)
 	assert.NoError(t, err)
 	server_utils.ResetTestState()
 }
@@ -522,7 +560,7 @@ func TestJobIdHeaderSetForDownload(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Write the job ad to the file
-	_, err = jobAdFile.WriteString("GlobalJobId = 12345")
+	_, err = jobAdFile.WriteString("GlobalJobId = \"12345\"")
 	assert.NoError(t, err)
 	jobAdFile.Close()
 
@@ -548,7 +586,13 @@ func TestJobIdHeaderSetForDownload(t *testing.T) {
 
 	serverURL, err := url.Parse(server.URL)
 	assert.NoError(t, err)
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "")
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	assert.NoError(t, err)
+	defer writer.Close()
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
+		fname, writer, 0, -1, "", "",
+	)
 	assert.NoError(t, err)
 	server_utils.ResetTestState()
 	os.Unsetenv("_CONDOR_JOB_AD")
@@ -583,7 +627,12 @@ func TestProjInUserAgent(t *testing.T) {
 
 	serverURL, err := url.Parse(server_test.server.URL)
 	assert.NoError(t, err)
-	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false}, filepath.Join(t.TempDir(), "test.txt"), -1, "", "test")
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	assert.NoError(t, err)
+	defer writer.Close()
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transferAttemptDetails{Url: serverURL, Proxy: false},
+		fname, writer, 0, -1, "", "test")
 	assert.NoError(t, err)
 
 	// Test the user-agent header is what we expect it to be
@@ -662,14 +711,16 @@ func TestSearchJobAd(t *testing.T) {
 	defer os.Remove(tempFile.Name())
 
 	// Write a project name and job id to the file
-	_, err = tempFile.WriteString("ProjectName = \"testProject\"\nGlobalJobId = 12345")
+	_, err = tempFile.WriteString("ProjectName = \"testProject\"\nGlobalJobId = \"12345\"")
 	assert.NoError(t, err)
 	tempFile.Close()
 	t.Run("TestNoJobAd", func(t *testing.T) {
 		// Unset this environment var
 		os.Unsetenv("_CONDOR_JOB_AD")
 		// Call GetProjectName and check the result
-		projectName := searchJobAd(projectName)
+		jobAdOnce = sync.Once{}
+		projectName, found := searchJobAd(attrProjectName)
+		assert.False(t, found)
 		assert.Equal(t, "", projectName)
 	})
 
@@ -679,7 +730,9 @@ func TestSearchJobAd(t *testing.T) {
 		defer os.Unsetenv("_CONDOR_JOB_AD")
 
 		// Call GetProjectName and check the result
-		projectName := searchJobAd(projectName)
+		jobAdOnce = sync.Once{}
+		projectName, found := searchJobAd(attrProjectName)
+		assert.True(t, found)
 		assert.Equal(t, "testProject", projectName)
 	})
 
@@ -689,7 +742,9 @@ func TestSearchJobAd(t *testing.T) {
 		defer os.Unsetenv("_CONDOR_JOB_AD")
 
 		// Call GetProjectName and check the result
-		jobId := searchJobAd(jobId)
+		jobAdOnce = sync.Once{}
+		jobId, found := searchJobAd(attrJobId)
+		assert.True(t, found)
 		assert.Equal(t, "12345", jobId)
 	})
 }

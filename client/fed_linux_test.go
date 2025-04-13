@@ -21,6 +21,7 @@
 package client_test
 
 import (
+	_ "embed"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -42,6 +43,11 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+)
+
+var (
+	//go:embed resources/origin-with-and-without-write.yaml
+	originConfigWithAndWithoutWrite string
 )
 
 func TestRecursiveUploadsAndDownloads(t *testing.T) {
