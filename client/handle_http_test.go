@@ -565,6 +565,8 @@ func TestJobIdHeaderSetForDownload(t *testing.T) {
 	jobAdFile.Close()
 
 	os.Setenv("_CONDOR_JOB_AD", jobAdFile.Name())
+	jobAdOnce = sync.Once{}
+
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
 	// We have this flag because our server will get a few requests throughout its lifetime and the other
