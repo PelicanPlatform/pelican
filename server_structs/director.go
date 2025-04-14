@@ -122,6 +122,8 @@ type (
 		AdvertiseUrl string `json:"advertise_url"` // The URL / endpoint where the director expects ads to be POST'd
 	}
 
+	// ** BE WARNED **
+	// This struct needs to be kept in sync with BOTH the director/director_ui.go:listServerResponse and the director/director_ui.go:serverResponse
 	ServerAd struct {
 		ServerBaseAd
 		StorageType         OriginStorageType `json:"storageType"` // Always POSIX for caches
