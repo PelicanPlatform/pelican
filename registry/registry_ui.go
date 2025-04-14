@@ -404,20 +404,29 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 	}
 
 	// Check if the parent or child path along the prefix has been registered
-	inTopo, topoNss, valErr, sysErr := validateKeyChaining(ns.Prefix, pubkey)
-	if valErr != nil {
-		log.Errorln("Bad prefix when validating key chaining", valErr)
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    valErr.Error()})
-		return
-	}
-	if sysErr != nil {
-		log.Errorln("Validation for key chaining failed", sysErr)
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    sysErr.Error()})
-		return
+	// Admin can waive this check and update any prefix's public key
+	var inTopo bool
+	var topoNss []Topology
+	var valErr error
+	var sysErr error
+	if isUpdate && isAdmin {
+		log.Debug("Skip key chaining validation when admin user is updating a namespace")
+	} else {
+		inTopo, topoNss, valErr, sysErr = validateKeyChaining(ns.Prefix, pubkey)
+		if valErr != nil {
+			log.Errorln("Bad prefix when validating key chaining", valErr)
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    valErr.Error()})
+			return
+		}
+		if sysErr != nil {
+			log.Errorln("Validation for key chaining failed", sysErr)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    sysErr.Error()})
+			return
+		}
 	}
 
 	validInst, err := validateInstitution(ns.AdminMetadata.Institution)
