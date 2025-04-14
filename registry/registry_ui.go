@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -67,6 +68,12 @@ type (
 
 	listNamespacesForUserRequest struct {
 		Status string `form:"status"`
+	}
+
+	LiveServerNames struct {
+		Name   string `json:"name"`
+		URL    string `json:"url"`
+		WebURL string `json:"webUrl"`
 	}
 )
 
@@ -920,6 +927,57 @@ func listTopologyNamespaces(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, nss)
 }
 
+// Get the live server names from the Director for the downtime creation form
+func listLiveServerNames(ctx *gin.Context) {
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil || fedInfo.DirectorEndpoint == "" {
+		log.Error("Failed to get federation info: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get federation info"})
+		return
+	}
+
+	directorEndpointURL, err := url.Parse(fedInfo.DirectorEndpoint)
+	if err != nil {
+		log.Error("Failed to parse director endpoint URL: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to parse director endpoint URL"})
+		return
+	}
+
+	// Create the list live servers url
+	directorNSListServersURL, err := url.JoinPath(directorEndpointURL.String(), "api", "v1.0", "director_ui", "servers")
+	if err != nil {
+		log.Error("Failed to create director list live servers URL: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to create director list live servers URL"})
+		return
+	}
+
+	tr := config.GetTransport()
+	respData, err := utils.MakeRequest(ctx, tr, directorNSListServersURL, "GET", nil, nil)
+	if err != nil {
+		log.Error("Failed to get live servers from the director: ", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get live servers from the director"})
+		return
+	}
+	var liveServerNames []LiveServerNames
+	err = json.Unmarshal(respData, &liveServerNames)
+	if err != nil {
+		log.Errorf("Failed to marshal response in to JSON: %v", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to marshal response in to JSON"})
+		return
+	}
+	ctx.JSON(http.StatusOK, liveServerNames)
+}
+
 // Define Gin APIs for registry Web UI. All endpoints are user-facing
 func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 	registryWebAPI := router.Group("/api/v1.0/registry_ui")
@@ -959,6 +1017,9 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 	}
 	{
 		registryWebAPI.GET("/institutions", web_ui.AuthHandler, listInstitutions)
+	}
+	{
+		registryWebAPI.GET("/live_server_names", web_ui.AuthHandler, listLiveServerNames)
 	}
 	return nil
 }
