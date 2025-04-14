@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS downtimes (
     uuid TEXT PRIMARY KEY,
     created_by TEXT NOT NULL,
     updated_by TEXT NOT NULL,
-    server_name TEXT,
+    server_name TEXT NOT NULL,
+    source TEXT NOT NULL, -- Pelican service that set this downtime
     class TEXT NOT NULL,
     description TEXT,
     severity TEXT NOT NULL,
