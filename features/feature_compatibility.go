@@ -47,6 +47,10 @@ func ServerSupportsFeature(feature Feature, sAd server_structs.ServerAd) utils.T
 		return utils.Tern_Unknown
 	}
 
+	// Treat any release candidates the way we'd treat the release version. If a feature is introduced
+	// in v7.X.Y, it should be available in v7.X.Y-rc.Z as well. Here, `Core()` strips the whole -rc.Z suffix.
+	adVersion = adVersion.Core()
+
 	// Determine whether to use Origin or Cache constraints based on the server type
 	var versionConstraints map[string]FeatureVersionInfo
 	switch sAd.Type {

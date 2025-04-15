@@ -66,6 +66,11 @@ func TestServerSupportsFeature(t *testing.T) {
 			expectedResult: utils.Tern_True,
 		},
 		{
+			name:           "Prerelease Origin server supports feature within range",
+			serverAd:       produceAd("OriginServer", server_structs.OriginType.String(), "v7.10-rc.0"),
+			expectedResult: utils.Tern_True,
+		},
+		{
 			name:           "Origin server does not support feature (below range)",
 			serverAd:       produceAd("OriginServer", server_structs.OriginType.String(), "v7.05"),
 			expectedResult: utils.Tern_False,
@@ -110,7 +115,9 @@ func TestServerSupportsFeature(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ServerSupportsFeature(mockFeature, tt.serverAd)
-			assert.Equal(t, tt.expectedResult, result)
+			// Compare string representations of the Ternary values so it's
+			// easier to reason over failed tests.
+			assert.Equal(t, tt.expectedResult.String(), result.String())
 		})
 	}
 }
