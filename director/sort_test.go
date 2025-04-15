@@ -722,6 +722,18 @@ func TestGetAdsForPath(t *testing.T) {
 		},
 	}
 
+	nsAdTopoOnly := server_structs.NamespaceAdV2{
+		Caps: server_structs.Capabilities{PublicReads: false},
+		Path: "/foo",
+		Issuer: []server_structs.TokenIssuer{{
+			IssuerUrl: url.URL{
+				Scheme: "https",
+				Host:   "wisc.edu",
+			},
+		},
+		},
+	}
+
 	cacheAd1 := server_structs.ServerAd{
 		URL: url.URL{
 			Scheme: "https",
@@ -770,8 +782,8 @@ func TestGetAdsForPath(t *testing.T) {
 
 	o1Slice := []server_structs.NamespaceAdV2{nsAd1}
 	o2Slice := []server_structs.NamespaceAdV2{nsAd2, nsAd3}
-	c1Slice := []server_structs.NamespaceAdV2{nsAd1, nsAd2}
-	topoSlice := []server_structs.NamespaceAdV2{nsAdTopo1}
+	c1Slice := []server_structs.NamespaceAdV2{nsAd1, nsAd2, nsAdTopoOnly}
+	topoSlice := []server_structs.NamespaceAdV2{nsAdTopo1, nsAdTopoOnly}
 	recordAd(context.Background(), originAd2, &o2Slice)
 	recordAd(context.Background(), originAd1, &o1Slice)
 	// Add a server from Topology that serves /chtc namespace
@@ -789,13 +801,21 @@ func TestGetAdsForPath(t *testing.T) {
 		fromTopoIndices map[int]bool // should only be instantiated if it's populated
 	}{
 		{
-			name:            "no trailing slash, topo filtered",
-			inPath:          "/chtc",
-			outPath:         "/chtc",
-			originNames:     []string{"origin1"},
-			cacheNames:      []string{"cache1", "cache2"},
-			nsCapsToVerify:  server_structs.Capabilities{PublicReads: false},
-			fromTopoIndices: nil,
+			name:           "no trailing slash, topo filtered",
+			inPath:         "/chtc",
+			outPath:        "/chtc",
+			originNames:    []string{"origin1"},
+			cacheNames:     []string{"cache1", "cache2"},
+			nsCapsToVerify: server_structs.Capabilities{PublicReads: false},
+		},
+		{
+			name:            "topology-only namespace gets topo origin",
+			inPath:          "/foo",
+			outPath:         "/foo",
+			originNames:     []string{"topology origin 1"},
+			cacheNames:      []string{"cache1"},
+			nsCapsToVerify:  server_structs.Capabilities{},
+			fromTopoIndices: map[int]bool{0: true},
 		},
 		{
 			name:           "path with trailing slash",
