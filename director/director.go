@@ -646,6 +646,39 @@ func getRequestID(ctx *gin.Context) uuid.UUID {
 	return uuid.New()
 }
 
+// If `getSortedAds` returns an error, determine which type it is and respond
+// to the client with a sensible explanation of what went wrong.
+func processSortedAdsErr(ginCtx *gin.Context, err error, requestId uuid.UUID) {
+	switch err.(type) {
+	case noOriginsForNsErr:
+		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("No sources found for the requested path: %v: Request ID: %s", err, requestId.String()),
+		})
+	case noOriginsForReqErr:
+		ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg: fmt.Sprintf("Discovered sources for the namespace, but none support the request: %v: "+
+				"See '%s' to troubleshoot available origins/caches and their capabilities: Request ID: %s", err, param.Server_ExternalWebUrl.GetString(), requestId.String()),
+		})
+	case objectNotFoundErr:
+		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("No sources reported possession of the object: %v: Are you sure it exists?: Request ID: %s", err, requestId.String()),
+		})
+	case directorStartupErr:
+		ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
+		})
+	default:
+		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to get/sort server ads for the requested path: %v: Request ID: %s", err, requestId.String()),
+		})
+	}
+}
+
 func redirectToCache(ginCtx *gin.Context) {
 	// Later we'll collect metrics for which service we sent the user to. For now, assume
 	// we're sending them to a cache.
@@ -673,35 +706,7 @@ func redirectToCache(ginCtx *gin.Context) {
 	// as matchmaking is handled within.
 	oAds, cAds, err := getSortedAds(ginCtx, requestId)
 	if err != nil {
-		switch err.(type) {
-		case noOriginsForNsErr:
-			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("No sources found for the requested path: %v: Request ID: %s", err, requestId.String()),
-			})
-		case noOriginsForReqErr:
-			ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg: fmt.Sprintf("Discovered sources for the namespace, but none support the request: %v: "+
-					"See '%s' to troubleshoot available origins/caches and their capabilities: Request ID: %s", err, param.Server_ExternalWebUrl.GetString(), requestId.String()),
-			})
-		case objectNotFoundErr:
-			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("No sources reported possession of the object: %v: Are you sure it exists?: Request ID: %s", err, requestId.String()),
-			})
-		case directorStartupErr:
-			ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
-			})
-		default:
-			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Failed to get/sort server ads for the requested path: %v: Request ID: %s", err, requestId.String()),
-			})
-		}
-
+		processSortedAdsErr(ginCtx, err, requestId)
 		return
 	}
 
@@ -778,40 +783,15 @@ func redirectToOrigin(ginCtx *gin.Context) {
 	// as matchmaking is handled here.
 	oAds, cAds, err := getSortedAds(ginCtx, requestId)
 	if err != nil {
-		switch err.(type) {
-		case noOriginsForNsErr:
-			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("No origins found for the requested path: %v: Request ID: %s", err, requestId.String()),
-			})
-		case noOriginsForReqErr:
-			ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg: fmt.Sprintf("Discovered origins for the namespace, but none support the request: %v: "+
-					"See '%s' to troubleshoot available origins and their capabilities: Request ID: %s", err, param.Server_ExternalWebUrl.GetString(), requestId.String()),
-			})
-		case objectNotFoundErr:
-			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("No origins reported possession of the object: %v: Are you sure it exists? Request ID: %s", err, requestId.String()),
-			})
-		case directorStartupErr:
-			ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
-			})
-		default:
-			ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Failed to get/sort server ads for the requested path: %v: Request ID: %s", err, requestId.String()),
-			})
-		}
-
+		processSortedAdsErr(ginCtx, err, requestId)
 		return
 	}
 
 	chosenServers := make([]server_structs.ServerAd, 0, serverResLimit)
-	for _, ad := range oAds {
+	for idx, ad := range oAds {
+		if idx >= serverResLimit {
+			break
+		}
 		chosenServers = append(chosenServers, ad.ServerAd)
 	}
 
