@@ -339,11 +339,11 @@ func TestAdvertiseOSDF(t *testing.T) {
 		require.NoError(t, err)
 
 		// Test a few values. If they're correct, it indicates the whole process likely succeeded
-		_, oAds, cAds := getAdsForPath("/my/server/path/to/file")
+		oAds, cAds := getAdsForPath("/my/server/path/to/file")
 		assert.Len(t, cAds, 0)
 		assert.Len(t, oAds, 1)
 
-		_, oAds, cAds = getAdsForPath("/my/server/2/path/to/file")
+		oAds, cAds = getAdsForPath("/my/server/2/path/to/file")
 		assert.Len(t, cAds, 0)
 		assert.Len(t, oAds, 1)
 	})
@@ -365,11 +365,11 @@ func TestAdvertiseOSDF(t *testing.T) {
 		require.NoError(t, err)
 
 		// Test a few values. If they're correct, it indicates the whole process likely succeeded
-		_, oAds, cAds := getAdsForPath("/my/server/path/to/file")
+		oAds, cAds := getAdsForPath("/my/server/path/to/file")
 		assert.Len(t, cAds, 7)
 		assert.Len(t, oAds, 0)
 
-		_, oAds, cAds = getAdsForPath("/my/server/2/path/to/file")
+		oAds, cAds = getAdsForPath("/my/server/2/path/to/file")
 		assert.Len(t, cAds, 1)
 		assert.Len(t, oAds, 0)
 	})
