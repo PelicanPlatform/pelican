@@ -44,7 +44,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -403,18 +402,12 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 		}
 	}()
 
-	// Check for local cache
-	var caches []*url.URL
-	if nearestCache, ok := os.LookupEnv("NEAREST_CACHE"); ok && nearestCache != "" {
-		caches, err = utils.GetPreferredCaches(nearestCache)
-		if err != nil {
-			return
-		}
-	} else if nearestCache, ok := os.LookupEnv("PELICAN_NEAREST_CACHE"); ok && nearestCache != "" {
-		caches, err = utils.GetPreferredCaches(nearestCache)
-		if err != nil {
-			return
-		}
+	// Get any configured preferred caches, to be passed along to the client
+	// as options.
+	caches, err := getPreferredCaches()
+	if err != nil {
+		log.Errorln("Failed to get preferred caches:", err)
+		os.Exit(1)
 	}
 
 	tc, err := te.NewClient(client.WithAcquireToken(false))
