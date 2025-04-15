@@ -2451,32 +2451,53 @@ components: ["origin"]
 ---
 name: Issuer.AuthorizationTemplates
 description: |+
-  The authorizations that should be generated for an authenticated request.  Value should be a list of
-  authorized actions.
+  The authorizations that may be generated for an authenticated request,
+  specified via a list of templates.
 
-  Each action is a key-value pair with the following keys defined:
-  - `actions`: A list of authorized actions.  Valid string values are `read`, `modify`, and `create`.
-  - `prefix`: A prefix where the actions are authorized.  If the prefix contains the substring `$USER`, the
-    string is replaced with the authenticated username.  If the prefix contains the substring `$GROUP`, then
-    an authorization is emitted for _each group_ authenticated.
+  Each template defines a set of authorizations that can depend on the
+  authenticated username and groups. An authorization is an action and
+  a prefix to which it applies.
 
-  For example, if the request is authenticated as user `bbockelm` with groups `dept_a` and `dept_b`, then
-  the following configuration:
+  Concretely, a template is a collection of key-value pairs:
+
+  - `actions`: A list of actions. Valid values are `read`, `create`, and
+    `modify`.
+
+  - `prefix`: The prefix to which those actions apply. If the prefix
+    contains the substring `$USER`, the string is replaced with the
+    authenticated username. If the prefix contains the substring `$GROUP`,
+    then an authorization is generated for each authenticated group.
+
+  - `users` (optional): A list of usernames. If non-empty, the authenticated
+    username must be in this list in order for this template to generate any
+    authorizations.
+
+  - `groups` (optional): A list of groups. If non-empty, at least one
+    authenticated group must be in this list in order for this template to
+    generate any authorizations. If `prefix` contains the substring
+    `$GROUP`, then authorizations will be generated only for the groups
+    listed here.
+
+  For example, if the request is authenticated as username `bbockelm` and
+  groups `dept_a` and `dept_b`, then the list of templates
 
   ```yaml
-  - actions: ["read", "create"]
-    prefix: /projects/$GROUP
   - actions: ["read", "modify"]
     prefix: /home/$USER
+  - actions: ["read"]
+    prefix: /staging/$USER
+    users: ["alice", "bob"]
+  - actions: ["read", "create"]
+    prefix: /projects/$GROUP
+    groups: ["dept_a", "dept_c"]
   ```
 
   will result in the following authorizations:
-  - read /projects/dept_a
-  - create /projects/dept_a
-  - read /projects/dept_b
-  - create /projects/dept_b
+
   - read /home/bbockelm
   - modify /home/bbockelm
+  - read /projects/dept_a
+  - create /projects_dept_a
 type: object
 default: []
 components: ["origin"]
