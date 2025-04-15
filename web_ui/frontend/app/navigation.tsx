@@ -13,6 +13,7 @@ import {
   AssistantDirection,
   AppRegistration,
   Cached,
+  CalendarMonth,
   Api,
   Settings,
 } from '@mui/icons-material';
@@ -77,6 +78,7 @@ const NavigationConfig: NavigationConfiguration = {
   origin: [
     { title: 'Dashboard', href: '/origin/', icon: <Dashboard /> },
     { title: 'Metrics', href: '/origin/metrics/', icon: <Equalizer /> },
+    { title: 'Downtime', href: '/origin/downtime/', icon: <CalendarMonth /> },
     {
       title: 'Globus Configurations',
       href: '/origin/globus/',
@@ -112,6 +114,7 @@ const NavigationConfig: NavigationConfiguration = {
   cache: [
     { title: 'Dashboard', href: '/cache/', icon: <Dashboard /> },
     { title: 'Metrics', href: '/cache/metrics/', icon: <Equalizer /> },
+    { title: 'Downtime', href: '/origin/downtime/', icon: <CalendarMonth /> },
     { title: 'Config', href: '/config/', icon: <Build /> },
     { title: 'Settings', href: '/settings/', icon: <Settings /> },
   ],

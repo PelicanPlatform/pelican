@@ -60,6 +60,36 @@ export interface ServerGeneral extends ServerBase {
 }
 
 /**
+ * Types for downtime interactions
+ */
+
+export type DowntimeClass = 'SCHEDULED' | 'UNSCHEDULED';
+export type DowntimeSeverity =
+  | 'Outage (completely inaccessible)'
+  | 'Severe (most services down)'
+  | 'Intermittent Outage (may be up for some of the time)'
+  | "No Significant Outage Expected (you shouldn't notice)";
+
+export interface DowntimeBase {
+  class: DowntimeClass;
+  description: string;
+  severity: DowntimeSeverity;
+  startTime: number;
+  endTime: number;
+}
+
+export interface DowntimePost extends DowntimeBase {}
+
+export interface DowntimeGet extends DowntimeBase {
+  id: string;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type DowntimePut = Partial<DowntimeBase>;
+
+/**
  * Token Types
  */
 
