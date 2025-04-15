@@ -571,6 +571,28 @@ default: false
 components: ["client"]
 hidden: true
 ---
+name: Client.PreferredCaches
+description: |+
+  A list of preferred caches the Pelican client/plugin should use when interacting with a remote object. There are two configuration options:
+    - A list containing `+` as a discrete element
+    - A list with no `+`
+
+  When `+` is included in the list, the client should _first_ try the provided caches, then fall back to any discovered via the Director. If no
+  `+` is included, the client should try _only_ the preferred caches and fail if none is able to provide the object.
+
+  Caches are generally tried in the order they're presented. For example, the configuration:
+  ```yaml
+  Client:
+    PreferredCaches: ["cache1", "cache2", "+"]
+  ```
+  should result in trying `cache1`, then `cache2`, and finally any caches discovered by the Director (if needed).
+
+  When set via the `PELICAN_CLIENT_PREFERREDCACHES` environment variable, caches should be comma-separated, e.g.:
+  `PELICAN_CLIENT_PREFERREDCACHES=cache1,cache2,+`
+type: stringSlice
+default: none
+components: ["client"]
+---
 ############################
 #   Origin-level Configs   #
 ############################

@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -19,18 +19,17 @@
 package main
 
 import (
-	"net/url"
 	"os"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -38,6 +37,9 @@ var (
 		Use:   "get {source ...} {destination}",
 		Short: "Get a file from a Pelican federation",
 		Run:   getMain,
+		PreRun: func(cmd *cobra.Command, args []string) {
+			commaFlagsListToViperSlice(cmd, map[string]string{"cache": param.Client_PreferredCaches.GetName()})
+		},
 	}
 )
 
@@ -50,6 +52,10 @@ func init() {
 	flagSet.Lookup("cache-list-name").Hidden = true
 	flagSet.String("caches", "", "A JSON file containing the list of caches")
 	objectCmd.AddCommand(getCmd)
+
+	if err := viper.BindPFlag(param.Client_PreferredCaches.GetName(), getCmd.Flags().Lookup("cache")); err != nil {
+		panic(err)
+	}
 }
 
 func getMain(cmd *cobra.Command, args []string) {
@@ -93,17 +99,11 @@ func getMain(cmd *cobra.Command, args []string) {
 	log.Debugln("Sources:", source)
 	log.Debugln("Destination:", dest)
 
-	// Check for manually entered cache to use
-	var preferredCache string
-	if nearestCache, ok := os.LookupEnv("NEAREST_CACHE"); ok {
-		preferredCache = nearestCache
-	} else if cache, _ := cmd.Flags().GetString("cache"); cache != "" {
-		preferredCache = cache
-	}
-	var caches []*url.URL
-	caches, err = utils.GetPreferredCaches(preferredCache)
+	// Get any configured preferred caches, to be passed along to the client
+	// as options.
+	caches, err := getPreferredCaches()
 	if err != nil {
-		log.Errorln(err)
+		log.Errorln("Failed to get preferred caches:", err)
 		os.Exit(1)
 	}
 
