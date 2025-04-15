@@ -1,0 +1,52 @@
+.react-calendar__tile {
+  padding: 0;
+  aspect-ratio: 4;
+  display: flex;
+  flex-direction: column;
+}
+
+/**
+ * Update tile aspect ratio for phone view
+ */
+@media (max-width: 1200px) {
+  .react-calendar__tile {
+    aspect-ratio: 2;
+  }
+}
+
+@media (max-width: 800px) {
+  .react-calendar__tile {
+    aspect-ratio: 1;
+  }
+}
+
+.react-calendar button {
+  border: 1px solid #ffffff;
+  background-color: #cce2ff;
+  border-radius: 5px;
+}
+
+.react-calendar__tile--active {
+  background-color: #007bff !important;
+  color: #ffffff !important;
+}
+
+.react-calendar__tile > abbr {
+  font-size: 1rem;
+  line-height: 1.5rem;
+  height: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.react-calendar {
+  width: 100%;
+  border: none;
+}
+
+.react-calendar__month-view__days__day--neighboringMonth,
+.react-calendar__decade-view__years__year--neighboringDecade,
+.react-calendar__century-view__decades__decade--neighboringCentury {
+  background-color: #f3f3f3 !important;
+}
