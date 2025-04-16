@@ -302,16 +302,23 @@ type (
 		Wq   int `xml:"wq"`
 	}
 
+	ProcTimes struct {
+		Seconds      int `xml:"s"`
+		MicroSeconds int `xml:"u"`
+	}
+
 	SummaryStat struct {
-		Id      SummaryStatType    `xml:"id,attr"`
-		Total   int                `xml:"tot"`
-		In      int                `xml:"in"`
-		Out     int                `xml:"out"`
-		Threads int                `xml:"threads"`
-		Idle    int                `xml:"idle"`
-		Paths   SummaryPath        `xml:"paths"` // For Oss Summary Data
-		Store   SummaryCacheStore  `xml:"store"`
-		Memory  SummaryCacheMemory `xml:"mem"`
+		Id         SummaryStatType    `xml:"id,attr"`
+		Total      int                `xml:"tot"`
+		In         int                `xml:"in"`
+		Out        int                `xml:"out"`
+		Threads    int                `xml:"threads"`
+		Idle       int                `xml:"idle"`
+		Paths      SummaryPath        `xml:"paths"` // For Oss Summary Data
+		Store      SummaryCacheStore  `xml:"store"`
+		Memory     SummaryCacheMemory `xml:"mem"`
+		ProcSystem ProcTimes          `xml:"sys"`
+		ProcUser   ProcTimes          `xml:"usr"`
 	}
 
 	SummaryStatistics struct {
@@ -342,6 +349,7 @@ const (
 	SchedStat SummaryStatType = "sched" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653745
 	OssStat   SummaryStatType = "oss"   // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653741
 	CacheStat SummaryStatType = "cache" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653733
+	ProcStat  SummaryStatType = "proc"  // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968507
 )
 
 var (
@@ -1612,6 +1620,12 @@ func HandleSummaryPacket(packet []byte) error {
 				Set(float64(cacheStore.Size))
 			StorageVolume.With(prometheus.Labels{"ns": "/cache", "type": "free", "server_type": "cache"}).
 				Set(float64(cacheStore.Size - cacheStore.Used))
+		case ProcStat:
+			fmt.Println("Got proc stat: ", string(packet))
+			fmt.Println("Proc System Seconds: ", stat.ProcSystem.Seconds)
+			fmt.Print("Proc System MicroSeconds: ", stat.ProcSystem.MicroSeconds)
+			fmt.Println("Proc User Seconds: ", stat.ProcUser.Seconds)
+			fmt.Println("Proc User MicroSeconds: ", stat.ProcUser.MicroSeconds)
 		}
 	}
 	return nil
