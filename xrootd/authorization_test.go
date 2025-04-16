@@ -394,6 +394,84 @@ func TestEmitAuthfile(t *testing.T) {
 	}
 }
 
+func TestEmitOriginAuthfileWithCacheAuth(t *testing.T) {
+	dirName := t.TempDir()
+	server_utils.ResetTestState()
+
+	defer server_utils.ResetTestState()
+
+	viper.Set(param.Origin_DisableDirectClients.GetName(), true)
+	viper.Set(param.Xrootd_Authfile.GetName(), filepath.Join(dirName, "authfile"))
+	viper.Set(param.Origin_RunLocation.GetName(), dirName)
+	viper.Set(param.Origin_FederationPrefix.GetName(), "cache-authz-test")
+	viper.Set(param.Origin_StoragePrefix.GetName(), "/")
+	viper.Set(param.Origin_EnablePublicReads.GetName(), true)
+
+	originServer := &origin.OriginServer{}
+
+	err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(""), fs.FileMode(0600))
+	require.NoError(t, err)
+
+	err = EmitAuthfile(originServer)
+	require.NoError(t, err)
+
+	contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
+	require.NoError(t, err)
+
+	assert.Equal(t, "u * /.well-known lr\n", string(contents))
+}
+
+func TestEmitOriginAuthfileWithCapabilities(t *testing.T) {
+	tests := []struct {
+		desc         string
+		name         string
+		authOut      string
+		capabilities []string
+	}{
+		{
+			desc:         "public-reads",
+			name:         "/public",
+			authOut:      "u * /.well-known lr /public lr\n",
+			capabilities: []string{param.Origin_EnablePublicReads.GetName()},
+		},
+		{
+			desc:         "no-public-access",
+			name:         "/private",
+			authOut:      "u * /.well-known lr\n",
+			capabilities: []string{param.Origin_EnableReads.GetName()},
+		},
+	}
+	for _, testInput := range tests {
+		t.Run(testInput.desc, func(t *testing.T) {
+			dirName := t.TempDir()
+			server_utils.ResetTestState()
+
+			defer server_utils.ResetTestState()
+
+			viper.Set(param.Xrootd_Authfile.GetName(), filepath.Join(dirName, "authfile"))
+			viper.Set(param.Origin_RunLocation.GetName(), dirName)
+			viper.Set(param.Origin_FederationPrefix.GetName(), testInput.name)
+			viper.Set(param.Origin_StoragePrefix.GetName(), "/")
+			viper.Set(param.Server_IssuerUrl.GetName(), "https://test-issuer.com")
+			for _, cap := range testInput.capabilities {
+				viper.Set(cap, true)
+			}
+			originServer := &origin.OriginServer{}
+
+			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(""), fs.FileMode(0600))
+			require.NoError(t, err)
+
+			err = EmitAuthfile(originServer)
+			require.NoError(t, err)
+
+			contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
+			require.NoError(t, err)
+
+			assert.Equal(t, testInput.authOut, string(contents))
+		})
+	}
+}
+
 func TestEmitCfg(t *testing.T) {
 	dirname := t.TempDir()
 	server_utils.ResetTestState()

@@ -331,7 +331,6 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 		if !param.Origin_DisableDirectClients.GetBool() {
 
 			// Configure the Authfile for each of the public exports we have in the origin
-
 			originExports, err := server_utils.GetOriginExports()
 			if err != nil {
 				return errors.Wrapf(err, "Failed to get origin exports")
