@@ -2,7 +2,7 @@
 
 /***************************************************************
 *
-* Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -61,6 +61,8 @@ var (
 	LotmanAddLot              func(lotJSON string, errMsg *[]byte) int32
 	LotmanGetLotJSON          func(lotName string, recursive bool, output *[]byte, errMsg *[]byte) int32
 	LotmanAddToLot            func(additionsJSON string, errMsg *[]byte) int32
+	LotmanRemoveLotParents    func(removalsJSON string, errMsg *[]byte) int32
+	LotmanRemoveLotPaths      func(removalsJSON string, errMsg *[]byte) int32
 	LotmanUpdateLot           func(updateJSON string, errMsg *[]byte) int32
 	LotmanDeleteLotsRecursive func(lotName string, errMsg *[]byte) int32
 
@@ -169,6 +171,23 @@ type (
 		Parents *[]ParentUpdate `json:"parents,omitempty"`
 		Paths   *[]PathUpdate   `json:"paths,omitempty"`
 		MPA     *MPA            `json:"management_policy_attrs,omitempty"`
+	}
+
+	LotAddition struct {
+		LotName string    `json:"lot_name"`
+		Parents []string  `json:"parents,omitempty"`
+		Paths   []LotPath `json:"paths,omitempty"`
+	}
+
+	LotPathRemoval struct {
+		// Paths can belong to at most one lot, so no need
+		// to provide a lot name here
+		Paths   []string `json:"paths"`
+	}
+
+	LotParentRemoval struct {
+		LotName string `json:"lot_name"`
+		Parents []string `json:"parents"`
 	}
 
 	PurgePolicy struct {
@@ -958,6 +977,9 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	purego.RegisterLibFunc(&LotmanGetLotJSON, lotmanLib, "lotman_get_lot_as_json")
 	// U
 	purego.RegisterLibFunc(&LotmanUpdateLot, lotmanLib, "lotman_update_lot")
+	purego.RegisterLibFunc(&LotmanAddToLot, lotmanLib, "lotman_add_to_lot")
+	purego.RegisterLibFunc(&LotmanRemoveLotParents, lotmanLib, "lotman_rm_parents_from_lot")
+	purego.RegisterLibFunc(&LotmanRemoveLotPaths, lotmanLib, "lotman_rm_paths_from_lots")
 	// D
 	purego.RegisterLibFunc(&LotmanDeleteLotsRecursive, lotmanLib, "lotman_remove_lots_recursive")
 
@@ -1143,7 +1165,7 @@ func CreateLot(newLot *Lot, caller string) error {
 	// Marshal the JSON into a string for the C function
 	lotJSON, err := json.Marshal(*newLot)
 	if err != nil {
-		return errors.Wrapf(err, "Error marshalling lot JSON: %v", err)
+		return errors.Wrapf(err, "error marshalling lot JSON: %v", err)
 	}
 
 	// Set the context to the incoming lot's owner:
@@ -1153,14 +1175,14 @@ func CreateLot(newLot *Lot, caller string) error {
 	ret := LotmanSetContextStr("caller", caller, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("Error creating lot: %s", string(errMsg)))
+		return fmt.Errorf(fmt.Sprintf("error creating lot: %s", string(errMsg)))
 	}
 
 	// Now finally add the lot
 	ret = LotmanAddLot(string(lotJSON), &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("Error creating lot: %s", string(errMsg)))
+		return fmt.Errorf(fmt.Sprintf("error creating lot: %s", string(errMsg)))
 	}
 
 	return nil
@@ -1178,13 +1200,13 @@ func GetLot(lotName string, recursive bool) (*Lot, error) {
 	ret := LotmanGetLotJSON(lotName, recursive, &outputBuf, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return nil, errors.Errorf("Error getting lot JSON: %s", string(errMsg))
+		return nil, errors.Errorf("error getting lot JSON: %s", string(errMsg))
 	}
 	trimBuf(&outputBuf)
 	var lot Lot
 	err := json.Unmarshal(outputBuf, &lot)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Error unmarshalling lot JSON: %v", err)
+		return nil, errors.Wrapf(err, "error unmarshalling lot JSON: %v", err)
 	}
 	return &lot, nil
 }
@@ -1223,7 +1245,7 @@ func UpdateLot(lotUpdate *LotUpdate, caller string) error {
 	// Marshal the JSON into a string for the C function
 	updateJSON, err := json.Marshal(*lotUpdate)
 	if err != nil {
-		return errors.Wrapf(err, "Error marshalling lot JSON: %v", err)
+		return errors.Wrapf(err, "error marshalling lot JSON: %v", err)
 	}
 
 	errMsg := make([]byte, 2048)
@@ -1232,13 +1254,128 @@ func UpdateLot(lotUpdate *LotUpdate, caller string) error {
 	ret := LotmanSetContextStr("caller", caller, &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("Error setting caller for lot update: %s", string(errMsg)))
+		return fmt.Errorf(fmt.Sprintf("error setting caller for lot update: %s", string(errMsg)))
 	}
 
 	ret = LotmanUpdateLot(string(updateJSON), &errMsg)
 	if ret != 0 {
 		trimBuf(&errMsg)
-		return fmt.Errorf(fmt.Sprintf("Error updating lot: %s", string(errMsg)))
+		return fmt.Errorf(fmt.Sprintf("error updating lot: %s", string(errMsg)))
+	}
+
+	return nil
+}
+
+// Unlike UpdateLot, which modifies a lot's _existing_ fields (e.g. switch a path from
+// recursive to non-recursive), AddToLot is used to _add_ new fields to a lot and is how
+// new paths/parents need to be populated. The caller is the entity that is updating
+// the lot, and is used to determine whether we want to allow the addition to go through.
+//
+// The lot addition JSON is limited to paths and parents and has the form:
+//
+//	{
+//		"lot_name": "lot_name", (REQUIRED)
+//		"paths": [
+//			{
+//				"path": "/new/path",
+// 				"recursive": true/false
+//			}
+//		], (OPTIONAL)
+//		"parents": ["newparent1", "newparent2"] (OPTIONAL)
+//	}
+func AddToLot(lotAddition *LotAddition, caller string) error {
+	// Marshal the JSON into a string for the C function
+	additionsJSON, err := json.Marshal(*lotAddition)
+	if err != nil {
+		return errors.Wrapf(err, "error marshalling lot addition JSON: %v", err)
+	}
+
+	errMsg := make([]byte, 2048)
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
+	ret := LotmanSetContextStr("caller", caller, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return fmt.Errorf(fmt.Sprintf("error setting caller for lot update: %s", string(errMsg)))
+	}
+
+	ret = LotmanAddToLot(string(additionsJSON), &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return fmt.Errorf(fmt.Sprintf("error adding to lot: %s", string(errMsg)))
+	}
+
+	return nil
+}
+
+// RemoveLotParents is used to remove parents from the lot. Because every lot must
+// have at least one parent, it'll throw an error if you try removing every parent.
+//
+// The parent removal JSON has the form:
+//
+// {
+//		"lot_name": "lot_name", (REQUIRED)
+//		"parents": [
+//			"parent1",
+//			"parent2"
+//		] (REQUIRED)
+//	}
+func RemoveLotParents(parentsRemoval *LotParentRemoval, caller string) error {
+	// Marshal the JSON into a string for the C function
+	parentRemovalJSON, err := json.Marshal(*parentsRemoval)
+	if err != nil {
+		return errors.Wrapf(err, "error marshalling lot parents removal JSON: %v", err)
+	}
+
+	errMsg := make([]byte, 2048)
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
+	ret := LotmanSetContextStr("caller", caller, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return fmt.Errorf(fmt.Sprintf("error setting caller for lot parents removal: %s", string(errMsg)))
+	}
+
+	ret = LotmanRemoveLotParents(string(parentRemovalJSON), &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return fmt.Errorf(fmt.Sprintf("error adding removing parents from lot: %s", string(errMsg)))
+	}
+
+	return nil
+}
+
+// RemoveLotPaths is used to remove paths from the lot.
+//
+// The path removal JSON has the form:
+//
+//	{
+//		"lot_name": "lot_name", (REQUIRED)
+//		"paths": [
+//			"/first/path",
+//			"/second/path"
+//		] (REQUIRED)
+//	}
+func RemoveLotPaths(pathsRemoval *LotPathRemoval, caller string) error {
+	// Marshal the JSON into a string for the C function
+	pathRemovalJSON, err := json.Marshal(*pathsRemoval)
+	if err != nil {
+		return errors.Wrapf(err, "error marshalling lot paths removal JSON: %v", err)
+	}
+
+	errMsg := make([]byte, 2048)
+	callerMutex.Lock()
+	defer callerMutex.Unlock()
+	ret := LotmanSetContextStr("caller", caller, &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return fmt.Errorf(fmt.Sprintf("error setting caller for lot paths removal: %s", string(errMsg)))
+	}
+
+	ret = LotmanRemoveLotPaths(string(pathRemovalJSON), &errMsg)
+	if ret != 0 {
+		trimBuf(&errMsg)
+		return fmt.Errorf(fmt.Sprintf("error adding removing paths from lot: %s", string(errMsg)))
 	}
 
 	return nil

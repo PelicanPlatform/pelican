@@ -68,7 +68,7 @@ func setupLotmanFromConf(t *testing.T, readConfig bool, name string, discUrl str
 	// Load in our config
 	viper.Set("Cache.HighWaterMark", "100g")
 	viper.Set("Cache.LowWaterMark", "50g")
-	viper.Set("Debug", true)
+	viper.Set("Logging.Level", "debug")
 	if readConfig {
 		viper.SetConfigType("yaml")
 		err := viper.ReadConfig(strings.NewReader(yamlMockup))
@@ -374,6 +374,99 @@ func TestUpdateLot(t *testing.T) {
 	require.Equal(t, int64(84), lot.MPA.MaxNumObjects.Value)
 	require.Equal(t, "/test-1-updated", lot.Paths[0].Path)
 	require.False(t, lot.Paths[0].Recursive)
+}
+
+func TestAddToLot(t *testing.T) {
+	server_utils.ResetTestState()
+	server := getMockDiscoveryHost()
+	viper.Set("Federation.DiscoveryUrl", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
+	defer cleanup()
+	require.True(t, success)
+
+	newLotPath := LotPath{
+		Path: "/a/new/path",
+		Recursive: true,
+	}
+	addition := LotAddition{
+		LotName: "test-1",
+		Paths: []LotPath{newLotPath},
+		Parents: []string{"default"},
+	}
+
+	err := AddToLot(&addition, server.URL)
+	require.NoError(t, err, "Failed to add to lot")
+	// Only after adding values to the lot do we set the lot name
+	// -- this lets us do the comparison later, as `GetLot()`` sets this value but
+	// `AddToLot()`` doesn't accept it
+	newLotPath.LotName = "test-1"
+
+	// Now check that the addition was successful
+	lot, err := GetLot("test-1", false)
+	require.NoError(t, err, "Failed to get lot")
+	require.Equal(t, "test-1", lot.LotName)
+	require.Equal(t, 2, len(lot.Paths), fmt.Sprintf("Expected 2 paths, got %+v", lot.Paths))
+	require.Contains(t, lot.Paths, newLotPath)
+}
+
+func TestRemoveLotParents(t *testing.T) {
+	server_utils.ResetTestState()
+	server := getMockDiscoveryHost()
+	viper.Set("Federation.DiscoveryUrl", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
+	defer cleanup()
+	require.True(t, success)
+
+	// First add default lot as parent to test-1, then remove it. We do this
+	// because lotman won't let us remove _all_ parents.
+	addition := LotAddition{
+		LotName: "test-1",
+		Parents: []string{"default"},
+	}
+	err := AddToLot(&addition, server.URL)
+	require.NoError(t, err, "Failed to add to lot")
+	// Now check that the addition was successful
+	lot, err := GetLot("test-1", false)
+	require.NoError(t, err, "Failed to get lot")
+	require.Equal(t, "test-1", lot.LotName)
+	require.Equal(t, 2, len(lot.Parents), fmt.Sprintf("Expected 2 parents, got %+v", lot.Parents))
+	require.Contains(t, lot.Parents, "default")
+
+	// Now remove the default parent
+	removal := LotParentRemoval{
+		LotName: "test-1",
+		Parents: []string{"default"},
+	}
+	err = RemoveLotParents(&removal, server.URL)
+	require.NoError(t, err, "Failed to remove lot parents")
+	// Now check that the removal was successful
+	lot, err = GetLot("test-1", false)
+	require.NoError(t, err, "Failed to get lot")
+	require.Equal(t, "test-1", lot.LotName)
+	require.Equal(t, 1, len(lot.Parents), fmt.Sprintf("Expected 1 parent, got %+v", lot.Parents))
+	require.NotContains(t, lot.Parents, "default")
+}
+
+func TestRemoveLotPaths(t *testing.T) {
+	server_utils.ResetTestState()
+	server := getMockDiscoveryHost()
+	viper.Set("Federation.DiscoveryUrl", server.URL)
+	success, cleanup := setupLotmanFromConf(t, true, "LotmanInitConf", server.URL, nil)
+	defer cleanup()
+	require.True(t, success)
+
+	// Remove the pre-configured path
+	removal := LotPathRemoval{
+		Paths: []string{"/test-1"},
+	}
+
+	err := RemoveLotPaths(&removal, server.URL)
+	require.NoError(t, err, "Failed to remove lot paths")
+	// Now check that the removal was successful
+	lot, err := GetLot("test-1", false)
+	require.NoError(t, err, "Failed to get lot")
+	require.Equal(t, "test-1", lot.LotName)
+	require.Equal(t, 0, len(lot.Paths), fmt.Sprintf("Expected 0 paths, got %+v", lot.Paths))
 }
 
 func TestDeleteLotsRec(t *testing.T) {
