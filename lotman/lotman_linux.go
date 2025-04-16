@@ -146,9 +146,9 @@ type (
 		Owners  []string `json:"owners,omitempty"`
 		Parents []string `json:"parents" mapstructure:"Parents"`
 		// While we _could_ expose Children, that complicates things so for now we keep it hidden from the config
-		Children *[]string  `json:"children,omitempty"`
+		Children *[]string `json:"children,omitempty"`
 		Paths    []LotPath `json:"paths,omitempty" mapstructure:"Paths"`
-		MPA      *MPA       `json:"management_policy_attrs,omitempty" mapstructure:"ManagementPolicyAttrs"`
+		MPA      *MPA      `json:"management_policy_attrs,omitempty" mapstructure:"ManagementPolicyAttrs"`
 		// Again, these are derived
 		RestrictiveMPA *RestrictiveMPA `json:"restrictive_management_policy_attrs,omitempty"`
 		Usage          *LotUsage       `json:"usage,omitempty"`
@@ -182,11 +182,11 @@ type (
 	LotPathRemoval struct {
 		// Paths can belong to at most one lot, so no need
 		// to provide a lot name here
-		Paths   []string `json:"paths"`
+		Paths []string `json:"paths"`
 	}
 
 	LotParentRemoval struct {
-		LotName string `json:"lot_name"`
+		LotName string   `json:"lot_name"`
 		Parents []string `json:"parents"`
 	}
 
@@ -358,38 +358,38 @@ func getFederationIssuer() (string, error) {
 // it will take precedence.
 func mergeMPAs(mpa1, mpa2 *MPA) *MPA {
 	// Handle nil cases
-    if mpa1 == nil && mpa2 == nil {
-        return nil
-    }
-    if mpa1 == nil {
-        return mpa2
-    }
-    if mpa2 == nil {
-        return mpa1
-    }
+	if mpa1 == nil && mpa2 == nil {
+		return nil
+	}
+	if mpa1 == nil {
+		return mpa2
+	}
+	if mpa2 == nil {
+		return mpa1
+	}
 
 	// Merge individual fields
-    mergedMPA := *mpa1
-    if mpa1.DedicatedGB == nil {
-        mergedMPA.DedicatedGB = mpa2.DedicatedGB
-    }
-    if mpa1.OpportunisticGB == nil {
-        mergedMPA.OpportunisticGB = mpa2.OpportunisticGB
-    }
-    if mpa1.MaxNumObjects == nil {
-        mergedMPA.MaxNumObjects = mpa2.MaxNumObjects
-    }
-    if mpa1.CreationTime == nil {
-        mergedMPA.CreationTime = mpa2.CreationTime
-    }
-    if mpa1.ExpirationTime == nil {
-        mergedMPA.ExpirationTime = mpa2.ExpirationTime
-    }
-    if mpa1.DeletionTime == nil {
-        mergedMPA.DeletionTime = mpa2.DeletionTime
-    }
+	mergedMPA := *mpa1
+	if mpa1.DedicatedGB == nil {
+		mergedMPA.DedicatedGB = mpa2.DedicatedGB
+	}
+	if mpa1.OpportunisticGB == nil {
+		mergedMPA.OpportunisticGB = mpa2.OpportunisticGB
+	}
+	if mpa1.MaxNumObjects == nil {
+		mergedMPA.MaxNumObjects = mpa2.MaxNumObjects
+	}
+	if mpa1.CreationTime == nil {
+		mergedMPA.CreationTime = mpa2.CreationTime
+	}
+	if mpa1.ExpirationTime == nil {
+		mergedMPA.ExpirationTime = mpa2.ExpirationTime
+	}
+	if mpa1.DeletionTime == nil {
+		mergedMPA.DeletionTime = mpa2.DeletionTime
+	}
 
-    return &mergedMPA
+	return &mergedMPA
 }
 
 // Given lot1 and lot2, merge them into a single lot. If a field is set in lot1,
@@ -401,79 +401,79 @@ func mergeLots(lot1, lot2 Lot) (Lot, error) {
 	mergedLot := lot1
 
 	// Prefer lot1's owner
-    if lot1.Owner == "" {
-        mergedLot.Owner = lot2.Owner
-    }
+	if lot1.Owner == "" {
+		mergedLot.Owner = lot2.Owner
+	}
 
 	// Calculate union between the parents -- if this gets us in trouble by introducing cycles,
 	// lotman will tell us on startup (hopefully...).
 	parentSet := make(map[string]bool)
-    for _, parent := range lot1.Parents {
-        parentSet[parent] = true
-    }
-    for _, parent := range lot2.Parents {
-        if !parentSet[parent] {
-            mergedLot.Parents = append(mergedLot.Parents, parent)
-            parentSet[parent] = true
-        }
-    }
+	for _, parent := range lot1.Parents {
+		parentSet[parent] = true
+	}
+	for _, parent := range lot2.Parents {
+		if !parentSet[parent] {
+			mergedLot.Parents = append(mergedLot.Parents, parent)
+			parentSet[parent] = true
+		}
+	}
 
 	// Merge the MPAs
 	mergedLot.MPA = mergeMPAs(lot1.MPA, lot2.MPA)
 
-    return mergedLot, nil
+	return mergedLot, nil
 }
 
 // Calculate the union of two lot maps. If a lot is present in both maps, merge them.
 func mergeLotMaps(map1, map2 map[string]Lot) (map[string]Lot, error) {
-    result := make(map[string]Lot)
+	result := make(map[string]Lot)
 
-    // Add all entries from map1 to result
-    for key, value := range map1 {
-        result[key] = value
-    }
+	// Add all entries from map1 to result
+	for key, value := range map1 {
+		result[key] = value
+	}
 
-    // Merge entries from map2 into result
-    for key, value := range map2 {
-        if existingValue, exists := result[key]; exists {
+	// Merge entries from map2 into result
+	for key, value := range map2 {
+		if existingValue, exists := result[key]; exists {
 			mergedLot, err := mergeLots(existingValue, value)
 			if err != nil {
 				return result, err
 			}
-            result[key] = mergedLot
-        } else {
-            result[key] = value
-        }
-    }
+			result[key] = mergedLot
+		} else {
+			result[key] = value
+		}
+	}
 
-    return result, nil
+	return result, nil
 }
 
 // A hook function for mapstructure that validates that all fields in the map are present in the struct.
 // Used to verify the user's input for PolicyDefinitions, since these aren't top-level fields in parameters.yaml
 func validateFieldsHook() mapstructure.DecodeHookFunc {
-    return func(from reflect.Type, to reflect.Type, data interface{}) (interface{}, error) {
-        if from.Kind() != reflect.Map || to.Kind() != reflect.Struct {
-            return data, nil
-        }
+	return func(from reflect.Type, to reflect.Type, data interface{}) (interface{}, error) {
+		if from.Kind() != reflect.Map || to.Kind() != reflect.Struct {
+			return data, nil
+		}
 
-        mapKeys := reflect.ValueOf(data).MapKeys()
-        structFields := make(map[string]struct{})
-        for i := 0; i < to.NumField(); i++ {
-            field := to.Field(i)
-            // Normalize the field name to lowercase
-            structFields[strings.ToLower(field.Tag.Get("mapstructure"))] = struct{}{}
-        }
+		mapKeys := reflect.ValueOf(data).MapKeys()
+		structFields := make(map[string]struct{})
+		for i := 0; i < to.NumField(); i++ {
+			field := to.Field(i)
+			// Normalize the field name to lowercase
+			structFields[strings.ToLower(field.Tag.Get("mapstructure"))] = struct{}{}
+		}
 
-        // Check for unknown fields
-        for _, key := range mapKeys {
-            if _, ok := structFields[strings.ToLower(key.String())]; !ok {
-                return nil, fmt.Errorf("unknown configuration field in Lotman policy definitions: %s", key.String())
-            }
-        }
+		// Check for unknown fields
+		for _, key := range mapKeys {
+			if _, ok := structFields[strings.ToLower(key.String())]; !ok {
+				return nil, fmt.Errorf("unknown configuration field in Lotman policy definitions: %s", key.String())
+			}
+		}
 
-        return data, nil
-    }
+		return data, nil
+	}
 }
 
 // Grab a map of policy definitions from the config file, where the policy
@@ -495,24 +495,24 @@ func GetPolicyMap() (map[string]PurgePolicy, error) {
 
 // Given a filesystem path, try to get the amount of total and free disk space.
 func getDiskUsage(path string) (total uint64, free uint64, err error) {
-    var stat syscall.Statfs_t
+	var stat syscall.Statfs_t
 
-    err = syscall.Statfs(path, &stat)
-    if err != nil {
-        return 0, 0, err
-    }
+	err = syscall.Statfs(path, &stat)
+	if err != nil {
+		return 0, 0, err
+	}
 
-    // Total space is the block size multiplied by the total number of blocks
-    total = stat.Blocks * uint64(stat.Bsize)
+	// Total space is the block size multiplied by the total number of blocks
+	total = stat.Blocks * uint64(stat.Bsize)
 
-    // Free space is the block size multiplied by the number of free blocks
-    free = stat.Bfree * uint64(stat.Bsize)
+	// Free space is the block size multiplied by the number of free blocks
+	free = stat.Bfree * uint64(stat.Bsize)
 
-    return total, free, nil
+	return total, free, nil
 }
 
 func bytesToGigabytes(bytes uint64) float64 {
-    return float64(bytes) / bytesInGigabyte
+	return float64(bytes) / bytesInGigabyte
 }
 
 func gigabytesToBytes(gb float64) uint64 {
@@ -614,31 +614,31 @@ func validateLotsConfig(lots []Lot, totalDiskSpaceB uint64) error {
 // to treat as the watermark, or they may be a suffixed byte value (e.g. 100G). We need this
 // information in bytes to calculate the amount of space to allocate to each lot.
 func convertWatermarkToBytes(value string, totalDiskSpace uint64) (uint64, error) {
-    suffixMultipliers := map[string]uint64{
-        "k": 1000,
-        "m": 1000 * 1000,
-        "g": 1000 * 1000 * 1000,
-        "t": 1000 * 1000 * 1000 * 1000,
-    }
+	suffixMultipliers := map[string]uint64{
+		"k": 1000,
+		"m": 1000 * 1000,
+		"g": 1000 * 1000 * 1000,
+		"t": 1000 * 1000 * 1000 * 1000,
+	}
 
-    // Check if the value has a suffix
-    if len(value) > 1 {
-        suffix := strings.ToLower(string(value[len(value)-1]))
-        if multiplier, exists := suffixMultipliers[suffix]; exists {
-            number, err := strconv.ParseFloat(value[:len(value)-1], 64)
-            if err != nil {
-                return 0, err
-            }
-            return uint64(number * float64(multiplier)), nil
-        }
-    }
+	// Check if the value has a suffix
+	if len(value) > 1 {
+		suffix := strings.ToLower(string(value[len(value)-1]))
+		if multiplier, exists := suffixMultipliers[suffix]; exists {
+			number, err := strconv.ParseFloat(value[:len(value)-1], 64)
+			if err != nil {
+				return 0, err
+			}
+			return uint64(number * float64(multiplier)), nil
+		}
+	}
 
-    // If no suffix, treat as percentage
-    percentage, err := strconv.ParseFloat(strings.TrimSuffix(value, "%"), 64)
-    if err != nil {
-        return 0, err
-    }
-    return uint64((percentage / 100) * float64(totalDiskSpace)), nil
+	// If no suffix, treat as percentage
+	percentage, err := strconv.ParseFloat(strings.TrimSuffix(value, "%"), 64)
+	if err != nil {
+		return 0, err
+	}
+	return uint64((percentage / 100) * float64(totalDiskSpace)), nil
 }
 
 // Divide the remaining space among lots' dedicatedGB values -- we don't ever want to
@@ -662,15 +662,15 @@ func divideRemainingSpace(lotMap *map[string]Lot, totalDiskSpaceB uint64) error 
 	}
 	remainingToHwmB := hwm
 
-    // first iterate through all lots and subtract from our total space any amount
-    // that's already been allocated. Note which lots have an unset value, as we'll
-    // need to return to them.
-    returnToKeys := make([]string, 0, len(*lotMap))
+	// first iterate through all lots and subtract from our total space any amount
+	// that's already been allocated. Note which lots have an unset value, as we'll
+	// need to return to them.
+	returnToKeys := make([]string, 0, len(*lotMap))
 	for key, lot := range *lotMap {
 		if lot.LotName == "root" {
 			continue
 		}
-		if lot.MPA != nil && lot.MPA.DedicatedGB != nil  {
+		if lot.MPA != nil && lot.MPA.DedicatedGB != nil {
 			dedicatedGBBytes := gigabytesToBytes(*lot.MPA.DedicatedGB)
 			// While we check that lot config is valid later, we can't finish dividing space if
 			// remainintToHwmB dips negative. Can't check for < 0 after subtraction because the uint64 will wrap
@@ -712,7 +712,7 @@ func divideRemainingSpace(lotMap *map[string]Lot, totalDiskSpaceB uint64) error 
 }
 
 // Lots have unix millisecond timestamps for creation, expiration, and deletion. If these are not set in the
-//config, we'll set them to the current time. Expiration and deletion times are set to the default lifetime
+// config, we'll set them to the current time. Expiration and deletion times are set to the default lifetime
 func configLotTimestamps(lotMap *map[string]Lot) {
 	now := time.Now().UnixMilli()
 	defaultExpiration := now + param.Lotman_DefaultLotExpirationLifetime.GetDuration().Milliseconds()
@@ -768,7 +768,7 @@ func configLotsFromFedPrefixes(nsAds []server_structs.NamespaceAdV2) (map[string
 			Parents: []string{"root"},
 			Paths: []LotPath{
 				{
-					Path: 	nsAd.Path,
+					Path:      nsAd.Path,
 					Recursive: true,
 				},
 			},
@@ -814,6 +814,101 @@ func topoSort(lotMap map[string]Lot) ([]Lot, error) {
 	return sorted, nil
 }
 
+// Given a lot from the on-disk database and a newly-initialized lot, determine whether
+// Lotman's database needs to be updated.
+// Quirks in Lotman (sorry y'all) mean that we need to do this in a few steps across different
+// update structs.
+func updateLotIfNeeded(existingLot *Lot, newLot *Lot, caller string) error {
+	lotUpdate, lotAddition, lotPathRemoval, lotParentRemoval, err := getLotUpdateJSONs(existingLot, newLot)
+	if err != nil {
+		return errors.Wrap(err, "error getting lot update JSONs")
+	}
+
+	// Send our update objects to Lotman
+	if lotUpdate != nil {
+		if err := UpdateLot(lotUpdate, caller); err != nil {
+			return errors.Wrap(err, "error updating lot")
+		}
+	}
+
+	if lotAddition != nil {
+		if err := AddToLot(lotAddition, caller); err != nil {
+			return errors.Wrap(err, "error adding lot")
+		}
+	}
+
+	if lotPathRemoval != nil {
+		if err := RemoveLotPaths(lotPathRemoval, caller); err != nil {
+			return errors.Wrap(err, "error removing paths from lot")
+		}
+	}
+
+	if lotParentRemoval != nil {
+		if err := RemoveLotParents(lotParentRemoval, caller); err != nil {
+			return errors.Wrap(err, "error removing parents from lot")
+		}
+	}
+
+	return nil
+}
+
+// A helper function used to either populate the database with a newly-initialized lot or update an existing one
+// based on the contents of the newly-initialized lot.
+func ensureLotExistsOrUpdate(lotName string, initializedLots []Lot, federationIssuer string) (bool, error) {
+	errMsg := make([]byte, 2048)
+	ret := LotmanLotExists(lotName, &errMsg)
+	if ret < 0 {
+		trimBuf(&errMsg)
+		log.Errorf("Unable to check whether %s lot exists: %s", lotName, string(errMsg))
+		return false, fmt.Errorf("unable to check whether %s lot exists: %s", lotName, string(errMsg))
+	}
+
+	if ret == 0 {
+		// Lot does not exist, create it
+		for _, lot := range initializedLots {
+			if lot.LotName == lotName {
+				log.Debugf("Creating lot %s defined by %v", lotName, lot)
+				lotJSON, err := json.Marshal(lot)
+				if err != nil {
+					log.Errorf("Unable to marshal %s lot JSON: %v", lotName, err)
+					return false, fmt.Errorf("unable to marshal %s lot JSON: %v", lotName, err)
+				}
+
+				ret = LotmanAddLot(string(lotJSON), &errMsg)
+				if ret != 0 {
+					trimBuf(&errMsg)
+					log.Errorf("Unable to create lot %s: %s", lotName, string(errMsg))
+					return false, fmt.Errorf("unable to create lot %s: %s", lotName, string(errMsg))
+				}
+				log.Infof("Created lot %s", lotName)
+				return true, nil
+			}
+		}
+	} else if ret == 1 {
+		// Lot exists, check for updates
+		for _, lot := range initializedLots {
+			if lot.LotName == lotName {
+				log.Debugf("Lot %s already exists, checking for updates", lotName)
+
+				// Get the lot from the lot database to see if it needs updating
+				existingLot, err := GetLot(lotName, false)
+				if err != nil {
+					log.Errorf("unable to get lot %s to check for updates: %v", lotName, err)
+					return false, fmt.Errorf("unable to get lot %s to check for updates: %v", lotName, err)
+				}
+
+				err = updateLotIfNeeded(existingLot, &lot, federationIssuer)
+				if err != nil {
+					log.Errorf("Unable to update lot %s: %v", lotName, err)
+					return false, fmt.Errorf("unable to update lot %s: %v", lotName, err)
+				}
+				return true, nil
+			}
+		}
+	}
+
+	return false, nil
+}
 
 // Initialize the lot configurations based on provided policy, discovered namespaces,
 // and available cache space, handling any necessary merges and validations along the way.
@@ -910,7 +1005,6 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 				OpportunisticGB: &zero,
 				MaxNumObjects:   &Int64FromFloat{Value: 0}, // Purge plugin doesn't yet use this, set to 0.
 			},
-
 		}
 	}
 	if _, exists := lotMap["root"]; !exists {
@@ -921,13 +1015,13 @@ func initLots(nsAds []server_structs.NamespaceAdV2) ([]Lot, error) {
 
 			Paths: []LotPath{
 				{
-					Path: 	"/",
+					Path:      "/",
 					Recursive: false, // setting this to true would prevent any other lot from claiming a path
 				},
 			},
 			MPA: &MPA{
 				// Max out dedicatedGB so the root lot never purges. All other lots should be tied to their own policies.
-				DedicatedGB: &rootDedGB,
+				DedicatedGB:     &rootDedGB,
 				OpportunisticGB: &zero,
 				MaxNumObjects:   &Int64FromFloat{Value: 0}, // Purge plugin doesn't yet use this, set to 0.
 			},
@@ -1020,80 +1114,31 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 		return false
 	}
 
-	callerMutex.Lock()
-	defer callerMutex.Unlock()
-	ret = LotmanSetContextStr("caller", federationIssuer, &errMsg)
+	// Encapsulate the lock/unlock -- strange things can happen when you call into the underlying C
+	func() {
+		callerMutex.Lock()
+		defer callerMutex.Unlock()
+		ret = LotmanSetContextStr("caller", federationIssuer, &errMsg)
+	}()
 	if ret != 0 {
 		trimBuf(&errMsg)
 		log.Errorf("Error setting caller context to %s for default lot: %s", federationIssuer, string(errMsg))
 		return false
 	}
 
-	// Create the basic lots if they don't already exist. We'll make one for default
-	// and one for the root namespace
-	defaultInitialized := false
-	ret = LotmanLotExists("default", &errMsg)
-	if ret < 0 {
-		trimBuf(&errMsg)
-		log.Errorf("Error checking if default lot exists: %s", string(errMsg))
+	// Init/update the default lot, which must exist _before_ any other lots can be touched
+	defaultInitialized, err := ensureLotExistsOrUpdate("default", initializedLots, federationIssuer)
+	if err != nil {
 		return false
-	} else if ret == 0 {
-		for _, lot := range initializedLots {
-			if lot.LotName == "default" {
-				log.Debugf("Creating the default lot defined by %v", lot)
-				lotJSON, err := json.Marshal(lot)
-				if err != nil {
-					log.Errorf("Error marshalling default lot JSON: %v", err)
-					return false
-				}
-
-				ret = LotmanAddLot(string(lotJSON), &errMsg)
-				if ret != 0 {
-					trimBuf(&errMsg)
-					log.Errorf("Error creating default lot: %s", string(errMsg))
-					return false
-				}
-				defaultInitialized = true
-			}
-		}
-
-		log.Infof("Created default lot")
-	} else if ret == 1 {
-		log.Infoln("Default lot already exists, skipping creation")
-		defaultInitialized = true
 	}
 
-	rootInitialized := false
-	ret = LotmanLotExists("root", &errMsg)
-	if ret < 0 {
-		trimBuf(&errMsg)
-		log.Errorf("Error checking if root lot exists: %s", string(errMsg))
+	// Init/update the root lot, which is a container we use to make sure all lots have a federation-owned parent.
+	rootInitialized, err := ensureLotExistsOrUpdate("root", initializedLots, federationIssuer)
+	if err != nil {
 		return false
-	} else if ret == 0 {
-		for _, lot := range initializedLots {
-			if lot.LotName == "root" {
-				lotJSON, err := json.Marshal(lot)
-				if err != nil {
-					log.Errorf("Error marshalling root lot JSON: %v", err)
-					return false
-				}
-
-				ret = LotmanAddLot(string(lotJSON), &errMsg)
-				if ret != 0 {
-					trimBuf(&errMsg)
-					log.Errorf("Error creating root lot: %s", string(errMsg))
-					return false
-				}
-				rootInitialized = true
-			}
-		}
-
-		log.Infof("Created root lot")
-	} else if ret == 1 {
-		log.Infoln("Root lot already exists, skipping creation")
-		rootInitialized = true
 	}
 
+	// If either of the default or root lots failed to initialize, we can't proceed.
 	if !defaultInitialized || !rootInitialized {
 		log.Errorln("Failed to create default and/or root lots")
 		return false
@@ -1102,32 +1147,12 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	// Now instantiate any other lots that are in the config
 	for _, lot := range initializedLots {
 		if lot.LotName != "default" && lot.LotName != "root" {
-			// Don't try to re-create lots that may already exist, as doing so could prevent
-			// the cache from restarting.
-			// TODO: Work out how to handle this case -- we may need to update the lot instead of creating it
-			ret = LotmanLotExists(lot.LotName, &errMsg)
-			if ret < 0 {
-				trimBuf(&errMsg)
-				log.Errorf("Error checking if lot '%s'exists: %s", lot.LotName, string(errMsg))
+			initialized, err := ensureLotExistsOrUpdate(lot.LotName, initializedLots, federationIssuer)
+			if err != nil {
 				return false
-			} else if ret == 0 {
-				lotJSON, err := json.Marshal(lot)
-				if err != nil {
-					log.Errorf("Error marshalling lot JSON for %s: %v", lot.LotName, err)
-					return false
-				}
-
-				ret = LotmanAddLot(string(lotJSON), &errMsg)
-				if ret != 0 {
-					trimBuf(&errMsg)
-					log.Errorf("Error creating lot %s: %s", lot.LotName, string(errMsg))
-					log.Infoln("Full lot JSON passed to Lotman for lot creation:", string(lotJSON))
-					return false
-				}
-			} else if ret == 1 {
-				log.Infof("Lot '%s' already exists, skipping creation", lot.LotName)
-			} else {
-				log.Errorf("Unexpected return value from Lotman for lot '%s' existence check: %d", lot.LotName, ret)
+			}
+			if !initialized {
+				log.Errorf("Failed to initialize lot %s", lot.LotName)
 				return false
 			}
 		}
@@ -1278,7 +1303,7 @@ func UpdateLot(lotUpdate *LotUpdate, caller string) error {
 //		"paths": [
 //			{
 //				"path": "/new/path",
-// 				"recursive": true/false
+//				"recursive": true/false
 //			}
 //		], (OPTIONAL)
 //		"parents": ["newparent1", "newparent2"] (OPTIONAL)
@@ -1313,13 +1338,13 @@ func AddToLot(lotAddition *LotAddition, caller string) error {
 //
 // The parent removal JSON has the form:
 //
-// {
-//		"lot_name": "lot_name", (REQUIRED)
-//		"parents": [
-//			"parent1",
-//			"parent2"
-//		] (REQUIRED)
-//	}
+//	{
+//			"lot_name": "lot_name", (REQUIRED)
+//			"parents": [
+//				"parent1",
+//				"parent2"
+//			] (REQUIRED)
+//		}
 func RemoveLotParents(parentsRemoval *LotParentRemoval, caller string) error {
 	// Marshal the JSON into a string for the C function
 	parentRemovalJSON, err := json.Marshal(*parentsRemoval)
