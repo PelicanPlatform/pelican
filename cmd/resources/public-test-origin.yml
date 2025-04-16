@@ -1,4 +1,4 @@
-# Origin export configuration to test full multi-export capabilities
+# Origin export configuration for testing
 
 Origin:
   # Things that configure the origin itself
@@ -8,5 +8,4 @@ Origin:
   Exports:
     - StoragePrefix: /<SHOULD BE OVERRIDDEN>
       FederationPrefix: /test
-      # Don't set Reads -- it should be toggled true by setting PublicReads
       Capabilities: ["PublicReads", "Writes", "DirectReads", "Listings"]

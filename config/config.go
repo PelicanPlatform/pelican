@@ -1261,6 +1261,7 @@ func SetServerDefaults(v *viper.Viper) error {
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
 	InitConfigInternal()
+	logging.FlushLogs(true)
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
@@ -1941,6 +1942,7 @@ func ResetConfig() {
 	fedDiscoveryOnce = &sync.Once{}
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
+
 	setServerOnce = sync.Once{}
 
 	ResetIssuerPrivateKeys()

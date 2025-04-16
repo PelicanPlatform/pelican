@@ -48,28 +48,17 @@ import (
 
 func setupXrootd(t *testing.T, ctx context.Context, server server_structs.ServerType) {
 	tmpDir := t.TempDir()
+	server_utils.ResetTestState()
 
 	viper.Set("ConfigDir", tmpDir)
 	viper.Set("Xrootd.RunLocation", tmpDir)
 	viper.Set("Cache.RunLocation", tmpDir)
 	viper.Set("Origin.RunLocation", tmpDir)
-
-	server_utils.ResetTestState()
-
-	dirname, err := os.MkdirTemp("", "tmpDir")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		os.RemoveAll(dirname)
-	})
-	viper.Set("ConfigDir", dirname)
-	viper.Set("Xrootd.RunLocation", dirname)
-	viper.Set("Cache.RunLocation", dirname)
-	viper.Set("Origin.RunLocation", dirname)
 	viper.Set("Origin.StoragePrefix", "/")
 	viper.Set("Origin.FederationPrefix", "/")
 	viper.Set("Server.IssuerUrl", "https://my-xrootd.com:8444")
 
-	err = config.InitServer(ctx, server)
+	err := config.InitServer(ctx, server)
 	require.NoError(t, err)
 
 }
