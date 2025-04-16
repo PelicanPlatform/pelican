@@ -42,6 +42,7 @@ import (
 	"github.com/go-ini/ini"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
 
 	"github.com/pelicanplatform/pelican/cache"
@@ -69,6 +70,7 @@ type (
 		DefaultUser     string
 		UsernameClaim   string
 		NameMapfile     string
+		FedIssuer       bool
 	}
 
 	// Top-level configuration object for the template
@@ -472,6 +474,39 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 	return
 }
 
+// Generate the federation issuer to ensure the client is federation authorized
+func GenerateFederationIssuer() (issuer Issuer, err error) {
+	if enabled := param.Origin_DisableDirectClients.GetBool(); !enabled {
+		return
+	}
+
+	exports, err := server_utils.GetOriginExports()
+	if err != nil {
+		err = errors.Wrap(err, "failed to get origin exports in scitokens config")
+		return
+	}
+	if len(exports) == 0 {
+		err = errors.New("no exports found when configuring Origin scitokens config")
+		return
+	}
+
+	// Use a map to emulate a set
+	pathSet := make(map[string]struct{})
+	for _, export := range exports {
+		pathSet[export.FederationPrefix] = struct{}{}
+	}
+	paths := maps.Keys(pathSet)
+	// Sort the paths to ensure consistent ordering
+	slices.Sort(paths)
+
+	issuer.Name = "Federation"
+	issuer.Issuer = param.Federation_DiscoveryUrl.GetString()
+	issuer.BasePaths = paths
+	issuer.FedIssuer = true
+
+	return
+}
+
 // Generate the scitokens issuer config for each export in the Origin.Exports block
 //
 // Exports map prefix --> issuers, but we need to remap that to issuer --> basePaths
@@ -652,6 +687,18 @@ func WriteOriginScitokensConfig() error {
 		}
 	} else if err != nil {
 		return errors.Wrap(err, "failed to generate xrootd issuer for director-based monitoring")
+	}
+
+	if issuer, err := GenerateFederationIssuer(); err == nil && len(issuer.Name) > 0 {
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			val.Name += " and " + issuer.Name
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
+		}
+	} else if err != nil {
+		return errors.Wrap(err, "failed to generate xrootd issuer for federation")
 	}
 
 	return writeScitokensConfiguration(server_structs.OriginType, &cfg)
