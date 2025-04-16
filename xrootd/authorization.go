@@ -297,15 +297,19 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 			// There exists a public access already in the authfile
 			if server.GetServerType().IsEnabled(server_structs.OriginType) {
 				outStr := "u * /.well-known lr "
-				// Set up public reads only for the namespaces that are public
-				originExports, err := server_utils.GetOriginExports()
-				if err != nil {
-					return errors.Wrapf(err, "Failed to get origin exports")
-				}
 
-				for _, export := range originExports {
-					if export.Capabilities.PublicReads {
-						outStr += export.FederationPrefix + " lr "
+				// Exports are only public if the origin allows direct clients
+				if !param.Origin_DisableDirectClients.GetBool() {
+					// Set up public reads only for the namespaces that are public
+					originExports, err := server_utils.GetOriginExports()
+					if err != nil {
+						return errors.Wrapf(err, "Failed to get origin exports")
+					}
+
+					for _, export := range originExports {
+						if export.Capabilities.PublicReads {
+							outStr += export.FederationPrefix + " lr "
+						}
 					}
 				}
 
@@ -323,15 +327,20 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 	if !foundPublicLine && server.GetServerType().IsEnabled(server_structs.OriginType) {
 		outStr := "u * /.well-known lr"
 
-		// Configure the Authfile for each of the public exports we have in the origin
-		originExports, err := server_utils.GetOriginExports()
-		if err != nil {
-			return errors.Wrapf(err, "Failed to get origin exports")
-		}
+		// Exports are only public if the origin allows direct clients
+		if !param.Origin_DisableDirectClients.GetBool() {
 
-		for _, export := range originExports {
-			if export.Capabilities.PublicReads {
-				outStr += " " + export.FederationPrefix + " lr"
+			// Configure the Authfile for each of the public exports we have in the origin
+
+			originExports, err := server_utils.GetOriginExports()
+			if err != nil {
+				return errors.Wrapf(err, "Failed to get origin exports")
+			}
+
+			for _, export := range originExports {
+				if export.Capabilities.PublicReads {
+					outStr += " " + export.FederationPrefix + " lr"
+				}
 			}
 		}
 
