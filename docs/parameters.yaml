@@ -744,6 +744,29 @@ deprecated: true
 replacedby: "Origin.ExportVolumes"
 components: ["origin"]
 ---
+name: Origin.DisableDirectClients
+description: |+
+  When set to true, the origin will disallow direct connections from end user clients. Instead, all clients must proxy through a valid
+  federation-approved cache service. Proof of this proxy is determined at the Origin by requiring that incoming requests provide a
+  federation-issued token, which caches are expected to provide on behalf of the client.
+
+  For example, if the origin exports a namespace that requires read tokens while enabling this option, the request picks up the federation token
+  from the cache and forwards it to the origin, e.g.:
+  ```
+            (read token)          (read & fed token)
+    client --------------> cache --------------------> origin
+  ```
+
+  This further requires that no exports include the `DirectReads` capability, and attempting to configure both will result in an error.
+
+  >WARNING: This currently breaks the Origin's ability to receive PUT requests, as caches are not yet able to proxy writes.
+  >WARNING: Enabling this option may also restrict which caches in a federation can serve the origin, unless all caches are running pelican
+  v7.15.0 or newer.
+type: bool
+default: false
+hidden: true
+components: ["origin"]
+---
 name: Origin.RunLocation
 description: |+
   A directory where temporary configurations will be stored for the XRootD daemon

@@ -1,26 +1,27 @@
 /***************************************************************
- *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- ***************************************************************/
+*
+* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+*
+* Licensed under the Apache License, Version 2.0 (the "License"); you
+* may not use this file except in compliance with the License.  You may
+* obtain a copy of the License at
+*
+*    http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*
+***************************************************************/
 
 package director
 
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net/http"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
+	"github.com/google/uuid"
 	"github.com/hashicorp/go-version"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
@@ -80,7 +82,45 @@ type (
 
 	// Context key for the project name
 	ProjectContextKey struct{}
+
+	// An internal struct for holding advertisements without any mutexing.
+	// We assume these are copies from the internal ttlcache. Note that we
+	// only store a single namespace ad for each server ad because there can
+	// be at most one supported namespace for each server that's the "best match"
+	copyAd struct {
+		ServerAd    server_structs.ServerAd
+		NamespaceAd server_structs.NamespaceAdV2
+	}
+
+	// Special Director redirect errors
+	noOriginsForNsErr struct {
+		ns string
+	}
+	noOriginsForReqErr struct {
+		verb    string
+		queries string
+	}
+	objectNotFoundErr struct {
+		msg    string
+		object string
+	}
+	directorStartupErr struct {
+		ns string
+	}
 )
+
+func (e noOriginsForNsErr) Error() string {
+	return fmt.Sprintf("no origins found for the requested namespace '%s'", e.ns)
+}
+func (e noOriginsForReqErr) Error() string {
+	return fmt.Sprintf("no origins found that support the '%s' request type with queries '%s'", e.verb, e.queries)
+}
+func (e objectNotFoundErr) Error() string {
+	return fmt.Sprintf("object %s could not be found: %s", e.object, e.msg)
+}
+func (e directorStartupErr) Error() string {
+	return fmt.Sprintf("no servers were found for the requested path '%s'; director just restarted, try again shortly", e.ns)
+}
 
 const (
 	HealthStatusDisabled HealthTestStatus = "Health Test Disabled"
@@ -172,6 +212,41 @@ func getLinkDepth(filepath, prefix string) (int, error) {
 	return pathDepth, nil
 }
 
+// Given a gin request for either the object or origin endpoint, extract the object path
+// from the request URL.
+func getObjectPathFromRequest(ctx *gin.Context) (oPath string) {
+	objectPath := "/api/v1.0/director/object"
+	originPath := "/api/v1.0/director/origin"
+	statPath := "/api/v1.0/director_ui/servers/origins/stat"
+
+	oPath = path.Clean("/" + ctx.Request.URL.Path)
+	// Trim prefixes as needed to get the actual object path
+	if strings.HasPrefix(oPath, objectPath) {
+		return strings.TrimPrefix(oPath, objectPath)
+	}
+
+	if strings.HasPrefix(oPath, originPath) {
+		return strings.TrimPrefix(oPath, originPath)
+	}
+
+	if strings.HasPrefix(oPath, statPath) {
+		return strings.TrimPrefix(oPath, statPath)
+	}
+
+	return oPath
+}
+
+// Given a raw gin request, determine whether it's an object/cache request
+func isCacheRequest(ctx *gin.Context) bool {
+	return strings.HasPrefix(ctx.Request.URL.Path, "/api/v1.0/director/object")
+}
+
+// Given a raw gin request, determine whether it's a source/origin request
+func isOriginRequest(ctx *gin.Context) bool {
+	return strings.HasPrefix(ctx.Request.URL.Path, "/api/v1.0/director/origin") ||
+		strings.HasPrefix(ctx.Request.URL.Path, "/api/v1.0/director_ui/servers/origins/stat")
+}
+
 // Aggregate various request parameters from header and query to a single url.Values struct
 func getRequestParameters(req *http.Request) (requestParams url.Values) {
 	requestParams = url.Values{}
@@ -222,6 +297,35 @@ func getRequestParameters(req *http.Request) (requestParams url.Values) {
 		requestParams.Set(pelican_url.QueryDirectRead, "")
 	}
 	return
+}
+
+// Generate the link header for the response, which encodes our metalink-prioritized list of redirect servers
+func generateLinkHeader(ctx *gin.Context, sAds []server_structs.ServerAd, nsAd server_structs.NamespaceAdV2) {
+	reqPath := getObjectPathFromRequest(ctx)
+
+	// if err != nil, depth == 0, which is the default value for depth
+	// so we can use it as the value for the header even with err
+	depth, err := getLinkDepth(reqPath, nsAd.Path)
+	if err != nil {
+		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, nsAd.Path)
+	}
+
+	linkHeader := ""
+	first := true
+	serversToSend := serverResLimit
+	if numAds := len(sAds); numAds < serverResLimit {
+		serversToSend = numAds
+	}
+	for idx, ad := range sAds[:serversToSend] {
+		if first {
+			first = false
+		} else {
+			linkHeader += ", "
+		}
+		redirectURL := getRedirectURL(reqPath, ad, !nsAd.Caps.PublicReads)
+		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
+	}
+	ctx.Writer.Header()["Link"] = []string{linkHeader}
 }
 
 // Generates the X-Pelican-Authorization header (when applicable) for responses that have
@@ -281,14 +385,53 @@ func generateXTokenGenHeader(ginCtx *gin.Context, namespaceAd server_structs.Nam
 	}
 }
 
-func generateXNamespaceHeader(ginCtx *gin.Context, namespaceAd server_structs.NamespaceAdV2, collUrl string) {
-	xPelicanNamespace := fmt.Sprintf("namespace=%s, require-token=%v", namespaceAd.Path, !namespaceAd.Caps.PublicReads)
+// Generate the X-Pelican-Namespace header, which includes information about the namespace and whether token auth is required
+// for reading from this namespace
+func generateXNamespaceHeader(ginCtx *gin.Context, oAds []server_structs.ServerAd, bestNSAd server_structs.NamespaceAdV2) {
+	var collUrl string
+	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
+	for _, oAd := range oAds {
+		if oAd.Caps.Listings && bestNSAd.Caps.Listings {
+			if !bestNSAd.Caps.PublicReads && oAd.AuthURL != (url.URL{}) {
+				collUrl = oAd.AuthURL.String()
+				break
+			} else {
+				collUrl = oAd.URL.String()
+				break
+			}
+		}
+	}
+
+	xPelicanNamespace := fmt.Sprintf("namespace=%s, require-token=%v", bestNSAd.Path, !bestNSAd.Caps.PublicReads)
 	if collUrl != "" {
 		xPelicanNamespace += fmt.Sprintf(", collections-url=%s", collUrl)
 	}
 	ginCtx.Writer.Header()["X-Pelican-Namespace"] = []string{xPelicanNamespace}
 }
 
+// Generate the X-Pelican-Broker header using the first origin ad we find supporting
+// a broker URL.
+// NOTE -- while we don't distinguish between origin/cache server ads, this function
+// really must be passed origin ads, as no cache ad would be expected to contain a
+// broker URL.
+func generateXBrokerHeader(ginCtx *gin.Context, oAds []server_structs.ServerAd) {
+	for _, ad := range oAds {
+		if brokerUrl := ad.BrokerURL.String(); brokerUrl != "" {
+			ginCtx.Writer.Header()["X-Pelican-Broker"] = []string{brokerUrl}
+			return
+		}
+	}
+}
+
+// Populate the X-Pelican-JobId header with the request ID. This is used for tracking
+// requests through the system.
+func generateXJobIdHeader(ginCtx *gin.Context, requestId uuid.UUID) {
+	ginCtx.Writer.Header()["X-Pelican-JobId"] = []string{requestId.String()}
+}
+
+// Given a URL and a set of query params, add the query params to the URL. This is
+// used in Director's redirect logic, where we only populate the final redirect URL
+// with query params (and not the URLs generated for metalink headers).
 func getFinalRedirectURL(rurl url.URL, requestParams url.Values) string {
 	rQuery := rurl.Query()
 	for key, vals := range requestParams {
@@ -319,7 +462,7 @@ func extractVersionAndService(ginCtx *gin.Context) (reqVer *version.Version, ser
 	return reqVer, service, nil
 }
 
-func versionCompatCheck(reqVer *version.Version, service string) error {
+func validateVersionCompat(reqVer *version.Version, service string) error {
 	var minCompatVer *version.Version
 	switch service {
 	case "client":
@@ -345,8 +488,8 @@ func versionCompatCheck(reqVer *version.Version, service string) error {
 	return nil
 }
 
-// Check and validate the director-specific query params from the redirect request
-func checkRedirectQuery(query url.Values) error {
+// Validate the director-specific query params from the redirect request
+func validateQueryParams(query url.Values) error {
 	_, hasDirectRead := query[pelican_url.QueryDirectRead]
 	_, hasPreferCached := query[pelican_url.QueryPreferCached]
 
@@ -356,568 +499,322 @@ func checkRedirectQuery(query url.Values) error {
 	return nil
 }
 
-func redirectToCache(ginCtx *gin.Context) {
-	reqVer, service, _ := extractVersionAndService(ginCtx)
-	// Flag to indicate if the request was redirected to a cache
-	// For metric collection purposes
-	// see collectDirectorRedirectionMetric
-	redirectedToCache := true
-	defer func() {
-		if !redirectedToCache {
-			collectDirectorRedirectionMetric(ginCtx, "origin")
+// Given a gin request, make sure there are no conflicting query params or other issues.
+func validateIncomingRequest(ctx *gin.Context) (err error) {
+	serviceVersion, service, _ := extractVersionAndService(ctx)
+
+	// TODO: Move this version compat check into the new feature compat code
+	if err = validateVersionCompat(serviceVersion, service); err != nil {
+		return errors.Wrap(err, "version compatibility check failed")
+	}
+
+	// Validate the incoming request doesn't have competing query params
+	if err = validateQueryParams(ctx.Request.URL.Query()); err != nil {
+		return errors.Wrap(err, "invalid query parameter combination")
+	}
+
+	return nil
+}
+
+// Generate the relevant Prometheus metrics based on the redirect. We should always record the client
+// information, but we should only record the redirection if we're sure the Director isn't responding
+// with an error, 404, etc.
+func collectRedirectMetrics(ctx *gin.Context, chosenService string, redirectSucceeded bool) {
+	serviceVersion, service, _ := extractVersionAndService(ctx)
+	collectClientVersionMetric(serviceVersion, service)
+	if redirectSucceeded {
+		collectDirectorRedirectionMetric(ctx, chosenService)
+	}
+}
+
+// Determine whether this request may require redirecting a cache to another cache.
+// TODO: At the time of comment writing, this feature has never been turned on in production
+// and it's likely we'll need to revisit this in the future when we're ready to flip
+// the switch.
+// NOTE: Again, while there's no typed distinction between origin/cache ServerAds, this
+// function should only be passed the slice of origin ads that may fulfill the request's needs
+// because we count those and use them in decision making.
+func requiresCacheChaining(ctx *gin.Context, oAds []server_structs.ServerAd) bool {
+	reqParams := getRequestParameters(ctx.Request)
+	// Can be enabled by query param and director param, but with the following exceptions:
+	// - Number of available Origins >= serverResLimit
+	// - This is a non-read request
+	// - The request has directread, which means direct read to the origin
+	if len(oAds) < serverResLimit &&
+		param.Director_CachesPullFromCaches.GetBool() &&
+		reqParams.Has(pelican_url.QueryPreferCached) &&
+		ctx.Request.Method == http.MethodGet {
+		return true
+	}
+
+	return false
+}
+
+// Given an HTTP verb, return the corresponding Pelican verb. Used for creating
+// more user-friendly error messages.
+func mapHTTPVerbToPelVerb(httpVerb string) string {
+	switch httpVerb {
+	case http.MethodGet:
+		return "get"
+	case http.MethodPut:
+		return "put"
+	case http.MethodDelete:
+		return "delete"
+	case "PROPFIND":
+		return "ls"
+	default:
+		return "unknown"
+	}
+}
+
+// Given a gin request context, determine which capabilities are requested by the client.
+func mapQueriesToCaps(ctx *gin.Context) string {
+	var caps []string
+	if ctx.Request.URL.Query().Has(pelican_url.QueryDirectRead) {
+		caps = append(caps, "DirectReads")
+	}
+	if ctx.Request.URL.Query().Has(pelican_url.QueryRecursive) {
+		caps = append(caps, "Listings")
+	}
+
+	var capsStr string
+	for i, cap := range caps {
+		if i == 0 {
+			capsStr = cap
 		} else {
-			collectDirectorRedirectionMetric(ginCtx, "cache")
+			capsStr += " AND " + cap
 		}
-	}()
-	err := versionCompatCheck(reqVer, service)
-	if err != nil {
-		log.Warningf("A version incompatibility was encountered while redirecting to a cache and no response was served: %v", err)
-		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+	}
+	return capsStr
+}
+
+func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.ServerAd, oAds []server_structs.ServerAd, nsAd server_structs.NamespaceAdV2, requestId uuid.UUID) {
+	reqPath := getObjectPathFromRequest(ctx)
+	if len(chosenAds) == 0 {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Incompatible versions detected: %v", err),
+			Msg:    fmt.Sprintf("No servers found for the requested path '%s': Request ID: %s", reqPath, requestId.String()),
 		})
 		return
 	}
 
-	if err = checkRedirectQuery(ginCtx.Request.URL.Query()); err != nil {
-		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Invalid query parameters: " + err.Error(),
-		})
-		return
-	}
+	// Generate headers
+	generateLinkHeader(ctx, chosenAds, nsAd)
+	generateXAuthHeader(ctx, nsAd)
+	generateXTokenGenHeader(ctx, nsAd)
+	generateXNamespaceHeader(ctx, oAds, nsAd)
+	generateXBrokerHeader(ctx, chosenAds)
+	generateXJobIdHeader(ctx, requestId)
 
-	collectClientVersionMetric(reqVer, service)
+	redirectURL := getRedirectURL(reqPath, chosenAds[0], !nsAd.Caps.PublicReads)
+	reqParams := getRequestParameters(ctx.Request)
 
-	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
-	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/object")
-	ipAddr := utils.ClientIPAddr(ginCtx)
-
-	reqParams := getRequestParameters(ginCtx.Request)
-
-	disableStat := !param.Director_CheckCachePresence.GetBool()
-
-	// Skip the stat check for object availability
-	// If either disableStat or skipstat is set, then skip the stat query
-	skipStat := ginCtx.Request.URL.Query().Has("skipstat") || disableStat
-
-	namespaceAd, originAds, prelimCacheAds := getAdsForPath(reqPath)
-	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
-	// report the lack of path first -- this is most important for the user because it tells them
-	// they're trying to get an object that simply doesn't exist
-	if namespaceAd.Path == "" {
-		// If the director restarted recently, tell the client to try again soon by sending a 429
-		if inStartupSequence() {
-			ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "No cache serving requested prefix; director just restarted, try again later",
-			})
-		} else {
-			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "No namespace found for prefix. Either it doesn't exist, or the Director is experiencing problems",
-			})
-		}
-		return
-	}
-	// if err != nil, depth == 0, which is the default value for depth
-	// so we can use it as the value for the header even with err
-	depth, err := getLinkDepth(reqPath, namespaceAd.Path)
-	if err != nil {
-		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
-	}
-
-	// If the namespace doesn't require a token for reads, remove all topology only ads in order to
-	// prevent redirection to the non-auth version of these caches
-	cacheAds := make([]server_structs.ServerAd, 0, len(prelimCacheAds))
-	if namespaceAd.Caps.PublicReads {
-		for _, pAd := range prelimCacheAds {
-			if !pAd.FromTopology {
-				cacheAds = append(cacheAds, pAd)
-			}
-		}
-	} else {
-		cacheAds = prelimCacheAds
-	}
-
-	// If the namespace requires a token yet there's no token available, skip the stat.
-	if !namespaceAd.Caps.PublicReads && reqParams.Get("authz") == "" {
-		skipStat = true
-	}
-
-	// Stat origins and caches for object availability
-	// For origins, we only want ones with the object
-	// For caches, we still list all in the response but turn down priorities for ones that don't have the object
-	originAdsWObject := []server_structs.ServerAd{}
-	// An array to keep track of object availability of each caches
-	cachesAvailabilityMap := make(map[string]bool, len(cacheAds))
-
-	if skipStat {
-		originAdsWObject = originAds
-		for _, cAd := range cacheAds {
-			cachesAvailabilityMap[cAd.URL.String()] = true
-		}
-	} else {
-		// Query Origins and check if the object exists on the server
-		q := NewObjectStat()
-		st := server_structs.NewServerType()
-		st.SetList([]server_structs.ServerType{server_structs.OriginType, server_structs.CacheType})
-		// Set max response to all available origin and cache servers to ensure we stat against origins
-		// if no cache server has the file
-		// TODO: come back and re-evaluate if we need this many responses and potential origin/cache
-		// server performance issue out of this
-		maxRes := len(cacheAds) + len(originAds)
-		qr := q.Query(context.Background(), reqPath, st, 1, maxRes,
-			withOriginAds(originAds), withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
-		log.Debugf("Cache stat result for %s: %s", reqPath, qr.String())
-
-		// For successful response, we got a list of URLs to access the object.
-		// We will use the host of the object url to match the URL field in originAds and cacheAds
-		if qr.Status == querySuccessful {
-			for _, obj := range qr.Objects {
-				serverHost := obj.URL.Host
-				for _, oAd := range originAds {
-					if oAd.URL.Host == serverHost || oAd.AuthURL.Host == serverHost {
-						originAdsWObject = append(originAdsWObject, oAd)
-					}
-				}
-				for _, cAd := range cacheAds {
-					if cAd.URL.Host == serverHost || cAd.AuthURL.Host == serverHost {
-						cachesAvailabilityMap[cAd.URL.String()] = true
-					}
-				}
-			}
-		} else if qr.Status == queryFailed {
-			if qr.ErrorType == queryNoSourcesErr {
-				ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "Object not found at any cache",
-				})
-				return
-			} else if qr.ErrorType != queryInsufficientResErr {
-				ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg),
-				})
-				return
-			}
-			// For denied servers, append them to availableOriginAds
-			// The qr.DeniedServers is a list of AuthURLs of servers that respond with 403
-			// Here, we need to match against the AuthURL field of originAds
-			for _, ds := range qr.DeniedServers {
-				for _, oAd := range originAds {
-					if oAd.Type == server_structs.OriginType.String() && oAd.AuthURL.String() == ds {
-						originAdsWObject = append(originAdsWObject, oAd)
-					}
-				}
-				for _, cAd := range cacheAds {
-					if cAd.AuthURL.String() == ds {
-						cachesAvailabilityMap[cAd.URL.String()] = true
-					}
-				}
-			}
-		}
-	}
-
-	// If the namespace prefix DOES exist, then it makes sense to say we couldn't find a valid cache.
-	// In this case, we append originAd(s) to cacheAds if the origin enabled DirectReads
-	if len(cacheAds) == 0 {
-		for _, originAd := range originAdsWObject {
-			// Find the first origin that enables direct reads as the fallback
-			if originAd.Caps.DirectReads {
-				cacheAds = append(cacheAds, originAd)
-				break
-			}
-		}
-		if len(cacheAds) == 0 {
-			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "No cache or fallback origin found for this object. The object may not exist in the federation",
-			})
+	// Use debugging redirect info if available and it was asked for
+	if redirectInfo, exists := ctx.Get("redirectInfo"); exists && ctx.GetHeader("X-Pelican-Debug") == "true" {
+		redirectInfoJSON, err := json.Marshal(redirectInfo)
+		if err == nil {
+			// If using ctx.JSON, we need to set the Location header manually.
+			ctx.Writer.Header().Set("Location", getFinalRedirectURL(redirectURL, reqParams))
+			ctx.JSON(http.StatusTemporaryRedirect, redirectInfoJSON)
 			return
-		}
-		// At this point, the cacheAds is full of originAds
-		// We need to indicate that we are redirecting to an origin and not a cache
-		// This is for the purpose of metrics
-		// See collectDirectorRedirectionMetric
-		redirectedToCache = false
-	}
-
-	ctx := context.Background()
-	project := utils.ExtractProjectFromUserAgent(ginCtx.Request.Header.Values("User-Agent"))
-	ctx = context.WithValue(ctx, ProjectContextKey{}, project)
-	redirectInfo := server_structs.NewRedirectInfoFromIP(ipAddr.String())
-	cacheAds, err = sortServerAds(ctx, ipAddr, cacheAds, cachesAvailabilityMap, redirectInfo)
-	if err != nil {
-		log.Error("Error determining server ordering for cacheAds: ", err)
-		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to determine server ordering",
-		})
-		return
-	}
-
-	// "adaptive" sorting method takes care of availability factor
-	if param.Director_CacheSortMethod.GetString() == string(server_structs.AdaptiveType) {
-		// Re-sort by availability, where caches having the object have higher priority
-		sortServerAdsByAvailability(cacheAds, cachesAvailabilityMap)
-	}
-
-	redirectURL := getRedirectURL(reqPath, cacheAds[0], !namespaceAd.Caps.PublicReads)
-
-	linkHeader := ""
-	first := true
-	cachesToSend := serverResLimit
-	if numCAds := len(cacheAds); numCAds < serverResLimit {
-		cachesToSend = numCAds
-	}
-	for idx, ad := range cacheAds[:cachesToSend] {
-		if first {
-			first = false
 		} else {
-			linkHeader += ", "
-		}
-		redirectURL := getRedirectURL(reqPath, ad, !namespaceAd.Caps.PublicReads)
-		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
-	}
-	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
-
-	// Generate headers needed for token generation/verification
-	generateXAuthHeader(ginCtx, namespaceAd)
-	generateXTokenGenHeader(ginCtx, namespaceAd)
-
-	var colUrl string
-	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
-	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
-	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
-	if namespaceAd.Caps.Listings && len(originAdsWObject) > 0 && originAdsWObject[0].Caps.Listings {
-		if !namespaceAd.Caps.PublicReads && originAdsWObject[0].AuthURL != (url.URL{}) {
-			colUrl = originAdsWObject[0].AuthURL.String()
-		} else {
-			colUrl = originAdsWObject[0].URL.String()
+			// Don't treat this is a redirect failure, just log it for director admins to see
+			// and continue with the redirect.
+			log.Errorf("Failed to marshal redirect info to JSON: %v", err)
 		}
 	}
-	generateXNamespaceHeader(ginCtx, namespaceAd, colUrl)
 
 	// Note we only append the `authz` query parameter in the case of the redirect response and not the
 	// duplicate link metadata above.  This is purposeful: the Link header might get too long if we repeat
 	// the token 20 times for 20 caches.  This means a "normal HTTP client" will correctly redirect but
 	// anything parsing the `Link` header for metalinks will need logic for redirecting appropriately.
-	if ginCtx.GetHeader("X-Pelican-Debug") == "true" {
-		ginCtx.JSON(http.StatusTemporaryRedirect, redirectInfo)
+	ctx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
+}
+
+// Get or create a taint we can use for tracking the behavior of this request
+// through the system.
+func getRequestID(ctx *gin.Context) uuid.UUID {
+	// Canonicalize the header key to avoid any issues with case sensitivity
+	canonicalKey := http.CanonicalHeaderKey("X-Pelican-JobId")
+	if jobID := ctx.Request.Header[canonicalKey]; len(jobID) > 0 {
+		if id, err := uuid.Parse(jobID[0]); err == nil {
+			return id
+		}
 	}
-	ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
+
+	// If request doesn't tell us its identity, assign one
+	return uuid.New()
+}
+
+// If `getSortedAds` returns an error, determine which type it is and respond
+// to the client with a sensible explanation of what went wrong.
+func processSortedAdsErr(ginCtx *gin.Context, err error, requestId uuid.UUID) {
+	switch err.(type) {
+	case noOriginsForNsErr:
+		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("No sources found for the requested path: %v: Request ID: %s", err, requestId.String()),
+		})
+	case noOriginsForReqErr:
+		ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg: fmt.Sprintf("Discovered sources for the namespace, but none support the request: %v: "+
+				"See '%s' to troubleshoot available origins/caches and their capabilities: Request ID: %s", err, param.Server_ExternalWebUrl.GetString(), requestId.String()),
+		})
+	case objectNotFoundErr:
+		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("No sources reported possession of the object: %v: Are you sure it exists?: Request ID: %s", err, requestId.String()),
+		})
+	case directorStartupErr:
+		ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
+		})
+	default:
+		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to get/sort server ads for the requested path: %v: Request ID: %s", err, requestId.String()),
+		})
+	}
+}
+
+func redirectToCache(ginCtx *gin.Context) {
+	// Later we'll collect metrics for which service we sent the user to. For now, assume
+	// we're sending them to a cache.
+	chosenService := "cache"
+	redirectSucceeded := false
+	defer func(chosenService *string, redirectSucceeded *bool) {
+		collectRedirectMetrics(ginCtx, *chosenService, *redirectSucceeded)
+	}(&chosenService, &redirectSucceeded)
+
+	// Assign this request an ID (which may come from the client) so we can use it to track
+	// the request through the Director.
+	requestId := getRequestID(ginCtx)
+
+	// Make sure the user hasn't asked us to do anything too goofy
+	if err := validateIncomingRequest(ginCtx); err != nil {
+		log.Debugf("Failed to validate incoming request: %v", err)
+		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to validate incoming request: %v: Request ID: %s", err, requestId.String()),
+		})
+		return
+	}
+
+	// Get the sorted origins/caches for the request. All returned ads should be capable of serving the request,
+	// as matchmaking is handled within.
+	oAds, cAds, err := getSortedAds(ginCtx, requestId)
+	if err != nil {
+		processSortedAdsErr(ginCtx, err, requestId)
+		return
+	}
+
+	// If the namespace prefix is exported by at least one functioning origin but there are no supporting
+	// caches, fallback to the origin if able.
+	if len(cAds) == 0 {
+		for _, oAd := range oAds {
+			// Find the first origin that enables direct reads as the fallback
+			if oAd.ServerAd.Caps.DirectReads && oAd.NamespaceAd.Caps.DirectReads {
+				cAds = append(cAds, oAd)
+				break
+			}
+		}
+		if len(cAds) == 0 {
+			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "No caches can fulfill this request and no fallback origins with the 'DirectReads' capability found for this object. Request ID: " + requestId.String(),
+			})
+			return
+		}
+
+		// At this point, the cacheAds is full of originAds
+		// We need to indicate that we are redirecting to an origin and not a cache
+		// This is for the purpose of metrics
+		// See collectDirectorRedirectionMetric
+		chosenService = "origin"
+	}
+
+	chosenServers := make([]server_structs.ServerAd, 0, len(cAds))
+	for _, ad := range cAds {
+		chosenServers = append(chosenServers, ad.ServerAd)
+	}
+
+	oServers := make([]server_structs.ServerAd, 0, len(oAds))
+	for _, ad := range oAds {
+		oServers = append(oServers, ad.ServerAd)
+	}
+
+	redirectSucceeded = true
+	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd, requestId)
 }
 
 func redirectToOrigin(ginCtx *gin.Context) {
-	reqVer, service, _ := extractVersionAndService(ginCtx)
-	defer collectDirectorRedirectionMetric(ginCtx, "origin")
-	err := versionCompatCheck(reqVer, service)
-	if err != nil {
-		log.Warningf("A version incompatibility was encountered while redirecting to an origin and no response was served: %v", err)
+	chosenService := "origin"
+	redirectSucceeded := false
+	defer func(chosenService *string, redirectSucceeded *bool) {
+		collectRedirectMetrics(ginCtx, *chosenService, *redirectSucceeded)
+	}(&chosenService, &redirectSucceeded)
+
+	// Assign this request an ID (which may come from the client) so we can use it to track
+	// the request through the Director.
+	requestId := getRequestID(ginCtx)
+
+	// Make sure the user hasn't asked us to do anything too goofy
+	if err := validateIncomingRequest(ginCtx); err != nil {
+		log.Debugf("Failed to validate incoming request: %v", err)
 		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Incompatible versions detected: %v", err),
+			Msg:    fmt.Sprintf("Failed to validate incoming request: %v: Request ID: %s", err, requestId.String()),
 		})
 		return
 	}
-
-	if err = checkRedirectQuery(ginCtx.Request.URL.Query()); err != nil {
-		ginCtx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Invalid query parameters: " + err.Error(),
-		})
-		return
-	}
-
-	collectClientVersionMetric(reqVer, service)
-
-	reqPath := path.Clean("/" + ginCtx.Request.URL.Path)
-	reqPath = strings.TrimPrefix(reqPath, "/api/v1.0/director/origin")
 
 	// /pelican/monitoring is the path for director-based health test
 	// where we have /director/healthTest API to mock a test object for caches to pull (as if it's from an origin)
-	if strings.HasPrefix(reqPath, "/pelican/monitoring/") {
+	reqPath := getObjectPathFromRequest(ginCtx)
+	if strings.HasPrefix(reqPath, server_utils.MonitoringBaseNs+"/") {
+		redirectSucceeded = true
 		ginCtx.Redirect(http.StatusTemporaryRedirect, param.Server_ExternalWebUrl.GetString()+"/api/v1.0/director/healthTest"+reqPath)
 		return
 	}
 
-	ipAddr := utils.ClientIPAddr(ginCtx)
-
-	reqParams := getRequestParameters(ginCtx.Request)
-
-	// Skip the stat check for object availability if either disableStat or skipstat is set
-	skipStat := reqParams.Has(pelican_url.QuerySkipStat) || !param.Director_CheckOriginPresence.GetBool()
-
-	// Include caches in the response if Director.CachesPullFromCaches is enabled
-	// AND prefercached query parameter is set
-	includeCaches := param.Director_CachesPullFromCaches.GetBool() && reqParams.Has(pelican_url.QueryPreferCached)
-
-	namespaceAd, originAds, cacheAds := getAdsForPath(reqPath)
-	// if GetAdsForPath doesn't find any ads because the prefix doesn't exist, we should
-	// report the lack of path first -- this is most important for the user because it tells them
-	// they're trying to get an object that simply doesn't exist
-	if namespaceAd.Path == "" {
-		// If the director restarted recently, tell the client to try again soon by sending a 429
-		if inStartupSequence() {
-			ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "No origin serving requested prefix; director just restarted, try again later",
-			})
-		} else {
-			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    "No namespace found for path. Either it doesn't exist, or the Director is experiencing problems",
-			})
-		}
+	// Get the sorted origins/caches for the request. All returned ads should be capable of serving the request,
+	// as matchmaking is handled here.
+	oAds, cAds, err := getSortedAds(ginCtx, requestId)
+	if err != nil {
+		processSortedAdsErr(ginCtx, err, requestId)
 		return
 	}
 
-	// If the namespace requires a token yet there's no token available, skip the stat.
-	if (!namespaceAd.Caps.PublicReads && reqParams.Get("authz") == "") || (param.Director_AssumePresenceAtSingleOrigin.GetBool() && len(originAds) == 1) {
-		skipStat = true
+	chosenServers := make([]server_structs.ServerAd, 0, serverResLimit)
+	for idx, ad := range oAds {
+		if idx >= serverResLimit {
+			break
+		}
+		chosenServers = append(chosenServers, ad.ServerAd)
 	}
 
-	var q *ObjectStat
-
-	availableAds := []server_structs.ServerAd{}
-	// Skip stat query for PUT (upload), PROPFIND (listing) or whenever the skipStat query flag is on
-	if ginCtx.Request.Method == http.MethodPut || ginCtx.Request.Method == "PROPFIND" || skipStat {
-		availableAds = originAds
-	} else {
-		// Query Origins and check if the object exists
-		q = NewObjectStat()
-		qr := q.Query(context.Background(), reqPath, server_structs.OriginType, 1, 3,
-			withOriginAds(originAds), WithToken(reqParams.Get("authz")), withAuth(!namespaceAd.Caps.PublicReads))
-		log.Debugf("Origin stat result for %s: %s", reqPath, qr.String())
-
-		// For a successful response, we got a list of object URLs.
-		// We then use the host of the object url to match the URL field in originAds
-		if qr.Status == querySuccessful {
-			for _, obj := range qr.Objects {
-				serverHost := obj.URL.Host
-				for _, oAd := range originAds {
-					// TODO: have a UNIQUE id for each server
-					// Also check AuthURL in case we retried on the AuthURL for some servers
-					if oAd.URL.Host == serverHost || oAd.AuthURL.Host == serverHost {
-						availableAds = append(availableAds, oAd)
-					}
-				}
-			}
-		} else if qr.Status == queryFailed {
-			if qr.ErrorType == queryNoSourcesErr {
-				ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    "All sources report object was not found",
-				})
-			} else if qr.ErrorType != queryInsufficientResErr {
-				ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-					Status: server_structs.RespFailed,
-					Msg:    fmt.Sprintf("Failed to query origins with error %s: %s", string(qr.ErrorType), qr.Msg),
-				})
-				return
-			}
-			// For denied servers, append them to availableOriginAds,
-			// we don't check if DeniedServers is empty as we might be able to pull the object from other caches.
-			// The qr.DeniedServers is a list of AuthURLs of servers that respond with 403
-			// Here, we need to match against the AuthURL field of originAds
-			for _, ds := range qr.DeniedServers {
-				for _, oAd := range originAds {
-					if oAd.AuthURL.String() == ds {
-						availableAds = append(availableAds, oAd)
-					}
-				}
-			}
-		}
-	}
-
-	// If CachesPullFromCaches is enabled, we stat caches and append cache servers that have the object,
-	// with the following exceptions:
-	// - Number of available Origins >= serverResLimit
-	// - This is an upload request (PUT) or listing request (PROPFIND)
-	// - The request has directread, which means direct read to the origin
-	if len(availableAds) < serverResLimit &&
-		includeCaches &&
-		ginCtx.Request.Method != http.MethodPut &&
-		ginCtx.Request.Method != "PROPFIND" &&
-		!reqParams.Has(pelican_url.QueryDirectRead) {
-		if q == nil {
-			q = NewObjectStat()
-		}
-		qr := q.Query(context.Background(), reqPath, server_structs.CacheType, 1, 3,
-			withCacheAds(cacheAds), WithToken(reqParams.Get("authz")))
-		log.Debugf("CachesPullFromCaches is enabled. Stat result for %s among caches: %s", reqPath, qr.String())
-
-		// For successful response, we got a list of URL to access the object.
-		// We will use the host of the object url to match the URL field in cacheAds
-		if qr.Status == querySuccessful {
-			for _, obj := range qr.Objects {
-				serverHost := obj.URL.Host
-				for _, oAd := range cacheAds {
-					// TODO: have a UNIQUE id for each server
-					// Also check AuthURL in case we retried on the AuthURL for some servers
-					if oAd.URL.Host == serverHost || oAd.AuthURL.Host == serverHost {
-						availableAds = append(availableAds, oAd)
-					}
-				}
-			}
-		} else if qr.Status == queryFailed {
-			if qr.ErrorType != queryInsufficientResErr {
-				log.Debugf("CachesPullFromCaches is enabled, but error occurred when querying caches for the object %s: %s %s", reqPath, string(qr.ErrorType), qr.Msg)
-			} else if len(qr.DeniedServers) == 0 { // Insufficient response
-				log.Debugf("CachesPullFromCaches is enabled, but no caches found for the object %s", reqPath)
+	if requiresCacheChaining(ginCtx, chosenServers) {
+		chosenCaches := make([]server_structs.ServerAd, 0, serverResLimit-len(oAds))
+		for i, ad := range cAds {
+			if i+len(oAds) < serverResLimit {
+				chosenCaches = append(chosenCaches, ad.ServerAd)
 			} else {
-				// For denied cache servers, append them to availableAds
-				// The qr.DeniedServers is a list of AuthURLs of servers that respond with 403
-				// Here, we need to match against the AuthURL field of cacheAds
-				for _, ds := range qr.DeniedServers {
-					for _, oAd := range cacheAds {
-						if oAd.AuthURL.String() == ds {
-							availableAds = append(availableAds, oAd)
-						}
-					}
-				}
+				break
 			}
 		}
+
+		chosenServers = append(chosenCaches, chosenServers...)
 	}
 
-	// No available originAds or cacheAds if CachesPullFromCaches is enabled, object does not exist
-	if len(availableAds) == 0 {
-		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "There are currently no origins hosting the object: available origin Ads is 0",
-		})
-		return
+	oServers := make([]server_structs.ServerAd, 0, len(oAds))
+	for _, ad := range oAds {
+		oServers = append(oServers, ad.ServerAd)
 	}
 
-	// if err != nil, depth == 0, which is the default value for depth
-	// so we can use it as the value for the header even with err
-	depth, err := getLinkDepth(reqPath, namespaceAd.Path)
-	if err != nil {
-		log.Errorf("Failed to get depth attribute for the redirecting request to %q, with best match namespace prefix %q", reqPath, namespaceAd.Path)
-	}
-
-	ctx := context.Background()
-	project := utils.ExtractProjectFromUserAgent(ginCtx.Request.Header.Values("User-Agent"))
-	ctx = context.WithValue(ctx, ProjectContextKey{}, project)
-	redirectInfo := server_structs.NewRedirectInfoFromIP(ipAddr.String())
-	availableAds, err = sortServerAds(ctx, ipAddr, availableAds, nil, redirectInfo)
-	if err != nil {
-		log.Error("Error determining server ordering for originAds: ", err)
-		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to determine origin ordering",
-		})
-		return
-	}
-
-	linkHeader := ""
-	first := true
-	serversToSend := serverResLimit
-	if numCAds := len(availableAds); numCAds < serverResLimit {
-		serversToSend = numCAds
-	}
-	for idx, ad := range availableAds[:serversToSend] {
-		if first {
-			first = false
-		} else {
-			linkHeader += ", "
-		}
-		redirectURL := getRedirectURL(reqPath, ad, !namespaceAd.Caps.PublicReads)
-		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
-	}
-	ginCtx.Writer.Header()["Link"] = []string{linkHeader}
-
-	var colUrl string
-	// If the namespace or the origin does not allow directory listings, then we should not advertise a collections-url.
-	// This is because the configuration of the origin/namespace should override the inclusion of "dirlisthost" for that origin.
-	// Listings is true by default so if it is ever set to false we should accept that config over the dirlisthost.
-	if namespaceAd.Caps.Listings && len(availableAds) > 0 && availableAds[0].Caps.Listings {
-		if !namespaceAd.Caps.PublicReads && availableAds[0].AuthURL != (url.URL{}) {
-			colUrl = availableAds[0].AuthURL.String()
-		} else {
-			colUrl = availableAds[0].URL.String()
-		}
-	}
-	generateXNamespaceHeader(ginCtx, namespaceAd, colUrl)
-
-	var redirectURL url.URL
-
-	// If we are doing a PROPFIND, check if origins enable dirlistings
-	if ginCtx.Request.Method == "PROPFIND" {
-		for idx, ad := range availableAds {
-			if ad.Caps.Listings && namespaceAd.Caps.Listings {
-				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.Caps.PublicReads)
-				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
-					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
-				}
-				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
-				return
-			}
-		}
-		ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "No origins on specified endpoint allow collection listings",
-		})
-	}
-
-	// We know this can be easily bypassed, we need to eventually enforce this
-	// Origin should only be redirected to if it allows direct reads or the cache is the one it is talking to.
-	// Any client that uses this api that doesn't set directreads can talk directly to an origin
-
-	// Check if we are doing a DirectRead and if it is allowed
-	if reqParams.Has(pelican_url.QueryDirectRead) {
-		for idx, originAd := range availableAds {
-			if originAd.Caps.DirectReads && namespaceAd.Caps.DirectReads {
-				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.Caps.PublicReads)
-				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
-					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
-				}
-				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
-				return
-			}
-		}
-		ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "No origins on specified endpoint have direct reads enabled",
-		})
-		return
-	}
-
-	// Generate headers needed for token generation/verification
-	generateXAuthHeader(ginCtx, namespaceAd)
-	generateXTokenGenHeader(ginCtx, namespaceAd)
-
-	// If we are doing a PUT or DELETE, check to see if any origins are writeable
-	if ginCtx.Request.Method == http.MethodPut || ginCtx.Request.Method == http.MethodDelete {
-		for idx, ad := range availableAds {
-			if ad.Caps.Writes && namespaceAd.Caps.Writes {
-				redirectURL = getRedirectURL(reqPath, availableAds[idx], !namespaceAd.Caps.PublicReads)
-				if brokerUrl := availableAds[idx].BrokerURL; brokerUrl.String() != "" {
-					ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
-				}
-				ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
-				return
-			}
-		}
-		ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "No origins on specified endpoint have direct reads enabled",
-		})
-		return
-	} else { // Otherwise, we are doing a GET
-		redirectURL := getRedirectURL(reqPath, availableAds[0], !namespaceAd.Caps.PublicReads)
-		if brokerUrl := availableAds[0].BrokerURL; brokerUrl.String() != "" {
-			ginCtx.Header("X-Pelican-Broker", brokerUrl.String())
-		}
-
-		// See note in RedirectToCache as to why we only add the authz query parameter to this URL,
-		// not those in the `Link`.
-		if ginCtx.GetHeader("X-Pelican-Debug") == "true" {
-			ginCtx.JSON(http.StatusTemporaryRedirect, redirectInfo)
-		}
-		ginCtx.Redirect(http.StatusTemporaryRedirect, getFinalRedirectURL(redirectURL, reqParams))
-	}
+	redirectSucceeded = true
+	generateRedirectResponse(ginCtx, chosenServers, oServers, oAds[0].NamespaceAd, requestId)
 }
 
 func checkHostnameRedirects(c *gin.Context, incomingHost string) {
@@ -1036,7 +933,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	}
 
 	reqVer, service, _ := extractVersionAndService(ctx)
-	err := versionCompatCheck(reqVer, service)
+	err := validateVersionCompat(reqVer, service)
 	if err != nil {
 		log.Warningf("A version incompatibility was encountered while registering %s and no response was served: %v", sType, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -1388,6 +1285,7 @@ func finishRegisterServeAd(engineCtx context.Context, ctx *gin.Context, adV2 *se
 		BrokerURL:           *brokerUrl,
 		Type:                sType.String(),
 		Caps:                adV2.Caps,
+		RequiredFeatures:    adV2.RequiredFeatures,
 		IOLoad:              0.0, // Explicitly set to 0. The sort algorithm takes 0.0 as unknown load
 		Downtimes:           adV2.Downtimes,
 	}
@@ -1494,7 +1392,7 @@ func listNamespacesV2(ctx *gin.Context) {
 			PublicReads: true,
 			Reads:       true,
 		},
-		Path: "/pelican/monitoring",
+		Path: server_utils.MonitoringBaseNs,
 	})
 	ctx.JSON(http.StatusOK, namespacesAdsV2)
 }
@@ -1509,10 +1407,17 @@ func getPrefixByPath(ctx *gin.Context) {
 		return
 	}
 
-	originNs, _, _ := getAdsForPath(pathParam)
-
+	oAds, _ := getAdsForPath(pathParam)
+	if len(oAds) == 0 {
+		ctx.AbortWithStatusJSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "No server is currently advertising the path",
+		})
+		return
+	}
+	ns := oAds[0].NamespaceAd
 	// If originNs.Path is an empty value, then the namespace is not found
-	if originNs.Path == "" {
+	if ns.Path == "" {
 		ctx.AbortWithStatusJSON(http.StatusNotFound, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Namespace prefix not found for " + pathParam,
@@ -1520,7 +1425,7 @@ func getPrefixByPath(ctx *gin.Context) {
 		return
 	}
 
-	res := server_structs.GetPrefixByPathRes{Prefix: originNs.Path}
+	res := server_structs.GetPrefixByPathRes{Prefix: ns.Path}
 	ctx.JSON(http.StatusOK, res)
 }
 

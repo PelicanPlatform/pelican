@@ -556,7 +556,9 @@ func TestDirectorRegistration(t *testing.T) {
 			Namespaces: []server_structs.NamespaceAdV2{{
 				Path:   "/foo/bar",
 				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+				Caps:   server_structs.Capabilities{PublicReads: true},
 			}},
+			Caps: server_structs.Capabilities{PublicReads: true},
 		}
 		ad.Initialize("test")
 
@@ -1245,7 +1247,7 @@ func TestCheckRedirectQuery(t *testing.T) {
 		mockQuery, err := url.ParseQuery(mockQueryStr)
 		require.NoError(t, err)
 
-		assert.NoError(t, checkRedirectQuery(mockQuery))
+		assert.NoError(t, validateQueryParams(mockQuery))
 	})
 
 	t.Run("valid-prefercached-only", func(t *testing.T) {
@@ -1253,7 +1255,7 @@ func TestCheckRedirectQuery(t *testing.T) {
 		mockQuery, err := url.ParseQuery(mockQueryStr)
 		require.NoError(t, err)
 
-		assert.NoError(t, checkRedirectQuery(mockQuery))
+		assert.NoError(t, validateQueryParams(mockQuery))
 	})
 
 	t.Run("invalid-both-directread-and-prefercached", func(t *testing.T) {
@@ -1261,7 +1263,7 @@ func TestCheckRedirectQuery(t *testing.T) {
 		mockQuery, err := url.ParseQuery(mockQueryStr)
 		require.NoError(t, err)
 
-		checkErr := checkRedirectQuery(mockQuery)
+		checkErr := validateQueryParams(mockQuery)
 		require.Error(t, checkErr)
 		assert.Equal(t, "cannot have both directread and prefercached query parameters", checkErr.Error())
 	})
@@ -1271,7 +1273,7 @@ func TestCheckRedirectQuery(t *testing.T) {
 		mockQuery, err := url.ParseQuery(mockQueryStr)
 		require.NoError(t, err)
 
-		assert.NoError(t, checkRedirectQuery(mockQuery))
+		assert.NoError(t, validateQueryParams(mockQuery))
 	})
 
 	t.Run("valid-random-param", func(t *testing.T) {
@@ -1279,7 +1281,7 @@ func TestCheckRedirectQuery(t *testing.T) {
 		mockQuery, err := url.ParseQuery(mockQueryStr)
 		require.NoError(t, err)
 
-		assert.NoError(t, checkRedirectQuery(mockQuery))
+		assert.NoError(t, validateQueryParams(mockQuery))
 	})
 }
 
@@ -1905,6 +1907,7 @@ func TestHeaderGenFuncs(t *testing.T) {
 		Caps: server_structs.Capabilities{
 			PublicReads: false,
 			Reads:       true,
+			Listings:    true,
 		},
 		Generation: []server_structs.TokenGen{tGen},
 		Issuer:     []server_structs.TokenIssuer{tIss},
@@ -1960,22 +1963,56 @@ func TestHeaderGenFuncs(t *testing.T) {
 		assert.Empty(t, cPub.Writer.Header().Get("X-Pelican-Token-Generation"))
 	})
 
-	t.Run("test-x-pel-namespace", func(t *testing.T) {
+	t.Run("test-x-pel-namespace-authed-with-collections", func(t *testing.T) {
 		authedRecorder := httptest.NewRecorder()
 		cAuth, _ := gin.CreateTestContext(authedRecorder)
 		cAuth.Request = authReq
 
-		collUrl := "https://my-origin.com"
-		generateXNamespaceHeader(cAuth, authedNamespaceAd, collUrl)
+		originAds := []server_structs.ServerAd{
+			{
+				Caps: server_structs.Capabilities{Listings: true},
+				URL: url.URL{
+					Scheme: "https",
+					Host:   "my-origin.com",
+				},
+			},
+			{
+				Caps: server_structs.Capabilities{Listings: false},
+				URL: url.URL{
+					Scheme: "https",
+					Host:   "my-origin2.com",
+				},
+			},
+		}
+		generateXNamespaceHeader(cAuth, originAds, authedNamespaceAd)
 		assert.NotEmpty(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"))
 		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"), "namespace=/my/server")
 		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"), "require-token=true")
 		assert.Contains(t, cAuth.Writer.Header().Get("X-Pelican-Namespace"), "collections-url=https://my-origin.com")
+	})
 
+	t.Run("test-x-pel-namespace-public-no-collections", func(t *testing.T) {
 		pubRecorder := httptest.NewRecorder()
 		cPub, _ := gin.CreateTestContext(pubRecorder)
 		cPub.Request = pubReq
-		generateXNamespaceHeader(cPub, publicNamespaceAd, "")
+
+		originAds := []server_structs.ServerAd{
+			{
+				Caps: server_structs.Capabilities{Listings: true},
+				URL: url.URL{
+					Scheme: "https",
+					Host:   "my-origin.com",
+				},
+			},
+			{
+				Caps: server_structs.Capabilities{Listings: false},
+				URL: url.URL{
+					Scheme: "https",
+					Host:   "my-origin2.com",
+				},
+			},
+		}
+		generateXNamespaceHeader(cPub, originAds, publicNamespaceAd)
 		assert.NotEmpty(t, cPub.Writer.Header().Get("X-Pelican-Namespace"))
 		assert.Contains(t, cPub.Writer.Header().Get("X-Pelican-Namespace"), "namespace=/different/server")
 		assert.Contains(t, cPub.Writer.Header().Get("X-Pelican-Namespace"), "require-token=false")

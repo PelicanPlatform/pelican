@@ -207,6 +207,7 @@ type Config struct {
 		Concurrency int `mapstructure:"concurrency" yaml:"Concurrency"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DirectorTest bool `mapstructure:"directortest" yaml:"DirectorTest"`
+		DisableDirectClients bool `mapstructure:"disabledirectclients" yaml:"DisableDirectClients"`
 		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
 		EnableCmsd bool `mapstructure:"enablecmsd" yaml:"EnableCmsd"`
 		EnableDirListing bool `mapstructure:"enabledirlisting" yaml:"EnableDirListing"`
@@ -557,6 +558,7 @@ type configWithType struct {
 		Concurrency struct { Type string; Value int }
 		DbLocation struct { Type string; Value string }
 		DirectorTest struct { Type string; Value bool }
+		DisableDirectClients struct { Type string; Value bool }
 		EnableBroker struct { Type string; Value bool }
 		EnableCmsd struct { Type string; Value bool }
 		EnableDirListing struct { Type string; Value bool }

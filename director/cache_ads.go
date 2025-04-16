@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -301,126 +300,6 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 	ad.Latitude = lat
 	ad.Longitude = long
 	return nil
-}
-
-func matchesPrefix(reqPath string, namespaceAds []server_structs.NamespaceAdV2) *server_structs.NamespaceAdV2 {
-	var best *server_structs.NamespaceAdV2
-
-	for _, namespace := range namespaceAds {
-		serverPath := namespace.Path
-		if strings.Compare(serverPath, reqPath) == 0 {
-			return &namespace
-		}
-
-		// Some namespaces in Topology already have the trailing /, some don't
-		// Perhaps this should be standardized, but in case it isn't we need to
-		// handle it throughout this function. Note that reqPath already has the
-		// tail from being called by GetAdsForPath
-		if serverPath[len(serverPath)-1:] != "/" {
-			serverPath += "/"
-		}
-
-		// The assignment of best doesn't account for the trailing / that we need to consider
-		// Account for that by setting up a tmpBest string that adds the / if needed
-		var tmpBest string
-		if best != nil {
-			tmpBest = best.Path
-			if tmpBest[len(tmpBest)-1:] != "/" {
-				tmpBest += "/"
-			}
-		}
-
-		// Make the len comparison with tmpBest, because serverPath is one char longer now
-		if strings.HasPrefix(reqPath, serverPath) && len(serverPath) > len(tmpBest) {
-			if best == nil {
-				best = new(server_structs.NamespaceAdV2)
-			}
-			*best = namespace
-		}
-	}
-	return best
-}
-
-func getAdsForPath(reqPath string) (originNamespace server_structs.NamespaceAdV2, originAds []server_structs.ServerAd, cacheAds []server_structs.ServerAd) {
-	skippedServers := []server_structs.ServerAd{}
-
-	// Clean the path, but re-append a trailing / to deal with some namespaces
-	// from topo that have a trailing /
-	reqPath = path.Clean(reqPath)
-	reqPath += "/"
-
-	// Iterate through all of the server ads. For each "item", the key
-	// is the server ad itself (either cache or origin), and the value
-	// is a slice of namespace prefixes are supported by that server
-	var best *server_structs.NamespaceAdV2
-	ads := []*server_structs.Advertisement{}
-	for _, item := range serverAds.Items() {
-		ads = append(ads, item.Value())
-	}
-	sortedAds := sortServerAdsByTopo(ads)
-	for _, ad := range sortedAds {
-		if filtered, ft := checkFilter(ad.Name); filtered {
-			log.Debugf("Skipping %s server %s as it's in the filtered server list with type %s", ad.Type, ad.Name, ft)
-			continue
-		}
-		if ns := matchesPrefix(reqPath, ad.NamespaceAds); ns != nil {
-			if best == nil || len(ns.Path) > len(best.Path) {
-				best = ns
-				// If anything was previously set by a namespace that constituted a shorter
-				// prefix, we overwrite that here because we found a better ns. We also clear
-				// the other slice of server ads, because we know those aren't good anymore
-				if ad.Type == server_structs.OriginType.String() {
-					originAds = []server_structs.ServerAd{ad.ServerAd}
-					cacheAds = []server_structs.ServerAd{}
-				} else if ad.Type == server_structs.CacheType.String() {
-					originAds = []server_structs.ServerAd{}
-					cacheAds = []server_structs.ServerAd{ad.ServerAd}
-				}
-			} else if ns.Path == best.Path {
-				// If the current is from Pelican but the best is from topology
-				// then replace the topology best by Pelican best
-				if !ns.FromTopology && best.FromTopology {
-					best = ns
-				}
-				// We treat serverAds differently from namespace
-				if ad.Type == server_structs.OriginType.String() {
-					// For origin, if there's no origin in the list yet, and there's a matched one from topology, then add it
-					// However, if the first one is from Topology but the second matched one is from Pelican, replace it (repeat this process)
-					if len(originAds) == 0 {
-						originAds = append(originAds, ad.ServerAd)
-					} else {
-						if originAds[len(originAds)-1].FromTopology == ad.FromTopology {
-							originAds = append(originAds, ad.ServerAd)
-						} else if !ad.FromTopology {
-							// Incoming ad is from Pelican and current last item in originAd is from Topology:
-							// clear originAds and put Pelican server in
-							skippedServers = append(skippedServers, originAds...)
-							originAds = []server_structs.ServerAd{ad.ServerAd}
-						} else {
-							// Incoming ad is from Topology but current last item in originAd is from Pelican: skip
-							skippedServers = append(skippedServers, ad.ServerAd)
-							continue
-						}
-					}
-				} else if ad.Type == server_structs.CacheType.String() {
-					// For caches, we allow both server from Topology and Pelican to serve the same namespace
-					cacheAds = append(cacheAds, ad.ServerAd)
-				}
-			}
-		}
-	}
-
-	if best != nil {
-		originNamespace = *best
-	}
-	if len(skippedServers) > 0 {
-		log.Debugf(
-			"getAdsForPath: The following matched servers from OSDF topology are skipped for the request path %s: %s",
-			reqPath,
-			server_structs.ServerAdsToServerNameURL(skippedServers),
-		)
-	}
-	return
 }
 
 // Clears the in-memory cache of server ads

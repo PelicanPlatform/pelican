@@ -21,7 +21,6 @@ package director
 import (
 	"fmt"
 	"net/http"
-	"path"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -384,12 +383,12 @@ func listNamespacesHandler(ctx *gin.Context) {
 
 // Issue a stat query to origins for an object and return which origins serve the object
 func queryOrigins(ctx *gin.Context) {
-	pathParam := ctx.Param("path")
-	path := path.Clean(pathParam)
+	requestId := getRequestID(ctx)
+	path := getObjectPathFromRequest(ctx)
 	if path == "" || strings.HasSuffix(path, "/") {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Path should not be empty or ended with slash '/'",
+			Msg:    "Path should not be empty or ended with slash '/': Request ID: " + requestId.String(),
 		})
 		return
 	}
@@ -397,7 +396,7 @@ func queryOrigins(ctx *gin.Context) {
 	if ctx.ShouldBindQuery(&queryParams) != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Invalid query parameters",
+			Msg:    "Invalid query parameters: Request ID: " + requestId.String(),
 		})
 		return
 	}
@@ -406,6 +405,44 @@ func queryOrigins(ctx *gin.Context) {
 	if authHeader != "" {
 		token = strings.TrimPrefix(authHeader, "Bearer ")
 	}
+
+	oAds, _, err := getSortedAds(ctx, requestId)
+	if err != nil {
+		switch err.(type) {
+		case noOriginsForNsErr:
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("No origins found for the requested path: %v: Request ID: %s", err, requestId.String()),
+			})
+		case noOriginsForReqErr:
+			ctx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg: fmt.Sprintf("Discovered origins for the namespace, but none support the request: %v: "+
+					"See '%s' to troubleshoot available origins/caches and their capabilities: Request ID: %s", err, param.Server_ExternalWebUrl.GetString(), requestId.String()),
+			})
+		case objectNotFoundErr:
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("No origins reported possession of the object: %v: Are you sure it exists?: Request ID: %s", err, requestId.String()),
+			})
+		case directorStartupErr:
+			ctx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
+			})
+		default:
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to get/sort origin ads for the requested path: %v: Request ID: %s", err, requestId.String()),
+			})
+		}
+	}
+
+	origins := make([]server_structs.ServerAd, 0, len(oAds))
+	for _, oAd := range oAds {
+		origins = append(origins, oAd.ServerAd)
+	}
+
 	qr := NewObjectStat().Query(
 		ctx,
 		path,
@@ -413,6 +450,7 @@ func queryOrigins(ctx *gin.Context) {
 		queryParams.MinResponses,
 		queryParams.MaxResponses,
 		WithToken(token),
+		withOriginAds(origins),
 	)
 	if qr.Status == querySuccessful {
 		ctx.JSON(http.StatusOK, qr)
