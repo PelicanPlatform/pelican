@@ -4,13 +4,13 @@
 
 ### Is it "Pelican" or "Pelican Platform"?
 
-"Pelican Platform" is the proper name for the software described in these documents, 
-as there are other pre-existing tech projects that use the name "Pelican". 
+"Pelican Platform" is the proper name for the software described in these documents,
+as there are other pre-existing tech projects that use the name "Pelican".
 
 That being said, `pelican` is the name of the command for interfacing with components of the Pelican Project,
 and we frequently refer to said components as "Pelican _____" in our documentation as a convenient shorthand.
 
-{/* 
+{/*
 ### How is the Pelican Platform different from existing technologies (Globus, S3, etc.)?
 
 > Answer needed from Brian B (https://github.com/PelicanPlatform/pelican/issues/1958)
@@ -18,54 +18,56 @@ and we frequently refer to said components as "Pelican _____" in our documentati
 
 ### How is the Pelican Platform related to the HTCondor Software Suite (HTCSS)?
 
-Both the Pelican Platform and HTCSS are open-source softwares whose development is led by the Center for High Throughput Computing (CHTC) at the University of Wisconsin-Madison, 
-whose mission is "to bring the power of High Throughput Computing to all fields of research, and to allow the future of HTC to be shaped by insight from all fields." 
-While the funding for developing these softwares comes from different sources, there is a lot of overlap of the staff that are involved in the development of these softwares. 
+Both the Pelican Platform and HTCSS are open-source software techonologies whose development is led by the Center for High Throughput Computing (CHTC) at the University of Wisconsin-Madison,
+whose mission is "to bring the power of High Throughput Computing to all fields of research, and to allow the future of HTC to be shaped by insight from all fields."
+While the funding for developing these technologies comes from different sources, there is a lot of overlap of the staff that are involved in the development of these technologies.
 
-The flagship instance of HTCSS is the OSPool, a nation-wide scientific and research computing platform based in the U.S. 
-The need for managing the efficient movement of large data within the OSPool led to the creation of the OSDF. 
-As adoption of the OSDF became more widespread, it became clear that a separate software platform was needed for deploying and managing the OSDF and other data federations like it, and that software is the Pelican Platform. 
+The flagship instance of HTCSS is the OSPool, a nation-wide scientific and research computing platform based in the U.S.
+The need for managing the efficient movement of large data within the OSPool led to the creation of the OSDF.
+As adoption of the OSDF became more widespread, it became clear that a separate software platform was needed for deploying and managing the OSDF and other data federations like it, and that software is the Pelican Platform.
 Now, the Pelican Plugin Client ships with HTCSS, meaning any computational work that is managed by HTCondor can access data via a Pelican Federation.
 
+{/*
 ### How can I contribute to the Pelican Platform?
 
-Pelican is constantly evolving, and we appreciate contributions of any kind. 
-Pelican is open source, and all our source code is available on [Github](https://github.com/PelicanPlatform/pelican). 
-If you're interested in contributing code, please follow our [contribution guide](https://github.com/PelicanPlatform/pelican/blob/main/CONTRIBUTE.md) to get started. 
+Pelican is constantly evolving, and we appreciate contributions of any kind.
+Pelican is open source, and all our source code is available on [Github](https://github.com/PelicanPlatform/pelican).
+If you're interested in contributing code, please follow our [contribution guide](https://github.com/PelicanPlatform/pelican/blob/main/CONTRIBUTE.md) to get started.
 If you have a feature request or come across a bug, please report it through [GitHub issues](https://github.com/PelicanPlatform/pelican/issues).
 
-For researchers, we would love to hear your feedback and learn how we can better support your scientific work. 
-Additionally, we welcome stories about how Pelican has helped you in your research. 
-{/*
-You can reach out to us at [CONTACT INFO]. 
+For researchers, we would love to hear your feedback and learn how we can better support your scientific work.
+Additionally, we welcome stories about how Pelican has helped you in your research.
+
+You can reach out to us at [CONTACT INFO].
 
 > Need Brian B's input about contact info
 */}
+
 ## Data Access Model
 
 ### Can I use Pelican Platform to search for the data I need?
 
-When a namespace is configured to allow listings, Pelican clients let users search for objects by prefix, 
-similar to the way you might check for files on a computer with the terminal command ls `/foo/bar/`. 
-However, this kind of searching is limited in that it can only tell you the names of objects under a prefix as defined by the prefix owner – 
-it does not necessarily tell you anything about the contents of objects, and it does not guarantee the data owner has chosen descriptive, reasonable names. 
-This is why Pelican encourages leaving breadcrumbs of data provenance in namespace prefixes, because it gives users information about who to contact for more information. 
+When a namespace is configured to allow listings, Pelican clients let users search for objects by prefix,
+similar to the way you might check for files on a computer with the terminal command ls `/foo/bar/`.
+However, this kind of searching is limited in that it can only tell you the names of objects under a prefix as defined by the prefix owner –
+it does not necessarily tell you anything about the contents of objects, and it does not guarantee the data owner has chosen descriptive, reasonable names.
+This is why Pelican encourages leaving breadcrumbs of data provenance in namespace prefixes, because it gives users information about who to contact for more information.
 See [Choosing a Namespace Prefix](/federating-your-data/choosing-namespaces) for more information.
 
 ### Can Pelican be used to satisfy "FAIR" data requirements?
 
-Supporting [FAIR data](https://www.go-fair.org/fair-principles/) – that is, making data "Findable", "Accessible", "Interoperable" and "Reusable" – is one of Pelican's main goals, 
+Supporting [FAIR data](https://www.go-fair.org/fair-principles/) – that is, making data "Findable", "Accessible", "Interoperable" and "Reusable" – is one of Pelican's main goals,
 because we believe that FAIR data is the bedrock of robust, open science.
 
-However, at this time Pelican's primary targets are data accessibility and interoperability, 
+However, at this time Pelican's primary targets are data accessibility and interoperability,
 which Pelican supports through its federated approach to data management (accessibility) along with its tight integration with HTCSS and caching mechanisms (interoperability).
 
-While Pelican lets users discover object names by prefix/namespace, 
+While Pelican lets users discover object names by prefix/namespace,
 Pelican does not meet the full set of requirements for "Findability" because it has no native integration with data cataloging technologies,
 and it provides no way for the generic researcher to answer "where can I get data related to ABC that looks like XYZ".
 However, Pelican has partnered with the [National Data Platform](https://www.nationaldataplatform.org/) to explore these concepts further.
 
-Finally, Pelican does not address data "Reusability" because it has no archival features, 
+Finally, Pelican does not address data "Reusability" because it has no archival features,
 and its "object immutability" rules are to prevent undefined behavior, not to guarantee that object contents never change.
 
 All this being said, researchers who use Pelican can still help address "Findability" and "Reusability" through practicing good data hygiene,
@@ -284,4 +286,3 @@ Once again, the `link` header will include an ordered list of Origins that your 
 < link: <https://chtc-osdf-origin.chtc.wisc.edu:8443/some/object>; rel="duplicate"; pri=1; depth=1
 ```
 This list is usually much shorter and likely contains a single Origin.
-
