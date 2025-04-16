@@ -44,6 +44,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -285,6 +286,7 @@ func LaunchWatcherMaintenance(ctx context.Context, dirPaths []string, descriptio
 func ResetTestState() {
 	config.ResetConfig()
 	ResetOriginExports()
+	logging.ResetLogFlush()
 	baseAdOnce = sync.Once{}
 	baseAd = server_structs.ServerBaseAd{}
 	baseAdErr = nil

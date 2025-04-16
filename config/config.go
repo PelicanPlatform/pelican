@@ -744,6 +744,12 @@ func setWebConfigOverride(v *viper.Viper, configPath string) error {
 		v.Set(key, tempV.Get(key))
 	}
 
+	// Use any new viper keys to re-set
+	// the logging level.
+	if err = setLoggingInternal(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -771,6 +777,24 @@ func SetBaseDefaultsInConfig(v *viper.Viper) {
 
 }
 
+// Helper func that uses configured params to toggle the correct logging level
+// in the log library
+func setLoggingInternal() error {
+	if param.Debug.GetBool() {
+		SetLogging(log.DebugLevel)
+		log.Warnf("Debug is set as a flag or in config, this will override anything set for '%s' within your configuration", param.Logging_Level.GetName())
+	} else {
+		logLevel := param.Logging_Level.GetString()
+		level, err := log.ParseLevel(logLevel)
+		if err != nil {
+			return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
+		}
+		SetLogging(level)
+	}
+
+	return nil
+}
+
 // For the given Viper instance, set the default config directory.
 func InitConfigDir(v *viper.Viper) {
 
@@ -789,6 +813,11 @@ func InitConfigDir(v *viper.Viper) {
 // InitConfig sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
 func InitConfig() {
+	// Set a prefix so Viper knows how to parse PELICAN_* env vars
+	// This must happen before config dir initialization so that Pelican
+	// can pick up setting the config dir with PELICAN_CONFIGDIR
+	viper.SetEnvPrefix("pelican")
+	viper.AutomaticEnv()
 
 	// Enable BindStruct to allow unmarshal env into a nested struct
 	viper.SetOptions(viper.ExperimentalBindStruct())
@@ -807,9 +836,6 @@ func InitConfig() {
 	// Load environment variables into the config
 	bindNonPelicanEnv() // Deprecate OSDF env prefix but be compatible for now
 
-	viper.SetEnvPrefix("pelican")
-	viper.AutomaticEnv()
-
 	// This line allows viper to use an env var like ORIGIN_VALUE to override the viper string "Origin.Value"
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	if err := viper.MergeInConfig(); err != nil {
@@ -823,14 +849,11 @@ func InitConfig() {
 		cobra.CheckErr(err)
 	}
 
-	if param.Debug.GetBool() {
-		SetLogging(log.DebugLevel)
-		log.Warnln("Debug is set as a flag or in config, this will override anything set for Logging.Level within your configuration")
-	} else {
-		logLevel := param.Logging_Level.GetString()
-		level, err := log.ParseLevel(logLevel)
+	// Use configuration to set the logging level, which must be fed to
+	// the logging library and isn't accessed directly through viper
+	err = setLoggingInternal()
+	if err != nil {
 		cobra.CheckErr(err)
-		SetLogging(level)
 	}
 
 	goose.SetLogger(CustomGooseLogger{})
@@ -1243,7 +1266,6 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
-	logging.FlushLogs(true)
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
@@ -1261,18 +1283,25 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	}
 
 	if err := SetServerDefaults(viper.GetViper()); err != nil {
+		logging.FlushLogs(true)
 		return err
 	}
 
 	webConfigPath := param.Server_WebConfigFile.GetString()
 	if webConfigPath != "" {
 		if err := os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
+			logging.FlushLogs(true)
 			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
 		}
 	}
 	if err := setWebConfigOverride(viper.GetViper(), webConfigPath); err != nil {
+		logging.FlushLogs(true)
 		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
 	}
+
+	// Flush logs only after we potentially ingest changes from the web UI. This must
+	// be done in sequence because the web UI may change the log location.
+	logging.FlushLogs(true)
 
 	if !IsRootExecution() {
 		var runtimeDir string
@@ -1791,6 +1820,7 @@ func ResetConfig() {
 
 	// Clear cached preferred prefix
 	testingPreferredPrefix = ""
+	logging.ResetLogFlush()
 
 	// Clear cached transport object
 	onceTransport = sync.Once{}

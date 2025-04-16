@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
@@ -79,6 +80,7 @@ func TestMain(m *testing.M) {
 	viper.Set("Transport.Dialer.Timeout", time.Second*1)
 	viper.Set("Transport.Dialer.KeepAlive", time.Second*30)
 	viper.Set("TLSSkipVerify", true)
+	viper.Set(param.Logging_Level.GetName(), "debug")
 	server.StartTLS()
 	defer server.Close()
 	exitCode := m.Run()
@@ -568,6 +570,7 @@ func TestInitServerUrl(t *testing.T) {
 		ResetConfig()
 		tempDir := t.TempDir()
 		viper.Set("ConfigDir", tempDir)
+		viper.Set(param.Logging_Level.GetName(), "debug")
 	}
 
 	initDirectoryConfig := func() {
@@ -577,20 +580,18 @@ func TestInitServerUrl(t *testing.T) {
 	}
 
 	t.Run("web-url-defaults-to-hostname-port", func(t *testing.T) {
-		ResetConfig()
+		initDirectoryConfig()
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mockNon443Port)
-		InitConfigDir(viper.GetViper())
 		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWNon443Port, param.Server_ExternalWebUrl.GetString())
 	})
 
 	t.Run("default-web-url-removes-443-port", func(t *testing.T) {
-		ResetConfig()
+		initDirectoryConfig()
 		viper.Set("Server.Hostname", mockHostname)
 		viper.Set("Server.WebPort", mock443Port)
-		InitConfigDir(viper.GetViper())
 		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
@@ -598,9 +599,8 @@ func TestInitServerUrl(t *testing.T) {
 
 	t.Run("remove-443-port-for-set-web-url", func(t *testing.T) {
 		// We respect the URL value set directly by others. Won't remove 443 port
-		ResetConfig()
+		initDirectoryConfig()
 		viper.Set("Server.ExternalWebUrl", mockWebUrlW443Port)
-		InitConfigDir(viper.GetViper())
 		err := InitServer(context.Background(), 0)
 		require.NoError(t, err)
 		assert.Equal(t, mockWebUrlWoPort, param.Server_ExternalWebUrl.GetString())
@@ -704,4 +704,35 @@ func TestInitServerUrl(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "https://example-registry.com", fedInfo.BrokerEndpoint)
 	})
+}
+
+// Test that the web config override can correctly set the logfile location.
+func TestWebConfigSetsLogFile(t *testing.T) {
+	ResetConfig()
+	defer ResetConfig()
+	configDir := t.TempDir()
+	viper.Set("ConfigDir", configDir)
+	viper.Set(param.Logging_Level.GetName(), "debug")
+	webConfigFile := filepath.Join(configDir, "web-config.yaml")
+	viper.Set(param.Server_WebConfigFile.GetName(), webConfigFile)
+	logFile := filepath.Join(configDir, "test-log.txt")
+
+	yamlContent := fmt.Sprintf(`
+Logging:
+  LogLocation: %s
+`, logFile)
+	require.NoError(t, os.WriteFile(webConfigFile, []byte(yamlContent), 0777))
+
+	logging.SetupLogBuffering()
+	err := InitServer(context.Background(), server_structs.OriginType)
+	require.NoError(t, err)
+
+	// Manually close the logger's file handle -- this happens automatically
+	// when running Pelican proper, but the file lingers in test code and Windows
+	// won't be able to close the file because it's in use.
+	logging.CloseLogger()
+
+	// Stat the file -- that it was created is sufficient evidence of success
+	_, err = os.Stat(logFile)
+	require.NoError(t, err)
 }
