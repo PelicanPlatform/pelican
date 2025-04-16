@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -215,7 +214,6 @@ func TestOidcDiscoveryHandler(t *testing.T) {
 			test_utils.InitClient(t, map[string]any{
 				"Federation.DirectorUrl": tc.dirUrl,
 			})
-			require.NoError(t, config.InitClient())
 
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("GET", "/test"+oidcDiscoveryPath, nil)

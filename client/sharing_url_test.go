@@ -35,6 +35,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
@@ -98,9 +99,9 @@ func TestSharingUrl(t *testing.T) {
 	defer os.Unsetenv("PELICAN_SKIP_TERMINAL_CHECK")
 
 	test_utils.InitClient(t, map[string]any{
-		"Logging.Level":           "debug",
-		"TLSSkipVerify":           true,
-		"Federation.DiscoveryUrl": server.URL,
+		param.Logging_Level.GetName():           "debug",
+		param.TLSSkipVerify.GetName():           true,
+		param.Federation_DiscoveryUrl.GetName(): server.URL,
 	})
 
 	// Call QueryDirector with the test server URL and a source path

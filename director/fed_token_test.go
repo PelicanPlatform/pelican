@@ -175,8 +175,6 @@ func parseJWT(tokenString string) (scopes []string, issuer string, err error) {
 }
 
 func TestCreateFedTok(t *testing.T) {
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
 
 	testCases := []struct {
 		name            string
@@ -219,6 +217,9 @@ func TestCreateFedTok(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			server_utils.ResetTestState()
+			defer server_utils.ResetTestState()
+
 			w := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(w)
 
