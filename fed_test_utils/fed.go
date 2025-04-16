@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"gopkg.in/yaml.v3"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
@@ -153,51 +154,89 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	directorStartTime := time.Now().Add(-6 * time.Minute)
 	director.SetStartupTime(directorStartTime)
 
-	config.InitConfig()
 	err = config.InitServer(ctx, modules)
 	require.NoError(t, err)
 
 	// Read in any config we may have set
+	var originConf interface{}
 	if originConfig != "" {
 		viper.SetConfigType("yaml")
 		err = viper.MergeConfig(strings.NewReader(originConfig))
 		require.NoError(t, err, "error reading config")
+
+		err := yaml.Unmarshal([]byte(originConfig), &originConf)
+		require.NoError(t, err, "error unmarshalling into interface")
+
+		confMap := originConf.(map[string]interface{})
+
+		originRaw, exists := confMap["Origin"]
+
+		if exists {
+			originMap := originRaw.(map[string]interface{})
+
+			// Override the test directory from the config file with our temp directory
+			if exportsRaw, ok := originMap["Exports"]; ok {
+				for i, item := range exportsRaw.([]interface{}) {
+					originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%d", i))
+					assert.NoError(t, err)
+					t.Cleanup(func() {
+						err := os.RemoveAll(originDir)
+						require.NoError(t, err)
+					})
+
+					exportMap := item.(map[string]interface{})
+					exportMap["StoragePrefix"] = originDir
+
+					// Change the permissions of the temporary origin directory
+					permissions = os.FileMode(0755)
+					err = os.Chmod(originDir, permissions)
+					require.NoError(t, err)
+
+					// Change ownership on the temporary origin directory so files can be uploaded
+					uinfo, err := config.GetDaemonUserInfo()
+					require.NoError(t, err)
+					require.NoError(t, os.Chown(originDir, uinfo.Uid, uinfo.Gid))
+
+					// Start off with a Hello World file we can use for testing in each of our exports
+					err = os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
+					require.NoError(t, err)
+				}
+			} else {
+				originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%s", "test"))
+				assert.NoError(t, err)
+				t.Cleanup(func() {
+					err := os.RemoveAll(originDir)
+					require.NoError(t, err)
+				})
+
+				originMap["StoragePrefix"] = originDir
+
+				permissions = os.FileMode(0755)
+				err = os.Chmod(originDir, permissions)
+				require.NoError(t, err)
+
+				// Change ownership on the temporary origin directory so files can be uploaded
+				uinfo, err := config.GetDaemonUserInfo()
+				require.NoError(t, err)
+				require.NoError(t, os.Chown(originDir, uinfo.Uid, uinfo.Gid))
+
+				// Start off with a Hello World file we can use for testing in the StoragePrefix
+				err = os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
+				require.NoError(t, err)
+			}
+		}
 	}
-	// Now call GetOriginExports and check the struct
-	exports, err := server_utils.GetOriginExports()
-	require.NoError(t, err, "error getting origin exports")
-	ft.Exports = exports
 
-	// Override the test directory from the config file with our temp directory
-	for i := 0; i < len(ft.Exports); i++ {
-		originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%d", i))
-		assert.NoError(t, err)
-		t.Cleanup(func() {
-			err := os.RemoveAll(originDir)
-			require.NoError(t, err)
-		})
+	confDir := t.TempDir()
+	outputPath := filepath.Join(confDir, "tempfile_*.yaml")
 
-		// Set the storage prefix to the temporary origin directory
-		ft.Exports[i].StoragePrefix = originDir
-		// Our exports object becomes global -- we must reset in between each fed test
-		t.Cleanup(func() {
-			server_utils.ResetOriginExports()
-		})
+	outputData, err := yaml.Marshal(&originConf)
+	require.NoError(t, err, "error marshalling struct into yaml format")
 
-		// Change the permissions of the temporary origin directory
-		permissions = os.FileMode(0755)
-		err = os.Chmod(originDir, permissions)
-		require.NoError(t, err)
+	err = os.WriteFile(outputPath, outputData, 0644)
+	require.NoError(t, err, "error writing out temporary config file for fed test")
 
-		// Change ownership on the temporary origin directory so files can be uploaded
-		uinfo, err := config.GetDaemonUserInfo()
-		require.NoError(t, err)
-		require.NoError(t, os.Chown(originDir, uinfo.Uid, uinfo.Gid))
-
-		// Start off with a Hello World file we can use for testing in each of our exports
-		err = os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
-		require.NoError(t, err)
-	}
+	viper.Set("config", outputPath)
 
 	servers, _, err := launchers.LaunchModules(ctx, modules)
 	require.NoError(t, err)
@@ -262,6 +301,9 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, err)
 
 	ft.Token = token
+
+	ft.Exports, err = server_utils.GetOriginExports()
+	require.NoError(t, err)
 
 	// Explicitly run tmpPath cleanup AFTER cancel and egrp are done -- otherwise we end up
 	// with a race condition where removing tmpPath might happen while the server is still
