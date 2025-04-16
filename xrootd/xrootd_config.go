@@ -787,7 +787,7 @@ func ConfigXrootd(ctx context.Context, isOrigin bool) (string, error) {
 		lotmanCfg := LotmanCfg{Enabled: false}
 		if param.Cache_EnableLotman.GetBool() {
 			lotmanCfg.Enabled = true
-			lotmanCfg.LotHome = param.Lotman_DbLocation.GetString()
+			lotmanCfg.LotHome = param.Lotman_LotHome.GetString()
 			policyMap, err := lotman.GetPolicyMap()
 			if err != nil {
 				return "", errors.Wrap(err, "unable to parse lotman configuration")

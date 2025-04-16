@@ -1358,7 +1358,7 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			pelicanDirs = append(pelicanDirs, param.LocalCache_RunLocation.GetString())
 		}
 		if currentServers.IsEnabled(server_structs.CacheType) && param.Cache_EnableLotman.GetBool() {
-			pelicanDirs = append(pelicanDirs, param.Lotman_LotHome.GetString(), param.Lotman_DbLocation.GetString())
+			pelicanDirs = append(pelicanDirs, param.Lotman_LotHome.GetString())
 		}
 		if (currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType)) && param.Shoveler_Enable.GetBool() {
 			pelicanDirs = append(pelicanDirs, param.Shoveler_QueueDirectory.GetString())
