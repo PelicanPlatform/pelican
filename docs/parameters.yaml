@@ -580,6 +580,11 @@ description: |+
   When `+` is included in the list, the client should _first_ try the provided caches, then fall back to any discovered via the Director. If no
   `+` is included, the client should try _only_ the preferred caches and fail if none is able to provide the object.
 
+  > Use of this configuration, especially when omitting the `+`, 
+  > *bypasses the Director and any of its potential logic for cache selection*. 
+  > As such, this configuration should only be used for testing
+  > or for preferring an on- or near-premises cache. 
+
   Caches are generally tried in the order they're presented. For example, the configuration:
   ```yaml
   Client:
