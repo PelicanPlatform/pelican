@@ -166,15 +166,16 @@ func HandleCreateDowntime(ctx *gin.Context) {
 
 func HandleGetDowntime(ctx *gin.Context) {
 	status := ctx.Query("status")
+	source := ctx.Query("source") // Which Pelican service set the downtime
 	var downtimes []server_structs.Downtime
 	var err error
 
 	switch status {
 	case "all":
-		downtimes, err = database.GetAllDowntimes()
+		downtimes, err = database.GetAllDowntimes(source)
 	default:
 		// "incomplete" includes active and future downtimes
-		downtimes, err = database.GetIncompleteDowntimes()
+		downtimes, err = database.GetIncompleteDowntimes(source)
 	}
 
 	if err != nil {
