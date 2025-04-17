@@ -639,6 +639,27 @@ func handleDirectorContact(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, supportContactRes{Email: email, Url: url})
 }
 
+// List all active and future downtimes for a server
+func listDowntimeDetails(ctx *gin.Context) {
+	serverName := ctx.Param("name")
+	if serverName == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server name is required",
+		})
+		return
+	}
+	downtimes, err := getCachedDowntimes(serverName)
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server not found",
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, downtimes)
+}
+
 func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 	directorWebAPI := router.Group("/api/v1.0/director_ui")
 	// Follow RESTful schema
@@ -652,5 +673,6 @@ func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 		directorWebAPI.HEAD("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
 		directorWebAPI.GET("/namespaces", listNamespacesHandler)
 		directorWebAPI.GET("/contact", handleDirectorContact)
+		directorWebAPI.GET("/downtime/:name", listDowntimeDetails)
 	}
 }
