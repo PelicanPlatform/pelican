@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -1124,6 +1125,26 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 				return false
 			}
 		}
+	}
+
+	// We've created the lotman home directory, but the database lotman creates will still be
+	// owned by the uid:gid that started the cache. Recursively set ownership to XRootD, but set
+	// permissions such that the Pelican user can still modify it.
+	if err := filepath.WalkDir(lotHome, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return errors.Wrapf(err, "the path %s cannot be accessed", path)
+		}
+		if chmodErr := os.Chmod(path, 0777); chmodErr != nil {
+			return errors.Wrapf(chmodErr, "permissions on the path %s to Lotman's database cannot be set", path)
+		}
+		if chownErr := os.Chown(path, uid, gid); chownErr != nil {
+			return errors.Wrapf(chownErr, "ownership of the path %s to Lotman's database cannot be set", path)
+		}
+
+		return nil
+	}); err != nil {
+		log.Errorf("Unable to finalize Lotman's initialization: %v", err)
+		return false
 	}
 
 	log.Infof("LotMan initialization complete")
