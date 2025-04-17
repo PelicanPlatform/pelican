@@ -54,7 +54,16 @@ var (
 	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
 	// The map holds servers that are disabled, with the key being the ServerAd.Name
 	// The map should be idenpendent of serverAds as we want to persist this change in-memory, regardless of the presence of the serverAd
-	filteredServers      = map[string]filterType{}
+	filteredServers = map[string]filterType{}
+
+	// A map of active and future downtimes set by server (Origin/Cache) admin, with the key being the ServerAd.Name
+	serverDowntimes = make(map[string][]server_structs.Downtime)
+	// A map of active and future downtimes set by topology, with the key being the ServerAd.Name
+	topologyDowntimes = make(map[string][]server_structs.Downtime)
+	// A map of active and future downtimes set by the federation admin, with the key being the ServerAd.Name
+	federationDowntimes = make(map[string][]server_structs.Downtime)
+
+	// Use a single mutex to protect four global maps
 	filteredServersMutex = sync.RWMutex{}
 )
 
