@@ -88,7 +88,7 @@ func GetIncompleteDowntimes(source string) ([]server_structs.Downtime, error) {
 	var downtimes []server_structs.Downtime
 	currentTime := time.Now().UTC().UnixMilli()
 
-	query := ServerDatabase.Where("end_time > ? OR end_time = -1", currentTime)
+	query := ServerDatabase.Where("end_time > ? OR end_time = ?", currentTime, server_structs.IndefiniteEndTime)
 
 	// If a source is provided, append it to the existing query.
 	if source != "" {

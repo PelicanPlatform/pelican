@@ -43,10 +43,6 @@ type (
 	}
 )
 
-// Indicate the downtime is ongoing indefinitely.
-// We chose -1 to avoid the default value (0) of the int64 type
-const indefiniteEndTime int64 = -1
-
 // Get the Pelican service that set the downtime
 func getDowntimeSource(ctx *gin.Context) (string, error) {
 	enabledServers := config.GetEnabledServerString(true)
