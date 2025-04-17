@@ -57,6 +57,8 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 	director.ConfigFilteredServers()
 
+	director.PeriodicFedDowntimeReload(ctx, egrp)
+
 	director.LaunchServerIOQuery(ctx, egrp)
 
 	director.LaunchRegistryPeriodicQuery(ctx, egrp)
