@@ -129,7 +129,8 @@ type (
 	// This struct needs to be kept in sync with BOTH the director/director_ui.go:listServerResponse and the director/director_ui.go:serverResponse
 	ServerAd struct {
 		ServerBaseAd
-		StorageType         OriginStorageType `json:"storageType"` // Always POSIX for caches
+		RegistryPrefix      string            `json:"registry_prefix"` // The server's prefix recorded in the registry
+		StorageType         OriginStorageType `json:"storageType"`     // Always POSIX for caches
 		DisableDirectorTest bool              `json:"directorTest"`
 		AuthURL             url.URL           `json:"auth_url"`
 		BrokerURL           url.URL           `json:"broker_url"` // The URL of the broker service to use for this host.
