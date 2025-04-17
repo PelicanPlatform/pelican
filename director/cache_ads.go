@@ -20,9 +20,12 @@ package director
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -309,6 +312,145 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 	ad.Latitude = lat
 	ad.Longitude = long
 	return nil
+}
+
+// Given a server name, get its cached downtimes from registry, topology and server itself
+func getCachedDowntimes(serverName string) ([]server_structs.Downtime, error) {
+	filteredServersMutex.RLock()
+	defer filteredServersMutex.RUnlock()
+
+	var downtimes []server_structs.Downtime
+	// Append server downtime entries
+	if dt, ok := serverDowntimes[serverName]; ok {
+		downtimes = append(downtimes, dt...)
+	}
+	// Append topology downtime entries
+	if dt, ok := topologyDowntimes[serverName]; ok {
+		downtimes = append(downtimes, dt...)
+	}
+	// Append federation downtime entries
+	if dt, ok := federationDowntimes[serverName]; ok {
+		downtimes = append(downtimes, dt...)
+	}
+
+	return downtimes, nil
+}
+
+// Get the downtimes set by federation admin in the Registry
+func updateDowntimeFromRegistry(ctx context.Context) error {
+	fedInfo, err := config.GetFederation(ctx)
+	if err != nil || fedInfo.DirectorEndpoint == "" {
+		log.Error("Failed to get federation info: ", err)
+		return errors.Wrap(err, "failed to get federation info")
+	}
+
+	registryEndpointURL, err := url.Parse(fedInfo.RegistryEndpoint)
+	if err != nil {
+		log.Error("Failed to parse registry endpoint URL: ", err)
+		return errors.Wrap(err, "failed to parse registry endpoint URL")
+	}
+
+	// Construct the registry downtime list URL to get active and future downtimes
+	registryEndpointURL.Path = path.Join(registryEndpointURL.Path, "api", "v1.0", "downtime")
+	// Set the query parameter "source" to "registry".
+	q := registryEndpointURL.Query()
+	q.Set("source", "registry")
+	registryEndpointURL.RawQuery = q.Encode()
+
+	registryDowntimeListURL := registryEndpointURL.String()
+
+	tr := config.GetTransport()
+	respData, err := utils.MakeRequest(ctx, tr, registryDowntimeListURL, "GET", nil, nil)
+	if err != nil {
+		log.Error("Failed to get live servers from the director: ", err)
+		return errors.Wrap(err, "failed to get live servers from the director")
+	}
+	var latestFedDowntimes []server_structs.Downtime
+	err = json.Unmarshal(respData, &latestFedDowntimes)
+	if err != nil {
+		log.Errorf("Failed to marshal response in to JSON: %v", err)
+		return errors.Wrap(err, "failed to marshal response in to JSON")
+	}
+
+	filteredServersMutex.Lock()
+	defer filteredServersMutex.Unlock()
+
+	// In the Registry, downtime.serverName is prefix, not server name (because Registry doesn't know the server name)
+	// So we need to find its corresponding server name in the serverAds and use it to overwrite downtime.serverName
+	var runningServersDowntimes []server_structs.Downtime
+	for i := 0; i < len(latestFedDowntimes); i++ {
+		found := false
+		for _, ad := range serverAds.Items() {
+			if ad.Value().RegistryPrefix == latestFedDowntimes[i].ServerName {
+				latestFedDowntimes[i].ServerName = ad.Value().Name
+				found = true
+				break // leave inner loop; moves on to the next downtime
+			}
+		}
+		if !found {
+			log.Errorf("Unable to find server name for prefix %s in the Director. The server with the given prefix is not running now.", latestFedDowntimes[i].ServerName)
+			continue
+		}
+		runningServersDowntimes = append(runningServersDowntimes, latestFedDowntimes[i])
+	}
+
+	// Remove existing filteredSevers that are fetched from the Registry first
+	for key, val := range filteredServers {
+		if val == tempFiltered {
+			delete(filteredServers, key)
+		}
+	}
+
+	// Build a new map to replace the in-memory federationDowntimes map
+	newFederationDowntimes := make(map[string][]server_structs.Downtime)
+	currentTime := time.Now().UTC().UnixMilli()
+	log.Info("Current time in milliseconds: ", currentTime)
+
+	for _, downtime := range runningServersDowntimes {
+		// If it is an active downtime, add it to the filteredServers map
+		if currentTime >= downtime.StartTime && (currentTime <= downtime.EndTime || downtime.EndTime == -1) {
+			filteredServers[downtime.ServerName] = tempFiltered
+			log.Infof("Adding server %s to filteredServers map", downtime.ServerName)
+			log.Infof("filteredServers: %#v", filteredServers)
+		}
+		// Save all active and future downtimes to the new map
+		newFederationDowntimes[downtime.ServerName] = append(newFederationDowntimes[downtime.ServerName], downtime)
+	}
+
+	// Overwrite the in-memory federationDowntimes map with the new data.
+	federationDowntimes = newFederationDowntimes
+	log.Infof("The following servers are currently configured in downtime: %#v", filteredServers)
+	log.Infof("federationDowntimes: %#v", federationDowntimes)
+	return nil
+}
+
+// Periodically fetch the downtimes set by Federation admin in the Registry
+func PeriodicFedDowntimeReload(ctx context.Context, egrp *errgroup.Group) {
+	refreshInterval := param.Federation_TopologyReloadInterval.GetDuration() // Could use a new config parameter
+	ticker := time.NewTicker(refreshInterval)
+
+	if err := updateDowntimeFromRegistry(ctx); err != nil {
+		log.Errorf("Failed to fetch the downtimes set by federation admin from the Registry: %v", err)
+	}
+	log.Debug("Federation downtimes updated successfully")
+
+	egrp.Go(func() error {
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				err := updateDowntimeFromRegistry(ctx)
+				if err != nil {
+					log.Errorf("Failed to fetch the downtimes set by federation admin from the Registry: %v", err)
+				}
+				log.Debug("Federation downtimes updated successfully")
+			case <-ctx.Done():
+				log.Debug("Periodic fetch for federation downtimes terminated")
+				return nil
+			}
+		}
+	})
 }
 
 // Clears the in-memory cache of server ads
