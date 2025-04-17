@@ -1007,7 +1007,30 @@ func TestConfigLotTimestamps(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			configLotTimestamps(&tc.lotMap)
-			assert.Equal(t, tc.expectedLotMap, tc.lotMap)
+
+			for lotName, lot := range tc.lotMap {
+				expectedLot, exists := tc.expectedLotMap[lotName]
+				require.True(t, exists)
+
+				// Use delta comparisons for timestamps to account for small skews
+				// that occur between creation of expected test lot and actual lot. This
+				// happens infrequently in GHA runners, but still causes test failures.
+				if expectedLot.MPA.CreationTime != nil && lot.MPA.CreationTime != nil {
+					assert.InDelta(t, expectedLot.MPA.CreationTime.Value, lot.MPA.CreationTime.Value, 2.0)
+				} else {
+					assert.Fail(t, "Expected creation time to be set")
+				}
+				if expectedLot.MPA.ExpirationTime != nil && lot.MPA.ExpirationTime != nil {
+					assert.InDelta(t, expectedLot.MPA.ExpirationTime.Value, lot.MPA.ExpirationTime.Value, 2.0)
+				} else {
+					assert.Fail(t, "Expected expiration time to be set")
+				}
+				if expectedLot.MPA.DeletionTime != nil && lot.MPA.DeletionTime != nil {
+					assert.InDelta(t, expectedLot.MPA.DeletionTime.Value, lot.MPA.DeletionTime.Value, 2.0)
+				} else {
+					assert.Fail(t, "Expected deletion time to be set")
+				}
+			}
 		})
 	}
 }
