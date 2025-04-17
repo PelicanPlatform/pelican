@@ -155,8 +155,8 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		prefixes = append(prefixes, export.FederationPrefix)
 	}
 
-	// Fetch origin's active downtimes
-	downtimes, err := database.GetIncompleteDowntimes()
+	// Fetch origin's active and future downtimes
+	downtimes, err := database.GetIncompleteDowntimes("origin")
 	if err != nil {
 		return nil, err
 	}

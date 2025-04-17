@@ -594,8 +594,8 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 	downtimeAPI := engine.Group("/api/v1.0/downtime")
 	{
 		downtimeAPI.POST("", AuthHandler, AdminAuthHandler, HandleCreateDowntime)
-		downtimeAPI.GET("", AuthHandler, AdminAuthHandler, HandleGetDowntime)
-		downtimeAPI.GET("/:uuid", AuthHandler, AdminAuthHandler, HandleGetDowntimeByUUID)
+		downtimeAPI.GET("", HandleGetDowntime)
+		downtimeAPI.GET("/:uuid", HandleGetDowntimeByUUID)
 		downtimeAPI.PUT("/:uuid", AuthHandler, AdminAuthHandler, HandleUpdateDowntime)
 		downtimeAPI.DELETE("/:uuid", AuthHandler, AdminAuthHandler, HandleDeleteDowntime)
 	}
