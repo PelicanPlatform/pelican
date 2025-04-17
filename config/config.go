@@ -1066,7 +1066,7 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault(param.Director_DbLocation.GetName(), "/var/lib/pelican/director.sqlite")
 		v.SetDefault(param.Cache_DbLocation.GetName(), "/var/lib/pelican/cache.sqlite")
 		// The lotman db will actually take this path and create the lot at /path/.lot/lotman_cpp.sqlite
-		v.SetDefault(param.Lotman_LotHome.GetName(), "/var/lib/pelican")
+		v.SetDefault(param.Lotman_LotHome.GetName(), "/var/lib/lotman")
 		v.SetDefault(param.Monitoring_DataLocation.GetName(), "/var/lib/pelican/monitoring/data")
 		v.SetDefault(param.Shoveler_QueueDirectory.GetName(), "/var/spool/pelican/shoveler/queue")
 		v.SetDefault(param.Shoveler_AMQPTokenLocation.GetName(), "/etc/pelican/shoveler-token")
