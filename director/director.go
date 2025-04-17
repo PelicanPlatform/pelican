@@ -1176,7 +1176,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		sn := adV2.Name
 		// Check if the server is currently in downtime
 		for _, downtime := range adV2.Downtimes {
-			if downtime.StartTime < currentTime && (downtime.EndTime > currentTime || downtime.EndTime == -1) {
+			if downtime.StartTime < currentTime && (downtime.EndTime > currentTime || downtime.EndTime == server_structs.IndefiniteEndTime) {
 				// Server is currently in downtime
 
 				// If this server is already put in downtime, we don't need to do anything

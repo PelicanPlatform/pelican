@@ -372,6 +372,11 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 		return errors.Wrap(err, "failed to marshal response in to JSON")
 	}
 
+	if len(latestFedDowntimes) == 0 {
+		log.Debug("No downtimes set by federation admin in the Registry")
+		return nil
+	}
+
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()
 
@@ -388,7 +393,7 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 			}
 		}
 		if !found {
-			log.Errorf("Unable to find server name for prefix %s in the Director. The server with the given prefix is not running now.", latestFedDowntimes[i].ServerName)
+			log.Infof("Unable to find server name for prefix %s in the Director. The server with the given prefix is not running now.", latestFedDowntimes[i].ServerName)
 			continue
 		}
 		runningServersDowntimes = append(runningServersDowntimes, latestFedDowntimes[i])
@@ -404,14 +409,11 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 	// Build a new map to replace the in-memory federationDowntimes map
 	newFederationDowntimes := make(map[string][]server_structs.Downtime)
 	currentTime := time.Now().UTC().UnixMilli()
-	log.Info("Current time in milliseconds: ", currentTime)
 
 	for _, downtime := range runningServersDowntimes {
 		// If it is an active downtime, add it to the filteredServers map
 		if currentTime >= downtime.StartTime && (currentTime <= downtime.EndTime || downtime.EndTime == -1) {
 			filteredServers[downtime.ServerName] = tempFiltered
-			log.Infof("Adding server %s to filteredServers map", downtime.ServerName)
-			log.Infof("filteredServers: %#v", filteredServers)
 		}
 		// Save all active and future downtimes to the new map
 		newFederationDowntimes[downtime.ServerName] = append(newFederationDowntimes[downtime.ServerName], downtime)
@@ -419,14 +421,12 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 
 	// Overwrite the in-memory federationDowntimes map with the new data.
 	federationDowntimes = newFederationDowntimes
-	log.Infof("The following servers are currently configured in downtime: %#v", filteredServers)
-	log.Infof("federationDowntimes: %#v", federationDowntimes)
 	return nil
 }
 
 // Periodically fetch the downtimes set by Federation admin in the Registry
 func PeriodicFedDowntimeReload(ctx context.Context, egrp *errgroup.Group) {
-	refreshInterval := param.Federation_TopologyReloadInterval.GetDuration() // Could use a new config parameter
+	refreshInterval := param.Director_RegistryQueryInterval.GetDuration()
 	ticker := time.NewTicker(refreshInterval)
 
 	if err := updateDowntimeFromRegistry(ctx); err != nil {
