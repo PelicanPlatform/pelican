@@ -77,6 +77,24 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	ft.Ctx = ctx
 	ft.Egrp = egrp
 
+	tmpPathPattern := "Pelican-FedTest*"
+	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
+	require.NoError(t, err)
+
+	// Explicitly run tmpPath cleanup AFTER cancel and egrp are done -- otherwise we end up
+	// with a race condition where removing tmpPath might happen while the server is still
+	// using it, resulting in "error: unlinkat <tmpPath>: directory not empty"
+	t.Cleanup(func() {
+		cancel()
+		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
+			require.NoError(t, err)
+		}
+		err := os.RemoveAll(tmpPath)
+		require.NoError(t, err)
+		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
+		server_utils.ResetTestState()
+	})
+
 	modules := server_structs.ServerType(0)
 	modules.Set(server_structs.CacheType)
 	modules.Set(server_structs.OriginType)
@@ -85,10 +103,6 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	// TODO: the cache startup routines not sequenced correctly for the downloads
 	// to immediately work through the cache.  For now, unit tests will just use the origin.
 	modules.Set(server_structs.LocalCacheType)
-
-	tmpPathPattern := "Pelican-FedTest*"
-	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
-	require.NoError(t, err)
 
 	permissions := os.FileMode(0755)
 	err = os.Chmod(tmpPath, permissions)
@@ -263,20 +277,6 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, err)
 
 	ft.Token = token
-
-	// Explicitly run tmpPath cleanup AFTER cancel and egrp are done -- otherwise we end up
-	// with a race condition where removing tmpPath might happen while the server is still
-	// using it, resulting in "error: unlinkat <tmpPath>: directory not empty"
-	t.Cleanup(func() {
-		cancel()
-		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
-			require.NoError(t, err)
-		}
-		err := os.RemoveAll(tmpPath)
-		require.NoError(t, err)
-		// Throw in a config.Reset for good measure. Keeps our env squeaky clean!
-		server_utils.ResetTestState()
-	})
 
 	return
 }

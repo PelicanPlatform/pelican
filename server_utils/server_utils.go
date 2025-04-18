@@ -44,6 +44,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/logging"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
@@ -291,6 +292,9 @@ func ResetTestState() {
 	baseAd = server_structs.ServerBaseAd{}
 	baseAdErr = nil
 	directorEndpoints.Store(nil)
+	if err := database.ShutdownDB(); err != nil {
+		log.Errorf("Failed to shutdown the database: %v", err)
+	}
 }
 
 // Given a slice of NamespaceAdV2 objects, return a slice of unique top-level prefixes.
