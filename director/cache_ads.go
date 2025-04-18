@@ -382,20 +382,21 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 
 	// In the Registry, downtime.serverName is prefix, not server name (because Registry doesn't know the server name)
 	// So we need to find its corresponding server name in the serverAds and use it to overwrite downtime.serverName
+
+	ads := serverAds.Items() // pull the ads slice once
+	// Build a prefix→name map
+	prefixToName := make(map[string]string, len(ads))
+	for _, ad := range ads {
+		prefixToName[ad.Value().RegistryPrefix] = ad.Value().Name
+	}
 	var runningServersDowntimes []server_structs.Downtime
 	for i := 0; i < len(latestFedDowntimes); i++ {
-		found := false
-		for _, ad := range serverAds.Items() {
-			if ad.Value().RegistryPrefix == latestFedDowntimes[i].ServerName {
-				latestFedDowntimes[i].ServerName = ad.Value().Name
-				found = true
-				break // leave inner loop; moves on to the next downtime
-			}
-		}
+		name, found := prefixToName[latestFedDowntimes[i].ServerName]
 		if !found {
 			log.Infof("Unable to find server name for prefix %s in the Director. The server with the given prefix is not running now.", latestFedDowntimes[i].ServerName)
 			continue
 		}
+		latestFedDowntimes[i].ServerName = name
 		runningServersDowntimes = append(runningServersDowntimes, latestFedDowntimes[i])
 	}
 
