@@ -314,26 +314,52 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 	return nil
 }
 
-// Given a server name, get its cached downtimes from registry, topology and server itself
-func getCachedDowntimes(serverName string) ([]server_structs.Downtime, error) {
+// Get cached downtimes from registry, topology and servers themselves.
+// Return downtimes for all servers or a specific server if serverName is provided.
+func getCachedDowntimes(serverName string) (map[string][]server_structs.Downtime, error) {
 	filteredServersMutex.RLock()
 	defer filteredServersMutex.RUnlock()
 
-	var downtimes []server_structs.Downtime
-	// Append server downtime entries
-	if dt, ok := serverDowntimes[serverName]; ok {
-		downtimes = append(downtimes, dt...)
-	}
-	// Append topology downtime entries
-	if dt, ok := topologyDowntimes[serverName]; ok {
-		downtimes = append(downtimes, dt...)
-	}
-	// Append federation downtime entries
-	if dt, ok := federationDowntimes[serverName]; ok {
-		downtimes = append(downtimes, dt...)
+	// helper to collect one server's downtimes
+	collect := func(name string) []server_structs.Downtime {
+		var out []server_structs.Downtime
+		if list, ok := serverDowntimes[name]; ok {
+			out = append(out, list...)
+		}
+		if list, ok := topologyDowntimes[name]; ok {
+			out = append(out, list...)
+		}
+		if list, ok := federationDowntimes[name]; ok {
+			out = append(out, list...)
+		}
+		return out
 	}
 
-	return downtimes, nil
+	result := make(map[string][]server_structs.Downtime)
+
+	if serverName != "" {
+		result[serverName] = collect(serverName)
+		return result, nil
+	}
+
+	// If no serverName is provided, return downtimes for all servers
+	seen := map[string]struct{}{}
+	for name := range serverDowntimes {
+		seen[name] = struct{}{}
+	}
+	for name := range topologyDowntimes {
+		seen[name] = struct{}{}
+	}
+	for name := range federationDowntimes {
+		seen[name] = struct{}{}
+	}
+
+	// Fill the result map
+	for name := range seen {
+		result[name] = collect(name)
+	}
+
+	return result, nil
 }
 
 // Get the downtimes set by federation admin in the Registry
