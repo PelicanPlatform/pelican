@@ -185,15 +185,20 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	t.Log("Registry Downtime Creation Response: ", string(registryDowntimeCreationRespBody))
 
 	// Now ask the Director for the downtimes we just set
-	getSpecificServerDowntimePath, err := url.JoinPath("api", "v1.0", "director_ui", "downtime", cacheServerName)
+	getServerDowntimesPath, err := url.JoinPath("api", "v1.0", "director_ui", "downtimes")
 	require.NoError(t, err, "Failed to join specific server downtime path")
-	directorUrl.Path = getSpecificServerDowntimePath
+	directorUrl.Path = getServerDowntimesPath
+	q := directorUrl.Query()
+	q.Set("server", cacheServerName)
+	directorUrl.RawQuery = q.Encode()
 
 	// Poll for the downtimes
 	timeout := time.After(5 * time.Second)
 	ticker := time.NewTicker(customAdvertisementInterval)
 	defer ticker.Stop()
 
+	// A map: serverName → its list of downtimes
+	var downtimeResp map[string][]server_structs.Downtime
 	var downtimes []server_structs.Downtime
 	var foundExpectedDowntimes bool
 LOOP:
@@ -209,11 +214,15 @@ LOOP:
 			require.NoError(t, err, "Failed to get response from specific server request")
 			dtBody, err := io.ReadAll(specificServerDowntimeResp.Body)
 			require.NoError(t, err, "Failed to read server downtimes body")
+			require.Equal(t, http.StatusOK, specificServerDowntimeResp.StatusCode,
+				"Expected 200 OK from server downtime endpoint. Got %d. Body: %s",
+				specificServerDowntimeResp.StatusCode, string(dtBody))
 			specificServerDowntimeResp.Body.Close()
-			err = json.Unmarshal(dtBody, &downtimes)
+			err = json.Unmarshal(dtBody, &downtimeResp)
 			require.NoError(t, err, "Failed to unmarshal server downtimes")
 
 			// Check if the downtimes present
+			downtimes = downtimeResp[cacheServerName]
 			if len(downtimes) >= 2 {
 				foundExpectedDowntimes = true
 				break LOOP // Exit the outer loop if all downtimes are found
@@ -223,7 +232,7 @@ LOOP:
 	require.True(t, foundExpectedDowntimes, "Downtime not found")
 
 	// Verify the downtime we just set
-	t.Log("Downtimes: ", downtimes)
+	t.Log("Downtimes: ", downtimeResp)
 	require.Len(t, downtimes, 2, "Downtimes count mismatch")
 	assert.Equal(t, incompleteDowntime.Severity, downtimes[0].Severity, "Downtime severity mismatch")
 	assert.Equal(t, server_structs.IndefiniteEndTime, downtimes[1].EndTime, "Downtime end time mismatch")

@@ -639,21 +639,15 @@ func handleDirectorContact(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, supportContactRes{Email: email, Url: url})
 }
 
-// List all active and future downtimes for a server
+// List in-memory downtimes for all servers or a specific server if serverName is provided.
+// Aggregate downtimes from registry, topology and servers themselves.
 func listDowntimeDetails(ctx *gin.Context) {
-	serverName := ctx.Param("name")
-	if serverName == "" {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Server name is required",
-		})
-		return
-	}
+	serverName := ctx.Query("server")
 	downtimes, err := getCachedDowntimes(serverName)
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Server not found",
+			Msg:    "Server not found: " + err.Error(),
 		})
 		return
 	}
@@ -673,6 +667,6 @@ func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 		directorWebAPI.HEAD("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
 		directorWebAPI.GET("/namespaces", listNamespacesHandler)
 		directorWebAPI.GET("/contact", handleDirectorContact)
-		directorWebAPI.GET("/downtime/:name", listDowntimeDetails)
+		directorWebAPI.GET("/downtimes", listDowntimeDetails)
 	}
 }
