@@ -211,11 +211,13 @@ func TestGetAndPutAuth(t *testing.T) {
 			// Upload the file with PUT
 			transferResultsUpload, err := client.DoPut(fed.Ctx, tempFile.Name(), uploadURL, false, client.WithToken(tmpTkn))
 			require.NoError(t, err)
+			require.Equal(t, len(transferResultsUpload), 1)
 			require.Equal(t, transferResultsUpload[0].TransferredBytes, int64(17))
 
 			// Download that same file with GET
 			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithToken(tmpTkn))
-			assert.NoError(t, err)
+			require.NoError(t, err)
+			require.Equal(t, len(transferResultsDownload), 1)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
 		}
 	})

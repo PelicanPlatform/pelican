@@ -778,12 +778,12 @@ func TestGatewayTimeout(t *testing.T) {
 	transferResult, err := downloadObject(transfer)
 	assert.NoError(t, err)
 	err = transferResult.Error
-	log.Debugln("Received connection error:", err)
+	log.Debugln("Received download error:", err)
 	var sce *StatusCodeError
 	if errors.As(err, &sce) {
 		assert.Equal(t, "cache timed out waiting on origin", sce.Error())
 	} else {
-		require.Fail(t, "downloadObject did not return a status code error: %s", err)
+		require.Fail(t, "downloadObject did not return a status code error", "%s", err)
 	}
 }
 
