@@ -1,4 +1,4 @@
-//go:build linux
+//go:build !windows
 
 /***************************************************************
  *
@@ -21,6 +21,7 @@
 package client_test
 
 import (
+	_ "embed"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -42,6 +43,11 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+)
+
+var (
+	//go:embed resources/origin-with-and-without-write.yaml
+	originConfigWithAndWithoutWrite string
 )
 
 func TestRecursiveUploadsAndDownloads(t *testing.T) {
@@ -618,6 +624,10 @@ func TestSyncUpload(t *testing.T) {
 		_, err = smallTestFile.WriteString(smallTestFileContent)
 		require.NoError(t, err, "Error writing to small test file")
 
+		// WORKAROUND: XRootD appears to not clear out the checksum calculation when overwriting files.
+		// For now, delete from the origin and then re-upload
+		require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, false, client.WithTokenLocation(tempToken.Name())))
+
 		//Upload the file into the same location as the previous test file - should overwrite
 		transferDetailsUpload, err = client.DoPut(fed.Ctx, smallTestFile.Name(), uploadUrl, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
 		require.NoError(t, err)
@@ -639,7 +649,7 @@ func TestSyncUpload(t *testing.T) {
 
 		// Attempt to sync an upload of a single file to a collection, should fail
 		_, err = client.DoPut(fed.Ctx, smallTestFile.Name(), uploadUrl, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
-		require.ErrorContains(t, err, "Request failed (HTTP status 409)")
+		require.ErrorContains(t, err, "request failed (HTTP status 409)")
 	})
 }
 

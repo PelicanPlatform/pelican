@@ -25,7 +25,6 @@ require (
 	github.com/lestrrat-go/jwx/v2 v2.0.21
 	github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f
 	github.com/oklog/run v1.1.0
-	github.com/opensaucerer/grab/v3 v3.0.1
 	github.com/opensciencegrid/xrootd-monitoring-shoveler v1.3.0
 	github.com/oschwald/geoip2-golang v1.9.0
 	github.com/pkg/errors v0.9.1

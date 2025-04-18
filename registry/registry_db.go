@@ -553,7 +553,7 @@ func InitializeDB() error {
 
 	// Run database migrations
 	if err := server_utils.MigrateDB(sqldb, embedMigrations); err != nil {
-		return err
+		return errors.Wrap(err, "unable to migrate the database")
 	}
 
 	return nil

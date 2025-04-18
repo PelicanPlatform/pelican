@@ -40,12 +40,12 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	// Initialize the registry's sqlite database
 	err := registry.InitializeDB()
 	if err != nil {
-		return errors.Wrap(err, "Unable to initialize the namespace registry database")
+		return errors.Wrap(err, "unable to initialize the namespace registry database")
 	}
 
 	err = database.InitServerDatabase()
 	if err != nil {
-		return errors.Wrap(err, "Unable to initialize the server database")
+		return errors.Wrap(err, "unable to initialize the server database")
 	}
 
 	if param.Server_EnableUI.GetBool() {

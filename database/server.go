@@ -2,9 +2,9 @@ package database
 
 import (
 	"embed"
-	"fmt"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/database/utils"
@@ -24,7 +24,7 @@ type Counter struct {
 
 func InitServerDatabase() error {
 	dbPath := param.Server_DbLocation.GetString()
-	fmt.Println("Initializing server database: ", dbPath)
+	log.Debugln("Initializing server database: ", dbPath)
 
 	tdb, err := utils.InitSQLiteDB(dbPath)
 	if err != nil {
@@ -116,4 +116,20 @@ func GetDowntimeByUUID(uuid string) (*server_structs.Downtime, error) {
 		return nil, err
 	}
 	return &downtime, nil
+}
+
+func ShutdownDB() error {
+	if ServerDatabase == nil {
+		return nil
+	}
+	sqldb, err := ServerDatabase.DB()
+	if err != nil {
+		log.Errorln("Failure when getting database instance from gorm:", err)
+		return err
+	}
+	err = sqldb.Close()
+	if err != nil {
+		log.Errorln("Failure when shutting down the database:", err)
+	}
+	return err
 }

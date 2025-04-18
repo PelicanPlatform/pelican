@@ -26,8 +26,6 @@ import (
 	"strings"
 	"time"
 
-	grab "github.com/opensaucerer/grab/v3"
-
 	"github.com/pelicanplatform/pelican/pelican_url"
 )
 
@@ -140,9 +138,6 @@ func IsRetryable(err error) bool {
 	if errors.Is(err, &SlowTransferError{}) {
 		return true
 	}
-	if errors.Is(err, grab.ErrBadLength) {
-		return false
-	}
 	if errors.Is(err, pelican_url.MetadataTimeoutErr) {
 		return true
 	}
@@ -168,8 +163,8 @@ func IsRetryable(err error) bool {
 	}
 	var cse *ConnectionSetupError
 	if errors.As(err, &cse) {
-		if sce, ok := cse.Unwrap().(grab.StatusCodeError); ok {
-			switch int(sce) {
+		if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
+			switch int(*sce) {
 			case http.StatusInternalServerError:
 			case http.StatusBadGateway:
 			case http.StatusServiceUnavailable:

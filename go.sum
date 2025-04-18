@@ -604,8 +604,6 @@ github.com/opencontainers/image-spec v1.1.0-rc5 h1:Ygwkfw9bpDvs+c9E34SdgGOj41dX/
 github.com/opencontainers/image-spec v1.1.0-rc5/go.mod h1:X4pATf0uXsnn3g5aiGIsVnJBR4mxhKzfwmvK/B2NTm8=
 github.com/opencontainers/runc v1.1.10 h1:EaL5WeO9lv9wmS6SASjszOeQdSctvpbu0DdBQBizE40=
 github.com/opencontainers/runc v1.1.10/go.mod h1:+/R6+KmDlh+hOO8NkjmgkG9Qzvypzk0yXxAPYYR65+M=
-github.com/opensaucerer/grab/v3 v3.0.1 h1:R4hEPWME8qocdGo5v/qHaNN9ArK5Eebt3KRFUwFPnyQ=
-github.com/opensaucerer/grab/v3 v3.0.1/go.mod h1:3smI0bkz/Uewv4a4euAxk/xMt/fpyees39X3dpStq+Y=
 github.com/opensciencegrid/xrootd-monitoring-shoveler v1.3.0 h1:LH4tawmXopCaGSCqoBa26WkTc3RhfG/z3X5pbmdAsGg=
 github.com/opensciencegrid/xrootd-monitoring-shoveler v1.3.0/go.mod h1:Vwfgh7SVDvaHDpbLsJVoTtIHAg8Uv8b2aRoTBGozASM=
 github.com/ory/dockertest/v3 v3.10.0 h1:4K3z2VMe8Woe++invjaTB7VRyQXQy5UY+loujO4aNE4=
