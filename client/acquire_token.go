@@ -416,6 +416,28 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 		return false
 	}
 
+	// Ensure the token issuer matches one of the issuers in the director response, if provided
+	if len(dirResp.XPelTokGenHdr.Issuers) > 0 {
+		issVal, ok := tok.Get("iss")
+		if !ok {
+			return false
+		}
+		issStr, ok := issVal.(string)
+		if !ok {
+			return false
+		}
+		foundIssuer := false
+		for _, u := range dirResp.XPelTokGenHdr.Issuers {
+			if u != nil && issStr == u.String() {
+				foundIssuer = true
+				break
+			}
+		}
+		if !foundIssuer {
+			return false
+		}
+	}
+
 	osdfPathCleaned := path.Clean(objectName)
 	if !strings.HasPrefix(osdfPathCleaned, dirResp.XPelNsHdr.Namespace) {
 		return false
