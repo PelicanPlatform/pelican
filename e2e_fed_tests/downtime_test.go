@@ -29,6 +29,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,6 +68,7 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 
 	// Spin up a federation and get the Director's URL
 	viper.Set(param.Server_UIAdminUsers.GetName(), "admin-user")
+	viper.Set(param.Director_RegistryQueryInterval.GetName(), 1*time.Second)
 	customAdvertisementInterval := 100 * time.Millisecond
 	viper.Set(param.Server_AdvertisementInterval.GetName(), customAdvertisementInterval) // was 1 minute by default
 	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
@@ -118,6 +120,7 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 
 	// Assemble a downtime creation request to the cache server
 	incompleteDowntime := web_ui.DowntimeInput{
+		Source:      "cache",
 		Class:       "SCHEDULED",
 		Description: "",
 		Severity:    "Intermittent Outage (may be up for some of the time)",
@@ -140,7 +143,6 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	tk.AddScopes(token_scopes.WebUi_Access)
 	tok, err := tk.CreateToken()
 	require.NoError(t, err)
-
 	downtimeCreationReq, _ := http.NewRequest("POST", cacheWebUrl.String(), bytes.NewBuffer(body))
 	downtimeCreationReq.Header.Set("Content-Type", "application/json")
 	downtimeCreationReq.Header.Set("Authorization", "Bearer "+tok)
@@ -154,46 +156,76 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	require.NoError(t, err, "Failed to read downtime creation response body")
 	t.Log("Downtime Creation Response: ", string(downtimeCreationRespBody))
 
-	// Now ask the Director for the downtime we just set
-	getSpecificServerAdPath, err := url.JoinPath("api", "v1.0", "director_ui", "servers", cacheServerName)
-	require.NoError(t, err, "Failed to join specific server ad path")
-	directorUrl.Path = getSpecificServerAdPath
+	// Also create a downtime in the Registry, imitating downtime set by federation admin
+	registryUrl, err := url.Parse(fedInfo.RegistryEndpoint)
+	require.NoError(t, err, "Failed to parse registry URL")
+	registryUrl.Path = downtimeCreationPath
 
-	// Poll for the downtime advertisement
+	downtimeByFedAdmin := web_ui.DowntimeInput{
+		ServerName:  server_structs.GetCacheNS(cacheServerName), // In Registry downtime table, the server name uses server's registered prefix
+		Source:      strings.ToLower(server_structs.RegistryType.String()),
+		Class:       "SCHEDULED",
+		Description: "This is a test downtime set by federation admin",
+		Severity:    "Intermittent Outage (may be up for some of the time)",
+		StartTime:   time.Now().UTC().Add(25 * time.Hour).UnixMilli(),
+		EndTime:     server_structs.IndefiniteEndTime,
+	}
+	registryDowntimebody, _ := json.Marshal(downtimeByFedAdmin)
+	require.NotEmpty(t, registryDowntimebody, "Failed to marshal registry downtime creation request")
+	registryDowntimeCreationReq, _ := http.NewRequest("POST", registryUrl.String(), bytes.NewBuffer(registryDowntimebody))
+	registryDowntimeCreationReq.Header.Set("Content-Type", "application/json")
+	registryDowntimeCreationReq.AddCookie(&http.Cookie{Name: "login", Value: tok})
+
+	registryDowntimeCreationResp, err := client.Do(registryDowntimeCreationReq)
+	require.NoError(t, err, "Failed to get response from registry downtime creation request")
+	defer registryDowntimeCreationResp.Body.Close()
+	assert.Equal(t, http.StatusOK, registryDowntimeCreationResp.StatusCode, "Failed to create downtime")
+	registryDowntimeCreationRespBody, err := io.ReadAll(registryDowntimeCreationResp.Body)
+	require.NoError(t, err, "Failed to read downtime creation response body")
+	t.Log("Registry Downtime Creation Response: ", string(registryDowntimeCreationRespBody))
+
+	// Now ask the Director for the downtimes we just set
+	getSpecificServerDowntimePath, err := url.JoinPath("api", "v1.0", "director_ui", "downtime", cacheServerName)
+	require.NoError(t, err, "Failed to join specific server downtime path")
+	directorUrl.Path = getSpecificServerDowntimePath
+
+	// Poll for the downtimes
 	timeout := time.After(5 * time.Second)
 	ticker := time.NewTicker(customAdvertisementInterval)
 	defer ticker.Stop()
 
-	var serverAd serverAdUnmarshalCustom
-	var foundDowntime bool
+	var downtimes []server_structs.Downtime
+	var foundExpectedDowntimes bool
 LOOP:
 	for {
 		select {
 		case <-timeout:
 			t.Fatal("Timed out waiting for downtime propagation")
 		case <-ticker.C:
-			// Re-fetch the server advertisement from the Director
-			specificServerAdRequest, err := http.NewRequest("GET", directorUrl.String(), nil)
+			// Re-fetch the downtimes from the Director
+			specificServerDowntimeRequest, err := http.NewRequest("GET", directorUrl.String(), nil)
 			require.NoError(t, err, "Failed to create HTTP request against a specific server")
-			specificServerAdResp, err := client.Do(specificServerAdRequest)
+			specificServerDowntimeResp, err := client.Do(specificServerDowntimeRequest)
 			require.NoError(t, err, "Failed to get response from specific server request")
-			adBody, err := io.ReadAll(specificServerAdResp.Body)
-			require.NoError(t, err, "Failed to read server ad body")
-			specificServerAdResp.Body.Close()
-			err = json.Unmarshal(adBody, &serverAd)
-			require.NoError(t, err, "Failed to unmarshal server ad")
+			dtBody, err := io.ReadAll(specificServerDowntimeResp.Body)
+			require.NoError(t, err, "Failed to read server downtimes body")
+			specificServerDowntimeResp.Body.Close()
+			err = json.Unmarshal(dtBody, &downtimes)
+			require.NoError(t, err, "Failed to unmarshal server downtimes")
 
-			// Check if downtime is present
-			if len(serverAd.Downtimes) > 0 {
-				foundDowntime = true
-				break LOOP // Exit the outer loop if downtime is found
+			// Check if the downtimes present
+			if len(downtimes) >= 2 {
+				foundExpectedDowntimes = true
+				break LOOP // Exit the outer loop if all downtimes are found
 			}
 		}
 	}
-	require.True(t, foundDowntime, "Downtime not found in server ad")
+	require.True(t, foundExpectedDowntimes, "Downtime not found")
 
-	// Verify the downtime we just set is in the server ad
-	require.Len(t, serverAd.Downtimes, 1, "Downtime not found in server ad")
-	require.Equal(t, incompleteDowntime.Severity, serverAd.Downtimes[0].Severity, "Downtime severity mismatch")
-	require.Equal(t, "admin-user", serverAd.Downtimes[0].CreatedBy, "Downtime creator mismatch")
+	// Verify the downtime we just set
+	t.Log("Downtimes: ", downtimes)
+	require.Len(t, downtimes, 2, "Downtimes count mismatch")
+	assert.Equal(t, incompleteDowntime.Severity, downtimes[0].Severity, "Downtime severity mismatch")
+	assert.Equal(t, server_structs.IndefiniteEndTime, downtimes[1].EndTime, "Downtime end time mismatch")
+	require.Equal(t, "admin-user", downtimes[0].CreatedBy, "Downtime creator mismatch")
 }

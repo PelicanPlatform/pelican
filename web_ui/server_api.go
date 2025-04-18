@@ -35,6 +35,7 @@ type (
 		CreatedBy   string                  `json:"createdBy"`  // Person who created this downtime
 		UpdatedBy   string                  `json:"updatedBy"`  // Person who last updated this downtime
 		ServerName  string                  `json:"serverName"` // Empty for Origin/Cache input; Not empty for Registry input
+		Source      string                  `json:"source"`     // Automatically set by the server; should only be set by input during testing
 		Class       server_structs.Class    `json:"class"`
 		Description string                  `json:"description"`
 		Severity    server_structs.Severity `json:"severity"`
@@ -131,13 +132,17 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		}
 	}
 
-	source, err := getDowntimeSource(ctx)
-	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    err.Error(),
-		})
-		return
+	// Source stands for the Pelican service that creates this downtime
+	// Mostly automatically set by the server via getDowntimeSource function; should only be set by input during testing
+	if downtimeInput.Source == "" {
+		downtimeInput.Source, err = getDowntimeSource(ctx)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
+			return
+		}
 	}
 
 	downtime := server_structs.Downtime{
@@ -145,7 +150,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 		CreatedBy:   user,
 		UpdatedBy:   user,
 		ServerName:  downtimeInput.ServerName,
-		Source:      source,
+		Source:      downtimeInput.Source,
 		Class:       downtimeInput.Class,
 		Description: downtimeInput.Description,
 		Severity:    downtimeInput.Severity,
