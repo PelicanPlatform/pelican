@@ -84,11 +84,18 @@ func DeleteDowntime(uuid string) error {
 }
 
 // Retrieve all downtime entries where EndTime is later than the current UTC time.
-func GetIncompleteDowntimes() ([]server_structs.Downtime, error) {
+func GetIncompleteDowntimes(source string) ([]server_structs.Downtime, error) {
 	var downtimes []server_structs.Downtime
 	currentTime := time.Now().UTC().UnixMilli()
 
-	err := ServerDatabase.Where("end_time > ? OR end_time = ?", currentTime, server_structs.IndefiniteEndTime).Find(&downtimes).Error
+	query := ServerDatabase.Where("end_time > ? OR end_time = ?", currentTime, server_structs.IndefiniteEndTime)
+
+	// If a source is provided, append it to the existing query.
+	if source != "" {
+		query = query.Where("source = ?", source)
+	}
+
+	err := query.Find(&downtimes).Error
 	if err != nil {
 		return nil, err
 	}
@@ -97,10 +104,19 @@ func GetIncompleteDowntimes() ([]server_structs.Downtime, error) {
 }
 
 // Retrieve all downtime entries
-func GetAllDowntimes() ([]server_structs.Downtime, error) {
+func GetAllDowntimes(source string) ([]server_structs.Downtime, error) {
 	var downtimes []server_structs.Downtime
 
-	err := ServerDatabase.Find(&downtimes).Error
+	// Begin a new query on the ServerDatabase
+	query := ServerDatabase
+
+	// If a non-empty source is provided, add the source condition
+	if source != "" {
+		query = query.Where("source = ?", source)
+	}
+
+	// Execute the query
+	err := query.Find(&downtimes).Error
 	if err != nil {
 		return nil, err
 	}

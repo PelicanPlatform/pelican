@@ -144,8 +144,15 @@ func updateDowntimeFromTopology(ctx context.Context) error {
 		}
 	}
 
+	// Create a new map to hold latest topology downtimes.
+	latestTopologyDowntimes := make(map[string][]server_structs.Downtime)
+	currentTime := time.Now()
+
+	// Combine both current and future downtimes into one slice.
+	fetchedTopologyDowntimes := append(downtimeInfo.CurrentDowntimes.Downtimes, downtimeInfo.FutureDowntimes.Downtimes...)
+
 	const timeLayout = "Jan 2, 2006 15:04 PM MST" // see https://pkg.go.dev/time#pkg-constants
-	for _, downtime := range downtimeInfo.CurrentDowntimes.Downtimes {
+	for _, downtime := range fetchedTopologyDowntimes {
 		parsedStartDT, err := time.Parse(timeLayout, downtime.StartTime)
 		if err != nil {
 			log.Warningf("Could not put %s into downtime because its start time '%s' could not be parsed: %s", downtime.ResourceName, downtime.StartTime, err)
@@ -158,11 +165,74 @@ func updateDowntimeFromTopology(ctx context.Context) error {
 			continue
 		}
 
-		currentTime := time.Now()
-		if parsedStartDT.Before(currentTime) && parsedEndDT.After(currentTime) {
-			filteredServers[downtime.ResourceName] = topoFiltered
+		if parsedEndDT.After(currentTime) {
+			// If it is an active downtime, add it to the filteredServers map
+			if parsedStartDT.Before(currentTime) {
+				// Check existing downtime filter
+				originalFilterType, hasOriginalFilter := filteredServers[downtime.ResourceName]
+				// If this server is already put in downtime, we don't need to do anything
+				if !(hasOriginalFilter && originalFilterType != tempAllowed) {
+					// Otherwise, we need to put it into the filteredServers map
+					filteredServers[downtime.ResourceName] = topoFiltered
+				}
+			}
+
+			// Add active and future downtimes to the latestTopologyDowntimes map
+			parsedCreatedTime, err := time.Parse(timeLayout, downtime.CreatedTime)
+			if err != nil {
+				log.Warningf("Could not put %s into downtime because its created time '%s' could not be parsed: %s", downtime.ResourceName, downtime.CreatedTime, err)
+				continue
+			}
+			parsedUpdateTime, err := time.Parse(timeLayout, downtime.UpdateTime)
+			if err != nil {
+				log.Warningf("Could not put %s into downtime because its update time '%s' could not be parsed: %s", downtime.ResourceName, downtime.UpdateTime, err)
+				continue
+			}
+
+			var parsedClass server_structs.Class
+			switch downtime.Class {
+			case "SCHEDULED":
+				parsedClass = server_structs.SCHEDULED
+			case "UNSCHEDULED":
+				parsedClass = server_structs.UNSCHEDULED
+			default:
+				log.Warningf("Unrecognized downtime class '%s' for server %s", downtime.Class, downtime.ResourceName)
+				continue
+			}
+
+			var parsedSeverity server_structs.Severity
+			switch {
+			case strings.HasPrefix(downtime.Severity, "Outage"):
+				parsedSeverity = server_structs.Outage
+			case strings.HasPrefix(downtime.Severity, "Severe"):
+				parsedSeverity = server_structs.Severe
+			case strings.HasPrefix(downtime.Severity, "Intermittent"):
+				parsedSeverity = server_structs.IntermittentOutage
+			case strings.HasPrefix(downtime.Severity, "No"):
+				parsedSeverity = server_structs.NoSignificantOutageExpected
+			default:
+				log.Warningf("Unrecognized downtime class '%s' for server %s", downtime.Severity, downtime.ResourceName)
+				continue
+			}
+
+			dtRecord := server_structs.Downtime{
+				ServerName:  downtime.ResourceName,
+				Class:       parsedClass,
+				Severity:    parsedSeverity,
+				Source:      "topology",
+				StartTime:   parsedStartDT.UnixMilli(),
+				EndTime:     parsedEndDT.UnixMilli(),
+				Description: downtime.Description,
+				CreatedAt:   parsedCreatedTime.UnixMilli(),
+				UpdatedAt:   parsedUpdateTime.UnixMilli(),
+			}
+			// Append the record to the list for the given server
+			latestTopologyDowntimes[downtime.ResourceName] = append(latestTopologyDowntimes[downtime.ResourceName], dtRecord)
 		}
 	}
+
+	// Overwrite the global topologyDowntimes with the newly computed map.
+	topologyDowntimes = latestTopologyDowntimes
 
 	log.Infof("The following servers are currently configured in downtime: %#v", filteredServers)
 	return nil

@@ -25,13 +25,17 @@ import (
 	"github.com/pkg/errors"
 	"google.golang.org/appengine/log"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 type (
 	DowntimeInput struct {
-		CreatedBy   string                  `json:"createdBy"` // Person who created this downtime
+		CreatedBy   string                  `json:"createdBy"`  // Person who created this downtime
+		UpdatedBy   string                  `json:"updatedBy"`  // Person who last updated this downtime
+		ServerName  string                  `json:"serverName"` // Empty for Origin/Cache input; Not empty for Registry input
+		Source      string                  `json:"source"`     // Automatically set by the server; should only be set by input during testing
 		Class       server_structs.Class    `json:"class"`
 		Description string                  `json:"description"`
 		Severity    server_structs.Severity `json:"severity"`
@@ -39,6 +43,24 @@ type (
 		EndTime     int64                   `json:"endTime"`   // Epoch UTC in seconds
 	}
 )
+
+// Get the Pelican service that set the downtime
+func getDowntimeSource(ctx *gin.Context) (string, error) {
+	enabledServers := config.GetEnabledServerString(true)
+	if len(enabledServers) == 0 {
+		log.Warningf(ctx, "Downtime source is not set. No Pelican service is enabled.")
+		return "", errors.New("No Pelican service is enabled")
+	}
+	// Multiple servers in a single process ("federation in a box") are not supported.
+	// Because it only happens in testing, we don't need to handle it.
+	if len(enabledServers) > 1 {
+		log.Warningf(ctx, "Downtime source is not set. Cannot determine which Pelican service set the downtime. Multiple servers are enabled: %s", enabledServers)
+		return "", nil
+	}
+	// Only one server is enabled
+	enabledServer := enabledServers[0]
+	return enabledServer, nil
+}
 
 func isValidClass(class server_structs.Class) bool {
 	validClasses := map[server_structs.Class]bool{
@@ -106,13 +128,29 @@ func HandleCreateDowntime(ctx *gin.Context) {
 	if user == "" || err != nil {
 		user = ctx.GetString("User")
 		if user == "" {
-			user = "unknown"
 			log.Warningf(ctx, "Failed to get user from context")
 		}
 	}
+
+	// Source stands for the Pelican service that creates this downtime
+	// Mostly automatically set by the server via getDowntimeSource function; should only be set by input during testing
+	if downtimeInput.Source == "" {
+		downtimeInput.Source, err = getDowntimeSource(ctx)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    err.Error(),
+			})
+			return
+		}
+	}
+
 	downtime := server_structs.Downtime{
 		UUID:        id.String(),
 		CreatedBy:   user,
+		UpdatedBy:   user,
+		ServerName:  downtimeInput.ServerName,
+		Source:      downtimeInput.Source,
 		Class:       downtimeInput.Class,
 		Description: downtimeInput.Description,
 		Severity:    downtimeInput.Severity,
@@ -129,15 +167,16 @@ func HandleCreateDowntime(ctx *gin.Context) {
 
 func HandleGetDowntime(ctx *gin.Context) {
 	status := ctx.Query("status")
+	source := ctx.Query("source") // Which Pelican service set the downtime
 	var downtimes []server_structs.Downtime
 	var err error
 
 	switch status {
 	case "all":
-		downtimes, err = database.GetAllDowntimes()
+		downtimes, err = database.GetAllDowntimes(source)
 	default:
 		// "incomplete" includes active and future downtimes
-		downtimes, err = database.GetIncompleteDowntimes()
+		downtimes, err = database.GetIncompleteDowntimes(source)
 	}
 
 	if err != nil {
@@ -180,6 +219,14 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 		return
 	}
 
+	user, _, err := GetUserGroups(ctx)
+	if user == "" || err != nil {
+		user = ctx.GetString("User")
+		if user == "" {
+			log.Warningf(ctx, "Failed to get user from context")
+		}
+	}
+	downtimeInput.UpdatedBy = user
 	// Only update fields provided in the request (different from default values)
 	if downtimeInput.CreatedBy != "" {
 		existingDowntime.CreatedBy = downtimeInput.CreatedBy
@@ -199,6 +246,7 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 	if downtimeInput.EndTime != 0 {
 		existingDowntime.EndTime = downtimeInput.EndTime
 	}
+	// To avoid confusion, we don't allow to change the server name in an update
 
 	if err := database.UpdateDowntime(uuid, existingDowntime); err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "Failed to update downtime: " + err.Error()})

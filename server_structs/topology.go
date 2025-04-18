@@ -63,6 +63,7 @@ type (
 	TopoDowntimeInfo struct {
 		XMLName          xml.Name             `xml:"Downtimes"`
 		CurrentDowntimes TopoCurrentDowntimes `xml:"CurrentDowntimes"`
+		FutureDowntimes  TopoCurrentDowntimes `xml:"FutureDowntimes"`
 	}
 
 	TopoCurrentDowntimes struct {
@@ -80,5 +81,7 @@ type (
 		UpdateTime    string            `xml:"UpdateTime"`
 		Services      TopoServices      `xml:"Services"`
 		Description   string            `xml:"Description"`
+		Class         string            `xml:"Class"`
+		Severity      string            `xml:"Severity"`
 	}
 )

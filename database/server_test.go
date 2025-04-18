@@ -112,7 +112,7 @@ func TestGetIncompleteDowntimes(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("fetch-active-downtimes", func(t *testing.T) {
-		activeEntries, err := GetIncompleteDowntimes()
+		activeEntries, err := GetIncompleteDowntimes("")
 		require.NoError(t, err)
 		assert.Len(t, activeEntries, 1)
 		assert.Equal(t, activeDowntime.UUID, activeEntries[0].UUID)
