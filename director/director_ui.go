@@ -58,6 +58,7 @@ type (
 		FromTopology      bool                        `json:"fromTopology"`
 		HealthStatus      HealthTestStatus            `json:"healthStatus"`
 		IOLoad            float64                     `json:"ioLoad"`
+		RegistryPrefix    string                      `json:"registryPrefix"`
 		NamespacePrefixes []string                    `json:"namespacePrefixes"`
 		Version           string                      `json:"version"`
 	}
@@ -68,6 +69,7 @@ type (
 	// and the server_structs.ServerAd.
 	serverResponse struct {
 		Name                string                           `json:"name"`
+		RegistryPrefix      string                           `json:"registryPrefix"`
 		StorageType         server_structs.OriginStorageType `json:"storageType"`
 		DisableDirectorTest bool                             `json:"disableDirectorTest"`
 		// AuthURL is Deprecated. For Pelican severs, URL is used as the base URL for object access.
@@ -235,6 +237,7 @@ func advertisementToServerResponse(ad *server_structs.Advertisement) serverRespo
 	filtered, ft := checkFilter(ad.Name)
 	res := serverResponse{
 		Name:                ad.Name,
+		RegistryPrefix:      ad.RegistryPrefix,
 		StorageType:         ad.StorageType,
 		DisableDirectorTest: ad.DisableDirectorTest,
 		BrokerURL:           ad.BrokerURL.String(),
@@ -263,6 +266,7 @@ func advertisementToServerResponse(ad *server_structs.Advertisement) serverRespo
 func serverResponseToListServerResponse(res serverResponse) listServerResponse {
 	listRes := listServerResponse{
 		Name:                res.Name,
+		RegistryPrefix:      res.RegistryPrefix,
 		StorageType:         res.StorageType,
 		DisableDirectorTest: res.DisableDirectorTest,
 		BrokerURL:           res.BrokerURL,
