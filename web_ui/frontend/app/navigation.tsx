@@ -13,10 +13,24 @@ import {
   AssistantDirection,
   AppRegistration,
   Cached,
+  Api,
+  Settings,
 } from '@mui/icons-material';
 import { NavigationConfiguration } from '@/components/layout/Navigation';
 
 const NavigationConfig: NavigationConfiguration = {
+  settings: [
+    {
+      title: 'General',
+      href: '/settings/',
+      icon: <Settings />,
+    },
+    {
+      title: 'API',
+      href: '/settings/api/',
+      icon: <Api />,
+    },
+  ],
   registry: [
     { title: 'Dashboard', href: '/registry/', icon: <Dashboard /> },
     {
@@ -53,6 +67,12 @@ const NavigationConfig: NavigationConfiguration = {
       icon: <Build />,
       allowedRoles: ['admin'],
     },
+    {
+      title: 'Settings',
+      href: '/settings/',
+      icon: <Settings />,
+      allowedRoles: ['admin'],
+    },
   ],
   origin: [
     { title: 'Dashboard', href: '/origin/', icon: <Dashboard /> },
@@ -65,6 +85,7 @@ const NavigationConfig: NavigationConfiguration = {
     },
     { title: 'Issuer', href: '/origin/issuer', icon: <Lock /> },
     { title: 'Config', href: '/config/', icon: <Build /> },
+    { title: 'Settings', href: '/settings/', icon: <Settings /> },
   ],
   director: [
     { title: 'Dashboard', href: '/director/', icon: <Dashboard /> },
@@ -81,11 +102,18 @@ const NavigationConfig: NavigationConfiguration = {
       icon: <Build />,
       allowedRoles: ['admin'],
     },
+    {
+      title: 'Settings',
+      href: '/settings/',
+      icon: <Settings />,
+      allowedRoles: ['admin'],
+    },
   ],
   cache: [
     { title: 'Dashboard', href: '/cache/', icon: <Dashboard /> },
     { title: 'Metrics', href: '/cache/metrics/', icon: <Equalizer /> },
     { title: 'Config', href: '/config/', icon: <Build /> },
+    { title: 'Settings', href: '/settings/', icon: <Settings /> },
   ],
   shared: [
     { title: 'Origin', href: '/origin/', icon: <TripOrigin /> },
