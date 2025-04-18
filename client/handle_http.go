@@ -511,10 +511,18 @@ func (e *dirListingNotSupportedError) Is(target error) bool {
 
 type HttpErrResp struct {
 	Code int
-	Err  string
+	Str  string
+	Err  error
 }
 
 func (e *HttpErrResp) Error() string {
+	if e.Err != nil {
+		return e.Str + ": " + e.Err.Error()
+	}
+	return e.Str
+}
+
+func (e *HttpErrResp) Unwrap() error {
 	return e.Err
 }
 
@@ -2674,8 +2682,12 @@ Loop:
 	// prior attempt.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 		log.WithFields(fields).Debugln("Got failure status code:", resp.StatusCode)
-		return 0, 0, -1, serverVersion, &HttpErrResp{resp.StatusCode, fmt.Sprintf("Request failed (HTTP status %d): %s",
-			resp.StatusCode, err)}
+		if err == nil {
+			sce := StatusCodeError(resp.StatusCode)
+			err = &sce
+		}
+		return 0, 0, -1, serverVersion, &HttpErrResp{resp.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
+			resp.StatusCode), err}
 	}
 
 	// By now, we think the download succeeded. If we know how large the file was supposed to
@@ -2956,8 +2968,9 @@ Loop:
 			// older versions of XRootD incorrectly use 200.
 			if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusCreated {
 				log.Errorln("Got failure status code:", response.StatusCode)
-				lastError = &HttpErrResp{response.StatusCode, fmt.Sprintf("Request failed (HTTP status %d)",
-					response.StatusCode)}
+				sce := StatusCodeError(response.StatusCode)
+				lastError = &HttpErrResp{response.StatusCode, fmt.Sprintf("request failed (HTTP status %d)",
+					response.StatusCode), &sce}
 				break Loop
 			}
 			break Loop
@@ -3641,9 +3654,11 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 			}
 		}
 	} else {
+		sce := StatusCodeError(headResponse.StatusCode)
 		err = &HttpErrResp{
 			Code: headResponse.StatusCode,
-			Err:  fmt.Sprintf("GET \"%s\" resulted in status code %d", objectUrl, headResponse.StatusCode),
+			Str:  fmt.Sprintf("request failed (%d)", headResponse.StatusCode),
+			Err:  &sce,
 		}
 	}
 	// Early return -- all the info we wanted was in the GET response.
@@ -3676,9 +3691,11 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 			}
 		}
 	} else {
+		sce := StatusCodeError(headResponse.StatusCode)
 		err = &HttpErrResp{
 			Code: headResponse.StatusCode,
-			Err:  fmt.Sprintf("HEAD \"%s\" resulted in status code %d", objectUrl, headResponse.StatusCode),
+			Str:  fmt.Sprintf("request failed (HTTP status %d)", headResponse.StatusCode),
+			Err:  &sce,
 		}
 	}
 	return
