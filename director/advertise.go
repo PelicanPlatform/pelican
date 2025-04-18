@@ -168,7 +168,13 @@ func updateDowntimeFromTopology(ctx context.Context) error {
 		if parsedEndDT.After(currentTime) {
 			// If it is an active downtime, add it to the filteredServers map
 			if parsedStartDT.Before(currentTime) {
-				filteredServers[downtime.ResourceName] = topoFiltered
+				// Check existing downtime filter
+				originalFilterType, hasOriginalFilter := filteredServers[downtime.ResourceName]
+				// If this server is already put in downtime, we don't need to do anything
+				if !(hasOriginalFilter && originalFilterType != tempAllowed) {
+					// Otherwise, we need to put it into the filteredServers map
+					filteredServers[downtime.ResourceName] = topoFiltered
+				}
 			}
 
 			// Add active and future downtimes to the latestTopologyDowntimes map

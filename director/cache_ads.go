@@ -438,12 +438,20 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 	currentTime := time.Now().UTC().UnixMilli()
 
 	for _, downtime := range runningServersDowntimes {
-		// If it is an active downtime, add it to the filteredServers map
+		// Save all active and future downtimes to the new map
+		newFederationDowntimes[downtime.ServerName] = append(newFederationDowntimes[downtime.ServerName], downtime)
+
+		// Check existing downtime filter
+		originalFilterType, hasOriginalFilter := filteredServers[downtime.ServerName]
+		// If this server is already put in downtime, we don't need to do anything
+		if hasOriginalFilter && originalFilterType != tempAllowed {
+			continue
+		}
+		// Otherwise, if it is an active downtime, we need to put it into the filteredServers map
 		if currentTime >= downtime.StartTime && (currentTime <= downtime.EndTime || downtime.EndTime == -1) {
 			filteredServers[downtime.ServerName] = tempFiltered
 		}
-		// Save all active and future downtimes to the new map
-		newFederationDowntimes[downtime.ServerName] = append(newFederationDowntimes[downtime.ServerName], downtime)
+
 	}
 
 	// Overwrite the in-memory federationDowntimes map with the new data.

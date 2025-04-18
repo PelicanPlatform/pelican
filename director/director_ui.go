@@ -59,7 +59,6 @@ type (
 		HealthStatus      HealthTestStatus            `json:"healthStatus"`
 		IOLoad            float64                     `json:"ioLoad"`
 		NamespacePrefixes []string                    `json:"namespacePrefixes"`
-		Downtimes         []server_structs.Downtime   `json:"downtimes"`
 		Version           string                      `json:"version"`
 	}
 
@@ -88,7 +87,6 @@ type (
 		HealthStatus HealthTestStatus            `json:"healthStatus"`
 		IOLoad       float64                     `json:"ioLoad"`
 		Namespaces   []NamespaceAdV2Response     `json:"namespaces"`
-		Downtimes    []server_structs.Downtime   `json:"downtimes"`
 		Version      string                      `json:"version"`
 	}
 
@@ -252,7 +250,6 @@ func advertisementToServerResponse(ad *server_structs.Advertisement) serverRespo
 		FromTopology:        ad.FromTopology,
 		HealthStatus:        healthStatus,
 		IOLoad:              ad.GetIOLoad(),
-		Downtimes:           ad.Downtimes,
 		Version:             ad.Version,
 	}
 	for _, ns := range ad.NamespaceAds {
@@ -282,7 +279,6 @@ func serverResponseToListServerResponse(res serverResponse) listServerResponse {
 		HealthStatus:        res.HealthStatus,
 		IOLoad:              res.IOLoad,
 		Version:             res.Version,
-		Downtimes:           res.Downtimes,
 	}
 	for _, ns := range res.Namespaces {
 		listRes.NamespacePrefixes = append(listRes.NamespacePrefixes, ns.Path)
@@ -496,141 +492,6 @@ func queryOrigins(ctx *gin.Context) {
 	}
 }
 
-// A gin route handler that given a server hostname through path variable `name`,
-// checks and adds the server to a list of servers to be bypassed when the director redirects
-// object requests from the client
-func handleFilterServer(ctx *gin.Context) {
-	sn := strings.TrimPrefix(ctx.Param("name"), "/")
-	if sn == "" {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "'name' is a required path parameter",
-		})
-		return
-	}
-	filtered, filterType := checkFilter(sn)
-	if filtered {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprint("Can't filter a server that already has been filtered with type ", filterType),
-		})
-		return
-	}
-	filteredServersMutex.Lock()
-	defer filteredServersMutex.Unlock()
-
-	// Backup the original filter type to revert in case of failure
-	originalFilterType, hasOriginalFilter := filteredServers[sn]
-
-	// Decide new filter type and update map
-	// If we previously temporarily allowed a server, we switch to permFiltered (reset)
-	newFilterType := tempFiltered
-	if filterType == tempAllowed {
-		newFilterType = permFiltered
-	}
-	filteredServers[sn] = newFilterType
-
-	// Attempt to persist change in the database
-	if err := setServerDowntimeFn(sn, newFilterType); err != nil {
-		// Revert the change in filteredServers if SetServerDowntime fails
-		if hasOriginalFilter {
-			filteredServers[sn] = originalFilterType
-		} else {
-			delete(filteredServers, sn)
-		}
-
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "Failed to persist server downtime due to database error",
-		})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "success"})
-}
-
-// A gin route handler that given a server hostname through path variable `name`,
-// checks and removes the server from a list of servers to be bypassed when the director redirects
-// object requests from the client
-func handleAllowServer(ctx *gin.Context) {
-	sn := strings.TrimPrefix(ctx.Param("name"), "/")
-	if sn == "" {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    "'name' is a required path parameter",
-		})
-		return
-	}
-	filtered, ft := checkFilter(sn)
-	if !filtered {
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Can't allow server %s that is not being filtered", sn),
-		})
-		return
-	}
-
-	filteredServersMutex.Lock()
-	defer filteredServersMutex.Unlock()
-
-	// Backup the original filter (downtime) type to revert in case of failure
-	originalFilterType, hasOriginalFilter := filteredServers[sn]
-
-	// Perform actions based on the current filter type
-	if ft == tempFiltered {
-		// Temporarily filtered server: allow it by removing from map
-		delete(filteredServers, sn)
-
-		if err := deleteServerDowntimeFn(sn); err != nil {
-			// Revert the change in filteredServers if DeleteServerDowntime fails
-			if hasOriginalFilter {
-				filteredServers[sn] = originalFilterType
-			} else {
-				delete(filteredServers, sn)
-			}
-
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Failed to remove the downtime of server %s in director db", sn),
-			})
-			return
-		}
-	} else if ft == permFiltered {
-		// Permanently filtered server: temporarily allow it
-		filteredServers[sn] = tempAllowed
-
-		if err := setServerDowntimeFn(sn, tempAllowed); err != nil {
-			// Revert the change in filteredServers if SetServerDowntime fails
-			if hasOriginalFilter {
-				filteredServers[sn] = originalFilterType
-			} else {
-				delete(filteredServers, sn)
-			}
-
-			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Failed to remove the downtime of server %s in director db", sn),
-			})
-			return
-		}
-	} else if ft == topoFiltered {
-		// Server is disabled by OSG Topology
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Can't allow server %s that is disabled by the OSG Topology. Contact OSG admin at support@osg-htc.org to enable the server.", sn),
-		})
-		return
-	} else if ft == serverFiltered {
-		// Server is disabled by server admin
-		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Can't allow server %s that is disabled by the server admin. Contact server admin to enable the server.", sn),
-		})
-		return
-	}
-	ctx.JSON(http.StatusOK, server_structs.SimpleApiResp{Status: server_structs.RespOK, Msg: "success"})
-}
-
 // Endpoint for director support contact information
 func handleDirectorContact(ctx *gin.Context) {
 	email := param.Director_SupportContactEmail.GetString()
@@ -661,8 +522,6 @@ func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 		directorWebAPI.GET("/servers", listServers)
 		directorWebAPI.GET("/servers/:name", getServerHandler)
 		directorWebAPI.GET("/servers/:name/namespaces", listServerNamespaces)
-		directorWebAPI.PATCH("/servers/filter/*name", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleFilterServer)
-		directorWebAPI.PATCH("/servers/allow/*name", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleAllowServer)
 		directorWebAPI.GET("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
 		directorWebAPI.HEAD("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
 		directorWebAPI.GET("/namespaces", listNamespacesHandler)
