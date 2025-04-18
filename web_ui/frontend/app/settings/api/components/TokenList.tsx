@@ -77,7 +77,7 @@ const TokenCard = ({ token, mutate, dispatch }: TokenCardProps) => {
             </Box>
             <Box display={'flex'}>
               <Typography variant={'subtitle2'}>
-                Expires on {expirationDate.toLocaleDateString()}
+                Expires on {expirationDate.toLocaleString()}
               </Typography>
               <Box mx={1}>-</Box>
               <Typography variant={'subtitle2'}>
@@ -89,7 +89,7 @@ const TokenCard = ({ token, mutate, dispatch }: TokenCardProps) => {
             {token.scopes.map((x) => {
               return (
                 <Tooltip key={x} title={'Token Scope'}>
-                  <Chip size={'small'} label={x} />
+                  <Chip sx={{ mr: 1 }} size={'small'} label={x} />
                 </Tooltip>
               );
             })}

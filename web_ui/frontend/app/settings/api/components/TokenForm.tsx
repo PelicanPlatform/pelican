@@ -32,15 +32,21 @@ const TokenForm = () => {
   const dispatch = useContext(AlertDispatchContext);
 
   const [name, setName] = useState('');
-  const [createdBy, setCreatedBy] = useState('');
   const [expiration, setExpiration] = useState('');
   const [scopes, setScopes] = useState<string[]>([]);
   const [token, setToken] = useState<string | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
 
   const onSubmit = useCallback(async () => {
+    // Check the fields are not empty
+    if (name === '' || expiration === '' || scopes.length === 0) {
+      setError('Please fill in all fields');
+      return;
+    }
+    setError(undefined);
+
     const tokenRequest = {
       name,
-      createdBy,
       expiration: new Date(expiration).toISOString(),
       scopes,
     };
@@ -49,12 +55,11 @@ const TokenForm = () => {
 
     // Remove current fields
     setName('');
-    setCreatedBy('');
     setExpiration('');
     setScopes([]);
 
     return token;
-  }, [name, createdBy, expiration, scopes]);
+  }, [name, expiration, scopes]);
 
   return (
     <Box sx={{ mt: 3 }}>
@@ -67,16 +72,7 @@ const TokenForm = () => {
         name={'name'}
         onChange={(e) => setName(e.target.value)}
         value={name}
-      />
-      <TextField
-        label='Creators Name'
-        size={'small'}
-        fullWidth
-        required
-        margin={'dense'}
-        name={'createdBy'}
-        onChange={(e) => setCreatedBy(e.target.value)}
-        value={createdBy}
+        aria-required={true}
       />
       <TextField
         label='Expiration Date'
@@ -91,6 +87,7 @@ const TokenForm = () => {
         }}
         onChange={(e) => setExpiration(e.target.value)}
         value={expiration}
+        aria-required={true}
       />
       <Autocomplete
         multiple
@@ -137,6 +134,11 @@ const TokenForm = () => {
       >
         Create Token
       </Button>
+      {error && (
+        <Typography variant={'subtitle2'} color={'error'} mt={1}>
+          {error}
+        </Typography>
+      )}
       <TokenModal setToken={setToken} token={token} />
     </Box>
   );
@@ -174,7 +176,7 @@ const TokenModal = ({
       >
         <Box display={'flex'}>
           <Typography variant={'subtitle1'}>
-            Copy your API Token, you cannot view it again.
+            Copy your API Token to a safe location, you cannot view it again.
           </Typography>
           <IconButton
             sx={{ ml: 'auto' }}
@@ -202,10 +204,13 @@ const TokenModal = ({
             setTimeout(() => setConfirmation(false), 2000);
           }}
         >
-          <IconButton sx={{ mr: 1, my: 'auto' }}>
-            {confirmation ? <Check /> : <ContentCopy />}
-          </IconButton>
           <Box my={'auto'}>{token}</Box>
+          <Button
+            sx={{ ml: 1, my: 'auto' }}
+            startIcon={confirmation ? <Check /> : <ContentCopy />}
+          >
+            Copy
+          </Button>
         </Box>
       </Box>
     </Modal>

@@ -65,11 +65,11 @@ export interface ServerGeneral extends ServerBase {
 
 export interface BaseToken {
   name: string;
-  createdBy: string;
   expiration: string;
   scopes: string[];
 }
 
 export interface GetToken extends BaseToken {
   id: string;
+  createdBy: string;
 }
