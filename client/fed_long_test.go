@@ -1,4 +1,4 @@
-//go:build linux
+//go:build !windows
 
 /***************************************************************
  *
@@ -649,7 +649,7 @@ func TestSyncUpload(t *testing.T) {
 
 		// Attempt to sync an upload of a single file to a collection, should fail
 		_, err = client.DoPut(fed.Ctx, smallTestFile.Name(), uploadUrl, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
-		require.ErrorContains(t, err, "Request failed (HTTP status 409)")
+		require.ErrorContains(t, err, "request failed (HTTP status 409)")
 	})
 }
 

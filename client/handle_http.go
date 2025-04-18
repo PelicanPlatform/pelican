@@ -1941,6 +1941,10 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		if info, err = os.Stat(localPath); err != nil {
 			if os.IsNotExist(err) {
 				directory := path.Dir(localPath)
+				if localPath != "" && localPath[len(localPath)-1] == '/' {
+					directory = localPath
+					localPath = path.Join(directory, path.Base(transfer.remoteURL.Path))
+				}
 				if err = os.MkdirAll(directory, 0700); err != nil {
 					return
 				}
