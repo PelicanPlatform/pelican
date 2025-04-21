@@ -143,6 +143,43 @@ func TestHttpReq(t *testing.T) {
 	assert.Equal(t, "Hello, World!", string(body))
 }
 
+// Test startup when the local cache socket wasn't cleaned up.
+//
+// Ensure that the cache.sock existing doesn't prevent the local cache
+// from starting up.
+func TestDirtyStartup(t *testing.T) {
+	server_utils.ResetTestState()
+
+	socketPath := filepath.Join(t.TempDir(), "lc.s")
+	sock, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
+	require.NoError(t, err)
+	defer func() {
+		sock.Close()
+		_ = os.Remove(socketPath)
+	}()
+
+	cfg := authOriginCfg
+	cfg += "\n\nLocalCache:\n  Socket: \"" + socketPath + "\"\n"
+	ft := fed_test_utils.NewFedTest(t, cfg)
+
+	transport := config.GetTransport().Clone()
+	transport.DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+		return net.Dial("unix", param.LocalCache_Socket.GetString())
+	}
+
+	client := &http.Client{Transport: transport}
+	req, err := http.NewRequest("GET", "http://localhost/test/hello_world.txt", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+ft.Token)
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	assert.NoError(t, err)
+	assert.Equal(t, "Hello, World!", string(body))
+}
+
 // Test a raw HTTP request (no Pelican client) returns a 404 for an unknown object
 func TestHttpFailures(t *testing.T) {
 	server_utils.ResetTestState()

@@ -47,14 +47,48 @@ import (
 // Launch the unix socket listener as a separate goroutine
 func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) (err error) {
 	socketName := param.LocalCache_Socket.GetString()
-	if err = os.MkdirAll(filepath.Dir(socketName), fs.FileMode(0755)); err != nil {
+	socketDir := filepath.Dir(socketName)
+
+	if err = os.MkdirAll(socketDir, fs.FileMode(0755)); err != nil {
 		err = errors.Wrap(err, "failed to create socket directory")
 		return
 	}
 
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketName, Net: "unix"})
-	if err != nil {
+	var startupDir string
+	// Create a temporary directory for the socket; once we are listening on the socket, we rename
+	// the temporary directory to the final socket name. This allows us to avoid outages if multiple
+	// processes are trying to create the socket at the same time (or if the socket already exists
+	// from a previous startup that didn't clean up properly).
+	//
+	// Note: Linux has relatively short limits on the name length of a Unix socket.
+	// We use the terse "lc-*" prefix to avoid exceeding the limit.
+	if startupDir, err = os.MkdirTemp(socketDir, "lc-*"); err != nil {
+		err = errors.Wrap(err, "failed to create temporary directory for launching local cache socket")
 		return
+	}
+	defer func() {
+		var matches []string
+		matches, err2 := filepath.Glob(filepath.Join(startupDir, "lc-*"))
+		if err2 != nil {
+			err2 = errors.Wrap(err2, "failed to list temporary directories for cleaning up local cache socket")
+			if err == nil {
+				err = err2
+			}
+			return
+		}
+		for _, dir := range matches {
+			if err2 := os.RemoveAll(dir); err2 != nil {
+				log.Warningf("Failed to remove temporary directory %s: %v", dir, err2)
+			}
+		}
+	}()
+
+	startupSockName := filepath.Join(startupDir, filepath.Base(socketName))
+	var listener *net.UnixListener
+	if listener, err = net.ListenUnix("unix", &net.UnixAddr{Name: startupSockName, Net: "unix"}); err != nil {
+		err = errors.Wrap(err, "failed to create unix socket for local cache")
+		log.Warningf("Failed to create socket %s: %v", startupSockName, err)
+		return err
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -152,6 +186,10 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 		<-ctx.Done()
 		return srv.Shutdown(ctx)
 	})
+
+	if err = os.Rename(startupSockName, socketName); err != nil {
+		err = errors.Wrap(err, "failed to rename temporary socket to final socket name for local cache")
+	}
 	return
 }
 
