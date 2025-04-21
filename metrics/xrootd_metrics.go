@@ -31,6 +31,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -325,6 +326,13 @@ type (
 		Version string        `xml:"ver,attr"`
 		Program string        `xml:"pgm,attr"`
 		Stats   []SummaryStat `xml:"stats"`
+	}
+
+	processUtilizationState struct {
+		sync.Mutex
+		lastUserSeconds float64
+		lastSysSeconds  float64
+		lastUpdateTime  time.Time
 	}
 )
 
@@ -741,8 +749,15 @@ var (
 		Buckets: TimeHistogramBuckets,
 	})
 
+	CPUUtilzation = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_cpu_utilization",
+		Help: "CPU utilization of the XRootD server",
+	})
+
 	lastStats    SummaryStat
 	lastOssStats OSSStatsGs
+
+	procState = processUtilizationState{}
 
 	lastTotalIO  int     // The last total IO value
 	lastWaitTime float64 // The last IO wait time
@@ -1621,11 +1636,30 @@ func HandleSummaryPacket(packet []byte) error {
 			StorageVolume.With(prometheus.Labels{"ns": "/cache", "type": "free", "server_type": "cache"}).
 				Set(float64(cacheStore.Size - cacheStore.Used))
 		case ProcStat:
-			fmt.Println("Got proc stat: ", string(packet))
-			fmt.Println("Proc System Seconds: ", stat.ProcSystem.Seconds)
-			fmt.Print("Proc System MicroSeconds: ", stat.ProcSystem.MicroSeconds)
-			fmt.Println("Proc User Seconds: ", stat.ProcUser.Seconds)
-			fmt.Println("Proc User MicroSeconds: ", stat.ProcUser.MicroSeconds)
+			procState.Lock()
+			currentTime := time.Now()
+			currentUserSeconds := float64(stat.ProcUser.Seconds) + float64(stat.ProcUser.MicroSeconds)/1e6
+			currentSystemSeconds := float64(stat.ProcSystem.Seconds) + float64(stat.ProcSystem.MicroSeconds)/1e6
+
+			// if this not is the first time we are receiving the proc stat, then we can
+			// calculate the deltas since the last time we received the proc stat
+			if !procState.lastUpdateTime.IsZero() {
+				wallDelta := currentTime.Sub(procState.lastUpdateTime).Seconds()
+				userDelta := currentUserSeconds - procState.lastUserSeconds
+				sysDelta := currentSystemSeconds - procState.lastSysSeconds
+				cpuDelta := userDelta + sysDelta // total CPU time during interval
+
+				if wallDelta > 0 {
+					// represents the average of cores utilized during the interval
+					utlizationRatio := cpuDelta / wallDelta
+					CPUUtilzation.Set(utlizationRatio)
+				}
+			}
+
+			procState.lastUserSeconds = currentUserSeconds
+			procState.lastSysSeconds = currentSystemSeconds
+			procState.lastUpdateTime = currentTime
+			procState.Unlock()
 		}
 	}
 	return nil
