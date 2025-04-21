@@ -81,11 +81,35 @@ func isValidSeverity(severity server_structs.Severity) bool {
 }
 
 func isValidTimeRange(startTime, endTime int64) bool {
+	// Check both startTime and endTime are in milliseconds
+	// All reasonable millisecond timestamps today are >= 10^11, so
+	// 0 < timestamp < 10^11 => not valid
+	const msThreshold = int64(100_000_000_000)
+
+	// startTime must be non‑negative, and if non‑zero, large enough to be ms
+	if startTime < 0 {
+		return false
+	}
+	if startTime != 0 && startTime < msThreshold {
+		return false
+	}
+
+	// endTime must be either:
+	//  • the special IndefiniteEndTime,
+	//  • zero (meaning “not provided” in partial update), or
+	//  • a non‑negative ms value ≥ msThreshold
+	if endTime < 0 && endTime != server_structs.IndefiniteEndTime {
+		return false
+	}
+	if endTime != 0 && endTime != server_structs.IndefiniteEndTime && endTime < msThreshold {
+		return false
+	}
+
 	// When endTime is indefinite, the downtime is considered ongoing forever
 	// Note: when you do a partial update and not provide startTime/endTime,
 	// they are 0 by default and should be considered as valid input
 	if endTime == server_structs.IndefiniteEndTime {
-		return startTime >= 0
+		return true
 	}
 	return startTime <= endTime
 }
