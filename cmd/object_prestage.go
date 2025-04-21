@@ -46,7 +46,8 @@ var (
 
 func init() {
 	flagSet := prestageCmd.Flags()
-	flagSet.StringP("cache", "c", "", "Cache to use")
+	flagSet.StringP("cache", "c", "", `A comma-separated list of preferred caches to try for the transfer, where a "+" in the list indicates
+the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	objectCmd.AddCommand(prestageCmd)
 
