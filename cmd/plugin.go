@@ -406,8 +406,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 	// as options.
 	caches, err := getPreferredCaches()
 	if err != nil {
-		log.Errorln("Failed to get preferred caches:", err)
-		os.Exit(1)
+		return errors.Wrap(err, "unable to determine whether to use any preferred caches")
 	}
 
 	tc, err := te.NewClient(client.WithAcquireToken(false))
