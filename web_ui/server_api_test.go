@@ -74,6 +74,7 @@ func TestDowntime(t *testing.T) {
 
 	viper.Set("Server.WebPort", 0)
 	viper.Set("Server.ExternalWebUrl", "https://mock-server.com")
+	viper.Set(param.Xrootd_Sitename.GetName(), "mock-sitename")
 
 	dirName := t.TempDir()
 	viper.Set("ConfigDir", dirName)

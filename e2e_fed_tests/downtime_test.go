@@ -198,7 +198,6 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	defer ticker.Stop()
 
 	// A map: serverName → its list of downtimes
-	var downtimeResp map[string][]server_structs.Downtime
 	var downtimes []server_structs.Downtime
 	var foundExpectedDowntimes bool
 LOOP:
@@ -218,11 +217,10 @@ LOOP:
 				"Expected 200 OK from server downtime endpoint. Got %d. Body: %s",
 				specificServerDowntimeResp.StatusCode, string(dtBody))
 			specificServerDowntimeResp.Body.Close()
-			err = json.Unmarshal(dtBody, &downtimeResp)
+			err = json.Unmarshal(dtBody, &downtimes)
 			require.NoError(t, err, "Failed to unmarshal server downtimes")
 
 			// Check if the downtimes present
-			downtimes = downtimeResp[cacheServerName]
 			if len(downtimes) >= 2 {
 				foundExpectedDowntimes = true
 				break LOOP // Exit the outer loop if all downtimes are found
@@ -232,7 +230,7 @@ LOOP:
 	require.True(t, foundExpectedDowntimes, "Downtime not found")
 
 	// Verify the downtime we just set
-	t.Log("Downtimes: ", downtimeResp)
+	t.Log("Downtimes: ", downtimes)
 	require.Len(t, downtimes, 2, "Downtimes count mismatch")
 	assert.Equal(t, incompleteDowntime.Severity, downtimes[0].Severity, "Downtime severity mismatch")
 	assert.Equal(t, server_structs.IndefiniteEndTime, downtimes[1].EndTime, "Downtime end time mismatch")

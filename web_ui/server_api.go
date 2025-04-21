@@ -23,11 +23,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
-	"google.golang.org/appengine/log"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 type (
@@ -46,15 +47,15 @@ type (
 
 // Get the Pelican service that set the downtime
 func getDowntimeSource(ctx *gin.Context) (string, error) {
-	enabledServers := config.GetEnabledServerString(true)
+	enabledServers := config.GetEnabledServerString(false)
 	if len(enabledServers) == 0 {
-		log.Warningf(ctx, "Downtime source is not set. No Pelican service is enabled.")
+		log.Warningf("Downtime source is not set. No Pelican service is enabled.")
 		return "", errors.New("No Pelican service is enabled")
 	}
 	// Multiple servers in a single process ("federation in a box") are not supported.
 	// Because it only happens in testing, we don't need to handle it.
 	if len(enabledServers) > 1 {
-		log.Warningf(ctx, "Downtime source is not set. Cannot determine which Pelican service set the downtime. Multiple servers are enabled: %s", enabledServers)
+		log.Warningf("Downtime source is not set. Cannot determine which Pelican service set the downtime. Multiple servers are enabled: %s", enabledServers)
 		return "", nil
 	}
 	// Only one server is enabled
@@ -152,7 +153,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 	if user == "" || err != nil {
 		user = ctx.GetString("User")
 		if user == "" {
-			log.Warningf(ctx, "Failed to get user from context")
+			log.Warning("Failed to get user from context")
 		}
 	}
 
@@ -166,6 +167,17 @@ func HandleCreateDowntime(ctx *gin.Context) {
 				Msg:    err.Error(),
 			})
 			return
+		}
+	}
+
+	// If the downtime is created by the Origin or Cache, serverName will be set automatically
+	serverType := server_structs.NewServerType()
+	serverType.SetString(downtimeInput.Source)
+	if serverType == server_structs.OriginType || serverType == server_structs.CacheType {
+		downtimeInput.ServerName, err = server_utils.GetServiceName(ctx, serverType)
+		if err != nil {
+			// Not a fatal error, serverName is set to sitename by the fallback
+			log.Debugf("During server name setting process: %v", err)
 		}
 	}
 
@@ -247,7 +259,7 @@ func HandleUpdateDowntime(ctx *gin.Context) {
 	if user == "" || err != nil {
 		user = ctx.GetString("User")
 		if user == "" {
-			log.Warningf(ctx, "Failed to get user from context")
+			log.Warningf("Failed to get user from context")
 		}
 	}
 	downtimeInput.UpdatedBy = user

@@ -540,11 +540,11 @@ func RegisterDirectorWebAPI(router *gin.RouterGroup) {
 		directorWebAPI.GET("/servers", listServers)
 		directorWebAPI.GET("/servers/:name", getServerHandler)
 		directorWebAPI.GET("/servers/:name/namespaces", listServerNamespaces)
+		directorWebAPI.GET("/servers/:name/downtimes", getDowntimeDetails)
 		directorWebAPI.GET("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
 		directorWebAPI.HEAD("/servers/origins/stat/*path", web_ui.AuthHandler, queryOrigins)
 		directorWebAPI.GET("/namespaces", listNamespacesHandler)
 		directorWebAPI.GET("/contact", handleDirectorContact)
 		directorWebAPI.GET("/downtimes", listDowntimeDetails)
-		directorWebAPI.GET("/downtimes/:name", getDowntimeDetails)
 	}
 }

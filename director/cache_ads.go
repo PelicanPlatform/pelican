@@ -316,7 +316,7 @@ func updateLatLong(ad *server_structs.ServerAd) error {
 
 // Get cached downtimes from registry, topology and servers themselves.
 // Return downtimes for all servers or a specific server if serverName is provided.
-func getCachedDowntimes(serverName string) (map[string][]server_structs.Downtime, error) {
+func getCachedDowntimes(serverName string) ([]server_structs.Downtime, error) {
 	filteredServersMutex.RLock()
 	defer filteredServersMutex.RUnlock()
 
@@ -335,11 +335,8 @@ func getCachedDowntimes(serverName string) (map[string][]server_structs.Downtime
 		return out
 	}
 
-	result := make(map[string][]server_structs.Downtime)
-
 	if serverName != "" {
-		result[serverName] = collect(serverName)
-		return result, nil
+		return collect(serverName), nil
 	}
 
 	// If no serverName is provided, return downtimes for all servers
@@ -354,9 +351,9 @@ func getCachedDowntimes(serverName string) (map[string][]server_structs.Downtime
 		seen[name] = struct{}{}
 	}
 
-	// Fill the result map
+	var result []server_structs.Downtime
 	for name := range seen {
-		result[name] = collect(name)
+		result = append(result, collect(name)...)
 	}
 
 	return result, nil
@@ -443,7 +440,7 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 
 		// Check existing downtime filter
 		originalFilterType, hasOriginalFilter := filteredServers[downtime.ServerName]
-		// If this server is already put in downtime, we don't need to do anything
+		// If this server is already put in downtime, we don't need to do anything to the filteredServers map
 		if hasOriginalFilter && originalFilterType != tempAllowed {
 			continue
 		}
@@ -451,7 +448,6 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 		if currentTime >= downtime.StartTime && (currentTime <= downtime.EndTime || downtime.EndTime == -1) {
 			filteredServers[downtime.ServerName] = tempFiltered
 		}
-
 	}
 
 	// Overwrite the in-memory federationDowntimes map with the new data.
