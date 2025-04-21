@@ -34,7 +34,11 @@ import (
 func commaFlagsListToViperSlice(cmd *cobra.Command, flags map[string]string) {
 	for flagName, viperName := range flags {
 		if flagValue, _ := cmd.Flags().GetString(flagName); flagValue != "" {
-			viper.Set(viperName, strings.Split(flagValue, ","))
+			trimmedValues := []string{}
+			for _, value := range strings.Split(flagValue, ",") {
+				trimmedValues = append(trimmedValues, strings.TrimSpace(value))
+			}
+			viper.Set(viperName, trimmedValues)
 		}
 	}
 }
@@ -44,23 +48,12 @@ func commaFlagsListToViperSlice(cmd *cobra.Command, flags map[string]string) {
 func getPreferredCaches() ([]*url.URL, error) {
 	var caches []*url.URL
 	for _, cacheStr := range param.Client_PreferredCaches.GetStringSlice() {
-		// If the current entry contains a comma because it comes directly from an env var
-		// and hasn't yet been converted to a string slice, split it into multiple entries
-		if strings.Contains(cacheStr, ",") {
-			for _, cache := range strings.Split(cacheStr, ",") {
-				cache, err := url.Parse(strings.TrimSpace(cache))
-				if err != nil {
-					return nil, errors.Wrapf(err, "failed to parse cache URL from preferred caches config: %s", cacheStr)
-				}
-				caches = append(caches, cache)
-			}
-		} else {
-			cache, err := url.Parse(cacheStr)
-			if err != nil {
-				return nil, errors.Wrapf(err, "failed to parse cache URL from preferred caches config: %s", cacheStr)
-			}
-			caches = append(caches, cache)
+		cache, err := url.Parse(cacheStr)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to parse cache URL from preferred caches config: %s", cacheStr)
 		}
+
+		caches = append(caches, cache)
 	}
 
 	return caches, nil

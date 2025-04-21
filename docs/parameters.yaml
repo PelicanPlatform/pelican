@@ -592,8 +592,8 @@ description: |+
   ```
   should result in trying `cache1`, then `cache2`, and finally any caches discovered by the Director (if needed).
 
-  When set via the `PELICAN_CLIENT_PREFERREDCACHES` environment variable, caches should be comma-separated, e.g.:
-  `PELICAN_CLIENT_PREFERREDCACHES=cache1,cache2,+`
+  When set via the `PELICAN_CLIENT_PREFERREDCACHES` environment variable, caches should be space-separated, e.g.:
+  `PELICAN_CLIENT_PREFERREDCACHES="cache cache2 +"`
 type: stringSlice
 default: none
 components: ["client"]
