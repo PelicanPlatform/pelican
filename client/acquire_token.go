@@ -411,8 +411,18 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 		return false
 	}
 
-	// For now, we'll accept any WLCG token
-	if wlcg_ver, present := tok.Get("wlcg.ver"); !present || wlcg_ver == nil {
+	// Accept either a WLCG token (wlcg.ver) or a SciToken (ver starting “scitokens:”)
+	var isWLCG, isSci bool
+
+	if wlcgVer, ok := tok.Get("wlcg.ver"); ok && wlcgVer != nil {
+		isWLCG = true
+	}
+	if ver, ok := tok.Get("ver"); ok {
+		if s, ok2 := ver.(string); ok2 && strings.HasPrefix(s, "scitokens:") {
+			isSci = true
+		}
+	}
+	if !isWLCG && !isSci {
 		return false
 	}
 

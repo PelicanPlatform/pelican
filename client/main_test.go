@@ -20,6 +20,9 @@ package client
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"fmt"
 	"net"
 	"net/http"
@@ -30,7 +33,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/lestrrat-go/jwx/v2/jwa"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -40,6 +46,8 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
+	"github.com/pelicanplatform/pelican/token"
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 // TestGetIps calls main.get_ips with a hostname, checking
@@ -496,4 +504,62 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 			assertPelicanURLEqual(t, test.expected, pUrl)
 		})
 	}
+}
+
+// mustURL parses a string into *url.URL or fails the test.
+func mustURL(t *testing.T, s string) *url.URL {
+	u, err := url.Parse(s)
+	require.NoError(t, err)
+	return u
+}
+
+// Verify if a scitoken‐profile JWT is acceptable for a given namespace
+func TestTokenIsAcceptableForSciTokens(t *testing.T) {
+	// 1) Build a minimal DirectorResponse whose namespace is "/foo"
+	dirResp := server_structs.DirectorResponse{
+		XPelNsHdr: server_structs.XPelNs{
+			Namespace: "/foo",
+		},
+		XPelTokGenHdr: server_structs.XPelTokGen{
+			Issuers:   []*url.URL{mustURL(t, "https://issuer.example")},
+			BasePaths: []string{"/foo"},
+		},
+	}
+
+	opts := config.TokenGenerationOpts{
+		Operation: config.TokenSharedRead,
+	}
+
+	// 2) Construct a SciToken JWT with ver="scitokens:2.0" and scope "storage.read:/bar"
+	tc, err := token.NewTokenConfig(token.TokenProfileScitokens2)
+	require.NoError(t, err)
+	tc.Lifetime = time.Hour
+	tc.Issuer = "https://issuer.example"
+	tc.AddAudienceAny()
+	tc.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/bar"))
+
+	// Generate an ECDSA P‑256 key so that ES256 signing works
+	privEC, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	jwkKey, err := jwk.FromRaw(privEC)
+	require.NoError(t, err)
+	require.NoError(t, jwkKey.Set(jwk.KeyIDKey, "test-ec-key"))
+	require.NoError(t, jwkKey.Set(jwk.AlgorithmKey, jwa.ES256))
+
+	// Inject the SciTokens version claim
+	require.NoError(t, jwkKey.Set("ver", "scitokens:2.0"))
+
+	// Create the serialized token
+	sciTokBytes, err := tc.CreateTokenWithKey(jwkKey)
+	require.NoError(t, err)
+	sciTok := string(sciTokBytes)
+
+	// 3a) Positive case: resource "/foo/bar/baz" is inside namespace and matches scope
+	accepted := tokenIsAcceptable(sciTok, "/foo/bar/baz", dirResp, opts)
+	assert.True(t, accepted, "expected SciToken to be acceptable for /foo/bar/baz")
+
+	// 3b) Negative case: resource "/other/bar" lies outside the declared namespace
+	accepted = tokenIsAcceptable(sciTok, "/other/bar", dirResp, opts)
+	assert.False(t, accepted, "expected SciToken for /other/bar to be rejected")
 }
