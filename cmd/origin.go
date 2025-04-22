@@ -24,6 +24,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+
+	"github.com/pelicanplatform/pelican/param"
 )
 
 var (
@@ -185,8 +187,8 @@ instead.
 	if err := viper.BindPFlag("Server.IssuerUrl", originTokenCreateCmd.Flags().Lookup("issuer")); err != nil {
 		panic(err)
 	}
-	originTokenCreateCmd.Flags().String("private-key", "", "Filepath designating the location of the private key in PEM format to be used for signing, if different from the origin's default.")
-	if err := viper.BindPFlag("IssuerKey", originTokenCreateCmd.Flags().Lookup("private-key")); err != nil {
+	originTokenCreateCmd.Flags().String("private-key", "", "Directory designating the location of the private key file(s) in PEM format to be used for signing, if different from the origin's default.")
+	if err := viper.BindPFlag(param.IssuerKeysDirectory.GetName(), originTokenCreateCmd.Flags().Lookup("private-key")); err != nil {
 		panic(err)
 	}
 	originTokenCmd.AddCommand(originTokenVerifyCmd)
