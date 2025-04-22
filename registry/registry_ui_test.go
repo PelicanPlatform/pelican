@@ -1366,6 +1366,10 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		updatedNs := mockNs
 		updatedNs.AdminMetadata.Description = "newDescription"
 
+		updatedPubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		updatedNs.Pubkey = updatedPubKeyStr
+
 		mockNsBytes, err := json.Marshal(updatedNs)
 		require.NoError(t, err)
 
@@ -1386,6 +1390,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/foo", nss[0].Prefix)
 		assert.Equal(t, "newDescription", nss[0].AdminMetadata.Description)
+		assert.Equal(t, updatedPubKeyStr, nss[0].Pubkey)
 	})
 }
 

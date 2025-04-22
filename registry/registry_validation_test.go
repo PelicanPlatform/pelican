@@ -247,6 +247,11 @@ func TestValidateKeyChaining(t *testing.T) {
 
 	t.Run("off-param-no-check", func(t *testing.T) {
 		viper.Set("Registry.RequireKeyChaining", false)
+		superspaces, subspaces, _, _, err := namespaceSupSubChecks("/foo/barz")
+		assert.NoError(t, err)
+		assert.Len(t, superspaces, 1)
+		assert.Empty(t, subspaces)
+
 		_, _, validErr, serverErr := validateKeyChaining("/foo/barz", jwkFoo)
 		assert.NoError(t, serverErr)
 		assert.NoError(t, validErr)
@@ -268,6 +273,11 @@ func TestValidateKeyChaining(t *testing.T) {
 
 	t.Run("on-param-ignore-cache", func(t *testing.T) {
 		viper.Set("Registry.RequireKeyChaining", true)
+		superspaces, subspaces, _, _, err := namespaceSupSubChecks("/cache/newCache")
+		assert.NoError(t, err)
+		assert.Empty(t, superspaces)
+		assert.Empty(t, subspaces)
+
 		_, _, validErr, serverErr := validateKeyChaining("/cache/newCache", jwkCache)
 		// Same public key as /cache/randomCache shouldn't give error
 		assert.NoError(t, serverErr)
@@ -277,6 +287,21 @@ func TestValidateKeyChaining(t *testing.T) {
 		// Different public key as /cache/randomCache shouldn't give error
 		assert.NoError(t, serverErr)
 		assert.NoError(t, validErr)
+	})
+
+	t.Run("super-sub-space-edge-case-check", func(t *testing.T) {
+		// A namespace's super/sub spaces should not contain itself
+		superspaces, subspaces, _, _, err := namespaceSupSubChecks("/foo")
+		assert.NoError(t, err)
+		assert.Empty(t, superspaces)
+		assert.Empty(t, subspaces)
+
+		// A complicated namespace
+		superspaces, subspaces, _, _, err = namespaceSupSubChecks("/foo/bar/baz")
+		assert.NoError(t, err)
+		assert.Len(t, superspaces, 1)
+		assert.Contains(t, superspaces, "/foo")
+		assert.Empty(t, subspaces)
 	})
 }
 
