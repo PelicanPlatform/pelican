@@ -1019,6 +1019,22 @@ func PrintClientConfig() error {
 	return nil
 }
 
+// Helper function to emit a warning telling the user to switch to IssuerKeysDirectory,
+// if the IssuerKey config param still points to a file on disk.
+func warnDeprecatedConfigs(v *viper.Viper) {
+	legacyKey := v.GetString(param.IssuerKey.GetName())
+	if legacyKey != "" {
+		if _, err := os.Stat(legacyKey); err == nil {
+			log.Warnf(
+				"Deprecated configuration %q detected — this will be removed in a future release. "+
+					"Please switch to %q, pointing at a directory of private key files with .pem extension.",
+				param.IssuerKey.GetName(),
+				param.IssuerKeysDirectory.GetName(),
+			)
+		}
+	}
+}
+
 func SetServerDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 	v.SetConfigType("yaml")
@@ -1258,6 +1274,9 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault("Federation.BrokerURL", v.GetString(param.Server_ExternalWebUrl.GetName()))
 		v.SetDefault("Federation_DirectorUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
 	}
+
+	// Warn the user if they still use IssuerKey
+	warnDeprecatedConfigs(v)
 
 	return err
 }
@@ -1779,6 +1798,9 @@ func SetClientDefaults(v *viper.Viper) error {
 		log.Warningf("Client.DirectorRetries was set to %d, but it must be at least 1. Falling back to default of 5.", param.Client_DirectorRetries.GetInt())
 		v.Set(param.Client_DirectorRetries.GetName(), 5)
 	}
+
+	// Warn the user if they still use IssuerKey
+	warnDeprecatedConfigs(v)
 
 	return nil
 }
