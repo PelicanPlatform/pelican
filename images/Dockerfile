@@ -56,9 +56,9 @@ ARG LOTMAN_VER=0.0.4
 ARG XRDCL_PELICAN_SRC_BUILD=false
 ARG XRDCL_PELICAN_VER=1.0.5
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
-ARG XRDHTTP_PELICAN_VER=0.0.3
+ARG XRDHTTP_PELICAN_VER=0.0.5
 ARG XROOTD_LOTMAN_SRC_BUILD=false
-ARG XROOTD_LOTMAN_VER=0.0.2
+ARG XROOTD_LOTMAN_VER=0.0.3
 ARG XROOTD_S3_HTTP_SRC_BUILD=false
 ARG XROOTD_S3_HTTP_VER=0.2.1
 
@@ -395,7 +395,7 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     if ${!SRC_BUILD}; then
       dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
     else
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-contrib --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
     fi
   }
 
