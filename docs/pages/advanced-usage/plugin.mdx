@@ -1,4 +1,4 @@
-# Advanced Usage: Plugin
+# HTCondor Plugin
 
 ## Configure the Plugin in an HTCondor Job
 
@@ -32,29 +32,11 @@ the user submitting the HTCondor job can modify the Plugin's transfers as desire
 ### Pelican environment variables
 
 Configuration options listed in the [configuration parameters table](/parameters) are typically set via the `pelican.yaml` file.
-If, however, there is a corresponding environment variable set in the shell where the command is executed,
-that will override the configuration provided in the `pelican.yaml` file.
-To demonstrate the syntax for setting the environment variable,
-consider the following example.
+Alternatively, the configuration options can be set using environment variables.
+We recommend reading the relevant section of the configuration page before proceeding: 
+[Environment Variable Configuration](/parameters#environment-variable-configuration).
 
-To set the logging level for a Pelican component to "Debug" in the `pelican.yaml` file,
-you would use the following:
-
-```yaml
-# /etc/pelican/pelican.yaml
-Logging:
-  Level: Debug
-```
-
-To set the logging level for a Pelican component to "Debug" via an environment variable,
-you would use
-
-```bash
-export PELICAN_LOGGING_LEVEL=Debug
-```
-
-Note that the environment variable is prefixed by `PELICAN_` and
-that the nested keys are capitalized and separated by underscores (`_`).
+In the following section, we'll leverage this functionality to pass configuration options to affect the file transfers involving the HTCondor Pelican Plugin.
 
 ### Setting environment variables for the Plugin as part of HTCondor job
 
