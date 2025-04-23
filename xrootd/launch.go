@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -130,6 +131,7 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 	}
 
 	if isCache {
+		result.Args = append(result.Args, "-n", "cache")
 		result.ExtraEnv = []string{
 			"XRD_PELICANBROKERSOCKET=" + filepath.Join(xrootdRun, "cache-reversal.sock"),
 			"XRD_PLUGINCONFDIR=" + filepath.Join(xrootdRun, "cache-client.plugins.d"),
@@ -142,6 +144,15 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 		}
 		result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANFEDERATIONMETADATATIMEOUT="+param.Cache_DefaultCacheTimeout.GetDuration().String())
 		result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANDEFAULTHEADERTIMEOUT="+param.Cache_DefaultCacheTimeout.GetDuration().String())
+		// Pass through the advanced Pelican cache control features; meant for unit tests of xrdcl-pelican
+		// Purposely allowing these to override the ones from the Pelican config file
+		for _, envVar := range os.Environ() {
+			if strings.HasPrefix(envVar, "XRD_PELICAN") {
+				result.ExtraEnv = append(result.ExtraEnv, envVar)
+			}
+		}
+	} else {
+		result.Args = append(result.Args, "-n", "origin")
 	}
 	if param.Server_DropPrivileges.GetBool() {
 		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CA_FILE="+filepath.Join(xrootdRun, "ca-bundle.crt"))
