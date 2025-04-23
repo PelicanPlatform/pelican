@@ -35,7 +35,7 @@ ARG OSG_SERIES=24
 ARG OSG_REPO=release
 
 # For compiling Pelican.
-ARG GO_VER=1.21.6
+ARG GO_VER=1.23.0
 ARG NODEJS_VER=20
 
 # For controlling how XRootD plugins are installed:
