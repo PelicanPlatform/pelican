@@ -1031,17 +1031,19 @@ func TestPrestage(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, int64(len(testFileContent)), size)
 		// Due to an xrootd limitation, CacheInfo performs a GET request instead of a HEAD request.
-		// Once this limitation is resolved and CacheInfo is updated accordingly,
-		// the assertion should be changed to -1 instead of 0.
-		assert.Equal(t, 0, age)
+		// Once this limitation is resolved and CacheInfo is updated accordingly.
+		if age != -1 && age != 0 {
+			require.Fail(t, "CacheInfo age should be -1 or 0, but got %d", age)
+		}
 
 		age, size, err = tc.CacheInfo(fed.Ctx, innerFileUrl)
 		require.NoError(t, err)
 		assert.Equal(t, int64(len(testFileContent)), size)
 		// Due to an xrootd limitation, CacheInfo performs a GET request instead of a HEAD request.
-		// Once this limitation is resolved and CacheInfo is updated accordingly,
-		// the assertion should be changed to -1 instead of 0.
-		assert.Equal(t, 0, age)
+		// Once this limitation is resolved and CacheInfo is updated accordingly.
+		if age != -1 && age != 0 {
+			require.Fail(t, "CacheInfo age should be -1 or 0, but got %d", age)
+		}
 
 		// Prestage the object
 		tj, err := tc.NewPrestageJob(fed.Ctx, innerFileUrl)

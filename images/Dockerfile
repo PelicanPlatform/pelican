@@ -1,6 +1,6 @@
 # ***************************************************************
 #
-#  Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+#  Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 #
 #  Licensed under the Apache License, Version 2.0 (the "License"); you
 #  may not use this file except in compliance with the License.  You may
@@ -56,9 +56,9 @@ ARG LOTMAN_VER=0.0.4
 ARG XRDCL_PELICAN_SRC_BUILD=false
 ARG XRDCL_PELICAN_VER=1.0.5
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
-ARG XRDHTTP_PELICAN_VER=0.0.3
+ARG XRDHTTP_PELICAN_VER=0.0.5
 ARG XROOTD_LOTMAN_SRC_BUILD=false
-ARG XROOTD_LOTMAN_VER=0.0.2
+ARG XROOTD_LOTMAN_VER=0.0.3
 ARG XROOTD_S3_HTTP_SRC_BUILD=false
 ARG XROOTD_S3_HTTP_VER=0.2.1
 
@@ -213,8 +213,10 @@ RUN groupadd -g 10940 xrootd \
 
 # We need to pin the install for many of the RPMs to "Koji" until all of
 # Pelican's patches are ingested into the OSG repositories.
-ARG XROOTD_VER="5.7.3"
-ARG XROOTD_RELEASE="1.5.osg${OSG_SERIES}.${BASE_OS}"
+# NOTE: If you update this version, you must also update the version in
+# github_scripts/osx_install.sh
+ARG XROOTD_VER="5.8.1"
+ARG XROOTD_RELEASE="1.3.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
 # The packages from Koji need to be installed in a single dnf command in
@@ -393,7 +395,7 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     if ${!SRC_BUILD}; then
       dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
     else
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-contrib --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
     fi
   }
 
