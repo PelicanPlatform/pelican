@@ -146,7 +146,10 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	viper.Set(param.Cache_DbLocation.GetName(), filepath.Join(t.TempDir(), "cache.sqlite"))
 	viper.Set(param.Server_EnableUI.GetName(), false)
 	viper.Set(param.Server_WebPort.GetName(), ports[2])
-	viper.Set(param.LocalCache_RunLocation.GetName(), filepath.Join(tmpPath, "local-cache"))
+	// Unix domain sockets have a maximum length of 108 bytes, so we need to make sure our
+	// socket path is short enough to fit within that limit. Mac OS X has long temporary path
+	// names, so we need to make sure our socket path is short enough to fit within that limit.
+	viper.Set(param.LocalCache_RunLocation.GetName(), filepath.Join(tmpPath, "lc"))
 	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "server.sqlite"))
 
 	// Set the Director's start time to 6 minutes ago. This prevents it from sending an HTTP 429 for
