@@ -1021,7 +1021,9 @@ func PrintClientConfig() error {
 
 // Helper function to emit a warning telling the user to switch to IssuerKeysDirectory,
 // if the IssuerKey config param still points to a file on disk.
-func warnDeprecatedConfigs(v *viper.Viper) {
+// This function serves as a transitional step to help users migrate from IssuerKey to
+// IssuerKeysDirectory. It should be removed if the transition is done.
+func warnIssuerKey(v *viper.Viper) {
 	legacyKey := v.GetString(param.IssuerKey.GetName())
 	if legacyKey != "" {
 		if _, err := os.Stat(legacyKey); err == nil {
@@ -1276,7 +1278,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	}
 
 	// Warn the user if they still use IssuerKey
-	warnDeprecatedConfigs(v)
+	warnIssuerKey(v)
 
 	return err
 }
@@ -1800,7 +1802,7 @@ func SetClientDefaults(v *viper.Viper) error {
 	}
 
 	// Warn the user if they still use IssuerKey
-	warnDeprecatedConfigs(v)
+	warnIssuerKey(v)
 
 	return nil
 }
