@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/launcher_utils"
 	"github.com/pelicanplatform/pelican/local_cache"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/origin"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -369,10 +370,13 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	}
 
 	if param.Server_EnableUI.GetBool() {
+		metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusWarning, "Prometheus not started")
 		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
 			err = errors.Wrap(err, "Failed to configure embedded prometheus instance")
+			metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusCritical, err.Error())
 			return
 		}
+		metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusOK, "Prometheus started")
 
 		log.Info("Starting web login...")
 		egrp.Go(func() error { return web_ui.InitServerWebLogin(ctx) })
