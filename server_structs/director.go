@@ -94,6 +94,7 @@ type (
 		EndTime     int64    `json:"endTime" gorm:"not null;index"`   // Epoch UTC
 		CreatedAt   int64    `json:"createdAt" gorm:"autoCreateTime:milli"`
 		UpdatedAt   int64    `json:"updatedAt" gorm:"autoUpdateTime:milli"`
+		DeletedAt   *int64   `json:"deletedAt"`
 	}
 
 	// Common attributes necessary for all server ads

@@ -322,7 +322,7 @@ func getCachedDowntimes(serverName string) ([]server_structs.Downtime, error) {
 
 	// helper to collect one server's downtimes
 	collect := func(name string) []server_structs.Downtime {
-		var out []server_structs.Downtime
+		out := make([]server_structs.Downtime, 0)
 		if list, ok := serverDowntimes[name]; ok {
 			out = append(out, list...)
 		}
@@ -351,7 +351,7 @@ func getCachedDowntimes(serverName string) ([]server_structs.Downtime, error) {
 		seen[name] = struct{}{}
 	}
 
-	var result []server_structs.Downtime
+	result := make([]server_structs.Downtime, 0)
 	for name := range seen {
 		result = append(result, collect(name)...)
 	}
