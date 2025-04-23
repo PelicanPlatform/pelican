@@ -3,7 +3,9 @@ module github.com/pelicanplatform/pelican
 // Unpublish Go package as we are not intended to allow users us import our packages for now
 retract [v1.0.0, v1.0.5]
 
-go 1.21
+go 1.23.0
+
+toolchain go1.23.8
 
 require (
 	github.com/JGLTechnologies/gin-rate-limit v1.5.4
@@ -45,10 +47,10 @@ require (
 	github.com/youmark/pkcs8 v0.0.0-20201027041543-1326539a0a0a
 	github.com/zsais/go-gin-prometheus v0.1.0
 	go.uber.org/atomic v1.11.0
-	golang.org/x/crypto v0.25.0
+	golang.org/x/crypto v0.35.0
 	golang.org/x/net v0.27.0
 	golang.org/x/oauth2 v0.18.0
-	golang.org/x/term v0.22.0
+	golang.org/x/term v0.29.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/gorm v1.25.7
 	kernel.org/pub/linux/libs/security/libcap/cap v1.2.69
@@ -91,7 +93,7 @@ require (
 	go.opentelemetry.io/collector/pdata v1.0.0-rcv0016 // indirect
 	go.opentelemetry.io/collector/semconv v0.87.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/sys v0.22.0 // indirect
+	golang.org/x/sys v0.30.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240314234333-6e1732d8331c // indirect
 	google.golang.org/grpc v1.62.1 // indirect
 	modernc.org/sqlite v1.28.0 // indirect
@@ -192,8 +194,8 @@ require (
 	go.uber.org/goleak v1.3.0 // indirect
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/exp v0.0.0-20240613232115-7f521ea00fb8
-	golang.org/x/sync v0.8.0
-	golang.org/x/text v0.16.0
+	golang.org/x/sync v0.11.0
+	golang.org/x/text v0.22.0
 	golang.org/x/time v0.5.0
 	google.golang.org/appengine v1.6.8
 	google.golang.org/protobuf v1.33.0 // indirect
