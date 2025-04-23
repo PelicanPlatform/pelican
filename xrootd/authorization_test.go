@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -66,12 +66,6 @@ var (
 
 	//go:embed resources/test-scitokens-monitoring.cfg
 	monitoringOutput string
-
-	//go:embed resources/test-scitokens-federation-issuer-private.cfg
-	federationPrivateOutput string
-
-	//go:embed resources/test-scitokens-federation-issuer-public.cfg
-	federationPublicOutput string
 
 	//go:embed resources/test-scitokens-cache-issuer.cfg
 	cacheSciOutput string
@@ -1203,7 +1197,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	t.Run("EmptyNS", cacheAuthTester(cacheServer, cacheEmptyOutput, ""))
 }
 
-func TestWriteOriginScitokensConfigDisableDirectReadsPrivate(t *testing.T) {
+func TestGenerateFederationIssuerPrivate(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
@@ -1218,6 +1212,8 @@ func TestWriteOriginScitokensConfigDisableDirectReadsPrivate(t *testing.T) {
 	viper.Set(param.Origin_DisableDirectClients.GetName(), true)
 	viper.Set(param.Origin_EnableDirectReads.GetName(), false)
 	viper.Set(param.Origin_EnablePublicReads.GetName(), false)
+	viper.Set(param.Origin_EnableListings.GetName(), false)
+	viper.Set(param.Origin_EnableWrites.GetName(), false)
 	viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
 	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
 
@@ -1225,16 +1221,19 @@ func TestWriteOriginScitokensConfigDisableDirectReadsPrivate(t *testing.T) {
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
-	err = WriteOriginScitokensConfig()
+	issuer, err := GenerateFederationIssuer()
 	require.NoError(t, err)
 
-	genCfg, err := os.ReadFile(filepath.Join(tmpDir, "scitokens-origin-generated.cfg"))
-	require.NoError(t, err)
-
-	assert.Equal(t, string(federationPrivateOutput), string(genCfg))
+	assert.Equal(t, issuer.Issuer, "")
+	assert.Equal(t, issuer.Name, "Federation")
+	assert.Equal(t, issuer.BasePaths, []string{"/foo/bar"})
+	assert.Empty(t, issuer.RestrictedPaths)
+	assert.Equal(t, issuer.DefaultUser, "")
+	assert.Equal(t, issuer.AcceptableAuth, "none")
+	assert.Equal(t, issuer.RequiredAuth, "all")
 }
 
-func TestWriteOriginScitokensConfigDisableDirectReadsPublic(t *testing.T) {
+func TestGenerateFederationIssuerPublic(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
@@ -1249,6 +1248,7 @@ func TestWriteOriginScitokensConfigDisableDirectReadsPublic(t *testing.T) {
 	viper.Set(param.Origin_DisableDirectClients.GetName(), true)
 	viper.Set(param.Origin_EnableDirectReads.GetName(), false)
 	viper.Set(param.Origin_EnablePublicReads.GetName(), true)
+	viper.Set(param.Origin_EnableListings.GetName(), false)
 	viper.Set(param.Origin_EnableWrites.GetName(), false)
 	viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
 	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
@@ -1257,13 +1257,16 @@ func TestWriteOriginScitokensConfigDisableDirectReadsPublic(t *testing.T) {
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
-	err = WriteOriginScitokensConfig()
+	issuer, err := GenerateFederationIssuer()
 	require.NoError(t, err)
 
-	genCfg, err := os.ReadFile(filepath.Join(tmpDir, "scitokens-origin-generated.cfg"))
-	require.NoError(t, err)
-
-	assert.Equal(t, string(federationPublicOutput), string(genCfg))
+	assert.Equal(t, issuer.Issuer, "")
+	assert.Equal(t, issuer.Name, "Federation")
+	assert.Equal(t, issuer.BasePaths, []string{"/foo/bar"})
+	assert.Empty(t, issuer.RestrictedPaths)
+	assert.Equal(t, issuer.DefaultUser, "")
+	assert.Equal(t, issuer.AcceptableAuth, "")
+	assert.Equal(t, issuer.RequiredAuth, "all")
 }
 
 func TestWriteOriginScitokensConfig(t *testing.T) {
