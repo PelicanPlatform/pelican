@@ -437,17 +437,29 @@ func (b *BaseOrigin) validateExports(o Origin) (err error) {
 			privateReadsFound = true
 		}
 
-		// If the Origin specifies it does not allow direct client access, we require that the exports
-		// all have the same read capabilities, either public or private, but not both.
-		if publicReadsFound && privateReadsFound && param.Origin_DisableDirectClients.GetBool() {
-			return errors.Errorf("config param '%s' is set to true, the exports have both 'PublicReads' and 'Reads' capabilities. These are incompatible",
-				param.Origin_DisableDirectClients.GetName())
-		}
-		// If the Origin specifies it does not allow direct client access, we require that no export
-		// sets Capabilities.DirectReads to true. This is a safeguard against misconfiguration.
-		if param.Origin_DisableDirectClients.GetBool() && e.Capabilities.DirectReads {
-			return errors.Errorf("config param '%s' is set to true, but one or more exports include the 'DirectReads' capability. These are incompatible",
-				param.Origin_DisableDirectClients.GetName())
+		if param.Origin_DisableDirectClients.GetBool() {
+			// If the Origin specifies it does not allow direct client access, we require that the exports
+			// all have the same read capabilities, either public or private, but not both.
+			if publicReadsFound && privateReadsFound {
+				return errors.Errorf("config param '%s' is set to true, the exports have both 'PublicReads' and 'Reads' capabilities. These are incompatible",
+					param.Origin_DisableDirectClients.GetName())
+			}
+			// If the Origin specifies it does not allow direct client access, we require that no export
+			// sets Capabilities.DirectReads to true. This is a safeguard against misconfiguration.
+			if e.Capabilities.DirectReads {
+				return errors.Errorf("config param '%s' is set to true, but one or more exports include the 'DirectReads' capability. These are incompatible",
+					param.Origin_DisableDirectClients.GetName())
+			}
+
+			if e.Capabilities.Writes {
+				return errors.Errorf("config param '%s' is set to true, but one or more exports include the 'Writes' capability. These are incompatible",
+					param.Origin_DisableDirectClients.GetName())
+			}
+
+			if e.Capabilities.Listings {
+				return errors.Errorf("config param '%s' is set to true, but one or more exports include the 'Listings' capability. These are incompatible",
+					param.Origin_DisableDirectClients.GetName())
+			}
 		}
 	}
 
