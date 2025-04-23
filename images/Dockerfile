@@ -191,7 +191,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
 
   printf '%s\n' "metadata_expire=1800" >> /etc/dnf/dnf.conf
 
-  dnf install -y tini
+  dnf install -y tini 'dnf-command(versionlock)'
 ENDRUN
 
 #################################################################
@@ -262,6 +262,12 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     fi
   done
   dnf install -y "${package_urls[@]}"
+
+  # Pelican is sensitive to the exact XRootD version that is
+  # installed, so having just installed a specific set of packages,
+  # prevent other packages from changing them via dependencies.
+
+  dnf versionlock "xrootd*"
 ENDRUN
 
 #################################################################
