@@ -1217,6 +1217,8 @@ func TestGenerateFederationIssuerPrivate(t *testing.T) {
 	viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
 	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
 
+	test_utils.MockFederationRoot(t, nil, nil)
+
 	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
@@ -1224,7 +1226,7 @@ func TestGenerateFederationIssuerPrivate(t *testing.T) {
 	issuer, err := GenerateFederationIssuer()
 	require.NoError(t, err)
 
-	assert.Equal(t, issuer.Issuer, "")
+	assert.Equal(t, issuer.Issuer, param.Federation_DiscoveryUrl.GetString())
 	assert.Equal(t, issuer.Name, "Federation")
 	assert.Equal(t, issuer.BasePaths, []string{"/foo/bar"})
 	assert.Empty(t, issuer.RestrictedPaths)
@@ -1253,6 +1255,8 @@ func TestGenerateFederationIssuerPublic(t *testing.T) {
 	viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
 	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
 
+	test_utils.MockFederationRoot(t, nil, nil)
+
 	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
@@ -1260,7 +1264,7 @@ func TestGenerateFederationIssuerPublic(t *testing.T) {
 	issuer, err := GenerateFederationIssuer()
 	require.NoError(t, err)
 
-	assert.Equal(t, issuer.Issuer, "")
+	assert.Equal(t, issuer.Issuer, param.Federation_DiscoveryUrl.GetString())
 	assert.Equal(t, issuer.Name, "Federation")
 	assert.Equal(t, issuer.BasePaths, []string{"/foo/bar"})
 	assert.Empty(t, issuer.RestrictedPaths)
