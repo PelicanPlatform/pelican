@@ -1993,11 +1993,9 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				err = errors.New("destination path is not a directory; must be a directory for unpacking")
 				return
 			}
-			if localPath == "." {
-				localPath, err = os.Getwd()
-				if err != nil {
-					return
-				}
+			if localPath, err = filepath.Abs(localPath); err != nil {
+				err = errors.Wrap(err, "failed to get absolute path for destination directory")
+				return
 			}
 			fileWriter = newAutoUnpacker(localPath, behavior)
 		} else {
