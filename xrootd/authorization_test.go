@@ -1197,80 +1197,63 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	t.Run("EmptyNS", cacheAuthTester(cacheServer, cacheEmptyOutput, ""))
 }
 
-func TestGenerateFederationIssuerPrivate(t *testing.T) {
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+func TestGenerateFederationIssuer(t *testing.T) {
+	testCases := []struct {
+		name           string
+		PublicReads    bool
+		AcceptableAuth string
+	}{
+		{
+			name:           "PublicReads",
+			PublicReads:    true,
+			AcceptableAuth: "",
+		},
+		{
+			name:           "PrivateReads",
+			PublicReads:    false,
+			AcceptableAuth: "none",
+		},
+	}
 
-	tmpDir := t.TempDir()
-	viper.Set("ConfigDir", tmpDir)
-	viper.Set(param.Logging_Level.GetName(), "debug")
-	viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
-	viper.Set(param.Origin_SelfTest.GetName(), true)
-	viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
-	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
-	viper.Set(param.Origin_DisableDirectClients.GetName(), true)
-	viper.Set(param.Origin_EnableDirectReads.GetName(), false)
-	viper.Set(param.Origin_EnablePublicReads.GetName(), false)
-	viper.Set(param.Origin_EnableListings.GetName(), false)
-	viper.Set(param.Origin_EnableWrites.GetName(), false)
-	viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
-	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server_utils.ResetTestState()
+			defer server_utils.ResetTestState()
+			ctx, _, _ := test_utils.TestContext(context.Background(), t)
 
-	test_utils.MockFederationRoot(t, nil, nil)
+			tmpDir := t.TempDir()
+			viper.Set("ConfigDir", tmpDir)
+			viper.Set(param.Logging_Level.GetName(), "debug")
+			viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
+			viper.Set(param.Origin_SelfTest.GetName(), true)
+			viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
+			viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
+			viper.Set(param.Origin_DisableDirectClients.GetName(), true)
+			viper.Set(param.Origin_EnableDirectReads.GetName(), false)
+			viper.Set(param.Origin_EnablePublicReads.GetName(), tc.PublicReads)
+			viper.Set(param.Origin_EnableListings.GetName(), false)
+			viper.Set(param.Origin_EnableWrites.GetName(), false)
+			viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
+			viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
 
-	config.InitConfig()
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
+			test_utils.MockFederationRoot(t, nil, nil)
 
-	issuer, err := GenerateFederationIssuer()
-	require.NoError(t, err)
+			config.InitConfig()
+			err := config.InitServer(ctx, server_structs.OriginType)
+			require.NoError(t, err)
 
-	assert.Equal(t, issuer.Issuer, param.Federation_DiscoveryUrl.GetString())
-	assert.Equal(t, issuer.Name, "Federation")
-	assert.Equal(t, issuer.BasePaths, []string{"/foo/bar"})
-	assert.Empty(t, issuer.RestrictedPaths)
-	assert.Equal(t, issuer.DefaultUser, "")
-	assert.Equal(t, issuer.AcceptableAuth, "none")
-	assert.Equal(t, issuer.RequiredAuth, "all")
-}
+			issuer, err := GenerateFederationIssuer()
+			require.NoError(t, err)
 
-func TestGenerateFederationIssuerPublic(t *testing.T) {
-	server_utils.ResetTestState()
-	defer server_utils.ResetTestState()
-	ctx, _, _ := test_utils.TestContext(context.Background(), t)
-
-	tmpDir := t.TempDir()
-	viper.Set("ConfigDir", tmpDir)
-	viper.Set(param.Logging_Level.GetName(), "debug")
-	viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
-	viper.Set(param.Origin_SelfTest.GetName(), true)
-	viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
-	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
-	viper.Set(param.Origin_DisableDirectClients.GetName(), true)
-	viper.Set(param.Origin_EnableDirectReads.GetName(), false)
-	viper.Set(param.Origin_EnablePublicReads.GetName(), true)
-	viper.Set(param.Origin_EnableListings.GetName(), false)
-	viper.Set(param.Origin_EnableWrites.GetName(), false)
-	viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
-	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
-
-	test_utils.MockFederationRoot(t, nil, nil)
-
-	config.InitConfig()
-	err := config.InitServer(ctx, server_structs.OriginType)
-	require.NoError(t, err)
-
-	issuer, err := GenerateFederationIssuer()
-	require.NoError(t, err)
-
-	assert.Equal(t, issuer.Issuer, param.Federation_DiscoveryUrl.GetString())
-	assert.Equal(t, issuer.Name, "Federation")
-	assert.Equal(t, issuer.BasePaths, []string{"/foo/bar"})
-	assert.Empty(t, issuer.RestrictedPaths)
-	assert.Equal(t, issuer.DefaultUser, "")
-	assert.Equal(t, issuer.AcceptableAuth, "")
-	assert.Equal(t, issuer.RequiredAuth, "all")
+			assert.Equal(t, issuer.Issuer, param.Federation_DiscoveryUrl.GetString())
+			assert.Equal(t, issuer.Name, "Federation")
+			assert.Equal(t, issuer.BasePaths, []string{"/foo/bar"})
+			assert.Empty(t, issuer.RestrictedPaths)
+			assert.Equal(t, issuer.DefaultUser, "")
+			assert.Equal(t, issuer.AcceptableAuth, tc.AcceptableAuth)
+			assert.Equal(t, issuer.RequiredAuth, "all")
+		})
+	}
 }
 
 func TestWriteOriginScitokensConfig(t *testing.T) {
