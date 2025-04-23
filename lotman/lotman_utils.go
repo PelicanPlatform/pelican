@@ -27,21 +27,14 @@ import (
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 type UpdateInfo[T comparable] struct {
 	Remove bool
 	Update T
 	Add    bool
-}
-
-// Helper function that converts a slice of type T to a set (map) of type T.
-func sliceToSet[T comparable](s []T) map[T]struct{} {
-	set := make(map[T]struct{}, len(s))
-	for _, item := range s {
-		set[item] = struct{}{}
-	}
-	return set
 }
 
 // Given two slices (lotman paths or parents), this function determines how to construct
@@ -66,8 +59,8 @@ func getModMap[T comparable](existing, new []T) map[T]UpdateInfo[T] {
 
 	updateMap := map[T]UpdateInfo[T]{}
 
-	eSet := sliceToSet(existing)
-	nSet := sliceToSet(new)
+	eSet := utils.SliceToSet(existing)
+	nSet := utils.SliceToSet(new)
 
 	visited := make(map[T]bool)
 	removedItems := map[T]struct{}{}

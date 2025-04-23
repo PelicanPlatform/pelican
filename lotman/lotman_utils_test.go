@@ -27,23 +27,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSliceToSet(t *testing.T) {
-	sSlice := []string{"foo", "bar", "baz", "foo"}
-	sSet := sliceToSet(sSlice)
-
-	assert.Equal(t, 3, len(sSet))
-	assert.Contains(t, sSet, "foo")
-	assert.Contains(t, sSet, "bar")
-	assert.Contains(t, sSet, "baz")
-
-	lSlice := []LotPath{{Path: "/foo", Recursive: true}, {Path: "/bar", Recursive: false}, {Path: "/foo", Recursive: true}, {Path: "/foo", Recursive: false}}
-	lSet := sliceToSet(lSlice)
-	assert.Equal(t, len(lSet), 3)
-	assert.Contains(t, lSet, LotPath{Path: "/foo", Recursive: true})
-	assert.Contains(t, lSet, LotPath{Path: "/bar", Recursive: false})
-	assert.Contains(t, lSet, LotPath{Path: "/foo", Recursive: false})
-}
-
 // Helper function to create an MPA with given parameters
 func createMPA(dedicatedGB, opportunisticGB float64, maxNumObjects int64) *MPA {
 	return &MPA{
