@@ -41,6 +41,15 @@ var (
 	uaRegExp       = regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
 )
 
+// Helper function that converts a slice of type T to a set (map) of type T.
+func SliceToSet[T comparable](s []T) map[T]struct{} {
+	set := make(map[T]struct{}, len(s))
+	for _, item := range s {
+		set[item] = struct{}{}
+	}
+	return set
+}
+
 // snakeCaseToCamelCase converts a snake case string to camel case.
 func SnakeCaseToCamelCase(input string) string {
 	isToUpper := false

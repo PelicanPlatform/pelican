@@ -27,6 +27,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSliceToSet(t *testing.T) {
+	sSlice := []string{"foo", "bar", "baz", "foo"}
+	sSet := SliceToSet(sSlice)
+
+	assert.Equal(t, 3, len(sSet))
+	assert.Contains(t, sSet, "foo")
+	assert.Contains(t, sSet, "bar")
+	assert.Contains(t, sSet, "baz")
+
+	// Test a slice with a different type
+	type someStruct struct {
+		Path      string
+		Recursive bool
+	}
+
+	lSlice := []someStruct{{Path: "/foo", Recursive: true}, {Path: "/bar", Recursive: false}, {Path: "/foo", Recursive: true}, {Path: "/foo", Recursive: false}}
+	lSet := SliceToSet(lSlice)
+	assert.Equal(t, len(lSet), 3)
+	assert.Contains(t, lSet, someStruct{Path: "/foo", Recursive: true})
+	assert.Contains(t, lSet, someStruct{Path: "/bar", Recursive: false})
+	assert.Contains(t, lSet, someStruct{Path: "/foo", Recursive: false})
+}
+
 func TestValidateWatermark(t *testing.T) {
 	// Can't use config.ResetConfig() due to circ dependency
 	viper.Reset()
