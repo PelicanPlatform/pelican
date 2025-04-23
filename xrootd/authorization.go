@@ -517,8 +517,6 @@ func GenerateFederationIssuer() (issuer Issuer, err error) {
 		pathSet[export.FederationPrefix] = struct{}{}
 	}
 	paths := maps.Keys(pathSet)
-	// Sort the paths to ensure consistent ordering
-	slices.Sort(paths)
 
 	issuer.Name = "Federation"
 	issuer.Issuer = fedInfo.DiscoveryEndpoint
