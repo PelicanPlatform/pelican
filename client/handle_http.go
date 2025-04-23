@@ -37,6 +37,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -343,8 +344,10 @@ const (
 	AlgMD5     = iota // Checksum is using the MD5 algorithm
 	AlgCRC32C         // Checksum is using the CRC32C algorithm
 	AlgCRC32          // Checksum is using the CRC32 algorithm
-	AlgSHA1           // Checksum is using the SHA-2 algorithm
+	AlgSHA1           // Checksum is using the SHA-1 algorithm
 	AlgUnknown        // Unknown checksum algorithm
+
+	AlgDefault = AlgCRC32C // Default checksum algorithm is CRC32C if the client doesn't specify one.
 
 	SyncNone  = iota // When synchronizing, always re-transfer, regardless of existence at destination.
 	SyncExist        // Skip synchronization transfer if the destination exists
@@ -393,6 +396,35 @@ func httpDigestFromChecksum(checksumType ChecksumType) string {
 		return "sha"
 	}
 	return ""
+}
+
+// Convert a checksum value to a human-readable string matching the encoding
+// specified in RFC 3230
+func checksumValueToHttpDigest(checksumType ChecksumType, checksumValue []byte) string {
+	switch checksumType {
+	case AlgCRC32:
+		fallthrough
+	case AlgCRC32C:
+		return hex.EncodeToString(checksumValue)
+	case AlgMD5:
+		fallthrough
+	case AlgSHA1:
+		return base64.StdEncoding.EncodeToString(checksumValue)
+	}
+	return "(unknown checksum type)"
+}
+
+// Reset the memory-cached copy of the HTCondor job ad
+//
+// The client will search through the process's environment to find
+// a HTCondor "job ad" and cache its contents in memory; the job ad
+// is used to determine the project name and job ID for the transfer
+// headers.
+//
+// This function is used to reset the job ad and is intended for use
+// in unit tests that need to reset things from outside the cache package.
+func ResetJobAd() {
+	jobAdOnce = sync.Once{}
 }
 
 // Write data to the rateLimitDiscarder; after applying the built-in
@@ -1941,7 +1973,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		if info, err = os.Stat(localPath); err != nil {
 			if os.IsNotExist(err) {
 				directory := path.Dir(localPath)
-				if localPath != "" && localPath[len(localPath)-1] == '/' {
+				if localPath != "" && os.IsPathSeparator(localPath[len(localPath)-1]) {
 					directory = localPath
 					localPath = path.Join(directory, path.Base(transfer.remoteURL.Path))
 				}
@@ -2101,6 +2133,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			}
 			if checksums, err := fetchChecksum(ctx, transfer.requestedChecksums, url, tokenContents, transfer.project); err == nil {
 				transferResults.Checksums = checksums
+				gotChecksum = true
 			}
 		}
 		if !gotChecksum && transfer.requireChecksum {
@@ -2112,7 +2145,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		if len(checksumHashes) == 0 {
 			// Added to make sure the list of checksum types are consistent with the logic
 			// when we created the hashes []io.Writer previously.
-			checksumHashes = []ChecksumType{AlgCRC32C}
+			checksumHashes = []ChecksumType{AlgDefault}
 		}
 		fields := log.Fields{
 			"url": transfer.remoteURL.String(),
@@ -2185,12 +2218,35 @@ func parseTransferStatus(status string) (int, string) {
 }
 
 // Fetch the checksum of a remote object
+//
+// The checksum is fetched via a HEAD request to the remote object server using RFC 3230 with the `Want-Digest` header.
+// Note the server is free to ignore the requested checksums and return whatever it wants (including no checksum at all
+// or even an error).  Hence, never assume the resulting checksum info is in the same order as the requested checksums
+// in `types`.
+//
+// It is permissible for `types` to be an empty list; in that case, the default checksum type (crc32c) will be requested.
 func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, token string, project string) (result []ChecksumInfo, err error) {
 	fields, ok := ctx.Value(logFields("fields")).(log.Fields)
 	if !ok {
 		fields = log.Fields{}
 	}
-	log.WithFields(fields).Debugln("Fetching checksum for", url.String())
+	if log.IsLevelEnabled(log.DebugLevel) {
+		checksumTypes := ""
+		for _, cksum := range types {
+			if checksumTypes != "" {
+				checksumTypes += ", "
+			}
+			checksumTypes += httpDigestFromChecksum(cksum)
+		}
+		if checksumTypes == "" {
+			log.WithFields(fields).Debugln(
+				"Fetching checksum for", url.String(),
+				"no checksum types explicitly requested; using default of crc32c",
+			)
+		} else {
+			log.WithFields(fields).Debugln("Fetching checksum for", url.String(), "for checksum types", checksumTypes)
+		}
+	}
 	var request *http.Request
 	if request, err = http.NewRequestWithContext(ctx, "HEAD", url.String(), nil); err != nil {
 		return
@@ -2204,7 +2260,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 		request.Header.Set("X-Pelican-JobId", val)
 	}
 	if len(types) == 0 {
-		request.Header.Set("Want-Digest", httpDigestFromChecksum(AlgCRC32C))
+		request.Header.Set("Want-Digest", httpDigestFromChecksum(AlgDefault))
 	} else {
 		multiple := false
 		val := ""
@@ -2228,7 +2284,8 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 		response.Body.Close()
 	}
 	if response.StatusCode != 200 {
-		sce := StatusCodeError(200)
+		log.Debugf("Failed to fetch checksum from %s: %s", url.String(), response.Status)
+		sce := StatusCodeError(response.StatusCode)
 		err = &sce
 		return
 	}
@@ -2252,6 +2309,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				// XRootD has a bug where crc32c is base64 encoded instead (per the spec)
 				// hex encoded.  Accept this case.  We've reported this as a bug so ideally
 				// future versions use hex instead.  Note: 0x3d is the = character.
+				// See: https://github.com/xrootd/xrootd/issues/2456
 				if len(info[1]) == 8 && info[1][6] == 0x3d && info[1][7] == 0x3d {
 					decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewReader([]byte(info[1])))
 					if _, err := decoder.Read(val); err == nil {
@@ -2263,7 +2321,11 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				}
 				fallthrough
 			case "crc32":
-				if intVal, err := strconv.Atoi(info[1]); err == nil {
+				// Parse crc32 and crc32c as hexadecimal values.  Per the IANA registry
+				// (https://www.iana.org/assignments/http-dig-alg/http-dig-alg.xhtml), these
+				// are hex-encoded and should accept leading 0's.  Once parsed, store the
+				// corresponding bytes in network order (big-endian) in our byte array.
+				if intVal, err := strconv.ParseInt(info[1], 16, 64); err == nil {
 					val[0] = byte((intVal >> 24) & 0xff)
 					val[1] = byte((intVal >> 16) & 0xff)
 					val[2] = byte((intVal >> 8) & 0xff)
@@ -2335,6 +2397,8 @@ func verifyFileSize(dest string, expectedSize int64, fields log.Fields) error {
 //   - callback: periodically invoked with progress information about the transfer.
 //   - transfer: contains the URL used for downloading the object.
 //   - dest: the destination file to write the object to.
+//   - writer: An io.Writer object where the downloaded bytes will be written to.
+//   - bytesSoFar: the number of bytes already downloaded prior to invocation.  This is used to set the Range header for the subsequent request.
 //   - totalSize: the expected size of the object.  If this is -1, the size is unknown.
 //   - token: the token to use for authoriation.
 //   - project: the project name to be used in the header identifying the transfer to the server.
