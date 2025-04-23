@@ -494,6 +494,11 @@ func GenerateFederationIssuer() (issuer Issuer, err error) {
 		return
 	}
 
+	if fedInfo.DiscoveryEndpoint == "" {
+		err = errors.New("cannot create federation issuer, federation discovery endpoint not found")
+		return
+	}
+
 	exports, err := server_utils.GetOriginExports()
 	if err != nil {
 		err = errors.Wrap(err, "failed to get origin exports in scitokens config")
