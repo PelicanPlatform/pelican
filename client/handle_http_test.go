@@ -31,7 +31,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -50,35 +49,12 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-// hasPort test the host if it includes a port
-func hasPort(host string) bool {
-	var checkPort = regexp.MustCompile("^.*:[0-9]+$")
-	return checkPort.MatchString(host)
-}
-
 func TestMain(m *testing.M) {
 	server_utils.ResetTestState()
 	if err := config.InitClient(); err != nil {
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
-}
-
-// TestIsPort calls main.hasPort with a hostname, checking
-// for a valid return value.
-func TestIsPort(t *testing.T) {
-
-	if hasPort("blah.not.port:") {
-		t.Fatal("Failed to parse port when : at end")
-	}
-
-	if !hasPort("host:1") {
-		t.Fatal("Failed to parse with port = 1")
-	}
-
-	if hasPort("https://example.com") {
-		t.Fatal("Failed when scheme is specified")
-	}
 }
 
 // TestNewTransferDetails checks the creation of transfer details
