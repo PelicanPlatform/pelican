@@ -67,6 +67,12 @@ var (
 	//go:embed resources/test-scitokens-monitoring.cfg
 	monitoringOutput string
 
+	//go:embed resources/test-scitokens-federation-issuer-private.cfg
+	federationPrivateOutput string
+
+	//go:embed resources/test-scitokens-federation-issuer-public.cfg
+	federationPublicOutput string
+
 	//go:embed resources/test-scitokens-cache-issuer.cfg
 	cacheSciOutput string
 
@@ -1195,6 +1201,69 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	cacheServer.SetNamespaceAds(nsAds)
 
 	t.Run("EmptyNS", cacheAuthTester(cacheServer, cacheEmptyOutput, ""))
+}
+
+func TestWriteOriginScitokensConfigDisableDirectReadsPrivate(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	tmpDir := t.TempDir()
+	viper.Set("ConfigDir", tmpDir)
+	viper.Set(param.Logging_Level.GetName(), "debug")
+	viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
+	viper.Set(param.Origin_SelfTest.GetName(), true)
+	viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
+	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
+	viper.Set(param.Origin_DisableDirectClients.GetName(), true)
+	viper.Set(param.Origin_EnableDirectReads.GetName(), false)
+	viper.Set(param.Origin_EnablePublicReads.GetName(), false)
+	viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
+
+	config.InitConfig()
+	err := config.InitServer(ctx, server_structs.OriginType)
+	require.NoError(t, err)
+
+	err = WriteOriginScitokensConfig()
+	require.NoError(t, err)
+
+	genCfg, err := os.ReadFile(filepath.Join(tmpDir, "scitokens-origin-generated.cfg"))
+	require.NoError(t, err)
+
+	assert.Equal(t, string(federationPrivateOutput), string(genCfg))
+}
+
+func TestWriteOriginScitokensConfigDisableDirectReadsPublic(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	tmpDir := t.TempDir()
+	viper.Set("ConfigDir", tmpDir)
+	viper.Set(param.Logging_Level.GetName(), "debug")
+	viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
+	viper.Set(param.Origin_SelfTest.GetName(), true)
+	viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
+	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
+	viper.Set(param.Origin_DisableDirectClients.GetName(), true)
+	viper.Set(param.Origin_EnableDirectReads.GetName(), false)
+	viper.Set(param.Origin_EnablePublicReads.GetName(), true)
+	viper.Set(param.Origin_EnableWrites.GetName(), false)
+	viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
+
+	config.InitConfig()
+	err := config.InitServer(ctx, server_structs.OriginType)
+	require.NoError(t, err)
+
+	err = WriteOriginScitokensConfig()
+	require.NoError(t, err)
+
+	genCfg, err := os.ReadFile(filepath.Join(tmpDir, "scitokens-origin-generated.cfg"))
+	require.NoError(t, err)
+
+	assert.Equal(t, string(federationPublicOutput), string(genCfg))
 }
 
 func TestWriteOriginScitokensConfig(t *testing.T) {

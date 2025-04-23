@@ -23,7 +23,7 @@ repos:
     rev: v4.5.0
     hooks:
     -   id: trailing-whitespace
-        exclude: github_scripts/pelican_protocol.patch
+        exclude: '^(github_scripts/pelican_protocol.patch|xrootd/resources/test-scitokens-federation-issuer-private.cfg|xrootd/resources/test-scitokens-federation-issuer-public.cfg)$'
     -   id: end-of-file-fixer
     -   id: check-yaml
         # Multi-documents are yaml files with multiple --- separating blocks, like

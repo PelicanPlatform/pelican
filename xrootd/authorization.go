@@ -62,15 +62,16 @@ type (
 
 	// Per-issuer configuration
 	Issuer struct {
-		Name            string
-		Issuer          string
-		BasePaths       []string
-		RestrictedPaths []string
-		MapSubject      bool
-		DefaultUser     string
-		UsernameClaim   string
-		NameMapfile     string
-		FedIssuer       bool
+		Name              string
+		Issuer            string
+		BasePaths         []string
+		RestrictedPaths   []string
+		MapSubject        bool
+		DefaultUser       string
+		UsernameClaim     string
+		NameMapfile       string
+		RequiredAuth      bool
+		NotAcceptableAuth bool
 	}
 
 	// Top-level configuration object for the template
@@ -488,6 +489,11 @@ func GenerateFederationIssuer() (issuer Issuer, err error) {
 		return
 	}
 
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return
+	}
+
 	exports, err := server_utils.GetOriginExports()
 	if err != nil {
 		err = errors.Wrap(err, "failed to get origin exports in scitokens config")
@@ -497,6 +503,11 @@ func GenerateFederationIssuer() (issuer Issuer, err error) {
 		err = errors.New("no exports found when configuring Origin scitokens config")
 		return
 	}
+
+	// If the exports do not have public reads capabilities, then we want to set the
+	// acceptable_authorization to be non for the federation issuer. Note that all
+	// exports will have the same capabilities, so we can just check the first one.
+	issuer.NotAcceptableAuth = !exports[0].Capabilities.PublicReads
 
 	// Use a map to emulate a set
 	pathSet := make(map[string]struct{})
@@ -508,9 +519,9 @@ func GenerateFederationIssuer() (issuer Issuer, err error) {
 	slices.Sort(paths)
 
 	issuer.Name = "Federation"
-	issuer.Issuer = param.Federation_DiscoveryUrl.GetString()
+	issuer.Issuer = fedInfo.DiscoveryEndpoint
 	issuer.BasePaths = paths
-	issuer.FedIssuer = true
+	issuer.RequiredAuth = true
 
 	return
 }

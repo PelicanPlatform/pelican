@@ -410,6 +410,9 @@ func (b *BaseOrigin) validateExports(o Origin) (err error) {
 		return errors.Wrap(err, "failed to validate export issuer URLs")
 	}
 
+	publicReadsFound := false
+	privateReadsFound := false
+
 	// Note that we assume we've already populated the origin export list
 	for i := range b.Exports { // validateExtra may update some parts of the export, so we need the index.
 		e := &b.Exports[i]
@@ -428,6 +431,18 @@ func (b *BaseOrigin) validateExports(o Origin) (err error) {
 			return
 		}
 
+		if e.Capabilities.PublicReads {
+			publicReadsFound = true
+		} else if e.Capabilities.Reads {
+			privateReadsFound = true
+		}
+
+		// If the Origin specifies it does not allow direct client access, we require that the exports
+		// all have the same read capabilities, either public or private, but not both.
+		if publicReadsFound && privateReadsFound && param.Origin_DisableDirectClients.GetBool() {
+			return errors.Errorf("config param '%s' is set to true, the exports have both 'PublicReads' and 'Reads' capabilities. These are incompatible",
+				param.Origin_DisableDirectClients.GetName())
+		}
 		// If the Origin specifies it does not allow direct client access, we require that no export
 		// sets Capabilities.DirectReads to true. This is a safeguard against misconfiguration.
 		if param.Origin_DisableDirectClients.GetBool() && e.Capabilities.DirectReads {
