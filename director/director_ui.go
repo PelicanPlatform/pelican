@@ -55,6 +55,7 @@ type (
 		Caps              server_structs.Capabilities `json:"capabilities"`
 		Filtered          bool                        `json:"filtered"`
 		FilteredType      string                      `json:"filteredType"`
+		Downtimes         []server_structs.Downtime   `json:"downtimes"`
 		FromTopology      bool                        `json:"fromTopology"`
 		HealthStatus      HealthTestStatus            `json:"healthStatus"`
 		IOLoad            float64                     `json:"ioLoad"`
@@ -85,6 +86,7 @@ type (
 		Caps         server_structs.Capabilities `json:"capabilities"`
 		Filtered     bool                        `json:"filtered"`
 		FilteredType string                      `json:"filteredType"`
+		Downtimes    []server_structs.Downtime   `json:"downtimes"`
 		FromTopology bool                        `json:"fromTopology"`
 		HealthStatus HealthTestStatus            `json:"healthStatus"`
 		IOLoad       float64                     `json:"ioLoad"`
@@ -250,6 +252,7 @@ func advertisementToServerResponse(ad *server_structs.Advertisement) serverRespo
 		Caps:                ad.Caps,
 		Filtered:            filtered,
 		FilteredType:        ft.String(),
+		Downtimes:           ad.Downtimes,
 		FromTopology:        ad.FromTopology,
 		HealthStatus:        healthStatus,
 		IOLoad:              ad.GetIOLoad(),
@@ -279,6 +282,7 @@ func serverResponseToListServerResponse(res serverResponse) listServerResponse {
 		Caps:                res.Caps,
 		Filtered:            res.Filtered,
 		FilteredType:        res.FilteredType,
+		Downtimes:           res.Downtimes,
 		FromTopology:        res.FromTopology,
 		HealthStatus:        res.HealthStatus,
 		IOLoad:              res.IOLoad,

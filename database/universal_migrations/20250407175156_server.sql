@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS downtimes (
     end_time INTEGER NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),  -- Stored as Unix epoch (UTC, Milliseconds)
     updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    deleted_at INTEGER    
+    deleted_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_downtimes_start_time ON downtimes(start_time);
 CREATE INDEX IF NOT EXISTS idx_downtimes_end_time ON downtimes(end_time);
