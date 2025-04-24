@@ -1,20 +1,20 @@
 /***************************************************************
- *
- * Copyright (C) 2024, University of Nebraska-Lincoln
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- ***************************************************************/
+*
+* Copyright (C) 2025, University of Nebraska-Lincoln
+*
+* Licensed under the Apache License, Version 2.0 (the "License"); you
+* may not use this file except in compliance with the License.  You may
+* obtain a copy of the License at
+*
+*    http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*
+***************************************************************/
 
 package main
 
@@ -44,7 +44,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -403,18 +402,11 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 		}
 	}()
 
-	// Check for local cache
-	var caches []*url.URL
-	if nearestCache, ok := os.LookupEnv("NEAREST_CACHE"); ok && nearestCache != "" {
-		caches, err = utils.GetPreferredCaches(nearestCache)
-		if err != nil {
-			return
-		}
-	} else if nearestCache, ok := os.LookupEnv("PELICAN_NEAREST_CACHE"); ok && nearestCache != "" {
-		caches, err = utils.GetPreferredCaches(nearestCache)
-		if err != nil {
-			return
-		}
+	// Get any configured preferred caches, to be passed along to the client
+	// as options.
+	caches, err := getPreferredCaches()
+	if err != nil {
+		return errors.Wrap(err, "unable to determine whether to use any preferred caches")
 	}
 
 	tc, err := te.NewClient(client.WithAcquireToken(false))

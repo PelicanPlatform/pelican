@@ -1,25 +1,24 @@
 /***************************************************************
- *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you
- * may not use this file except in compliance with the License.  You may
- * obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- ***************************************************************/
+*
+* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
+*
+* Licensed under the Apache License, Version 2.0 (the "License"); you
+* may not use this file except in compliance with the License.  You may
+* obtain a copy of the License at
+*
+*    http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*
+***************************************************************/
 
 package main
 
 import (
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +30,6 @@ import (
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -41,6 +39,9 @@ var (
 		Use:   "copy {source ...} {destination}",
 		Short: "Copy a file to/from a Pelican federation",
 		Run:   copyMain,
+		PreRun: func(cmd *cobra.Command, args []string) {
+			commaFlagsListToViperSlice(cmd, map[string]string{"cache": param.Client_PreferredCaches.GetName()})
+		},
 	}
 )
 
@@ -51,11 +52,13 @@ func init() {
 	// Being case-insensitive
 	execName = strings.ToLower(execName)
 	flagSet := copyCmd.Flags()
-	flagSet.StringP("cache", "c", "", "Cache to use")
+	flagSet.StringP("cache", "c", "", `A comma-separated list of preferred caches to try for the transfer, where a "+" in the list indicates
+the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.BoolP("recursive", "r", false, "Recursively copy a collection.  Forces methods to only be http to get the freshest collection contents")
 	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
 	flagSet.Lookup("cache-list-name").Hidden = true
+
 	// All the deprecated or hidden flags that are only relevant if we are in historical "stashcp mode"
 	if strings.HasPrefix(execName, "stashcp") {
 		copyCmd.Use = "stashcp {source ...} {destination}"
@@ -139,17 +142,11 @@ func copyMain(cmd *cobra.Command, args []string) {
 	log.Debugln("Sources:", source)
 	log.Debugln("Destination:", dest)
 
-	// Check for manually entered cache to use
-	var preferredCache string
-	if nearestCache, ok := os.LookupEnv("NEAREST_CACHE"); ok {
-		preferredCache = nearestCache
-	} else if cache, _ := cmd.Flags().GetString("cache"); cache != "" {
-		preferredCache = cache
-	}
-	var caches []*url.URL
-	caches, err = utils.GetPreferredCaches(preferredCache)
+	// Get any configured preferred caches, to be passed along to the client
+	// as options.
+	caches, err := getPreferredCaches()
 	if err != nil {
-		log.Errorln(err)
+		log.Errorln("Failed to get preferred caches:", err)
 		os.Exit(1)
 	}
 

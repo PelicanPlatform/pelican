@@ -1,6 +1,6 @@
 /***************************************************************
 *
-* Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+* Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 *
 * Licensed under the Apache License, Version 2.0 (the "License"); you
 * may not use this file except in compliance with the License.  You may
@@ -31,7 +31,6 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/utils"
 )
 
 var (
@@ -39,12 +38,16 @@ var (
 		Use:   "sync {source ...} {destination}",
 		Short: "Sync a directory to or from a Pelican federation",
 		Run:   syncMain,
+		PreRun: func(cmd *cobra.Command, args []string) {
+			commaFlagsListToViperSlice(cmd, map[string]string{"cache": param.Client_PreferredCaches.GetName()})
+		},
 	}
 )
 
 func init() {
 	flagSet := syncCmd.Flags()
-	flagSet.StringP("cache", "c", "", "Cache to use")
+	flagSet.StringP("cache", "c", "", `A comma-separated list of preferred caches to try for the transfer, where a "+" in the list indicates
+the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	objectCmd.AddCommand(syncCmd)
 }
@@ -144,17 +147,11 @@ func syncMain(cmd *cobra.Command, args []string) {
 	log.Debugln("Sources:", sources)
 	log.Debugln("Destination:", dest)
 
-	// Check for manually entered cache to use
-	var preferredCache string
-	if nearestCache, ok := os.LookupEnv("NEAREST_CACHE"); ok {
-		preferredCache = nearestCache
-	} else if cache, _ := cmd.Flags().GetString("cache"); cache != "" {
-		preferredCache = cache
-	}
-	var caches []*url.URL
-	caches, err = utils.GetPreferredCaches(preferredCache)
+	// Get any configured preferred caches, to be passed along to the client
+	// as options.
+	caches, err := getPreferredCaches()
 	if err != nil {
-		log.Errorln(err)
+		log.Errorln("Failed to get preferred caches:", err)
 		os.Exit(1)
 	}
 

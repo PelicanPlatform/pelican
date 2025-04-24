@@ -56,8 +56,12 @@ For example, to configure the Plugin to transfer objects only via a specific cac
 you would use the following line:
 
 ```
-environment = "PELICAN_NEAREST_CACHE=https://address.to.desired.cache:port"
+environment = "PELICAN_CLIENT_PREFERREDCACHES=https://address.to.desired.cache:port"
 ```
+
+> **Note:** Plugins older than v7.16.0 should use the `PELICAN_NEAREST_CACHE` environment variable,
+as `PELICAN_CLIENT_PREFERREDCACHES` was introduced in v7.16.0 with the intention of deprecating
+`PELICAN_NEAREST_CACHE`.
 
 > This particular example would be useful for testing that a specific cache is operational
 > and accessible from the EP the job is running at.

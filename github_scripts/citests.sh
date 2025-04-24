@@ -103,7 +103,7 @@ if [ ! -e "$SOCKET_DIR/data/ospool/uc-shared/public/OSG-Staff/validation/test.tx
 fi
 
 # Test we work with PELICAN_NEAREST_CACHE as well
-PELICAN_NEAREST_CACHE="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt /dev/null
+PELICAN_PREFFERREDCACHES="unix://$SOCKET_DIR/socket" ./stash_plugin -d osdf:///ospool/uc-shared/public/OSG-Staff/validation/test.txt /dev/null
 exit_status=$?
 
 if ! [[ "$exit_status" = 0 ]]; then
