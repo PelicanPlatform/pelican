@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
@@ -1085,8 +1086,23 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	purego.RegisterLibFunc(&LotmanGetLotParents, lotmanLib, "lotman_get_parent_names")
 	purego.RegisterLibFunc(&LotmanGetLotsFromDir, lotmanLib, "lotman_get_lots_from_dir")
 
-	// Set the lot_home context -- where the db lives
+	// Create the lot home dir (where lotman's sqlite db lives) and set the lot_home context
 	lotHome := param.Lotman_LotHome.GetString()
+	uid, err := config.GetDaemonUID()
+	if err != nil {
+		log.Errorf("Error getting daemon UID, needed to create '%s' directory: %v", param.Lotman_LotHome.GetName(), err)
+		return false
+	}
+	gid, err := config.GetDaemonGID()
+	if err != nil {
+		log.Errorf("Error getting daemon GID, needed to create '%s' directory: %v", param.Lotman_LotHome.GetName(), err)
+		return false
+	}
+	err = config.MkdirAll(lotHome, 0777, uid, gid)
+	if err != nil {
+		log.Errorf("Error creating lot home directory: %v", err)
+		return false
+	}
 
 	errMsg := make([]byte, 2048)
 
@@ -1156,6 +1172,26 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 				return false
 			}
 		}
+	}
+
+	// We've created the lotman home directory, but the database lotman creates will still be
+	// owned by the uid:gid that started the cache. Recursively set ownership to XRootD, but set
+	// permissions such that the Pelican user can still modify it.
+	if err := filepath.WalkDir(lotHome, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return errors.Wrapf(err, "the path %s cannot be accessed", path)
+		}
+		if chmodErr := os.Chmod(path, 0777); chmodErr != nil {
+			return errors.Wrapf(chmodErr, "permissions on the path %s to Lotman's database cannot be set", path)
+		}
+		if chownErr := os.Chown(path, uid, gid); chownErr != nil {
+			return errors.Wrapf(chownErr, "ownership of the path %s to Lotman's database cannot be set", path)
+		}
+
+		return nil
+	}); err != nil {
+		log.Errorf("Unable to finalize Lotman's initialization: %v", err)
+		return false
 	}
 
 	log.Infof("LotMan initialization complete")

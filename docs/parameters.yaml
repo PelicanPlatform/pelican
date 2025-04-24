@@ -3174,7 +3174,7 @@ description: |+
   The prefix indicating where LotMan should store its lot database. Configured with path `<path>`, the database
   will be stored at `<path>/.lot/lotman_cpp.sqlite`.
 type: filename
-root_default: /var/run/pelican
+root_default: /var/lib/lotman
 default: $ConfigBase
 components: ["cache"]
 ---
@@ -3186,7 +3186,7 @@ description: |+
   The prefix indicating where LotMan should store its lot database. For the provided path, the database
   will be stored at <path>/.lot/lotman_cpp.sqlite.
 type: filename
-root_default: /var/run/pelican
+root_default: /var/lib/lotman
 default: $ConfigBase
 deprecated: true
 replacedby: ["Lotman.LotHome"]

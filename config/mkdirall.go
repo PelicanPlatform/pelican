@@ -84,11 +84,18 @@ func MkdirAll(path string, perm os.FileMode, uid int, gid int) error {
 		cmd := exec.Command("icacls", path, "/grant", username+":F")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			return errors.Wrapf(err, "Failed to modify discretionary ACLs on directory %v: %s", path, string(output))
+			return errors.Wrapf(err, "unable to modify discretionary ACLs on directory %v: %s", path, string(output))
 		}
 	} else { // Assume macOS or Linux.
+		// Any default system umask may prevent previous application of the permissions
+		// from taking effect. To override this, set the permissions explicitly
+		// after creation.
+		if err = os.Chmod(path, perm); err != nil {
+			return errors.Wrapf(err, "unable to chmod on directory %v to %v", path, perm)
+		}
+
 		if err = os.Chown(path, uid, gid); err != nil {
-			return errors.Wrapf(err, "Failed to chown on directory %v to %v:%v", path, uid, gid)
+			return errors.Wrapf(err, "unable to chown on directory %v to %v:%v", path, uid, gid)
 		}
 	}
 	return nil
