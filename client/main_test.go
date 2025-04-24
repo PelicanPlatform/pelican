@@ -506,22 +506,18 @@ func TestParseRemoteAsPUrl(t *testing.T) {
 	}
 }
 
-// mustURL parses a string into *url.URL or fails the test.
-func mustURL(t *testing.T, s string) *url.URL {
-	u, err := url.Parse(s)
-	require.NoError(t, err)
-	return u
-}
-
 // Verify if a scitoken‐profile JWT is acceptable for a given namespace
 func TestTokenIsAcceptableForSciTokens(t *testing.T) {
+	issuerURL, err := url.Parse("https://issuer.example")
+	require.NoError(t, err)
+
 	// 1) Build a minimal DirectorResponse whose namespace is "/foo"
 	dirResp := server_structs.DirectorResponse{
 		XPelNsHdr: server_structs.XPelNs{
 			Namespace: "/foo",
 		},
 		XPelTokGenHdr: server_structs.XPelTokGen{
-			Issuers:   []*url.URL{mustURL(t, "https://issuer.example")},
+			Issuers:   []*url.URL{issuerURL},
 			BasePaths: []string{"/foo"},
 		},
 	}
