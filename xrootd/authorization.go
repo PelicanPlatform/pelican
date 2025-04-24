@@ -42,6 +42,7 @@ import (
 	"github.com/go-ini/ini"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
 
 	"github.com/pelicanplatform/pelican/cache"
@@ -69,6 +70,8 @@ type (
 		DefaultUser     string
 		UsernameClaim   string
 		NameMapfile     string
+		RequiredAuth    string
+		AcceptableAuth  string
 	}
 
 	// Top-level configuration object for the template
@@ -179,18 +182,18 @@ func writeScitokensConfiguration(modules server_structs.ServerType, cfg *Scitoke
 	configPath := filepath.Join(xrootdRun, "scitokens-generated.cfg.tmp")
 	file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
-		return errors.Wrapf(err, "Failed to create a temporary scitokens file %s", configPath)
+		return errors.Wrapf(err, "failed to create a temporary scitokens file %s", configPath)
 	}
 	defer file.Close()
 	if err = os.Chown(configPath, -1, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of generated scitokens"+
+		return errors.Wrapf(err, "unable to change ownership of generated scitokens"+
 			" configuration file %v to desired daemon gid %v", configPath, gid)
 	}
 
 	deduplicateBasePaths(cfg)
 	err = templ.Execute(file, cfg)
 	if err != nil {
-		return errors.Wrapf(err, "Unable to create scitokens.cfg template")
+		return errors.Wrapf(err, "unable to create scitokens.cfg template")
 	}
 
 	// Note that we write to the file then rename it into place.  This is because the
@@ -201,7 +204,7 @@ func writeScitokensConfiguration(modules server_structs.ServerType, cfg *Scitoke
 		finalConfigPath = filepath.Join(xrootdRun, "scitokens-cache-generated.cfg")
 	}
 	if err = os.Rename(configPath, finalConfigPath); err != nil {
-		return errors.Wrapf(err, "Failed to rename scitokens.cfg to final location")
+		return errors.Wrapf(err, "failed to rename scitokens.cfg to final location")
 	}
 	return nil
 }
@@ -264,7 +267,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 	log.Debugln("Location of input authfile:", authfile)
 	contents, err := os.ReadFile(authfile)
 	if err != nil {
-		return errors.Wrapf(err, "Failed to read xrootd authfile from %s", authfile)
+		return errors.Wrapf(err, "failed to read xrootd authfile from %s", authfile)
 	}
 
 	output := new(bytes.Buffer)
@@ -295,15 +298,19 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 			// There exists a public access already in the authfile
 			if server.GetServerType().IsEnabled(server_structs.OriginType) {
 				outStr := "u * /.well-known lr "
-				// Set up public reads only for the namespaces that are public
-				originExports, err := server_utils.GetOriginExports()
-				if err != nil {
-					return errors.Wrapf(err, "Failed to get origin exports")
-				}
 
-				for _, export := range originExports {
-					if export.Capabilities.PublicReads {
-						outStr += export.FederationPrefix + " lr "
+				// Exports are only public if the origin allows direct clients
+				if !param.Origin_DisableDirectClients.GetBool() {
+					// Set up public reads only for the namespaces that are public
+					originExports, err := server_utils.GetOriginExports()
+					if err != nil {
+						return errors.Wrapf(err, "failed to get origin exports")
+					}
+
+					for _, export := range originExports {
+						if export.Capabilities.PublicReads {
+							outStr += export.FederationPrefix + " lr "
+						}
 					}
 				}
 
@@ -321,15 +328,19 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 	if !foundPublicLine && server.GetServerType().IsEnabled(server_structs.OriginType) {
 		outStr := "u * /.well-known lr"
 
-		// Configure the Authfile for each of the public exports we have in the origin
-		originExports, err := server_utils.GetOriginExports()
-		if err != nil {
-			return errors.Wrapf(err, "Failed to get origin exports")
-		}
+		// Exports are only public if the origin allows direct clients
+		if !param.Origin_DisableDirectClients.GetBool() {
 
-		for _, export := range originExports {
-			if export.Capabilities.PublicReads {
-				outStr += " " + export.FederationPrefix + " lr"
+			// Configure the Authfile for each of the public exports we have in the origin
+			originExports, err := server_utils.GetOriginExports()
+			if err != nil {
+				return errors.Wrapf(err, "failed to get origin exports")
+			}
+
+			for _, export := range originExports {
+				if export.Capabilities.PublicReads {
+					outStr += " " + export.FederationPrefix + " lr"
+				}
 			}
 		}
 
@@ -372,7 +383,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 	}
 	file, err := os.OpenFile(finalAuthPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0640)
 	if err != nil {
-		return errors.Wrapf(err, "Failed to create a generated authfile %s", finalAuthPath)
+		return errors.Wrapf(err, "failed to create a generated authfile %s", finalAuthPath)
 	}
 	defer file.Close()
 	if err = os.Chown(finalAuthPath, -1, gid); err != nil {
@@ -380,7 +391,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 			"file %v to desired daemon gid %v", finalAuthPath, gid)
 	}
 	if _, err := output.WriteTo(file); err != nil {
-		return errors.Wrapf(err, "Failed to write to generated authfile %v", finalAuthPath)
+		return errors.Wrapf(err, "failed to write to generated authfile %v", finalAuthPath)
 	}
 
 	return nil
@@ -390,7 +401,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 	configIni, err := ini.Load(fileName)
 	if err != nil {
-		return cfg, errors.Wrapf(err, "Unable to load the scitokens.cfg at %s", fileName)
+		return cfg, errors.Wrapf(err, "unable to load the scitokens.cfg at %s", fileName)
 	}
 
 	cfg.IssuerMap = make(map[string]Issuer)
@@ -404,7 +415,7 @@ func LoadScitokensConfig(fileName string) (cfg ScitokensCfg, err error) {
 		if audienceKey := section.Key("audience_json"); audienceKey != nil && audienceKey.String() != "" {
 			var audiences []string
 			if err := json.Unmarshal([]byte(audienceKey.String()), &audiences); err != nil {
-				return cfg, errors.Wrapf(err, "Unable to parse audience_json from %s", fileName)
+				return cfg, errors.Wrapf(err, "unable to parse audience_json from %s", fileName)
 			}
 			for _, audience := range audiences {
 				cfg.Global.Audience = append(cfg.Global.Audience, strings.TrimSpace(audience))
@@ -468,6 +479,54 @@ func GenerateMonitoringIssuer() (issuer Issuer, err error) {
 	issuer.Issuer = builtinIssuer
 	issuer.BasePaths = []string{server_utils.MonitoringBaseNs}
 	issuer.DefaultUser = "xrootd"
+
+	return
+}
+
+// Generate the federation issuer to ensure the client is federation authorized
+func GenerateFederationIssuer() (issuer Issuer, err error) {
+	if enabled := param.Origin_DisableDirectClients.GetBool(); !enabled {
+		return
+	}
+
+	fedInfo, err := config.GetFederation(context.Background())
+	if err != nil {
+		return
+	}
+
+	if fedInfo.DiscoveryEndpoint == "" {
+		err = errors.New("cannot create federation issuer, federation discovery endpoint not found")
+		return
+	}
+
+	exports, err := server_utils.GetOriginExports()
+	if err != nil {
+		err = errors.Wrap(err, "failed to get origin exports in scitokens config")
+		return
+	}
+	if len(exports) == 0 {
+		err = errors.New("no exports found when configuring Origin scitokens config")
+		return
+	}
+
+	// If the exports do not have public reads capabilities, then we want to set the
+	// acceptable_authorization to be none for the federation issuer. Note that all
+	// exports will have the same capabilities, so we can just check the first one.
+	if !exports[0].Capabilities.PublicReads {
+		issuer.AcceptableAuth = "none"
+	}
+
+	// Use a map to emulate a set
+	pathSet := make(map[string]struct{})
+	for _, export := range exports {
+		pathSet[export.FederationPrefix] = struct{}{}
+	}
+	paths := maps.Keys(pathSet)
+
+	issuer.Name = "Federation"
+	issuer.Issuer = fedInfo.DiscoveryEndpoint
+	issuer.BasePaths = paths
+	issuer.RequiredAuth = "all"
 
 	return
 }
@@ -547,7 +606,7 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 
 	err = config.MkdirAll(filepath.Dir(scitokensCfg), 0755, -1, gid)
 	if err != nil {
-		return cfg, errors.Wrapf(err, "Unable to create directory %v",
+		return cfg, errors.Wrapf(err, "unable to create directory %v",
 			filepath.Dir(scitokensCfg))
 	}
 	// We only open the file without chmod to daemon group as we will make
@@ -559,7 +618,7 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 	}
 	cfg, err = LoadScitokensConfig(scitokensCfg)
 	if err != nil {
-		return cfg, errors.Wrapf(err, "Failed to load scitokens configuration at %s", scitokensCfg)
+		return cfg, errors.Wrapf(err, "failed to load scitokens configuration at %s", scitokensCfg)
 	}
 
 	return cfg, nil
@@ -594,7 +653,7 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 		}
 		return WriteCacheScitokensConfig(directorAds)
 	} else {
-		return errors.New("Internal error: server object is neither cache nor origin")
+		return errors.New("internal error: server object is neither cache nor origin")
 	}
 }
 
@@ -652,6 +711,18 @@ func WriteOriginScitokensConfig() error {
 		}
 	} else if err != nil {
 		return errors.Wrap(err, "failed to generate xrootd issuer for director-based monitoring")
+	}
+
+	if issuer, err := GenerateFederationIssuer(); err == nil && len(issuer.Name) > 0 {
+		if val, ok := cfg.IssuerMap[issuer.Issuer]; ok {
+			val.BasePaths = append(val.BasePaths, issuer.BasePaths...)
+			val.Name += " and " + issuer.Name
+			cfg.IssuerMap[issuer.Issuer] = val
+		} else {
+			cfg.IssuerMap[issuer.Issuer] = issuer
+		}
+	} else if err != nil {
+		return errors.Wrap(err, "failed to generate xrootd issuer for federation")
 	}
 
 	return writeScitokensConfiguration(server_structs.OriginType, &cfg)
@@ -734,11 +805,11 @@ func EmitIssuerMetadata(exportPath string, xServeUrl string) error {
 	defer file.Close()
 	buf, err := json.MarshalIndent(keys, "", " ")
 	if err != nil {
-		return errors.Wrap(err, "Failed to marshal public keys")
+		return errors.Wrap(err, "failed to marshal public keys")
 	}
 	_, err = file.Write(buf)
 	if err != nil {
-		return errors.Wrap(err, "Failed to write public key set to export directory")
+		return errors.Wrap(err, "failed to write public key set to export directory")
 	}
 
 	openidFile, err := os.OpenFile(filepath.Join(wellKnownPath, "openid-configuration"),
@@ -775,11 +846,11 @@ func EmitIssuerMetadata(exportPath string, xServeUrl string) error {
 
 	buf, err = json.MarshalIndent(cfg, "", " ")
 	if err != nil {
-		return errors.Wrap(err, "Failed to marshal OpenID configuration file contents")
+		return errors.Wrap(err, "failed to marshal OpenID configuration file contents")
 	}
 	_, err = openidFile.Write(buf)
 	if err != nil {
-		return errors.Wrap(err, "Failed to write OpenID configuration file")
+		return errors.Wrap(err, "failed to write OpenID configuration file")
 	}
 
 	return nil

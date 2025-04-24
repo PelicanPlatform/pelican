@@ -421,8 +421,8 @@ func TestWhoamiAPI(t *testing.T) {
 
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
-	config.InitConfig()
 	viper.Set("ConfigDir", dirName)
+	config.InitConfig()
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
@@ -599,8 +599,8 @@ func TestLogoutAPI(t *testing.T) {
 
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
-	config.InitConfig()
 	viper.Set("ConfigDir", dirName)
+	config.InitConfig()
 	viper.Set("Server.UIPasswordFile", tempPasswdFile.Name())
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)

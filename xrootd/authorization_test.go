@@ -2,7 +2,7 @@
 
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -384,6 +384,84 @@ func TestEmitAuthfile(t *testing.T) {
 			require.NoError(t, err)
 
 			err = EmitAuthfile(server)
+			require.NoError(t, err)
+
+			contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
+			require.NoError(t, err)
+
+			assert.Equal(t, testInput.authOut, string(contents))
+		})
+	}
+}
+
+func TestEmitOriginAuthfileWithCacheAuth(t *testing.T) {
+	dirName := t.TempDir()
+	server_utils.ResetTestState()
+
+	defer server_utils.ResetTestState()
+
+	viper.Set(param.Origin_DisableDirectClients.GetName(), true)
+	viper.Set(param.Xrootd_Authfile.GetName(), filepath.Join(dirName, "authfile"))
+	viper.Set(param.Origin_RunLocation.GetName(), dirName)
+	viper.Set(param.Origin_FederationPrefix.GetName(), "cache-authz-test")
+	viper.Set(param.Origin_StoragePrefix.GetName(), "/")
+	viper.Set(param.Origin_EnablePublicReads.GetName(), true)
+
+	originServer := &origin.OriginServer{}
+
+	err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(""), fs.FileMode(0600))
+	require.NoError(t, err)
+
+	err = EmitAuthfile(originServer)
+	require.NoError(t, err)
+
+	contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
+	require.NoError(t, err)
+
+	assert.Equal(t, "u * /.well-known lr\n", string(contents))
+}
+
+func TestEmitOriginAuthfileWithCapabilities(t *testing.T) {
+	tests := []struct {
+		desc         string
+		name         string
+		authOut      string
+		capabilities []string
+	}{
+		{
+			desc:         "public-reads",
+			name:         "/public",
+			authOut:      "u * /.well-known lr /public lr\n",
+			capabilities: []string{param.Origin_EnablePublicReads.GetName()},
+		},
+		{
+			desc:         "no-public-access",
+			name:         "/private",
+			authOut:      "u * /.well-known lr\n",
+			capabilities: []string{param.Origin_EnableReads.GetName()},
+		},
+	}
+	for _, testInput := range tests {
+		t.Run(testInput.desc, func(t *testing.T) {
+			dirName := t.TempDir()
+			server_utils.ResetTestState()
+
+			defer server_utils.ResetTestState()
+
+			viper.Set(param.Xrootd_Authfile.GetName(), filepath.Join(dirName, "authfile"))
+			viper.Set(param.Origin_RunLocation.GetName(), dirName)
+			viper.Set(param.Origin_FederationPrefix.GetName(), testInput.name)
+			viper.Set(param.Origin_StoragePrefix.GetName(), "/")
+			viper.Set(param.Server_IssuerUrl.GetName(), "https://test-issuer.com")
+			for _, cap := range testInput.capabilities {
+				viper.Set(cap, true)
+			}
+			originServer := &origin.OriginServer{}
+
+			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(""), fs.FileMode(0600))
+			require.NoError(t, err)
+
+			err = EmitAuthfile(originServer)
 			require.NoError(t, err)
 
 			contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
@@ -1117,6 +1195,65 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 	cacheServer.SetNamespaceAds(nsAds)
 
 	t.Run("EmptyNS", cacheAuthTester(cacheServer, cacheEmptyOutput, ""))
+}
+
+func TestGenerateFederationIssuer(t *testing.T) {
+	testCases := []struct {
+		name           string
+		PublicReads    bool
+		AcceptableAuth string
+	}{
+		{
+			name:           "PublicReads",
+			PublicReads:    true,
+			AcceptableAuth: "",
+		},
+		{
+			name:           "PrivateReads",
+			PublicReads:    false,
+			AcceptableAuth: "none",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server_utils.ResetTestState()
+			defer server_utils.ResetTestState()
+			ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+			tmpDir := t.TempDir()
+			viper.Set("ConfigDir", tmpDir)
+			viper.Set(param.Logging_Level.GetName(), "debug")
+			viper.Set(param.Origin_RunLocation.GetName(), tmpDir)
+			viper.Set(param.Origin_SelfTest.GetName(), true)
+			viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
+			viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
+			viper.Set(param.Origin_DisableDirectClients.GetName(), true)
+			viper.Set(param.Origin_EnableDirectReads.GetName(), false)
+			viper.Set(param.Origin_EnablePublicReads.GetName(), tc.PublicReads)
+			viper.Set(param.Origin_EnableListings.GetName(), false)
+			viper.Set(param.Origin_EnableWrites.GetName(), false)
+			viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
+			viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
+
+			test_utils.MockFederationRoot(t, nil, nil)
+
+			config.InitConfig()
+			err := config.InitServer(ctx, server_structs.OriginType)
+			require.NoError(t, err)
+
+			issuer, err := GenerateFederationIssuer()
+			require.NoError(t, err)
+
+			assert.Equal(t, issuer.Issuer, param.Federation_DiscoveryUrl.GetString())
+			assert.Equal(t, issuer.Name, "Federation")
+			assert.Equal(t, issuer.BasePaths, []string{"/foo/bar"})
+			assert.Empty(t, issuer.RestrictedPaths)
+			assert.Equal(t, issuer.DefaultUser, "")
+			assert.Equal(t, issuer.AcceptableAuth, tc.AcceptableAuth)
+			assert.Equal(t, issuer.RequiredAuth, "all")
+		})
+	}
 }
 
 func TestWriteOriginScitokensConfig(t *testing.T) {
