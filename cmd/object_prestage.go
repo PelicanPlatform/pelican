@@ -24,7 +24,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
@@ -50,10 +49,6 @@ func init() {
 the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	objectCmd.AddCommand(prestageCmd)
-
-	if err := viper.BindPFlag(param.Client_PreferredCaches.GetName(), prestageCmd.Flags().Lookup("cache")); err != nil {
-		panic(err)
-	}
 }
 
 func prestageMain(cmd *cobra.Command, args []string) {

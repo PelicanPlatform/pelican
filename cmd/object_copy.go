@@ -26,7 +26,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
@@ -60,9 +59,6 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
 	flagSet.Lookup("cache-list-name").Hidden = true
 
-	if err := viper.BindPFlag(param.Client_PreferredCaches.GetName(), copyCmd.Flags().Lookup("cache")); err != nil {
-		panic(err)
-	}
 	// All the deprecated or hidden flags that are only relevant if we are in historical "stashcp mode"
 	if strings.HasPrefix(execName, "stashcp") {
 		copyCmd.Use = "stashcp {source ...} {destination}"

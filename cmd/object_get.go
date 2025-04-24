@@ -24,7 +24,6 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
@@ -53,10 +52,6 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.Lookup("cache-list-name").Hidden = true
 	flagSet.String("caches", "", "A JSON file containing the list of caches")
 	objectCmd.AddCommand(getCmd)
-
-	if err := viper.BindPFlag(param.Client_PreferredCaches.GetName(), getCmd.Flags().Lookup("cache")); err != nil {
-		panic(err)
-	}
 }
 
 func getMain(cmd *cobra.Command, args []string) {
