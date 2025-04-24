@@ -375,9 +375,9 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 
 	// Construct the registry downtime list URL to get active and future downtimes
 	registryEndpointURL.Path = path.Join(registryEndpointURL.Path, "api", "v1.0", "downtime")
-	// Set the query parameter "source" to "registry".
+	// Set the query parameter "source" to the Registry.
 	q := registryEndpointURL.Query()
-	q.Set("source", "registry")
+	q.Set("source", strings.ToLower(server_structs.RegistryType.String()))
 	registryEndpointURL.RawQuery = q.Encode()
 
 	registryDowntimeListURL := registryEndpointURL.String()

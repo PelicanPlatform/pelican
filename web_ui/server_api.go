@@ -19,6 +19,7 @@ package web_ui
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -46,8 +47,8 @@ type (
 )
 
 // Get the Pelican service that set the downtime
-func getDowntimeSource(ctx *gin.Context) (string, error) {
-	enabledServers := config.GetEnabledServerString(false)
+func getDowntimeSource() (string, error) {
+	enabledServers := config.GetEnabledServerString(true)
 	if len(enabledServers) == 0 {
 		log.Warningf("Downtime source is not set. No Pelican service is enabled.")
 		return "", errors.New("No Pelican service is enabled")
@@ -160,7 +161,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 	// Source stands for the Pelican service that creates this downtime
 	// Mostly automatically set by the server via getDowntimeSource function; should only be set by input during testing
 	if downtimeInput.Source == "" {
-		downtimeInput.Source, err = getDowntimeSource(ctx)
+		downtimeInput.Source, err = getDowntimeSource()
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -203,7 +204,7 @@ func HandleCreateDowntime(ctx *gin.Context) {
 
 func HandleGetDowntime(ctx *gin.Context) {
 	status := ctx.Query("status")
-	source := ctx.Query("source") // Which Pelican service set the downtime
+	source := strings.ToLower(ctx.Query("source")) // Which Pelican service set the downtime
 	var downtimes []server_structs.Downtime
 	var err error
 

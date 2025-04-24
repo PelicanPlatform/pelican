@@ -54,7 +54,7 @@ func (server *CacheServer) CreateAdvertisement(name, originUrl, originWebUrl str
 	registryPrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
 
 	// Fetch cache's active and future downtimes
-	downtimes, err := database.GetIncompleteDowntimes("cache")
+	downtimes, err := database.GetIncompleteDowntimes(strings.ToLower(server_structs.CacheType.String()))
 	if err != nil {
 		return nil, err
 	}

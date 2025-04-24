@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -156,7 +157,7 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 	}
 
 	// Fetch origin's active and future downtimes
-	downtimes, err := database.GetIncompleteDowntimes("origin")
+	downtimes, err := database.GetIncompleteDowntimes(strings.ToLower(server_structs.OriginType.String()))
 	if err != nil {
 		return nil, err
 	}

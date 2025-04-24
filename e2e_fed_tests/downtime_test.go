@@ -120,7 +120,7 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 
 	// Assemble a downtime creation request to the cache server
 	incompleteDowntime := web_ui.DowntimeInput{
-		Source:      "cache",
+		Source:      strings.ToLower(server_structs.CacheType.String()),
 		Class:       "SCHEDULED",
 		Description: "",
 		Severity:    "Intermittent Outage (may be up for some of the time)",
