@@ -1027,11 +1027,27 @@ func warnIssuerKey(v *viper.Viper) {
 	legacyKey := v.GetString(param.IssuerKey.GetName())
 	if legacyKey != "" {
 		if _, err := os.Stat(legacyKey); err == nil {
-			log.Warnf(
-				"Deprecated configuration %q detected — this will be removed in a future release. "+
-					"Please switch to %q, pointing at a directory of private key files with .pem extension.",
-				param.IssuerKey.GetName(),
-				param.IssuerKeysDirectory.GetName(),
+			issuerKeyConfigBy := "default"
+			issuerKeysDirectoryConfigBy := "default"
+			changeExtension := ""
+
+			configDir := v.GetString("ConfigDir")
+			if filepath.Join(configDir, "issuer.jwk") != param.IssuerKey.GetString() {
+				issuerKeyConfigBy = "custom"
+			}
+			if filepath.Join(configDir, "issuer-keys") != param.IssuerKeysDirectory.GetString() {
+				issuerKeysDirectoryConfigBy = "custom"
+			}
+			if !strings.HasSuffix(param.IssuerKey.GetString(), ".pem") {
+				changeExtension = "renamed to use '.pem' extension and "
+			}
+
+			log.Errorf(
+				"File %q should be %smoved into directory %q. "+
+					"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). ",
+				param.IssuerKey.GetString(), changeExtension, param.IssuerKeysDirectory.GetString(),
+				param.IssuerKey.GetName(), param.IssuerKey.GetString(), issuerKeyConfigBy,
+				param.IssuerKeysDirectory.GetName(), param.IssuerKeysDirectory.GetString(), issuerKeysDirectoryConfigBy,
 			)
 		}
 	}
