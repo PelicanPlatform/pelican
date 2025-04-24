@@ -573,7 +573,7 @@ hidden: true
 ---
 name: Client.PreferredCaches
 description: |+
-  A list of preferred caches the Pelican client/plugin should use when interacting with a remote object. There are two configuration options:
+  A list of preferred cache hostname/ports the Pelican client/plugin should use when interacting with a remote object. There are two configuration options:
     - A list containing `+` as a discrete element
     - A list with no `+`
 
@@ -588,12 +588,12 @@ description: |+
   Caches are generally tried in the order they're presented. For example, the configuration:
   ```yaml
   Client:
-    PreferredCaches: ["cache1", "cache2", "+"]
+    PreferredCaches: ["https://cache1.com:8443", "https://cache2.com:8443", "+"]
   ```
   should result in trying `cache1`, then `cache2`, and finally any caches discovered by the Director (if needed).
 
   When set via the `PELICAN_CLIENT_PREFERREDCACHES` environment variable, caches should be space-separated, e.g.:
-  `PELICAN_CLIENT_PREFERREDCACHES="cache cache2 +"`
+  `PELICAN_CLIENT_PREFERREDCACHES="https://cache1.com:8443 https://cache2.com:8443 +"`
 type: stringSlice
 default: none
 components: ["client"]
