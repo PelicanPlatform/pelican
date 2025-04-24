@@ -59,7 +59,9 @@ func TestFedServePosixOrigin(t *testing.T) {
 	modules.Set(server_structs.RegistryType)
 
 	// Create our own temp directory (for some reason t.TempDir() does not play well with xrootd)
-	tmpPathPattern := "XRootD-Test_Origin*"
+	// Note: on Mac OS X, this runs extremely close to the path limits as the admin path has a
+	// Unix socket in it.  Shortening as much as possible.
+	tmpPathPattern := "XrdOrigin*"
 	tmpPath, err := os.MkdirTemp("", tmpPathPattern)
 	require.NoError(t, err)
 
@@ -69,7 +71,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	require.NoError(t, err)
 
 	viper.Set("ConfigDir", tmpPath)
-	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "xrootd"))
+	viper.Set("Origin.RunLocation", filepath.Join(tmpPath, "xrd"))
 	t.Cleanup(func() {
 		if err := os.RemoveAll(tmpPath); err != nil {
 			t.Fatal("Failed to clean up temp path")
