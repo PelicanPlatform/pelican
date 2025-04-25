@@ -13,6 +13,7 @@ import {
   AssistantDirection,
   AppRegistration,
   Cached,
+  CalendarMonth,
   Api,
   Settings,
 } from '@mui/icons-material';
@@ -33,12 +34,6 @@ const NavigationConfig: NavigationConfiguration = {
   ],
   registry: [
     { title: 'Dashboard', href: '/registry/', icon: <Dashboard /> },
-    {
-      title: 'Denied Namespaces',
-      href: '/registry/denied/',
-      icon: <Block />,
-      allowedRoles: ['admin'],
-    },
     {
       title: 'Add',
       icon: <Add />,
@@ -62,6 +57,18 @@ const NavigationConfig: NavigationConfiguration = {
       ],
     },
     {
+      title: 'Denied Namespaces',
+      href: '/registry/denied/',
+      icon: <Block />,
+      allowedRoles: ['admin'],
+    },
+    {
+      title: 'Downtime',
+      href: '/registry/downtime/',
+      icon: <CalendarMonth />,
+      allowedRoles: ['admin'],
+    },
+    {
       title: 'Config',
       href: '/config/',
       icon: <Build />,
@@ -77,6 +84,7 @@ const NavigationConfig: NavigationConfiguration = {
   origin: [
     { title: 'Dashboard', href: '/origin/', icon: <Dashboard /> },
     { title: 'Metrics', href: '/origin/metrics/', icon: <Equalizer /> },
+    { title: 'Downtime', href: '/origin/downtime/', icon: <CalendarMonth /> },
     {
       title: 'Globus Configurations',
       href: '/origin/globus/',
@@ -95,6 +103,7 @@ const NavigationConfig: NavigationConfiguration = {
       icon: <Equalizer />,
       allowedRoles: ['admin'],
     },
+    { title: 'Downtime', href: '/director/downtime/', icon: <CalendarMonth /> },
     { title: 'Map', href: '/director/map/', icon: <MapOutlined /> },
     {
       title: 'Config',
@@ -112,6 +121,7 @@ const NavigationConfig: NavigationConfiguration = {
   cache: [
     { title: 'Dashboard', href: '/cache/', icon: <Dashboard /> },
     { title: 'Metrics', href: '/cache/metrics/', icon: <Equalizer /> },
+    { title: 'Downtime', href: '/cache/downtime/', icon: <CalendarMonth /> },
     { title: 'Config', href: '/config/', icon: <Build /> },
     { title: 'Settings', href: '/settings/', icon: <Settings /> },
   ],
