@@ -1215,6 +1215,18 @@ func handlePacket(packet []byte) error {
 				counter.Add(float64(int64(binary.BigEndian.Uint64(
 					packet[offset+xfrOffset+16:offset+xfrOffset+24]) -
 					oldWriteBytes)))
+
+				logFields := log.Fields{
+					"timestamp":    time.Now().Format(time.RFC3339),
+					"filePath":     labels["path"],
+					"authProtocol": labels["ap"],
+					"dn":           labels["dn"],
+					"project":      labels["proj"],
+					"org":          labels["org"],
+					"role":         labels["role"],
+					"network":      labels["network"],
+				}
+				log.WithFields(logFields).Info("XRootD file closed")
 			case isOpen: // XrdXrootdMonFileHdr::isOpen
 				log.Debug("MonPacket: Received a f-stream file-open packet")
 				fileid := FileId{Id: fileHdr.FileId}
