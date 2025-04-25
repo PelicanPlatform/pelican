@@ -239,9 +239,9 @@ const submitDowntime = async (
 };
 
 const defaultDowntime = {
-  severity:
-    'Intermittent Outage (may be up for some of the time)' as DowntimeSeverity,
+  severity: 'Outage (completely inaccessible)' as DowntimeSeverity,
   class: 'SCHEDULED' as DowntimeClass,
 };
+
 
 export default DowntimeForm;
