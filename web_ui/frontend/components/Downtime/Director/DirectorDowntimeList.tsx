@@ -2,8 +2,7 @@ import DirectorDowntimeCard from '@/components/Downtime/Director/DirectorDowntim
 import DowntimeCardList from '@/components/Downtime/DowntimeCardList';
 import { DowntimeGet } from '@/types';
 
-const DirectorDowntimeList = ({data}: {data?: DowntimeGet[]}) => {
-
+const DirectorDowntimeList = ({ data }: { data?: DowntimeGet[] }) => {
   return <DowntimeCardList Card={DirectorDowntimeCard} data={data} />;
 };
 

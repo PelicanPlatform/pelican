@@ -12,7 +12,7 @@ import {
 import { DateTimePicker } from '@mui/x-date-pickers';
 import { mutate } from 'swr';
 import { DateTime } from 'luxon';
-import {Dispatch, useContext, useEffect, useMemo, useState} from 'react';
+import { Dispatch, useContext, useEffect, useMemo, useState } from 'react';
 import {
   DowntimeClass,
   DowntimeGet,
@@ -77,10 +77,10 @@ const ServerUnknownDowntimeForm = ({
 
   // Set a default prefix on registry
   useEffect(() => {
-    if(prefixes.length > 0 && downtime.serverName === '') {
+    if (prefixes.length > 0 && downtime.serverName === '') {
       setDowntime({ ...downtime, serverName: prefixes[0] });
     }
-  }, [prefixes, setDowntime, downtime])
+  }, [prefixes, setDowntime, downtime]);
 
   return (
     <Box>

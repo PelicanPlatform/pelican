@@ -2,10 +2,7 @@ import RegistryDowntimeCard from '@/components/Downtime/Registry/RegistryDowntim
 import DowntimeCardList from '@/components/Downtime/DowntimeCardList';
 import { DowntimeGet } from '@/types';
 
-
-
-const RegistryDowntimeList = ({data}: {data?: DowntimeGet[]}) => {
-
+const RegistryDowntimeList = ({ data }: { data?: DowntimeGet[] }) => {
   return <DowntimeCardList Card={RegistryDowntimeCard} data={data} />;
 };
 

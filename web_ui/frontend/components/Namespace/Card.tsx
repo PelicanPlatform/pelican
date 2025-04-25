@@ -130,7 +130,7 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                       </IconButton>
                     </Link>
                   </Tooltip>
-                  {(['origin', 'cache'].includes(namespace.type)) && (
+                  {['origin', 'cache'].includes(namespace.type) && (
                     <Tooltip title={'Register Downtime'}>
                       <Link
                         href={`/registry/downtime/?serverName=/${namespace.type}s/${namespace.prefix}`}

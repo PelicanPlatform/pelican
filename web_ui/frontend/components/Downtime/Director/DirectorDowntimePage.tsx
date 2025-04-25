@@ -6,17 +6,16 @@ import React from 'react';
 import DirectorDowntimeList from './DirectorDowntimeList';
 import { CalendarDateTimeProvider } from '@/components/Downtime/CalendarContext';
 import DirectorDowntimePageHeader from './DirectorDowntimePageHeader';
-import useApiSWR from "@/hooks/useApiSWR";
-import {DowntimeGet} from "@/types";
-import {DirectorDowntimeKey, ServerDowntimeKey} from "@/components/Downtime";
-import {getDirectorDowntime, getDowntime} from "@/helpers/api";
+import useApiSWR from '@/hooks/useApiSWR';
+import { DowntimeGet } from '@/types';
+import { DirectorDowntimeKey, ServerDowntimeKey } from '@/components/Downtime';
+import { getDirectorDowntime, getDowntime } from '@/helpers/api';
 
 const ServerDowntimePage = () => {
-
   const { data } = useApiSWR<DowntimeGet[]>(
-      'Failed to fetch downtimes',
-      DirectorDowntimeKey,
-      getDirectorDowntime
+    'Failed to fetch downtimes',
+    DirectorDowntimeKey,
+    getDirectorDowntime
   );
 
   return (
