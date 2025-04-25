@@ -16,13 +16,8 @@ import {
 } from '@/components/Downtime/CalendarContext';
 import { getDowntime } from '@/helpers/api';
 
-const DowntimeCalendar = () => {
+const DowntimeCalendar = ({data}: {data?: DowntimeGet[]}) => {
   const setRange = useContext(CalendarDateTimeDispatchContext);
-  const { data } = useApiSWR<DowntimeGet[]>(
-    'Failed to fetch downtimes',
-    ServerDowntimeKey,
-    getDowntime
-  );
 
   return (
     <Calendar

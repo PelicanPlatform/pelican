@@ -130,18 +130,20 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                       </IconButton>
                     </Link>
                   </Tooltip>
-                  <Tooltip title={'Register Downtime'}>
-                    <Link
-                      href={`/registry/downtime/?serverName=/${namespace.type}s/${namespace.prefix}`}
-                    >
-                      <IconButton
-                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                        size={size}
+                  {(['origin', 'cache'].includes(namespace.type)) && (
+                    <Tooltip title={'Register Downtime'}>
+                      <Link
+                        href={`/registry/downtime/?serverName=/${namespace.type}s/${namespace.prefix}`}
                       >
-                        <CalendarMonth fontSize={size} />
-                      </IconButton>
-                    </Link>
-                  </Tooltip>
+                        <IconButton
+                          onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                          size={size}
+                        >
+                          <CalendarMonth fontSize={size} />
+                        </IconButton>
+                      </Link>
+                    </Tooltip>
+                  )}
                   <Tooltip title={'Delete Registration'}>
                     <IconButton
                       sx={{ bgcolor: '#ff00001a', mx: 1 }}

@@ -6,6 +6,7 @@ export { RegistryDowntimePage } from './Registry';
 
 // Used to key useSWR to keep things updated across posts
 export const ServerDowntimeKey = 'ServerDowntime';
+export const DirectorDowntimeKey = 'DirectorDowntime';
 
 export const DowntimeSeverities: DowntimeSeverity[] = [
   'Outage (completely inaccessible)',

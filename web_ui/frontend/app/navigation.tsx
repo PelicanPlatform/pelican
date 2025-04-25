@@ -62,7 +62,7 @@ const NavigationConfig: NavigationConfiguration = {
       icon: <Block />,
       allowedRoles: ['admin'],
     },
-    { title: 'Downtime', href: '/origin/downtime/', icon: <CalendarMonth /> },
+    { title: 'Downtime', href: '/registry/downtime/', icon: <CalendarMonth /> },
     {
       title: 'Config',
       href: '/config/',
@@ -116,7 +116,7 @@ const NavigationConfig: NavigationConfiguration = {
   cache: [
     { title: 'Dashboard', href: '/cache/', icon: <Dashboard /> },
     { title: 'Metrics', href: '/cache/metrics/', icon: <Equalizer /> },
-    { title: 'Downtime', href: '/origin/downtime/', icon: <CalendarMonth /> },
+    { title: 'Downtime', href: '/cache/downtime/', icon: <CalendarMonth /> },
     { title: 'Config', href: '/config/', icon: <Build /> },
     { title: 'Settings', href: '/settings/', icon: <Settings /> },
   ],

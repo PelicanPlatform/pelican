@@ -11,10 +11,20 @@ import {
 import EditDowntimePageHeader from '@/components/Downtime/EditDowntimePageHeader';
 import { DowntimeModal } from '@/components/Downtime/DowntimeModal';
 import DowntimeForm from '@/components/Downtime/Server/DowntimeForm';
+import useApiSWR from "@/hooks/useApiSWR";
+import {DowntimeGet} from "@/types";
+import {ServerDowntimeKey} from "@/components/Downtime";
+import {getDowntime} from "@/helpers/api";
 
 const ServerDowntimePage = () => {
   const setDowntime = useContext(DowntimeEditDispatchContext);
   const downtime = useContext(DowntimeEditContext);
+
+  const { data } = useApiSWR<DowntimeGet[]>(
+      'Failed to fetch downtimes',
+      ServerDowntimeKey,
+      getDowntime
+  );
 
   return (
     <>
@@ -23,9 +33,9 @@ const ServerDowntimePage = () => {
           <Grid item xs={12} lg={12}>
             <EditDowntimePageHeader />
             <Box my={2}>
-              <DowntimeCalendar />
+              <DowntimeCalendar data={data} />
             </Box>
-            <DowntimeList />
+            <DowntimeList data={data} />
           </Grid>
         </Grid>
       </Box>

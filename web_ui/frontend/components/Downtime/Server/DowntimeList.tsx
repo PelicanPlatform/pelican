@@ -5,13 +5,7 @@ import { DowntimeGet } from '@/types';
 import { ServerDowntimeKey } from '@/components/Downtime';
 import { getDowntime } from '@/helpers/api';
 
-const RegistryDowntimeList = () => {
-  const { data } = useApiSWR<DowntimeGet[]>(
-    'Failed to fetch downtimes',
-    ServerDowntimeKey,
-    getDowntime
-  );
-
+const RegistryDowntimeList = ({data}: {data?: DowntimeGet[]}) => {
   return <DowntimeCardList Card={ServerDowntimeCard} data={data} />;
 };
 

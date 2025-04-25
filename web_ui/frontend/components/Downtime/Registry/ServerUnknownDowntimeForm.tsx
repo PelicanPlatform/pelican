@@ -12,7 +12,7 @@ import {
 import { DateTimePicker } from '@mui/x-date-pickers';
 import { mutate } from 'swr';
 import { DateTime } from 'luxon';
-import { Dispatch, useContext, useMemo, useState } from 'react';
+import {Dispatch, useContext, useEffect, useMemo, useState} from 'react';
 import {
   DowntimeClass,
   DowntimeGet,
@@ -75,7 +75,12 @@ const ServerUnknownDowntimeForm = ({
     [namespaces]
   );
 
-  console.log(downtime.serverName);
+  // Set a default prefix on registry
+  useEffect(() => {
+    if(prefixes.length > 0 && downtime.serverName === '') {
+      setDowntime({ ...downtime, serverName: prefixes[0] });
+    }
+  }, [prefixes, setDowntime, downtime])
 
   return (
     <Box>
@@ -83,6 +88,7 @@ const ServerUnknownDowntimeForm = ({
         <FormControl fullWidth>
           <InputLabel id='server-prefix-label'>Server Prefix</InputLabel>
           <Select
+            required
             labelId='server-prefix-label'
             id='server-prefix'
             value={downtime.serverName}
@@ -285,8 +291,7 @@ const namespacesToOriginAndCachePrefixes = (
 };
 
 const defaultDowntime = {
-  severity:
-    'Intermittent Outage (may be up for some of the time)' as DowntimeSeverity,
+  severity: 'Outage (completely inaccessible)' as DowntimeSeverity,
   class: 'SCHEDULED' as DowntimeClass,
 };
 
