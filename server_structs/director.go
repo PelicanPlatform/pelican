@@ -83,7 +83,10 @@ type (
 	Severity string
 	Downtime struct {
 		UUID        string   `json:"id" gorm:"primaryKey"`
+		ServerName  string   `json:"serverName" gorm:"index"`   // Empty in Origin/Cache; not empty in Registry
 		CreatedBy   string   `json:"createdBy" gorm:"not null"` // Person who created this downtime
+		UpdatedBy   string   `json:"updatedBy" gorm:"not null"` // Person who last updated this downtime
+		Source      string   `json:"source" gorm:"not null"`    // Pelican service that set this downtime
 		Class       Class    `json:"class" gorm:"not null"`     // SCHEDULED or UNSCHEDULED
 		Description string   `json:"description" gorm:"type:text"`
 		Severity    Severity `json:"severity" gorm:"type:varchar(80);not null"`
@@ -91,6 +94,7 @@ type (
 		EndTime     int64    `json:"endTime" gorm:"not null;index"`   // Epoch UTC
 		CreatedAt   int64    `json:"createdAt" gorm:"autoCreateTime:milli"`
 		UpdatedAt   int64    `json:"updatedAt" gorm:"autoUpdateTime:milli"`
+		DeletedAt   *int64   `json:"deletedAt"`
 	}
 
 	// Common attributes necessary for all server ads
@@ -126,7 +130,8 @@ type (
 	// This struct needs to be kept in sync with BOTH the director/director_ui.go:listServerResponse and the director/director_ui.go:serverResponse
 	ServerAd struct {
 		ServerBaseAd
-		StorageType         OriginStorageType `json:"storageType"` // Always POSIX for caches
+		RegistryPrefix      string            `json:"registryPrefix"` // The server's prefix recorded in the registry
+		StorageType         OriginStorageType `json:"storageType"`    // Always POSIX for caches
 		DisableDirectorTest bool              `json:"directorTest"`
 		AuthURL             url.URL           `json:"auth_url"`
 		BrokerURL           url.URL           `json:"broker_url"` // The URL of the broker service to use for this host.

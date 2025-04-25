@@ -734,9 +734,27 @@ definitions:
         type: string
         description: Unique identifier for the downtime entry
         example: "019564c2-7893-73e1-ab74-c566972cf059"
+      serverName:
+        type: string
+        description: >-
+          The name of the server affected by the downtime.
+          In Origin or Cache server, this property is empty because all entries in the table are its own downtimes.
+          In Registry, this property uses the prefix of a server, instead of the server name.
+        example: "TEST_ORIGIN"
+      source:
+        type: string
+        description: Which Pelican service sets this downtime entry
+        example: "registry"
+        enum:
+          - registry
+          - origin
+          - cache
       createdBy:
         type: string
         description: The person who created the downtime entry
+      updatedBy:
+        type: string
+        description: The person who updated the downtime entry
       class:
         type: string
         description: Class of downtime (SCHEDULED or UNSCHEDULED)
@@ -1972,6 +1990,42 @@ paths:
           description: Server not found
           schema:
             $ref: "#/definitions/ErrorModelV2"
+    /director_ui/server/{name}/downtimes:
+      get:
+        tags:
+          - director_ui
+        summary: List downtime entries for a specific server
+        description: |
+          Retrieves downtime information aggregated from:
+
+          - the registry (set by federation administrators),
+          - the servers themselves (self-declared),
+          - the topology
+
+          This data is retrieved from in-memory structures in the Director that periodically pulls from other services.
+        produces:
+          - application/json
+        parameters:
+          - in: path
+            name: name
+            type: string
+            required: true
+            description: The name of the server (e.g., `TEST_CACHE`) to retrieve downtimes information for.
+        responses:
+          "200":
+            description: Downtime entries found
+            schema:
+              type: array
+              items:
+                $ref: "#/definitions/Downtime"
+          "404":
+            description: Server name not found or has no associated downtimes.
+            schema:
+              $ref: "#/definitions/ErrorModelV2"
+          "500":
+            description: Internal server error when retrieving downtimes.
+            schema:
+              $ref: "#/definitions/ErrorModelV2"
   /director_ui/namespaces:
     get:
       tags:
@@ -1990,45 +2044,6 @@ paths:
           description: Bad request
           schema:
             $ref: "#/definitions/ErrorModelV2"
-  /director_ui/servers/filter/{name}:
-    patch:
-      summary: Filter a server from director redirecting
-      description: |
-        `Authentication Required` `Admin privilege Required`
-
-
-        **The filter rules registered by this endpoint are in-memory and will be reset at the server restart.**
-
-        If `Director.FilteredServers` is set, you may add additional, in-memory filter rules.
-
-        If you want to persist the filtering rules, set `Director.FilteredServers` in your server config instead.
-      tags:
-        - "director_ui"
-      parameters:
-        - in: path
-          name: name
-          type: string
-          required: true
-          description: The server name to filter
-      produces:
-        - application/json
-      responses:
-        "200":
-          description: "OK"
-          schema:
-            type: object
-            $ref: "#/definitions/SuccessModelV2"
-        "400":
-          description: "Bad request. Either `name` is invalid or the server has been filtered"
-          schema:
-            type: object
-            $ref: "#/definitions/ErrorModelV2"
-        "403":
-          description: "Forbidden. Admin privilege required"
-          schema:
-            type: object
-            $ref: "#/definitions/ErrorModelV2"
-  /director_ui/servers/allow/{name}:
     patch:
       summary: Reset filtering rule for a server from director redirecting
       description: |
@@ -2187,6 +2202,36 @@ paths:
           description: "Bad server configuration. Failed to get the director contact information from the server configuration"
           schema:
             type: object
+            $ref: "#/definitions/ErrorModelV2"
+  /director_ui/downtimes:
+    get:
+      tags:
+        - director_ui
+      summary: List downtime entries for all servers
+      description: |
+        Retrieves downtime information aggregated from:
+
+        - the registry (set by federation administrators),
+        - the servers themselves (self-declared),
+        - the topology
+
+        This data is retrieved from in-memory structures in the Director that periodically pulls from other services.
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: Downtime entries found
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/Downtime"
+        "404":
+          description: Server name not found or has no associated downtimes.
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error when retrieving downtimes.
+          schema:
             $ref: "#/definitions/ErrorModelV2"
 
   /director/namespaces/prefix/{path}:
@@ -2436,10 +2481,12 @@ paths:
   /downtime:
     post:
       tags:
-        - origin_ui
-        - cache_ui
-      summary: Create a new downtime entry for the origin/cache server
+        - common
+      summary: Create a new downtime entry for this server or given server
       description: >-
+        - On Origin or Cache servers, this creates downtimes on current server itself.
+        - On the Registry, this can create downtimes for any server managed by the federation.
+
         `Authentication Required` `Admin Privilege Required`
       consumes:
         - application/json
@@ -2505,11 +2552,12 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
     get:
       tags:
-        - origin_ui
-        - cache_ui
-      summary: Get the currently active and future downtime entries for the origin/cache server
+        - common
+      summary: Retrieve active and upcoming downtime entries for this server or registry-managed entries
       description: >-
-        `Authentication Required` `Admin Privilege Required`
+        Returns the list of downtime entries:
+        - On Origin or Cache servers, this includes downtimes set by the server itself.
+        - On the Registry, this includes downtimes set by federation administrators.
       produces:
         - application/json
       parameters:
@@ -2517,9 +2565,27 @@ paths:
         name: status
         type: string
         description: Filter downtime entries by status. "incomplete" includes active and future downtimes
-      enum:
-        - incomplete
-        - all
+        enum:
+          - incomplete
+          - all
+      - in: query
+        name: source
+        type: string
+        description: >-
+          Filter downtime entries by their source (set by which Pelican service).
+
+          Possible values:
+
+          - `registry`: downtimes set by federation administrators.
+
+          - `origin`: downtimes set by origin server admin.
+
+          - `cache`: downtimes set by cache server admin.
+
+        enum:
+          - registry
+          - origin
+          - cache
       responses:
         "200":
           description: OK
@@ -2542,10 +2608,9 @@ paths:
   /downtime/{id}:
     get:
       tags:
-        - origin_ui
-        - cache_ui
+        - common
       summary: Get a specific downtime entry by ID
-      description: "`Authentication Required` `Admin privilege Required`"
+      description:
       produces:
         - application/json
       parameters:
@@ -2581,8 +2646,7 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
     put:
       tags:
-        - origin_ui
-        - cache_ui
+        - common
       summary: Update a specific downtime entry by ID
       description: "`Authentication Required` `Admin privilege Required`"
       consumes:
@@ -2654,8 +2718,7 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
     delete:
       tags:
-        - origin_ui
-        - cache_ui
+        - common
       summary: Delete a specific downtime entry by ID
       description: "`Authentication Required` `Admin privilege Required`"
       produces:
