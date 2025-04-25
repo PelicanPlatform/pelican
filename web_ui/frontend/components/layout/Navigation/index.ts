@@ -4,7 +4,7 @@ export { Navigation } from './Navigation';
 import { ExportRes } from '@/components/DataExportTable';
 
 export type NavigationConfiguration = {
-  [key in ServerType | 'shared']: StaticNavigationItemProps[];
+  [key in ServerType | 'shared' | 'settings']: StaticNavigationItemProps[];
 };
 
 export type StaticNavigationItemProps =
