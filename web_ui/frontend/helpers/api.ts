@@ -357,6 +357,5 @@ export const getDowntime = async () => {
  * Get director downtime
  */
 export const getDirectorDowntime = async () => {
-  console.log('karate');
   return await fetch('/api/v1.0/director_ui/downtimes');
 };

@@ -48,8 +48,6 @@ const DowntimeCalendar = ({ data }: { data?: DowntimeGet[] }) => {
             startTime: v[0].getTime(),
             endTime: v[1].getTime(),
           });
-
-          console.log(v[0].getTime(), v[1].getTime());
         }
       }}
       tileContent={(args) => <DateTile downtimes={data} {...args} />}

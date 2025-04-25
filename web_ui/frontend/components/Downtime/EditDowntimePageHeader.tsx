@@ -18,7 +18,6 @@ const EditDowntimePageHeader = () => {
         variant={'contained'}
         color={'primary'}
         onClick={() => {
-          console.log('test');
           setDowntime({
             startTime: range.startTime,
             endTime: range.endTime,
