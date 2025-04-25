@@ -3,7 +3,7 @@ import { DowntimeEditDispatchContext } from '@/components/Downtime/DowntimeEditC
 import { Box, Button, Typography } from '@mui/material';
 import { CalendarDateTimeContext } from '@/components/Downtime/CalendarContext';
 
-const ServerDowntimePageHeader = () => {
+const EditDowntimePageHeader = () => {
   const setDowntime = useContext(DowntimeEditDispatchContext);
   const range = useContext(CalendarDateTimeContext);
 
@@ -18,6 +18,7 @@ const ServerDowntimePageHeader = () => {
         variant={'contained'}
         color={'primary'}
         onClick={() => {
+          console.log('test');
           setDowntime({
             startTime: range.startTime,
             endTime: range.endTime,
@@ -30,4 +31,4 @@ const ServerDowntimePageHeader = () => {
   );
 };
 
-export default ServerDowntimePageHeader;
+export default EditDowntimePageHeader;

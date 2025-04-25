@@ -1,26 +1,37 @@
-import { DowntimeGet } from '@/types';
 import {
   Box,
   Collapse,
   Divider,
   Grid,
-  Grow,
   IconButton,
   Paper,
-  Slide,
   Tooltip,
   Typography,
 } from '@mui/material';
 import React, { useContext, useState } from 'react';
-import DowntimeIcon from '@/components/Downtime/ServerDowntime/DowntimeIcon';
+import DowntimeIcon from './DowntimeIcon';
 import { Edit } from '@mui/icons-material';
 import { DowntimeEditDispatchContext } from '@/components/Downtime/DowntimeEditContext';
+import { DowntimeGet } from '@/types';
 
-export interface ServerDowntimeCardProps {
+interface GeneralDowntimeCardProps {
   downtime: DowntimeGet;
+  federationLevel?: boolean;
+  editable?: boolean;
 }
 
-const ServerDowntimeCard = ({ downtime }: ServerDowntimeCardProps) => {
+/**
+ *
+ * @param downtime
+ * @param federationLevel - If this component is intended for use in an aggregate of a federations downtimes
+ * @param editable
+ * @constructor
+ */
+const DowntimeCard = ({
+  downtime,
+  federationLevel = false,
+  editable = false,
+}: GeneralDowntimeCardProps) => {
   const setDowntime = useContext(DowntimeEditDispatchContext);
 
   const [hovered, setHovered] = useState(false);
@@ -59,19 +70,26 @@ const ServerDowntimeCard = ({ downtime }: ServerDowntimeCardProps) => {
                   </Tooltip>
                 </Box>
                 <Box flexGrow={1}>
+                  {federationLevel && (
+                    <Typography variant={'subtitle2'}>
+                      {downtime.serverName}
+                    </Typography>
+                  )}
                   <Typography variant={'subtitle2'}>
                     {downtime.description}
                   </Typography>
                 </Box>
-                <Box>
-                  <IconButton
-                    onClick={() => {
-                      setDowntime(downtime);
-                    }}
-                  >
-                    <Edit />
-                  </IconButton>
-                </Box>
+                {editable && (
+                  <Box>
+                    <IconButton
+                      onClick={() => {
+                        setDowntime(downtime);
+                      }}
+                    >
+                      <Edit />
+                    </IconButton>
+                  </Box>
+                )}
               </Box>
             </Grid>
             <Grid item xs={12}>
@@ -120,7 +138,7 @@ const ServerDowntimeCard = ({ downtime }: ServerDowntimeCardProps) => {
                     </Grid>
                     <Grid item xs={6}>
                       <Typography variant={'subtitle2'}>
-                        <b>ID:</b> {downtime.id}
+                        <b>Updated By:</b> {downtime.updatedBy}
                       </Typography>
                     </Grid>
                     <Grid item xs={6}>
@@ -129,6 +147,18 @@ const ServerDowntimeCard = ({ downtime }: ServerDowntimeCardProps) => {
                         {new Date(downtime.updatedAt).toLocaleString()}
                       </Typography>
                     </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant={'subtitle2'}>
+                        <b>ID:</b> {downtime.id}
+                      </Typography>
+                    </Grid>
+                    {federationLevel && (
+                      <Grid item xs={6}>
+                        <Typography variant={'subtitle2'}>
+                          <b>Server:</b> {downtime.source}
+                        </Typography>
+                      </Grid>
+                    )}
                   </Grid>
                 </Collapse>
               </Box>
@@ -140,4 +170,4 @@ const ServerDowntimeCard = ({ downtime }: ServerDowntimeCardProps) => {
   );
 };
 
-export default ServerDowntimeCard;
+export default DowntimeCard;

@@ -5,9 +5,7 @@ import 'react-calendar/dist/Calendar.css';
 import './calendar.css';
 
 import DateTile from './DateTile';
-import { DowntimeModal } from '@/components/Downtime/ServerDowntime/DowntimeModal';
 import { useContext, useState } from 'react';
-import { DowntimeEditDispatchContext } from '@/components/Downtime/DowntimeEditContext';
 import { DowntimeGet, DowntimePost } from '@/types';
 import useApiSWR from '@/hooks/useApiSWR';
 import { ServerDowntimeKey } from '@/components/Downtime';

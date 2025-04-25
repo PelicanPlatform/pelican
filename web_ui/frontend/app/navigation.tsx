@@ -35,12 +35,6 @@ const NavigationConfig: NavigationConfiguration = {
   registry: [
     { title: 'Dashboard', href: '/registry/', icon: <Dashboard /> },
     {
-      title: 'Denied Namespaces',
-      href: '/registry/denied/',
-      icon: <Block />,
-      allowedRoles: ['admin'],
-    },
-    {
       title: 'Add',
       icon: <Add />,
       allowedRoles: ['admin'],
@@ -62,6 +56,13 @@ const NavigationConfig: NavigationConfiguration = {
         },
       ],
     },
+    {
+      title: 'Denied Namespaces',
+      href: '/registry/denied/',
+      icon: <Block />,
+      allowedRoles: ['admin'],
+    },
+    { title: 'Downtime', href: '/origin/downtime/', icon: <CalendarMonth /> },
     {
       title: 'Config',
       href: '/config/',
@@ -97,6 +98,7 @@ const NavigationConfig: NavigationConfiguration = {
       icon: <Equalizer />,
       allowedRoles: ['admin'],
     },
+    { title: 'Downtime', href: '/director/downtime/', icon: <CalendarMonth /> },
     { title: 'Map', href: '/director/map/', icon: <MapOutlined /> },
     {
       title: 'Config',

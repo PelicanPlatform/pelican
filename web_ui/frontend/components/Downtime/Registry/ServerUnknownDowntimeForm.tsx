@@ -5,9 +5,7 @@ import {
   Button,
   Select,
   Box,
-  Typography,
   MenuItem,
-  IconButton,
   FormControlLabel,
   Checkbox,
 } from '@mui/material';
@@ -19,13 +17,19 @@ import {
   DowntimeClass,
   DowntimeGet,
   DowntimePost,
+  DowntimeRegistryPost,
   DowntimeSeverity,
 } from '@/types';
 import { DowntimeClasses, DowntimeSeverities } from '@/components/Downtime';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import { alertOnError } from '@/helpers/util';
-import { deleteDowntime, postDowntime, putDowntime } from '@/helpers/api';
+import {
+  deleteDowntime,
+  postDowntime,
+  putDowntime,
+  getNamespaces,
+} from '@/helpers/api';
 import {
   AlertDispatchContext,
   AlertReducerAction,
@@ -33,41 +37,72 @@ import {
 import { ServerDowntimeKey } from '@/components/Downtime';
 import { Delete } from '@mui/icons-material';
 import FormHelperText from '@mui/material/FormHelperText';
+import { useSearchParams } from 'next/navigation';
+import { RegistryNamespace } from '@/index';
+import useApiSWR from '@/hooks/useApiSWR';
 
 interface DowntimeFormProps {
-  downtime:
-    | DowntimeGet
-    | Omit<DowntimePost, 'severity' | 'class' | 'description'>;
-  onSuccess?: (downtime: DowntimePost) => void;
+  downtime: Partial<DowntimeGet>;
+  onSuccess?: (downtime: DowntimeRegistryPost) => void;
 }
 
-const DowntimeForm = ({
+const ServerUnknownDowntimeForm = ({
   downtime: inputDowntime,
   onSuccess,
 }: DowntimeFormProps) => {
   const dispatch = useContext(AlertDispatchContext);
 
-  const id = 'id' in inputDowntime ? inputDowntime.id : undefined;
-
-  const [downtime, setDowntime] = useState<DowntimePost>({
-    startTime: inputDowntime.startTime,
-    endTime: inputDowntime.endTime,
-    description:
-      'description' in inputDowntime ? inputDowntime.description : '',
-    severity:
-      'severity' in inputDowntime
-        ? inputDowntime.severity
-        : defaultDowntime.severity,
-    class:
-      'class' in inputDowntime ? inputDowntime.class : defaultDowntime.class,
+  const [downtime, setDowntime] = useState<DowntimeRegistryPost>({
+    serverName: inputDowntime.serverName ?? '',
+    startTime: inputDowntime.startTime ?? Date.now(),
+    endTime: inputDowntime.endTime ?? Date.now(),
+    description: inputDowntime.description ?? '',
+    severity: inputDowntime.severity ?? defaultDowntime.severity,
+    class: inputDowntime.class ?? defaultDowntime.class,
   });
 
+  const id = 'id' in inputDowntime ? inputDowntime.id : undefined;
   const endless = useMemo(() => downtime.endTime === -1, [downtime.endTime]);
 
-  console.log(endless, downtime);
+  // Get the cache and origin prefixes to key the downtimes for the director
+  const { data: namespaces } = useApiSWR<RegistryNamespace[]>(
+    'Could not fetch Origins and Caches to populate downtime form',
+    'getNamespaces',
+    getNamespaces
+  );
+  const prefixes = useMemo(
+    () => namespacesToOriginAndCachePrefixes(namespaces || []),
+    [namespaces]
+  );
+
+  console.log(downtime.serverName);
 
   return (
     <Box>
+      <Box mt={2}>
+        <FormControl fullWidth>
+          <InputLabel id='server-prefix-label'>Server Prefix</InputLabel>
+          <Select
+            labelId='server-prefix-label'
+            id='server-prefix'
+            value={downtime.serverName}
+            label='Server Prefix'
+            onChange={(e) => {
+              setDowntime({ ...downtime, serverName: e.target.value });
+            }}
+          >
+            {prefixes.map((prefix) => (
+              <MenuItem
+                key={prefix}
+                value={prefix}
+                selected={prefix === downtime.serverName}
+              >
+                {prefix}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      </Box>
       <Box mt={2}>
         <DateTimePicker
           label={'Start Time'}
@@ -219,7 +254,7 @@ const DowntimeForm = ({
  * Submit a new downtime with error handling
  */
 const submitDowntime = async (
-  downtime: DowntimePost,
+  downtime: DowntimeRegistryPost,
   dispatch: Dispatch<AlertReducerAction>,
   id?: string
 ) => {
@@ -238,10 +273,21 @@ const submitDowntime = async (
   }
 };
 
+const namespacesToOriginAndCachePrefixes = (
+  namespaces: RegistryNamespace[]
+): string[] => {
+  const originsAndCaches = namespaces.filter(
+    (n) => n.prefix.startsWith('/origin') || n.prefix.startsWith('/cache')
+  );
+
+  // Pull the prefixes out of the namespaces
+  return originsAndCaches.map((n) => n.prefix);
+};
+
 const defaultDowntime = {
   severity:
     'Intermittent Outage (may be up for some of the time)' as DowntimeSeverity,
   class: 'SCHEDULED' as DowntimeClass,
 };
 
-export default DowntimeForm;
+export default ServerUnknownDowntimeForm;

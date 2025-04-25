@@ -8,7 +8,7 @@ import { secureFetch } from '@/helpers/login';
 import { getErrorMessage } from '@/helpers/util';
 import { RegistryNamespace } from '@/index';
 import { AlertDispatchContext } from '@/components/AlertProvider';
-import { DowntimeBase, DowntimePost } from '@/types';
+import { DowntimeBase, DowntimePost, DowntimeRegistryPost } from '@/types';
 import { useContext } from 'react';
 
 /**
@@ -306,7 +306,9 @@ export const login = async (
 /**
  * Downtime
  */
-export const postDowntime = async (downtime: DowntimePost) => {
+export const postDowntime = async (
+  downtime: DowntimePost | DowntimeRegistryPost
+) => {
   return await fetchApi(
     async () =>
       await secureFetch('/api/v1.0/downtime', {
@@ -328,7 +330,10 @@ export const deleteDowntime = async (id: string) => {
   );
 };
 
-export const putDowntime = async (id: string, downtime: DowntimePost) => {
+export const putDowntime = async (
+  id: string,
+  downtime: DowntimePost | DowntimeRegistryPost
+) => {
   return await fetchApi(
     async () =>
       await secureFetch(`/api/v1.0/downtime/${id}`, {
@@ -346,4 +351,11 @@ export const putDowntime = async (id: string, downtime: DowntimePost) => {
  */
 export const getDowntime = async () => {
   return await fetch('/api/v1.0/downtime?status=all');
+};
+
+/**
+ * Get director downtime
+ */
+export const getDirectorDowntime = async () => {
+  return await fetch('/api/v1.0/director_ui/downtimes');
 };

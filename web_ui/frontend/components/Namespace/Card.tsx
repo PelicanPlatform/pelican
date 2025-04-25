@@ -11,7 +11,13 @@ import {
   Typography,
   useMediaQuery,
 } from '@mui/material';
-import { Delete, Download, Edit, Person } from '@mui/icons-material';
+import {
+  Delete,
+  Download,
+  Edit,
+  Person,
+  CalendarMonth,
+} from '@mui/icons-material';
 import Link from 'next/link';
 
 import InformationDropdown from './InformationDropdown';
@@ -20,7 +26,6 @@ import { User } from '@/index';
 import { deleteNamespace } from '@/helpers/api';
 import { useSWRConfig } from 'swr';
 import { AlertDispatchContext } from '@/components/AlertProvider';
-import CodeBlock from '@/components/CodeBlock';
 import { alertOnError } from '@/helpers/util';
 import { Theme } from '@mui/system';
 
@@ -122,6 +127,18 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                         size={size}
                       >
                         <Edit fontSize={size} />
+                      </IconButton>
+                    </Link>
+                  </Tooltip>
+                  <Tooltip title={'Register Downtime'}>
+                    <Link
+                      href={`/registry/downtime/?serverName=/${namespace.type}s/${namespace.prefix}`}
+                    >
+                      <IconButton
+                        onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                        size={size}
+                      >
+                        <CalendarMonth fontSize={size} />
                       </IconButton>
                     </Link>
                   </Tooltip>

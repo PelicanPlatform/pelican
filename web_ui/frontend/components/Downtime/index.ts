@@ -1,6 +1,8 @@
 import { DowntimeClass, DowntimeSeverity } from '@/types';
 
-export { ServerDowntime, ServerDowntimePage } from './ServerDowntime';
+export { ServerDowntimePage } from './Server';
+export { DirectorDowntimePage } from './Director';
+export { RegistryDowntimePage } from './Registry';
 
 // Used to key useSWR to keep things updated across posts
 export const ServerDowntimeKey = 'ServerDowntime';

@@ -1,13 +1,15 @@
 'use client';
 
-import React, { useContext, useEffect, useMemo, useState } from 'react';
-import ServerDowntimeCard, {
-  ServerDowntimeCardProps,
-} from './ServerDowntimeCard';
+import React, {
+  ComponentType,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import { DowntimeCardProps } from './type';
 import { CardList } from '@/components';
 import { DowntimeGet } from '@/types';
-import useApiSWR from '@/hooks/useApiSWR';
-import { ServerDowntimeKey } from '@/components/Downtime';
 import {
   CalendarDateTimeContext,
   CalendarDateTimeDispatchContext,
@@ -15,21 +17,16 @@ import {
 import { Box, Grid } from '@mui/material';
 import { DateTimePicker } from '@mui/x-date-pickers';
 import { DateTime } from 'luxon';
-import { getDowntime } from '@/helpers/api';
 
 interface DowntimeListProps {
+  Card: ComponentType<any>;
   data?: DowntimeGet[];
 }
 
-function DowntimeList({}: DowntimeListProps) {
+function DowntimeCardList({ Card, data }: DowntimeListProps) {
   const [recentlyUpdated, setRecentlyUpdated] = useState(false);
   const range = useContext(CalendarDateTimeContext);
   const setRange = useContext(CalendarDateTimeDispatchContext);
-  const { data } = useApiSWR<DowntimeGet[]>(
-    'Failed to fetch downtimes',
-    ServerDowntimeKey,
-    getDowntime
-  );
 
   // Filter the data based on the range
   const filteredData = useMemo(() => {
@@ -103,12 +100,9 @@ function DowntimeList({}: DowntimeListProps) {
           </Grid>
         </Grid>
       </Box>
-      <CardList<ServerDowntimeCardProps>
-        Card={ServerDowntimeCard}
-        data={downtimeCardProps}
-      />
+      <CardList<DowntimeCardProps> Card={Card} data={downtimeCardProps} />
     </>
   );
 }
 
-export default DowntimeList;
+export default DowntimeCardList;

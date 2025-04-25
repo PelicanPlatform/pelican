@@ -13,7 +13,6 @@ import {
   Dispatch,
 } from 'react';
 import { DowntimeGet, DowntimePost } from '@/types';
-import { DowntimeModal } from '@/components/Downtime/ServerDowntime/DowntimeModal';
 
 type DowntimeFormProps =
   | DowntimeGet
@@ -35,13 +34,6 @@ export const DowntimeEditProvider = ({ children }: { children: ReactNode }) => {
     <DowntimeEditContext.Provider value={downtime}>
       <DowntimeEditDispatchContext.Provider value={setDowntime}>
         {children}
-        {downtime !== undefined && (
-          <DowntimeModal
-            open={true}
-            onClose={() => setDowntime(undefined)}
-            downtime={downtime}
-          />
-        )}
       </DowntimeEditDispatchContext.Provider>
     </DowntimeEditContext.Provider>
   );
