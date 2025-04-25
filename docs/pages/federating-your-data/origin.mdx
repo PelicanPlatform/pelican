@@ -13,18 +13,18 @@ This document contains instructions on how to serve a Pelican origin on top of a
 
 ### Install Pelican
 
-If you haven't installed Pelican, follow the instructions to [install pelican](./install.mdx).
+If you haven't installed Pelican, follow the instructions to [install pelican](../install.mdx).
 
-For _Linux_ users, it is recommended to install Pelican using one of the package managers (RPM, APK, Deb, etc.) so that Pelican dependencies are automatically handled. You may also run a [Pelican Docker image](./install/docker.mdx) to serve a Pelican origin.
+For _Linux_ users, it is recommended to install Pelican using one of the package managers (RPM, APK, Deb, etc.) so that Pelican dependencies are automatically handled. You may also run a [Pelican Docker image](../install/docker.mdx) to serve a Pelican origin.
 If you prefer to install Pelican as a standalone binary, you need to follow [additional instructions](https://osg-htc.org/docs/data/xrootd/install-standalone/#install-xrootd-standalone) to install dependencies for the Pelican origin server.
 
 > **NOTE:** Serving origins with a standalone Pelican binary is possible, but not recommended.
 
-_MacOS_ and _Windows_ users who want to serve a Pelican origin should use the [Pelican Docker image](./install/docker.mdx).
+_MacOS_ and _Windows_ users who want to serve a Pelican origin should use the [Pelican Docker image](../install/docker.mdx).
 
 ### Open Firewall Port for Pelican Origin
 
-At their core, Pelican origins are web servers that listen to two TCP ports for file transfers and Web UI. By default, the Web UI and API interface for your origin will be at port `8444`, and the port for object transfers will be at `8443`. You may change these port numbers through the [configuration file](./parameters.mdx) with parameters [`Server.WebPort`](./parameters.mdx#Server-WebPort) and [`Origin.Port`](./parameters.mdx#Origin-Port), respectively.
+At their core, Pelican origins are web servers that listen to two TCP ports for file transfers and Web UI. By default, the Web UI and API interface for your origin will be at port `8444`, and the port for object transfers will be at `8443`. You may change these port numbers through the [configuration file](../parameters.mdx) with parameters [`Server.WebPort`](../parameters.mdx#Server-WebPort) and [`Origin.Port`](../parameters.mdx#Origin-Port), respectively.
 
 In order for Pelican origins to work properly, these ports need to be accessible by the federation, which in most cases means they need to be open to the internet. If your server host has a firewall policy in place, please open these two ports for both incoming the outgoing TCP requests.
 
@@ -62,13 +62,13 @@ Since your TLS certificate is associated with your domain name, you will need to
 
 When you've completed the aforementioned steps, you're ready to start configuring the origin that will add your data to a federation. Serving an origin is the process of taking some underlying storage repository and making its data accessible via a namespace prefix in your federation. For example, you might make files in the directory `/my/directory` available at the federation path `/my/namespace` so that anyone with access to the federation can get objects from the directory
 
-By default, Pelican origins serve files from a POSIX backend, the filesystem used by Linux computers. However, Pelican aims to support a variety of backends and we currently also support serving objects from S3. Configuration for S3 is mostly similar to configuration for POSIX file systems, but with a few important differences. For information about S3 backends, refer to the [S3 Backend](./federating-your-data/s3-backend.mdx) page.
+By default, Pelican origins serve files from a POSIX backend, the filesystem used by Linux computers. However, Pelican aims to support a variety of backends and we currently also support serving objects from S3. Configuration for S3 is mostly similar to configuration for POSIX file systems, but with a few important differences. For information about S3 backends, refer to the [S3 Backend](./s3-backend.mdx) page.
 
-> If you are running Pelican docker image to serve an origin, please refer to [Pelican Docker image documentation](./install/docker.mdx#run-pelican-origin-server).
+> If you are running Pelican docker image to serve an origin, please refer to [Pelican Docker image documentation](../install/docker.mdx#run-pelican-origin-server).
 
 ### Find a Federation to join
 
-Before serving an origin, you need to decide which [**federation**](./core-concepts.mdx#federations) your data will be accessed through. For example, the Open Science Data Federation (OSDF) is Pelican's flagship federation, and if you are interested in serving an OSDF origin, you can refer to the [OSDF website](https://osg-htc.org/services/osdf.html) for details about how to join.
+Before serving an origin, you need to decide which [**federation**](../about-pelican/core-concepts.mdx#federations) your data will be accessed through. For example, the Open Science Data Federation (OSDF) is Pelican's flagship federation, and if you are interested in serving an OSDF origin, you can refer to the [OSDF website](https://osg-htc.org/services/osdf.html) for details about how to join.
 
 Federations are identified their URL, which is used to host information that origins need for discovering other federation services. For example, the OSDF's federation URL is `https://osg-htc.org`, and an origin that joins the OSDF will visit `https://osg-htc.org/.well-known/pelican-configuration` to get important metadata about the federation's central services (the Director and Registry).
 
@@ -202,11 +202,11 @@ This section documents additional arguments you can pass via the command line wh
 * **-d or --debug**: Enable debugging mode, which greatly increases the Pelican's logging verbosity
 * **-l or --log**: Set the location of a file that will capture Pelican logs. Setting this will prevent logging output from printing to your terminal.
 
-For more information about available yaml configuration options, refer to the [Parameters page](./parameters.mdx).
+For more information about available yaml configuration options, refer to the [Parameters page](../parameters.mdx).
 
 ## Login to Admin Website
 
-After your origin is running, the next step is to initialize its admin website, which can be used by administrators for monitoring and further configuration. To initialize this interface, go to the URL specified in the terminal. By default, it should point to https://localhost:8444/view/initialization/code/
+After your origin is running, the next step is to initialize its admin website, which can be used by administrators for monitoring and further configuration. To initialize this interface, go to the URL specified in the terminal. By default, it should point to `https://localhost:8444/view/initialization/code/`
 
 You will be directed to the page to activate the website with a one-time passcode. Copy the passcode from the terminal where you launch Pelican origin and paste to the website to finish activation.
 
@@ -238,7 +238,7 @@ The origin dashboard page consists of the following panels:
 
 The **Status** panel shows information about the health status of the origin, delineated by the following components:
 
-* **CMSD** indicates whether the [Cluster Management Service Distributed (CMSD)](https://xrootd.slac.stanford.edu/doc/dev410/cms_config.htm) daemon is running.
+* **CMSD** indicates whether the [Cluster Management Service Distributed (CMSD)](https://xrootd.web.cern.ch/doc/dev57/cms_config.pdf) daemon is running.
 * **Director** indicates whether the origin can advertise itself to its federation director, which is required for other members in the federation to discover your origin's existence and how to access objects from it.
 * **Federation** indicates whether the origin can fetch from the federation discovery URL, which contains locations of central services (Director and Registry).
 * **Registry** indicates whether the origin successfully registered the federation prefixes it exports at the Registry.
@@ -267,7 +267,7 @@ The **Transfer Rate** graph visualizes object transfer metrics like transfer **s
 
 ### For local deployment
 
-When you hit the URL at https://localhost:8444/view/initialization/code/, You may see a warning that looks like the following (with some differences depending on the browser you use):
+When you hit the URL at `https://localhost:8444/view/initialization/code/`, You may see a warning that looks like the following (with some differences depending on the browser you use):
 
 <ExportedImage width={1000} height={1000} src={"/pelican/invalid_certificate.png"} alt={"Image of a safari browser invalid certificate warning"} />
 
