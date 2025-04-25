@@ -62,7 +62,7 @@ const NavigationConfig: NavigationConfiguration = {
       icon: <Block />,
       allowedRoles: ['admin'],
     },
-    { title: 'Downtime', href: '/registry/downtime/', icon: <CalendarMonth /> },
+    { title: 'Downtime', href: '/registry/downtime/', icon: <CalendarMonth />, allowedRoles: ['admin'] },
     {
       title: 'Config',
       href: '/config/',
