@@ -243,5 +243,4 @@ const defaultDowntime = {
   class: 'SCHEDULED' as DowntimeClass,
 };
 
-
 export default DowntimeForm;
