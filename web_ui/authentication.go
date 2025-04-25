@@ -175,7 +175,7 @@ func GetUserGroups(ctx *gin.Context) (user string, groups []string, err error) {
 // Create a JWT and set the "login" cookie to store that JWT
 func setLoginCookie(ctx *gin.Context, user string, groups []string) {
 	loginCookieTokenCfg := token.NewWLCGToken()
-	loginCookieTokenCfg.Lifetime = 30 * time.Minute
+	loginCookieTokenCfg.Lifetime = 16 * time.Hour
 	loginCookieTokenCfg.Issuer = param.Server_ExternalWebUrl.GetString()
 	loginCookieTokenCfg.AddAudiences(param.Server_ExternalWebUrl.GetString())
 	loginCookieTokenCfg.Subject = user
