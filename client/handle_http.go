@@ -2064,7 +2064,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	}
 	fileWriter = io.MultiWriter(fileWriter, hashesWriter)
 
-	size, attempts := sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token)
+	var size int64 = -1
+	attempts := transfer.attempts
+	if transfer.job != nil && transfer.job.ctx != nil {
+		size, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token)
+	}
 
 	transferResults = newTransferResults(transfer.job)
 	xferErrors := NewTransferErrors()
