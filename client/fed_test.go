@@ -527,15 +527,33 @@ func TestObjectStat(t *testing.T) {
 			var got client.FileInfo
 			if export.Capabilities.PublicReads {
 				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(""))
-				got = *statInfo
 				require.NoError(t, err)
+				got = *statInfo
 			} else {
 				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(tempToken.Name()))
-				got = *statInfo
 				require.NoError(t, err)
+				got = *statInfo
 			}
 			assert.Equal(t, int64(13), got.Size)
 			assert.Equal(t, fmt.Sprintf("%s/hello_world.txt", export.FederationPrefix), got.Name)
+			assert.Nil(t, got.Checksums)
+
+			// Repeat the process with checksum requests
+			if export.Capabilities.PublicReads {
+				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(""), client.WithRequestChecksums([]client.ChecksumType{client.AlgCRC32C}))
+				require.NoError(t, err)
+				got = *statInfo
+			} else {
+				statInfo, err := client.DoStat(fed.Ctx, statUrl, client.WithTokenLocation(tempToken.Name()), client.WithRequestChecksums([]client.ChecksumType{client.AlgCRC32C}))
+				require.NoError(t, err)
+				got = *statInfo
+			}
+			assert.Equal(t, int64(13), got.Size)
+			assert.Equal(t, fmt.Sprintf("%s/hello_world.txt", export.FederationPrefix), got.Name)
+			assert.NotNil(t, got.Checksums)
+			val, ok := got.Checksums["crc32c"]
+			assert.True(t, ok)
+			assert.Equal(t, "4d551068", val)
 		}
 	})
 

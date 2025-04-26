@@ -20,6 +20,7 @@ package client
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
@@ -52,6 +53,7 @@ type FileInfo struct {
 	Size         int64
 	ModTime      time.Time
 	IsCollection bool
+	Checksums    map[string]string `json:"checksums,omitempty"` // Checksum type (HTTP digest name) to hex-encoded value
 }
 
 // handleSchemelessIfNeeded is a helper function that updates the input discovery options to use a configured discovery
@@ -166,6 +168,8 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		return nil, err
 	}
 
+	var requestedChecksums []ChecksumType
+
 	token := newTokenGenerator(pUrl, &dirResp, false, true)
 	for _, option := range options {
 		switch option.Ident() {
@@ -175,11 +179,14 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 			token.EnableAcquire = option.Value().(bool)
 		case identTransferOptionToken{}:
 			token.SetToken(option.Value().(string))
+		case identTransferOptionChecksums{}:
+			requestedChecksums = option.Value().([]ChecksumType)
 		}
 	}
 
+	var tokenContents string
 	if dirResp.XPelNsHdr.RequireToken {
-		tokenContents, err := token.get()
+		tokenContents, err = token.get()
 		if err != nil || tokenContents == "" {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
@@ -187,11 +194,45 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 		token = nil
 	}
 
-	if statInfo, err := statHttp(pUrl, dirResp, token); err != nil {
+	statInfo, err := statHttp(pUrl, dirResp, token)
+	if err != nil {
 		return nil, errors.Wrap(err, "failed to do the stat")
-	} else {
-		return &statInfo, nil
 	}
+	if len(requestedChecksums) > 0 {
+		log.Debugln("Requested checksums:", requestedChecksums)
+		project, _ := searchJobAd(attrProjectName)
+
+		statUrls := make([]*url.URL, 0, len(dirResp.ObjectServers))
+		if len(dirResp.ObjectServers) > 0 {
+			for idx, oServer := range dirResp.ObjectServers {
+				if idx > 2 {
+					break
+				}
+				statUrls = append(statUrls, oServer)
+			}
+		} else {
+			// If we don't have any object servers, we need to use the original URL
+			statUrls = append(statUrls, pUrl.GetRawUrl())
+		}
+
+		var lastErr error
+		for _, statUrl := range statUrls {
+			checksums, err := fetchChecksum(ctx, requestedChecksums, statUrl, tokenContents, project)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			statInfo.Checksums = make(map[string]string)
+			for _, info := range checksums {
+				statInfo.Checksums[HttpDigestFromChecksum(info.Algorithm)] = hex.EncodeToString(info.Value)
+			}
+		}
+		if lastErr != nil {
+			err = errors.Wrap(lastErr, "failed to fetch checksums")
+			return
+		}
+	}
+	return &statInfo, nil
 }
 
 // Check the cache information of a remote cache

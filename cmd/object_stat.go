@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -43,6 +44,13 @@ func init() {
 	flagSet := statCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.BoolP("json", "j", false, "Print results in JSON format")
+	flagSet.StringArray(
+		"checksums",
+		[]string{},
+		fmt.Sprintf("Checksums to request from the server.  Known values are: %s",
+			strings.Join(client.KnownChecksumTypesAsHttpDigest(), ", "),
+		),
+	)
 	objectCmd.AddCommand(statCmd)
 }
 
@@ -63,6 +71,25 @@ func statMain(cmd *cobra.Command, args []string) {
 	tokenLocation, _ := cmd.Flags().GetString("token")
 	jsn, _ := cmd.Flags().GetBool("json")
 
+	// Get the checksums to request
+	checksums, _ := cmd.Flags().GetStringArray("checksums")
+	checksumTypes := make([]client.ChecksumType, 0, len(checksums))
+	if len(checksums) > 0 {
+		// Convert the checksums to the correct type
+		for _, checksum := range checksums {
+			checksumType := client.ChecksumFromHttpDigest(checksum)
+			if checksumType == client.AlgUnknown {
+				log.Errorf("Unknown checksum type: %s", checksum)
+				err = cmd.Help()
+				if err != nil {
+					log.Errorln("Failed to print out help:", err)
+				}
+				os.Exit(1)
+			}
+			checksumTypes = append(checksumTypes, checksumType)
+		}
+	}
+
 	if len(args) < 1 {
 		log.Errorln("No object provided")
 		err = cmd.Help()
@@ -75,7 +102,7 @@ func statMain(cmd *cobra.Command, args []string) {
 
 	log.Debugln("Object:", object)
 
-	statInfo, err := client.DoStat(ctx, object, client.WithTokenLocation(tokenLocation))
+	statInfo, err := client.DoStat(ctx, object, client.WithTokenLocation(tokenLocation), client.WithRequestChecksums(checksumTypes))
 
 	// Exit with failure
 	if err != nil {
@@ -108,6 +135,12 @@ func statMain(cmd *cobra.Command, args []string) {
 		fmt.Println("Size:", statInfo.Size)
 		fmt.Println("ModTime:", statInfo.ModTime)
 		fmt.Println("IsCollection:", statInfo.IsCollection)
+		if len(statInfo.Checksums) > 0 {
+			fmt.Println("Checksums:")
+			for alg, value := range statInfo.Checksums {
+				fmt.Printf("  %s: %s\n", alg, value)
+			}
+		}
 		return
 	}
 }
