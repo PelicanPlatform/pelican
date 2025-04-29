@@ -48,6 +48,7 @@ const TokenList = () => {
       })} // Nest token in a object as token key to align with card props
       cardProps={{ mutate, dispatch }}
       pageSize={5}
+      keyGetter={(o) => o.token.id}
     />
   );
 };
