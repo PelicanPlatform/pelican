@@ -25,7 +25,9 @@ const Navigation = ({
     throw new Error('Either config xor sharedPage must be defined');
   }
 
-  const { data: exports } = useSWR('getDataExport', getExportData);
+  const { data: exports } = useSWR('getDataExport', getExportData, {
+    errorRetryCount: 0,
+  });
   const { data: user } = useSWR('getUser', getUser);
   const { data: servers } = useSWR('getServers', getEnabledServers);
 

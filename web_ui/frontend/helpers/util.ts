@@ -159,3 +159,26 @@ export const multiSort = <T>(arr: T[], ...args: ((a: T, b: T) => number)[]) => {
     return 0;
   });
 };
+
+/**
+ * Convert an object to a string key that is robust to unsorted lists
+ */
+export const objectToDeterministicString = (o: any): string => {
+  return Object.keys(o)
+    .sort()
+    .reduce((p, k) => {
+      const value = o[k];
+
+      // If the value is an array then ignore it
+      if (Array.isArray(value)) {
+        return p;
+      }
+
+      // If the object is an object then convert it to a string
+      if (typeof value === 'object' && value !== null) {
+        return p + k + ':' + objectToDeterministicString(value);
+      }
+
+      return p + k + ':' + value;
+    }, '');
+};
