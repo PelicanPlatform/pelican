@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -809,6 +810,21 @@ func TestSyncDownload(t *testing.T) {
 		transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadInnerUrl, innerDownloadDir, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
 		require.NoError(t, err)
 		require.Len(t, transferDetailsDownload, 1)
+
+		// After the introduction of E2E client checksumming, this test started to break on the final
+		// direct read download. As best we can currently figure, this happens because the subsequent
+		// DoPut call overwrites the file without overwriting the files xattrs, where the checksum is
+		// stored. This causes the final directread DoGet to grab a file with a stale checksum. As a
+		// workaround until this issue can be resolved in the upstream XRootD operation, we manually
+		// delete the file from the Origin to force a rewrite of the xattrs checksum.
+		var originLocation string
+		for _, export := range fed.Exports {
+			if strings.Contains(export.FederationPrefix, "/first/namespace") {
+				originLocation = export.StoragePrefix
+				break
+			}
+		}
+		require.NoError(t, os.Remove(filepath.Join(originLocation, fmt.Sprintf("sync_download_partial/%s/%s/%s", dirName, filepath.Base(innerTempDir), filepath.Base(innerTempFile.Name())))))
 
 		// Change the contents of one already-uploaded file and re-upload it.
 		// Filesize is the same so a re-download should be skipped.
