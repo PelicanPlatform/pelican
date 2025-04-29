@@ -348,7 +348,7 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   run_task  LOTMAN          PelicanPlatform  lotman
   run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
   run_task  XRDHTTP_PELICAN PelicanPlatform  xrdhttp-pelican
-  run_task  XROOTD_LOTMAN   PelicanPlatform  xrootd-lotman
+  dnf install -y https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd-lotman/0.0.2/1.osg24.el9/x86_64/xrootd-lotman-0.0.2-1.osg24.el9.x86_64.rpm
   run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
 ENDRUN
 
@@ -366,8 +366,8 @@ ARG XRDCL_PELICAN_SRC_BUILD
 ARG XRDCL_PELICAN_VER
 ARG XRDHTTP_PELICAN_SRC_BUILD
 ARG XRDHTTP_PELICAN_VER
-ARG XROOTD_LOTMAN_SRC_BUILD
-ARG XROOTD_LOTMAN_VER
+#ARG XROOTD_LOTMAN_SRC_BUILD
+#ARG XROOTD_LOTMAN_VER
 ARG XROOTD_S3_HTTP_SRC_BUILD
 ARG XROOTD_S3_HTTP_VER
 
@@ -400,7 +400,7 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
   run_task  LOTMAN          PelicanPlatform  lotman
   run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
   run_task  XRDHTTP_PELICAN PelicanPlatform  xrdhttp-pelican
-  yum install https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd-lotman/0.0.2/1.osg24.el9/x86_64/xrootd-lotman-0.0.2-1.osg24.el9.x86_64.rpm
+  dnf install -y https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd-lotman/0.0.2/1.osg24.el9/x86_64/xrootd-lotman-0.0.2-1.osg24.el9.x86_64.rpm
   run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
 
   # Configure XRootD to use the Pelican plugin.
