@@ -10,7 +10,11 @@ import { AlertContext, AlertDispatchContext } from '@/components/AlertProvider';
 import { User } from '@/index';
 import { useSWRConfig } from 'swr';
 import CodeBlock from '@/components/CodeBlock';
-import { approveNamespace, deleteNamespace } from '@/helpers/api';
+import {
+  approveNamespace,
+  deleteNamespace,
+  NAMESPACE_KEY,
+} from '@/helpers/api';
 import { alertOnError } from '@/helpers/util';
 
 export interface DeniedCardProps {
@@ -89,6 +93,7 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
                           'Could Not Delete Registration',
                           dispatch
                         );
+                        mutate(NAMESPACE_KEY);
                       }}
                     >
                       <Delete />
@@ -105,7 +110,7 @@ export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
                           'Could Not Approve Registration',
                           dispatch
                         );
-                        setTimeout(() => mutate('getExtendedNamespaces'), 600);
+                        mutate(NAMESPACE_KEY);
                       }}
                     >
                       <Check />
