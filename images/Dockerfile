@@ -412,7 +412,7 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
 
   run_task  LOTMAN          PelicanPlatform  lotman
   run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
-  run_task  XRDHTTP_PELICAN PelicanPlatform  xrdhttp-Pelican
+  run_task  XRDHTTP_PELICAN PelicanPlatform  xrdhttp-pelican
   dnf install -y https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd-lotman/0.0.2/1.osg24.el9/${PKG_ARCH}/xrootd-lotman-0.0.2-1.osg24.el9.${PKG_ARCH}.rpm
   run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
 
