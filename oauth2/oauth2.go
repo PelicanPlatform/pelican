@@ -134,16 +134,16 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_st
 	}
 
 	if len(deviceAuth.VerificationURIComplete) > 0 {
-		fmt.Fprintln(os.Stdin, "To approve credentials for this operation, please navigate to the following URL and approve the request:")
-		fmt.Fprintln(os.Stdin, "")
-		fmt.Fprintln(os.Stdin, deviceAuth.VerificationURIComplete)
+		fmt.Fprintln(os.Stderr, "To approve credentials for this operation, please navigate to the following URL and approve the request:")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, deviceAuth.VerificationURIComplete)
 	} else {
-		fmt.Fprintln(os.Stdin, "To approve credentials for this operation, please navigate to the following URL:")
-		fmt.Fprintln(os.Stdin, "")
-		fmt.Fprintln(os.Stdin, deviceAuth.VerificationURIComplete)
-		fmt.Fprintln(os.Stdin, "\nand enter the following code")
-		fmt.Fprintln(os.Stdin, "")
-		fmt.Fprintln(os.Stdin, deviceAuth.UserCode)
+		fmt.Fprintln(os.Stderr, "To approve credentials for this operation, please navigate to the following URL:")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, deviceAuth.VerificationURIComplete)
+		fmt.Fprintln(os.Stderr, "\nand enter the following code")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, deviceAuth.UserCode)
 	}
 
 	upstream_token, err := oauth2Config.Poll(ctx, deviceAuth)
