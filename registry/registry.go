@@ -278,6 +278,16 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 	serverVerified := verifySignature(serverPayload, serverSignature, &serverPubkey)
 
 	if clientVerified && serverVerified {
+		// Ensure the user input prefix doesn't contain any invalid characters.
+		// Also remove the trailing slash if it exists.
+		reqPrefix, err := validatePrefix(data.Prefix)
+		if err != nil {
+			err = errors.Wrapf(err, "Requested namespace %s failed validation", data.Prefix)
+			log.Errorln(err)
+			return false, nil, badRequestError{Message: err.Error()}
+		}
+		data.Prefix = reqPrefix
+
 		log.Debug("Registering namespace ", data.Prefix)
 
 		// Check if prefix exists before doing anything else
@@ -294,15 +304,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 			return false, returnMsg, nil
 		}
 
-		reqPrefix, err := validatePrefix(data.Prefix)
-		if err != nil {
-			err = errors.Wrapf(err, "Requested namespace %s failed validation", data.Prefix)
-			log.Errorln(err)
-			return false, nil, badRequestError{Message: err.Error()}
-		}
-		data.Prefix = reqPrefix
-
-		inTopo, topoNss, valErr, sysErr := validateKeyChaining(reqPrefix, key)
+		inTopo, topoNss, valErr, sysErr := validateKeyChaining(data.Prefix, key)
 		if valErr != nil {
 			log.Errorln(err)
 			return false, nil, permissionDeniedError{Message: valErr.Error()}
