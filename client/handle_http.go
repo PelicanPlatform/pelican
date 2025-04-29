@@ -350,14 +350,21 @@ const (
 	attrProjectName classAdAttr = "ProjectName"
 	attrJobId       classAdAttr = "GlobalJobId"
 
+	// The checksum algorithms supported by the client
+	//
+	// Note we have a helper function, KnownChecksumTypes, that returns a list
+	// of all the elements enumerated below; do not skip integers in this list
+	// or that functionality will break.
+	//
 	AlgMD5     ChecksumType = iota // Checksum is using the MD5 algorithm
 	AlgCRC32C                      // Checksum is using the CRC32C algorithm
 	AlgCRC32                       // Checksum is using the CRC32 algorithm
 	AlgSHA1                        // Checksum is using the SHA-1 algorithm
-	AlgUnknown                     // Unknown checksum algorithm
+	AlgUnknown                     // Unknown checksum algorithm.  Always a "trailer" indicating the last known algorithm.
 
 	AlgDefault = AlgCRC32C // Default checksum algorithm is CRC32C if the client doesn't specify one.
 	algFirst   = AlgMD5
+	algLast    = AlgUnknown
 
 	SyncNone  = iota // When synchronizing, always re-transfer, regardless of existence at destination.
 	SyncExist        // Skip synchronization transfer if the destination exists
@@ -398,8 +405,8 @@ func ChecksumFromHttpDigest(httpDigest string) ChecksumType {
 
 // List all the checksum types known to the client
 func KnownChecksumTypes() (result []ChecksumType) {
-	result = make([]ChecksumType, AlgUnknown-algFirst)
-	for idx := algFirst; idx < AlgUnknown; idx++ {
+	result = make([]ChecksumType, algLast-algFirst)
+	for idx := algFirst; idx < algLast; idx++ {
 		result[idx-algFirst] = idx
 	}
 	return

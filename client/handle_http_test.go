@@ -44,6 +44,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -767,7 +768,7 @@ func TestGatewayTimeout(t *testing.T) {
 // Test checksum calculation and validation
 func TestChecksum(t *testing.T) {
 	test_utils.InitClient(t, map[string]any{
-		"Logging.Level": "debug",
+		param.Logging_Level.GetName(): "debug",
 	})
 
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -817,7 +818,7 @@ func TestChecksum(t *testing.T) {
 // Test behavior when checksum is incorrect
 func TestChecksumIncorrect(t *testing.T) {
 	test_utils.InitClient(t, map[string]any{
-		"Logging.Level": "debug",
+		param.Logging_Level.GetName(): "debug",
 	})
 
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -871,7 +872,7 @@ func TestChecksumIncorrect(t *testing.T) {
 // Test behavior when checksum is missing
 func TestChecksumMissing(t *testing.T) {
 	test_utils.InitClient(t, map[string]any{
-		"Logging.Level": "debug",
+		param.Logging_Level.GetName(): "debug",
 	})
 
 	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
