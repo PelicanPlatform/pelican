@@ -132,13 +132,21 @@ func SaveEncryptedContents(encContents []byte) error {
 	if err != nil {
 		return err
 	}
-	defer fp.Close()
-	if _, err := fp.Write(encContents); err != nil {
-		os.Remove(fp.Name())
-		return err
-	}
-	if err := fp.Sync(); err != nil {
-		os.Remove(fp.Name())
+	// Ensure that the file is closed before we attempt to rename it.
+	// Otherwise, on Windows, the rename operation will fail.
+	err = func() error {
+		defer fp.Close()
+		if _, err := fp.Write(encContents); err != nil {
+			os.Remove(fp.Name())
+			return err
+		}
+		if err := fp.Sync(); err != nil {
+			os.Remove(fp.Name())
+			return err
+		}
+		return nil
+	}()
+	if err != nil {
 		return err
 	}
 
