@@ -1,0 +1,63 @@
+services:
+
+  director:
+    image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+    working_dir: /app
+    volumes:
+      - ../../dist/pelican_linux_arm64_v8.0/:/app/ # If you are using a local build rather than the container provided pelican
+      - ./configs/director/:/etc/pelican/
+      - ./configs/shared/certificates/:/etc/pelican/certificates/
+      - ./configs/shared/oidc/:/etc/pelican/oidc/
+    command: [ "./pelican", "director", "serve" ]
+    network_mode: host
+
+  registry:
+    image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+    working_dir: /app
+    volumes:
+      - ../../dist/pelican_linux_arm64_v8.0/:/app/ # If you are using a local build rather than the container provided pelican
+      - ./configs/registry/:/etc/pelican/
+      - ./configs/shared/certificates/:/etc/pelican/certificates/
+      - ./configs/shared/oidc/:/etc/pelican/oidc/
+    command: [ "./pelican", "registry", "serve" ]
+    network_mode: host
+    depends_on:
+      - director
+
+  origin:
+    image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+    working_dir: /app
+    volumes:
+      - /Users/clock/GolandProjects/pelican/dist/pelican_linux_arm64_v8.0/:/app/ # If you are using a local build rather than the container provided pelican
+      - ./configs/origin/:/etc/pelican/
+      - ./configs/shared/certificates/:/etc/pelican/certificates/
+      - ./configs/shared/oidc/:/etc/pelican/oidc/
+      - ./data/:/data/
+    command: [ "./pelican", "origin", "serve" ]
+    network_mode: host
+    depends_on:
+      - director
+
+  cache:
+    restart: unless-stopped
+    image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+    working_dir: /app
+    volumes:
+      - ../../dist/pelican_linux_arm64_v8.0/:/app/ # If you are using a local build rather than the container provided pelican
+      - ./configs/cache/:/etc/pelican/
+      - ./configs/shared/certificates/:/etc/pelican/certificates/
+      - ./configs/shared/oidc/:/etc/pelican/oidc/
+    command: [ "./pelican", "cache", "serve" ]
+    network_mode: host
+    depends_on:
+      - director
+
+  discovery:
+    restart: unless-stopped
+    image: nginx:latest
+    volumes:
+      - ${PWD}/configs/discovery/pelican-configuration.json:/usr/share/nginx/html/.well-known/pelican-configuration
+      - ${PWD}/public_key.jwks:/usr/share/nginx/html/public_key.jwks
+      - ${PWD}/configs/discovery/:/etc/nginx/conf.d/
+      - ${PWD}/configs/shared/certificates/:/certificates/
+    network_mode: host

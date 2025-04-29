@@ -1,0 +1,32 @@
+TLSSkipVerify: true
+Federation:
+  DiscoveryUrl: "https://localhost:8444"
+Registry:
+  DBLocation: /etc/pelican
+  InstitutionsUrl: "https://topology-institutions.osg-htc.org/api/institution_ids"
+Director:
+  DBLocation: /etc/pelican
+Server:
+  HostName: "localhost"
+logging:
+  level: debug
+  origin:
+    xrootd: debug
+issuer:
+  authorizationtemplates:
+    - actions:
+        - read
+        - modify
+        - create
+      prefix: /
+origin:
+  exports:
+    - capabilities:
+        - Writes
+        - Listings
+        - Reads
+        - DirectReads
+      federationprefix: /mnt
+      storageprefix: /data
+xrootd:
+  sitename: Origin

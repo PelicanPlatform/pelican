@@ -1,0 +1,4 @@
+{
+  "director_endpoint": "https://localhost:8400",
+  "namespace_registration_endpoint": "https://localhost:8300"
+}

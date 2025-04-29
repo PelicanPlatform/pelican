@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+
+  # Powers the pelican in a box service
+  pelican-in-a-box:
+    image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
+    container_name: pelican-in-a-box
+    working_dir: /app
+    volumes:
+      - ../../dist/pelican_linux_arm64_v8.0/:/app/ # If you are using a local build rather than the container provided pelican
+      - ./pelican.yaml:/etc/pelican/pelican.yaml
+      - ./config/:/etc/pelican/
+      - ./data/:/data/
+    command: ["./pelican", "serve", "--module", "director,registry,origin"]
+
+  # Used to partially serve api requests from the pelican-in-a-box service combined with
+  pelican-proxy:
+    build:
+      context: ./api-proxy
+    container_name: pelican-proxy
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    ports:
+      - "8444:8444"
+    env_file:
+      - .env.local
