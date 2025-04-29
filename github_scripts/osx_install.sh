@@ -36,7 +36,7 @@ pushd scitokens-cpp
 mkdir build
 cd build
 export SCITOKENS_CPP_DIR=$PWD/release_dir
-cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"
+cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir" -DSCITOKENS_BUILD_UNITTESTS=OFF
 ninja install
 sudo ln -s "$PWD"/release_dir/lib/libSciTokens*.dylib /usr/local/lib
 popd
