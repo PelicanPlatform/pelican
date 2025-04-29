@@ -28,7 +28,7 @@ services:
     image: hub.opensciencegrid.org/pelican_platform/pelican-dev:latest-itb
     working_dir: /app
     volumes:
-      - /Users/clock/GolandProjects/pelican/dist/pelican_linux_arm64_v8.0/:/app/ # If you are using a local build rather than the container provided pelican
+      - ../../dist/pelican_linux_arm64_v8.0/:/app/ # If you are using a local build rather than the container provided pelican
       - ./configs/origin/:/etc/pelican/
       - ./configs/shared/certificates/:/etc/pelican/certificates/
       - ./configs/shared/oidc/:/etc/pelican/oidc/
