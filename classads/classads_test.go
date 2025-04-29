@@ -74,6 +74,28 @@ func TestStringClassAd(t *testing.T) {
 	assert.Equal(t, localFileName1, localFileName2)
 }
 
+func TestSubClassAd(t *testing.T) {
+	ad := NewClassAd()
+	subMap := make(map[string]string)
+	subMap["LocalFileName"] = "/path/to/local/copy/of/foo"
+	subMap["Url"] = "url://server/some/directory//foo"
+	ad.Set("SubClassAd", subMap)
+	adStr := ad.String()
+	// We don't know the order of the attributes in the subclassad; test for both
+	option1 := "[SubClassAd = [LocalFileName = \"/path/to/local/copy/of/foo\"; Url = \"url://server/some/directory//foo\"; ]; ]"
+	option2 := "[SubClassAd = [Url = \"url://server/some/directory//foo\"; LocalFileName = \"/path/to/local/copy/of/foo\"; ]; ]"
+	assert.True(t, adStr == option1 || adStr == option2, "ClassAd.String() returned %s, expected %s or %s", adStr, option1, option2)
+
+	ad = NewClassAd()
+	subAd := make(map[string]any)
+	subAd2 := make(map[string]any)
+	subAd["foo"] = subAd2
+	subAd2["bar"] = "baz"
+	ad.Set("SubClassAd", subAd)
+	adStr = ad.String()
+	assert.Equal(t, "[SubClassAd = [foo = [bar = \"baz\"; ]; ]; ]", adStr)
+}
+
 func TestStringQuoteClassAd(t *testing.T) {
 	ad := NewClassAd()
 	ad.Set("StringValue", "Get quotes \"right\"")

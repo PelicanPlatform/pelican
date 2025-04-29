@@ -23,6 +23,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"io/fs"
 	"net"
 	"net/http"
@@ -43,6 +44,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -761,6 +763,237 @@ func TestGatewayTimeout(t *testing.T) {
 	} else {
 		require.Fail(t, "downloadObject did not return a status code error", "%s", err)
 	}
+}
+
+// Test checksum calculation and validation
+func TestChecksum(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		param.Logging_Level.GetName(): "debug",
+	})
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "17")
+			w.Header().Set("Digest", "crc32c=977b8112")
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			w.Header().Set("Content-Length", "17")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("test file content"))
+			assert.NoError(t, err)
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: "/dev/null",
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+	transferResult, err := downloadObject(transfer)
+	assert.NoError(t, err)
+	assert.NoError(t, transferResult.Error)
+	// Checksum validation
+	assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+	info := transferResult.ServerChecksums[0]
+	assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+
+	assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+	info = transferResult.ClientChecksums[0]
+	assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+}
+
+// Test behavior when checksum is incorrect
+func TestChecksumIncorrect(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		param.Logging_Level.GetName(): "debug",
+	})
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "17")
+			w.Header().Set("Digest", "crc32c=977b8111") // Incorrect checksum; should be 977b8112
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			w.Header().Set("Content-Length", "17")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("test file content"))
+			assert.NoError(t, err)
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: "/dev/null",
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+	transferResult, err := downloadObject(transfer)
+	assert.NoError(t, err)
+	assert.Error(t, transferResult.Error)
+	incorrectChecksumError := &ChecksumMismatchError{}
+	assert.True(t, errors.As(transferResult.Error, &incorrectChecksumError), "Expected a checksum mismatch error")
+	assert.Equal(t, "checksum mismatch for crc32c; client computed 977b8112, server reported 977b8111", incorrectChecksumError.Error())
+
+	// Checksum validation
+	assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+	info := transferResult.ServerChecksums[0]
+	assert.Equal(t, "977b8111", hex.EncodeToString(info.Value))
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+
+	assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+	info = transferResult.ClientChecksums[0]
+	assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+}
+
+// Test behavior when checksum is missing
+func TestChecksumMissing(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		param.Logging_Level.GetName(): "debug",
+	})
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "17")
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			w.Header().Set("Content-Length", "17")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("test file content"))
+			assert.NoError(t, err)
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: "/dev/null",
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+		requireChecksum: true,
+	}
+	transferResult, err := downloadObject(transfer)
+	assert.NoError(t, err)
+	assert.Error(t, transferResult.Error)
+	assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error")
+}
+
+// Test behavior when resuming a transfer after an EOF
+//
+// Sets up two servers, one that returns the first 9 bytes and then an EOF (simulating a network
+// error), and another that returns the rest of the file. The test checks that the transfer resumes
+// after the first attempt and that the checksums are calculated and validated properly.
+func TestResume(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		"Logging.Level": "debug",
+	})
+
+	svr1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "17")
+			w.Header().Set("Digest", "crc32c=977b8112")
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			w.Header().Set("Content-Length", "17")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("test file"))
+			assert.NoError(t, err)
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr1.Close()
+	svr1URL, err := url.Parse(svr1.URL)
+	require.NoError(t, err)
+
+	svr2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "17")
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			require.Equal(t, "bytes=9-", r.Header.Get("Range"))
+			w.Header().Set("Content-Range", "bytes 9-16/17")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(" content"))
+			assert.NoError(t, err)
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr2.Close()
+	svr2URL, err := url.Parse(svr2.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: "/dev/null",
+		remoteURL: svr1URL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svr1URL,
+			},
+			{
+				Url: svr2URL,
+			},
+		},
+		requireChecksum: true,
+	}
+	transferResult, err := downloadObject(transfer)
+	assert.NoError(t, err)
+	assert.NoError(t, transferResult.Error)
+
+	assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+	info := transferResult.ServerChecksums[0]
+	assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+
+	assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+	info = transferResult.ClientChecksums[0]
+	assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+
+	// Check that two attempts were made
+	assert.Equal(t, 2, len(transferResult.Attempts), "Expected 2 attempts, got %d", len(transferResult.Attempts))
+	tae := &TransferAttemptError{}
+	require.True(t, errors.As(transferResult.Attempts[0].Error, &tae), "Got error of type %T; expected transfer attempt error", transferResult.Attempts[0].Error)
+	assert.Equal(t, "unexpected EOF", tae.Unwrap().Error())
+	assert.Equal(t, int64(9), transferResult.Attempts[0].TransferFileBytes)
+	assert.NoError(t, transferResult.Attempts[1].Error)
+	assert.Equal(t, int64(8), transferResult.Attempts[1].TransferFileBytes)
+	assert.Equal(t, int64(17), transferResult.TransferredBytes)
 }
 
 // Test failed connection setup error message for downloads

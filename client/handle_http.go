@@ -115,6 +115,12 @@ type (
 		Err error
 	}
 
+	// Represents a mismatched checksum
+	ChecksumMismatchError struct {
+		Info        ChecksumInfo // The checksum that was calculated by the client
+		ServerValue []byte       // The checksum value that was calculated by the server
+	}
+
 	HeaderTimeoutError struct{}
 
 	NetworkResetError struct{}
@@ -156,7 +162,8 @@ type (
 		job               *TransferJob
 		Error             error
 		TransferredBytes  int64
-		Checksums         []ChecksumInfo
+		ServerChecksums   []ChecksumInfo // Checksums returned by the server
+		ClientChecksums   []ChecksumInfo // Checksums calculated by the client
 		TransferStartTime time.Time
 		Scheme            string
 		Attempts          []TransferResult
@@ -343,13 +350,21 @@ const (
 	attrProjectName classAdAttr = "ProjectName"
 	attrJobId       classAdAttr = "GlobalJobId"
 
-	AlgMD5     = iota // Checksum is using the MD5 algorithm
-	AlgCRC32C         // Checksum is using the CRC32C algorithm
-	AlgCRC32          // Checksum is using the CRC32 algorithm
-	AlgSHA1           // Checksum is using the SHA-1 algorithm
-	AlgUnknown        // Unknown checksum algorithm
+	// The checksum algorithms supported by the client
+	//
+	// Note we have a helper function, KnownChecksumTypes, that returns a list
+	// of all the elements enumerated below; do not skip integers in this list
+	// or that functionality will break.
+	//
+	AlgMD5     ChecksumType = iota // Checksum is using the MD5 algorithm
+	AlgCRC32C                      // Checksum is using the CRC32C algorithm
+	AlgCRC32                       // Checksum is using the CRC32 algorithm
+	AlgSHA1                        // Checksum is using the SHA-1 algorithm
+	AlgUnknown                     // Unknown checksum algorithm.  Always a "trailer" indicating the last known algorithm.
 
 	AlgDefault = AlgCRC32C // Default checksum algorithm is CRC32C if the client doesn't specify one.
+	algFirst   = AlgMD5
+	algLast    = AlgUnknown
 
 	SyncNone  = iota // When synchronizing, always re-transfer, regardless of existence at destination.
 	SyncExist        // Skip synchronization transfer if the destination exists
@@ -370,9 +385,11 @@ var (
 	// Error condition indicating that the progress writer was externally closed
 	// before the transfer was completed
 	progressWriterClosed error = errors.New("progress writer closed")
+
+	ErrServerChecksumMissing = errors.New("no checksum information was returned by server but checksums were required by the client")
 )
 
-func checksumFromHttpDigest(httpDigest string) ChecksumType {
+func ChecksumFromHttpDigest(httpDigest string) ChecksumType {
 	switch httpDigest {
 	case "md5":
 		return AlgMD5
@@ -386,7 +403,26 @@ func checksumFromHttpDigest(httpDigest string) ChecksumType {
 	return AlgUnknown
 }
 
-func httpDigestFromChecksum(checksumType ChecksumType) string {
+// List all the checksum types known to the client
+func KnownChecksumTypes() (result []ChecksumType) {
+	result = make([]ChecksumType, algLast-algFirst)
+	for idx := algFirst; idx < algLast; idx++ {
+		result[idx-algFirst] = idx
+	}
+	return
+}
+
+// List all the checksum types known as HTTP digest strings
+func KnownChecksumTypesAsHttpDigest() (result []string) {
+	known := KnownChecksumTypes()
+	result = make([]string, len(known))
+	for idx, checksumType := range known {
+		result[idx] = HttpDigestFromChecksum(checksumType)
+	}
+	return
+}
+
+func HttpDigestFromChecksum(checksumType ChecksumType) string {
 	switch checksumType {
 	case AlgCRC32:
 		return "crc32"
@@ -414,6 +450,15 @@ func checksumValueToHttpDigest(checksumType ChecksumType, checksumValue []byte) 
 		return base64.StdEncoding.EncodeToString(checksumValue)
 	}
 	return "(unknown checksum type)"
+}
+
+func (e *ChecksumMismatchError) Error() string {
+	return fmt.Sprintf(
+		"checksum mismatch for %s; client computed %s, server reported %s",
+		HttpDigestFromChecksum(e.Info.Algorithm),
+		checksumValueToHttpDigest(e.Info.Algorithm, e.Info.Value),
+		checksumValueToHttpDigest(e.Info.Algorithm, e.ServerValue),
+	)
 }
 
 // Reset the memory-cached copy of the HTCondor job ad
@@ -2026,7 +2071,11 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 	}
 	fileWriter = io.MultiWriter(fileWriter, hashesWriter)
 
-	size, attempts := sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token)
+	var size int64 = -1
+	attempts := transfer.attempts
+	if transfer.job != nil && transfer.job.ctx != nil {
+		size, attempts = sortAttempts(transfer.job.ctx, transfer.remoteURL.Path, transfer.attempts, transfer.token)
+	}
 
 	transferResults = newTransferResults(transfer.job)
 	xferErrors := NewTransferErrors()
@@ -2138,7 +2187,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				tokenContents, _ = transfer.token.get()
 			}
 			if checksums, err := fetchChecksum(ctx, transfer.requestedChecksums, url, tokenContents, transfer.project); err == nil {
-				transferResults.Checksums = checksums
+				transferResults.ServerChecksums = checksums
 				gotChecksum = true
 			}
 		}
@@ -2158,24 +2207,30 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			"job": transfer.job.ID(),
 		}
 		successCtr := 0
+		transferResults.ClientChecksums = make([]ChecksumInfo, 0, len(checksumHashes))
 		for idx, checksum := range checksumHashes {
 			computedValue := hashes[idx].(hash.Hash).Sum(nil)
+			transferResults.ClientChecksums = append(transferResults.ClientChecksums, ChecksumInfo{
+				Algorithm: checksum,
+				Value:     computedValue,
+			})
 			found := false
-			for _, checksumInfo := range transferResults.Checksums {
+			for _, checksumInfo := range transferResults.ServerChecksums {
 				if checksumInfo.Algorithm == checksum {
 					found = true
 					if !bytes.Equal(checksumInfo.Value, computedValue) {
-						transferResults.Error = errors.Errorf(
-							"checksum mismatch for %s: server sent '%s', client computed '%s'",
-							httpDigestFromChecksum(checksumInfo.Algorithm),
-							checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
-							checksumValueToHttpDigest(checksumInfo.Algorithm, computedValue),
-						)
+						transferResults.Error = &ChecksumMismatchError{
+							Info: ChecksumInfo{
+								Algorithm: checksumInfo.Algorithm,
+								Value:     computedValue,
+							},
+							ServerValue: checksumInfo.Value,
+						}
 						log.WithFields(fields).Errorln(transferResults.Error)
 					} else {
 						successCtr++
 						log.WithFields(fields).Debugf("Checksum %s matches: %s",
-							httpDigestFromChecksum(checksumInfo.Algorithm),
+							HttpDigestFromChecksum(checksumInfo.Algorithm),
 							checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
 						)
 					}
@@ -2184,13 +2239,13 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			}
 			if !found {
 				log.WithFields(fields).Debugf("Client requested checksum %s but server did not provide it",
-					httpDigestFromChecksum(checksum),
+					HttpDigestFromChecksum(checksum),
 				)
 			}
 		}
 		// Can happen if all the checksum values we received are not known checksum algorithms
 		// we computed (the server can ignore our requested checksums and send its preferred ones)
-		if successCtr == 0 && transfer.requireChecksum {
+		if successCtr == 0 && transfer.requireChecksum && transferResults.Error == nil {
 			if len(transfer.requestedChecksums) == 0 {
 				log.WithFields(fields).Errorln(
 					"Client requires checksum to succeed and it was not provided by server; client computed crc32c value is",
@@ -2199,22 +2254,22 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			} else {
 				log.WithFields(fields).Errorln(
 					"Client requires checksum to succeed and it was not provided by server; client computed",
-					httpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
+					HttpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
 					checksumValueToHttpDigest(transfer.requestedChecksums[0], hashes[0].(hash.Hash).Sum(nil)),
 				)
 			}
-			transferResults.Error = errors.New("no checksum information was returned but checksums are required")
+			transferResults.Error = ErrServerChecksumMissing
 			// Otherwise, it's not an error so we should log what we did
-		} else if successCtr == 0 && len(transferResults.Checksums) == 0 {
+		} else if successCtr == 0 && len(transferResults.ServerChecksums) == 0 && transferResults.Error == nil {
 			log.WithFields(fields).Debugln(
 				"Client computed crc32c value is", hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
 				"(server did not provide any checksum values to compare)",
 			)
-		} else if successCtr == 0 {
-			for _, checksumInfo := range transferResults.Checksums {
+		} else if successCtr == 0 && transferResults.Error == nil {
+			for _, checksumInfo := range transferResults.ServerChecksums {
 				log.WithFields(fields).Debugf(
 					"Server provided checksum not requested by client (cannot compare to local) %s=%x",
-					httpDigestFromChecksum(checksumInfo.Algorithm),
+					HttpDigestFromChecksum(checksumInfo.Algorithm),
 					checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
 				)
 			}
@@ -2226,7 +2281,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			} else {
 				log.WithFields(fields).Debugln(
 					"Checksum algorithms provided by server were not the requested ones; client computed",
-					httpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
+					HttpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
 					checksumValueToHttpDigest(transfer.requestedChecksums[0], hashes[0].(hash.Hash).Sum(nil)),
 				)
 			}
@@ -2270,7 +2325,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 			if checksumTypes != "" {
 				checksumTypes += ", "
 			}
-			checksumTypes += httpDigestFromChecksum(cksum)
+			checksumTypes += HttpDigestFromChecksum(cksum)
 		}
 		if checksumTypes == "" {
 			log.WithFields(fields).Debugln(
@@ -2294,7 +2349,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 		request.Header.Set("X-Pelican-JobId", val)
 	}
 	if len(types) == 0 {
-		request.Header.Set("Want-Digest", httpDigestFromChecksum(AlgDefault))
+		request.Header.Set("Want-Digest", HttpDigestFromChecksum(AlgDefault))
 	} else {
 		multiple := false
 		val := ""
@@ -2302,7 +2357,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 			if multiple {
 				val += ","
 			}
-			val += httpDigestFromChecksum(cksum)
+			val += HttpDigestFromChecksum(cksum)
 			multiple = true
 		}
 		request.Header.Set("Want-Digest", val)
@@ -2334,7 +2389,8 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 			}
 			log.WithFields(fields).Debugf("Server reported object has checksum %s=%s", info[0], info[1])
 			checksumInfo := ChecksumInfo{}
-			if checksumInfo.Algorithm = checksumFromHttpDigest(info[0]); checksumInfo.Algorithm == AlgUnknown {
+			if checksumInfo.Algorithm = ChecksumFromHttpDigest(info[0]); checksumInfo.Algorithm == AlgUnknown {
+				log.WithFields(fields).Warningln("Unknown checksum algorithm:", info[0])
 				continue
 			}
 			val := make([]byte, 32)
@@ -2373,9 +2429,11 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 				fallthrough
 			case "sha":
 				decoder := base64.NewDecoder(base64.StdEncoding, bytes.NewReader([]byte(info[1])))
-				if _, err := decoder.Read(val); err != nil {
+				if count, err := decoder.Read(val); err != nil {
 					log.WithFields(fields).Errorf("Failed to parse %s checksum value (%s): %s", info[0], info[1], err)
 					continue
+				} else {
+					val = val[:count]
 				}
 				checksumInfo.Value = val
 			default:

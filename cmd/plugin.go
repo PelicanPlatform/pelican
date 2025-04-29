@@ -21,6 +21,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"net/url"
@@ -495,7 +496,22 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				}
 				if attempt.Error != nil {
 					developerData[fmt.Sprintf("TransferError%d", attempt.Number)] = attempt.Error.Error()
+					developerData[fmt.Sprintf("IsRetryable%d", attempt.Number)] = client.IsRetryable(attempt.Error)
 				}
+			}
+			if len(result.ClientChecksums) > 0 {
+				checksumInfo := make(map[string]interface{})
+				for _, checksum := range result.ClientChecksums {
+					checksumInfo[client.HttpDigestFromChecksum(checksum.Algorithm)] = hex.EncodeToString(checksum.Value)
+				}
+				developerData["ClientChecksums"] = checksumInfo
+			}
+			if len(result.ServerChecksums) > 0 {
+				checksumInfo := make(map[string]interface{})
+				for _, checksum := range result.ServerChecksums {
+					checksumInfo[client.HttpDigestFromChecksum(checksum.Algorithm)] = hex.EncodeToString(checksum.Value)
+				}
+				developerData["ServerChecksums"] = checksumInfo
 			}
 
 			resultAd.Set("DeveloperData", developerData)

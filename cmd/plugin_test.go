@@ -553,6 +553,34 @@ func TestPluginMulti(t *testing.T) {
 			boolVal, ok := transferSuccess.(bool)
 			require.True(t, ok)
 			assert.True(t, boolVal)
+
+			log.Debugln("Got result ad:", resultAd)
+			// Verify the checksums
+			fileName, err := resultAd.Get("TransferFileName")
+			require.NoError(t, err)
+			fileNameString, ok := fileName.(string)
+			require.True(t, ok)
+
+			devData, err := resultAd.Get("DeveloperData")
+			require.NoError(t, err)
+			devDataMap, ok := devData.(map[string]interface{})
+			require.True(t, ok)
+			checksum, ok := devDataMap["ClientChecksums"]
+			require.True(t, ok)
+			checksumMap, ok := checksum.(map[string]interface{})
+			require.True(t, ok, "Expected transfer checksum to be a map type; was %T", checksum)
+			checksumValue, ok := checksumMap["crc32c"]
+			require.True(t, ok)
+			checksumString, ok := checksumValue.(string)
+			require.True(t, ok)
+
+			if fileNameString == filepath.Base(localPath1) {
+				assert.Equal(t, "977b8112", checksumString)
+			} else if fileNameString == filepath.Base(localPath2) {
+				assert.Equal(t, "b99ecaad", checksumString)
+			} else {
+				t.Fatalf("Unexpected file name: %s", fileNameString)
+			}
 		}
 	}
 }
