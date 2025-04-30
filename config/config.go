@@ -1019,6 +1019,40 @@ func PrintClientConfig() error {
 	return nil
 }
 
+// Helper function to emit a warning telling the user to switch to IssuerKeysDirectory,
+// if the IssuerKey config param still points to a file on disk.
+// This function serves as a transitional step to help users migrate from IssuerKey to
+// IssuerKeysDirectory. It should be removed if the transition is done.
+func warnIssuerKey(v *viper.Viper) {
+	legacyKey := v.GetString(param.IssuerKey.GetName())
+	if legacyKey != "" {
+		if _, err := os.Stat(legacyKey); err == nil {
+			issuerKeyConfigBy := "default"
+			issuerKeysDirectoryConfigBy := "default"
+			changeExtension := ""
+
+			configDir := v.GetString("ConfigDir")
+			if filepath.Join(configDir, "issuer.jwk") != param.IssuerKey.GetString() {
+				issuerKeyConfigBy = "custom"
+			}
+			if filepath.Join(configDir, "issuer-keys") != param.IssuerKeysDirectory.GetString() {
+				issuerKeysDirectoryConfigBy = "custom"
+			}
+			if !strings.HasSuffix(param.IssuerKey.GetString(), ".pem") {
+				changeExtension = "renamed to use '.pem' extension and "
+			}
+
+			log.Errorf(
+				"File %q should be %smoved into directory %q. "+
+					"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). ",
+				param.IssuerKey.GetString(), changeExtension, param.IssuerKeysDirectory.GetString(),
+				param.IssuerKey.GetName(), param.IssuerKey.GetString(), issuerKeyConfigBy,
+				param.IssuerKeysDirectory.GetName(), param.IssuerKeysDirectory.GetString(), issuerKeysDirectoryConfigBy,
+			)
+		}
+	}
+}
+
 func SetServerDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 	v.SetConfigType("yaml")
@@ -1258,6 +1292,9 @@ func SetServerDefaults(v *viper.Viper) error {
 		v.SetDefault("Federation.BrokerURL", v.GetString(param.Server_ExternalWebUrl.GetName()))
 		v.SetDefault("Federation_DirectorUrl", v.GetString(param.Server_ExternalWebUrl.GetName()))
 	}
+
+	// Warn the user if they still use IssuerKey
+	warnIssuerKey(v)
 
 	return err
 }
@@ -1779,6 +1816,9 @@ func SetClientDefaults(v *viper.Viper) error {
 		log.Warningf("Client.DirectorRetries was set to %d, but it must be at least 1. Falling back to default of 5.", param.Client_DirectorRetries.GetInt())
 		v.Set(param.Client_DirectorRetries.GetName(), 5)
 	}
+
+	// Warn the user if they still use IssuerKey
+	warnIssuerKey(v)
 
 	return nil
 }
