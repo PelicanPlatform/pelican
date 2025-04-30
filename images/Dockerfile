@@ -53,12 +53,12 @@ ARG NODEJS_VER=20
 #
 ARG LOTMAN_SRC_BUILD=false
 ARG LOTMAN_VER=0.0.4
-ARG XRDCL_PELICAN_SRC_BUILD=true
+ARG XRDCL_PELICAN_SRC_BUILD=false
 ARG XRDCL_PELICAN_VER=1.2.1
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.6
-#ARG XROOTD_LOTMAN_SRC_BUILD=false
-#ARG XROOTD_LOTMAN_VER=0.0.2
+ARG XROOTD_LOTMAN_SRC_BUILD=false
+ARG XROOTD_LOTMAN_VER=0.0.3
 ARG XROOTD_S3_HTTP_SRC_BUILD=false
 ARG XROOTD_S3_HTTP_VER=0.2.1
 
@@ -213,8 +213,8 @@ RUN groupadd -g 10940 xrootd \
 
 # We need to pin the install for many of the RPMs to "Koji" until all of
 # Pelican's patches are ingested into the OSG repositories.
-ARG XROOTD_VER="5.7.3"
-ARG XROOTD_RELEASE="1.5.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_VER="5.8.1"
+ARG XROOTD_RELEASE="1.3.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
 # The packages from Koji need to be installed in a single dnf command in
@@ -274,8 +274,8 @@ ARG XRDCL_PELICAN_SRC_BUILD
 ARG XRDCL_PELICAN_VER
 ARG XRDHTTP_PELICAN_SRC_BUILD
 ARG XRDHTTP_PELICAN_VER
-#ARG XROOTD_LOTMAN_SRC_BUILD
-#ARG XROOTD_LOTMAN_VER
+ARG XROOTD_LOTMAN_SRC_BUILD
+ARG XROOTD_LOTMAN_VER
 ARG XROOTD_S3_HTTP_SRC_BUILD
 ARG XROOTD_S3_HTTP_VER
 
@@ -345,17 +345,11 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
     fi
   }
 
-  if [ "$TARGETARCH" = "amd64" ]; then
-    PKG_ARCH=x86_64
-  elif [ "$TARGETARCH" = "arm64" ]; then
-    PKG_ARCH=aarch64
-  fi
-
 
   run_task  LOTMAN          PelicanPlatform  lotman
   run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
   run_task  XRDHTTP_PELICAN PelicanPlatform  xrdhttp-pelican
-  dnf install -y https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd-lotman/0.0.2/1.osg24.el9/${PKG_ARCH}/xrootd-lotman-0.0.2-1.osg24.el9.${PKG_ARCH}.rpm
+  run_task  XROOTD_LOTMAN   PelicanPlatform  xrootd-lotman
   run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
 ENDRUN
 
@@ -373,8 +367,8 @@ ARG XRDCL_PELICAN_SRC_BUILD
 ARG XRDCL_PELICAN_VER
 ARG XRDHTTP_PELICAN_SRC_BUILD
 ARG XRDHTTP_PELICAN_VER
-#ARG XROOTD_LOTMAN_SRC_BUILD
-#ARG XROOTD_LOTMAN_VER
+ARG XROOTD_LOTMAN_SRC_BUILD
+ARG XROOTD_LOTMAN_VER
 ARG XROOTD_S3_HTTP_SRC_BUILD
 ARG XROOTD_S3_HTTP_VER
 
@@ -400,20 +394,15 @@ RUN --mount=type=bind,from=xrootd-build,source=/xrootd-build,target=/xrootd-buil
     if ${!SRC_BUILD}; then
       dnf install -y /xrootd-build/RPMS/*/${REPO}-*.rpm
     else
-      dnf install -y --enablerepo=epel-testing --enablerepo=osg-contrib --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
+      dnf install -y --enablerepo=epel-testing --enablerepo=osg-development --enablerepo=osg-testing --enablerepo=osg-upcoming-testing ${REPO}-${!VER}
     fi
   }
 
-  if [ "$TARGETARCH" = "amd64" ]; then
-    PKG_ARCH=x86_64
-  elif [ "$TARGETARCH" = "arm64" ]; then
-    PKG_ARCH=aarch64
-  fi
 
   run_task  LOTMAN          PelicanPlatform  lotman
   run_task  XRDCL_PELICAN   PelicanPlatform  xrdcl-pelican
   run_task  XRDHTTP_PELICAN PelicanPlatform  xrdhttp-pelican
-  dnf install -y https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd-lotman/0.0.2/1.osg24.el9/${PKG_ARCH}/xrootd-lotman-0.0.2-1.osg24.el9.${PKG_ARCH}.rpm
+  run_task  XROOTD_LOTMAN   PelicanPlatform  xrootd-lotman
   run_task  XROOTD_S3_HTTP  PelicanPlatform  xrootd-s3-http
 
   # Configure XRootD to use the Pelican plugin.
