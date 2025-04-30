@@ -611,10 +611,10 @@ func copyXrootdCertificates(server server_structs.XRootDServer) error {
 	return nil
 }
 
-func SelfTestFileCopy(cmd int, file *os.File) error {
-	log.Debug("Transplanting a self-test file")
-	if err := sendChildFD(false, cmd, file); err != nil {
-		return errors.Wrap(err, "Failed to copy the self-test file via FD")
+func FileCopyToXrootdDir(isOrigin bool, cmd int, file *os.File) error {
+	log.Debugf("Transplanting file %s to a directory owned by the xrootd process", file.Name())
+	if err := sendChildFD(isOrigin, cmd, file); err != nil {
+		return errors.Wrapf(err, "Failed to copy the file %s via FD", file.Name())
 	}
 	return nil
 }
