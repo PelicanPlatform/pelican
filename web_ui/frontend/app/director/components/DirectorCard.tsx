@@ -16,7 +16,7 @@ import {
 } from '@mui/material';
 import { red, grey } from '@mui/material/colors';
 import { Server } from '@/index';
-import { Equalizer, Language } from '@mui/icons-material';
+import { Equalizer, Language, FolderOff } from '@mui/icons-material';
 import { NamespaceIcon } from '@/components/Namespace/index';
 import useSWR from 'swr';
 import Link from 'next/link';
@@ -33,15 +33,12 @@ export interface DirectorCardProps {
 }
 
 export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
-  const [disabled, setDisabled] = useState<boolean>(false);
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
   const [detailedServer, setDetailedServer] = useState<
     ServerDetailed | undefined
   >();
 
   const dispatch = useContext(AlertDispatchContext);
-
-  const { mutate } = useSWR<Server[]>('getServers');
 
   return (
     <>
@@ -52,13 +49,14 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
             display: 'flex',
             width: '100%',
             justifyContent: 'space-between',
-            border: 'solid #ececec 1px',
+            border: 'solid #ececec 2px',
             borderRadius: '4px',
             transition: 'background-color 0.3s',
             '&:hover': {
-              bgcolor: server.healthStatus === 'Error' ? red[200] : grey[200],
+              borderColor:
+                server.healthStatus === 'Error' ? red[400] : grey[200],
             },
-            bgcolor:
+            borderColor:
               server.healthStatus === 'Error' ? red[100] : 'secondary.main',
             p: 1,
           }}
@@ -79,6 +77,7 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
           <Box my={'auto'} ml={1} display={'flex'} flexDirection={'row'}>
             <NamespaceIcon
               serverType={server.type.toLowerCase() as 'cache' | 'origin'}
+              bgcolor={server.filtered ? grey[500] : undefined}
             />
             <Typography sx={{ pt: '2px' }}>
               {server.name}
@@ -87,47 +86,6 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
           </Box>
           <Box display={'flex'} flexDirection={'row'}>
             <Box my={'auto'} display={'flex'}>
-              {authenticated && authenticated.role == 'admin' && (
-                <Tooltip title={'Toggle Server Downtime'}>
-                  <FormGroup>
-                    <FormControlLabel
-                      labelPlacement='start'
-                      control={
-                        <Switch
-                          key={server.name}
-                          disabled={disabled}
-                          checked={!server.filtered}
-                          color={'success'}
-                          onClick={async (e) => {
-                            e.stopPropagation();
-
-                            // Disable the switch
-                            setDisabled(true);
-
-                            // Update the server
-                            await alertOnError(
-                              async () => {
-                                if (server.filtered) {
-                                  await allowServer(server.name);
-                                } else {
-                                  await filterServer(server.name);
-                                }
-                              },
-                              'Failed to toggle server status',
-                              dispatch
-                            );
-
-                            mutate();
-
-                            setDisabled(false);
-                          }}
-                        />
-                      }
-                      label={server.filtered ? 'Disabled' : 'Active'}
-                    />
-                  </FormGroup>
-                </Tooltip>
-              )}
               {server?.webUrl && (
                 <Box ml={1}>
                   <Link href={server.webUrl} target={'_blank'}>
@@ -149,7 +107,7 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
                     >
                       <Tooltip title={'View Server Metrics'}>
                         <IconButton size={'small'}>
-                          <Equalizer />
+                          <Equalizer fill={'inherit'} />
                         </IconButton>
                       </Tooltip>
                     </Link>

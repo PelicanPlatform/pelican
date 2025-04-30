@@ -21,8 +21,12 @@ export const DirectorDropdown = ({
       <Dropdown transition={transition} flexDirection={'column'}>
         <Grid container spacing={1}>
           <Grid item xs={12} md={7}>
-            <InformationSpan name={'Version'} value={server.version} />
             <InformationSpan name={'Type'} value={server.type} />
+            <InformationSpan name={'Version'} value={server.version} />
+            <InformationSpan
+              name={'In Downtime'}
+              value={server.filtered ? 'True' : 'False'}
+            />
             <InformationSpan name={'Status'} value={server.healthStatus} />
             <InformationSpan name={'URL'} value={server.url} />
             <InformationSpan
