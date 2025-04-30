@@ -945,7 +945,7 @@ func TestResume(t *testing.T) {
 		} else if r.Method == "GET" {
 			require.Equal(t, "bytes=9-", r.Header.Get("Range"))
 			w.Header().Set("Content-Range", "bytes 9-16/17")
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusPartialContent)
 			_, err := w.Write([]byte(" content"))
 			assert.NoError(t, err)
 		} else {

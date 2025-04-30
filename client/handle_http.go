@@ -2165,6 +2165,12 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			log.WithFields(fields).Debugln("Downloaded bytes:", downloaded)
 			success = true
 			break
+		} else if size > 0 && downloaded == size {
+			// We have downloaded all the data but we still have an error.  If we retry again,
+			// we will read past the end of the file and generate yet another error.  So, break
+			// and cause a permanent failure.
+			// In the future, we can consider deleting the file and trying again.
+			break
 		}
 	}
 
@@ -2856,9 +2862,9 @@ Loop:
 	// <= 0, it indicates we don't know how large the transfer was supposed to be in the first
 	// place.
 	if totalSize > 0 {
-		if downloaded != totalSize {
-			log.WithFields(fields).Debugf("Download completed but received size %db does not match expected size '%db'", downloaded, totalSize)
-			err = errors.Errorf("download completed but received size %db does not match expected size '%db'", downloaded, totalSize)
+		if bytesSoFar+downloaded != totalSize {
+			log.WithFields(fields).Debugf("Download completed but received size %db does not match expected size %db", bytesSoFar+downloaded, totalSize)
+			err = errors.Errorf("download completed but received size %db does not match expected size %db", bytesSoFar+downloaded, totalSize)
 			return
 		}
 
