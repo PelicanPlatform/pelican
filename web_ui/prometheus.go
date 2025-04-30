@@ -42,6 +42,7 @@ import (
 	"go.uber.org/atomic"
 
 	pelican_config "github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
@@ -686,6 +687,7 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 			func(err error) {
 				close(cancel)
 				readyHandler.SetReady(false)
+				metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusCritical, "Server is not ready to receive web requests.")
 			},
 		)
 	}
@@ -880,6 +882,7 @@ func ConfigureEmbeddedPrometheus(ctx context.Context, engine *gin.Engine) error 
 
 				readyHandler.SetReady(true)
 				err2 := level.Info(logger).Log("msg", "Server is ready to receive web requests.")
+				metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusOK, "Server is ready to receive web requests.")
 				_ = err2
 				<-cancel
 				return nil

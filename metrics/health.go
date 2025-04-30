@@ -75,6 +75,7 @@ const (
 	OriginCache_Registry      HealthStatusComponent = "registry"   // Register namespace at the registry
 	DirectorRegistry_Topology HealthStatusComponent = "topology"   // Fetch data from OSDF topology
 	Server_WebUI              HealthStatusComponent = "web-ui"
+	Prometheus                HealthStatusComponent = "prometheus" // Prometheus server
 )
 
 var (
