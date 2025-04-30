@@ -79,7 +79,7 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
           </Grid>
           <Grid item>
             <BooleanToggleButton
-              label={'Is Disabled'}
+              label={'In Downtime'}
               value={serverDowntime}
               onChange={setServerDowntime}
             />
