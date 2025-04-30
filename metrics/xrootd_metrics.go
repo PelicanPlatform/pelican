@@ -31,6 +31,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jellydator/ttlcache/v3"
@@ -306,22 +307,36 @@ type (
 		Wq   int `xml:"wq"`
 	}
 
+	ProcTimes struct {
+		Seconds      int `xml:"s"`
+		MicroSeconds int `xml:"u"`
+	}
+
 	SummaryStat struct {
-		Id      SummaryStatType    `xml:"id,attr"`
-		Total   int                `xml:"tot"`
-		In      int                `xml:"in"`
-		Out     int                `xml:"out"`
-		Threads int                `xml:"threads"`
-		Idle    int                `xml:"idle"`
-		Paths   SummaryPath        `xml:"paths"` // For Oss Summary Data
-		Store   SummaryCacheStore  `xml:"store"`
-		Memory  SummaryCacheMemory `xml:"mem"`
+		Id         SummaryStatType    `xml:"id,attr"`
+		Total      int                `xml:"tot"`
+		In         int                `xml:"in"`
+		Out        int                `xml:"out"`
+		Threads    int                `xml:"threads"`
+		Idle       int                `xml:"idle"`
+		Paths      SummaryPath        `xml:"paths"` // For Oss Summary Data
+		Store      SummaryCacheStore  `xml:"store"`
+		Memory     SummaryCacheMemory `xml:"mem"`
+		ProcSystem ProcTimes          `xml:"sys"`
+		ProcUser   ProcTimes          `xml:"usr"`
 	}
 
 	SummaryStatistics struct {
 		Version string        `xml:"ver,attr"`
 		Program string        `xml:"pgm,attr"`
 		Stats   []SummaryStat `xml:"stats"`
+	}
+
+	processUtilizationState struct {
+		sync.Mutex
+		lastUserSeconds float64
+		lastSysSeconds  float64
+		lastUpdateTime  time.Time
 	}
 )
 
@@ -346,6 +361,7 @@ const (
 	SchedStat SummaryStatType = "sched" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653745
 	OssStat   SummaryStatType = "oss"   // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653741
 	CacheStat SummaryStatType = "cache" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653733
+	ProcStat  SummaryStatType = "proc"  // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968507
 )
 
 var (
@@ -737,8 +753,15 @@ var (
 		Buckets: TimeHistogramBuckets,
 	})
 
+	CPUUtilzation = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_cpu_utilization",
+		Help: "CPU utilization of the XRootD server",
+	})
+
 	lastStats    SummaryStat
 	lastOssStats OSSStatsGs
+
+	procState = processUtilizationState{}
 
 	lastTotalIO  int     // The last total IO value
 	lastWaitTime float64 // The last IO wait time
@@ -1623,6 +1646,31 @@ func HandleSummaryPacket(packet []byte) error {
 				Set(float64(cacheStore.Size))
 			StorageVolume.With(prometheus.Labels{"ns": "/cache", "type": "free", "server_type": "cache"}).
 				Set(float64(cacheStore.Size - cacheStore.Used))
+		case ProcStat:
+			procState.Lock()
+			defer procState.Unlock()
+			currentTime := time.Now()
+			currentUserSeconds := float64(stat.ProcUser.Seconds) + float64(stat.ProcUser.MicroSeconds)/1e6
+			currentSystemSeconds := float64(stat.ProcSystem.Seconds) + float64(stat.ProcSystem.MicroSeconds)/1e6
+
+			// if this not is the first time we are receiving the proc stat, then we can
+			// calculate the deltas since the last time we received the proc stat
+			if !procState.lastUpdateTime.IsZero() {
+				wallDelta := currentTime.Sub(procState.lastUpdateTime).Seconds()
+				userDelta := currentUserSeconds - procState.lastUserSeconds
+				sysDelta := currentSystemSeconds - procState.lastSysSeconds
+				cpuDelta := userDelta + sysDelta // total CPU time during interval
+
+				if wallDelta > 0 {
+					// represents the average of cores utilized during the interval
+					utlizationRatio := cpuDelta / wallDelta
+					CPUUtilzation.Set(utlizationRatio)
+				}
+			}
+
+			procState.lastUserSeconds = currentUserSeconds
+			procState.lastSysSeconds = currentSystemSeconds
+			procState.lastUpdateTime = currentTime
 		}
 	}
 	return nil
