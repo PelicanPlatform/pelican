@@ -314,9 +314,10 @@ func handleWebUIAuth(ctx *gin.Context) {
 	if !strings.HasPrefix(requestPath, "/login") {
 		// / -> ""
 		// /origin/ -> origin
-		// /registry/origin/edit/ -> registry/origin/edit
-		rootPage := strings.TrimPrefix(strings.TrimSuffix(requestPath, "/"), "/")
-		// If the page is a public page, pass the check
+		// /registry/origin/edit/ -> registry
+		rootPage := strings.Split(strings.TrimPrefix(requestPath, "/"), "/")[0]
+
+		// If the root is public, pass the check
 		if slices.Contains(publicAccessPages, rootPage) {
 			ctx.Next()
 			return
@@ -332,33 +333,33 @@ func handleWebUIAuth(ctx *gin.Context) {
 				ctx.Next()
 				return
 			}
-			// For other pages, pass the check so that the frontend can handle it
-			ctx.Next()
-			return
 		}
 
 		// If rootPage requires admin privilege
 		if slices.Contains(adminAccessPages, rootPage) {
-			// If director or registry server is up and user is at /view/
-			// then we allow them to choose the server without being an admin
-			if (config.IsServerEnabled(server_structs.DirectorType) ||
-				config.IsServerEnabled(server_structs.RegistryType)) &&
-				rootPage == "" {
-				ctx.Next()
-				return
-			}
 			isAdmin, _ := CheckAdmin(user)
 			if isAdmin {
+
+				// If user is admin, pass the check
 				ctx.Next()
 				return
 			} else {
-				ctx.String(http.StatusForbidden, "You don't have the permission to view this page. If you think this is wrong, please contact your server admin.")
-				ctx.Abort()
-				return
+
+				// If user is not admin, rewrite the request to 403 page
+				if err == nil && user != "" {
+
+					ctx.Redirect(http.StatusFound, "/view/403/")
+					ctx.Abort()
+					return
+
+					// If user is not logged in, redirect to login page
+				} else {
+
+					ctx.Redirect(http.StatusFound, "/view/login/?returnURL=/view"+requestPath)
+					ctx.Abort()
+					return
+				}
 			}
-		} else {
-			// If the page does not require admin privilege
-			ctx.Next()
 		}
 	}
 }
