@@ -1637,6 +1637,7 @@ func HandleSummaryPacket(packet []byte) error {
 				Set(float64(cacheStore.Size - cacheStore.Used))
 		case ProcStat:
 			procState.Lock()
+			defer procState.Unlock()
 			currentTime := time.Now()
 			currentUserSeconds := float64(stat.ProcUser.Seconds) + float64(stat.ProcUser.MicroSeconds)/1e6
 			currentSystemSeconds := float64(stat.ProcSystem.Seconds) + float64(stat.ProcSystem.MicroSeconds)/1e6
@@ -1659,7 +1660,6 @@ func HandleSummaryPacket(packet []byte) error {
 			procState.lastUserSeconds = currentUserSeconds
 			procState.lastSysSeconds = currentSystemSeconds
 			procState.lastUpdateTime = currentTime
-			procState.Unlock()
 		}
 	}
 	return nil
