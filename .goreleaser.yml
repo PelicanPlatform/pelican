@@ -170,10 +170,9 @@ nfpms:
               group: pelican
         dependencies:
           - "/bin/sh"
+          - "/usr/bin/getent"
           # for useradd and groupadd:
           - "shadow-utils"
-          # for getent:
-          - "glibc-common"
       deb:
         contents:
           - src: LICENSE
