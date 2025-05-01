@@ -1186,16 +1186,16 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		}
 
 		// Inspect the existing downtime status for this server
-		existing, had := filteredServers[sn]
+		existingFilterType, isServerFiltered := filteredServers[sn]
 
 		if active {
 			// Only override if there's no filter
-			if !had {
+			if !isServerFiltered {
 				filteredServers[sn] = serverFiltered
 			}
 		} else {
 			// Clear only the downtimes with serverFiltered tag if it’s stale
-			if had && existing == serverFiltered {
+			if isServerFiltered && existingFilterType == serverFiltered {
 				delete(filteredServers, sn)
 			}
 		}
