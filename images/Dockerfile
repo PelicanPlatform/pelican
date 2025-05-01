@@ -216,7 +216,7 @@ RUN groupadd -g 10940 xrootd \
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh
 ARG XROOTD_VER="5.8.1"
-ARG XROOTD_RELEASE="1.3.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_RELEASE="1.5.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
 # The packages from Koji need to be installed in a single dnf command in
