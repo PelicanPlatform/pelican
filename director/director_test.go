@@ -1140,6 +1140,154 @@ func TestDirectorRegistration(t *testing.T) {
 		assert.Equal(t, "7.0.0", getAd.Version)
 		teardown()
 	})
+
+	t.Run("cache-downtime-filtering", func(t *testing.T) {
+		now := time.Now().UTC().UnixMilli()
+		allowed := map[string]map[string]struct{}{
+			"cache-url.org": {"/foo/bar": {}},
+		}
+		allowedPrefixesForCaches.Store(&allowed)
+		allowedPrefixesForCachesLastSetTimestamp.Store(time.Now().Unix())
+
+		// helper to build a valid Downtime object
+		makeDT := func(start, end int64) server_structs.Downtime {
+			return server_structs.Downtime{
+				UUID:        "00000000-0000-0000-0000-000000000000",
+				ServerName:  "", // empty for origin/cache
+				CreatedBy:   "testuser",
+				UpdatedBy:   "testuser",
+				Source:      "cache",
+				Class:       server_structs.SCHEDULED,
+				Description: "",
+				Severity:    server_structs.Outage,
+				StartTime:   start,
+				EndTime:     end,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+				DeletedAt:   nil,
+			}
+		}
+		isurl := url.URL{}
+		isurl.Path = ts.URL
+		baseAd := server_structs.OriginAdvertiseV2{
+			RegistryPrefix: "/caches/test",
+			DataURL:        "https://cache-url.org",
+			WebURL:         "https://localhost:8844",
+			Namespaces: []server_structs.NamespaceAdV2{{
+				Path:   "/foo/bar",
+				Issuer: []server_structs.TokenIssuer{{IssuerUrl: isurl}},
+			}},
+			// Downtimes will be injected per‐case below
+		}
+
+		t.Run("active-downtime-sets-filter", func(t *testing.T) {
+			teardown()
+			c, r, w := setupContext()
+
+			pKey, token, _ := generateToken()
+			pub, err := jwk.PublicKeyOf(pKey)
+			require.NoError(t, err)
+			setupJwksCache(t, "/caches/test", pub)
+
+			ad := baseAd
+			ad.Downtimes = []server_structs.Downtime{
+				makeDT(now-1_000, now+1_000),
+			}
+			ad.Initialize("test-cache")
+
+			body, err := json.Marshal(ad)
+			require.NoError(t, err)
+			setupRequest(c, r, body, token, server_structs.CacheType)
+			r.ServeHTTP(w, c.Request)
+			assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+			filteredServersMutex.RLock()
+			f, ok := filteredServers["test-cache"]
+			filteredServersMutex.RUnlock()
+			assert.True(t, ok, "expected filter entry")
+			assert.Equal(t, serverFiltered, f)
+		})
+
+		t.Run("future-downtime-clears-filter", func(t *testing.T) {
+			teardown()
+			c, r, w := setupContext()
+
+			pKey, token, _ := generateToken()
+			pub, err := jwk.PublicKeyOf(pKey)
+			require.NoError(t, err)
+			setupJwksCache(t, "/caches/test", pub)
+
+			ad := baseAd
+			ad.Downtimes = []server_structs.Downtime{
+				makeDT(now+5_000, now+6_000),
+			}
+			ad.Initialize("test-cache")
+
+			// pre-seed a stale filter
+			filteredServersMutex.Lock()
+			filteredServers["test-cache"] = serverFiltered
+			filteredServersMutex.Unlock()
+
+			body, err := json.Marshal(ad)
+			require.NoError(t, err)
+			setupRequest(c, r, body, token, server_structs.CacheType)
+			r.ServeHTTP(w, c.Request)
+			assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+			filteredServersMutex.RLock()
+			_, ok := filteredServers["test-cache"]
+			filteredServersMutex.RUnlock()
+			assert.False(t, ok, "expected stale filter removed")
+		})
+
+		t.Run("future-to-active-toggle", func(t *testing.T) {
+			teardown()
+			c, r, w := setupContext()
+
+			pKey, token, _ := generateToken()
+			pub, err := jwk.PublicKeyOf(pKey)
+			require.NoError(t, err)
+			setupJwksCache(t, "/caches/test", pub)
+
+			// 1) future-only
+			ad1 := baseAd
+			ad1.Downtimes = []server_structs.Downtime{
+				makeDT(now+5_000, now+6_000),
+			}
+			ad1.Initialize("test-cache")
+			body1, _ := json.Marshal(ad1)
+			setupRequest(c, r, body1, token, server_structs.CacheType)
+			r.ServeHTTP(w, c.Request)
+			assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+			filteredServersMutex.RLock()
+			_, ok1 := filteredServers["test-cache"]
+			filteredServersMutex.RUnlock()
+			assert.False(t, ok1, "no filter on future downtime")
+
+			// 2) now active
+			ad2 := baseAd
+			ad2.Downtimes = []server_structs.Downtime{
+				makeDT(now-1_000, now+1_000),
+			}
+			ad2.Initialize("test-cache")
+			body2, _ := json.Marshal(ad2)
+
+			// Manually set up the request to avoid repeated registering for path '/', instead of calling setupRequest
+			c.Request, _ = http.NewRequest(http.MethodPost, "/", bytes.NewBuffer(body2))
+			c.Request.Header.Set("Authorization", "Bearer "+token)
+			c.Request.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, c.Request)
+			r.ServeHTTP(w, c.Request)
+			assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+
+			filteredServersMutex.RLock()
+			f2, ok2 := filteredServers["test-cache"]
+			filteredServersMutex.RUnlock()
+			assert.True(t, ok2, "filter added on active downtime")
+			assert.Equal(t, serverFiltered, f2)
+		})
+	})
+
 }
 
 func TestGetAuthzEscaped(t *testing.T) {
