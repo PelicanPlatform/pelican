@@ -171,8 +171,8 @@ nfpms:
         dependencies:
           - "/bin/sh"
           - "/usr/bin/getent"
-          # for useradd and groupadd:
-          - "shadow-utils"
+          - "/usr/sbin/useradd"
+          - "/usr/sbin/groupadd"
       deb:
         contents:
           - src: LICENSE
