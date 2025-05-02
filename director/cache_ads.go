@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -54,7 +54,7 @@ const (
 
 var (
 	// The in-memory cache of xrootd server advertisement, with the key being ServerAd.URL.String()
-	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](15 * time.Minute))
+	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](param.Director_AdvertisementTTL.GetDuration()))
 	// The map holds servers that are disabled, with the key being the ServerAd.Name
 	// The map should be idenpendent of serverAds as we want to persist this change in-memory, regardless of the presence of the serverAd
 	filteredServers = map[string]filterType{}
@@ -124,12 +124,14 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 		httpsURL = "https://" + strings.TrimPrefix(rawURL, "http://")
 	}
 
-	existing := serverAds.Get(httpURL)
+	// Although we're in `recordAd`, which implies we _DO_ plan to update the incoming
+	// advertisement, it's better not to refresh the expiration until we explicitly intend to do so.
+	existing := serverAds.Get(httpURL, ttlcache.WithDisableTouchOnHit[string, *server_structs.Advertisement]())
 	if existing == nil {
-		existing = serverAds.Get(httpsURL)
+		existing = serverAds.Get(httpsURL, ttlcache.WithDisableTouchOnHit[string, *server_structs.Advertisement]())
 	}
 	if existing == nil {
-		existing = serverAds.Get(rawURL)
+		existing = serverAds.Get(rawURL, ttlcache.WithDisableTouchOnHit[string, *server_structs.Advertisement]())
 	}
 
 	// There's an existing ad in the cache
