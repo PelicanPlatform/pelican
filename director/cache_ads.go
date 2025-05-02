@@ -54,7 +54,8 @@ const (
 
 var (
 	// The in-memory cache of xrootd server advertisement, with the key being ServerAd.URL.String()
-	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](param.Director_AdvertisementTTL.GetDuration()))
+	serverAds = ttlcache.New(ttlcache.WithTTL[string, *server_structs.Advertisement](param.Director_AdvertisementTTL.GetDuration()),
+		ttlcache.WithDisableTouchOnHit[string, *server_structs.Advertisement]())
 	// The map holds servers that are disabled, with the key being the ServerAd.Name
 	// The map should be idenpendent of serverAds as we want to persist this change in-memory, regardless of the presence of the serverAd
 	filteredServers = map[string]filterType{}
