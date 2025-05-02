@@ -1169,33 +1169,36 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker when necessary
 	if adV2.Downtimes != nil {
 		filteredServersMutex.Lock()
+		defer filteredServersMutex.Unlock()
+
+		// Update the cached server downtime list
 		serverDowntimes[adV2.Name] = adV2.Downtimes
-		currentTime := time.Now().UTC().UnixMilli()
-		bringItDown := false // Flag to indicate if this server is put in downtime during the traversal of the downtimes in this server ad
+
+		now := time.Now().UTC().UnixMilli()
 		sn := adV2.Name
-		// Check existing downtime filter
-		originalFilterType, hasOriginalFilter := filteredServers[sn]
-		// If this server is already put in downtime, we don't need to do anything
-		if !(hasOriginalFilter && originalFilterType != tempAllowed) {
-			// Check if the server is currently in downtime
-			for _, downtime := range adV2.Downtimes {
-				if downtime.StartTime < currentTime && (downtime.EndTime > currentTime || downtime.EndTime == server_structs.IndefiniteEndTime) {
-					// Server is currently in downtime
-					filteredServers[sn] = serverFiltered
-					bringItDown = true
-					break
-				}
+		active := false // Flag to indicate if this server has active downtime in this server ad
+		for _, dt := range adV2.Downtimes {
+			if dt.StartTime <= now &&
+				(dt.EndTime >= now || dt.EndTime == server_structs.IndefiniteEndTime) {
+				active = true
+				break
 			}
 		}
-		// If the server doesn't have an active downtime, it means Director's previously
-		// recorded downtime set by the server admin is stale and should be removed.
-		// It only removes the downtime set by the server admin, not the downtime set by others.
-		if !bringItDown {
-			if hasOriginalFilter && originalFilterType == serverFiltered {
+
+		// Inspect the existing downtime status for this server
+		existingFilterType, isServerFiltered := filteredServers[sn]
+
+		if active {
+			// Only override if there's no filter
+			if !isServerFiltered {
+				filteredServers[sn] = serverFiltered
+			}
+		} else {
+			// Clear only the downtimes with serverFiltered tag if it’s stale
+			if isServerFiltered && existingFilterType == serverFiltered {
 				delete(filteredServers, sn)
 			}
 		}
-		filteredServersMutex.Unlock()
 	}
 
 	// Forward to other directors, if applicable
