@@ -1559,9 +1559,13 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 
 			viper.Set(param.Director_RegistryQueryInterval.GetName(), "1m")
 		}
-	}
 
-	if currentServers.IsEnabled(server_structs.DirectorType) {
+		if adTTL := param.Director_AdvertisementTTL.GetDuration(); adTTL <= 0 {
+			log.Warningf("Invalid value of '%s' for config param %s; must be greater than 0, falling back to default of 15 minutes",
+				adTTL, param.Director_AdvertisementTTL.GetName())
+			viper.Set(param.Director_AdvertisementTTL.GetName(), "15m")
+		}
+
 		viper.SetDefault("Federation.DirectorUrl", param.Server_ExternalWebUrl.GetString())
 		minStatRes := param.Director_MinStatResponse.GetInt()
 		maxStatRes := param.Director_MaxStatResponse.GetInt()
