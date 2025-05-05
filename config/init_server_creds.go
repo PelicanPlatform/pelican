@@ -708,11 +708,19 @@ func GeneratePEM(dir string) (key jwk.Key, err error) {
 		return nil, errors.Wrapf(err, "failed to get pelican user for ownership: %v", err)
 	}
 
-	if err = os.Chmod(fname, 0640); err != nil {
-		return nil, errors.Wrapf(err, "failed to set permission for key file %s", fname)
-	}
-	if err = os.Chown(fname, user.Uid, user.Gid); err != nil {
-		return nil, errors.Wrapf(err, "failed to chown key file %s", fname)
+	// Windows does not have "chown", has to work differently
+	currentOS := runtime.GOOS
+	if currentOS == "windows" {
+		cmd := exec.Command("icacls", fname, "/grant", user.Username+":F")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return nil, errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
+				fname, user.Groupname, string(output))
+		}
+	} else { // Else we are running on linux/mac
+		if err = os.Chown(fname, user.Uid, user.Gid); err != nil {
+			return nil, errors.Wrapf(err, "failed to chown key file %s", fname)
+		}
 	}
 
 	if err = generatePrivateKeyToFile(keyFile, elliptic.P256()); err != nil {
