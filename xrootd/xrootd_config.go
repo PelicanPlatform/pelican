@@ -633,6 +633,14 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 		destination = filepath.Join(param.Cache_RunLocation.GetString(), "pelican")
 	}
 	destination = filepath.Join(destination, "copied-tls-creds.crt")
+
+	// If the file already exists, delete it so that OpenFile will create a new one.
+	// Because the destination file is read-only (0400), user cannot update it (os.O_TRUNC will hit an permission denied error).
+	err := os.Remove(destination)
+	if err != nil && !os.IsNotExist(err) {
+		return errors.Wrapf(err, "Failure when removing existing certificate key pair file for xrootd")
+	}
+
 	destFile, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(0400))
 	if err != nil {
 		return errors.Wrap(err, "Failure when opening certificate key pair file to pass to xrootd")
