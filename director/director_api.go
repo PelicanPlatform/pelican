@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -337,7 +337,12 @@ func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
 							log.Debugf("Failed to update IO stat for server %s: failed to convert Prometheus response to a float number: %s", serverUrl, ioDerivStr)
 							continue
 						}
-						serverAd := serverAds.Get(serverUrl)
+
+						// NOTE: We may reach this spot if the server previously succeeded in advertising, but starts to fail
+						// while still remaining resoponsive to the Prometheus queries fired by this routine. Because of this,
+						// we MUST disable the touch on hit behavior of the cache or the ads may never expire while the server
+						// is still running.
+						serverAd := serverAds.Get(serverUrl, ttlcache.WithDisableTouchOnHit[string, *server_structs.Advertisement]())
 						if serverAd == nil {
 							log.Debugf("Failed to update IO stat for server %s: server does not exist in the director", serverUrl)
 							continue
