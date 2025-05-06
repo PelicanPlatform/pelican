@@ -23,7 +23,11 @@ export function NamespaceCardList({ data }: NamespaceCardListProps) {
           label='Search'
         />
       </Box>
-      <CardList data={searchedData} Card={NamespaceCard} />
+      <CardList
+        data={searchedData}
+        Card={NamespaceCard}
+        keyGetter={(o) => o?.namespace?.path || 'undefined'}
+      />
     </Box>
   );
 }

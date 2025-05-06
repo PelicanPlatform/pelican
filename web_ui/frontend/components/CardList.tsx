@@ -21,12 +21,14 @@ interface CardListProps<T> {
   Card: ComponentType<any>;
   cardProps?: Partial<T>;
   pageSize?: number;
+  keyGetter: (o: T) => string;
 }
 
 export function CardList<T>({
   data,
   Card,
   cardProps,
+  keyGetter,
   pageSize = 10,
 }: CardListProps<T>) {
   const [page, setPage] = useState<number>(1);
@@ -56,7 +58,7 @@ export function CardList<T>({
           } as T;
 
           return (
-            <Box pb={1} key={JSON.stringify(props)}>
+            <Box pb={1} key={keyGetter(props)}>
               <Card {...props} />
             </Box>
           );

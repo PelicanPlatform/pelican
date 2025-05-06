@@ -86,7 +86,12 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
           </Grid>
         </Grid>
       </Box>
-      <CardList data={filteredData} Card={DirectorCard} cardProps={cardProps} />
+      <CardList
+        data={filteredData}
+        Card={DirectorCard}
+        cardProps={cardProps}
+        keyGetter={(o) => o.server.name}
+      />
     </Box>
   );
 }

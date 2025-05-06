@@ -100,7 +100,11 @@ function DowntimeCardList({ Card, data }: DowntimeListProps) {
           </Grid>
         </Grid>
       </Box>
-      <CardList<DowntimeCardProps> Card={Card} data={downtimeCardProps} />
+      <CardList<DowntimeCardProps>
+        Card={Card}
+        data={downtimeCardProps}
+        keyGetter={(o) => o.downtime.id}
+      />
     </>
   );
 }
