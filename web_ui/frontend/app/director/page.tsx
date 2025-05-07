@@ -124,7 +124,7 @@ export default function Page() {
             )}
           </Grid>
           <Grid item xs={12} lg={8} xl={6}>
-            <AuthenticatedContent>
+            <AuthenticatedContent allowedRoles={['admin']}>
               <GeoIpErrorTable />
             </AuthenticatedContent>
           </Grid>
