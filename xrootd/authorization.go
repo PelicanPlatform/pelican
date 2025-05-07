@@ -169,6 +169,38 @@ func writeScitokensConfiguration(modules server_structs.ServerType, cfg *Scitoke
 		Funcs(template.FuncMap{"StringsJoin": strings.Join, "JSONify": JSONify}).
 		Parse(scitokensCfgTemplate))
 
+	// If Pelican is run by unprivileged user, we use xrdhttp-pelican plugin to make sure the final scitokens.cfg file is owned by xrootd
+	if param.Server_DropPrivileges.GetBool() {
+		tempConfigPath := filepath.Join(param.Monitoring_DataLocation.GetString(), "scitokens-generated.cfg.tmp")
+		file, err := os.OpenFile(tempConfigPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0640)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create a temporary scitokens file %s", tempConfigPath)
+		}
+		defer func() {
+			file.Close()
+			os.Remove(tempConfigPath)
+		}()
+		deduplicateBasePaths(cfg)
+		err = templ.Execute(file, cfg)
+		if err != nil {
+			return errors.Wrapf(err, "unable to create scitokens.cfg template")
+		}
+		// After writing configuration to the file, the file pointer remains at the end.
+		// Seek back to the beginning of the file so that the copy operation reads from the start.
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			return errors.Wrap(err, "failed to seek to beginning of the file")
+		}
+
+		// Use plugin to transplant the final file to a directory owned by xrootd. This is because
+		// the xrootd daemon will periodically reload the scitokens.cfg and, in some cases, we may
+		// want to update it without restarting the server.
+		if err = FileCopyToXrootdDir(modules.IsEnabled(server_structs.OriginType), 7, file); err != nil {
+			return errors.Wrap(err, "failed to copy the scitokens config file to the xrootd directory")
+		}
+
+		return nil
+	}
+
 	gid, err := config.GetDaemonGID()
 	if err != nil {
 		return err
@@ -364,6 +396,32 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 		if len(outStr) > 4 {
 			output.Write([]byte(outStr + "\n"))
 		}
+	}
+
+	// If Pelican is run by unprivileged user, we use xrdhttp-pelican plugin to make sure the final authfile is owned by xrootd
+	if param.Server_DropPrivileges.GetBool() {
+		tempAuthPath := filepath.Join(param.Monitoring_DataLocation.GetString(), "temp-authfile-generated")
+		file, err := os.OpenFile(tempAuthPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0640)
+		if err != nil {
+			return errors.Wrapf(err, "failed to create a generated authfile %s", tempAuthPath)
+		}
+		defer func() {
+			file.Close()
+			os.Remove(tempAuthPath)
+		}()
+		if _, err := output.WriteTo(file); err != nil {
+			return errors.Wrapf(err, "failed to write to generated authfile %v", tempAuthPath)
+		}
+		// After writing content to the file, the file pointer remains at the end.
+		// Seek back to the beginning of the file so that the copy operation reads from the start.
+		if _, err := file.Seek(0, io.SeekStart); err != nil {
+			return errors.Wrap(err, "failed to seek to beginning of the file")
+		}
+
+		if err = FileCopyToXrootdDir(server.GetServerType().IsEnabled(server_structs.OriginType), 6, file); err != nil {
+			return errors.Wrap(err, "failed to copy the auth file to the xrootd directory")
+		}
+		return nil
 	}
 
 	gid, err := config.GetDaemonGID()

@@ -33,6 +33,7 @@ import (
 	"github.com/tg123/go-htpasswd"
 	"golang.org/x/term"
 
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
@@ -121,6 +122,15 @@ func passwordMain(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	file.Close()
+
+	// chown the file to the pelican user
+	user, err := config.GetPelicanUser()
+	if err != nil {
+		return errors.Wrap(err, "no OS user found for pelican")
+	}
+	if err := os.Chown(outPasswordPath, user.Uid, user.Gid); err != nil {
+		return errors.Wrapf(err, "failed to set ownership on %s", outPasswordPath)
+	}
 
 	_, err = htpasswd.New(outPasswordPath, []htpasswd.PasswdParser{htpasswd.AcceptBcrypt}, nil)
 	if err != nil {

@@ -101,6 +101,24 @@ func MkdirAll(path string, perm os.FileMode, uid int, gid int) error {
 	return nil
 }
 
+// Set the permissions on the targeted file only if it exists. Doesn't care about its parent or siblings
+func setFilePerms(paths []string, perm os.FileMode, uid int, gid int) error {
+	for _, path := range paths {
+		// Skip the file if it doesn't exist
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			continue
+		}
+		// Set the permissions on the file
+		if err := os.Chmod(path, perm); err != nil {
+			return errors.Wrapf(err, "Failed to set permissions on file %v", path)
+		}
+		if err := os.Chown(path, uid, gid); err != nil {
+			return errors.Wrapf(err, "Failed to chown file %v", path)
+		}
+	}
+	return nil
+}
+
 func setFileAndDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, uid int, gid int, recursive bool) error {
 	dirs := map[string]bool{}
 	for _, path := range paths {
