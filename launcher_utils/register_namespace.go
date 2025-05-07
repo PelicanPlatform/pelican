@@ -272,6 +272,9 @@ func RegisterNamespaceWithRetry(ctx context.Context, egrp *errgroup.Group, prefi
 		retryInterval = 10 * time.Second
 	}
 	siteName := param.Xrootd_Sitename.GetString()
+	if siteName == "" {
+		return errors.Errorf("Server name isn't set. Please set the name via %s", param.Xrootd_Sitename.GetName())
+	}
 
 	key, url, isRegistered, err := registerNamespacePrep(ctx, prefix)
 	if err != nil {
