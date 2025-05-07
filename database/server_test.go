@@ -216,6 +216,7 @@ func TestUpsertServiceName(t *testing.T) {
 		)
 
 		// Upsert with same name
+		time.Sleep(10 * time.Millisecond) // ensure UpdatedAt is different
 		err = UpsertServiceName(name1, origType)
 		require.NoError(t, err)
 
