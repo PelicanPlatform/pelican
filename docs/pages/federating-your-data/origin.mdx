@@ -4,7 +4,7 @@ import { Callout } from 'nextra/components'
 
 # Federating Your Data via a Pelican Origin
 
-Pelican users who want to share data within a Pelican federation do so via an [*Origin*](../about-pelican/core-concepts.mdx#origins).
+Pelican users who want to share data within a Pelican federation do so via an [***Origin***](../about-pelican/core-concepts.mdx#origins).
 Origins are a crucial component of Pelican's architecture for several reasons: they act as an adapter between various storage backends and Pelican federations, they provide fine-grained access controls for that data, and they act as a circuit breaker that protects the underlying data repository from large volumes of data movement.
 That is, they figure out how to take data from wherever it lives (such as a POSIX filesystem, S3 buckets, HTTPS servers, etc.) and transform it into a format that the federation can utilize, all while respecting your data access requirements and protecting the storage they make accessible.
 
@@ -31,11 +31,13 @@ Pelican Origins have two major components -- one is a data transfer endpoint pow
 By design, these two components are hosted behind two separate ports, each dedicated a distinct function.
 Pelican has chosen ports 8443 for data transfers and 8444 for the browser interface as defaults, but you may change these port numbers through your Origin's [configuration file](../parameters.mdx) with parameters [`Server.WebPort`](../parameters.mdx#Server-WebPort) and [`Origin.Port`](../parameters.mdx#Origin-Port), respectively.
 
-In order for Pelican Origins to work properly, **both** of these ports need to be accessible by the federation, which in most cases means they need to be open to the internet. If your server host has a firewall policy in place, please open these two ports for both incoming the outgoing TCP requests.
+In order for Pelican Origins to work properly, **both** of these ports need to be accessible by the federation, which in most cases means they need to be open to the internet.
+If your server host has a firewall policy in place, please open these two ports for both incoming and outgoing TCP requests.
 
 ### Preparing TLS Credentials
 
-Data transfers in Pelican rely on HTTPS, the web encryption scheme used by everyone from banks to instagram that's responsible for securely transmitting data between internet-connected computers. To configure the Origin with HTTPS, you'll first need to acquire three things:
+Data transfers in Pelican rely on HTTPS, the web encryption scheme used by everyone from banks to instagram that's responsible for securely transmitting data between internet-connected computers.
+To configure the Origin with HTTPS, you'll first need to acquire three things:
 
 - A valid Transport Layer Security (TLS) certificate
 - The private key associated with the certificate
@@ -59,11 +61,17 @@ Once you go through the process, locate your credential files and set the follow
 
 Since your TLS certificate is associated with your domain name, you will need to change the default hostname of Pelican server to be consistent. Set `Server.Hostname` to your domain name (e.g. `example.com`).
 
-### Picking a Federation to join
+### Picking a Federation and your Namespace Prefix(es)
 
-Before serving an Origin, you need to decide which [**federation**](../about-pelican/core-concepts.mdx#federations) your data will be accessed through. For example, the Open Science Data Federation (OSDF) is Pelican's flagship federation, and if you are interested in serving an OSDF Origin, you can refer to the [OSDF website](https://osg-htc.org/services/osdf.html) for details about how to join. If you're unsure about which federation to join and aren't ready to run your own federation, this is a good place to start.
+Before serving an Origin, you need to decide which [***federation***](../about-pelican/core-concepts.mdx#federations) your data will be accessed through. For example, the Open Science Data Federation (OSDF) is Pelican's flagship federation, and if you are interested in serving an OSDF Origin, you can refer to the [OSDF website](https://osg-htc.org/services/osdf.html) for details about how to join. If you're unsure about which federation to join and aren't ready to run your own federation, this is a good place to start.
 
-All federations are uniquely identified their URL. For example, the OSDF's URL is `https://osg-htc.org` and Pelican command line client commands that interact with objects from this federation would indicate this by using Pelican URLs like `pelican://osg-htc.org/some/namespace/path`.
+All federations are uniquely identified by their URL. For example, the OSDF's URL is `https://osg-htc.org` and Pelican command line client commands that interact with objects from this federation would indicate this by using Pelican URLs like `pelican://osg-htc.org/some/namespace/path`.
+
+Once you've picked a federation, you should think about the namespace prefix(es) you'll want to tie your data to.
+Namespace prefixes map data from Origins into something resembling a "file path" within their federation.
+For example, an S3 bucket with data about whale sightings may be mapped to the namespace prefix `/whales`, such that an object named `2025-sightings.csv` in the bucket would be referred to as `/whales/2025-sightings.csv`.
+Its fully-qualified name, scoped to the federation, would then be `pelican://<federation URL>/whales/2025-sitings.csv`.
+While it's convenient to think of these prefixes as file paths, it should be noted the comparison is only logical -- there isn't necessarily a `/whales` directory anywhere.
 
 For more information about how to choose prefixes, see [Choosing a Namespace Prefix](./choosing-namespaces.mdx)
 
@@ -114,7 +122,7 @@ Available capabilities include:
 - `PublicReads`: When set, objects from the namespace become public and require no authorization to read.
 - `Writes`: When included, objects can be written back to the storage backend by Pelican. Write operations _always_ require a valid authorization token.
 - `DirectReads`: When included, a namespace indicates that it is willing to serve clients directly and does not require data to be pulled through a cache. Disabling this feature may be useful in cases where the Origin isn't very performant or has to pay egress costs when data moves through it. Note that this is respected by federation central services, but may not be respected by all clients.
-- `Listings`: When included, the namespace indicates it will allow object discovery. Be careful when setting this for authorized namespaces, as this will allow anyone to discover the names of objects exported by this namespace. Listings is required if your Origin must support any recursive operations, such as downloading entire directories or object prefixes.
+- `Listings`: When included, the namespace indicates it permits object discovery. Authorization requirements for listing objects through an Origin are tied to the values of `Reads` and `PublicReads`. If your namespace sets `Reads`, object discovery will require a valid token, while prefixes with `PublicReads` will not require tokens. This capability is ***required*** if your Origin must support any recursive operations, such as downloading entire directories or object prefixes.
 
 <Callout type="warning">
 Most Origins should have either `Reads` or `PublicReads` enabled. If neither is set, the Origin won't export any data.
@@ -191,7 +199,7 @@ Multiple namespaces can be exported by the same Origin but they must all have th
 That is, if the Origin serves files from POSIX, it can _only_ serve files from POSIX and not objects from S3.
 However, separate Origins can serve files from POSIX and objects from S3 under the same namespace prefix, allowing the Origin administrators to aggregate data under a unified namespace.
 
-One additional constraint to be aware of is that failure to advertise any of the prefixes in a multi-export Origin will prevent the entire Origin from functioning.
+One current limitation to be aware of is that failure to advertise any of the prefixes in a multi-export Origin will prevent the entire Origin from functioning.
 For example, if your federation requires an administrator to pre-approve namespaces (as does the OSDF) but only a subset of the namespaces from the Origin are approved at the Registry, this will prevent the entire Origin from joining the federation.
 See [Federation Namespace Prefix Registration](#federation-namespace-prefix-registration) for more details.
 
@@ -304,12 +312,12 @@ Origin:
     - StoragePrefix: /first/path
       FederationPrefix: /prefix-1
       Capabilities: ["Reads", "Writes", "Listings", "DirectReads"]
-      IssuerUrls: ["https://chtc.cs.wisc.edu.com"]
+      IssuerUrls: ["https://chtc.cs.wisc.edu"]
 
     - StoragePrefix: /my/data/private
       FederationPrefix: /my/prefix/private
       Capabilities: ["Reads", "DirectReads"]
-      IssuerUrls: ["https://chtc.cs.wisc.edu.com"]
+      IssuerUrls: ["https://chtc.cs.wisc.edu"]
 
 # Specify a human readable name for the Origin, which shows up in the Director's UI.
 # Without this specification, the Origin would show up in the Director under its hostname
@@ -319,8 +327,10 @@ Xrootd:
 
 ### Federation Namespace Prefix Registration
 
-Registering a federation namespace prefix is the process of claiming the prefix with the federation's [*Registry*](../about-pelican/core-concepts.mdx#registry).
+Registering a federation namespace prefix is the process of claiming the prefix with the federation's [***Registry***](../about-pelican/core-concepts.mdx#registry).
 This asserts your ownership over the namespace and gives you the ability to further subdivide the prefix by tying it to a public/private key pair you posses.
+
+For more information about how to choose these prefixes, see [Choosing a Namespace Prefix](./choosing-namespaces.mdx)
 
 Generally this process is a pre-requisite to setting up an functional Origin, but it's not included in this page's "Before Starting" section because Origins attempt to do this automatically on server startup.
 However, there are some cases where you may not wish to rely on this automatic feature.
@@ -354,10 +364,6 @@ Finally, submit the registration, and if your federation requires namespace appr
 In the meantime, store your private key someplace safe -- once you're ready to start your Origin, you'll configure it to use the private key using the [`IssuerKeysDirectory`](../parameters.mdx#IssuerKeysDirectory) configuration option.
 Once your registration is complete/approved and your keys are hooked up to the Origin, your Origin should have control over your new prefix.
 
-
-
-
-
 ## Serving & Administering Your Origin
 
 Once you've drafted your Origin's configuration and handled the pre-requisites from the [Before Starting](#before-starting) section, you're ready to start serving data.
@@ -384,7 +390,7 @@ Pelican admin interface is not initialized
 To initialize, login at https://localhost:8444/view/initialization/code/ with the following code:
 551220
 ```
-See the [admin website configuration](#login-to-admin-website) documentation section for more information about initializing your Origin's admin website.
+See [Logging in to the Origin's Admin Page](#logging-in-to-the-origins-admin-page) for more information about initializing your Origin's admin website.
 
 ### Additional Command Line Arguments for Origins
 
@@ -394,15 +400,14 @@ This section documents additional arguments you can pass via the command line wh
 * **-m or --mode**: Set the mode for the Origin service ('posix'|'s3, default to 'posix').
 * **-p or --port**: Set the port at which the Pelican admin website should be accessible.
 * **--writeable**: A boolean value to allow or disable writing to the Origin (default is true).
-* **-v
-
+* **-v**: A shortcut for configuring docker-style volume mounts/namespace prefixes for the Origin (POSIX only). For example, `-v /local/path:/federation/prefix` will bind a directory `/local/path` to the namespace prefix `/federation/prefix`. Use of configuration yaml is strongly preferred over this method because config passed with this flag cannot be picked up by tools like `pelican config summary`.
 * **--config**: Set the location of the configuration file.
 * **-d or --debug**: Enable debugging mode, which greatly increases the Pelican's logging verbosity
 * **-l or --log**: Set the location of a file that will capture Pelican logs. Setting this will prevent logging output from printing to your terminal.
 
 For more information about available yaml configuration options, refer to the [Parameters page](../parameters.mdx).
 
-### Login to Admin Website
+### Logging in to the Origin's Admin Page
 
 After your Origin is running, the next step is to initialize its admin website, which can be used by administrators for monitoring and further configuration.
 To initialize this interface, go to the URL specified in the terminal.
@@ -413,12 +418,12 @@ Copy the passcode from the terminal where you launch Pelican Origin and paste to
 
 <ExportedImage width={1000} height={1000} src={"/pelican/federating-your-data/origin-otp.png"} alt={"Screenshot of Pelican website activation page"} />
 
-In our case, it's `551220` from the example terminal above.
+The example terminal from "Starting Your Origin" shows `551220`, but your one-time passcode will be different.
 
-> **NOTE:** that your one-time passcode will be different from the example.
-
-> **NOTE:** These one-time passcodes will be refreshed every few minutes.
+<Callout type="info">
+These one-time passcodes will be refreshed every few minutes.
 Find the latest passcode in the terminal before proceeding.
+</Callout>
 
 ### Set up password for the admin
 
@@ -469,8 +474,10 @@ You may change the time range of the graph by changing the **Reporting Period** 
 
 <ExportedImage width={1000} height={1000} src={"/pelican/federating-your-data/origin-dashboard-graph.png"} alt={"Screenshot of the graph panel on Pelican Origin website dashboard page"} style={{marginTop: 30}} />
 
-> **NOTE:** This graph may be empty when the Origin first starts, as it takes several minutes to collect enough data for the display.
+<Callout type="info">
+This graph may be empty when the Origin first starts, as it takes several minutes to collect enough data for the display.
 Try refreshing the page after the Origin has been running for ~5 minutes and you you should see data being aggregated.
+</Callout>
 
 ### Test Origin Functionality
 
