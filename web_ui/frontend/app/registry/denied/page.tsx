@@ -31,11 +31,12 @@ import DeniedCard from '@/components/Namespace/DeniedCard';
 import { getExtendedNamespaces } from '@/helpers/get';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
+import { NAMESPACE_KEY } from '@/helpers/api';
 
 export default function Home() {
   const dispatch = useContext(AlertDispatchContext);
 
-  const { data } = useSWR('getExtendedNamespaces', async () =>
+  const { data } = useSWR(NAMESPACE_KEY, async () =>
     alertOnError(getExtendedNamespaces, "Couldn't fetch namespaces", dispatch)
   );
   const { data: user, error } = useSWR('getUser', async () =>
