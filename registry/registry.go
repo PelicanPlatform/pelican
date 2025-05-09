@@ -277,126 +277,127 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 	serverPubkey := serverPrivateKey.PublicKey
 	serverVerified := verifySignature(serverPayload, serverSignature, &serverPubkey)
 
-	if clientVerified && serverVerified {
-		// Ensure the user input prefix doesn't contain any invalid characters.
-		// Also remove the trailing slash if it exists.
-		reqPrefix, err := validatePrefix(data.Prefix)
-		if err != nil {
-			err = errors.Wrapf(err, "Requested namespace %s failed validation", data.Prefix)
-			log.Errorln(err)
-			return false, nil, badRequestError{Message: err.Error()}
-		}
-		data.Prefix = reqPrefix
-
-		log.Debug("Registering namespace ", data.Prefix)
-
-		// Check if prefix exists before doing anything else
-		exists, err := namespaceExistsByPrefix(data.Prefix)
-		if err != nil {
-			log.Errorf("Failed to check if namespace already exists: %v", err)
-			return false, nil, errors.Wrap(err, "Server encountered an error checking if namespace already exists")
-		}
-		if exists {
-			returnMsg := map[string]interface{}{
-				"message": fmt.Sprintf("The prefix %s is already registered -- nothing else to do!", data.Prefix),
-			}
-			log.Infof("Skipping registration of prefix %s because it's already registered.", data.Prefix)
-			return false, returnMsg, nil
-		}
-
-		inTopo, topoNss, valErr, sysErr := validateKeyChaining(data.Prefix, key)
-		if valErr != nil {
-			log.Errorln(err)
-			return false, nil, permissionDeniedError{Message: valErr.Error()}
-		}
-		if sysErr != nil {
-			log.Errorln(err)
-			return false, nil, sysErr
-		}
-
-		var ns server_structs.Namespace
-		ns.Prefix = data.Prefix
-
-		pubkeyData, err := json.Marshal(data.Pubkey)
-		if err != nil {
-			return false, nil, errors.Wrapf(err, "Failed to convert public key from json to string format for the prefix %s", ns.Prefix)
-		}
-		ns.Pubkey = string(pubkeyData)
-		ns.Identity = data.Identity
-		ns.AdminMetadata.SiteName = data.SiteName
-
-		if data.Identity != "" {
-			idMap := map[string]interface{}{}
-			err := json.Unmarshal([]byte(data.Identity), &idMap)
-			if err != nil {
-				log.Errorln("Failed to decode non-empty Identity field:", err)
-				return false, nil, err
-			}
-			sub, ok := idMap["sub"]
-			if ok {
-				val, ok := sub.(string)
-				if ok {
-					ns.AdminMetadata.UserID = val
-				}
-			}
-			if inTopo {
-				topoNssStr := GetTopoPrefixString(topoNss)
-				ns.AdminMetadata.Description = fmt.Sprintf("[ Attention: A superspace or subspace of this prefix exists in OSDF topology: %s ] ", topoNssStr)
-			}
-			userName, ok := idMap["name"]
-			if ok {
-				val, ok := userName.(string)
-				if ok {
-					ns.AdminMetadata.Description += "User name: " + val + " "
-				}
-			}
-			email, ok := idMap["email"]
-			if ok {
-				val, ok := email.(string)
-				if ok {
-					ns.AdminMetadata.Description += "User email: " + val + " This is a namespace registration from Pelican CLI with OIDC authentication. Certain fields may not be populated"
-				}
-			}
-		} else {
-			// This is either a registration from CLI without --with-identity flag or
-			// an automated registration from origin or cache
-			ns.AdminMetadata.Description = "This is a namespace registration from Pelican CLI or an automated registration. Certain fields may not be populated"
-
-			// If the namespace is in the topology, we require identity information to register a Pelican namespace
-			// for verification purpose
-			if inTopo {
-				return false,
-					nil,
-					permissionDeniedError{Message: fmt.Sprintf("A superspace or subspace of this namespace %s already exists in the OSDF topology: %s. "+
-						"To register a Pelican equivalence, you need to present your identity. "+
-						"If you are registering through Pelican CLI, try again with the flag '--with-identity' enabled. "+
-						"If this is an auto-registration from a Pelican origin or cache server, "+
-						"register your namespace or server through the Pelican registry website at %s instead.",
-						ns.Prefix,
-						GetTopoPrefixString(topoNss),
-						registryUrl)}
-			}
-		}
-
-		// Overwrite status to Pending to filter malicious request
-		ns.AdminMetadata.Status = server_structs.RegPending
-
-		err = AddNamespace(&ns)
-		if err != nil {
-			return false, nil, errors.Wrapf(err, "Failed to add the prefix %q to the database", ns.Prefix)
-		} else {
-			msg := fmt.Sprintf("Prefix %s successfully registered", ns.Prefix)
-			if inTopo {
-				msg = fmt.Sprintf("Prefix %s successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: %s. The registry admin will review your request and approve your namespace if this is expected.", ns.Prefix, GetTopoPrefixString(topoNss))
-			}
-			return true, map[string]interface{}{
-				"message": msg,
-			}, nil
-		}
-	} else {
+	if !(clientVerified && serverVerified) {
 		return false, nil, errors.Errorf("Unable to verify the client's public key, or an encountered an error with its own: "+
 			"server verified:%t, client verified:%t", serverVerified, clientVerified)
 	}
+
+	// Ensure the user input prefix doesn't contain any invalid characters.
+	// Also remove the trailing slash if it exists.
+	reqPrefix, err := validatePrefix(data.Prefix)
+	if err != nil {
+		err = errors.Wrapf(err, "requested namespace %s failed validation", data.Prefix)
+		log.Errorln(err)
+		return false, nil, badRequestError{Message: err.Error()}
+	}
+	data.Prefix = reqPrefix
+
+	log.Debug("Registering namespace ", data.Prefix)
+
+	// Check if prefix exists before doing anything else
+	exists, err := namespaceExistsByPrefix(data.Prefix)
+	if err != nil {
+		log.Errorf("Failed to check if namespace already exists: %v", err)
+		return false, nil, errors.Wrap(err, "Server encountered an error checking if namespace already exists")
+	}
+	if exists {
+		returnMsg := map[string]interface{}{
+			"message": fmt.Sprintf("The prefix %s is already registered -- nothing else to do!", data.Prefix),
+		}
+		log.Infof("Skipping registration of prefix %s because it's already registered.", data.Prefix)
+		return false, returnMsg, nil
+	}
+
+	inTopo, topoNss, valErr, sysErr := validateKeyChaining(data.Prefix, key)
+	if valErr != nil {
+		log.Errorln(err)
+		return false, nil, permissionDeniedError{Message: valErr.Error()}
+	}
+	if sysErr != nil {
+		log.Errorln(err)
+		return false, nil, sysErr
+	}
+
+	var ns server_structs.Namespace
+	ns.Prefix = data.Prefix
+
+	pubkeyData, err := json.Marshal(data.Pubkey)
+	if err != nil {
+		return false, nil, errors.Wrapf(err, "Failed to convert public key from json to string format for the prefix %s", ns.Prefix)
+	}
+	ns.Pubkey = string(pubkeyData)
+	ns.Identity = data.Identity
+	ns.AdminMetadata.SiteName = data.SiteName
+
+	if data.Identity != "" {
+		idMap := map[string]interface{}{}
+		err := json.Unmarshal([]byte(data.Identity), &idMap)
+		if err != nil {
+			log.Errorln("Failed to decode non-empty Identity field:", err)
+			return false, nil, err
+		}
+		sub, ok := idMap["sub"]
+		if ok {
+			val, ok := sub.(string)
+			if ok {
+				ns.AdminMetadata.UserID = val
+			}
+		}
+		if inTopo {
+			topoNssStr := GetTopoPrefixString(topoNss)
+			ns.AdminMetadata.Description = fmt.Sprintf("[ Attention: A superspace or subspace of this prefix exists in OSDF topology: %s ] ", topoNssStr)
+		}
+		userName, ok := idMap["name"]
+		if ok {
+			val, ok := userName.(string)
+			if ok {
+				ns.AdminMetadata.Description += "User name: " + val + " "
+			}
+		}
+		email, ok := idMap["email"]
+		if ok {
+			val, ok := email.(string)
+			if ok {
+				ns.AdminMetadata.Description += "User email: " + val + " This is a namespace registration from Pelican CLI with OIDC authentication. Certain fields may not be populated"
+			}
+		}
+	} else {
+		// This is either a registration from CLI without --with-identity flag or
+		// an automated registration from origin or cache
+		ns.AdminMetadata.Description = "This is a namespace registration from Pelican CLI or an automated registration. Certain fields may not be populated"
+
+		// If the namespace is in the topology, we require identity information to register a Pelican namespace
+		// for verification purpose
+		if inTopo {
+			return false,
+				nil,
+				permissionDeniedError{Message: fmt.Sprintf("A superspace or subspace of this namespace %s already exists in the OSDF topology: %s. "+
+					"To register a Pelican equivalence, you need to present your identity. "+
+					"If you are registering through Pelican CLI, try again with the flag '--with-identity' enabled. "+
+					"If this is an auto-registration from a Pelican origin or cache server, "+
+					"register your namespace or server through the Pelican registry website at %s instead.",
+					ns.Prefix,
+					GetTopoPrefixString(topoNss),
+					registryUrl)}
+		}
+	}
+
+	// Overwrite status to Pending to filter malicious request
+	ns.AdminMetadata.Status = server_structs.RegPending
+
+	err = AddNamespace(&ns)
+	if err != nil {
+		return false, nil, errors.Wrapf(err, "Failed to add the prefix %q to the database", ns.Prefix)
+	} else {
+		msg := fmt.Sprintf("Prefix %s successfully registered", ns.Prefix)
+		if inTopo {
+			msg = fmt.Sprintf("Prefix %s successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: %s. The registry admin will review your request and approve your namespace if this is expected.", ns.Prefix, GetTopoPrefixString(topoNss))
+		}
+		return true, map[string]interface{}{
+			"message": msg,
+		}, nil
+	}
+
 }
 
 // Handle the namespace registration with nonce generation and verification, regardless of
