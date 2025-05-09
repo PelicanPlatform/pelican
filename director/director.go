@@ -993,6 +993,11 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		adV2 = server_structs.ConvertOriginAdV1ToV2(ad)
 	}
 
+	// Check every namespace path to strip the trailing slash
+	for i := range adV2.Namespaces {
+		adV2.Namespaces[i].Path = server_utils.RemoveTrailingSlash(adV2.Namespaces[i].Path)
+	}
+
 	// Filter the advertised prefixes in the cache server ad
 	// based on the allowed prefixes for caches data.
 	if sType == server_structs.CacheType {
@@ -1061,7 +1066,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	// Verify server registration
 	token := strings.TrimPrefix(tokens[0], "Bearer ")
 
-	registryPrefix := adV2.RegistryPrefix
+	registryPrefix := server_utils.RemoveTrailingSlash(adV2.RegistryPrefix)
 	verifyServer := true
 	if registryPrefix == "" {
 		if sType == server_structs.OriginType {

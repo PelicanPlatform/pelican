@@ -42,6 +42,9 @@ var (
 	//go:embed resources/posix-origins/multi-export-valid.yml
 	multiExportValidConfig string
 
+	//go:embed resources/posix-origins/multi-export-trailing-slash.yml
+	multiExportTrailingSlashConfig string
+
 	//go:embed resources/posix-origins/single-export-block.yml
 	singleExportBlockConfig string
 
@@ -205,6 +208,16 @@ func TestGetExports(t *testing.T) {
 		assert.Len(t, exports, 2, "expected 2 exports")
 		assert.Equal(t, expectedExport1, exports[0])
 		assert.Equal(t, expectedExport2, exports[1])
+	})
+
+	t.Run("testTrailingSlashRemovalPosix", func(t *testing.T) {
+		defer ResetTestState()
+		exports := setup(t, multiExportTrailingSlashConfig, false)
+
+		// Both trailing-slash prefixes should have been trimmed
+		assert.Len(t, exports, 2)
+		assert.Equal(t, "/first/namespace", exports[0].FederationPrefix)
+		assert.Equal(t, "/", exports[1].FederationPrefix)
 	})
 
 	t.Run("testExportVolumesValid", func(t *testing.T) {
