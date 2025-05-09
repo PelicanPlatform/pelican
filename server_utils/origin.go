@@ -260,6 +260,20 @@ func (b *BaseOrigin) validateExtra(*OriginExport, int) error {
 }
 func (b *BaseOrigin) mapSingleExtra() {}
 
+// Remove the trailing '/' in the prefix, if it exists.
+// If the prefix is '/', leave it alone.
+func RemoveTrailingSlash(prefix string) string {
+	result := prefix
+	if prefix != "/" {
+		result = strings.TrimSuffix(prefix, "/")
+	}
+	if result != prefix {
+		// We log this as a warning because it may be a sign of a misconfiguration
+		log.Warningf("Stripped trailing '/' from prefix '%s' before export", result)
+	}
+	return result
+}
+
 // Since Federation Prefixes get treated like POSIX filepaths by XRootD and other services, we need to
 // validate them to ensure funky things don't ensue.
 // Note that this isn't a part of the origin interface because it's not meant to be overridden -- _every_ origin
@@ -416,6 +430,10 @@ func (b *BaseOrigin) validateExports(o Origin) (err error) {
 	// Note that we assume we've already populated the origin export list
 	for i := range b.Exports { // validateExtra may update some parts of the export, so we need the index.
 		e := &b.Exports[i]
+
+		// strip the trailing '/' so that "/prefix" and "/prefix/" are treated identically
+		e.FederationPrefix = RemoveTrailingSlash(e.FederationPrefix)
+
 		// all fed prefixes are validated the same way -- no way to override this one!
 		if err = validateFederationPrefix(e.FederationPrefix); err != nil {
 			return

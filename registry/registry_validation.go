@@ -55,7 +55,7 @@ func validatePrefix(nspath string) (string, error) {
 	result := ""
 	for _, component := range components {
 		if len(component) == 0 {
-			continue
+			continue // This can remove the trailing '/' in nspath
 		} else if component == "." {
 			return "", errors.New("Path component cannot be '.'")
 		} else if component == ".." {
