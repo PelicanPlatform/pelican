@@ -66,7 +66,7 @@ func InitSelfTestDir() error {
 	selfTestPath := filepath.Join(basePath, selfTestDir)
 	err = config.MkdirAll(selfTestPath, 0750, uid, gid)
 	if err != nil {
-		return errors.Wrap(err, "Fail to create directory for the self-test")
+		return errors.Wrap(err, "fail to create directory for the self-test")
 	}
 	log.Debugf("Created cache self-test directory at %s", selfTestPath)
 
@@ -170,9 +170,14 @@ func generateTestFile() (string, error) {
 // when drop privileges is enabled, as the pelican server is running as an unprivileged user
 // and cannot directly create files in the selfTestDir.
 func generateTestFileViaPlugin() (string, error) {
+	user, err := config.GetPelicanUser()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get user")
+	}
+
 	// Create a temp directory own by pelican user to bypass privilege restrictions, named "birthplace"
 	selfTestBirthplace := filepath.Join(param.Monitoring_DataLocation.GetString(), "selfTest")
-	err := os.MkdirAll(selfTestBirthplace, 0750)
+	err = config.MkdirAll(selfTestBirthplace, 0750, user.Uid, user.Gid)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to create selftest directory")
 	}
