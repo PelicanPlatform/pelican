@@ -40,7 +40,6 @@ import (
 	"github.com/pelicanplatform/pelican/lotman"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/self_monitor"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/web_ui"
@@ -109,12 +108,12 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 	cache.LaunchFedTokManager(ctx, egrp, cacheServer)
 
 	if param.Cache_SelfTest.GetBool() {
-		err = self_monitor.InitSelfTestDir()
+		err = xrootd.InitSelfTestDir()
 		if err != nil {
 			return nil, err
 		}
 
-		self_monitor.PeriodicSelfTest(ctx, egrp, false)
+		xrootd.PeriodicSelfTest(ctx, egrp, false)
 	}
 
 	// Director and origin also registers this metadata URL; avoid registering twice.

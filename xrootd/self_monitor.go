@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package self_monitor
+package xrootd
 
 import (
 	"context"
@@ -41,7 +41,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
-	"github.com/pelicanplatform/pelican/xrootd"
 )
 
 const (
@@ -179,7 +178,7 @@ func generateTestFileViaPlugin() (string, error) {
 	selfTestBirthplace := filepath.Join(param.Monitoring_DataLocation.GetString(), "selfTest")
 	err = config.MkdirAll(selfTestBirthplace, 0750, user.Uid, user.Gid)
 	if err != nil {
-		return "", errors.Wrap(err, "failed to create selftest directory")
+		return "", errors.Wrap(err, "failed to create self-test directory")
 	}
 
 	// Create a test file and its cinfo in the birthplace
@@ -234,11 +233,15 @@ func generateTestFileViaPlugin() (string, error) {
 		return "", errors.Wrap(err, "failed to seek to beginning of cinfo file")
 	}
 
-	// Transplant the test file and cinfo from birthplace to the selfTestDir via xrdhttp-pelican plugin
-	if err = xrootd.SelfTestFileCopy(4, file); err != nil {
+	// Transplant the test file to selfTestDir using the xrdhttp-pelican plugin.
+	// Command "4" instructs the plugin to put the test file into the designated location, which is specified in `xrootd/launch.go`.
+	// Check `src/XrdHttpPelican.cc` in https://github.com/PelicanPlatform/xrdhttp-pelican for the counterpart in the plugin.
+	if err = SelfTestFileCopy(4, file); err != nil {
 		return "", errors.Wrap(err, "failed to copy the test file to the self-test directory")
 	}
-	if err = xrootd.SelfTestFileCopy(5, cinfoFile); err != nil {
+	// Transplant the cinfo file to selfTestDir using the xrdhttp-pelican plugin.
+	// Command "5" instructs the plugin to put the cinfo file into the designated location, which is specified in `xrootd/launch.go`.
+	if err = SelfTestFileCopy(5, cinfoFile); err != nil {
 		return "", errors.Wrap(err, "failed to copy the test cinfo file to the self-test directory")
 	}
 
@@ -418,9 +421,14 @@ func PeriodicSelfTest(ctx context.Context, ergp *errgroup.Group, isOrigin bool) 
 		customInterval = param.Origin_SelfTestInterval.GetDuration()
 	}
 
-	if customInterval == 0 {
+	// Fallback to a 15s interval, if the user sets a very small or negative interval
+	if customInterval < 1*time.Second {
 		customInterval = 15 * time.Second
-		log.Error("Invalid config value: both Origin.SelfTestInterval and Cache.SelfTestInterval are 0. Fallback to 15s.")
+		serverType := "Cache"
+		if isOrigin {
+			serverType = "Origin"
+		}
+		log.Warningf("Invalid config value: %s.SelfTestInterval. Fallback to 15s.", serverType)
 	}
 	ticker := time.NewTicker(customInterval)
 	firstRound := time.After(5 * time.Second)
