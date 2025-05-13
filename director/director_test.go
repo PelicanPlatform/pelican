@@ -1243,6 +1243,7 @@ func TestDirectorRegistration(t *testing.T) {
 		t.Run("future-to-active-toggle", func(t *testing.T) {
 			teardown()
 			c, r, w := setupContext()
+			now := time.Now().UTC().UnixMilli()
 
 			pKey, token, _ := generateToken()
 			pub, err := jwk.PublicKeyOf(pKey)
@@ -1267,7 +1268,10 @@ func TestDirectorRegistration(t *testing.T) {
 			// 2) now active
 			ad2 := baseAd
 			ad2.Downtimes = []server_structs.Downtime{
-				makeDT(now-1_000, now+1_000),
+				// A new active downtime with 20s (+/-10s) window to prevent it expiring
+				// before the server ad gets to the Director, which results in a flaky test.
+				// This should clear the previous future downtime.
+				makeDT(now-10_000, now+10_000),
 			}
 			ad2.Initialize("test-cache")
 			body2, _ := json.Marshal(ad2)
