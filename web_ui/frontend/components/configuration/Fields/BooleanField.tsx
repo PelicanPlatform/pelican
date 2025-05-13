@@ -1,13 +1,7 @@
-import {
-  FormControl,
-  InputLabel,
-  MenuItem,
-  Select,
-  SelectChangeEvent,
-} from '@mui/material';
-import React, { useMemo, useCallback } from 'react';
+import { FormControl, InputLabel, MenuItem, Select } from '@mui/material';
+import React, { useMemo } from 'react';
 
-import { createId, buildPatch } from '../util';
+import { createId } from '../util';
 
 export type BooleanFieldProps = {
   name: string;

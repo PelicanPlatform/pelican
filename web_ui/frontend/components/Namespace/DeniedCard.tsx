@@ -1,15 +1,12 @@
-import React, { useContext, useMemo, useRef, useState } from 'react';
+import React, { useContext, useRef, useState } from 'react';
 import { green, red } from '@mui/material/colors';
-import { Authenticated, secureFetch } from '@/helpers/login';
 import { Avatar, Box, IconButton, Tooltip, Typography } from '@mui/material';
-import { Block, Check, Delete, Edit, Person } from '@mui/icons-material';
-import { Alert, RegistryNamespace } from '@/index';
+import { Check, Delete, Person } from '@mui/icons-material';
+import { Alert, RegistryNamespace, User } from '@/index';
 import InformationDropdown from './InformationDropdown';
-import { getServerType, NamespaceIcon } from '@/components/Namespace/index';
+import { NamespaceIcon } from '@/components/Namespace/index';
 import { AlertContext, AlertDispatchContext } from '@/components/AlertProvider';
-import { User } from '@/index';
 import { useSWRConfig } from 'swr';
-import CodeBlock from '@/components/CodeBlock';
 import { approveNamespace, deleteNamespace } from '@/helpers/api';
 import { alertOnError } from '@/helpers/util';
 

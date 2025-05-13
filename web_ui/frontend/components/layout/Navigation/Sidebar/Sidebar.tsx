@@ -19,7 +19,7 @@
 import { Box } from '@mui/material';
 
 import styles from '../../../../app/page.module.css';
-import React, { ReactNode } from 'react';
+import React from 'react';
 
 import UserMenu from './UserMenu';
 import { default as NextLink } from 'next/link';

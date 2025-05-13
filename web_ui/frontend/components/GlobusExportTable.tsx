@@ -29,7 +29,7 @@ import {
 } from '@mui/material';
 import { CheckCircle, Warning } from '@mui/icons-material';
 
-import { MouseEventHandler, ReactElement } from 'react';
+import { ReactElement } from 'react';
 import useSWR from 'swr';
 import { ValueLabel } from './DataExportTable';
 

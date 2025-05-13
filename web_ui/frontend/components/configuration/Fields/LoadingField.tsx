@@ -1,4 +1,4 @@
-import { LinearProgress, TextField, Box } from '@mui/material';
+import { Box, LinearProgress, TextField } from '@mui/material';
 import React from 'react';
 
 interface LoadingFieldProps {

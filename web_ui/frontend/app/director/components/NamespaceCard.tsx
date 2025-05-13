@@ -1,9 +1,8 @@
-import { secureFetch } from '@/helpers/login';
 import React, { useContext, useState } from 'react';
 import { Box, Paper, Typography } from '@mui/material';
 import { NamespaceIcon } from '@/components/Namespace/index';
 import { NamespaceDropdown } from './NamespaceDropdown';
-import { DirectorNamespace, ServerDetailed, ServerGeneral } from '@/types';
+import { DirectorNamespace, ServerDetailed } from '@/types';
 import { getDirectorServer } from '@/helpers/api';
 import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';

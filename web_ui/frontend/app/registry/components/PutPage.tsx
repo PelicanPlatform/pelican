@@ -18,25 +18,11 @@
 
 'use client';
 
-import {
-  Box,
-  Grid,
-  Typography,
-  Collapse,
-  Alert,
-  Skeleton,
-} from '@mui/material';
-import React, {
-  ReactNode,
-  Suspense,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
+import { Grid, Skeleton } from '@mui/material';
+import React, { useContext, useEffect, useState } from 'react';
 
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
-import { RegistryNamespace, Alert as AlertType } from '@/index';
+import { RegistryNamespace } from '@/index';
 import Form from '@/app/registry/components/Form';
 import { submitNamespaceForm } from '@/app/registry/components/util';
 import { getNamespace } from '@/helpers/api';

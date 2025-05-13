@@ -1,14 +1,13 @@
-import { Box, Grid, Paper, Typography } from '@mui/material';
-import { green, grey, blue } from '@mui/material/colors';
+import { Box, Grid, Paper } from '@mui/material';
+import { blue, green, grey } from '@mui/material/colors';
 
 import {
-  BigMetric,
-  ProjectTable,
   BigBytesMetric,
-  TransferRateGraph,
+  BigMetric,
   CPUGraph,
   MemoryGraph,
-  StorageGraph,
+  ProjectTable,
+  TransferRateGraph,
 } from '@/components/metrics';
 import { buildMetric as bm } from '@/components';
 

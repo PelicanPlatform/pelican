@@ -1,15 +1,13 @@
 import React, { useCallback } from 'react';
-import { Box, Button, TextField } from '@mui/material';
+import { Box, Button } from '@mui/material';
 
 import {
   FormProps,
-  Action,
   IPMapping,
   IPMappingFine,
   StringField,
 } from '@/components/configuration';
 import { verifyIpAddress } from '@/components/configuration/util';
-import { DefaultMap, SinglePointMap } from '@/components/Map';
 
 const verifySourceIp = (x: string) => {
   const isValidIp =

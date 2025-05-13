@@ -1,6 +1,6 @@
 import { Box, Tooltip, Typography } from '@mui/material';
 import { grey } from '@mui/material/colors';
-import React, { ReactNode } from 'react';
+import React from 'react';
 
 export const InformationSpanHeader = ({
   title,

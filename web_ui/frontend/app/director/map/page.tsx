@@ -18,9 +18,7 @@
 
 'use client';
 
-import { Box } from '@mui/material';
 import useSWR from 'swr';
-import { Server } from '@/index';
 import { ServerMap } from '@/components/Map';
 import { useContext } from 'react';
 import { AlertDispatchContext } from '@/components/AlertProvider';

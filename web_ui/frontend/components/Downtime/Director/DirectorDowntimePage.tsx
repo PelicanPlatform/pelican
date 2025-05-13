@@ -8,8 +8,8 @@ import { CalendarDateTimeProvider } from '@/components/Downtime/CalendarContext'
 import DirectorDowntimePageHeader from './DirectorDowntimePageHeader';
 import useApiSWR from '@/hooks/useApiSWR';
 import { DowntimeGet } from '@/types';
-import { DirectorDowntimeKey, ServerDowntimeKey } from '@/components/Downtime';
-import { getDirectorDowntime, getDowntime } from '@/helpers/api';
+import { DirectorDowntimeKey } from '@/components/Downtime';
+import { getDirectorDowntime } from '@/helpers/api';
 
 const ServerDowntimePage = () => {
   const { data } = useApiSWR<DowntimeGet[]>(

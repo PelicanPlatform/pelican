@@ -19,9 +19,8 @@
 'use client';
 
 import Image from 'next/image';
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import styles from '../../app/page.module.css';
-import { Poppins } from 'next/font/google';
 
 import PelicanLogo from '../../public/static/images/PelicanPlatformLogo_Icon.png';
 import GithubIcon from '../../public/static/images/github-mark.png';

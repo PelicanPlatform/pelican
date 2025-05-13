@@ -18,17 +18,16 @@
 
 'use client';
 
-import React, { useState, useReducer, useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Box,
-  Typography,
-  FormGroup,
-  FormControlLabel,
-  Switch,
-  Skeleton,
-  Grid,
   Button,
+  FormControlLabel,
+  FormGroup,
+  Grid,
   Snackbar,
+  Switch,
+  Typography,
 } from '@mui/material';
 import { green, grey } from '@mui/material/colors';
 import useSWR from 'swr';

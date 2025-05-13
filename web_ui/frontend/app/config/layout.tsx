@@ -16,8 +16,7 @@
  *
  ***************************************************************/
 
-import { Box } from '@mui/material';
-import { PaddedContent, Main } from '@/components/layout';
+import { Main, PaddedContent } from '@/components/layout';
 import { Navigation } from '@/components/layout/Navigation';
 
 export const metadata = {

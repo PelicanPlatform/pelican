@@ -1,11 +1,5 @@
-import {
-  FormControl,
-  InputLabel,
-  MenuItem,
-  Select,
-  Checkbox,
-} from '@mui/material';
-import React, { ChangeEvent, ReactNode, SyntheticEvent, useMemo } from 'react';
+import { FormControl, InputLabel, MenuItem, Select } from '@mui/material';
+import React, { useMemo } from 'react';
 
 import { createId } from '@/components/configuration/util';
 import FormHelperText from '@mui/material/FormHelperText';

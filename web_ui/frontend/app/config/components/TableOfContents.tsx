@@ -4,7 +4,7 @@ import {
   ParameterMetadata,
   ParameterMetadataRecord,
 } from '@/components/configuration/index';
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Box, Link, Typography } from '@mui/material';
 import { ArrowDropDown, ArrowDropUp } from '@mui/icons-material';
 import {

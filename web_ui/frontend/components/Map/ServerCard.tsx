@@ -1,4 +1,4 @@
-import { Box, Grid, Typography } from '@mui/material';
+import { Box, Grid } from '@mui/material';
 import { InformationSpan } from '@/components';
 import { ServerCapabilitiesTable } from '@/components/ServerCapabilitiesTable';
 import React from 'react';

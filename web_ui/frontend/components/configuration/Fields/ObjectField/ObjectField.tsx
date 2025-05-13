@@ -1,24 +1,24 @@
-import React, { ReactElement, useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   Box,
   Button,
-  IconButton,
-  Tooltip,
-  Typography,
-  Modal,
   Checkbox,
   FormControlLabel,
+  IconButton,
+  Modal,
+  Tooltip,
+  Typography,
 } from '@mui/material';
 import {
-  Edit,
   Add,
+  Delete,
+  Edit,
   KeyboardArrowDown,
   KeyboardArrowUp,
   KeyboardDoubleArrowDown,
-  Delete,
 } from '@mui/icons-material';
 import { ClickAwayListener } from '@mui/base';
-import { isEmpty, isEqual, merge } from 'lodash';
+import { isEmpty } from 'lodash';
 
 import ObjectModal from './ObjectModal';
 
