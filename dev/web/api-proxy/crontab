@@ -1,0 +1,1 @@
+19,39,59 * * * * /opt/bin/login.sh >> /var/log/cron.log 2>&1
