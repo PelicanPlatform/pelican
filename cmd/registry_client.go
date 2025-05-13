@@ -38,6 +38,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 )
 
@@ -113,15 +114,19 @@ func registerANamespace(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	siteName := param.Xrootd_Sitename.GetString()
+	if siteName == "" {
+		log.Errorf("Server name isn't set. Please set the name via %s", param.Xrootd_Sitename.GetName())
+		os.Exit(1)
+	}
 	if withIdentity {
-		// We haven't added support to pass sitename from CLI, so leave it empty
-		err := registry.NamespaceRegisterWithIdentity(privateKey, registrationEndpointURL, prefix, "")
+		err := registry.NamespaceRegisterWithIdentity(privateKey, registrationEndpointURL, prefix, siteName)
 		if err != nil {
 			log.Errorf("Failed to register prefix %s with identity: %v", prefix, err)
 			os.Exit(1)
 		}
 	} else {
-		err := registry.NamespaceRegister(privateKey, registrationEndpointURL, "", prefix, "")
+		err := registry.NamespaceRegister(privateKey, registrationEndpointURL, "", prefix, siteName)
 		if err != nil {
 			log.Errorf("Failed to register prefix %s: %v", prefix, err)
 			os.Exit(1)
