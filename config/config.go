@@ -1076,6 +1076,8 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Registry_RequireKeyChaining.GetName(), true)
 	v.SetDefault(param.Origin_StorageType.GetName(), "posix")
 	v.SetDefault(param.Origin_SelfTest.GetName(), true)
+	v.SetDefault(param.Origin_SelfTestInterval.GetName(), 15*time.Second)
+	v.SetDefault(param.Cache_SelfTestInterval.GetName(), 15*time.Second)
 	v.SetDefault(param.Origin_DirectorTest.GetName(), true)
 	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml because
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)

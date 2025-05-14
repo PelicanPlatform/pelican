@@ -39,6 +39,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/daemon"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 type (
@@ -158,6 +159,12 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CA_FILE="+filepath.Join(xrootdRun, "ca-bundle.crt"))
 		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CERT_FILE="+filepath.Join(xrootdRun, "copied-tls-creds.crt"))
 		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_INFO_FD="+strconv.Itoa(result.fds[1]))
+
+		basePath := filepath.Join(param.Cache_NamespaceLocation.GetString(), server_utils.MonitoringBaseNs, "selfTest")
+		testFileLocation := filepath.Join(basePath, "self-test-cache-server.txt")
+		testFileCinfoLocation := filepath.Join(basePath, "self-test-cache-server.txt.cinfo")
+		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CACHE_SELF_TEST_FILE="+testFileLocation)
+		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CACHE_SELF_TEST_FILE_CINFO="+testFileCinfoLocation)
 	}
 	return
 }
