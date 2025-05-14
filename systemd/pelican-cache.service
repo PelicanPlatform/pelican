@@ -1,6 +1,8 @@
 [Unit]
 Description = Pelican service pelican-cache
 After = network.target nss-lookup.target
+StartLimitIntervalSec = 60
+StartLimitBurst = 3
 
 [Service]
 EnvironmentFile = -/etc/sysconfig/pelican-cache
