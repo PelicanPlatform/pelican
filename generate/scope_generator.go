@@ -128,15 +128,15 @@ func GenTokenScope() {
 	defer f.Close()
 
 	err = tokenTemplate.Execute(f, struct {
-		Scopes        []ScopeName
-		WlcgScopes []ScopeName
+		Scopes          []ScopeName
+		WlcgScopes      []ScopeName
 		ScitokensScopes []ScopeName
-		LotmanScopes  []ScopeName
+		LotmanScopes    []ScopeName
 	}{
-		Scopes:        scopes,
-		WlcgScopes: wlcgScopes,
+		Scopes:          scopes,
+		WlcgScopes:      wlcgScopes,
 		ScitokensScopes: scitokensScopes,
-		LotmanScopes:  lotmanScopes,
+		LotmanScopes:    lotmanScopes,
 	})
 
 	if err != nil {

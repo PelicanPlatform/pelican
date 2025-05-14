@@ -48,18 +48,18 @@ type (
 	StorageTokenProfile interface {
 		TokenProfile
 
-		ReadScope(string)   token_scopes.TokenScope
-		WriteScope(string)  token_scopes.TokenScope
+		ReadScope(string) token_scopes.TokenScope
+		WriteScope(string) token_scopes.TokenScope
 		ModifyScope(string) token_scopes.TokenScope
-		StageScope(string)  token_scopes.TokenScope
+		StageScope(string) token_scopes.TokenScope
 
 		AnyAudience() string
 	}
-	NoneTokenProfile struct{}
-	WlcgProfile struct{}
+	NoneTokenProfile  struct{}
+	WlcgProfile       struct{}
 	Scitokens2Profile struct{}
 
-	TokenConfig  struct {
+	TokenConfig struct {
 		tokenProfile TokenProfile
 		Lifetime     time.Duration     // Lifetime is used to set 'exp' claim from now
 		Issuer       string            // Issuer is 'iss' claim

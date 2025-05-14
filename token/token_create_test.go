@@ -242,7 +242,7 @@ func TestCreateToken(t *testing.T) {
 	assert.EqualError(t, err, "invalid tokenConfig: the 'audience' claim is required for the scitokens2 profile, but it could not be found")
 
 	// Test that additional claims can be passed into the token
-	tokenConfig = TokenConfig{tokenProfile:  WlcgProfile{}, audience: []string{"foo"}, Subject: "bar", Lifetime: time.Minute * 10, Claims: map[string]string{"foo": "bar"}}
+	tokenConfig = TokenConfig{tokenProfile: WlcgProfile{}, audience: []string{"foo"}, Subject: "bar", Lifetime: time.Minute * 10, Claims: map[string]string{"foo": "bar"}}
 	token, err := tokenConfig.CreateToken()
 	require.NoError(t, err)
 	jwt, err := jwt.ParseString(token, jwt.WithVerify(false))
@@ -253,7 +253,7 @@ func TestCreateToken(t *testing.T) {
 
 	// Test providing issuer via claim
 	viper.Set("IssuerUrl", "")
-	tokenConfig = TokenConfig{tokenProfile:  WlcgProfile{}, audience: []string{"foo"}, Subject: "bar", Issuer: "https://localhost:9999", Lifetime: time.Minute * 10}
+	tokenConfig = TokenConfig{tokenProfile: WlcgProfile{}, audience: []string{"foo"}, Subject: "bar", Issuer: "https://localhost:9999", Lifetime: time.Minute * 10}
 	_, err = tokenConfig.CreateToken()
 	assert.NoError(t, err)
 
