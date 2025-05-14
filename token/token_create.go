@@ -334,12 +334,11 @@ func (config *TokenConfig) GetScope() string {
 }
 
 // CreateToken validates a JWT TokenConfig and if it's valid, create and sign a token based on the TokenConfig.
-func (tokenConfig *TokenConfig) CreateToken() (string, error) {
-
+func (tokenConfig *TokenConfig) CreateToken(signingKey ...string) (string, error) {
 	// Now that we have a token, it needs signing. Note that GetIssuerPrivateJWK
 	// will get the private key passed via the command line because that
 	// file path has already been bound to IssuerKey
-	key, err := config.GetIssuerPrivateJWK()
+	key, err := config.GetIssuerPrivateJWK(signingKey...)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to load signing keys. Either generate one at the default "+
 			"location by serving an origin, or provide one via the --private-key flag")
@@ -429,6 +428,7 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 		return "", errors.Wrap(err, "Failed to assign kid to the token")
 	}
 
+	log.Debugln("Signing token with key id:", key.KeyID())
 	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to sign the deletion token")
