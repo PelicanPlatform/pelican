@@ -1,6 +1,6 @@
 # ***************************************************************
 #
-#  Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+#  Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
 #
 #  Licensed under the Apache License, Version 2.0 (the "License"); you
 #  may not use this file except in compliance with the License.  You may
@@ -21,13 +21,16 @@ version: 2
 
 release:
   prerelease: true
+
 before:
   hooks:
     - go mod tidy
     - go generate ./...
     - make web-build
 builds:
-  - env:
+  - &build-pelican
+    id: pelican
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
@@ -37,13 +40,15 @@ builds:
       - "amd64"
       - "arm64"
       - "ppc64le"
-    id: "pelican"
     dir: ./cmd
     binary: pelican
     tags:
       - forceposix
     ldflags:
-      - -s -w -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version={{.Version}}
+      - &ldflags-metadata
+        -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version={{.Version}}
+      - &ldflags-strip-symbols
+        -s -w
     ignore:
       - goos: windows
         goarch: arm64
@@ -51,23 +56,35 @@ builds:
         goarch: ppc64le
       - goos: darwin
         goarch: ppc64le
-  # Set things up to build a second server binary that enables Lotman. Eventually
-  # we'll also use this to filter which modules are built into the binary.
-  - env:
+
+  # Build a `pelican` binary that includes debugging symbols.
+  - <<: *build-pelican
+    id: pelican-debug
+    gcflags:
+      # From https://go.dev/doc/gdb: Disable inlining of function invocations.
+      - all="-N"
+    ldflags:
+      - *ldflags-metadata
+
+  # Build a second, server binary that enables Lotman. Eventually, we'll
+  # also use this to filter which modules are built into the binary.
+  - id: pelican-server
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
     goarch:
       - "amd64"
       - "arm64"
-    id: "pelican-server"
     dir: ./cmd
     binary: pelican-server
     tags:
       - forceposix
       - lotman
     ldflags:
-      - -s -w -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version={{.Version}}
+      - *ldflags-metadata
+      - *ldflags-strip-symbols
+
 # Goreleaser complains if there's a different number of binaries built for different architectures
 # in the same archive. Instead of plopping pelican-server in the same archive as pelican, split the
 # builds into separate archives.
@@ -107,7 +124,9 @@ changelog:
       - Merge branch
 
 nfpms:
-  - package_name: pelican
+  - &package-pelican
+    id: pelican
+    package_name: pelican
     builds:
       - pelican
     # Note that git tags like v7.0.0-rc.1 will be modified by goreleaser when building
@@ -115,7 +134,6 @@ nfpms:
     # signifies some version substring should be sorted as less than the rest of the version,
     # so that v7.0.0~rc.1-1 < v7.0.0-1.
     file_name_template: "{{ .ConventionalFileName }}"
-    id: pelican
     vendor: OSG Consortium
     homepage: https://pelicanplatform.org
     maintainer: Pelican Team <help@pelicanplatform.org>
@@ -256,10 +274,25 @@ nfpms:
           preinstall: "scripts/preinstall-alpine.sh"
   # end package pelican
 
-  - package_name: pelican-osdf-compat
+  - <<: *package-pelican
+    id: pelican-debug
+    package_name: pelican-debug
+    builds:
+      - pelican-debug
+    description: Command-line copy tool for the Open Science Data Federation (includes debug symbols)
+    formats:
+      - rpm
+    provides:
+      # brianaydemir 2025-05-15: Because some software, e.g., HTCSS, has
+      # a version constraint on `pelican`, we need to include some version
+      # here. However, I have found no way to refer to {{ .Version }}.
+      - pelican = 7.16.1
+  # end package pelican-debug
+
+  - id: pelican-osdf-compat
+    package_name: pelican-osdf-compat
     builds: []
     file_name_template: "{{ .ConventionalFileName }}"
-    id: pelican-osdf-compat
     vendor: OSG Consortium
     homepage: https://pelicanplatform.org
     maintainer: Pelican Team <help@pelicanplatform.org>
@@ -344,13 +377,13 @@ nfpms:
           - "osdf-client (<< 7)"
           - "stashcp (<< 7)"
           - "condor-stash-plugin (<< 7)"
-  # end package pelican-osdf-compet
+  # end package pelican-osdf-compat
 
-  - package_name: pelican-server
+  - id: pelican-server
+    package_name: pelican-server
     builds:
       - pelican-server
     file_name_template: "{{ .ConventionalFileName }}"
-    id: pelican-server
     vendor: OSG Consortium
     homepage: https://pelicanplatform.org
     maintainer: Pelican Team <help@pelicanplatform.org>
@@ -419,7 +452,6 @@ nfpms:
           owner: root
           group: root
           mode: 0700
-
     overrides:
       rpm:
         provides:
