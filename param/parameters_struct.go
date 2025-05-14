@@ -214,6 +214,7 @@ type Config struct {
 		ClientSecretFile string `mapstructure:"clientsecretfile" yaml:"ClientSecretFile"`
 		DeviceAuthEndpoint string `mapstructure:"deviceauthendpoint" yaml:"DeviceAuthEndpoint"`
 		Issuer string `mapstructure:"issuer" yaml:"Issuer"`
+		Scopes []string `mapstructure:"scopes" yaml:"Scopes"`
 		TokenEndpoint string `mapstructure:"tokenendpoint" yaml:"TokenEndpoint"`
 		UserInfoEndpoint string `mapstructure:"userinfoendpoint" yaml:"UserInfoEndpoint"`
 	} `mapstructure:"oidc" yaml:"OIDC"`
@@ -583,6 +584,7 @@ type configWithType struct {
 		ClientSecretFile struct { Type string; Value string }
 		DeviceAuthEndpoint struct { Type string; Value string }
 		Issuer struct { Type string; Value string }
+		Scopes struct { Type string; Value []string }
 		TokenEndpoint struct { Type string; Value string }
 		UserInfoEndpoint struct { Type string; Value string }
 	}

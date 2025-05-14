@@ -142,6 +142,7 @@ OIDC:
   DeviceAuthEndpoint: "https://cilogon.org/oauth2/device_authorization"
   TokenEndpoint: "https://cilogon.org/oauth2/token"
   UserInfoEndpoint: "https://cilogon.org/oauth2/userinfo"
+  Scopes: ["openid", "email", "profile"]
 Issuer:
   TomcatLocation: /opt/tomcat
   ScitokensServerLocation: /opt/scitokens-server

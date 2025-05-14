@@ -2807,6 +2807,13 @@ type: url
 default: https://cilogon.org
 components: ["registry", "origin", "cache", "director"]
 ---
+name: OIDC.Scopes
+description: |+
+  A list of scopes to request from the authentication provider.
+type: stringSlice
+default: ["openid", "email", "profile"]
+components: ["registry", "origin", "cache", "director"]
+---
 name: OIDC.ClientRedirectHostname
 description: |+
   The hostname for the OIDC client redirect URL that the OIDC provider will redirect to after the user is authenticated.
