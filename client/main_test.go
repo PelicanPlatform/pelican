@@ -527,7 +527,7 @@ func TestTokenIsAcceptableForSciTokens(t *testing.T) {
 	}
 
 	// 2) Construct a SciToken JWT with ver="scitokens:2.0" and scope "storage.read:/bar"
-	tc, err := token.NewTokenConfig(token.TokenProfileScitokens2)
+	tc, err := token.NewTokenConfig(token.Scitokens2Profile{})
 	require.NoError(t, err)
 	tc.Lifetime = time.Hour
 	tc.Issuer = "https://issuer.example"
