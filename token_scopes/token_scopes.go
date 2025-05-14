@@ -2,7 +2,7 @@
 // To make changes to source, see generate/scope_generator.go and docs/scopes.yaml
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -41,11 +41,15 @@ const (
 	Broker_Callback TokenScope = "broker.callback"
 	Localcache_Purge TokenScope = "localcache.purge"
 
-	// Storage Scopes
-	Storage_Read TokenScope = "storage.read"
-	Storage_Create TokenScope = "storage.create"
-	Storage_Modify TokenScope = "storage.modify"
-	Storage_Stage TokenScope = "storage.stage"
+	// WLCG Scopes
+	Wlcg_Storage_Read TokenScope = "storage.read"
+	Wlcg_Storage_Create TokenScope = "storage.create"
+	Wlcg_Storage_Modify TokenScope = "storage.modify"
+	Wlcg_Storage_Stage TokenScope = "storage.stage"
+
+	// Scitokens Scopes
+	Scitokens_Read TokenScope = "read"
+	Scitokens_Write TokenScope = "write"
 
 	// Lotman Scopes
 	Lot_Create TokenScope = "lot.create"
@@ -61,8 +65,8 @@ func (s TokenScope) String() string {
 // Interface that allows us to assign a path to some token scopes, such as "storage.read:/foo/bar"
 func (s TokenScope) Path(path string) (TokenScope, error) {
 	// Only some of the token scopes can be assigned a path. This list might grow in the future.
-	if !(s == Storage_Read || s == Storage_Create || s == Storage_Modify || s == Storage_Stage || false) { // final "false" is a hack so we don't have to post process the template we generate from
-		return "", errors.New("cannot assign path to non-storage token scope")
+	if !(s == Wlcg_Storage_Read || s == Wlcg_Storage_Create || s == Wlcg_Storage_Modify || s == Wlcg_Storage_Stage || s == Scitokens_Read || s == Scitokens_Write || false) { // final "false" is a hack so we don't have to post process the template we generate from
+		return "", errors.New("cannot assign path to non-wlcg or non-scitokens2 token scope")
 	}
 
 	return TokenScope(s.String() + ":" + path), nil

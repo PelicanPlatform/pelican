@@ -110,7 +110,7 @@ func TestFedAuthGet(t *testing.T) {
 	tokConf.Issuer = issuer
 	tokConf.Subject = "test"
 	tokConf.AddAudienceAny()
-	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/not_correct"))
+	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/not_correct"))
 
 	token, err := tokConf.CreateToken()
 	require.NoError(t, err)
@@ -197,7 +197,7 @@ func TestHttpFailures(t *testing.T) {
 	tokConf.Issuer = issuer
 	tokConf.Subject = "test"
 	tokConf.AddAudienceAny()
-	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/no_such_file"))
+	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/no_such_file"))
 	token, err := tokConf.CreateToken()
 	require.NoError(t, err)
 
@@ -360,7 +360,7 @@ func TestClient(t *testing.T) {
 		tokConf.Issuer = issuer
 		tokConf.Subject = "test"
 		tokConf.AddAudienceAny()
-		tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/hello_world.txt.1"))
+		tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/hello_world.txt.1"))
 
 		token, err := tokConf.CreateToken()
 		require.NoError(t, err)

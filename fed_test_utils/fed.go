@@ -274,7 +274,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	tokConf.Issuer = issuer
 	tokConf.Subject = "test"
 	tokConf.AddAudienceAny()
-	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/hello_world.txt"))
+	tokConf.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/hello_world.txt"))
 
 	token, err := tokConf.CreateToken()
 	require.NoError(t, err)

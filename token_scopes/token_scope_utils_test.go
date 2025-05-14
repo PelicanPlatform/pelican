@@ -101,15 +101,15 @@ func TestResourceScopes(t *testing.T) {
 		otherScope ResourceScope
 		expected   bool
 	}{
-		{"diffScope", NewResourceScope(Storage_Create, "/"), NewResourceScope(Storage_Modify, "/"), false},
-		{"same", NewResourceScope(Storage_Create, ""), NewResourceScope(Storage_Create, ""), true},
-		{"default", NewResourceScope(Storage_Create, ""), NewResourceScope(Storage_Create, "/"), true},
-		{"sub", NewResourceScope(Storage_Create, ""), NewResourceScope(Storage_Create, "/foo"), true},
-		{"subDeep", NewResourceScope(Storage_Create, "/foo"), NewResourceScope(Storage_Create, "/foo/bar"), true},
-		{"subClean", NewResourceScope(Storage_Create, "/foo"), NewResourceScope(Storage_Create, "/foo/"), true},
-		{"noPath", NewResourceScope(Storage_Create, "/foo"), NewResourceScope(Storage_Create, "/foobar"), false},
-		{"sameDeep", NewResourceScope(Storage_Create, "/foo/bar"), NewResourceScope(Storage_Create, "/foo/bar"), true},
-		{"sameDeep", NewResourceScope(Storage_Create, "/foo/bar"), NewResourceScope(Storage_Create, "/foo/barbaz"), false},
+		{"diffScope", NewResourceScope(Wlcg_Storage_Create, "/"), NewResourceScope(Wlcg_Storage_Modify, "/"), false},
+		{"same", NewResourceScope(Wlcg_Storage_Create, ""), NewResourceScope(Wlcg_Storage_Create, ""), true},
+		{"default", NewResourceScope(Wlcg_Storage_Create, ""), NewResourceScope(Wlcg_Storage_Create, "/"), true},
+		{"sub", NewResourceScope(Wlcg_Storage_Create, ""), NewResourceScope(Wlcg_Storage_Create, "/foo"), true},
+		{"subDeep", NewResourceScope(Wlcg_Storage_Create, "/foo"), NewResourceScope(Wlcg_Storage_Create, "/foo/bar"), true},
+		{"subClean", NewResourceScope(Wlcg_Storage_Create, "/foo"), NewResourceScope(Wlcg_Storage_Create, "/foo/"), true},
+		{"noPath", NewResourceScope(Wlcg_Storage_Create, "/foo"), NewResourceScope(Wlcg_Storage_Create, "/foobar"), false},
+		{"sameDeep", NewResourceScope(Wlcg_Storage_Create, "/foo/bar"), NewResourceScope(Wlcg_Storage_Create, "/foo/bar"), true},
+		{"sameDeep", NewResourceScope(Wlcg_Storage_Create, "/foo/bar"), NewResourceScope(Wlcg_Storage_Create, "/foo/barbaz"), false},
 	}
 
 	for _, tt := range tests {
@@ -132,5 +132,5 @@ func TestParseResources(t *testing.T) {
 	assert.Equal(t, []ResourceScope{{Authorization: TokenScope("foo"), Resource: "/"}, {Authorization: TokenScope("bar"), Resource: "/"}}, ParseResourceScopeString(tok))
 
 	require.NoError(t, tok.Set("scope", "storage.create:/foo"))
-	assert.Equal(t, []ResourceScope{{Authorization: Storage_Create, Resource: "/foo"}}, ParseResourceScopeString(tok))
+	assert.Equal(t, []ResourceScope{{Authorization: Wlcg_Storage_Create, Resource: "/foo"}}, ParseResourceScopeString(tok))
 }
