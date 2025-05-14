@@ -16,8 +16,6 @@
  *
  ***************************************************************/
 
-import { Box } from '@mui/material';
-
 import { Header } from '@/components/layout/Header';
 import { Main, PaddedContent } from '@/components/layout';
 

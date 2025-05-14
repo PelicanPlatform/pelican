@@ -4,7 +4,7 @@ import { cloneElement, JSXElementConstructor, ReactElement } from 'react';
 import NavigationConfiguration from '@/app/navigation';
 import { StaticNavigationChildItemProps } from '@/components/layout/Navigation';
 import Link from 'next/link';
-import { Box, Typography } from '@mui/material';
+import { Box } from '@mui/material';
 import { evaluateOrReturn } from '@/helpers/util';
 import { usePathname } from 'next/navigation';
 

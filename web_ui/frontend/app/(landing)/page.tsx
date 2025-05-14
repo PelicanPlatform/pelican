@@ -18,15 +18,13 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
   Box,
   Container,
-  Grid,
   List,
   ListItemButton,
   ListItemText,
-  Skeleton,
   Typography,
 } from '@mui/material';
 import Link from 'next/link';

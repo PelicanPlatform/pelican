@@ -1,31 +1,13 @@
+import { Box, IconButton, TextField, Tooltip, Typography } from '@mui/material';
 import {
-  FormControl,
-  InputLabel,
-  MenuItem,
-  Select,
-  SelectChangeEvent,
-  TextField,
-  Box,
-  Tooltip,
-  IconButton,
-  Typography,
-} from '@mui/material';
-import {
+  Close,
   KeyboardArrowDown,
   KeyboardArrowUp,
   KeyboardDoubleArrowDown,
-  Edit,
-  Close,
 } from '@mui/icons-material';
-import React, {
-  useMemo,
-  useCallback,
-  ChangeEvent,
-  KeyboardEvent,
-  useEffect,
-} from 'react';
+import React, { KeyboardEvent, useCallback, useEffect, useMemo } from 'react';
 
-import { createId, buildPatch, stringSort } from '../util';
+import { createId } from '../util';
 
 export type StringSliceFieldProps = {
   name: string;

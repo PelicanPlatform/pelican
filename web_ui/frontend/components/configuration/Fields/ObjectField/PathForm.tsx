@@ -2,10 +2,10 @@ import React, { useCallback } from 'react';
 import { Box, Button } from '@mui/material';
 
 import {
+  BooleanField,
   FormProps,
   Path,
   StringField,
-  BooleanField,
 } from '@/components/configuration';
 
 const verifyForm = (x: Path) => {

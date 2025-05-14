@@ -1,5 +1,5 @@
-import useSWR, { BareFetcher, SWRConfiguration, SWRResponse } from 'swr';
-import { useContext, useCallback } from 'react';
+import useSWR, { SWRConfiguration } from 'swr';
+import { useCallback, useContext } from 'react';
 
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';

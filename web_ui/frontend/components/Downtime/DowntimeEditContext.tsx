@@ -7,10 +7,10 @@
 
 import {
   createContext,
-  ReactNode,
-  useState,
-  SetStateAction,
   Dispatch,
+  ReactNode,
+  SetStateAction,
+  useState,
 } from 'react';
 import { DowntimeGet, DowntimePost } from '@/types';
 

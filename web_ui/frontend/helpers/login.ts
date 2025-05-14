@@ -1,5 +1,4 @@
 import { User } from '@/index';
-import React from 'react';
 
 export interface Authenticated {
   authenticated: boolean;

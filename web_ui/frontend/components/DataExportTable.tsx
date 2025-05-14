@@ -1,24 +1,24 @@
 'use client';
 
 import Link from 'next/link';
-import { green, grey, orange, red } from '@mui/material/colors';
+import { grey, red } from '@mui/material/colors';
 import {
-  Typography,
+  Alert,
   Box,
   BoxProps,
   Button,
   Grid,
-  Tooltip,
-  Pagination,
-  Paper,
-  Alert,
   IconButton,
   LinearProgress,
+  Pagination,
+  Paper,
+  Skeleton,
+  Tooltip,
+  Typography,
 } from '@mui/material';
 import React, { ReactElement, useEffect, useMemo, useState } from 'react';
-import { Skeleton } from '@mui/material';
 
-import { Edit, Settings, Check, Clear } from '@mui/icons-material';
+import { Edit, Settings } from '@mui/icons-material';
 import useSWR from 'swr';
 import { getErrorMessage } from '@/helpers/util';
 import { Capabilities } from '@/types';

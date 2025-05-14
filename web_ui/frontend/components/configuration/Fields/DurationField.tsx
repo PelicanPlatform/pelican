@@ -1,25 +1,14 @@
-import {
-  FormControl,
-  InputLabel,
-  MenuItem,
-  Select,
-  TextField,
-} from '@mui/material';
+import { TextField } from '@mui/material';
 import React, {
-  useMemo,
-  useCallback,
-  SetStateAction,
   ChangeEvent,
-  useState,
+  useCallback,
   useEffect,
+  useMemo,
+  useState,
 } from 'react';
 
-import {
-  ParameterInputProps,
-  Duration,
-  DurationString,
-} from '@/components/configuration';
-import { createId, buildPatch } from '../util';
+import { DurationString } from '@/components/configuration';
+import { createId } from '../util';
 
 export type DurationFieldProps = {
   name: string;

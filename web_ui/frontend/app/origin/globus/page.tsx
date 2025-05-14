@@ -19,8 +19,6 @@
 'use client';
 
 import { Box, Typography } from '@mui/material';
-
-import { User } from '@/index';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { GlobusExportTable } from '@/components/GlobusExportTable';
 

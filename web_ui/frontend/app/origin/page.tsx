@@ -18,22 +18,20 @@
 
 'use client';
 
-import { useState, Suspense } from 'react';
+import { Suspense, useState } from 'react';
 import {
   Box,
-  IconButton,
   Grid,
+  IconButton,
+  Skeleton,
   Tooltip,
   Typography,
-  Skeleton,
 } from '@mui/material';
-import { Key, CheckCircle } from '@mui/icons-material';
+import { CheckCircle, Key } from '@mui/icons-material';
 
 import StatusBox from '@/components/StatusBox';
 import { DataExportTable } from '@/components/DataExportTable';
-import { TimeDuration } from '@/components/graphs/prometheus';
 import FederationOverview from '@/components/FederationOverview';
-import { User } from '@/index';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { getErrorMessage } from '@/helpers/util';
 

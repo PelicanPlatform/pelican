@@ -1,21 +1,21 @@
 import {
   Add,
+  Api,
+  AppRegistration,
+  AssistantDirection,
   Block,
   Build,
+  Cached,
+  CalendarMonth,
   Dashboard,
   Equalizer,
   FolderOpen,
   Lock,
   MapOutlined,
   Public,
+  Settings,
   Storage,
   TripOrigin,
-  AssistantDirection,
-  AppRegistration,
-  Cached,
-  CalendarMonth,
-  Api,
-  Settings,
 } from '@mui/icons-material';
 import { NavigationConfiguration } from '@/components/layout/Navigation';
 

@@ -8,17 +8,15 @@
 
 import { Doughnut } from 'react-chartjs-2';
 
-import { useContext, useEffect, useState } from 'react';
+import { useContext } from 'react';
 import { DateTime } from 'luxon';
-import { Chart as ChartJS, Colors, Title, Tooltip, ArcElement } from 'chart.js';
-import { grey, blue } from '@mui/material/colors';
+import { ArcElement, Chart as ChartJS, Colors, Title, Tooltip } from 'chart.js';
+import { blue, grey } from '@mui/material/colors';
 
 import { GraphContext } from '@/components/graphs/GraphContext';
 import {
   buildMetric,
-  MatrixResponseData,
   query_raw,
-  TimeDuration,
   VectorResponseData,
 } from '@/components/graphs/prometheus';
 

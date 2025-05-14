@@ -16,8 +16,8 @@
  *
  ***************************************************************/
 
-import { Box, Button } from '@mui/material';
-import React, { useContext } from 'react';
+import { Box } from '@mui/material';
+import React from 'react';
 import SettingHeader from '@/app/settings/components/SettingHeader';
 import TokenForm from '@/app/settings/api/components/TokenForm';
 

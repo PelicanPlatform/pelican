@@ -2,30 +2,22 @@
 
 import Link from 'next/link';
 import {
-  Box,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  styled,
 } from '@mui/material';
-import {
-  MatrixResponseData,
-  query_raw,
-  TimeDuration,
-  VectorResponseData,
-} from '@/components/graphs/prometheus';
+import { query_raw, VectorResponseData } from '@/components/graphs/prometheus';
 
 import useSWR from 'swr';
-import { ReactNode, useContext, useMemo } from 'react';
+import { useContext, useMemo } from 'react';
 import { GraphContext } from '@/components/graphs/GraphContext';
 import { DateTime } from 'luxon';
 import chroma from 'chroma-js';
-import { convertToBiggestBytes, toBytes, toBytesString } from '@/helpers/bytes';
+import { toBytesString } from '@/helpers/bytes';
 import { ServerType } from '@/types';
-import { tableCellClasses } from '@mui/material/TableCell';
 import StyledTableCell from '@/components/StyledHeadTableCell';
 
 export const StorageTable = () => {

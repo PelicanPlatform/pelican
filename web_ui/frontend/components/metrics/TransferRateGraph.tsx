@@ -17,7 +17,7 @@ import {
 } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
 
-import { useContext, useEffect, useMemo, useState } from 'react';
+import { useContext, useMemo } from 'react';
 
 import {
   GraphContext,

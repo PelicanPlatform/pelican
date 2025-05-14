@@ -17,7 +17,6 @@ import {
 import Link from 'next/link';
 import {
   NavigationItemProps,
-  NavigationProps,
   StaticNavigationChildItemProps,
   StaticNavigationItemProps,
   StaticNavigationParentItemProps,

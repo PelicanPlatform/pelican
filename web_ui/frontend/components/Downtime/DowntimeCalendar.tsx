@@ -5,16 +5,9 @@ import 'react-calendar/dist/Calendar.css';
 import './calendar.css';
 
 import DateTile from './DateTile';
-import { useContext, useState } from 'react';
-import { DowntimeGet, DowntimePost } from '@/types';
-import useApiSWR from '@/hooks/useApiSWR';
-import { ServerDowntimeKey } from '@/components/Downtime';
-import { Box, Paper } from '@mui/material';
-import {
-  CalendarDateTimeContext,
-  CalendarDateTimeDispatchContext,
-} from '@/components/Downtime/CalendarContext';
-import { getDowntime } from '@/helpers/api';
+import { useContext } from 'react';
+import { DowntimeGet } from '@/types';
+import { CalendarDateTimeDispatchContext } from '@/components/Downtime/CalendarContext';
 
 const DowntimeCalendar = ({ data }: { data?: DowntimeGet[] }) => {
   const setRange = useContext(CalendarDateTimeDispatchContext);

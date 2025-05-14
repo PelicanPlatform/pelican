@@ -4,15 +4,14 @@
 
 import { styled } from '@mui/material/styles';
 import {
+  Button,
   Paper,
   Table,
+  TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  TableBody,
-  Button,
-  Modal,
   Typography,
 } from '@mui/material';
 import { tableCellClasses } from '@mui/material/TableCell';
@@ -26,13 +25,9 @@ import {
   submitConfigChange,
 } from '@/components/configuration';
 import { alertOnError } from '@/helpers/util';
-import { Dispatch, useCallback, useContext, useMemo, useState } from 'react';
-import {
-  AlertDispatchContext,
-  AlertReducerAction,
-} from '@/components/AlertProvider';
+import { useCallback, useContext, useMemo, useState } from 'react';
+import { AlertDispatchContext } from '@/components/AlertProvider';
 import { getConfig } from '@/helpers/api';
-import LatitudeLongitudePicker from '@/components/LatitudeLongitudePicker';
 import ObjectModal from '@/components/configuration/Fields/ObjectField/ObjectModal';
 import CircularProgress from '@mui/material/CircularProgress';
 

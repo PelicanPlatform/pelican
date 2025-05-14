@@ -1,54 +1,44 @@
 'use client';
 
-import Link from 'next/link';
 import { Chart } from 'react-chartjs-2';
 import {
   CategoryScale,
   Chart as ChartJS,
   ChartDataset,
+  ChartOptions,
   Colors,
   Filler,
   Legend,
   LinearScale,
   LineElement,
+  LogarithmicScale,
   PointElement,
   TimeScale,
   Title,
   Tooltip,
-  LogarithmicScale,
-  ChartOptions,
-  TooltipLabelStyle,
   TooltipItem,
 } from 'chart.js';
 import { getRelativePosition } from 'chart.js/helpers';
-import { useContext, useEffect, useMemo, useState } from 'react';
+import { useContext, useMemo } from 'react';
 import {
   BoxAndWiskers,
   BoxPlotController,
 } from '@sgratzl/chartjs-chart-boxplot';
 import {
-  MatrixResponseData,
   query_raw,
   replaceQueryParameters,
   TimeDuration,
   VectorResponseData,
 } from '@/components';
 import { DateTime } from 'luxon';
-import {
-  GraphContext,
-  GraphDispatchContext,
-} from '@/components/graphs/GraphContext';
+import { GraphContext } from '@/components/graphs/GraphContext';
 import useSWR from 'swr';
 import {
   getSmallestByteCategory,
   toBytes,
   toBytesString,
 } from '@/helpers/bytes';
-import {
-  alertOnError,
-  evaluateOrReturn,
-  TypeOrTypeFunction,
-} from '@/helpers/util';
+import { alertOnError } from '@/helpers/util';
 import { useRouter } from 'next/navigation';
 import { ServerGeneral, ServerType } from '@/types';
 import { getDirectorServers } from '@/helpers/get';

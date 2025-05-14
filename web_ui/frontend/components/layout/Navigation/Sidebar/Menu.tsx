@@ -1,13 +1,12 @@
 'use client';
 
-import React, { ReactNode, useMemo, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
-  BoxProps,
   IconButton,
-  Menu,
   ListItemIcon,
-  MenuItem,
   ListItemText,
+  Menu,
+  MenuItem,
 } from '@mui/material';
 
 import {

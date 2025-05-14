@@ -1,5 +1,5 @@
 import { ServerType } from '@/index';
-import { Dispatch, useContext } from 'react';
+import { Dispatch } from 'react';
 import { AlertReducerAction } from '@/components/AlertProvider';
 
 const stringToTime = (time: string) => {

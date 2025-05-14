@@ -20,7 +20,6 @@
 
 import { createTheme, responsiveFontSizes, ThemeProvider } from '@mui/material';
 import { FC } from 'react';
-import { blue } from '@mui/material/colors';
 import { Poppins } from 'next/font/google';
 
 const poppins = Poppins({

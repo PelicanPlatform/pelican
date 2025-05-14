@@ -16,12 +16,9 @@ import {
   Title,
   Tooltip,
 } from 'chart.js';
-import { useContext, useEffect, useState } from 'react';
+import { useContext } from 'react';
 
-import {
-  GraphContext,
-  GraphDispatchContext,
-} from '@/components/graphs/GraphContext';
+import { GraphContext } from '@/components/graphs/GraphContext';
 import {
   buildMetric,
   MatrixResponseData,
