@@ -139,6 +139,7 @@ func init() {
 	rootCmd.AddCommand(registryCmd)
 	rootCmd.AddCommand(originCmd)
 	rootCmd.AddCommand(cacheCmd)
+	rootCmd.AddCommand(tokenCmd)
 	rootCmd.AddCommand(namespaceCmd)
 	rootCmd.AddCommand(rootConfigCmd)
 	rootCmd.AddCommand(rootPluginCmd)
