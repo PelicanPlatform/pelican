@@ -129,7 +129,7 @@ func createFedTok(ginCtx *gin.Context, rInfo requestInfo) (tok string, err error
 			continue
 		}
 		var readScope token_scopes.TokenScope
-		readScope, err = token_scopes.Storage_Read.Path(prefix)
+		readScope, err = token_scopes.Wlcg_Storage_Read.Path(prefix)
 		if err != nil {
 			err = errors.Wrap(err, "token scopes could not be created")
 			return

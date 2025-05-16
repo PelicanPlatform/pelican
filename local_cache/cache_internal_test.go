@@ -36,43 +36,43 @@ func TestCalcResources(t *testing.T) {
 		result          []token_scopes.ResourceScope
 	}{
 		{
-			scopes:    token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
+			scopes:    token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"),
 			basePaths: []string{"/foo", "/bar"},
 			result: []token_scopes.ResourceScope{
-				token_scopes.NewResourceScope(token_scopes.Storage_Read, "/foo"),
-				token_scopes.NewResourceScope(token_scopes.Storage_Read, "/bar"),
+				token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/foo"),
+				token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/bar"),
 			},
 		},
 		{
-			scopes:          token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
+			scopes:          token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"),
 			basePaths:       []string{"/foo", "/bar"},
 			restrictedPaths: []string{"/baz"},
 			result: []token_scopes.ResourceScope{
-				token_scopes.NewResourceScope(token_scopes.Storage_Read, "/foo/baz"),
-				token_scopes.NewResourceScope(token_scopes.Storage_Read, "/bar/baz"),
+				token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/foo/baz"),
+				token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/bar/baz"),
 			},
 		},
 		{
-			scopes:          token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
+			scopes:          token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"),
 			basePaths:       []string{"/"},
 			restrictedPaths: []string{"/foo", "/bar"},
 			result: []token_scopes.ResourceScope{
-				token_scopes.NewResourceScope(token_scopes.Storage_Read, "/foo"),
-				token_scopes.NewResourceScope(token_scopes.Storage_Read, "/bar"),
+				token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/foo"),
+				token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/bar"),
 			},
 		},
 		{
-			scopes:          token_scopes.NewResourceScope(token_scopes.Storage_Read, "/baz"),
+			scopes:          token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/baz"),
 			basePaths:       []string{"/foo"},
 			restrictedPaths: []string{"/bar"},
 			result:          []token_scopes.ResourceScope{},
 		},
 		{
-			scopes:          token_scopes.NewResourceScope(token_scopes.Storage_Read, "/bar/baz"),
+			scopes:          token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/bar/baz"),
 			basePaths:       []string{"/foo"},
 			restrictedPaths: []string{"/bar"},
 			result: []token_scopes.ResourceScope{
-				token_scopes.NewResourceScope(token_scopes.Storage_Read, "/foo/bar/baz"),
+				token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/foo/bar/baz"),
 			},
 		},
 	}
