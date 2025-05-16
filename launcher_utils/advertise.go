@@ -50,6 +50,26 @@ type directorResponse struct {
 	ApprovalError bool   `json:"approval_error"`
 }
 
+// Package level variable to track if the server shutdown has been requested
+var shutdown atomic.Pointer[bool]
+
+// Set the shutdown flag to true or false
+func SetShutdown(val bool) {
+	// allocate a bool on the heap so the pointer stays valid
+	p := new(bool)
+	*p = val
+	shutdown.Store(p)
+}
+
+// Get the current shutdown flag (defaults to false).
+func IsShutdown() bool {
+	p := shutdown.Load()
+	if p == nil {
+		return false
+	}
+	return *p
+}
+
 func doAdvertise(ctx context.Context, servers []server_structs.XRootDServer) {
 	log.Debugf("About to advertise %d XRootD servers", len(servers))
 	err := Advertise(ctx, servers)
@@ -126,7 +146,12 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 		serverUrl = param.Cache_Url.GetString()
 	}
 
-	ad, err := server.CreateAdvertisement(name, serverUrl, webUrl)
+	availability := server_structs.AvailActive
+	if IsShutdown() {
+		availability = server_structs.AvailShuttingDown
+	}
+
+	ad, err := server.CreateAdvertisement(name, serverUrl, webUrl, availability)
 	if err != nil {
 		return err
 	}

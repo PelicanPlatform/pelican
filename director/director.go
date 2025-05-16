@@ -1171,16 +1171,15 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		adV2.Version = "unknown"
 	}
 
+	sn := adV2.Name
 	// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker when necessary
 	if adV2.Downtimes != nil {
 		filteredServersMutex.Lock()
-		defer filteredServersMutex.Unlock()
 
 		// Update the cached server downtime list
-		serverDowntimes[adV2.Name] = adV2.Downtimes
+		serverDowntimes[sn] = adV2.Downtimes
 
 		now := time.Now().UTC().UnixMilli()
-		sn := adV2.Name
 		active := false // Flag to indicate if this server has active downtime in this server ad
 		for _, dt := range adV2.Downtimes {
 			if dt.StartTime <= now &&
@@ -1204,6 +1203,35 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 				delete(filteredServers, sn)
 			}
 		}
+		filteredServersMutex.Unlock()
+	}
+
+	// If the server is about to shutdown, we silently apply a short period of downtime to it.
+	// Then it will not receive new requests from the Director, but it will still be able to serve the existing ones.
+	if adV2.Availability == server_structs.AvailShuttingDown {
+		filteredServersMutex.Lock()
+		// Inspect the existing downtime status for this server
+		existingFilterType, isServerFiltered := filteredServers[sn]
+
+		// Put the server in downtime only if no filter (downtime) exists or it was tempAllowed
+		if !isServerFiltered || existingFilterType == tempAllowed {
+			filteredServers[sn] = shutdownFiltered
+
+			// The downtime window is set to the TTL of the advertisement + shutting down grace period
+			window := param.Director_AdvertisementTTL.GetDuration() + time.Minute
+			log.Debugf("Server %s is shutting down, applying a %d-min downtime so it will not receive new transfer requests", sn, window.Round(time.Minute))
+
+			// Remove the downtime (shutdown filter) after the downtime window
+			time.AfterFunc(window, func() {
+				filteredServersMutex.Lock()
+				defer filteredServersMutex.Unlock()
+				if existing, ok := filteredServers[sn]; ok && existing == shutdownFiltered {
+					delete(filteredServers, sn)
+					log.Debugf("Removed the active downtime for server %s because it is no longer running", sn)
+				}
+			})
+		}
+		filteredServersMutex.Unlock()
 	}
 
 	// Forward to other directors, if applicable

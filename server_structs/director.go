@@ -154,9 +154,11 @@ type (
 		NamespaceAds []NamespaceAdV2
 	}
 
-	StrategyType string
-	SortType     string
+	StrategyType     string
+	SortType         string
+	AvailabilityType string
 
+	// OriginAdvertiseV2 is the struct used to advertise BOTH Origin and Cache server to the director
 	OriginAdvertiseV2 struct {
 		ServerBaseAd
 		// The namespace prefix to register/look up the server in the registry.
@@ -174,6 +176,7 @@ type (
 		StorageType         OriginStorageType `json:"storageType"`
 		DisableDirectorTest bool              `json:"directorTest"`        // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
 		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
+		Availability        AvailabilityType  `json:"availability"`
 		RequiredFeatures    []string          `json:"requiredFeatures"`
 		Now                 time.Time         `json:"now"` // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
 	}
@@ -292,6 +295,18 @@ const (
 // Indicate the downtime is ongoing indefinitely.
 // We chose -1 to avoid the default value (0) of the int64 type
 const IndefiniteEndTime int64 = -1
+
+const (
+	// AvailActive indicates the server is accepting new requests.
+	AvailActive AvailabilityType = "ACTIVE"
+
+	// AvailShuttingDown indicates the server does not accept new transfer requests,
+	// but is still working on in-flight ones.
+	AvailShuttingDown AvailabilityType = "SHUTTING_DOWN"
+
+	// AvailShutdown indicates the server is still accepting new requests, but operating at reduced capacity.
+	AvailDegraded AvailabilityType = "DEGRADED"
+)
 
 func (x XPelNs) GetName() string {
 	return "X-Pelican-Namespace"

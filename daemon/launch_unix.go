@@ -233,9 +233,14 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 				if !ok {
 					panic(errors.New("Unable to convert signal to syscall.Signal"))
 				}
+				if sys_sig == syscall.SIGTERM {
+					log.Warnf("Received SIGTERM, pausing the signal forwarding to daemons for 1 minute")
+					time.Sleep(1 * time.Minute)
+				}
 				log.Warnf("Forwarding signal %v to daemons\n", sys_sig)
 				var lastErr error
-				for idx, daemon := range daemons {
+				for idx := range daemons {
+					daemon := &daemons[idx]
 					if err = daemon.killFunc(daemon.pid, int(sys_sig)); err != nil {
 						lastErr = errors.Wrapf(err, "Failed to forward signal to %s process", launchers[idx].Name())
 					}

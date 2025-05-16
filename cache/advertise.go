@@ -50,7 +50,7 @@ type (
 // Can use this mechanism to override the minimum for the sake of tests
 var MinFedTokenTickerRate = 1 * time.Minute
 
-func (server *CacheServer) CreateAdvertisement(name, originUrl, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
+func (server *CacheServer) CreateAdvertisement(name, originUrl, originWebUrl string, availability server_structs.AvailabilityType) (*server_structs.OriginAdvertiseV2, error) {
 	registryPrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
 
 	// Fetch cache's active and future downtimes
@@ -65,6 +65,7 @@ func (server *CacheServer) CreateAdvertisement(name, originUrl, originWebUrl str
 		WebURL:         originWebUrl,
 		Namespaces:     server.GetNamespaceAds(),
 		Downtimes:      downtimes,
+		Availability:   availability,
 	}
 	ad.Initialize(name)
 
