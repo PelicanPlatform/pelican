@@ -1632,6 +1632,20 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		os.Setenv("XRD_PELICANCACHETOKENLOCATION", param.Cache_FedTokenLocation.GetString())
 	}
 
+	// Fallback `SelfTestInterval` to 15 seconds, if user sets a very small value
+	if currentServers.IsEnabled(server_structs.OriginType) {
+		if param.Origin_SelfTestInterval.GetDuration() < 1*time.Second {
+			viper.Set(param.Origin_SelfTestInterval.GetName(), "15s")
+			log.Warningf("Invalid %s value of %s. Falling back to 15s", param.Origin_SelfTestInterval.GetName(), param.Origin_SelfTestInterval.GetDuration().String())
+		}
+	}
+	if currentServers.IsEnabled(server_structs.CacheType) {
+		if param.Cache_SelfTestInterval.GetDuration() < 1*time.Second {
+			viper.Set(param.Cache_SelfTestInterval.GetName(), "15s")
+			log.Warningf("Invalid %s value of %s. Falling back to 15s", param.Cache_SelfTestInterval.GetName(), param.Cache_SelfTestInterval.GetDuration().String())
+		}
+	}
+
 	// Unmarshal Viper config into a Go struct
 	unmarshalledConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil || unmarshalledConfig == nil {

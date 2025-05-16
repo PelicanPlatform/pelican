@@ -65,7 +65,7 @@ func InitSelfTestDir() error {
 	selfTestPath := filepath.Join(basePath, selfTestDir)
 	err = config.MkdirAll(selfTestPath, 0750, uid, gid)
 	if err != nil {
-		return errors.Wrap(err, "fail to create directory for the self-test")
+		return errors.Wrap(err, "failed to create directory for the self-test")
 	}
 	log.Debugf("Created cache self-test directory at %s", selfTestPath)
 
@@ -421,15 +421,6 @@ func PeriodicSelfTest(ctx context.Context, ergp *errgroup.Group, isOrigin bool) 
 		customInterval = param.Origin_SelfTestInterval.GetDuration()
 	}
 
-	// Fallback to a 15s interval, if the user sets a very small or negative interval
-	if customInterval < 1*time.Second {
-		customInterval = 15 * time.Second
-		serverType := "Cache"
-		if isOrigin {
-			serverType = "Origin"
-		}
-		log.Warningf("Invalid config value: %s.SelfTestInterval. Fallback to 15s.", serverType)
-	}
 	ticker := time.NewTicker(customInterval)
 	firstRound := time.After(5 * time.Second)
 
