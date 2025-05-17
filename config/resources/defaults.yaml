@@ -16,6 +16,8 @@
 
 Logging:
   Level: error
+  Client:
+    ProgressInterval: 1m
 Client:
   SlowTransferRampupTime: 100s
   SlowTransferWindow: 30s
