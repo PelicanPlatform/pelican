@@ -2532,7 +2532,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			if totalSize >= 0 {
 				finalSize = totalSize
 			}
-			callback(dest, downloaded, finalSize, true)
+			callback(dest, downloaded+bytesSoFar, finalSize, true)
 		}
 		if te != nil {
 			te.ewmaCtr.Add(int64(time.Since(lastUpdate)))
@@ -2610,6 +2610,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	req.Header.Set("X-Pelican-Timeout", headerTimeout.Round(time.Millisecond).String())
 	if bytesSoFar > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", bytesSoFar))
+		log.Debugln("Resuming transfer starting at offset", bytesSoFar)
 	}
 	req.Header.Set("TE", "trailers")
 	req.Header.Set("User-Agent", userAgent)
@@ -2748,7 +2749,7 @@ Loop:
 			}
 			lastUpdate = currentTime
 			if callback != nil {
-				callback(dest, downloaded, totalSize, false)
+				callback(dest, downloaded+bytesSoFar, totalSize, false)
 			}
 
 		case <-t.C:
