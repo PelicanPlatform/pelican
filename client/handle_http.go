@@ -2715,6 +2715,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	stoppedTransferTimeout := compatToDuration(param.Client_StoppedTransferTimeout.GetDuration(), "Client.StoppedTransferTimeout")
 	slowTransferRampupTime := compatToDuration(param.Client_SlowTransferRampupTime.GetDuration(), "Client.SlowTransferRampupTime")
 	slowTransferWindow := compatToDuration(param.Client_SlowTransferWindow.GetDuration(), "Client.SlowTransferWindow")
+	progressInterval := param.Logging_Client_ProgressInterval.GetDuration()
 	stoppedTransferDebugLine.Do(func() {
 		log.WithFields(fields).Debugf("Configuration values for stopped transfer timeout: %s; slow transfer ramp-up: %s; slow transfer look-back window: %s",
 			stoppedTransferTimeout.String(), slowTransferRampupTime.String(), slowTransferWindow.String())
@@ -2738,6 +2739,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	defer pw.Close()
 
 	// Loop of the download
+	lastProgressUpdate := time.Now()
 Loop:
 	for {
 		select {
@@ -2782,6 +2784,11 @@ Loop:
 				limit = int64(float64(limit) / concurrency)
 			}
 			transferRate := pw.BytesPerSecond()
+			if progressInterval > 0 && time.Since(lastProgressUpdate) > progressInterval {
+				lastProgressUpdate = time.Now()
+				log.Infof("Download of %s has %d bytes complete out of %d; recent transfer rate is %s/s", transferUrl.String(), downloaded, totalSize, ByteCountSI(transferRate))
+			}
+
 			if transferRate < limit {
 				// Give the download `slowTransferRampupTime` (default 120) seconds to start
 				if time.Since(downloadStart) < slowTransferRampupTime {
