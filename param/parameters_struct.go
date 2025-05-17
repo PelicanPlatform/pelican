@@ -154,6 +154,9 @@ type Config struct {
 			Xrd string `mapstructure:"xrd" yaml:"Xrd"`
 			Xrootd string `mapstructure:"xrootd" yaml:"Xrootd"`
 		} `mapstructure:"cache" yaml:"Cache"`
+		Client struct {
+			ProgressInterval time.Duration `mapstructure:"progressinterval" yaml:"ProgressInterval"`
+		} `mapstructure:"client" yaml:"Client"`
 		DisableProgressBars bool `mapstructure:"disableprogressbars" yaml:"DisableProgressBars"`
 		Level string `mapstructure:"level" yaml:"Level"`
 		LogLocation string `mapstructure:"loglocation" yaml:"LogLocation"`
@@ -505,6 +508,9 @@ type configWithType struct {
 			Scitokens struct { Type string; Value string }
 			Xrd struct { Type string; Value string }
 			Xrootd struct { Type string; Value string }
+		}
+		Client struct {
+			ProgressInterval struct { Type string; Value time.Duration }
 		}
 		DisableProgressBars struct { Type string; Value bool }
 		Level struct { Type string; Value string }
