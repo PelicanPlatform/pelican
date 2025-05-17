@@ -2800,6 +2800,7 @@ Loop:
 						log.WithFields(fields).Errorln("Problem displaying slow message", err, status)
 						continue
 					}
+					log.Warningln("Transfer of", transferUrl.String(), "is below threshold; attempt will error out if it remains below threshold for", slowTransferWindow)
 					startBelowLimit = time.Now()
 					continue
 				} else if time.Since(startBelowLimit) < slowTransferWindow {
@@ -2809,7 +2810,11 @@ Loop:
 				// The download is below the threshold for more than `SlowTransferWindow` seconds, cancel the download
 				cancel()
 
-				log.WithFields(fields).Errorf("Cancelled: Download speed of %s/s is below the limit of %s/s", ByteCountSI(transferRate), ByteCountSI(int64(downloadLimit)))
+				if concurrency > 1 {
+					log.WithFields(fields).Errorf("Cancelling download attempt of %s: Download speed of %s/s is below the computed limit of %s/s (configured limit of %s/s divided by estimated %.1f concurrent transfers on average)", transferUrl.String(), ByteCountSI(transferRate), ByteCountSI(int64(limit)), ByteCountSI(int64(downloadLimit)), concurrency)
+				} else {
+					log.WithFields(fields).Errorf("Cancelling download attempt of %s: Download speed of %s/s is below the limit of %s/s", transferUrl.String(), ByteCountSI(transferRate), ByteCountSI(int64(downloadLimit)))
+				}
 
 				err = &SlowTransferError{
 					BytesTransferred: pw.BytesComplete(),
