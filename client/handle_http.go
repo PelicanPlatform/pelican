@@ -345,7 +345,8 @@ type (
 )
 
 const (
-	ewmaInterval = 15 * time.Second
+	// The EWMA library we use assumes there's a single tick per second
+	ewmaInterval = time.Second
 
 	attrProjectName classAdAttr = "ProjectName"
 	attrJobId       classAdAttr = "GlobalJobId"
@@ -785,7 +786,7 @@ func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
 		closeChan:       make(chan bool),
 		closeDoneChan:   make(chan bool),
 		ewmaTick:        time.NewTicker(ewmaInterval),
-		ewma:            ewma.NewMovingAverage(),
+		ewma:            ewma.NewMovingAverage(20), // By explicitly setting the age to 20s, the first 10 seconds will use an average of historical samples instead of EWMA
 		pelicanUrlCache: pelicanUrlCache,
 	}
 	workerCount := param.Client_WorkerCount.GetInt()
