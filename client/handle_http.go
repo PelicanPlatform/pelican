@@ -2953,16 +2953,22 @@ func (pw *progressWriter) Write(p []byte) (n int, err error) {
 		pw.firstByteTime = time.Now()
 	}
 	now := time.Now()
-	elapsed := now.Sub(pw.firstByteTime)
-	elapsedUS := elapsed.Microseconds()
-	if elapsed < 5*time.Second && elapsedUS > 0 {
-		pw.bytesPerSecond.Store(1000000 * pw.bytesWritten.Load() / elapsedUS)
-	} else if elapsedUS > 0 {
-		oldBytesPerSecond := pw.bytesPerSecond.Load()
-		elapsed = now.Sub(pw.lastRateSample)
-		alpha := math.Exp(-1 * float64(elapsed) / float64(10*time.Second))
-		recentRate := 1000000 * int64(len(p)) / elapsedUS
-		pw.bytesPerSecond.Store(int64(float64(oldBytesPerSecond)*alpha + float64(recentRate)*(1-alpha)))
+	startupTime := now.Sub(pw.firstByteTime)
+	startupTimeUS := startupTime.Microseconds()
+	// Transfer is ramping up, less than 5 seconds total.  Take the average rate since start.
+	if startupTime < 5*time.Second && startupTimeUS > 0 {
+		pw.bytesPerSecond.Store(1000000 * pw.bytesWritten.Load() / startupTimeUS)
+		pw.lastRateSample = now
+	} else {
+		elapsed := now.Sub(pw.lastRateSample)
+		pw.lastRateSample = now
+		elapsedUS := elapsed.Microseconds()
+		if elapsedUS > 0 {
+			oldBytesPerSecond := pw.bytesPerSecond.Load()
+			alpha := math.Exp(-1 * float64(elapsed) / float64(10*time.Second))
+			recentRate := 1000000 * int64(len(p)) / elapsedUS
+			pw.bytesPerSecond.Store(int64(float64(oldBytesPerSecond)*alpha + float64(recentRate)*(1-alpha)))
+		}
 	}
 	n, err = pw.writer.Write(p)
 	pw.bytesWritten.Add(int64(n))
