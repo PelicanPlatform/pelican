@@ -21,6 +21,7 @@ import { CustomRegistrationFieldProps } from './CustomRegistrationField';
 import { alertOnError, getErrorMessage } from '@/helpers/util';
 import { optionsNamespaceRegistrationFields } from '@/helpers/api';
 import { AlertDispatchContext } from '@/components/AlertProvider';
+import { getUser } from '@/helpers/login';
 
 interface FormProps {
   namespace?: RegistryNamespace;
@@ -29,7 +30,7 @@ interface FormProps {
 
 const onChange = (
   name: string,
-  value: string | number | boolean | null,
+  value: string | number | boolean | null | undefined,
   setData: Dispatch<SetStateAction<Partial<RegistryNamespace | undefined>>>
 ) => {
   setData((prevData) => {
@@ -50,9 +51,9 @@ const onChange = (
 const Form = ({ namespace, onSubmit }: FormProps) => {
   const dispatch = useContext(AlertDispatchContext);
 
-  const [data, setData] = useState<Partial<RegistryNamespace> | undefined>(
-    namespace || {}
-  );
+  const [formNamespace, setFormNamespace] = useState<
+    Partial<RegistryNamespace> | undefined
+  >(namespace || {});
 
   const { data: fields, error } = useSWR<
     Omit<CustomRegistrationFieldProps, 'onChange'>[] | undefined
@@ -71,15 +72,30 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
     { fallbackData: [] }
   );
 
+  // Auto-fill in the security contact if no security contact
+  const { data: user } = useSWR('getUser', getUser);
+  useEffect(() => {
+    if (
+      user !== undefined &&
+      !namespace?.admin_metadata?.security_contact_user_id
+    ) {
+      onChange(
+        'admin_metadata.security_contact_user_id',
+        user?.user,
+        setFormNamespace
+      );
+    }
+  }, [user, setFormNamespace, namespace]);
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
 
-        if (!data) {
+        if (!formNamespace) {
           return;
         }
-        onSubmit(data);
+        onSubmit(formNamespace);
       }}
     >
       {error && (
@@ -91,9 +107,9 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
             <Box key={field.name} pt={index == 0 ? 0 : 2}>
               <CustomRegistrationField
                 onChange={(value: string | number | boolean | null) =>
-                  onChange(field.name, value, setData)
+                  onChange(field.name, value, setFormNamespace)
                 }
-                value={getValue(data, calculateKeys(field.name))}
+                value={getValue(formNamespace, calculateKeys(field.name))}
                 {...field}
               />
             </Box>
