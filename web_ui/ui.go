@@ -310,58 +310,59 @@ func handleWebUIAuth(ctx *gin.Context) {
 		return
 	}
 
-	// For all routes other than /login and /initialization,
-	if !strings.HasPrefix(requestPath, "/login") {
-		// / -> ""
-		// /origin/ -> origin
-		// /registry/origin/edit/ -> registry
-		rootPage := strings.Split(strings.TrimPrefix(requestPath, "/"), "/")[0]
+	// For all routes other than /login and /initialization
+    // / -> ""
+    // /origin/ -> origin
+    // /registry/origin/edit/ -> registry
+    rootPage := strings.Split(strings.TrimPrefix(requestPath, "/"), "/")[0]
 
-		// If the root is public, pass the check
-		if slices.Contains(publicAccessPages, rootPage) {
-			ctx.Next()
-			return
-		}
+    // If the root is public, pass the check
+    if slices.Contains(publicAccessPages, rootPage) {
+        ctx.Next()
+        return
+    }
 
-		// If user is not logged in
-		if err != nil || user == "" {
-			// If director or registry server is up and user is at /view/
-			// then we allow them to choose the server without logging in
-			if (config.IsServerEnabled(server_structs.DirectorType) ||
-				config.IsServerEnabled(server_structs.RegistryType)) &&
-				rootPage == "" {
-				ctx.Next()
-				return
-			}
-		}
+    // If user is not logged in
+    if err != nil || user == "" {
+        // If director or registry server is up and user is at /view/
+        // then we allow them to choose the server without logging in
+        if (config.IsServerEnabled(server_structs.DirectorType) ||
+            config.IsServerEnabled(server_structs.RegistryType)) &&
+            rootPage == "" {
+            ctx.Next()
+            return
+        }
+    }
 
-		// If rootPage requires admin privilege
-		if slices.Contains(adminAccessPages, rootPage) {
-			isAdmin, _ := CheckAdmin(user)
-			if isAdmin {
+    // If rootPage requires admin privilege
+    if slices.Contains(adminAccessPages, rootPage) {
+        isAdmin, _ := CheckAdmin(user)
+        if isAdmin {
 
-				// If user is admin, pass the check
-				ctx.Next()
-				return
-			} else {
+            // If user is admin, pass the check
+            ctx.Next()
+            return
+        } else {
 
-				// If user is not admin, rewrite the request to 403 page
-				if err == nil && user != "" {
+            // If user is not admin, rewrite the request to 403 page
+            if err == nil && user != "" {
 
-					ctx.Redirect(http.StatusFound, "/view/403/")
-					ctx.Abort()
-					return
+                ctx.Redirect(http.StatusFound, "/view/403/")
+                ctx.Abort()
+                return
 
-					// If user is not logged in, redirect to login page
-				} else {
+                // If user is not logged in, redirect to login page
+            } else {
 
-					ctx.Redirect(http.StatusFound, "/view/login/?returnURL=/view"+requestPath)
-					ctx.Abort()
-					return
-				}
-			}
-		}
+                ctx.Redirect(http.StatusFound, "/view/login/?returnURL=/view" + url.QueryEscape(requestPath))
+                ctx.Abort()
+                return
+            }
+        }
 	}
+
+    // If it made it this far, it doesn't need special handling
+    ctx.Next()
 }
 
 func handleWebUIResource(ctx *gin.Context) {
