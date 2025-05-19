@@ -1898,5 +1898,5 @@ func ResetConfig() {
 
 	ResetClientInitialized()
 
-	// other than what's above, resetting Origin exports will be done by ResetTestState() in server_utils pkg
+	// There are other test state resets in server_utils.ResetTestState()
 }

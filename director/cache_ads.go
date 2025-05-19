@@ -365,7 +365,7 @@ func getCachedDowntimes(serverName string) ([]server_structs.Downtime, error) {
 // Get the downtimes set by federation admin in the Registry
 func updateDowntimeFromRegistry(ctx context.Context) error {
 	fedInfo, err := config.GetFederation(ctx)
-	if err != nil || fedInfo.DirectorEndpoint == "" {
+	if err != nil || fedInfo.RegistryEndpoint == "" {
 		log.Error("Failed to get federation info: ", err)
 		return errors.Wrap(err, "failed to get federation info")
 	}
@@ -398,10 +398,9 @@ func updateDowntimeFromRegistry(ctx context.Context) error {
 		return errors.Wrap(err, "failed to marshal response in to JSON")
 	}
 
-	if len(latestFedDowntimes) == 0 {
-		log.Debug("No downtimes set by federation admin in the Registry")
-		return nil
-	}
+	// If `latestFedDowntimes` is empty, it means there's no downtime set by federation admin,
+	// or the downtime is expired (deleted). In either case, we still need to proceed to use
+	// it to update `filteredServers` and `federationDowntimes`, clearing out stale info.
 
 	filteredServersMutex.Lock()
 	defer filteredServersMutex.Unlock()

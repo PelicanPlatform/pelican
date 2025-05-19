@@ -47,6 +47,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -1292,6 +1293,76 @@ func TestDirectorRegistration(t *testing.T) {
 		})
 	})
 
+}
+
+func TestUpdateDowntimeFromRegistry(t *testing.T) {
+	server_utils.ResetTestState()
+	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	t.Cleanup(func() {
+		cancel()
+		assert.NoError(t, egrp.Wait())
+		server_utils.ResetTestState()
+	})
+
+	// Mock Registry that always returns an empty downtime list
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/api/v1.0/downtime") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("[]")) // empty list
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer ts.Close()
+
+	// Satisfy config.GetFederation() expectations in updateDowntimeFromRegistry func
+	config.SetFederation(pelican_url.FederationDiscovery{
+		RegistryEndpoint: ts.URL,
+	})
+	fedInfo, err := config.GetFederation(ctx)
+	require.NoError(t, err)
+	require.Equal(t, ts.URL, fedInfo.RegistryEndpoint)
+
+	now := time.Now().UTC().UnixMilli()
+	makeDT := func(start, end int64) server_structs.Downtime {
+		return server_structs.Downtime{
+			UUID:        "00000000-0000-0000-0000-000000000000",
+			ServerName:  "test-cache",
+			CreatedBy:   "testuser",
+			UpdatedBy:   "testuser",
+			Source:      "cache",
+			Class:       server_structs.SCHEDULED,
+			Description: "",
+			Severity:    server_structs.Outage,
+			StartTime:   start,
+			EndTime:     end,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			DeletedAt:   nil,
+		}
+	}
+
+	// Tests that when the Registry (source of fed admin downtimes) reports no current downtimes for a server,
+	// any previously recorded Registry-set downtimes for that server are cleared in the Director.
+	t.Run("clears-registry-downtime-when-deleted", func(t *testing.T) {
+		// Pre-seed state as if a Registry-set downtime is active
+		filteredServersMutex.Lock()
+		filteredServers["test-cache"] = tempFiltered
+		filteredServersMutex.Unlock()
+		federationDowntimes = map[string][]server_structs.Downtime{
+			"test-cache": {makeDT(now-10_000, now+10_000)},
+		}
+
+		require.NoError(t, updateDowntimeFromRegistry(ctx))
+
+		// Expect the Registry-derived filter to be gone
+		filteredServersMutex.RLock()
+		_, ok := filteredServers["test-cache"]
+		filteredServersMutex.RUnlock()
+		assert.False(t, ok, "tempFiltered entry should be removed")
+
+		assert.Empty(t, federationDowntimes, "federationDowntimes should be cleared")
+	})
 }
 
 func TestGetAuthzEscaped(t *testing.T) {
