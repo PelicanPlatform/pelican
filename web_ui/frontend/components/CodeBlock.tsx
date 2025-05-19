@@ -1,6 +1,6 @@
-import {stackoverflowLight} from 'react-syntax-highlighter/dist/cjs/styles/hljs';
+import { stackoverflowLight } from 'react-syntax-highlighter/dist/cjs/styles/hljs';
 import SyntaxHighlighter from 'react-syntax-highlighter';
-import {Box} from '@mui/material';
+import { Box } from '@mui/material';
 
 /**
  * CodeBlock component

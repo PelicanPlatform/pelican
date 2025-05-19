@@ -1,4 +1,9 @@
-import {Config, ParameterMetadata, ParameterMetadataList, ParameterMetadataRecord,} from '@/components/configuration';
+import {
+  Config,
+  ParameterMetadata,
+  ParameterMetadataList,
+  ParameterMetadataRecord,
+} from '@/components/configuration';
 
 /**
  * The parameters are stored as a list keyed by the parameter name. This function

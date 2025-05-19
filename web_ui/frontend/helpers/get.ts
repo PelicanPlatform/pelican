@@ -4,17 +4,17 @@
  * @module helpers/get
  */
 
-import {Config, ParameterValueRecord} from '@/components/configuration';
+import { Config, ParameterValueRecord } from '@/components/configuration';
 import {
   getConfig as getConfigResponse,
   getDirectorNamespaces as getDirectorNamespacesResponse,
   getDirectorServers as getDirectorServersResponse,
   getNamespaces,
 } from '@/helpers/api';
-import {flattenObject} from '@/app/config/util';
-import {DirectorNamespace, ServerGeneral} from '@/types';
-import {RegistryNamespace} from '@/index';
-import {getObjectValue} from '@/helpers/util';
+import { flattenObject } from '@/app/config/util';
+import { DirectorNamespace, ServerGeneral } from '@/types';
+import { RegistryNamespace } from '@/index';
+import { getObjectValue } from '@/helpers/util';
 
 /**
  * Director Getters

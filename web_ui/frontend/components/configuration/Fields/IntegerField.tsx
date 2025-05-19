@@ -1,7 +1,7 @@
-import {TextField,} from '@mui/material';
-import React, {useEffect, useMemo,} from 'react';
+import { TextField } from '@mui/material';
+import React, { useEffect, useMemo } from 'react';
 
-import {createId} from '../util';
+import { createId } from '../util';
 
 /**
  * Verify if the Integer is in the correct format

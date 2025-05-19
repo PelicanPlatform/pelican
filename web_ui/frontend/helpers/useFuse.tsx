@@ -1,5 +1,5 @@
-import {useMemo} from 'react';
-import Fuse, {IFuseOptions} from 'fuse.js';
+import { useMemo } from 'react';
+import Fuse, { IFuseOptions } from 'fuse.js';
 
 /**
  * A utility function to get all keys of an object recursively returning a array of keys with . notation
