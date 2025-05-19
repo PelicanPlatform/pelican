@@ -66,6 +66,9 @@ const getMetadata = async () => {
 
 const Page = async () => {
   const metadata = await getMetadata();
+
+
+
   return <Issuer metadata={metadata} />;
 };
 

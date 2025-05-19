@@ -98,7 +98,7 @@ export const ConfigField = ({
             onChange={onChange}
             focused={focused}
           />
-          {metadata.description && showDescription && expandDescription && (
+          {metadata?.description && showDescription && expandDescription && (
             <Box p={1} bgcolor={grey[100]} borderRadius={1} mb={1}>
               <Typography variant={'body2'}>
                 <MarkdownRender content={metadata.description} />
@@ -106,7 +106,7 @@ export const ConfigField = ({
             </Box>
           )}
         </Box>
-        {!showDescription && (
+        {metadata?.description && !showDescription && (
           <Button
             size={'small'}
             href={`https://docs.pelicanplatform.org/parameters#${metadata.name.split('.').join('-')}`}

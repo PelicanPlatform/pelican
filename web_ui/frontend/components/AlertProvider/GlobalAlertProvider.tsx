@@ -1,8 +1,9 @@
 'use client';
 
 import { createContext, Dispatch, useReducer } from 'react';
-import { AlertPortal, AlertPortalProps } from '@/components/AlertPortal';
+import { AlertPortal, AlertPortalProps } from './AlertPortal';
 import CodeBlock from '@/components/CodeBlock';
+import {AlertReducerAction} from "@/components/AlertProvider/index";
 
 const defaultAlertContext: AlertPortalProps | undefined = undefined;
 
@@ -50,27 +51,4 @@ const alertReducer = (
     default:
       return state;
   }
-};
-
-export type AlertReducerAction =
-  | closeAlertAction
-  | openErrorAlertAction
-  | openAlertAction;
-
-type closeAlertAction = {
-  type: 'closeAlert';
-};
-
-type openErrorAlertAction = {
-  type: 'openErrorAlert';
-  payload: {
-    title: string;
-    error: string;
-    onClose: () => void;
-  };
-};
-
-type openAlertAction = {
-  type: 'openAlert';
-  payload: AlertPortalProps;
 };

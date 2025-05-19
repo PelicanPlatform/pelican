@@ -1,19 +1,12 @@
 import { Portal } from '@mui/base';
 import React, { ReactNode } from 'react';
 import {
-  Alert,
-  AlertProps,
   Snackbar,
-  SnackbarProps,
-  AlertTitle,
+  SnackbarProps
 } from '@mui/material';
+import Alert, {InlineAlertProps} from "./Alert"
 
-export interface AlertPortalProps {
-  onClose: () => void;
-  title?: string;
-  autoHideDuration?: number;
-  message?: ReactNode | string;
-  alertProps?: Omit<AlertProps, 'onClose'>;
+export interface AlertPortalProps extends InlineAlertProps {
   snackBarProps?: SnackbarProps;
 }
 
@@ -25,9 +18,6 @@ export const AlertPortal = ({
   alertProps,
   snackBarProps,
 }: AlertPortalProps) => {
-  if (autoHideDuration) {
-    setTimeout(() => onClose(), autoHideDuration);
-  }
 
   return (
     <Portal>
@@ -37,13 +27,12 @@ export const AlertPortal = ({
         {...snackBarProps}
       >
         <Alert
-          onClose={autoHideDuration ? undefined : onClose}
-          severity={alertProps?.severity}
-          sx={{ width: '100%' }}
-        >
-          {title && <AlertTitle>{title}</AlertTitle>}
-          {message}
-        </Alert>
+          onClose={onClose}
+          title={title}
+          autoHideDuration={autoHideDuration}
+          message={message}
+          alertProps={alertProps}
+        />
       </Snackbar>
     </Portal>
   );

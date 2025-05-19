@@ -28,10 +28,11 @@ import {
   Skeleton,
   Grid,
   Button,
-  Snackbar,
+  Snackbar
 } from '@mui/material';
 import { green, grey } from '@mui/material/colors';
 import useSWR from 'swr';
+import Link from 'next/link';
 
 import { getConfig } from '@/helpers/get';
 import {
@@ -95,10 +96,11 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
         <Grid item xs={12} lg={8}>
           <Typography variant={'h4'}>Issuer Configuration</Typography>
           <Box my={2}>
-            <Typography variant={'body1'}>
-              The origins issuer is responsible for issuing access tokens for
-              the data that it holds.
-            </Typography>
+            <Link href={"./setup/client/"}>
+              <Button variant={"outlined"}>
+                Setup Issuer
+              </Button>
+            </Link>
           </Box>
           <BooleanToggle
             label={'Enable Issuer'}

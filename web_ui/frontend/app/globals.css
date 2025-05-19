@@ -81,8 +81,3 @@ body {
   color: rgb(var(--foreground-rgb));
   padding: 0 !important;
 }
-
-a {
-  color: inherit;
-  text-decoration: none;
-}

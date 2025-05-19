@@ -21,7 +21,7 @@
 import { createTheme, responsiveFontSizes, ThemeProvider } from '@mui/material';
 import { FC } from 'react';
 import { blue } from '@mui/material/colors';
-import { Poppins } from 'next/font/google';
+import { Poppins, Open_Sans } from 'next/font/google';
 
 const poppins = Poppins({
   subsets: ['latin'],
@@ -29,6 +29,13 @@ const poppins = Poppins({
   weight: ['300', '400', '600'],
   display: 'swap',
 });
+
+const openSans = Open_Sans({
+  subsets: ['latin'],
+  style: ['normal'],
+  weight: ['300', '400', '600'],
+  display: 'swap',
+})
 
 let themeProvider = createTheme({
   palette: {
@@ -60,7 +67,12 @@ let themeProvider = createTheme({
       fontFamily: poppins.style.fontFamily,
     },
     body1: {
-      fontSize: '1.2rem',
+      fontSize: '1.1rem',
+      fontFamily: openSans.style.fontFamily,
+    },
+    body2: {
+      fontSize: '1rem',
+      fontFamily: openSans.style.fontFamily,
     },
     fontFamily: [
       'Poppins',
