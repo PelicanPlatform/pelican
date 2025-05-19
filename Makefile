@@ -46,11 +46,11 @@ WEBSITE_SRC_PATH := web_ui/frontend
 WEBSITE_OUT_PATH := web_ui/frontend/out
 WEBSITE_CACHE_PATH := web_ui/frontend/.next
 
-WEBSITE_SRC_FILES := $(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next*" -not -path "*out*" -not -path "*node_modules*" -not -path "*pelican-swagger.yaml")
+WEBSITE_SRC_FILES := $(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next*" -not -path "*/out/*" -not -path "*node_modules*" -not -path "*pelican-swagger.yaml")
 WEBSITE_CLEAN_LIST := $(WEBSITE_OUT_PATH) \
 						$(WEBSITE_CACHE_PATH)
 
-$(info These files have changed causing the website to have to rebuild: [$(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next*" -not -path "*out*" -not -path "*node_modules*" -not -path "*pelican-swagger.yaml" -newer web_ui/frontend/out/index.html)])
+$(info These files have changed causing the website to have to rebuild: [$(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next*" -not -path "*/out/*" -not -path "*node_modules*" -not -path "*pelican-swagger.yaml" -newer web_ui/frontend/out/index.html)])
 
 
 .PHONY: all
@@ -120,9 +120,9 @@ else
 	@$(CONTAINER_TOOL) run -w /app -v $(PWD):/app goreleaser/goreleaser --clean --snapshot
 endif
 
-.PHONY: pelican-build
+.PHONY: pelican-dev-build
 pelican-dev-build:
-	@echo PELICAN BUILD
+	@echo PELICAN DEV BUILD
 ifeq ($(USE_DOCKER),0)
 	@goreleaser --clean --snapshot --config .goreleaser.dev.yml
 else
