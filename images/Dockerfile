@@ -634,6 +634,7 @@ RUN /usr/bin/crb enable
 RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=locked \
   dnf install -y --enablerepo=osg-contrib \
         cmake3 \
+        delve \
         docker \
         gdb \
         gcc-c++ \

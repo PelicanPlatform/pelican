@@ -37,6 +37,7 @@ import { PendingCardProps } from '@/components/Namespace/PendingCard';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 import { getExtendedNamespaces } from '@/helpers/get';
+import { NAMESPACE_KEY } from '@/helpers/api';
 
 export default function Home() {
   const dispatch = useContext(AlertDispatchContext);
@@ -44,7 +45,7 @@ export default function Home() {
   const { data, mutate: mutateNamespaces } = useSWR<
     { namespace: RegistryNamespace }[] | undefined
   >(
-    'getExtendedNamespaces',
+    NAMESPACE_KEY,
     () =>
       alertOnError(
         getExtendedNamespaces,

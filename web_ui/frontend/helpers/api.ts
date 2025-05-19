@@ -156,6 +156,8 @@ export const getDirectorNamespaces = async () => {
   return await fetchApi(async () => await fetch(url));
 };
 
+export const NAMESPACE_KEY = 'getNamespaces';
+
 /**
  * Get namespaces
  */

@@ -22,7 +22,8 @@ import Link from 'next/link';
 
 import InformationDropdown from './InformationDropdown';
 import { NamespaceIcon } from '@/components/Namespace/index';
-import { deleteNamespace } from '@/helpers/api';
+import { User } from '@/index';
+import { deleteNamespace, NAMESPACE_KEY } from '@/helpers/api';
 import { useSWRConfig } from 'swr';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
@@ -155,7 +156,7 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                           'Could Not Delete Registration',
                           dispatch
                         );
-                        setTimeout(() => mutate('getExtendedNamespaces'), 600);
+                        await mutate(NAMESPACE_KEY);
                         if (onUpdate) {
                           onUpdate();
                         }
