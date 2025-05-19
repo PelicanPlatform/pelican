@@ -44,12 +44,12 @@ import { Add } from '@mui/icons-material';
 import useSWR from 'swr';
 import { CardProps } from '@/components/Namespace/Card';
 import { PendingCardProps } from '@/components/Namespace/PendingCard';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 import { getExtendedNamespaces } from '@/helpers/get';
 
 export default function Home() {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const { data, mutate: mutateNamespaces } = useSWR<
     { namespace: RegistryNamespace }[] | undefined

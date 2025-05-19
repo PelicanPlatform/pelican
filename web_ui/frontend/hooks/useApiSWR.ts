@@ -1,7 +1,7 @@
 import useSWR, { BareFetcher, SWRConfiguration, SWRResponse } from 'swr';
 import { useContext, useCallback } from 'react';
 
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 import { fetchApi } from '@/helpers/api';
 
@@ -16,7 +16,7 @@ function useApiSWR<T>(
   fetcher: () => Promise<Response>,
   config?: SWRConfiguration
 ): ReturnType<typeof useSWR<T | undefined>> {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const wrappedFetcher = useCallback(() => {
     return alertOnError<T>(

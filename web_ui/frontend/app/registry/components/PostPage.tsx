@@ -25,10 +25,10 @@ import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { submitNamespaceForm } from '@/app/registry/components/util';
 import { NamespaceFormPage } from '@/app/registry/components';
 import { alertOnError } from '@/helpers/util';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 
 const PostPage = ({ update }: NamespaceFormPage) => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const [fromUrl, setFromUrl] = useState<URL | undefined>(undefined);
 

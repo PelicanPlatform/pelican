@@ -1,5 +1,6 @@
 import { AlertPortalProps } from './AlertPortal';
-export {default as Global} from "./AlertProvider"
+export {default as GlobalAlertProvider, GlobalAlertDispatchContext, GlobalAlertContext} from "./GlobalAlertProvider"
+export {default as InlineAlertProvider, InlineAlertDispatchContext, InlineAlertContext} from "./InlineAlertProvider"
 
 export type AlertReducerAction =
 		| closeAlertAction

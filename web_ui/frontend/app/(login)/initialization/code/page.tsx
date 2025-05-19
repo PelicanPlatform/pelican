@@ -26,7 +26,7 @@ import CodeInput, { Code } from '../../components/CodeInput';
 import LoadingButton from '../../components/LoadingButton';
 import { initLogin } from '@/helpers/api';
 import { alertOnError } from '@/helpers/util';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 
 export default function Home() {
   const router = useRouter();
@@ -40,7 +40,7 @@ export default function Home() {
   ]);
   let [loading, setLoading] = useState(false);
 
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const setCode = (code: Code) => {
     _setCode(code);

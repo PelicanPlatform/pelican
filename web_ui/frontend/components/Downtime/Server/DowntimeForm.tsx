@@ -28,7 +28,7 @@ import InputLabel from '@mui/material/InputLabel';
 import { alertOnError } from '@/helpers/util';
 import { deleteDowntime, postDowntime, putDowntime } from '@/helpers/api';
 import {
-  AlertDispatchContext,
+  GlobalAlertDispatchContext,
   AlertReducerAction,
 } from '@/components/AlertProvider';
 import { ServerDowntimeKey } from '@/components/Downtime';
@@ -47,7 +47,7 @@ const DowntimeForm = ({
   downtime: inputDowntime,
   onSuccess,
 }: DowntimeFormProps) => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const id = 'id' in inputDowntime ? inputDowntime.id : undefined;
 

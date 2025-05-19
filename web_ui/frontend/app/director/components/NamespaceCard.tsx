@@ -6,14 +6,14 @@ import { NamespaceDropdown } from './NamespaceDropdown';
 import { DirectorNamespace, ServerDetailed, ServerGeneral } from '@/types';
 import { getDirectorServer } from '@/helpers/api';
 import { alertOnError } from '@/helpers/util';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 
 export interface NamespaceCardProps {
   namespace: DirectorNamespace;
 }
 
 export const NamespaceCard = ({ namespace }: NamespaceCardProps) => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
   const [servers, setServers] = useState<ServerDetailed[] | undefined>(
     undefined

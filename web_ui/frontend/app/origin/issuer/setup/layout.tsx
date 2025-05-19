@@ -5,13 +5,16 @@ import IssuerFlowContainer from "@/app/origin/issuer/components/IssuerFlowContai
 
 import _metadata from '@/public/data/parameters.json';
 import { ParameterMetadataList } from '@/components/configuration';
+import {InlineAlertProvider} from "@/components/AlertProvider";
 
 const Layout = ({children}: {children: ReactElement}) => {
 	return (
 		<ConfigurationProvider>
-			<IssuerFlowContainer>
-				{children}
-			</IssuerFlowContainer>
+			<InlineAlertProvider>
+				<IssuerFlowContainer>
+					{children}
+				</IssuerFlowContainer>
+			</InlineAlertProvider>
 		</ConfigurationProvider>
 	)
 }

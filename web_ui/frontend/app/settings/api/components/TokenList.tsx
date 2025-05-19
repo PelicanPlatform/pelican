@@ -18,7 +18,7 @@ import {
 import { Delete } from '@mui/icons-material';
 
 import {
-  AlertDispatchContext,
+  GlobalAlertDispatchContext,
   AlertReducerAction,
 } from '@/components/AlertProvider';
 import { Dispatch, useContext } from 'react';
@@ -30,7 +30,7 @@ import { CardList } from '@/components';
 import { GetToken } from '@/types';
 
 const TokenList = () => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const { data, mutate } = useSWR<GetToken[]>(
     'getTokens',

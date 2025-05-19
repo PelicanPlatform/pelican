@@ -30,10 +30,10 @@ import { DirectorNamespace, ServerGeneral } from '@/types';
 import { NamespaceCardList } from './components/NamespaceCardList';
 import { getDirectorServers, getDirectorNamespaces } from '@/helpers/get';
 import { alertOnError } from '@/helpers/util';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 
 export default function Page() {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const { data } = useSWR<ServerGeneral[] | undefined>(
     'getDirectorServers',

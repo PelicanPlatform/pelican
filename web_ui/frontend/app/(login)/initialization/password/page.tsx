@@ -26,11 +26,11 @@ import LoadingButton from '../../components/LoadingButton';
 
 import PasswordInput from '../../components/PasswordInput';
 import { alertOnError, getErrorMessage } from '@/helpers/util';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { initLogin, resetLogin } from '@/helpers/api';
 
 export default function Home() {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const router = useRouter();
   let [password, _setPassword] = useState<string>('');

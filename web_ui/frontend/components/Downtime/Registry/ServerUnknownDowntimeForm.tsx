@@ -31,7 +31,7 @@ import {
   getNamespaces,
 } from '@/helpers/api';
 import {
-  AlertDispatchContext,
+  GlobalAlertDispatchContext,
   AlertReducerAction,
 } from '@/components/AlertProvider';
 import { ServerDowntimeKey } from '@/components/Downtime';
@@ -50,7 +50,7 @@ const ServerUnknownDowntimeForm = ({
   downtime: inputDowntime,
   onSuccess,
 }: DowntimeFormProps) => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const [downtime, setDowntime] = useState<DowntimeRegistryPost>({
     serverName: inputDowntime.serverName ?? '',

@@ -1,13 +1,13 @@
 import { Box, Button, Paper } from '@mui/material';
 import { Replay } from '@mui/icons-material';
 
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { useCallback, useContext } from 'react';
 import { alertOnError } from '@/helpers/util';
 import { restartServer } from '@/helpers/api';
 
 export const RestartBox = () => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   return (
     <Button

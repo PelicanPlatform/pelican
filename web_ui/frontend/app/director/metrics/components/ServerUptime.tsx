@@ -29,14 +29,14 @@ import {
   TableHead,
   TableRow,
 } from '@mui/material';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 import Link from 'next/link';
 import { ServerType } from '@/types';
 import StyledTableCell from '@/components/StyledHeadTableCell';
 
 const ServerUptime = () => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
   const { rate, time, resolution, range } = useContext(GraphContext);
 
   let { data, error, isLoading, isValidating } = useSWR(

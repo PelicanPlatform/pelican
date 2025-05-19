@@ -7,7 +7,7 @@ import {ParameterValueRecord, submitConfigChange} from "@/components/configurati
 import {getConfig} from "@/helpers/get";
 import {merge} from "lodash";
 import {alertOnError} from "@/helpers/util";
-import {AlertDispatchContext} from "@/components/AlertProvider";
+import {GlobalAlertDispatchContext} from "@/components/AlertProvider";
 
 export const ConfigurationContext = createContext<ConfigurationContextState>({
 	configuration: undefined,
@@ -24,7 +24,7 @@ export const ConfigurationContext = createContext<ConfigurationContextState>({
 
 export const ConfigurationProvider = ({ children }: { children: React.ReactNode }) => {
 
-	const dispatch = useContext(AlertDispatchContext);
+	const dispatch = useContext(GlobalAlertDispatchContext);
 	const [patch, _setPatch] = useState<ParameterValueRecord>({});
 	const [submitting, setSubmitting] = useState<boolean>(false);
 	const {

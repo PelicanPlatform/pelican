@@ -18,7 +18,7 @@ import {
   Typography,
 } from '@mui/material';
 import {
-  AlertDispatchContext,
+  GlobalAlertDispatchContext,
   AlertReducerAction,
 } from '@/components/AlertProvider';
 import { secureFetch } from '@/helpers/login';
@@ -29,7 +29,7 @@ import { BaseToken } from '@/types';
 import { Check, ContentCopy, Close } from '@mui/icons-material';
 
 const TokenForm = () => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const [name, setName] = useState('');
   const [expiration, setExpiration] = useState('');

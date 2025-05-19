@@ -20,7 +20,7 @@ import {
 import { CustomRegistrationFieldProps } from './CustomRegistrationField';
 import { alertOnError, getErrorMessage } from '@/helpers/util';
 import { optionsNamespaceRegistrationFields } from '@/helpers/api';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 
 interface FormProps {
   namespace?: RegistryNamespace;
@@ -48,7 +48,7 @@ const onChange = (
 };
 
 const Form = ({ namespace, onSubmit }: FormProps) => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const [data, setData] = useState<Partial<RegistryNamespace> | undefined>(
     namespace || {}

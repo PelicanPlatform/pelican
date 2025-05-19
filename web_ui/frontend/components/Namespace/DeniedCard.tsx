@@ -6,7 +6,7 @@ import { Block, Check, Delete, Edit, Person } from '@mui/icons-material';
 import { Alert, RegistryNamespace } from '@/index';
 import InformationDropdown from './InformationDropdown';
 import { getServerType, NamespaceIcon } from '@/components/Namespace/index';
-import { AlertContext, AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertContext, GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { User } from '@/index';
 import { useSWRConfig } from 'swr';
 import CodeBlock from '@/components/CodeBlock';
@@ -23,8 +23,8 @@ export interface DeniedCardProps {
 export const DeniedCard = ({ namespace, authenticated }: DeniedCardProps) => {
   const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
-  const dispatch = useContext(AlertDispatchContext);
-  const alert = useContext(AlertContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
+  const alert = useContext(GlobalAlertContext);
   const { mutate } = useSWRConfig();
 
   return (

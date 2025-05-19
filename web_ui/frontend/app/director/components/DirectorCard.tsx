@@ -25,7 +25,7 @@ import { alertOnError, getErrorMessage } from '@/helpers/util';
 import { DirectorDropdown } from '@/app/director/components/DirectorDropdown';
 import { ServerDetailed, ServerGeneral } from '@/types';
 import { allowServer, filterServer, getDirectorServer } from '@/helpers/api';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 
 export interface DirectorCardProps {
   server: ServerGeneral;
@@ -38,7 +38,7 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
     ServerDetailed | undefined
   >();
 
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   return (
     <>

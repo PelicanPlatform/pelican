@@ -1,12 +1,12 @@
 'use client';
 
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import React, { useContext } from 'react';
 import { Box } from '@mui/material';
 import CodeBlock from '@/components/CodeBlock';
 
 const Page = () => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   return (
     <div>

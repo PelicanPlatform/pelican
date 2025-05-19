@@ -52,7 +52,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { ServerGeneral, ServerType } from '@/types';
 import { getDirectorServers } from '@/helpers/get';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 
 ChartJS.register(
   BoxPlotController,
@@ -182,7 +182,7 @@ export const MetricBoxPlot = ({
 }) => {
   const router = useRouter();
   const { rate, time, resolution, range } = useContext(GraphContext);
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const { data } = useSWR(
     [metric, rate, time, resolution, range],

@@ -12,7 +12,7 @@ import InformationDropdown from './InformationDropdown';
 import { getServerType, NamespaceIcon } from '@/components/Namespace/index';
 import { User } from '@/index';
 import { alertOnError } from '@/helpers/util';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { approveNamespace, denyNamespace } from '@/helpers/api';
 import { Theme } from '@mui/system';
 
@@ -36,7 +36,7 @@ export const PendingCard = ({
   const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
 
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   return (
     <Box>

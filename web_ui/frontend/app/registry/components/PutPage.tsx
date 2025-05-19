@@ -41,7 +41,7 @@ import Form from '@/app/registry/components/Form';
 import { submitNamespaceForm } from '@/app/registry/components/util';
 import { getNamespace } from '@/helpers/api';
 import { NamespaceFormPage } from '@/app/registry/components';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 
 const PutPage = ({ update }: NamespaceFormPage) => {
@@ -51,7 +51,7 @@ const PutPage = ({ update }: NamespaceFormPage) => {
     undefined
   );
 
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);

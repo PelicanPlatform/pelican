@@ -14,7 +14,7 @@ import { Server } from '@/index';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { alertOnError } from '@/helpers/util';
 import { getDirectorServer } from '@/helpers/api';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { ServerDetailed, ServerGeneral } from '@/types';
 import { Box } from '@mui/material';
 
@@ -23,7 +23,7 @@ interface ServerMapProps {
 }
 
 export const ServerMap = ({ servers }: ServerMapProps) => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const [activeServer, setActiveServer] = useState<
     ServerGeneral | ServerDetailed | undefined

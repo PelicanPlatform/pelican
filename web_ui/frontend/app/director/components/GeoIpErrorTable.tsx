@@ -27,17 +27,14 @@ import {
 } from '@/components/configuration';
 import { alertOnError } from '@/helpers/util';
 import { Dispatch, useCallback, useContext, useMemo, useState } from 'react';
-import {
-  AlertDispatchContext,
-  AlertReducerAction,
-} from '@/components/AlertProvider';
+import {GlobalAlertDispatchContext} from '@/components/AlertProvider';
 import { getConfig } from '@/helpers/api';
 import LatitudeLongitudePicker from '@/components/LatitudeLongitudePicker';
 import ObjectModal from '@/components/configuration/Fields/ObjectField/ObjectModal';
 import CircularProgress from '@mui/material/CircularProgress';
 
 const GeoIpErrorTable = () => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
   const { data: ipErrors } = useSWR('geoip_errors', getIpErrorRows);
 
   const {

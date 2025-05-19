@@ -25,7 +25,7 @@ import { NamespaceIcon } from '@/components/Namespace/index';
 import { User } from '@/index';
 import { deleteNamespace } from '@/helpers/api';
 import { useSWRConfig } from 'swr';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 import { Theme } from '@mui/system';
 
@@ -40,7 +40,7 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
     ? 'small'
     : 'medium';
 
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
   const ref = useRef<HTMLDivElement>(null);
   const [transition, setTransition] = useState<boolean>(false);
   const { mutate } = useSWRConfig();

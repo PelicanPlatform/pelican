@@ -67,10 +67,10 @@ import {
 } from '@/app/config/components';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { getConfig } from '@/helpers/api';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 
 function Config({ metadata }: { metadata: ParameterMetadataRecord }) {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const [status, setStatus] = useState<StatusSnackBarProps | undefined>(
     undefined

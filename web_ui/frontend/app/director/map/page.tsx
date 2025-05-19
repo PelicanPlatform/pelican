@@ -23,13 +23,13 @@ import useSWR from 'swr';
 import { Server } from '@/index';
 import { ServerMap } from '@/components/Map';
 import { useContext } from 'react';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { ServerGeneral } from '@/types';
 import { alertOnError } from '@/helpers/util';
 import { getDirectorServers } from '@/helpers/get';
 
 export default function Page() {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const { data } = useSWR<ServerGeneral[] | undefined>(
     'getDirectorServers',

@@ -41,10 +41,10 @@ import {
   getOauthEnabledServers,
 } from '@/helpers/util';
 import { login } from '@/helpers/api';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 
 const AdminLogin = () => {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const router = useRouter();
   const { mutate } = useSWR('getUser', getUser);
@@ -155,7 +155,7 @@ const AdminLogin = () => {
 };
 
 export default function Home() {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const [returnUrl, setReturnUrl] = useState<string | undefined>(undefined);
   const { data: enabledServers } = useSWR<ServerType[] | undefined>(

@@ -18,7 +18,7 @@
 
 import { LocalizationProvider } from '@/clientComponents';
 import { ThemeProviderClient } from '@/components/ThemeProvider';
-import { AlertProvider } from '@/components/AlertProvider';
+import { GlobalAlertProvider } from '@/components/AlertProvider';
 import './globals.css';
 export const metadata = {
   title: 'Pelican Platform',
@@ -34,9 +34,9 @@ export default function RootLayout({
     <html lang='en'>
       <ThemeProviderClient>
         <LocalizationProvider>
-          <AlertProvider>
+          <GlobalAlertProvider>
             <body>{children}</body>
-          </AlertProvider>
+          </GlobalAlertProvider>
         </LocalizationProvider>
       </ThemeProviderClient>
     </html>

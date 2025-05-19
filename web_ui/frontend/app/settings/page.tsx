@@ -21,12 +21,12 @@
 import { Box } from '@mui/material';
 import React, { useContext } from 'react';
 
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import SettingHeader from '@/app/settings/components/SettingHeader';
 import { RestartBox } from '@/app/config/components';
 
 export default function Home() {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   return (
     <Box width={'100%'}>

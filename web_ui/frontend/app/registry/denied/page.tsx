@@ -29,11 +29,11 @@ import { CardProps } from '@/components/Namespace/Card';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import DeniedCard from '@/components/Namespace/DeniedCard';
 import { getExtendedNamespaces } from '@/helpers/get';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 
 export default function Home() {
-  const dispatch = useContext(AlertDispatchContext);
+  const dispatch = useContext(GlobalAlertDispatchContext);
 
   const { data } = useSWR('getExtendedNamespaces', async () =>
     alertOnError(getExtendedNamespaces, "Couldn't fetch namespaces", dispatch)
