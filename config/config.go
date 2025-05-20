@@ -1702,8 +1702,12 @@ func SetClientDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Client_WorkerCount.GetName(), 5)
 	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), filepath.Join(configDir, "certificates", "tlsca.pem"))
 
-	var downloadLimit int64 = 1024 * 100
-	v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), downloadLimit)
+	// Default is set outside of defaults.yaml to allow SetDefault call below to override
+	viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), 102400)
+	if param.MinimumDownloadSpeed.IsSet() {
+		viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), param.MinimumDownloadSpeed.GetInt())
+	}
+
 	if v == viper.GetViper() {
 		viper.AutomaticEnv()
 		upperPrefix := GetPreferredPrefix()
@@ -1763,7 +1767,6 @@ func SetClientDefaults(v *viper.Viper) error {
 			}
 		}
 		// Check the environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED (and all the prefix variants)
-		var downloadLimit int64 = 1024 * 100
 		var prefixes_with_cp []ConfigPrefix
 		for _, prefix := range prefixes {
 			prefixes_with_cp = append(prefixes_with_cp, prefix+"CP")
@@ -1773,18 +1776,22 @@ func SetClientDefaults(v *viper.Viper) error {
 			if len(downloadLimitStr) == 0 {
 				continue
 			}
-			var err error
-			downloadLimit, err = strconv.ParseInt(downloadLimitStr, 10, 64)
+			downloadLimit, err := strconv.ParseInt(downloadLimitStr, 10, 64)
 			if err != nil {
 				log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is not parsable as integer: %s",
 					prefixes, downloadLimitStr, err.Error())
+				continue
 			}
+			if downloadLimit < 0 {
+				log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is negative value; ignoring and will use"+
+					"built-in default of %s", prefixes, downloadLimitStr, viper.Get(param.Client_MinimumDownloadSpeed.GetName()))
+				continue
+			}
+
+			// Backward compatibility environment variables do not overwrite the new-style ones
+			viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), downloadLimit)
+
 			break
-		}
-		if param.MinimumDownloadSpeed.IsSet() {
-			viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), param.MinimumDownloadSpeed.GetInt())
-		} else {
-			viper.Set(param.Client_MinimumDownloadSpeed.GetName(), downloadLimit)
 		}
 		// Handle more legacy config options
 		if param.DisableProxyFallback.IsSet() {

@@ -194,6 +194,13 @@ type: bool
 default: false
 components: ["Client"]
 ---
+name: Logging.Client.ProgressInterval
+description: |+
+  Interval at which the client's download progress is logged.
+type: duration
+default: 1m
+components: ["client"]
+---
 name: Logging.Origin.Cms
 description: |+
   Trace level of XRootD cluster management service, one of the main XRootD executables.
