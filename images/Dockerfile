@@ -91,7 +91,7 @@ gpgcheck=0
 ENDCOPY
 RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
-  dnf install -y goreleaser
+  dnf install -y goreleaser make
 ENDRUN
 
 RUN curl -O https://dl.google.com/go/go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz \
