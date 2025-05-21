@@ -82,6 +82,11 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 		origin.LaunchGlobusTokenRefresh(ctx, egrp)
 	}
 
+	concLimit := param.Origin_Concurrency.GetInt()
+	if concLimit > 0 {
+		server_utils.LaunchConcurrencyMonitoring(ctx, egrp, originServer.GetServerType())
+	}
+
 	// Set up the APIs unrelated to UI, which only contains director-based health test reporting endpoint for now
 	if err = origin.RegisterOriginAPI(engine, ctx, egrp); err != nil {
 		return nil, err
