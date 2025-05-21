@@ -1,11 +1,9 @@
 import { CapabilitiesChip, Dropdown, InformationSpan } from '@/components';
-import { Box, Grid, Typography } from '@mui/material';
-import DirectoryTree from '@/components/DirectoryTree';
+import { Box, Grid } from '@mui/material';
 import React from 'react';
 import { SinglePointMap } from '@/components/Map';
 import { ServerCapabilitiesTable } from '@/components/ServerCapabilitiesTable';
 import { Capabilities, ServerDetailed, ServerGeneral } from '@/types';
-import { Capability } from '@/components/configuration';
 
 interface DirectorDropdownProps {
   server: ServerGeneral | ServerDetailed;

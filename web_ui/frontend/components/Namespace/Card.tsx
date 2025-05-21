@@ -1,6 +1,6 @@
 'use client';
 
-import { Alert, Alert as AlertType, RegistryNamespace } from '@/index';
+import { RegistryNamespace, User } from '@/index';
 import React, { useContext, useRef, useState } from 'react';
 import {
   Avatar,
@@ -12,17 +12,16 @@ import {
   useMediaQuery,
 } from '@mui/material';
 import {
+  CalendarMonth,
   Delete,
   Download,
   Edit,
   Person,
-  CalendarMonth,
 } from '@mui/icons-material';
 import Link from 'next/link';
 
 import InformationDropdown from './InformationDropdown';
 import { NamespaceIcon } from '@/components/Namespace/index';
-import { User } from '@/index';
 import { deleteNamespace, NAMESPACE_KEY } from '@/helpers/api';
 import { useSWRConfig } from 'swr';
 import { AlertDispatchContext } from '@/components/AlertProvider';

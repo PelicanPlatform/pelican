@@ -19,12 +19,10 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Box, LinearProgress, Typography } from '@mui/material';
-import { Error, CheckCircle } from '@mui/icons-material';
+import { CheckCircle, Error } from '@mui/icons-material';
 import { useRouter } from 'next/navigation';
-import { User } from '@/index';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { getErrorMessage } from '@/helpers/util';
-import { set } from 'lodash';
 
 interface callbackResponse {
   nextUrl: string;

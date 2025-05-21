@@ -1,20 +1,7 @@
 'use client';
 
-import React, {
-  ComponentType,
-  FunctionComponent,
-  useMemo,
-  useState,
-  JSX,
-  useEffect,
-} from 'react';
-import {
-  Box,
-  Pagination,
-  Skeleton,
-  TextField,
-  Typography,
-} from '@mui/material';
+import React, { ComponentType, useEffect, useMemo, useState } from 'react';
+import { Box, Pagination, Typography } from '@mui/material';
 
 interface CardListProps<T> {
   data?: Partial<T>[];

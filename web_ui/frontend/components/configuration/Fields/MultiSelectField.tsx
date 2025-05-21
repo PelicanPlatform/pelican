@@ -4,17 +4,11 @@ import {
   MenuItem,
   Select,
   SelectChangeEvent,
-  TextField,
 } from '@mui/material';
-import React, {
-  useMemo,
-  useCallback,
-  SetStateAction,
-  ChangeEvent,
-} from 'react';
+import React, { useMemo } from 'react';
 import OutlinedInput from '@mui/material/OutlinedInput';
 
-import { createId, buildPatch } from '../util';
+import { createId } from '../util';
 
 export type MultiSelectFieldProps<T extends string> = {
   name: string;

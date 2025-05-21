@@ -18,14 +18,7 @@
 
 'use client';
 
-import {
-  Box,
-  Grow,
-  Typography,
-  Button,
-  Collapse,
-  Skeleton,
-} from '@mui/material';
+import { Box, Button, Collapse, Skeleton, Typography } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import { useContext, useEffect, useMemo, useState } from 'react';
 
@@ -37,7 +30,6 @@ import { ServerType } from '@/index';
 import {
   alertOnError,
   getEnabledServers,
-  getErrorMessage,
   getOauthEnabledServers,
 } from '@/helpers/util';
 import { login } from '@/helpers/api';

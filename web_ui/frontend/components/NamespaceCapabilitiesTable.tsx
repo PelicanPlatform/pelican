@@ -6,7 +6,7 @@
  * Table to display the server capabilities with its namespaces
  */
 
-import { DirectorNamespace, ServerDetailed, ServerGeneral } from '@/types';
+import { DirectorNamespace, ServerDetailed } from '@/types';
 import { Box, Grid, Typography, useTheme } from '@mui/material';
 import { CapabilitiesRow } from '@/app/director/components/DirectorDropdown';
 import { grey } from '@mui/material/colors';

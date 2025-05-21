@@ -21,7 +21,6 @@
 import { Box, Grid, Typography } from '@mui/material';
 
 import StatusBox from '@/components/StatusBox';
-import { DataPoint, TimeDuration } from '@/components/graphs/prometheus';
 import FederationOverview from '@/components/FederationOverview';
 
 export default function Home() {

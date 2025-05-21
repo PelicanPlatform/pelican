@@ -18,7 +18,7 @@
 
 'use client';
 
-import { Box, Grid, Typography, Alert, Collapse } from '@mui/material';
+import { Box, Grid, Typography } from '@mui/material';
 import React, { useContext, useMemo } from 'react';
 
 import { CardSkeleton } from '@/components/Namespace';

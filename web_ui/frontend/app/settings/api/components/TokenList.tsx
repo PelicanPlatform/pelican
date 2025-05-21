@@ -9,11 +9,10 @@
 import {
   Box,
   Chip,
-  Grid,
   IconButton,
   Paper,
-  Typography,
   Tooltip,
+  Typography,
 } from '@mui/material';
 import { Delete } from '@mui/icons-material';
 

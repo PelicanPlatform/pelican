@@ -1,5 +1,5 @@
-import React, { MouseEventHandler, useCallback } from 'react';
-import { Box, Button, TextField } from '@mui/material';
+import React, { useCallback } from 'react';
+import { Box, Button } from '@mui/material';
 
 import { FormProps, Option, StringField } from '@/components/configuration';
 

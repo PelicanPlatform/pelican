@@ -3,9 +3,9 @@ import React, { ReactNode } from 'react';
 import {
   Alert,
   AlertProps,
+  AlertTitle,
   Snackbar,
   SnackbarProps,
-  AlertTitle,
 } from '@mui/material';
 
 export interface AlertPortalProps {

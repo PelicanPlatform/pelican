@@ -2,21 +2,20 @@
 
 import React, { ReactNode, useMemo, useRef, useState } from 'react';
 import {
-  BoxProps,
   IconButton,
-  Menu,
-  ListItemText,
-  ListItemIcon,
-  MenuItem,
   Link,
+  ListItemIcon,
+  ListItemText,
+  Menu,
+  MenuItem,
 } from '@mui/material';
 import {
+  Api,
   BugReport,
   Description,
-  HelpOutline,
-  Api,
-  GitHub,
   Email,
+  GitHub,
+  HelpOutline,
   Link as LinkIcon,
 } from '@mui/icons-material';
 import useSWR from 'swr';

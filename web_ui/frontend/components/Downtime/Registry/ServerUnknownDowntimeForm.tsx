@@ -1,13 +1,13 @@
 'use client';
 
 import {
-  TextField,
-  Button,
-  Select,
   Box,
-  MenuItem,
-  FormControlLabel,
+  Button,
   Checkbox,
+  FormControlLabel,
+  MenuItem,
+  Select,
+  TextField,
 } from '@mui/material';
 import { DateTimePicker } from '@mui/x-date-pickers';
 import { mutate } from 'swr';
@@ -16,28 +16,29 @@ import { Dispatch, useContext, useEffect, useMemo, useState } from 'react';
 import {
   DowntimeClass,
   DowntimeGet,
-  DowntimePost,
   DowntimeRegistryPost,
   DowntimeSeverity,
 } from '@/types';
-import { DowntimeClasses, DowntimeSeverities } from '@/components/Downtime';
+import {
+  DowntimeClasses,
+  DowntimeSeverities,
+  ServerDowntimeKey,
+} from '@/components/Downtime';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import { alertOnError } from '@/helpers/util';
 import {
   deleteDowntime,
+  getNamespaces,
   postDowntime,
   putDowntime,
-  getNamespaces,
 } from '@/helpers/api';
 import {
   AlertDispatchContext,
   AlertReducerAction,
 } from '@/components/AlertProvider';
-import { ServerDowntimeKey } from '@/components/Downtime';
 import { Delete } from '@mui/icons-material';
 import FormHelperText from '@mui/material/FormHelperText';
-import { useSearchParams } from 'next/navigation';
 import { RegistryNamespace } from '@/index';
 import useApiSWR from '@/hooks/useApiSWR';
 

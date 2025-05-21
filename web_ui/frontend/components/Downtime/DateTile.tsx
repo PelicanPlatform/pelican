@@ -1,6 +1,6 @@
-import { TileArgs, TileContentFunc } from 'react-calendar';
+import { TileArgs } from 'react-calendar';
 import { DowntimeGet, DowntimeSeverity } from '@/types';
-import { Box, Divider, Tooltip } from '@mui/material';
+import { Box, Tooltip } from '@mui/material';
 
 interface DateTileProps extends TileArgs {
   downtimes?: DowntimeGet[];

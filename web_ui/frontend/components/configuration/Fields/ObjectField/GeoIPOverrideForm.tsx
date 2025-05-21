@@ -1,18 +1,15 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Box, Button, TextField, Typography } from '@mui/material';
+import { Box, Button } from '@mui/material';
 
 import {
   FormProps,
-  ModalProps,
   GeoIPOverride,
-  Institution,
   StringField,
 } from '@/components/configuration';
 import {
   verifyIpAddress,
   verifyLongitude,
 } from '@/components/configuration/util';
-import { SinglePointMap } from '@/components/Map';
 import UpdateSinglePoint from '@/components/Map/UpdateSinglePoint';
 
 const verifyForm = (x: GeoIPOverride) => {
