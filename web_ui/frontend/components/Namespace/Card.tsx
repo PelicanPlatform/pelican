@@ -22,7 +22,6 @@ import Link from 'next/link';
 
 import InformationDropdown from './InformationDropdown';
 import { NamespaceIcon } from '@/components/Namespace/index';
-import { User } from '@/index';
 import { deleteNamespace, NAMESPACE_KEY } from '@/helpers/api';
 import { useSWRConfig } from 'swr';
 import { AlertDispatchContext } from '@/components/AlertProvider';

@@ -7,7 +7,6 @@ import InformationDropdown from './InformationDropdown';
 import { NamespaceIcon } from '@/components/Namespace/index';
 import { AlertContext, AlertDispatchContext } from '@/components/AlertProvider';
 import { useSWRConfig } from 'swr';
-import { approveNamespace, deleteNamespace } from '@/helpers/api';
 import {
   approveNamespace,
   deleteNamespace,
