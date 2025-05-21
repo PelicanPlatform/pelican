@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package director
+package server_utils
 
 import (
 	"context"
@@ -31,7 +31,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/param"
-	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 var (
@@ -203,8 +202,8 @@ func TestParsePromRes(t *testing.T) {
 }
 
 func TestQueryPrometheus(t *testing.T) {
-	server_utils.ResetTestState()
-	t.Cleanup(server_utils.ResetTestState)
+	ResetTestState()
+	t.Cleanup(ResetTestState)
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query().Get("query")
@@ -246,7 +245,7 @@ func TestQueryPrometheus(t *testing.T) {
 	defer server.Close()
 
 	t.Run("no-token-query-matrix", func(t *testing.T) {
-		parsed, err := queryPromtheus(context.Background(), "matrix", false)
+		parsed, err := QueryMyPrometheus(context.Background(), "matrix", false, "test")
 		require.NoError(t, err)
 		assert.Equal(t, "matrix", parsed.ResultType)
 		require.Len(t, parsed.Result, 2)
@@ -273,7 +272,7 @@ func TestQueryPrometheus(t *testing.T) {
 	})
 
 	t.Run("no-token-query-vector", func(t *testing.T) {
-		parsed, err := queryPromtheus(context.Background(), "vector", false)
+		parsed, err := QueryMyPrometheus(context.Background(), "vector", false, "test")
 		require.NoError(t, err)
 		assert.Equal(t, "vector", parsed.ResultType)
 		require.Len(t, parsed.Result, 2)
@@ -292,7 +291,7 @@ func TestQueryPrometheus(t *testing.T) {
 	})
 
 	t.Run("no-token-query-scalar", func(t *testing.T) {
-		parsed, err := queryPromtheus(context.Background(), "scalar", false)
+		parsed, err := QueryMyPrometheus(context.Background(), "scalar", false, "test")
 		require.NoError(t, err)
 		assert.Equal(t, "scalar", parsed.ResultType)
 		require.Len(t, parsed.Result, 1)
@@ -304,7 +303,7 @@ func TestQueryPrometheus(t *testing.T) {
 	})
 
 	t.Run("no-token-query-string", func(t *testing.T) {
-		parsed, err := queryPromtheus(context.Background(), "string", false)
+		parsed, err := QueryMyPrometheus(context.Background(), "string", false, "test")
 		require.NoError(t, err)
 		assert.Equal(t, "string", parsed.ResultType)
 		require.Len(t, parsed.Result, 1)
@@ -316,13 +315,13 @@ func TestQueryPrometheus(t *testing.T) {
 	})
 
 	t.Run("no-token-query-prom-error", func(t *testing.T) {
-		_, err := queryPromtheus(context.Background(), "error", false)
+		_, err := QueryMyPrometheus(context.Background(), "error", false, "test")
 		assert.Error(t, err)
 		require.Equal(t, "Prometheus responded error for query \"error\" with error type notInTheMood: bad weather", err.Error())
 	})
 
 	t.Run("no-token-query-empty-data", func(t *testing.T) {
-		parsed, err := queryPromtheus(context.Background(), "empty", false)
+		parsed, err := QueryMyPrometheus(context.Background(), "empty", false, "test")
 		assert.NoError(t, err)
 		assert.Nil(t, parsed.Result)
 		assert.Equal(t, "vector", parsed.ResultType) // default type is vector
