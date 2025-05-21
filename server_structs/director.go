@@ -176,8 +176,8 @@ type (
 		DisableDirectorTest bool              `json:"directorTest"`        // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
 		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
 		RequiredFeatures    []string          `json:"requiredFeatures"`
-		Now                 time.Time         `json:"now"` // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
-		Status              string			  `json:"status"` // The status of the server ad. This is a human-readable string that describes the server's status.
+		Now                 time.Time         `json:"now"`    // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
+		Status              string            `json:"status"` // The status of the server ad. This is a human-readable string that describes the server's status.
 	}
 
 	OriginAdvertiseV1 struct {

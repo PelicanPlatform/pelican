@@ -78,7 +78,7 @@ const (
 	DirectorRegistry_Topology HealthStatusComponent = "topology"   // Fetch data from OSDF topology
 	Server_WebUI              HealthStatusComponent = "web-ui"
 	OriginCache_IOConcurrency HealthStatusComponent = "IO-concurrency" // Keep track of whether or active requests are exceeding configured concurrency limits
-	Prometheus                HealthStatusComponent = "prometheus" // Prometheus server
+	Prometheus                HealthStatusComponent = "prometheus"     // Prometheus server
 )
 
 var (
