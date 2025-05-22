@@ -215,7 +215,7 @@ RUN groupadd -g 10940 xrootd \
 # Pelican's patches are ingested into the OSG repositories.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh
-ARG XROOTD_VER="5.8.1"
+ARG XROOTD_VER="5.8.2"
 ARG XROOTD_RELEASE="1.5.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
