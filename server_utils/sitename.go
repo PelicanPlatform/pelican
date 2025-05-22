@@ -110,7 +110,7 @@ func GetServiceName(ctx context.Context, server server_structs.ServerType) (name
 			log.Errorf("Failed to get sitename from the registry for the origin. Will fallback to using %s: %v", param.Xrootd_Sitename.GetName(), err)
 		}
 	} else if server.IsEnabled(server_structs.CacheType) {
-		cachePrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
+		cachePrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
 		name, err = getSitenameFromReg(ctx, cachePrefix)
 		if err != nil {
 			log.Errorf("Failed to get sitename from the registry for the cache. Will fallback to use %s: %v", param.Xrootd_Sitename.GetName(), err)

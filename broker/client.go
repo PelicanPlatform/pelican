@@ -215,7 +215,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	brokerAud.RawQuery = ""
 	brokerAud.Path = ""
 
-	cachePrefix := server_structs.GetCacheNS(param.Server_Hostname.GetString())
+	cachePrefix := server_structs.GetCacheNs(param.Server_Hostname.GetString())
 	token, err := createToken(cachePrefix, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Reverse)
 	if err != nil {
 		err = errors.Wrap(err, "failure when constructing the broker request token")
