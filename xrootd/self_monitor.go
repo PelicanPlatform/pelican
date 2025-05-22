@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package cache
+package xrootd
 
 import (
 	"context"
@@ -34,9 +34,11 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -60,22 +62,13 @@ func InitSelfTestDir() error {
 	}
 
 	basePath := param.Cache_NamespaceLocation.GetString()
-	pelicanMonPath := filepath.Join(basePath, "/pelican")
-	monitoringPath := filepath.Join(pelicanMonPath, "/monitoring")
-	selfTestPath := filepath.Join(monitoringPath, "/selfTest")
-	err = os.MkdirAll(selfTestPath, 0700)
+	selfTestPath := filepath.Join(basePath, selfTestDir)
+	err = config.MkdirAll(selfTestPath, 0750, uid, gid)
 	if err != nil {
-		return errors.Wrap(err, "Fail to create directory for the self-test")
+		return errors.Wrap(err, "failed to create directory for the self-test")
 	}
-	if err = os.Chown(pelicanMonPath, uid, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of self-test /pelican directory %v to desired daemon gid %v", monitoringPath, gid)
-	}
-	if err = os.Chown(monitoringPath, uid, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of self-test /pelican/monitoring directory %v to desired daemon gid %v", monitoringPath, gid)
-	}
-	if err = os.Chown(selfTestPath, uid, gid); err != nil {
-		return errors.Wrapf(err, "Unable to change ownership of self-test /pelican/monitoring directory %v to desired daemon gid %v", monitoringPath, gid)
-	}
+	log.Debugf("Created cache self-test directory at %s", selfTestPath)
+
 	return nil
 }
 
@@ -102,8 +95,8 @@ func generateTestFile() (string, error) {
 	now := time.Now()
 	testFileBytes := []byte(selfTestBody)
 	fileSize := len(testFileBytes)
-	cinfo := cInfo{
-		Store: store{
+	cinfo := cache.Cinfo{
+		Store: cache.Store{
 			FileSize:     int64(fileSize),
 			CreationTime: now.Unix(),
 			Status:       2, // CSChk_None = 0
@@ -171,6 +164,103 @@ func generateTestFile() (string, error) {
 	return baseUrl.String(), nil
 }
 
+// generateTestFileViaPlugin creates a test file and its .cinfo file in a temp location (birthplace),
+// then copies them to the selfTestDir using the xrdhttp-pelican plugin. This function is used
+// when drop privileges is enabled, as the pelican server is running as an unprivileged user
+// and cannot directly create files in the selfTestDir.
+func generateTestFileViaPlugin() (string, error) {
+	user, err := config.GetPelicanUser()
+	if err != nil {
+		return "", errors.Wrap(err, "failed to get user")
+	}
+
+	// Create a temp directory own by pelican user to bypass privilege restrictions, named "birthplace"
+	selfTestBirthplace := filepath.Join(param.Monitoring_DataLocation.GetString(), "selfTest")
+	err = config.MkdirAll(selfTestBirthplace, 0750, user.Uid, user.Gid)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create self-test directory")
+	}
+
+	// Create a test file and its cinfo in the birthplace
+	testFileBytes := []byte(selfTestBody)
+	fileSize := len(testFileBytes)
+	cinfo := cache.Cinfo{
+		Store: cache.Store{
+			FileSize:     int64(fileSize),
+			CreationTime: time.Now().Unix(),
+			Status:       2,
+		},
+	}
+	cinfoBytes, err := cinfo.Serialize()
+	if err != nil {
+		return "", err
+	}
+
+	file, err := os.CreateTemp(selfTestBirthplace, selfTestPrefix+"*.txt")
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create test file")
+	}
+	cinfoFile, err := os.Create(file.Name() + ".cinfo")
+	if err != nil {
+		return "", errors.Wrap(err, "failed to create test file cinfo")
+	}
+	defer func() {
+		file.Close()
+		cinfoFile.Close()
+		// Delete the test file and its cinfo in the birthplace
+		if err := os.Remove(file.Name()); err != nil {
+			log.Warningf("Failed to remove test file %s: %v", file.Name(), err)
+		}
+		if err := os.Remove(cinfoFile.Name()); err != nil {
+			log.Warningf("Failed to remove test file cinfo %s: %v", cinfoFile.Name(), err)
+		}
+	}()
+
+	// Write test data and cinfo to the files
+	if _, err := file.Write(testFileBytes); err != nil {
+		return "", errors.Wrapf(err, "failed to write test content to self-test file %s", file.Name())
+	}
+	if _, err := cinfoFile.Write(cinfoBytes); err != nil {
+		return "", errors.Wrapf(err, "failed to write cinfo content to self-test cinfo %s", cinfoFile.Name())
+	}
+
+	// After writing the test content to the file, the file pointer remains at the end.
+	// Seek back to the beginning of the file so that the copy operation reads from the start.
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return "", errors.Wrap(err, "failed to seek to beginning of test file")
+	}
+	if _, err := cinfoFile.Seek(0, io.SeekStart); err != nil {
+		return "", errors.Wrap(err, "failed to seek to beginning of cinfo file")
+	}
+
+	// Transplant the test file to selfTestDir using the xrdhttp-pelican plugin.
+	// Command "4" instructs the plugin to put the test file into the designated location, which is specified in `xrootd/launch.go`.
+	// Check `src/XrdHttpPelican.cc` in https://github.com/PelicanPlatform/xrdhttp-pelican for the counterpart in the plugin.
+	if err = SelfTestFileCopy(4, file); err != nil {
+		return "", errors.Wrap(err, "failed to copy the test file to the self-test directory")
+	}
+	// Transplant the cinfo file to selfTestDir using the xrdhttp-pelican plugin.
+	// Command "5" instructs the plugin to put the cinfo file into the designated location, which is specified in `xrootd/launch.go`.
+	if err = SelfTestFileCopy(5, cinfoFile); err != nil {
+		return "", errors.Wrap(err, "failed to copy the test cinfo file to the self-test directory")
+	}
+
+	// Construct and return the URL of the copied test file in the selfTestDir
+	cachePort := param.Cache_Port.GetInt()
+	baseUrlStr := fmt.Sprintf("https://%s:%d", param.Server_Hostname.GetString(), cachePort)
+	baseUrl, err := url.Parse(baseUrlStr)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to validate the base url for self-test download")
+	}
+	// This is for web URL path, do not use filepath pkg.
+	// The file name of the test file is always the same in the selfTestDir,
+	// no matter what's the file name in the birthplace.
+	extFilePath := path.Join(selfTestDir, selfTestPrefix+"cache-server.txt")
+	baseUrl.Path = extFilePath
+
+	return baseUrl.String(), nil
+}
+
 func generateFileTestScitoken() (string, error) {
 	issuerUrl := param.Server_ExternalWebUrl.GetString()
 	if issuerUrl == "" { // if both are empty, then error
@@ -229,6 +319,14 @@ func downloadTestFile(ctx context.Context, fileUrl string) error {
 }
 
 func deleteTestFile(fileUrlStr string) error {
+	// If drop privileges is enabled, the test file at selfTestDir will be overwritten by the next self-test,
+	// because the test file and cinfo at selfTestDir always have the same name.
+	// Also, the test file and cinfo in their birthplace were deleted right after generateTestFileViaPlugin,
+	// so this function can be skipped.
+	if param.Server_DropPrivileges.GetBool() {
+		return nil
+	}
+
 	basePath := param.Cache_NamespaceLocation.GetString()
 	fileUrl, err := url.Parse(fileUrlStr)
 	if err != nil {
@@ -252,18 +350,27 @@ func deleteTestFile(fileUrlStr string) error {
 }
 
 func runSelfTest(ctx context.Context) (bool, error) {
-	fileUrl, err := generateTestFile()
-	if err != nil || fileUrl == "" {
+	var fileUrl string
+	var err error
+	if param.Server_DropPrivileges.GetBool() {
+		fileUrl, err = generateTestFileViaPlugin()
+	} else {
+		fileUrl, err = generateTestFile()
+	}
+	if err != nil {
 		return false, errors.Wrap(err, "self-test failed when generating the file")
 	}
+
 	err = downloadTestFile(ctx, fileUrl)
 	if err != nil {
+		log.Warningf("Self-test download failed for file %s; err: %v", fileUrl, err)
 		errDel := deleteTestFile(fileUrl)
 		if errDel != nil {
 			return false, errors.Wrap(errDel, "self-test failed during automatic cleanup")
 		}
 		return false, errors.Wrapf(err, "self-test failed during download. Automatic cleanup of file at '%s' has completed", fileUrl)
 	}
+
 	err = deleteTestFile(fileUrl)
 	if err != nil {
 		return false, errors.Wrap(err, "self-test failed during automatic cleanup")
@@ -272,7 +379,7 @@ func runSelfTest(ctx context.Context) (bool, error) {
 }
 
 // Run a cache self-test and log/record metrics with the test result
-func doSelfMonitor(ctx context.Context) {
+func doSelfMonitorCache(ctx context.Context) {
 	log.Debug("Starting a new self-test monitoring cycle")
 
 	ok, err := runSelfTest(ctx)
@@ -288,15 +395,36 @@ func doSelfMonitor(ctx context.Context) {
 	}
 }
 
-func PeriodicCacheSelfTest(ctx context.Context, ergp *errgroup.Group) {
+// Run an origin self-test and log/record metrics with the test result
+func doSelfMonitorOrigin(ctx context.Context) {
+	log.Debug("Starting a new self-test monitoring cycle")
+	fileTests := server_utils.TestFileTransferImpl{}
+	issuerUrl := param.Server_ExternalWebUrl.GetString()
+	ok, err := fileTests.RunTests(ctx, param.Origin_Url.GetString(), param.Origin_TokenAudience.GetString(), issuerUrl, server_utils.ServerSelfTest)
+	if ok && err == nil {
+		log.Debugln("Self-test monitoring cycle succeeded at", time.Now().Format(time.UnixDate))
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusOK, "Self-test monitoring cycle succeeded at "+time.Now().Format(time.RFC3339))
+	} else {
+		log.Warningln("Self-test monitoring cycle failed: ", err)
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusCritical, "Self-test monitoring cycle failed: "+err.Error())
+	}
+}
+
+// Start self-test monitoring of the origin/cache.  This will upload, download, and delete
+// a generated filename every 15 seconds to the local origin.  On failure, it will
+// set the xrootd component's status to critical.
+func PeriodicSelfTest(ctx context.Context, ergp *errgroup.Group, isOrigin bool) {
+	customInterval := param.Cache_SelfTestInterval.GetDuration()
+	doSelfMonitor := doSelfMonitorCache
+	if isOrigin {
+		doSelfMonitor = doSelfMonitorOrigin
+		customInterval = param.Origin_SelfTestInterval.GetDuration()
+	}
+
+	ticker := time.NewTicker(customInterval)
 	firstRound := time.After(5 * time.Second)
+
 	ergp.Go(func() error {
-		customInterval := param.Cache_SelfTestInterval.GetDuration()
-		if customInterval == 0 {
-			customInterval = 15 * time.Second
-			log.Error("Invalid config value: Cache.SelfTestInterval is 0. Fallback to 15s.")
-		}
-		ticker := time.NewTicker(customInterval)
 		defer ticker.Stop()
 		for {
 			select {

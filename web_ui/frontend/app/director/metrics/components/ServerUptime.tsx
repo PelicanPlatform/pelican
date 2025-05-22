@@ -10,18 +10,16 @@ import {
   query_raw,
   replaceQueryParameters,
   TimeDuration,
-  VectorResponseData,
 } from '@/components';
 import { useContext, useMemo } from 'react';
 import { GraphContext } from '@/components/graphs/GraphContext';
 import { DateTime } from 'luxon';
 import { green, red } from '@mui/material/colors';
 import { TimeBar } from '@chtc/web-components';
-import { TimeBarProps, Point, Range } from '@chtc/web-components/dist/types';
+import { Point, Range } from '@chtc/web-components/dist/types';
 import useSWR from 'swr';
 import {
   Alert,
-  Box,
   Table,
   TableBody,
   TableCell,

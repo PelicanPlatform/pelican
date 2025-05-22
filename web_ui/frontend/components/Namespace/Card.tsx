@@ -1,6 +1,6 @@
 'use client';
 
-import { Alert, Alert as AlertType, RegistryNamespace } from '@/index';
+import { RegistryNamespace, User } from '@/index';
 import React, { useContext, useRef, useState } from 'react';
 import {
   Avatar,
@@ -12,18 +12,17 @@ import {
   useMediaQuery,
 } from '@mui/material';
 import {
+  CalendarMonth,
   Delete,
   Download,
   Edit,
   Person,
-  CalendarMonth,
 } from '@mui/icons-material';
 import Link from 'next/link';
 
 import InformationDropdown from './InformationDropdown';
 import { NamespaceIcon } from '@/components/Namespace/index';
-import { User } from '@/index';
-import { deleteNamespace } from '@/helpers/api';
+import { deleteNamespace, NAMESPACE_KEY } from '@/helpers/api';
 import { useSWRConfig } from 'swr';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
@@ -156,7 +155,7 @@ export const Card = ({ namespace, authenticated, onUpdate }: CardProps) => {
                           'Could Not Delete Registration',
                           dispatch
                         );
-                        setTimeout(() => mutate('getExtendedNamespaces'), 600);
+                        await mutate(NAMESPACE_KEY);
                         if (onUpdate) {
                           onUpdate();
                         }

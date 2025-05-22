@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  Box,
   Table,
   TableBody,
   TableCell,
@@ -11,7 +10,6 @@ import {
 } from '@mui/material';
 import {
   buildMetric,
-  MatrixResponseData,
   query_raw,
   TimeDuration,
   VectorResponseData,

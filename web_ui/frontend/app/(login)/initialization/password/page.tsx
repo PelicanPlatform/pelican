@@ -18,16 +18,16 @@
 
 'use client';
 
-import { Box, Grow, Typography } from '@mui/material';
+import { Box, Typography } from '@mui/material';
 import { useRouter } from 'next/navigation';
 import { useContext, useState } from 'react';
 
 import LoadingButton from '../../components/LoadingButton';
 
 import PasswordInput from '../../components/PasswordInput';
-import { alertOnError, getErrorMessage } from '@/helpers/util';
+import { alertOnError } from '@/helpers/util';
 import { AlertDispatchContext } from '@/components/AlertProvider';
-import { initLogin, resetLogin } from '@/helpers/api';
+import { resetLogin } from '@/helpers/api';
 
 export default function Home() {
   const dispatch = useContext(AlertDispatchContext);

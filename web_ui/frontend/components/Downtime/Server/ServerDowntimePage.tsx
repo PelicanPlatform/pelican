@@ -1,7 +1,7 @@
 'use client';
 
 import DowntimeCalendar from '../DowntimeCalendar';
-import { Box, Button, Grid, Typography } from '@mui/material';
+import { Box, Grid } from '@mui/material';
 import React, { useContext } from 'react';
 import DowntimeList from '@/components/Downtime/Server/DowntimeList';
 import {

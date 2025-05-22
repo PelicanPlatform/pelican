@@ -18,27 +18,17 @@
 
 'use client';
 
-import {
-  Box,
-  Button,
-  Grid,
-  Typography,
-  Paper,
-  Alert,
-  Collapse,
-  IconButton,
-} from '@mui/material';
-import React, { useEffect, useMemo, useState, useContext } from 'react';
+import { Box, Grid, IconButton, Paper, Typography } from '@mui/material';
+import React, { useContext, useMemo } from 'react';
 
 import {
-  PendingCard,
   Card,
-  CardSkeleton,
   CreateNamespaceCard,
   NamespaceCardList,
+  PendingCard,
 } from '@/components';
 import Link from 'next/link';
-import { RegistryNamespace, Alert as AlertType } from '@/index';
+import { RegistryNamespace } from '@/index';
 import { getUser } from '@/helpers/login';
 import { Add } from '@mui/icons-material';
 import useSWR from 'swr';
@@ -47,6 +37,7 @@ import { PendingCardProps } from '@/components/Namespace/PendingCard';
 import { AlertDispatchContext } from '@/components/AlertProvider';
 import { alertOnError } from '@/helpers/util';
 import { getExtendedNamespaces } from '@/helpers/get';
+import { NAMESPACE_KEY } from '@/helpers/api';
 
 export default function Home() {
   const dispatch = useContext(AlertDispatchContext);
@@ -54,7 +45,7 @@ export default function Home() {
   const { data, mutate: mutateNamespaces } = useSWR<
     { namespace: RegistryNamespace }[] | undefined
   >(
-    'getExtendedNamespaces',
+    NAMESPACE_KEY,
     () =>
       alertOnError(
         getExtendedNamespaces,

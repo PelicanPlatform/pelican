@@ -2,13 +2,13 @@
 
 import useSWR from 'swr';
 import { useRouter } from 'next/navigation';
-import React, { useContext, useState } from 'react';
+import React, { useState } from 'react';
 import { IconButton, Menu, MenuItem, MenuProps, Tooltip } from '@mui/material';
 import {
-  Login,
   AccountCircle,
-  CloudSync,
   AdminPanelSettings,
+  CloudSync,
+  Login,
 } from '@mui/icons-material';
 import StatusSnackBar from '@/components/StatusSnackBar';
 import { getUser } from '@/helpers/login';

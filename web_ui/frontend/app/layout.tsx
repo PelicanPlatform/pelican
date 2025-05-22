@@ -20,6 +20,7 @@ import { LocalizationProvider } from '@/clientComponents';
 import { ThemeProviderClient } from '@/components/ThemeProvider';
 import { AlertProvider } from '@/components/AlertProvider';
 import './globals.css';
+
 export const metadata = {
   title: 'Pelican Platform',
   description: 'Software designed to make data distribution easy',

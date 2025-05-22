@@ -1,7 +1,8 @@
 import { ServerType, User } from '@/index';
 import { ReactNode } from 'react';
-export { Navigation } from './Navigation';
 import { ExportRes } from '@/components/DataExportTable';
+
+export { Navigation } from './Navigation';
 
 export type NavigationConfiguration = {
   [key in ServerType | 'shared' | 'settings']: StaticNavigationItemProps[];

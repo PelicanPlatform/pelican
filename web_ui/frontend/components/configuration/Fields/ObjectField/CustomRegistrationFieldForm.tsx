@@ -2,16 +2,14 @@ import React, { useCallback } from 'react';
 import { Box, Button } from '@mui/material';
 
 import {
-  Action,
+  BooleanField,
   CustomRegistrationField,
   FieldType,
-  Option,
+  FormProps,
   ObjectField,
   OptionForm,
-  StringField,
   SelectField,
-  BooleanField,
-  FormProps,
+  StringField,
 } from '@/components/configuration';
 
 const verifyForm = (x: CustomRegistrationField) => {

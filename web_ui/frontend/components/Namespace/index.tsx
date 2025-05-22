@@ -1,8 +1,8 @@
 import { RegistryNamespace } from '@/index';
-import Card from './Card';
+import Card, { CardProps } from './Card';
 import CreateNamespaceCard from './CreateNamespaceCard';
 import CardSkeleton from './CardSkeleton';
-import PendingCard from './PendingCard';
+import PendingCard, { PendingCardProps } from './PendingCard';
 import NamespaceCardList from './NamespaceCardList';
 import NamespaceIcon from './NamespaceIcon';
 
@@ -14,9 +14,6 @@ export {
   PendingCard,
   NamespaceIcon,
 };
-
-import { PendingCardProps } from './PendingCard';
-import { CardProps } from './Card';
 
 export interface NamespaceAdminMetadata {
   user_id: string;

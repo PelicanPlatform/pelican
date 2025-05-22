@@ -1076,6 +1076,8 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Registry_RequireKeyChaining.GetName(), true)
 	v.SetDefault(param.Origin_StorageType.GetName(), "posix")
 	v.SetDefault(param.Origin_SelfTest.GetName(), true)
+	v.SetDefault(param.Origin_SelfTestInterval.GetName(), 15*time.Second)
+	v.SetDefault(param.Cache_SelfTestInterval.GetName(), 15*time.Second)
 	v.SetDefault(param.Origin_DirectorTest.GetName(), true)
 	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml because
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
@@ -1630,6 +1632,20 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		os.Setenv("XRD_PELICANCACHETOKENLOCATION", param.Cache_FedTokenLocation.GetString())
 	}
 
+	// Fallback `SelfTestInterval` to 15 seconds, if user sets a very small value
+	if currentServers.IsEnabled(server_structs.OriginType) {
+		if param.Origin_SelfTestInterval.GetDuration() < 1*time.Second {
+			viper.Set(param.Origin_SelfTestInterval.GetName(), "15s")
+			log.Warningf("Invalid %s value of %s. Falling back to 15s", param.Origin_SelfTestInterval.GetName(), param.Origin_SelfTestInterval.GetDuration().String())
+		}
+	}
+	if currentServers.IsEnabled(server_structs.CacheType) {
+		if param.Cache_SelfTestInterval.GetDuration() < 1*time.Second {
+			viper.Set(param.Cache_SelfTestInterval.GetName(), "15s")
+			log.Warningf("Invalid %s value of %s. Falling back to 15s", param.Cache_SelfTestInterval.GetName(), param.Cache_SelfTestInterval.GetDuration().String())
+		}
+	}
+
 	// Unmarshal Viper config into a Go struct
 	unmarshalledConfig, err := param.UnmarshalConfig(viper.GetViper())
 	if err != nil || unmarshalledConfig == nil {
@@ -1702,8 +1718,12 @@ func SetClientDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Client_WorkerCount.GetName(), 5)
 	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), filepath.Join(configDir, "certificates", "tlsca.pem"))
 
-	var downloadLimit int64 = 1024 * 100
-	v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), downloadLimit)
+	// Default is set outside of defaults.yaml to allow SetDefault call below to override
+	viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), 102400)
+	if param.MinimumDownloadSpeed.IsSet() {
+		viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), param.MinimumDownloadSpeed.GetInt())
+	}
+
 	if v == viper.GetViper() {
 		viper.AutomaticEnv()
 		upperPrefix := GetPreferredPrefix()
@@ -1763,7 +1783,6 @@ func SetClientDefaults(v *viper.Viper) error {
 			}
 		}
 		// Check the environment variable STASHCP_MINIMUM_DOWNLOAD_SPEED (and all the prefix variants)
-		var downloadLimit int64 = 1024 * 100
 		var prefixes_with_cp []ConfigPrefix
 		for _, prefix := range prefixes {
 			prefixes_with_cp = append(prefixes_with_cp, prefix+"CP")
@@ -1773,18 +1792,22 @@ func SetClientDefaults(v *viper.Viper) error {
 			if len(downloadLimitStr) == 0 {
 				continue
 			}
-			var err error
-			downloadLimit, err = strconv.ParseInt(downloadLimitStr, 10, 64)
+			downloadLimit, err := strconv.ParseInt(downloadLimitStr, 10, 64)
 			if err != nil {
 				log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is not parsable as integer: %s",
 					prefixes, downloadLimitStr, err.Error())
+				continue
 			}
+			if downloadLimit < 0 {
+				log.Errorf("Environment variable %s_MINIMUM_DOWNLOAD_SPEED=%s is negative value; ignoring and will use"+
+					"built-in default of %s", prefixes, downloadLimitStr, viper.Get(param.Client_MinimumDownloadSpeed.GetName()))
+				continue
+			}
+
+			// Backward compatibility environment variables do not overwrite the new-style ones
+			viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), downloadLimit)
+
 			break
-		}
-		if param.MinimumDownloadSpeed.IsSet() {
-			viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), param.MinimumDownloadSpeed.GetInt())
-		} else {
-			viper.Set(param.Client_MinimumDownloadSpeed.GetName(), downloadLimit)
 		}
 		// Handle more legacy config options
 		if param.DisableProxyFallback.IsSet() {
@@ -1898,5 +1921,5 @@ func ResetConfig() {
 
 	ResetClientInitialized()
 
-	// other than what's above, resetting Origin exports will be done by ResetTestState() in server_utils pkg
+	// There are other test state resets in server_utils.ResetTestState()
 }

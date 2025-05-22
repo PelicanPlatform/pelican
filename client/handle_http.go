@@ -345,7 +345,8 @@ type (
 )
 
 const (
-	ewmaInterval = 15 * time.Second
+	// The EWMA library we use assumes there's a single tick per second
+	ewmaInterval = time.Second
 
 	attrProjectName classAdAttr = "ProjectName"
 	attrJobId       classAdAttr = "GlobalJobId"
@@ -785,7 +786,7 @@ func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
 		closeChan:       make(chan bool),
 		closeDoneChan:   make(chan bool),
 		ewmaTick:        time.NewTicker(ewmaInterval),
-		ewma:            ewma.NewMovingAverage(),
+		ewma:            ewma.NewMovingAverage(20), // By explicitly setting the age to 20s, the first 10 seconds will use an average of historical samples instead of EWMA
 		pelicanUrlCache: pelicanUrlCache,
 	}
 	workerCount := param.Client_WorkerCount.GetInt()
@@ -2531,7 +2532,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			if totalSize >= 0 {
 				finalSize = totalSize
 			}
-			callback(dest, downloaded, finalSize, true)
+			callback(dest, downloaded+bytesSoFar, finalSize, true)
 		}
 		if te != nil {
 			te.ewmaCtr.Add(int64(time.Since(lastUpdate)))
@@ -2609,6 +2610,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	req.Header.Set("X-Pelican-Timeout", headerTimeout.Round(time.Millisecond).String())
 	if bytesSoFar > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", bytesSoFar))
+		log.Debugln("Resuming transfer starting at offset", bytesSoFar)
 	}
 	req.Header.Set("TE", "trailers")
 	req.Header.Set("User-Agent", userAgent)
@@ -2713,6 +2715,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	stoppedTransferTimeout := compatToDuration(param.Client_StoppedTransferTimeout.GetDuration(), "Client.StoppedTransferTimeout")
 	slowTransferRampupTime := compatToDuration(param.Client_SlowTransferRampupTime.GetDuration(), "Client.SlowTransferRampupTime")
 	slowTransferWindow := compatToDuration(param.Client_SlowTransferWindow.GetDuration(), "Client.SlowTransferWindow")
+	progressInterval := param.Logging_Client_ProgressInterval.GetDuration()
 	stoppedTransferDebugLine.Do(func() {
 		log.WithFields(fields).Debugf("Configuration values for stopped transfer timeout: %s; slow transfer ramp-up: %s; slow transfer look-back window: %s",
 			stoppedTransferTimeout.String(), slowTransferRampupTime.String(), slowTransferWindow.String())
@@ -2736,6 +2739,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	defer pw.Close()
 
 	// Loop of the download
+	lastProgressUpdate := time.Now()
 Loop:
 	for {
 		select {
@@ -2747,7 +2751,7 @@ Loop:
 			}
 			lastUpdate = currentTime
 			if callback != nil {
-				callback(dest, downloaded, totalSize, false)
+				callback(dest, downloaded+bytesSoFar, totalSize, false)
 			}
 
 		case <-t.C:
@@ -2780,6 +2784,11 @@ Loop:
 				limit = int64(float64(limit) / concurrency)
 			}
 			transferRate := pw.BytesPerSecond()
+			if progressInterval > 0 && time.Since(lastProgressUpdate) > progressInterval {
+				lastProgressUpdate = time.Now()
+				log.Infof("Download of %s has %d bytes complete out of %d; recent transfer rate is %s/s", transferUrl.String(), downloaded, totalSize, ByteCountSI(transferRate))
+			}
+
 			if transferRate < limit {
 				// Give the download `slowTransferRampupTime` (default 120) seconds to start
 				if time.Since(downloadStart) < slowTransferRampupTime {
@@ -2791,6 +2800,7 @@ Loop:
 						log.WithFields(fields).Errorln("Problem displaying slow message", err, status)
 						continue
 					}
+					log.Warningln("Transfer of", transferUrl.String(), "is below threshold; attempt will error out if it remains below threshold for", slowTransferWindow)
 					startBelowLimit = time.Now()
 					continue
 				} else if time.Since(startBelowLimit) < slowTransferWindow {
@@ -2800,7 +2810,11 @@ Loop:
 				// The download is below the threshold for more than `SlowTransferWindow` seconds, cancel the download
 				cancel()
 
-				log.WithFields(fields).Errorf("Cancelled: Download speed of %s/s is below the limit of %s/s", ByteCountSI(transferRate), ByteCountSI(int64(downloadLimit)))
+				if concurrency > 1 {
+					log.WithFields(fields).Errorf("Cancelling download attempt of %s: Download speed of %s/s is below the computed limit of %s/s (configured limit of %s/s divided by estimated %.1f concurrent transfers on average)", transferUrl.String(), ByteCountSI(transferRate), ByteCountSI(int64(limit)), ByteCountSI(int64(downloadLimit)), concurrency)
+				} else {
+					log.WithFields(fields).Errorf("Cancelling download attempt of %s: Download speed of %s/s is below the limit of %s/s", transferUrl.String(), ByteCountSI(transferRate), ByteCountSI(int64(downloadLimit)))
+				}
 
 				err = &SlowTransferError{
 					BytesTransferred: pw.BytesComplete(),
@@ -2939,16 +2953,22 @@ func (pw *progressWriter) Write(p []byte) (n int, err error) {
 		pw.firstByteTime = time.Now()
 	}
 	now := time.Now()
-	elapsed := now.Sub(pw.firstByteTime)
-	elapsedUS := elapsed.Microseconds()
-	if elapsed < 5*time.Second && elapsedUS > 0 {
-		pw.bytesPerSecond.Store(1000000 * pw.bytesWritten.Load() / elapsedUS)
-	} else if elapsedUS > 0 {
-		oldBytesPerSecond := pw.bytesPerSecond.Load()
-		elapsed = now.Sub(pw.lastRateSample)
-		alpha := math.Exp(-1 * float64(elapsed) / float64(10*time.Second))
-		recentRate := 1000000 * int64(len(p)) / elapsedUS
-		pw.bytesPerSecond.Store(int64(float64(oldBytesPerSecond)*alpha + float64(recentRate)*(1-alpha)))
+	startupTime := now.Sub(pw.firstByteTime)
+	startupTimeUS := startupTime.Microseconds()
+	// Transfer is ramping up, less than 5 seconds total.  Take the average rate since start.
+	if startupTime < 5*time.Second && startupTimeUS > 0 {
+		pw.bytesPerSecond.Store(1000000 * pw.bytesWritten.Load() / startupTimeUS)
+		pw.lastRateSample = now
+	} else {
+		elapsed := now.Sub(pw.lastRateSample)
+		pw.lastRateSample = now
+		elapsedUS := elapsed.Microseconds()
+		if elapsedUS > 0 {
+			oldBytesPerSecond := pw.bytesPerSecond.Load()
+			alpha := math.Exp(-1 * float64(elapsed) / float64(10*time.Second))
+			recentRate := 1000000 * int64(len(p)) / elapsedUS
+			pw.bytesPerSecond.Store(int64(float64(oldBytesPerSecond)*alpha + float64(recentRate)*(1-alpha)))
+		}
 	}
 	n, err = pw.writer.Write(p)
 	pw.bytesWritten.Add(int64(n))

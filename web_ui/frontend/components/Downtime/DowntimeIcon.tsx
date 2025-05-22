@@ -1,9 +1,4 @@
-import {
-  TaskAlt,
-  ErrorOutline,
-  WarningAmber,
-  InfoOutlined,
-} from '@mui/icons-material';
+import { InfoOutlined, WarningAmber } from '@mui/icons-material';
 import { SvgIconProps } from '@mui/material';
 
 import { DowntimeSeverity } from '@/types';

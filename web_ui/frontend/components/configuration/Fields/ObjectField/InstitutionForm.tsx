@@ -1,9 +1,10 @@
-import { Institution, StringField } from '@/components/configuration';
+import {
+  FormProps,
+  Institution,
+  StringField,
+} from '@/components/configuration';
 import React, { useCallback } from 'react';
-import { Box, Button, TextField } from '@mui/material';
-
-import { FormProps, ModalProps } from '@/components/configuration';
-import { String } from 'ts-toolbelt';
+import { Box, Button } from '@mui/material';
 
 const verifyForm = (x: Institution) => {
   return x.id != '' && x.name != '';

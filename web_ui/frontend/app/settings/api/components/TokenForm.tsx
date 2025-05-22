@@ -1,11 +1,11 @@
 'use client';
 
 import {
-  useState,
   Dispatch,
-  useContext,
-  useCallback,
   SetStateAction,
+  useCallback,
+  useContext,
+  useState,
 } from 'react';
 import {
   Autocomplete,
@@ -13,7 +13,6 @@ import {
   Button,
   IconButton,
   Modal,
-  Paper,
   TextField,
   Typography,
 } from '@mui/material';
@@ -24,9 +23,8 @@ import {
 import { secureFetch } from '@/helpers/login';
 import { fetchApi } from '@/helpers/api';
 import { alertOnError } from '@/helpers/util';
-import Link from 'next/link';
 import { BaseToken } from '@/types';
-import { Check, ContentCopy, Close } from '@mui/icons-material';
+import { Check, Close, ContentCopy } from '@mui/icons-material';
 
 const TokenForm = () => {
   const dispatch = useContext(AlertDispatchContext);

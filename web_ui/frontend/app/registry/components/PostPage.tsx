@@ -18,7 +18,7 @@
 
 'use client';
 
-import { Box, Grid, Collapse, Alert, Skeleton } from '@mui/material';
+import { Grid } from '@mui/material';
 import React, { useContext, useEffect, useState } from 'react';
 import Form from '@/app/registry/components/Form';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';

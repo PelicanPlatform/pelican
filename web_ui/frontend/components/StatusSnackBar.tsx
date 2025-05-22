@@ -1,4 +1,4 @@
-import { Button, Snackbar, IconButton, Alert, AlertColor } from '@mui/material';
+import { Alert, AlertColor, Button, Snackbar } from '@mui/material';
 import React from 'react';
 
 interface StatusSnackBarAction {

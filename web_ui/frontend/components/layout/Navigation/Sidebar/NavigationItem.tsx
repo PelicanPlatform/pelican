@@ -8,7 +8,6 @@ import { Air } from '@mui/icons-material';
 import {
   NavigationItemProps,
   StaticNavigationChildItemProps,
-  StaticNavigationParentItemProps,
 } from '@/components/layout/Navigation';
 import { ExportRes } from '@/components/DataExportTable';
 import NavigationMenu from '@/components/layout/Navigation/Sidebar/Menu';

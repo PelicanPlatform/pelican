@@ -19,51 +19,34 @@
 'use client';
 
 import {
-  Box,
-  Grid,
-  Typography,
-  Snackbar,
-  Button,
-  IconButton,
   Alert,
+  Box,
+  Button,
+  Grid,
+  IconButton,
+  Snackbar,
+  Typography,
 } from '@mui/material';
-import React, {
-  memo,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
-import {
-  AppRegistration,
-  AssistantDirection,
-  TripOrigin,
-  Cached,
-  Download,
-} from '@mui/icons-material';
+import React, { useCallback, useContext, useMemo, useState } from 'react';
+import { Download } from '@mui/icons-material';
 import useSWR from 'swr';
-import { merge, isMatch, isEqual } from 'lodash';
+import { isEqual } from 'lodash';
 import * as yaml from 'js-yaml';
-import { Main } from '@/components/layout/Main';
 import { submitConfigChange } from '@/components/configuration/util';
 import {
-  ParameterMetadataList,
   ParameterMetadataRecord,
   ParameterValueRecord,
 } from '@/components/configuration';
-import { stripNulls, flattenObject } from './util';
+import { flattenObject, stripNulls } from './util';
 import StatusSnackBar, {
   StatusSnackBarProps,
 } from '@/components/StatusSnackBar';
-import { ServerType } from '@/index';
-import { alertOnError, getEnabledServers } from '@/helpers/util';
+import { alertOnError } from '@/helpers/util';
 import DownloadButton from '@/components/DownloadButton';
-import { PaddedContent } from '@/components/layout';
 import {
   ConfigDisplay,
-  TableOfContents,
   RestartBox,
+  TableOfContents,
 } from '@/app/config/components';
 import AuthenticatedContent from '@/components/layout/AuthenticatedContent';
 import { getConfig } from '@/helpers/api';

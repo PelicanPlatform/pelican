@@ -28,14 +28,14 @@ import (
 )
 
 type (
-	cInfo struct {
-		Store            store
+	Cinfo struct {
+		Store            Store
 		cksum            uint32
 		buffSynced       []byte
 		cksumSyncedAstat uint32
 	}
 
-	store struct {
+	Store struct {
 		BufferSize   int64
 		FileSize     int64
 		CreationTime int64 // Unix time in seconds
@@ -52,13 +52,13 @@ const (
 
 // SetFCheckSumCheck sets the f_cksum_check value.
 // val is expected to fit within 3 bits.
-func (st *store) SetFCheckSumCheck(val uint32) {
+func (st *Store) SetFCheckSumCheck(val uint32) {
 	const mask uint32 = 0b111 // 3 bits for f_cksum_check
 	// Clear the f_cksum_check bits then set to val
 	st.Status = (st.Status &^ (mask << 0)) | ((val & mask) << 0)
 }
 
-func (st *store) Serialize() ([]byte, error) {
+func (st *Store) Serialize() ([]byte, error) {
 	if st.BufferSize == 0 {
 		st.BufferSize = 131072 // 128K, same as pfc.blocksize in xrootd-cache.cfg
 	}
@@ -94,7 +94,7 @@ func (st *store) Serialize() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (info *cInfo) Serialize() ([]byte, error) {
+func (info *Cinfo) Serialize() ([]byte, error) {
 	crc32c := crc32.MakeTable(crc32.Castagnoli)
 	var buf bytes.Buffer
 	err := binary.Write(&buf, binary.LittleEndian, int32(defaultCinfoVersion))

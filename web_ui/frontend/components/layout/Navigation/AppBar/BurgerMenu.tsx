@@ -1,23 +1,15 @@
-import React, { useState } from 'react';
-import {
-  List,
-  ListItem,
-  ListItemText,
-  Collapse,
-  IconButton,
-  Box,
-} from '@mui/material';
+import React from 'react';
+import { Box, IconButton, List } from '@mui/material';
 import {
   Api,
   BugReport,
+  Close,
   Description,
   GitHub,
   HelpOutline,
 } from '@mui/icons-material';
 import {
-  NavigationItemProps,
   NavigationProps,
-  StaticNavigationBaseItemProps,
   StaticNavigationItemProps,
 } from '@/components/layout/Navigation/index';
 import Container from '@mui/material/Container';
@@ -27,7 +19,6 @@ import PelicanLogo from '@/public/static/images/PelicanPlatformLogo_Icon.png';
 import Typography from '@mui/material/Typography';
 import UserMenu from '@/components/layout/Navigation/Sidebar/UserMenu';
 import AppBar from '@mui/material/AppBar';
-import { Close } from '@mui/icons-material';
 import { NavigationItem } from '@/components/layout/Navigation/AppBar/NavigationItem';
 import { getVersionNumber } from '@/components/layout/Navigation/Sidebar/AboutMenu';
 

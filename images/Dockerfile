@@ -54,7 +54,7 @@ ARG NODEJS_VER=20
 ARG LOTMAN_SRC_BUILD=false
 ARG LOTMAN_VER=0.0.4
 ARG XRDCL_PELICAN_SRC_BUILD=false
-ARG XRDCL_PELICAN_VER=1.2.1
+ARG XRDCL_PELICAN_VER=1.2.3
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.6
 ARG XROOTD_LOTMAN_SRC_BUILD=false
@@ -91,7 +91,7 @@ gpgcheck=0
 ENDCOPY
 RUN --mount=type=cache,id=dnf-${BUILDPLATFORM},target=/var/cache/dnf,sharing=locked <<ENDRUN
   set -eux
-  dnf install -y goreleaser
+  dnf install -y goreleaser make
 ENDRUN
 
 RUN curl -O https://dl.google.com/go/go${GO_VER}.${BUILDOS}-${BUILDARCH}.tar.gz \
@@ -215,7 +215,7 @@ RUN groupadd -g 10940 xrootd \
 # Pelican's patches are ingested into the OSG repositories.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh
-ARG XROOTD_VER="5.8.1"
+ARG XROOTD_VER="5.8.2"
 ARG XROOTD_RELEASE="1.5.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
