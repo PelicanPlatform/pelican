@@ -310,7 +310,7 @@ func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kS
 		}
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(responseHandler))
+	server := httptest.NewTLSServer(http.HandlerFunc(responseHandler))
 	serverUrl := server.URL
 	getInternalFInfo = func() pelican_url.FederationDiscovery {
 		// Pre-populate some fed metadata values

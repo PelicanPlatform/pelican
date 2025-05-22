@@ -1576,6 +1576,8 @@ func TestDiscoverOriginCache(t *testing.T) {
 	privateKey, err := config.GetIssuerPrivateJWK()
 	assert.NoError(t, err, "Error fetching private key for test")
 
+	viper.Set(param.TLSSkipVerify.GetName(), true)
+
 	// Set up the mock federation, which must exist for the auth handler to fetch federation keys
 	test_utils.MockFederationRoot(t, nil, &pKeySet)
 	fedInfo, err := config.GetFederation(ctx)
