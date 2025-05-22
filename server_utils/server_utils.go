@@ -381,18 +381,32 @@ func CreateFedTok(ctx context.Context, server server_structs.XRootDServer) (tok 
 			continue
 		}
 
-		host := param.Server_Hostname.GetString()
 		var adTok string
 		if adTok, err = GetAdvertisementTok(server, directorUrl); err != nil {
 			err = errors.Wrap(err, "failed to get advertisement token")
 			continue
 		}
 
-		// The fed token endpoint wants to know the host and server type,
+		// NOTE: The first implementation of this always used the hostname in the query
+		// parameter, but this prevented the Director from validating advertise tokens from
+		// services registered under their 'Xrootd.Sitename`
+		var registrationName string
+		sType := server.GetServerType()
+		if sType == server_structs.OriginType {
+			registrationName = param.Server_Hostname.GetString()
+		} else if sType == server_structs.CacheType {
+			// Note that the default value for `Xrootd.Sitename` is the hostname
+			// Thus, if no sitename is set, this behaves the same as origins
+			registrationName = param.Xrootd_Sitename.GetString()
+		} else {
+			return "", errors.New("attempted to get a federation token for a server that is not an origin or cache")
+		}
+
+		// The fed token endpoint wants to know the host (registration name) and server type,
 		// which it needs to verify the token
 		params := url.Values{}
-		params.Add("host", host)
-		params.Add("sType", server.GetServerType().String())
+		params.Add("host", registrationName)
+		params.Add("sType", sType.String())
 		query.RawQuery = params.Encode()
 
 		var req *http.Request

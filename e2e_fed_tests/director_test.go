@@ -170,36 +170,49 @@ func TestDirectorFedTokenCacheAPI(t *testing.T) {
 
 	testCases := []struct {
 		name               string
+		shouldSetSitename  bool
 		allowedPrefixes    []string
 		scopeShouldHave    []string
 		scopeShouldNotHave []string
 	}{
 		{
 			name:               "AllowFirstNamespace",
+			shouldSetSitename:  false,
+			allowedPrefixes:    []string{"/first/namespace"},
+			scopeShouldHave:    []string{"storage.read:/first/namespace"},
+			scopeShouldNotHave: []string{"/second/namespace"},
+		},
+		{
+			name:               "WithSitename",
+			shouldSetSitename:  true,
 			allowedPrefixes:    []string{"/first/namespace"},
 			scopeShouldHave:    []string{"storage.read:/first/namespace"},
 			scopeShouldNotHave: []string{"/second/namespace"},
 		},
 		{
 			name:               "AllowBothNamespaces",
+			shouldSetSitename:  false,
 			allowedPrefixes:    []string{"/first/namespace", "/second/namespace"},
 			scopeShouldHave:    []string{"storage.read:/first/namespace", "storage.read:/second/namespace"},
 			scopeShouldNotHave: []string{},
 		},
 		{
 			name:               "NoCustomField",
+			shouldSetSitename:  false,
 			allowedPrefixes:    []string{},
 			scopeShouldHave:    []string{"storage.read:/"}, // Absence of field means no namespace restrictions
 			scopeShouldNotHave: []string{},
 		},
 		{
 			name:               "EmptyCustomField",
+			shouldSetSitename:  false,
 			allowedPrefixes:    []string{""},
 			scopeShouldHave:    []string{}, // Empty field means no read permissions
 			scopeShouldNotHave: []string{},
 		},
 		{
 			name:               "GlobNamespace",
+			shouldSetSitename:  false,
 			allowedPrefixes:    []string{"*"},
 			scopeShouldHave:    []string{"storage.read:/"},
 			scopeShouldNotHave: []string{},
@@ -212,19 +225,24 @@ func TestDirectorFedTokenCacheAPI(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.shouldSetSitename {
+				viper.Set(param.Xrootd_Sitename.GetName(), "fed-test")
+			}
+
 			viper.Set(param.Director_RegistryQueryInterval.GetName(), "1s")
 			_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
 
-			// All servers running as part of fed-in-a-box will have the same hostname
-			// so we can use that fact when injecting allowed prefixes into the registry database
-			host := param.Server_Hostname.GetString()
-			require.NotEmpty(t, host, "Failed to determine server hostname")
+			// If the sitename is not set, this fetches the server's hostname.
+			// Since all servers running in the fed test have the same hostname,
+			// this lets us inject allowed prefixes in the registry database.
+			registrationName := param.Xrootd_Sitename.GetString()
+			require.NotEmpty(t, registrationName, "Failed to determine server's XRootD sitename")
 
 			// Inject our "AllowedPrefixes" data into the registry database under
-			// the /caches/<hostname> namespace
+			// the /caches/<registration name> namespace
 			dbLoc := param.Registry_DbLocation.GetString()
 			require.NotEmpty(t, dbLoc, "Failed to determine registry database location")
-			updateAllowedPrefixesForCache(t, dbLoc, host, tc.allowedPrefixes)
+			updateAllowedPrefixesForCache(t, dbLoc, registrationName, tc.allowedPrefixes)
 
 			// Now sleep for 2 seconds so the Director has time to populate the changes
 			time.Sleep(2 * time.Second)
