@@ -64,7 +64,7 @@ func (s ServerPrefix) String() string {
 
 // Get the namespace for a cache server, i.e. /caches/<hostname>
 // It returns an empty string is the host is empty
-func GetCacheNS(host string) string {
+func GetCacheNs(host string) string {
 	if host == "" {
 		return ""
 	}

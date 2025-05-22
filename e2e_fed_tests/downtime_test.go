@@ -162,7 +162,7 @@ func TestServerDowntimeDirectorForwarding(t *testing.T) {
 	registryUrl.Path = downtimeCreationPath
 
 	downtimeByFedAdmin := web_ui.DowntimeInput{
-		ServerName:  server_structs.GetCacheNS(cacheServerName), // In Registry downtime table, the server name uses server's registered prefix
+		ServerName:  server_structs.GetCacheNs(cacheServerName), // In Registry downtime table, the server name uses server's registered prefix
 		Source:      strings.ToLower(server_structs.RegistryType.String()),
 		Class:       "SCHEDULED",
 		Description: "This is a test downtime set by federation admin",

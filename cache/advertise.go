@@ -51,7 +51,7 @@ type (
 var MinFedTokenTickerRate = 1 * time.Minute
 
 func (server *CacheServer) CreateAdvertisement(name, originUrl, originWebUrl string) (*server_structs.OriginAdvertiseV2, error) {
-	registryPrefix := server_structs.GetCacheNS(param.Xrootd_Sitename.GetString())
+	registryPrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
 
 	// Fetch cache's active and future downtimes
 	downtimes, err := database.GetIncompleteDowntimes(strings.ToLower(server_structs.CacheType.String()))
