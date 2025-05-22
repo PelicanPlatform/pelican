@@ -16,9 +16,12 @@
  *
  ***************************************************************/
 
+import CssBaseline from '@mui/material/CssBaseline';
+
 import { LocalizationProvider } from '@/clientComponents';
 import { ThemeProviderClient } from '@/components/ThemeProvider';
 import { GlobalAlertProvider } from '@/components/AlertProvider';
+
 import './globals.css';
 export const metadata = {
   title: 'Pelican Platform',
@@ -32,6 +35,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang='en'>
+      <CssBaseline />
       <ThemeProviderClient>
         <LocalizationProvider>
           <GlobalAlertProvider>

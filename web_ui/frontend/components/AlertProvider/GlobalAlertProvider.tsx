@@ -3,7 +3,7 @@
 import { createContext, Dispatch, useReducer } from 'react';
 import { AlertPortal, AlertPortalProps } from './AlertPortal';
 import CodeBlock from '@/components/CodeBlock';
-import {AlertReducerAction} from "@/components/AlertProvider/index";
+import { AlertReducerAction } from '@/components/AlertProvider/index';
 
 const defaultGlobalAlertContext: AlertPortalProps | undefined = undefined;
 
@@ -11,11 +11,15 @@ export const GlobalAlertContext = createContext<AlertPortalProps | undefined>(
   defaultGlobalAlertContext
 );
 
-export const GlobalAlertDispatchContext = createContext<Dispatch<AlertReducerAction>>(
-  () => {}
-);
+export const GlobalAlertDispatchContext = createContext<
+  Dispatch<AlertReducerAction>
+>(() => {});
 
-export const GlobalAlertProvider = ({ children }: { children: React.ReactNode }) => {
+export const GlobalAlertProvider = ({
+  children,
+}: {
+  children: React.ReactNode;
+}) => {
   const [state, dispatch] = useReducer(alertReducer, defaultGlobalAlertContext);
 
   return (

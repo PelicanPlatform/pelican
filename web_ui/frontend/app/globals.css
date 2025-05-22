@@ -81,3 +81,13 @@ body {
   color: rgb(var(--foreground-rgb));
   padding: 0 !important;
 }
+
+ol {
+  margin-left: 3ch;
+}
+
+pre {
+  padding: 1rem;
+  border-radius: 1rem;
+  background-color: var(--mui-palette-grey-50);
+}

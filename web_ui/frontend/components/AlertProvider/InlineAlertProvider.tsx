@@ -2,29 +2,33 @@
 
 import { createContext, Dispatch, useReducer } from 'react';
 import { AlertPortalProps } from './AlertPortal';
-import {AlertReducerAction} from "@/components/AlertProvider/index";
-import alertReducer from "@/components/AlertProvider/alertReducer";
+import { AlertReducerAction } from '@/components/AlertProvider/index';
+import alertReducer from '@/components/AlertProvider/alertReducer';
 
 const defaultInlineAlertContext: AlertPortalProps | undefined = undefined;
 
 export const InlineAlertContext = createContext<AlertPortalProps | undefined>(
-		defaultInlineAlertContext
+  defaultInlineAlertContext
 );
 
-export const InlineAlertDispatchContext = createContext<Dispatch<AlertReducerAction>>(
-		() => {}
-);
+export const InlineAlertDispatchContext = createContext<
+  Dispatch<AlertReducerAction>
+>(() => {});
 
-export const GlobalAlertProvider = ({ children }: { children: React.ReactNode }) => {
-	const [state, dispatch] = useReducer(alertReducer, defaultInlineAlertContext);
+export const GlobalAlertProvider = ({
+  children,
+}: {
+  children: React.ReactNode;
+}) => {
+  const [state, dispatch] = useReducer(alertReducer, defaultInlineAlertContext);
 
-	return (
-			<InlineAlertContext.Provider value={state}>
-				<InlineAlertDispatchContext.Provider value={dispatch}>
-					{children}
-				</InlineAlertDispatchContext.Provider>
-			</InlineAlertContext.Provider>
-	);
+  return (
+    <InlineAlertContext.Provider value={state}>
+      <InlineAlertDispatchContext.Provider value={dispatch}>
+        {children}
+      </InlineAlertDispatchContext.Provider>
+    </InlineAlertContext.Provider>
+  );
 };
 
 export default GlobalAlertProvider;

@@ -35,7 +35,7 @@ const openSans = Open_Sans({
   style: ['normal'],
   weight: ['300', '400', '600'],
   display: 'swap',
-})
+});
 
 let themeProvider = createTheme({
   palette: {

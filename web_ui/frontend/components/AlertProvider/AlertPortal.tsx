@@ -1,10 +1,7 @@
 import { Portal } from '@mui/base';
 import React, { ReactNode } from 'react';
-import {
-  Snackbar,
-  SnackbarProps
-} from '@mui/material';
-import Alert, {InlineAlertProps} from "./Alert"
+import { Snackbar, SnackbarProps } from '@mui/material';
+import Alert, { InlineAlertProps } from './Alert';
 
 export interface AlertPortalProps extends InlineAlertProps {
   snackBarProps?: SnackbarProps;
@@ -18,7 +15,6 @@ export const AlertPortal = ({
   alertProps,
   snackBarProps,
 }: AlertPortalProps) => {
-
   return (
     <Portal>
       <Snackbar

@@ -89,7 +89,7 @@ const StringSliceField = ({
     if (error) {
       return error;
     } else if (inputValue != '') {
-      return 'Press enter to add';
+      return 'Press enter to add to list';
     }
   }, [error, inputValue]);
 

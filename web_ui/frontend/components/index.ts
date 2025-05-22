@@ -6,3 +6,4 @@ export * from './Namespace';
 export * from './CapabilitiesDisplay';
 export * from './graphs';
 export * from './MarkdownRender';
+export { default as Code } from './Code';

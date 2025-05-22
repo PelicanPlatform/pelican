@@ -28,7 +28,7 @@ import {
   Skeleton,
   Grid,
   Button,
-  Snackbar
+  Snackbar,
 } from '@mui/material';
 import { green, grey } from '@mui/material/colors';
 import useSWR from 'swr';
@@ -96,10 +96,8 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
         <Grid item xs={12} lg={8}>
           <Typography variant={'h4'}>Issuer Configuration</Typography>
           <Box my={2}>
-            <Link href={"./setup/client/"}>
-              <Button variant={"outlined"}>
-                Setup Issuer
-              </Button>
+            <Link href={'./setup/client/'}>
+              <Button variant={'outlined'}>Setup Issuer</Button>
             </Link>
           </Box>
           <BooleanToggle

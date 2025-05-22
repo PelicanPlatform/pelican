@@ -27,7 +27,7 @@ import {
 } from '@/components/configuration';
 import { alertOnError } from '@/helpers/util';
 import { Dispatch, useCallback, useContext, useMemo, useState } from 'react';
-import {GlobalAlertDispatchContext} from '@/components/AlertProvider';
+import { GlobalAlertDispatchContext } from '@/components/AlertProvider';
 import { getConfig } from '@/helpers/api';
 import LatitudeLongitudePicker from '@/components/LatitudeLongitudePicker';
 import ObjectModal from '@/components/configuration/Fields/ObjectField/ObjectModal';

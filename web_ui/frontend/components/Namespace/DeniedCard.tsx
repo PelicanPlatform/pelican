@@ -6,7 +6,10 @@ import { Block, Check, Delete, Edit, Person } from '@mui/icons-material';
 import { Alert, RegistryNamespace } from '@/index';
 import InformationDropdown from './InformationDropdown';
 import { getServerType, NamespaceIcon } from '@/components/Namespace/index';
-import { GlobalAlertContext, GlobalAlertDispatchContext } from '@/components/AlertProvider';
+import {
+  GlobalAlertContext,
+  GlobalAlertDispatchContext,
+} from '@/components/AlertProvider';
 import { User } from '@/index';
 import { useSWRConfig } from 'swr';
 import CodeBlock from '@/components/CodeBlock';
