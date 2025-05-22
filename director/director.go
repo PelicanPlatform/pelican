@@ -1070,7 +1070,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		} else {
 			// For caches <= 7.8.1, they don't have RegistryPrefix
 			// so we fall back to Name
-			registryPrefix = server_structs.GetCacheNS(adV2.Name)
+			registryPrefix = server_structs.GetCacheNs(adV2.Name)
 		}
 	}
 
