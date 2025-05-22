@@ -1076,6 +1076,8 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Registry_RequireKeyChaining.GetName(), true)
 	v.SetDefault(param.Origin_StorageType.GetName(), "posix")
 	v.SetDefault(param.Origin_SelfTest.GetName(), true)
+	v.SetDefault(param.Origin_SelfTestInterval.GetName(), 15*time.Second)
+	v.SetDefault(param.Cache_SelfTestInterval.GetName(), 15*time.Second)
 	v.SetDefault(param.Origin_DirectorTest.GetName(), true)
 	// Set up the default S3 URL style to be path-style here as opposed to in the defaults.yaml because
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
@@ -1628,6 +1630,20 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	if currentServers.IsEnabled(server_structs.CacheType) {
 		viper.SetDefault(param.Cache_FedTokenLocation.GetName(), filepath.Join(configDir, "cache-fed-token"))
 		os.Setenv("XRD_PELICANCACHETOKENLOCATION", param.Cache_FedTokenLocation.GetString())
+	}
+
+	// Fallback `SelfTestInterval` to 15 seconds, if user sets a very small value
+	if currentServers.IsEnabled(server_structs.OriginType) {
+		if param.Origin_SelfTestInterval.GetDuration() < 1*time.Second {
+			viper.Set(param.Origin_SelfTestInterval.GetName(), "15s")
+			log.Warningf("Invalid %s value of %s. Falling back to 15s", param.Origin_SelfTestInterval.GetName(), param.Origin_SelfTestInterval.GetDuration().String())
+		}
+	}
+	if currentServers.IsEnabled(server_structs.CacheType) {
+		if param.Cache_SelfTestInterval.GetDuration() < 1*time.Second {
+			viper.Set(param.Cache_SelfTestInterval.GetName(), "15s")
+			log.Warningf("Invalid %s value of %s. Falling back to 15s", param.Cache_SelfTestInterval.GetName(), param.Cache_SelfTestInterval.GetDuration().String())
+		}
 	}
 
 	// Unmarshal Viper config into a Go struct

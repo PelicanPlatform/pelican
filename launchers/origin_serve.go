@@ -109,7 +109,7 @@ func OriginServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, 
 	}
 
 	if param.Origin_SelfTest.GetBool() {
-		egrp.Go(func() error { return origin.PeriodicSelfTest(ctx) })
+		xrootd.PeriodicSelfTest(ctx, egrp, true)
 	}
 
 	privileged := param.Origin_Multiuser.GetBool()

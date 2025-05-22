@@ -611,10 +611,17 @@ func copyXrootdCertificates(server server_structs.XRootDServer) error {
 	return nil
 }
 
+func SelfTestFileCopy(cmd int, file *os.File) error {
+	log.Debug("Transplanting a self-test file")
+	if err := sendChildFD(false, cmd, file); err != nil {
+		return errors.Wrap(err, "Failed to copy the self-test file via FD")
+	}
+	return nil
+}
+
 // After privileges have been dropped, copy the server certificates
 // to the xrootd process.
 func dropPrivilegeCopy(server server_structs.XRootDServer) error {
-
 	certFile := param.Server_TLSCertificateChain.GetString()
 	certKey := param.Server_TLSKey.GetString()
 	if _, err := tls.LoadX509KeyPair(certFile, certKey); err != nil {
