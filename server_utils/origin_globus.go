@@ -52,7 +52,7 @@ func (o *GlobusOrigin) validateExtra(e *OriginExport, numExports int) (err error
 		return errors.Errorf("GlobusCollectionName is required for export '%s'", e.FederationPrefix)
 	}
 
-	if e.Capabilities.Writes == true {
+	if e.Capabilities.Writes {
 		return errors.Errorf("Write capability is not yet supported for export '%s'", e.FederationPrefix)
 	}
 
