@@ -55,6 +55,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -1274,5 +1275,103 @@ func TestWriteTransferErrorMessage(t *testing.T) {
 			baseResultMessage := fmt.Sprintf("Pelican Client Error: Test Error Message (Version: %s", config.GetVersion())
 			require.Equal(t, errMsg, fmt.Sprintf("%s%s", baseResultMessage, test.resultMessage))
 		})
+	}
+}
+
+func TestTransferError404(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Isolate the test so it doesn't use system config
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	err := config.InitClient()
+	require.NoError(t, err)
+
+	// Second server that returns 404
+	secondServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer secondServer.Close()
+
+	// First server returns Link header pointing to second server
+	firstServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", secondServer.URL)
+		w.Header().Set("X-Pelican-Namespace", "namespace=/test-namespace, require-token=false")
+		linkHeader := fmt.Sprintf(`<%s>; rel="duplicate"; pri=1; depth=0`, secondServer.URL)
+		w.Header().Set("Link", linkHeader)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer firstServer.Close()
+
+	fInfo := pelican_url.FederationDiscovery{
+		DirectorEndpoint: firstServer.URL,
+	}
+
+	viper.Set(param.TLSSkipVerify.GetName(), true)
+
+	test_utils.MockFederationRoot(t, &fInfo, nil)
+	ctx, _, egrp := test_utils.TestContext(context.Background(), t)
+	objectUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	if err != nil {
+		t.Fatalf("Error parsing URL: %v", err)
+	}
+
+	objectUrl.Path = "/test-namespace/object"
+	objectUrl.Scheme = "pelican"
+
+	workChan := make(chan PluginTransfer, 1)
+	workChan <- PluginTransfer{url: objectUrl, localFile: "/tmp/targetfile"}
+	close(workChan)
+	results := make(chan *classads.ClassAd, 2)
+	egrp.Go(func() error {
+		return runPluginWorker(ctx, false, workChan, results)
+	})
+
+	done := false
+	for !done {
+		select {
+		case <-ctx.Done():
+			break
+		case resultAd, ok := <-results:
+			if !ok {
+				done = true
+				break
+			}
+			transferSuccess, err := resultAd.Get("TransferSuccess")
+			assert.NoError(t, err)
+			boolVal, ok := transferSuccess.(bool)
+			require.True(t, ok)
+			assert.False(t, boolVal)
+
+			log.Debugln("Got result ad:", resultAd)
+
+			errData, err := resultAd.Get("TransferErrorData")
+			require.NoError(t, err)
+			errorDataList := errData.([]interface{})
+			require.Equal(t, 1, len(errorDataList))
+			errorData := errorDataList[0].(map[string]interface{})
+			errorTypeStr, ok := errorData["ErrorType"].(string)
+			require.True(t, ok)
+			assert.Equal(t, "Contact", errorTypeStr)
+			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
+			require.True(t, ok)
+
+			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
+			require.True(t, ok)
+			assert.Equal(t, 3000, pelicanErrorCode)
+
+			pelicanErrorMessage, ok := developerData["ErrorMessage"].(string)
+			require.True(t, ok)
+			assert.Equal(t, "404: Not Found", pelicanErrorMessage)
+
+			pelicanErrorType, ok := developerData["ErrorType"].(string)
+			require.True(t, ok)
+			assert.Equal(t, "Contact", pelicanErrorType)
+
+			retryable, ok := developerData["Retryable"].(bool)
+			require.True(t, ok)
+			assert.False(t, retryable)
+		}
 	}
 }
