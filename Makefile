@@ -45,20 +45,12 @@ endif
 WEBSITE_SRC_PATH := web_ui/frontend
 WEBSITE_OUT_PATH := web_ui/frontend/out
 WEBSITE_CACHE_PATH := web_ui/frontend/.next
-WEBSITE_SRC_FILES := $(shell find $(WEBSITE_SRC_PATH)/app -type f) \
-						$(shell find $(WEBSITE_SRC_PATH)/components -type f) \
-						$(shell find $(WEBSITE_SRC_PATH)/helpers -type f) \
-						$(shell find $(WEBSITE_SRC_PATH)/public -type f) \
-						web_ui/frontend/tsconfig.json \
-						web_ui/frontend/next.config.js \
-						web_ui/frontend/package.json \
-						web_ui/frontend/package-lock.json \
-						web_ui/frontend/Dockerfile
 
-WEBSITE_OUT_FILE := $(WEBSITE_OUT_FILES)/index.html
-
+WEBSITE_SRC_FILES := $(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next*" -not -path "*/out/*" -not -path "*node_modules*" -not -path "*pelican-swagger.yaml")
 WEBSITE_CLEAN_LIST := $(WEBSITE_OUT_PATH) \
 						$(WEBSITE_CACHE_PATH)
+
+$(info These files have changed causing the website to have to rebuild: [$(shell find $(WEBSITE_SRC_PATH) -type f -not -path "*.next*" -not -path "*/out/*" -not -path "*node_modules*" -not -path "*pelican-swagger.yaml" -newer web_ui/frontend/out/index.html)])
 
 
 .PHONY: all
@@ -96,7 +88,7 @@ else
 web-build: generate web_ui/frontend/out/index.html
 endif
 
-web_ui/frontend/out/index.html : $(WEBSITE_SRC_FILES)
+web_ui/frontend/out/index.html : $(WEBSITE_SRC_FILES) swagger/pelican-swagger.yaml
 ifeq ($(USE_DOCKER),0)
 	@cd $(WEBSITE_SRC_PATH) && npm install && npm run build
 else
@@ -126,6 +118,15 @@ ifeq ($(USE_DOCKER),0)
 	@goreleaser --clean --snapshot
 else
 	@$(CONTAINER_TOOL) run -w /app -v $(PWD):/app goreleaser/goreleaser --clean --snapshot
+endif
+
+.PHONY: pelican-dev-build
+pelican-dev-build:
+	@echo PELICAN DEV BUILD
+ifeq ($(USE_DOCKER),0)
+	@goreleaser --clean --snapshot --config .goreleaser.dev.yml
+else
+	@$(CONTAINER_TOOL) run -w /app -v $(PWD):/app goreleaser/goreleaser --clean --snapshot --config .goreleaser.dev.yml
 endif
 
 .PHONY: pelican-serve-test-origin
