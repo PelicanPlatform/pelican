@@ -30,6 +30,7 @@ import (
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/features"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -177,6 +178,9 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 	// Only use hostname:port
 	registryPrefix := server_structs.GetOriginNs(extUrl.Host)
 
+	// Get the overall health status as reported by the origin.
+	status := metrics.GetHealthStatus().OverallStatus
+
 	ad := server_structs.OriginAdvertiseV2{
 		RegistryPrefix: registryPrefix,
 		DataURL:        originUrlStr,
@@ -203,6 +207,7 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		DisableDirectorTest: !param.Origin_DirectorTest.GetBool(),
 		Downtimes:           downtimes,
 		RequiredFeatures:    featureNames,
+		Status:              status,
 	}
 	ad.Initialize(name)
 

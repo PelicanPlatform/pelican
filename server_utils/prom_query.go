@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -16,7 +16,7 @@
  *
  ***************************************************************/
 
-package director
+package server_utils
 
 import (
 	"context"
@@ -74,7 +74,7 @@ type (
 // where the only arg is the query to execute, without "?query="
 //
 // Example: queryPromtheus("up") // Get metric of the running Prometheus instances
-func queryPromtheus(ctx context.Context, query string, withToken bool) (promParsed promQLParsed, err error) {
+func QueryMyPrometheus(ctx context.Context, query string, withToken bool, identity string) (promParsed promQLParsed, err error) {
 	if strings.HasPrefix(query, "?query=") {
 		err = errors.Errorf("query argument should not contain \"?query=\"")
 		return
@@ -91,7 +91,7 @@ func queryPromtheus(ctx context.Context, query string, withToken bool) (promPars
 		tc := token.NewWLCGToken()
 		tc.Issuer = extWebUrl
 		tc.Lifetime = time.Minute
-		tc.Subject = "director"
+		tc.Subject = identity
 		tc.AddAudiences(extWebUrl)
 		tc.AddScopes(token_scopes.Monitoring_Query)
 		tk, err = tc.CreateToken()

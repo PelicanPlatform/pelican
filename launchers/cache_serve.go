@@ -107,6 +107,11 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 	cache.LaunchFedTokManager(ctx, egrp, cacheServer)
 
+	concLimit := param.Cache_Concurrency.GetInt()
+	if concLimit > 0 {
+		server_utils.LaunchConcurrencyMonitoring(ctx, egrp, cacheServer.GetServerType())
+	}
+
 	if param.Cache_SelfTest.GetBool() {
 		err = xrootd.InitSelfTestDir()
 		if err != nil {

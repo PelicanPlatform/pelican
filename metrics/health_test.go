@@ -26,7 +26,7 @@ import (
 )
 
 func TestHealthStatusString(t *testing.T) {
-	expectedStrings := [...]string{"critical", "warning", "ok", "unknown"}
+	expectedStrings := [...]string{"critical", "shutting down", "degraded", "warning", "ok", "unknown"}
 
 	t.Run("health-status-string-handles-out-of-range-index", func(t *testing.T) {
 		invalidIndex := len(expectedStrings) + 1
@@ -35,4 +35,27 @@ func TestHealthStatusString(t *testing.T) {
 		}
 		require.Equal(t, statusIndexErrorMessage, HealthStatusEnum(invalidIndex).String())
 	})
+}
+
+func TestParseHealthStatus(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected HealthStatusEnum
+	}{
+		{"critical", StatusCritical},
+		{"shutting down", StatusShuttingDown},
+		{"degraded", StatusDegraded},
+		{"warning", StatusWarning},
+		{"ok", StatusOK},
+		{"unknown", StatusUnknown},
+		{"invalid", StatusUnknown},
+		{"", StatusUnknown},
+	}
+
+	for _, tt := range tests {
+		result := ParseHealthStatus(tt.input)
+		if result != tt.expected {
+			t.Errorf("ParseHealthStatus(%q) = %v, want %v", tt.input, result, tt.expected)
+		}
+	}
 }

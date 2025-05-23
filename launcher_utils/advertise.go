@@ -79,19 +79,11 @@ func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers 
 		for {
 			select {
 			case <-ticker.C:
-				err := Advertise(ctx, servers)
-				if err != nil {
-					log.Warningln("XRootD server failed to advertise to the director:", err)
-					metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("XRootD server failed to advertise to the director: %v", err))
-				} else {
-					metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusOK, "")
-				}
+				doAdvertise(ctx, servers)
 			case <-ctx.Done():
 				log.Infoln("Periodic advertisement loop has been terminated")
 				return nil
 			}
-
-			doAdvertise(ctx, servers)
 		}
 	})
 
