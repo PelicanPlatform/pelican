@@ -1215,6 +1215,19 @@ func handlePacket(packet []byte) error {
 				counter.Add(float64(int64(binary.BigEndian.Uint64(
 					packet[offset+xfrOffset+16:offset+xfrOffset+24]) -
 					oldWriteBytes)))
+
+				logFields := log.Fields{
+					"timestamp":    time.Now().Format(time.RFC3339),
+					"filePath":     labels["path"],
+					"authProtocol": labels["ap"],
+					"dn":           labels["dn"],
+					"project":      labels["proj"],
+					"org":          labels["org"],
+					"role":         labels["role"],
+					"network":      labels["network"],
+					"type":         labels["type"],
+				}
+				log.WithFields(logFields).Info("XRootD file closed")
 			case isOpen: // XrdXrootdMonFileHdr::isOpen
 				log.Debug("MonPacket: Received a f-stream file-open packet")
 				fileid := FileId{Id: fileHdr.FileId}
@@ -1232,6 +1245,34 @@ func handlePacket(packet []byte) error {
 				}
 				transfers.Set(fileid, FileRecord{UserId: userId, Path: path},
 					ttlcache.DefaultTTL)
+
+				logFields := log.Fields{
+					"timestamp":    time.Now().Format(time.RFC3339),
+					"filePath":     path,
+					"authProtocol": "",
+					"dn":           "",
+					"project":      "",
+					"org":          "",
+					"role":         "",
+					"network":      "",
+					"type":         "open",
+				}
+
+				userRecord := sessions.Get(userId)
+				if userRecord != nil {
+					maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().XrdUserId.Host)
+					if !ok {
+						log.Warning(fmt.Sprintf("Failed to mask IP address: %s", maskedIP))
+					} else {
+						logFields["network"] = maskedIP
+					}
+					logFields["authProtocol"] = userRecord.Value().AuthenticationProtocol
+					logFields["dn"] = userRecord.Value().DN
+					logFields["role"] = userRecord.Value().Role
+					logFields["org"] = userRecord.Value().Org
+					logFields["project"] = userRecord.Value().Project
+				}
+				log.WithFields(logFields).Info("XRootD file opened")
 			case isTime: // XrdXrootdMonFileHdr::isTime
 				log.Debug("MonPacket: Received a f-stream time packet")
 			case isXfr: // XrdXrootdMonFileHdr::isXfr
@@ -1256,10 +1297,23 @@ func handlePacket(packet []byte) error {
 					"network": "",
 				}
 
+				logFields := log.Fields{
+					"timestamp":    time.Now().Format(time.RFC3339),
+					"filePath":     "/",
+					"authProtocol": "",
+					"dn":           "",
+					"project":      "",
+					"org":          "",
+					"role":         "",
+					"network":      "",
+					"type":         "",
+				}
+
 				if item != nil {
 					record = item.Value()
 					userRecord := sessions.Get(record.UserId)
 					labels["path"] = record.Path
+					logFields["filePath"] = record.Path
 					if userRecord != nil {
 						maskedIP, ok := utils.ExtractAndMaskIP(userRecord.Value().XrdUserId.Host)
 						if !ok {
@@ -1268,10 +1322,15 @@ func handlePacket(packet []byte) error {
 							labels["network"] = maskedIP
 						}
 						labels["ap"] = userRecord.Value().AuthenticationProtocol
+						logFields["authProtocol"] = userRecord.Value().AuthenticationProtocol
 						labels["dn"] = userRecord.Value().DN
+						logFields["dn"] = userRecord.Value().DN
 						labels["role"] = userRecord.Value().Role
+						logFields["role"] = userRecord.Value().Role
 						labels["org"] = userRecord.Value().Org
+						logFields["org"] = userRecord.Value().Org
 						labels["proj"] = userRecord.Value().Project
+						logFields["project"] = userRecord.Value().Project
 					}
 				}
 
@@ -1306,6 +1365,9 @@ func handlePacket(packet []byte) error {
 				record.ReadvBytes = readvBytes
 				record.WriteBytes = writeBytes
 				transfers.Set(fileid, record, ttlcache.DefaultTTL)
+
+				logFields["type"] = labels["type"]
+				log.WithFields(logFields).Info("XRootD file transfer")
 
 			case isDisc: // XrdXrootdMonFileHdr::isDisc
 				log.Debug("MonPacket: Received a f-stream disconnect packet")
