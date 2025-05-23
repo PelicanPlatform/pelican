@@ -7,7 +7,8 @@ Origin:
       FederationPrefix: "/first/namespace"
       GlobusCollectionID: "abc123"
       GlobusCollectionName: "Pelican >> Globus!"
-      Capabilities: ["PublicReads", "DirectReads", "Writes"]
+      Capabilities: ["PublicReads", "DirectReads"]
+      IssuerUrls: ["https://foo-issuer.com"]
     - StoragePrefix: "/bar"
       FederationPrefix: "/second/namespace"
       GlobusCollectionID: "123abc" # The Globus collection UUID
