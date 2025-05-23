@@ -71,8 +71,8 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 	tokenConfig.Issuer = issuer
 	tokenConfig.Subject = "origin"
 	tokenConfig.AddAudienceAny()
-	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
-		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
+	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/"))
 	token, err := tokenConfig.CreateToken()
 	require.NoError(t, err)
 	tempToken, err := os.CreateTemp(t.TempDir(), "token")
@@ -275,8 +275,8 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 	tokenConfig.Issuer = issuer
 	tokenConfig.Subject = "origin"
 	tokenConfig.AddAudienceAny()
-	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
-		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
+	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/"))
 	token, err := tokenConfig.CreateToken()
 	require.NoError(t, err)
 	tempToken, err := os.CreateTemp(t.TempDir(), "token")
@@ -479,8 +479,8 @@ func TestSyncUpload(t *testing.T) {
 	tokenConfig.Issuer = issuer
 	tokenConfig.Subject = "origin"
 	tokenConfig.AddAudienceAny()
-	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
-		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
+	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/"))
 	token, err := tokenConfig.CreateToken()
 	require.NoError(t, err)
 	tempToken, err := os.CreateTemp(t.TempDir(), "token")
@@ -671,8 +671,8 @@ func TestSyncDownload(t *testing.T) {
 	tokenConfig.Issuer = issuer
 	tokenConfig.Subject = "origin"
 	tokenConfig.AddAudienceAny()
-	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
-		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
+	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/"))
 	token, err := tokenConfig.CreateToken()
 	require.NoError(t, err)
 	tempToken, err := os.CreateTemp(t.TempDir(), "token")
@@ -884,8 +884,8 @@ func TestObjectPutNonRecursiveDirPath(t *testing.T) {
 	tokenConfig.Issuer = issuer
 	tokenConfig.Subject = "origin"
 	tokenConfig.AddAudienceAny()
-	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
-		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
+	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/"))
 	token, err := tokenConfig.CreateToken()
 	require.NoError(t, err)
 	tempToken, err := os.CreateTemp(t.TempDir(), "token")
@@ -967,8 +967,8 @@ func TestObjectDelete(t *testing.T) {
 	tokenConfig.Subject = "origin"
 	tokenConfig.AddAudienceAny()
 	tokenConfig.AddResourceScopes(
-		token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
-		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"),
+		token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/"),
 	)
 	token, err := tokenConfig.CreateToken()
 	require.NoError(t, err)

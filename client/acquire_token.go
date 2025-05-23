@@ -818,7 +818,7 @@ func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse
 		return
 	}
 
-	tc, err := token.NewTokenConfig(token.TokenProfileWLCG)
+	tc, err := token.NewTokenConfig(token.WlcgProfile{})
 	if err != nil {
 		return
 	}
@@ -826,9 +826,9 @@ func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse
 	tc.Issuer = issuer
 	tc.Lifetime = time.Hour
 	tc.Subject = "client_token"
-	ts := token_scopes.Storage_Read
+	ts := token_scopes.Wlcg_Storage_Read
 	if opts.Operation == config.TokenSharedWrite {
-		ts = token_scopes.Storage_Modify
+		ts = token_scopes.Wlcg_Storage_Modify
 	}
 	if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
 		tc.AddResourceScopes(token_scopes.NewResourceScope(ts, after))

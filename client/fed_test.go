@@ -85,10 +85,10 @@ func getTempToken(t *testing.T) (tempToken *os.File, tkn string) {
 	tokenConfig.AddAudienceAny()
 
 	scopes := []token_scopes.TokenScope{}
-	readScope, err := token_scopes.Storage_Read.Path("/")
+	readScope, err := token_scopes.Wlcg_Storage_Read.Path("/")
 	assert.NoError(t, err)
 	scopes = append(scopes, readScope)
-	modScope, err := token_scopes.Storage_Modify.Path("/")
+	modScope, err := token_scopes.Wlcg_Storage_Modify.Path("/")
 	assert.NoError(t, err)
 	scopes = append(scopes, modScope)
 	tokenConfig.AddScopes(scopes...)
