@@ -571,7 +571,7 @@ func TestGetExports(t *testing.T) {
 			GlobusCollectionID:   "abc123",
 			GlobusCollectionName: "Pelican >> Globus!",
 			Capabilities: server_structs.Capabilities{
-				Writes:      true,
+				Writes:      false,
 				PublicReads: true,
 				Listings:    false,
 				Reads:       true,
