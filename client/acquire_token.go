@@ -340,7 +340,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 	// If _any_ potential token is found, even though it's not thought to be acceptable,
 	// return that instead of failing outright under the theory the user knows better.
 	if len(potentialTokens) > 0 {
-		log.Warningln("Using provided token even though it does not appear to be acceptable to perform transfer")
+		log.Warningf("Using provided token %s even though it does not appear to be acceptable to perform transfer", tg.TokenLocation)
 		tg.Token.Store(&potentialTokens[0])
 		token = potentialTokens[0].Contents
 		err = nil
