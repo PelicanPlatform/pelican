@@ -53,7 +53,11 @@ func (o *GlobusOrigin) validateExtra(e *OriginExport, numExports int) (err error
 	}
 
 	if e.Capabilities.Writes {
-		return errors.Errorf("Write capability is not yet supported for export '%s'", e.FederationPrefix)
+		return errors.Errorf("write capability is not yet supported for origins with %s globus '%s'", param.Origin_StorageType.GetName(), e.FederationPrefix)
+	}
+
+	if e.Capabilities.Listings {
+		return errors.Errorf("listing capability is not yet supported for origins with %s '%s'", param.Origin_StorageType.GetName(), e.FederationPrefix)
 	}
 
 	if viper.GetString(param.OIDC_Issuer.GetName()) != "globus" {
