@@ -46,7 +46,7 @@ func parseInputSlice(rawSlice *[]string, claimPrefix string) []string {
 }
 
 // Parse claims to tokenConfig, excluding "sub". `claims` should be in the form of
-// <claim_key>=<claim=value>
+// <claim_key>=<claim_value>
 func parseClaimsToTokenConfig(profile string, claims []string) (*token.TokenConfig, error) {
 	tokenProfile, err := token.ParseProfile(profile)
 	if err != nil {

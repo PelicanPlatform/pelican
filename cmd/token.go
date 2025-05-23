@@ -53,6 +53,8 @@ var (
 		Short: "Create a token",
 		RunE:  createToken,
 		Args:  cobra.ExactArgs(1),
+		Example: "To create a read/write token for /some/namespace/path in OSDF: " +
+			"pelican token create --read --write pelican://osg-htc.org/some/namespace/path",
 	}
 )
 
@@ -65,17 +67,18 @@ func init() {
 		"Does not grant the ability to overwrite/modify existing resources")
 	tokenCreateCmd.Flags().BoolP("modify", "m", false, "Create a token with the ability to modify/delete the specified resource.")
 	tokenCreateCmd.Flags().BoolP("stage", "s", false, "Create a token with the ability to stage the specified resource.")
-	tokenCreateCmd.Flags().StringP("scope-path", "P", "", "Specify the path to use when creating the token's scopes. This should generally be "+
+	tokenCreateCmd.Flags().String("scope-path", "", "Specify the path to use when creating the token's scopes. This should generally be "+
 		"the object path without the namespace prefix.")
 
 	// Additional token fields
 	tokenCreateCmd.Flags().StringP("audience", "a", "", "Specify the tokens audience. If not provided, the equivalent 'any' audience "+
 		"for the selected profile will be used (e.g. 'https://wlcg.cern.ch/jwt/v1/any' for the 'wlcg' profile).")
 	tokenCreateCmd.Flags().IntP("lifetime", "l", 1200, "Set the lifetime of the token in seconds. Default is 1200 (20min).")
-	tokenCreateCmd.Flags().StringP("subject", "u", "", "Set the subject of the token. If not provided, the current user will be used as the default subject.")
+	tokenCreateCmd.Flags().String("subject", "", "Set the subject of the token. If not provided, the current user will be used as the default subject.")
 	tokenCreateCmd.Flags().StringP("issuer", "i", "", "Set the issuer of the token. If not provided, the issuer will be discovered via the Director.")
-	tokenCreateCmd.Flags().StringArrayP("claim", "c", []string{}, "Set claims to be added to the token. Format: <claim_key>=<claim_value>. ")
-	tokenCreateCmd.Flags().StringArrayP("scope", "C", []string{}, "Set non-typical values for the token's 'scope' claim. Format: <scope_key>=<scope_value>. ")
+	tokenCreateCmd.Flags().StringArray("raw-claim", []string{}, "Set claims to be added to the token. Format: <claim_key>=<claim_value>. ")
+	tokenCreateCmd.Flags().StringArray("raw-scope", []string{}, "Set non-typical values for the token's 'scope' claim. Scopes should be space-separated, e.g. "+
+		"'storage.read:/ storage.create:/'.")
 	tokenCreateCmd.Flags().StringP("profile", "p", "wlcg", "Create a token with a specific JWT profile. Accepted values are scitokens2 and wlcg")
 	tokenCreateCmd.Flags().StringP("private-key", "k", "", "Path to the private key used to sign the token. If not provided, Pelican will look for the private key in the default location.")
 }
@@ -101,11 +104,9 @@ func verifyIssuer(issuer string, kidSet map[string]struct{}) (bool, error) {
 		return false, err
 	}
 
-	it := (*remoteJWKS).Keys(context.Background())
-	for it.Next(context.Background()) {
-		key := it.Pair().Value.(jwk.Key)
-		if _, ok := kidSet[key.KeyID()]; ok {
-			log.Debugf("Found matching key ID %s in JWKS from issuer %s", key.KeyID(), issuer)
+	for kid := range kidSet {
+		if _, ok := (*remoteJWKS).LookupKeyID(kid); ok {
+			log.Debugf("Found matching key ID %s in JWKS from issuer %s", kid, issuer)
 			return true, nil
 		}
 	}
@@ -120,7 +121,7 @@ func verifyIssuer(issuer string, kidSet map[string]struct{}) (bool, error) {
 // which issuer aligns with their signing key.
 func getIssuer(directorInfo server_structs.DirectorResponse, kidSet map[string]struct{}) (string, error) {
 	if len(directorInfo.XPelAuthHdr.Issuers) == 0 {
-		return "", errors.New("no issuers found for %s in the Director response")
+		return "", errors.Errorf("no issuers found for %s in the Director response", directorInfo.XPelNsHdr.Namespace)
 	}
 
 	// Comb through the JWKS from each issuer to find which matches the signing key
@@ -158,7 +159,7 @@ func getIssuer(directorInfo server_structs.DirectorResponse, kidSet map[string]s
 func createToken(cmd *cobra.Command, args []string) error {
 	err := config.InitClient()
 	if err != nil {
-		log.Warning("Unable to initialize client config, issuer auto discovery may not work")
+		log.Warningf("Unable to initialize client config, issuer auto discovery may not work: %v", err)
 	}
 
 	profileStr, _ := cmd.Flags().GetString("profile")
@@ -180,7 +181,8 @@ func createToken(cmd *cobra.Command, args []string) error {
 	// First arg contains the pelican URL of the resource
 	// Cobra has already checked that we have exactly one arg
 	rawUrl := args[0]
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	pUrl, pUrlErr := client.ParseRemoteAsPUrl(ctx, rawUrl)
 	sPath, err := cmd.Flags().GetString("scope-path")
 	if err != nil {

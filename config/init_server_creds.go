@@ -748,7 +748,10 @@ func loadIssuerPrivateKey(issuerKeysDir string) (jwk.Key, error) {
 
 // Helper function to load the issuer/server's public key for other servers
 // to verify the token signed by this server. Only intended to be called internally
-func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string, pemPath ...string) (jwk.Set, error) {
+//
+// The `keyPathOverridePEM` parameter is used to override the default locations by
+// providing a PEM file path.
+func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string, keyPathOverridePEM ...string) (jwk.Set, error) {
 	jwks := jwk.NewSet()
 	if existingJWKS != "" {
 		var err error
@@ -756,10 +759,10 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string, pemPath ...
 		if err != nil {
 			return nil, errors.Wrap(err, "Failed to read issuer JWKS file")
 		}
-	} else if len(pemPath) > 0 && pemPath[0] != "" {
-		key, err := LoadSinglePEM(pemPath[0])
+	} else if len(keyPathOverridePEM) > 0 && keyPathOverridePEM[0] != "" {
+		key, err := LoadSinglePEM(keyPathOverridePEM[0])
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to load signing key from %s", pemPath[0])
+			return nil, errors.Wrapf(err, "failed to load signing key from %s", keyPathOverridePEM[0])
 		}
 		pkey, err := jwk.PublicKeyOf(key)
 		if err != nil {
@@ -798,12 +801,15 @@ func loadIssuerPublicJWKS(existingJWKS string, issuerKeysDir string, pemPath ...
 }
 
 // Return the private JWK for the server to sign tokens and payloads
-func GetIssuerPrivateJWK(signingKey ...string) (jwk.Key, error) {
+//
+// The `keyPathOverridePEM` parameter is used to override the default locations by
+// providing a PEM file path.
+func GetIssuerPrivateJWK(keyPathOverridePEM ...string) (jwk.Key, error) {
 	// If an optional key is provided, load it and return
-	if len(signingKey) > 0 && signingKey[0] != "" {
-		key, err := LoadSinglePEM(signingKey[0])
+	if len(keyPathOverridePEM) > 0 && keyPathOverridePEM[0] != "" {
+		key, err := LoadSinglePEM(keyPathOverridePEM[0])
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to load signing key from %s", signingKey[0])
+			return nil, errors.Wrapf(err, "failed to load signing key from %s", keyPathOverridePEM[0])
 		}
 		return key, nil
 	}
@@ -837,10 +843,13 @@ func GetIssuerPrivateJWK(signingKey ...string) (jwk.Key, error) {
 // this server to sign JWTs it issues. The public key returned will be exposed publicly
 // for other servers to verify JWTs signed by this server, typically via a well-known URL
 // i.e. "/.well-known/issuer.jwks"
-func GetIssuerPublicJWKS(keyPath ...string) (jwk.Set, error) {
+//
+// The `keyPathOverridePEM` parameter is used to override the default locations by
+// providing a PEM file path.
+func GetIssuerPublicJWKS(keyPathOverridePEM ...string) (jwk.Set, error) {
 	existingJWKS := param.Server_IssuerJwks.GetString()
 	issuerKeysDir := param.IssuerKeysDirectory.GetString()
-	return loadIssuerPublicJWKS(existingJWKS, issuerKeysDir, keyPath...)
+	return loadIssuerPublicJWKS(existingJWKS, issuerKeysDir, keyPathOverridePEM...)
 }
 
 // Check if there is a session secret exists at param.Server_SessionSecretFile and is not empty if there is one.
