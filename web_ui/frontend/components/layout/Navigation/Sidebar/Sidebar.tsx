@@ -54,7 +54,7 @@ export const Sidebar = ({ config, exportType, role }: NavigationProps) => {
             }}
           >
             <Box style={{ display: 'flex', flexDirection: 'column' }}>
-              <NextLink href={'/'}>
+              <a href={'/'}>
                 <Image
                   src={PelicanLogo}
                   alt={'Pelican Logo'}
@@ -63,7 +63,7 @@ export const Sidebar = ({ config, exportType, role }: NavigationProps) => {
                   priority={true}
                   loading={'eager'}
                 />
-              </NextLink>
+              </a>
               {config.map((navItem) => {
                 return (
                   <NavigationItem
