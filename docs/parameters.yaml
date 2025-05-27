@@ -215,6 +215,7 @@ description: |+
   If unset, will fallback to `Logging.Level`.
 type: string
 default: info
+components: ["director", "registry", "origin", "cache"]
 ---
 name: Logging.Origin.Cms
 description: |+
