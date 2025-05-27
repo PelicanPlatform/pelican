@@ -74,7 +74,7 @@ type (
 // where the only arg is the query to execute, without "?query="
 //
 // Example: queryPromtheus("up") // Get metric of the running Prometheus instances
-func QueryMyPrometheus(ctx context.Context, query string, identity string) (promParsed promQLParsed, err error) {
+func QueryMyPrometheus(ctx context.Context, query string) (promParsed promQLParsed, err error) {
 	if strings.HasPrefix(query, "?query=") {
 		err = errors.Errorf("query argument should not contain \"?query=\"")
 		return
@@ -86,13 +86,20 @@ func QueryMyPrometheus(ctx context.Context, query string, identity string) (prom
 	}
 	queryUrl := baseUrl + "?query=" + url.QueryEscape(query)
 
+	myExtUrlStr := param.Server_ExternalWebUrl.GetString()
+	myExtUrl, err := url.Parse(myExtUrlStr)
+	if err != nil {
+		err = errors.Wrapf(err, "failed to parse external web URL %s", myExtUrlStr)
+		return
+	}
+
 	tk := ""
 	requiresToken := param.Monitoring_PromQLAuthorization.GetBool()
 	if requiresToken {
 		tc := token.NewWLCGToken()
 		tc.Issuer = extWebUrl
 		tc.Lifetime = time.Minute
-		tc.Subject = identity
+		tc.Subject = myExtUrl.String()
 		tc.AddAudiences(extWebUrl)
 		tc.AddScopes(token_scopes.Monitoring_Query)
 		tk, err = tc.CreateToken()

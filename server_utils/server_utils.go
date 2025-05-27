@@ -548,9 +548,10 @@ func LaunchConcurrencyMonitoring(ctx context.Context, egrp *errgroup.Group, sTyp
 			case <-ticker.C:
 				log.Debug("Starting a new concurrency monitoring cycle")
 
-				qResult, err := QueryMyPrometheus(ctx, concQuery, sType.String())
+				qResult, err := QueryMyPrometheus(ctx, concQuery)
 				if err != nil {
 					log.Errorf("Failed to query prometheus for current xrootd concurrency value; query: %s; error: %v", concQuery, err)
+					continue
 				}
 
 				if qResult.ResultType != "vector" {
