@@ -128,6 +128,7 @@ type (
 
 	// ** BE WARNED **
 	// This struct needs to be kept in sync with BOTH the director/director_ui.go:listServerResponse and the director/director_ui.go:serverResponse
+	// and the functions responsible for generating these structs on-demand.
 	ServerAd struct {
 		ServerBaseAd
 		RegistryPrefix      string            `json:"registryPrefix"` // The server's prefix recorded in the registry
