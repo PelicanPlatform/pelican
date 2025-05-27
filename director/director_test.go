@@ -1285,12 +1285,14 @@ func TestDirectorRegistration(t *testing.T) {
 			assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 
 			// 3) Verify the downtime filter is set
-			filteredServersMutex.RLock()
-			f2, ok2 := filteredServers["test-cache"]
-			filteredServersMutex.RUnlock()
-			t.Log("Now: ", now, "; Downtime start: ", ad2.Downtimes[0].StartTime, "; Downtime end: ", ad2.Downtimes[0].EndTime)
-			assert.True(t, ok2, "filter added on active downtime")
-			assert.Equal(t, serverFiltered, f2)
+			// Wait up to 500ms for the filter to be appear
+			assert.Eventually(t, func() bool {
+				filteredServersMutex.RLock()
+				defer filteredServersMutex.RUnlock()
+				f2, ok2 := filteredServers["test-cache"]
+				t.Log("Now: ", now, "; Downtime start: ", ad2.Downtimes[0].StartTime, "; Downtime end: ", ad2.Downtimes[0].EndTime)
+				return ok2 && f2 == serverFiltered
+			}, 500*time.Millisecond, 10*time.Millisecond, "filter should be added on active downtime")
 		})
 	})
 
