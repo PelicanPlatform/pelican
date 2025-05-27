@@ -71,11 +71,11 @@ func init() {
 		"the object path without the namespace prefix.")
 
 	// Additional token fields
-	tokenCreateCmd.Flags().StringP("audience", "a", "", "Specify the tokens audience. If not provided, the equivalent 'any' audience "+
+	tokenCreateCmd.Flags().StringP("audience", "a", "", "Specify the token's 'audience/aud' claim. If not provided, the equivalent 'any' audience "+
 		"for the selected profile will be used (e.g. 'https://wlcg.cern.ch/jwt/v1/any' for the 'wlcg' profile).")
-	tokenCreateCmd.Flags().IntP("lifetime", "l", 1200, "Set the lifetime of the token in seconds. Default is 1200 (20min).")
-	tokenCreateCmd.Flags().String("subject", "", "Set the subject of the token. If not provided, the current user will be used as the default subject.")
-	tokenCreateCmd.Flags().StringP("issuer", "i", "", "Set the issuer of the token. If not provided, the issuer will be discovered via the Director.")
+	tokenCreateCmd.Flags().IntP("lifetime", "l", 1200, "Set the token's lifetime in seconds.")
+	tokenCreateCmd.Flags().String("subject", "", "Set token's 'subject/sub' claim. If not provided, the current user will be used as the default subject.")
+	tokenCreateCmd.Flags().StringP("issuer", "i", "", "Set the token's 'issuer/iss' claim. If not provided, the issuer will be discovered via the Director.")
 	tokenCreateCmd.Flags().StringArray("raw-claim", []string{}, "Set claims to be added to the token. Format: <claim_key>=<claim_value>. ")
 	tokenCreateCmd.Flags().StringArray("raw-scope", []string{}, "Set non-typical values for the token's 'scope' claim. Scopes should be space-separated, e.g. "+
 		"'storage.read:/ storage.create:/'.")
