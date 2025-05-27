@@ -74,7 +74,7 @@ type (
 // where the only arg is the query to execute, without "?query="
 //
 // Example: queryPromtheus("up") // Get metric of the running Prometheus instances
-func QueryMyPrometheus(ctx context.Context, query string, withToken bool, identity string) (promParsed promQLParsed, err error) {
+func QueryMyPrometheus(ctx context.Context, query string, identity string) (promParsed promQLParsed, err error) {
 	if strings.HasPrefix(query, "?query=") {
 		err = errors.Errorf("query argument should not contain \"?query=\"")
 		return
@@ -87,7 +87,8 @@ func QueryMyPrometheus(ctx context.Context, query string, withToken bool, identi
 	queryUrl := baseUrl + "?query=" + url.QueryEscape(query)
 
 	tk := ""
-	if withToken {
+	requiresToken := param.Monitoring_PromQLAuthorization.GetBool()
+	if requiresToken {
 		tc := token.NewWLCGToken()
 		tc.Issuer = extWebUrl
 		tc.Lifetime = time.Minute
@@ -106,9 +107,13 @@ func QueryMyPrometheus(ctx context.Context, query string, withToken bool, identi
 	if err != nil {
 		return
 	}
-	if withToken && tk != "" {
+	if requiresToken && tk != "" {
 		req.Header.Add("Authorization", "Bearer "+tk)
+	} else if requiresToken {
+		err = errors.New("token is required to access Prometheus PromQL endpoint, but no token was generated")
+		return
 	}
+
 	req.Header.Add("Content-Type", "application/json")
 	res, err := client.Do(req)
 	if err != nil {

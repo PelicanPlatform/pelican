@@ -245,7 +245,7 @@ func TestQueryPrometheus(t *testing.T) {
 	defer server.Close()
 
 	t.Run("no-token-query-matrix", func(t *testing.T) {
-		parsed, err := QueryMyPrometheus(context.Background(), "matrix", false, "test")
+		parsed, err := QueryMyPrometheus(context.Background(), "matrix", "test")
 		require.NoError(t, err)
 		assert.Equal(t, "matrix", parsed.ResultType)
 		require.Len(t, parsed.Result, 2)
@@ -272,7 +272,7 @@ func TestQueryPrometheus(t *testing.T) {
 	})
 
 	t.Run("no-token-query-vector", func(t *testing.T) {
-		parsed, err := QueryMyPrometheus(context.Background(), "vector", false, "test")
+		parsed, err := QueryMyPrometheus(context.Background(), "vector", "test")
 		require.NoError(t, err)
 		assert.Equal(t, "vector", parsed.ResultType)
 		require.Len(t, parsed.Result, 2)
@@ -291,7 +291,7 @@ func TestQueryPrometheus(t *testing.T) {
 	})
 
 	t.Run("no-token-query-scalar", func(t *testing.T) {
-		parsed, err := QueryMyPrometheus(context.Background(), "scalar", false, "test")
+		parsed, err := QueryMyPrometheus(context.Background(), "scalar", "test")
 		require.NoError(t, err)
 		assert.Equal(t, "scalar", parsed.ResultType)
 		require.Len(t, parsed.Result, 1)
@@ -303,7 +303,7 @@ func TestQueryPrometheus(t *testing.T) {
 	})
 
 	t.Run("no-token-query-string", func(t *testing.T) {
-		parsed, err := QueryMyPrometheus(context.Background(), "string", false, "test")
+		parsed, err := QueryMyPrometheus(context.Background(), "string", "test")
 		require.NoError(t, err)
 		assert.Equal(t, "string", parsed.ResultType)
 		require.Len(t, parsed.Result, 1)
@@ -315,13 +315,13 @@ func TestQueryPrometheus(t *testing.T) {
 	})
 
 	t.Run("no-token-query-prom-error", func(t *testing.T) {
-		_, err := QueryMyPrometheus(context.Background(), "error", false, "test")
+		_, err := QueryMyPrometheus(context.Background(), "error", "test")
 		assert.Error(t, err)
 		require.Equal(t, "Prometheus responded error for query \"error\" with error type notInTheMood: bad weather", err.Error())
 	})
 
 	t.Run("no-token-query-empty-data", func(t *testing.T) {
-		parsed, err := QueryMyPrometheus(context.Background(), "empty", false, "test")
+		parsed, err := QueryMyPrometheus(context.Background(), "empty", "test")
 		assert.NoError(t, err)
 		assert.Nil(t, parsed.Result)
 		assert.Equal(t, "vector", parsed.ResultType) // default type is vector
