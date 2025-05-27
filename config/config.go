@@ -783,14 +783,35 @@ func setLoggingInternal() error {
 	if param.Debug.GetBool() {
 		SetLogging(log.DebugLevel)
 		log.Warnf("Debug is set as a flag or in config, this will override anything set for '%s' within your configuration", param.Logging_Level.GetName())
-	} else {
-		logLevel := param.Logging_Level.GetString()
-		level, err := log.ParseLevel(logLevel)
-		if err != nil {
-			return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
-		}
-		SetLogging(level)
+		return nil
 	}
+
+	var logLevelParam param.StringParam
+	var logLevel string
+
+	if len(GetEnabledServerString(true)) > 0 { // Server context
+		if viper.IsSet(param.Logging_Server_Level.GetName()) {
+			logLevelParam = param.Logging_Server_Level
+			logLevel = logLevelParam.GetString()
+		} else {
+			logLevelParam = param.Logging_Level
+			logLevel = logLevelParam.GetString()
+		}
+	} else { // Client context
+		if viper.IsSet(param.Logging_Client_Level.GetName()) {
+			logLevelParam = param.Logging_Client_Level
+			logLevel = logLevelParam.GetString()
+		} else {
+			logLevelParam = param.Logging_Level
+			logLevel = logLevelParam.GetString()
+		}
+	}
+
+	level, err := log.ParseLevel(logLevel)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse value of config param %s", logLevelParam.GetName())
+	}
+	SetLogging(level)
 
 	return nil
 }
@@ -1083,6 +1104,8 @@ func SetServerDefaults(v *viper.Viper) error {
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
 	v.SetDefault(param.Origin_S3UrlStyle.GetName(), "path")
 
+	v.SetDefault(param.Logging_Server_Level.GetName(), log.InfoLevel.String())
+	v.SetDefault(param.Logging_Client_Level.GetName(), log.ErrorLevel.String())
 	// At the time of this comment, Pelican's default log level is set to "Error". However, that's still
 	// too verbose for some XRootD parameters. Because we generally want to use Pelican's configured log level as a
 	// default for the XRootD parameters, we only set the corrected default values for these special XRootD directives

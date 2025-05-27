@@ -173,7 +173,7 @@ components: ["director"]
 ############################
 name: Logging.Level
 description: |+
-  A string defining the log level of the client. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+  A string defining the Pelican wide log level. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
 
   Log levels are inherited by all components unless explicitly overridden. Levels are case-insensitive.
 type: string
@@ -200,6 +200,21 @@ description: |+
 type: duration
 default: 1m
 components: ["client"]
+---
+name: Logging.Client.Level
+description: |+
+  A string defining the log level of the client. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+  If unset, will fallback to `Logging.Level`.
+type: string
+default: error
+components: ["client"]
+---
+name: Logging.Server.Level
+description: |+
+  A string defining the log level of the server (Director, Registry, Origin, Cache). Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+  If unset, will fallback to `Logging.Level`.
+type: string
+default: info
 ---
 name: Logging.Origin.Cms
 description: |+

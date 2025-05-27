@@ -197,6 +197,7 @@ var (
 	Logging_Cache_Scitokens = StringParam{"Logging.Cache.Scitokens"}
 	Logging_Cache_Xrd = StringParam{"Logging.Cache.Xrd"}
 	Logging_Cache_Xrootd = StringParam{"Logging.Cache.Xrootd"}
+	Logging_Client_Level = StringParam{"Logging.Client.Level"}
 	Logging_Level = StringParam{"Logging.Level"}
 	Logging_LogLocation = StringParam{"Logging.LogLocation"}
 	Logging_Origin_Cms = StringParam{"Logging.Origin.Cms"}
@@ -206,6 +207,7 @@ var (
 	Logging_Origin_Scitokens = StringParam{"Logging.Origin.Scitokens"}
 	Logging_Origin_Xrd = StringParam{"Logging.Origin.Xrd"}
 	Logging_Origin_Xrootd = StringParam{"Logging.Origin.Xrootd"}
+	Logging_Server_Level = StringParam{"Logging.Server.Level"}
 	Lotman_DbLocation = StringParam{"Lotman.DbLocation"}
 	Lotman_EnabledPolicy = StringParam{"Lotman.EnabledPolicy"}
 	Lotman_LibLocation = StringParam{"Lotman.LibLocation"}

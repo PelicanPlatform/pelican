@@ -155,6 +155,7 @@ type Config struct {
 			Xrootd string `mapstructure:"xrootd" yaml:"Xrootd"`
 		} `mapstructure:"cache" yaml:"Cache"`
 		Client struct {
+			Level string `mapstructure:"level" yaml:"Level"`
 			ProgressInterval time.Duration `mapstructure:"progressinterval" yaml:"ProgressInterval"`
 		} `mapstructure:"client" yaml:"Client"`
 		DisableProgressBars bool `mapstructure:"disableprogressbars" yaml:"DisableProgressBars"`
@@ -169,6 +170,9 @@ type Config struct {
 			Xrd string `mapstructure:"xrd" yaml:"Xrd"`
 			Xrootd string `mapstructure:"xrootd" yaml:"Xrootd"`
 		} `mapstructure:"origin" yaml:"Origin"`
+		Server struct {
+			Level string `mapstructure:"level" yaml:"Level"`
+		} `mapstructure:"server" yaml:"Server"`
 	} `mapstructure:"logging" yaml:"Logging"`
 	Lotman struct {
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
@@ -510,6 +514,7 @@ type configWithType struct {
 			Xrootd struct { Type string; Value string }
 		}
 		Client struct {
+			Level struct { Type string; Value string }
 			ProgressInterval struct { Type string; Value time.Duration }
 		}
 		DisableProgressBars struct { Type string; Value bool }
@@ -523,6 +528,9 @@ type configWithType struct {
 			Scitokens struct { Type string; Value string }
 			Xrd struct { Type string; Value string }
 			Xrootd struct { Type string; Value string }
+		}
+		Server struct {
+			Level struct { Type string; Value string }
 		}
 	}
 	Lotman struct {
