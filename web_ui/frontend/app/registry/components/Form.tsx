@@ -1,5 +1,5 @@
 import { Alert, Box, Button } from '@mui/material';
-import React, { Dispatch, SetStateAction, useContext, useState } from 'react';
+import React, { Dispatch, SetStateAction, useContext, useState, useEffect } from 'react';
 import useSWR from 'swr';
 
 import { RegistryNamespace } from '@/index';
