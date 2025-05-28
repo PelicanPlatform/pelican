@@ -87,6 +87,7 @@ func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, er
 // under /origins; otherwise, we look it up under /caches.
 func GetServiceName(ctx context.Context, server server_structs.ServerType) (name string, err error) {
 
+	var nameFromReg string
 	// Fetch site name from the registry, if not, fall back to Xrootd.Sitename.
 	if server.IsEnabled(server_structs.DirectorType) {
 		exturlStr := param.Server_ExternalWebUrl.GetString()
@@ -96,7 +97,7 @@ func GetServiceName(ctx context.Context, server server_structs.ServerType) (name
 			err = errors.Wrap(err, "unable to determine service name")
 			return
 		}
-		name = extUrl.Host
+		nameFromReg = extUrl.Host
 	} else if server.IsEnabled(server_structs.OriginType) {
 		// Note we use Server_ExternalWebUrl as the origin prefix
 		// But caches still use Xrootd_Sitename, which will be changed to Server_ExternalWebUrl in
@@ -105,21 +106,33 @@ func GetServiceName(ctx context.Context, server server_structs.ServerType) (name
 		extUrl, _ := url.Parse(extUrlStr)
 		// Only use hostname:port
 		originPrefix := server_structs.GetOriginNs(extUrl.Host)
-		name, err = getSitenameFromReg(ctx, originPrefix)
+		nameFromReg, err = getSitenameFromReg(ctx, originPrefix)
 		if err != nil {
 			log.Errorf("Failed to get sitename from the registry for the origin. Will fallback to using %s: %v", param.Xrootd_Sitename.GetName(), err)
 		}
 	} else if server.IsEnabled(server_structs.CacheType) {
 		cachePrefix := server_structs.GetCacheNs(param.Xrootd_Sitename.GetString())
-		name, err = getSitenameFromReg(ctx, cachePrefix)
+		nameFromReg, err = getSitenameFromReg(ctx, cachePrefix)
 		if err != nil {
 			log.Errorf("Failed to get sitename from the registry for the cache. Will fallback to use %s: %v", param.Xrootd_Sitename.GetName(), err)
 		}
 	}
 
-	if name == "" {
+	if nameFromReg == "" {
 		log.Infof("Sitename from the registry is empty, fall back to %s: %s", param.Xrootd_Sitename.GetName(), param.Xrootd_Sitename.GetString())
 		name = param.Xrootd_Sitename.GetString()
+	} else {
+		// Use the registered sitename as service name if it is not empty
+		name = nameFromReg
+		// Warn the user if the sitename from the registry does not match the local configuration
+		if nameFromReg != param.Xrootd_Sitename.GetString() && param.Xrootd_Sitename.GetString() != "" {
+			log.Warningf("Sitename mismatch detected:\n"+
+				"  Registered sitename: %q\n"+
+				"  Local sitename:      %q\n"+
+				"Pelican will use the registered sitename as your service name.\n"+
+				"Please update either the registry or local configuration to maintain consistency.",
+				nameFromReg, param.Xrootd_Sitename.GetString())
+		}
 	}
 	if name == "" {
 		err = errors.Errorf("%s name isn't set. Please set the name via %s", server.String(), param.Xrootd_Sitename.GetName())
