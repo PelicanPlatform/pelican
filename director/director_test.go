@@ -1251,10 +1251,10 @@ func TestDirectorRegistration(t *testing.T) {
 			require.NoError(t, err)
 			setupJwksCache(t, "/caches/test", pub)
 
-			// 1) future-only
+			// 1) Create a downtime in the future
 			ad1 := baseAd
 			ad1.Downtimes = []server_structs.Downtime{
-				makeDT(now+5_000, now+6_000),
+				makeDT(now+86400_000, now+172800_000), // now + 1 day, now + 2 days
 			}
 			ad1.Initialize("test-cache")
 			body1, _ := json.Marshal(ad1)
@@ -1266,13 +1266,13 @@ func TestDirectorRegistration(t *testing.T) {
 			filteredServersMutex.RUnlock()
 			assert.False(t, ok1, "no filter on future downtime")
 
-			// 2) now active
+			// 2) Flush out the future downtime with an active one
 			ad2 := baseAd
 			ad2.Downtimes = []server_structs.Downtime{
-				// A new active downtime with 20s (+/-10s) window to prevent it expiring
+				// A new active downtime with 2 days (+/- 1 day) window to prevent it expiring
 				// before the server ad gets to the Director, which results in a flaky test.
 				// This should clear the previous future downtime.
-				makeDT(now-10_000, now+10_000),
+				makeDT(now-86400_000, now+86400_000),
 			}
 			ad2.Initialize("test-cache")
 			body2, _ := json.Marshal(ad2)
@@ -1282,14 +1282,17 @@ func TestDirectorRegistration(t *testing.T) {
 			c.Request.Header.Set("Authorization", "Bearer "+token)
 			c.Request.Header.Set("Content-Type", "application/json")
 			r.ServeHTTP(w, c.Request)
-			r.ServeHTTP(w, c.Request)
 			assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 
-			filteredServersMutex.RLock()
-			f2, ok2 := filteredServers["test-cache"]
-			filteredServersMutex.RUnlock()
-			assert.True(t, ok2, "filter added on active downtime")
-			assert.Equal(t, serverFiltered, f2)
+			// 3) Verify the downtime filter is set
+			// Wait up to 500ms for the filter to be appear
+			assert.Eventually(t, func() bool {
+				filteredServersMutex.RLock()
+				defer filteredServersMutex.RUnlock()
+				f2, ok2 := filteredServers["test-cache"]
+				t.Log("Now: ", now, "; Downtime start: ", ad2.Downtimes[0].StartTime, "; Downtime end: ", ad2.Downtimes[0].EndTime)
+				return ok2 && f2 == serverFiltered
+			}, 500*time.Millisecond, 10*time.Millisecond, "filter should be added on active downtime")
 		})
 	})
 
