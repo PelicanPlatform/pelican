@@ -35,14 +35,31 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 type (
-	TokenProfile string
-	TokenConfig  struct {
+	TokenProfile interface {
+		String() string
+	}
+	StorageTokenProfile interface {
+		TokenProfile
+
+		ReadScope(string) token_scopes.TokenScope
+		WriteScope(string) token_scopes.TokenScope
+		ModifyScope(string) token_scopes.TokenScope
+		StageScope(string) token_scopes.TokenScope
+
+		AnyAudience() string
+	}
+	NoneTokenProfile  struct{}
+	WlcgProfile       struct{}
+	Scitokens2Profile struct{}
+
+	TokenConfig struct {
 		tokenProfile TokenProfile
 		Lifetime     time.Duration     // Lifetime is used to set 'exp' claim from now
 		Issuer       string            // Issuer is 'iss' claim
@@ -66,17 +83,79 @@ var (
 )
 
 const (
-	TokenProfileWLCG       TokenProfile = "wlcg"
-	TokenProfileScitokens2 TokenProfile = "scitokens2"
-	TokenProfileNone       TokenProfile = "none"
-	tokenProfileEmpty      TokenProfile = ""
+	tokenProfileWLCG       string = "wlcg"
+	tokenProfileScitokens2 string = "scitokens2"
+	tokenProfileNone       string = "none"
 
 	wlcgAny      string = "https://wlcg.cern.ch/jwt/v1/any"
 	scitokensAny string = "ANY"
 )
 
-func (p TokenProfile) String() string {
-	return string(p)
+func ParseProfile(profile string) (TokenProfile, error) {
+	switch profile {
+	case tokenProfileWLCG:
+		return WlcgProfile{}, nil
+	case tokenProfileScitokens2:
+		return Scitokens2Profile{}, nil
+	case tokenProfileNone:
+		return NoneTokenProfile{}, nil
+	default:
+		return nil, errors.Errorf("%s is not a supported token profile; valid profiles are 'wlcg' and 'scitokens2'", profile)
+	}
+}
+
+func (NoneTokenProfile) String() string {
+	return tokenProfileNone
+}
+
+func (WlcgProfile) String() string {
+	return tokenProfileWLCG
+}
+func (WlcgProfile) ReadScope(path string) token_scopes.TokenScope {
+	scope, _ := token_scopes.Wlcg_Storage_Read.Path(path)
+	return scope
+}
+func (WlcgProfile) WriteScope(path string) token_scopes.TokenScope {
+	scope, _ := token_scopes.Wlcg_Storage_Create.Path(path)
+	return scope
+}
+func (WlcgProfile) ModifyScope(path string) token_scopes.TokenScope {
+	scope, _ := token_scopes.Wlcg_Storage_Modify.Path(path)
+	return scope
+}
+func (WlcgProfile) StageScope(path string) token_scopes.TokenScope {
+	scope, _ := token_scopes.Wlcg_Storage_Stage.Path(path)
+	return scope
+}
+func (WlcgProfile) AnyAudience() string {
+	return wlcgAny
+}
+
+func (Scitokens2Profile) String() string {
+	return tokenProfileScitokens2
+}
+func (Scitokens2Profile) ReadScope(path string) token_scopes.TokenScope {
+	scope, _ := token_scopes.Scitokens_Read.Path(path)
+	return scope
+}
+func (Scitokens2Profile) WriteScope(path string) token_scopes.TokenScope {
+	scope, _ := token_scopes.Scitokens_Write.Path(path)
+	return scope
+}
+func (Scitokens2Profile) ModifyScope(path string) token_scopes.TokenScope {
+	scope, _ := token_scopes.Scitokens_Write.Path(path)
+	return scope
+}
+func (Scitokens2Profile) StageScope(path string) token_scopes.TokenScope {
+	// While WLCG has a native staging scope, the closest equivalent
+	// in SciTokens is probably the read scope because the upstream
+	// resource must be read to stage it, whereas a write operates
+	// on the resource at the source (Origin).
+	scope, _ := token_scopes.Scitokens_Write.Path(path)
+	return scope
+}
+func (Scitokens2Profile) AnyAudience() string {
+	return scitokensAny
 }
 
 // Validate a TokenConfig given its profile and checks if the required claims are present per profile requirement
@@ -88,19 +167,17 @@ func (config *TokenConfig) Validate() (bool, error) {
 	if _, err := url.Parse(config.Issuer); err != nil {
 		return false, errors.Wrap(err, "Invalid issuer, issuer is not a valid Url")
 	}
-	switch config.tokenProfile {
-	case TokenProfileScitokens2:
+	switch config.tokenProfile.String() {
+	case tokenProfileScitokens2:
 		if err := config.verifyCreateSciTokens2(); err != nil {
 			return false, err
 		}
-	case TokenProfileWLCG:
+	case tokenProfileWLCG:
 		if err := config.verifyCreateWLCG(); err != nil {
 			return false, err
 		}
-	case TokenProfileNone:
+	case tokenProfileNone:
 		return true, nil // we don't have profile specific check for None type
-	case tokenProfileEmpty:
-		return false, errors.New("token profile is not set")
 	default:
 		return false, errors.Errorf("unsupported token profile: %s", config.tokenProfile.String())
 	}
@@ -108,15 +185,13 @@ func (config *TokenConfig) Validate() (bool, error) {
 }
 
 func NewTokenConfig(tokenProfile TokenProfile) (tc TokenConfig, err error) {
-	switch tokenProfile {
-	case TokenProfileScitokens2:
+	switch tokenProfile.String() {
+	case tokenProfileScitokens2:
 		fallthrough
-	case TokenProfileWLCG:
+	case tokenProfileWLCG:
 		fallthrough
-	case TokenProfileNone:
+	case tokenProfileNone:
 		tc.tokenProfile = tokenProfile
-	case tokenProfileEmpty:
-		err = errors.New("token profile is not set")
 	default:
 		err = errors.Errorf("unsupported token profile: %s", tokenProfile.String())
 	}
@@ -124,12 +199,12 @@ func NewTokenConfig(tokenProfile TokenProfile) (tc TokenConfig, err error) {
 }
 
 func NewWLCGToken() (tc TokenConfig) {
-	tc.tokenProfile = TokenProfileWLCG
+	tc.tokenProfile, _ = ParseProfile(tokenProfileWLCG)
 	return
 }
 
 func NewScitoken() (tc TokenConfig) {
-	tc.tokenProfile = TokenProfileScitokens2
+	tc.tokenProfile, _ = ParseProfile(tokenProfileScitokens2)
 	return
 }
 
@@ -138,14 +213,14 @@ func (config *TokenConfig) GetVersion() string {
 }
 
 func (config *TokenConfig) SetVersion(ver string) error {
-	if config.tokenProfile == TokenProfileScitokens2 {
+	if config.tokenProfile.String() == tokenProfileScitokens2 {
 		if ver == "" {
 			ver = "scitokens:2.0"
 		} else if !scitokensVerPattern.MatchString(ver) {
 			return errors.New("the provided version '" + ver +
 				"' is not valid. It must match 'scitokens:<version>', where version is of the form 2.x")
 		}
-	} else if config.tokenProfile == TokenProfileWLCG {
+	} else if config.tokenProfile.String() == tokenProfileWLCG {
 		if ver == "" {
 			ver = "1.0"
 		} else if !wlcgVerPattern.MatchString(ver) {
@@ -162,10 +237,10 @@ func (config *TokenConfig) SetVersion(ver string) error {
 // For Scitokens profile, it will be "ANY"
 func (config *TokenConfig) AddAudienceAny() {
 	newAud := ""
-	switch config.tokenProfile {
-	case TokenProfileScitokens2:
+	switch config.tokenProfile.String() {
+	case tokenProfileScitokens2:
 		newAud = string(scitokensAny)
-	case TokenProfileWLCG:
+	case tokenProfileWLCG:
 		newAud = string(wlcgAny)
 	}
 	if newAud != "" {
@@ -243,8 +318,8 @@ func (config *TokenConfig) AddResourceScopes(scopes ...token_scopes.ResourceScop
 // AddRawScope appends a space-delimited, case-sensitive scope string to the Scope field.
 //
 // Examples for valid scopes:
-//   - "storage:read"
-//   - "storage:read storage:write"
+//   - "storage.read:/"
+//   - "storage.read:/ storage.modify:/"
 func (config *TokenConfig) AddRawScope(scope string) {
 	if config.scope == "" {
 		config.scope = scope
@@ -259,12 +334,11 @@ func (config *TokenConfig) GetScope() string {
 }
 
 // CreateToken validates a JWT TokenConfig and if it's valid, create and sign a token based on the TokenConfig.
-func (tokenConfig *TokenConfig) CreateToken() (string, error) {
-
+func (tokenConfig *TokenConfig) CreateToken(signingKey ...string) (string, error) {
 	// Now that we have a token, it needs signing. Note that GetIssuerPrivateJWK
 	// will get the private key passed via the command line because that
 	// file path has already been bound to IssuerKey
-	key, err := config.GetIssuerPrivateJWK()
+	key, err := config.GetIssuerPrivateJWK(signingKey...)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to load signing keys. Either generate one at the default "+
 			"location by serving an origin, or provide one via the --private-key flag")
@@ -325,10 +399,10 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 		builder.Claim("scope", tokenConfig.scope)
 	}
 
-	if tokenConfig.tokenProfile == TokenProfileScitokens2 {
+	if tokenConfig.tokenProfile.String() == tokenProfileScitokens2 {
 		builder.Claim("ver", tokenConfig.version)
 	}
-	if tokenConfig.tokenProfile == TokenProfileWLCG {
+	if tokenConfig.tokenProfile.String() == tokenProfileWLCG {
 		builder.Claim("wlcg.ver", tokenConfig.version)
 		if len(tokenConfig.group) > 0 {
 			builder.Claim("wlcg.groups", tokenConfig.group)
@@ -354,6 +428,7 @@ func (tokenConfig *TokenConfig) CreateTokenWithKey(key jwk.Key) (string, error) 
 		return "", errors.Wrap(err, "Failed to assign kid to the token")
 	}
 
+	log.Debugln("Signing token with key id:", key.KeyID())
 	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256, key))
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to sign the deletion token")

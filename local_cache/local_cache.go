@@ -806,7 +806,7 @@ func (sc *LocalCache) newCacheReader(ctx context.Context, path, token string) (r
 
 // Get path from the cache
 func (sc *LocalCache) Get(ctx context.Context, path, token string) (io.ReadCloser, error) {
-	if !sc.ac.authorize(token_scopes.Storage_Read, path, token) {
+	if !sc.ac.authorize(token_scopes.Wlcg_Storage_Read, path, token) {
 		return nil, authorizationDenied
 	}
 
@@ -824,7 +824,7 @@ func (sc *LocalCache) Get(ctx context.Context, path, token string) (io.ReadClose
 }
 
 func (lc *LocalCache) Stat(path, token string) (uint64, error) {
-	if !lc.ac.authorize(token_scopes.Storage_Read, path, token) {
+	if !lc.ac.authorize(token_scopes.Wlcg_Storage_Read, path, token) {
 		return 0, authorizationDenied
 	}
 

@@ -395,8 +395,8 @@ func TestInfileUploadWithDirAndFiles(t *testing.T) {
 	tokenConfig.Issuer = issuer
 	tokenConfig.Subject = "origin"
 	tokenConfig.AddAudienceAny()
-	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/"),
-		token_scopes.NewResourceScope(token_scopes.Storage_Modify, "/"))
+	tokenConfig.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/"),
+		token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/"))
 	token, err := tokenConfig.CreateToken()
 	require.NoError(t, err)
 	tempToken, err := os.CreateTemp(t.TempDir(), "token")

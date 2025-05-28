@@ -90,7 +90,7 @@ description: |+
 type: filename
 root_default: /etc/pelican/issuer-keys
 default: $ConfigBase/issuer-keys
-components: ["origin", "cache", "registry", "director"]
+components: ["*"]
 ---
 name: Transport.DialerTimeout
 description: |+

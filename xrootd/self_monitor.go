@@ -270,7 +270,7 @@ func generateFileTestScitoken() (string, error) {
 	fTestTokenCfg.Lifetime = time.Minute
 	fTestTokenCfg.Issuer = issuerUrl
 	fTestTokenCfg.Subject = "cache"
-	fTestTokenCfg.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Storage_Read, "/pelican/monitoring/selfTest"))
+	fTestTokenCfg.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, "/pelican/monitoring/selfTest"))
 	// For self-tests, the audience is the server itself
 	fTestTokenCfg.AddAudienceAny()
 

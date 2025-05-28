@@ -252,7 +252,7 @@ func GetUniqueAvailablePorts(count int) ([]int, error) {
 }
 
 // Create a mock federation root that can respond to requests for metadata and federation keys
-func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kSet *jwk.Set) { // *httptest.Server {
+func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kSet *jwk.Set) {
 	// Set up the keys to use in our response jwks
 	var pKeySetInternal jwk.Set
 	var err error
@@ -348,4 +348,62 @@ func MockFederationRoot(t *testing.T, fInfo *pelican_url.FederationDiscovery, kS
 	// Finally, set this as the federation discovery URL so tests
 	// can "discover" the info
 	viper.Set(param.Federation_DiscoveryUrl.GetName(), serverUrl)
+}
+
+// Create a mock issuer that responds to request for /.well-known/openid-configuration
+// and /.well-known/issuer.jwks
+func MockIssuer(t *testing.T, kSet *jwk.Set) string {
+	// Set up the keys to use in our response jwks
+	var pKeySetInternal jwk.Set
+	var err error
+	if kSet == nil {
+		keysDir := filepath.Join(t.TempDir(), "testKeyDir")
+		viper.Set(param.IssuerKeysDirectory.GetName(), keysDir)
+		pKeySetInternal, err = config.GetIssuerPublicJWKS()
+		require.NoError(t, err, "Failed to load public JWKS while creating mock federation root")
+	} else {
+		pKeySetInternal = *kSet
+	}
+	kSetBytes, err := json.Marshal(pKeySetInternal)
+	require.NoError(t, err, "Failed to marshal public JWKS while creating mock federation root")
+
+	var getMyUrl func() string
+	responseHandler := func(w http.ResponseWriter, r *http.Request) {
+		// We only understand GET requests
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			_, err := w.Write([]byte("I only understand GET requests, but you sent me " + r.Method))
+			require.NoError(t, err)
+			return
+		}
+
+		path := r.URL.Path
+		switch path {
+		case "/.well-known/openid-configuration":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			OIDCConfig := fmt.Sprintf(`{"jwks_uri":"%s/.well-known/issuer.jwks"}`, getMyUrl())
+			_, err = w.Write([]byte(OIDCConfig))
+			require.NoError(t, err)
+		case "/.well-known/issuer.jwks":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write(kSetBytes)
+			require.NoError(t, err)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, err := w.Write([]byte("I don't understand this path: " + path))
+			require.NoError(t, err)
+		}
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(responseHandler))
+	serverUrl := server.URL
+	getMyUrl = func() string {
+		return serverUrl
+	}
+
+	t.Cleanup(server.Close)
+
+	return serverUrl
 }
