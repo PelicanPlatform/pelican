@@ -188,6 +188,7 @@ func GetServiceName() (string, error) {
 	var entry server_structs.ServiceName
 	// There is an index in the database to speed up this query
 	err := ServerDatabase.
+		Where("deleted_at IS NULL").
 		Order("updated_at DESC").
 		First(&entry).Error
 	if err != nil {
@@ -195,4 +196,39 @@ func GetServiceName() (string, error) {
 		return "", err
 	}
 	return entry.Name, nil
+}
+
+// Retrieve all service names from most recent to oldest
+func GetServiceNameHistory() ([]server_structs.ServiceName, error) {
+	var entries []server_structs.ServiceName
+
+	err := ServerDatabase.
+		Where("deleted_at IS NULL").
+		Order("updated_at DESC").
+		Find(&entries).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return entries, nil
+}
+
+// Mark a service name as deleted without actually removing it from the database
+func SoftDeleteServiceName(id string) error {
+	now := time.Now()
+
+	result := ServerDatabase.Model(&server_structs.ServiceName{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Update("deleted_at", now)
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+
+	return nil
 }
