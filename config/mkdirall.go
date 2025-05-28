@@ -110,10 +110,10 @@ func setFilePerms(paths []string, perm os.FileMode, uid int, gid int) error {
 		}
 		// Set the permissions on the file
 		if err := os.Chmod(path, perm); err != nil {
-			return errors.Wrapf(err, "Failed to set permissions on file %v", path)
+			return errors.Wrapf(err, "failed to set permissions on file %v", path)
 		}
 		if err := os.Chown(path, uid, gid); err != nil {
-			return errors.Wrapf(err, "Failed to chown file %v", path)
+			return errors.Wrapf(err, "failed to chown file %v", path)
 		}
 	}
 	return nil

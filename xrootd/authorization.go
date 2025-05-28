@@ -191,7 +191,8 @@ func writeScitokensConfiguration(modules server_structs.ServerType, cfg *Scitoke
 			return errors.Wrap(err, "failed to seek to beginning of the file")
 		}
 
-		// Use plugin to transplant the final file to a directory owned by xrootd. This is because
+		// Use command "7" in xrdhttp-pelican plugin to transplant the scitoken config file to a
+		// directory owned by xrootd. The directory is specified in `xrootd/launch.go`. This is because
 		// the xrootd daemon will periodically reload the scitokens.cfg and, in some cases, we may
 		// want to update it without restarting the server.
 		if err = FileCopyToXrootdDir(modules.IsEnabled(server_structs.OriginType), 7, file); err != nil {
@@ -418,6 +419,9 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 			return errors.Wrap(err, "failed to seek to beginning of the file")
 		}
 
+		// Transplant the auth file using the xrdhttp-pelican plugin so xrootd can access it.
+		// Command "6" instructs the plugin to put the auth file into the designated location owned by "xrootd" user,
+		// which is specified in `xrootd/launch.go`.
 		if err = FileCopyToXrootdDir(server.GetServerType().IsEnabled(server_structs.OriginType), 6, file); err != nil {
 			return errors.Wrap(err, "failed to copy the auth file to the xrootd directory")
 		}

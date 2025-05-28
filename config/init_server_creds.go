@@ -705,7 +705,7 @@ func GeneratePEM(dir string) (key jwk.Key, err error) {
 
 	user, err := GetPelicanUser()
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to get pelican user for ownership: %v", err)
+		return nil, errors.Wrap(err, "failed to get pelican user for setting ownership")
 	}
 
 	// Windows does not have "chown", has to work differently
@@ -714,7 +714,7 @@ func GeneratePEM(dir string) (key jwk.Key, err error) {
 		cmd := exec.Command("icacls", fname, "/grant", user.Username+":F")
 		output, err := cmd.CombinedOutput()
 		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to chown generated key %v to daemon group %v: %s",
+			return nil, errors.Wrapf(err, "failed to chown generated key %v to daemon group %v: %s",
 				fname, user.Groupname, string(output))
 		}
 	} else { // Else we are running on linux/mac

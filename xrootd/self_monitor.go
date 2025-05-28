@@ -246,8 +246,7 @@ func generateTestFileViaPlugin() (string, error) {
 	}
 
 	// Construct and return the URL of the copied test file in the selfTestDir
-	cachePort := param.Cache_Port.GetInt()
-	baseUrlStr := fmt.Sprintf("https://%s:%d", param.Server_Hostname.GetString(), cachePort)
+	baseUrlStr := fmt.Sprintf("https://%s:%d", param.Server_Hostname.GetString(), param.Cache_Port.GetInt())
 	baseUrl, err := url.Parse(baseUrlStr)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to validate the base url for self-test download")
