@@ -1,0 +1,15 @@
+TLSSkipVerify: true
+Logging:
+  Level: debug
+  Cache:
+    scitokens: debug
+Federation:
+  DiscoveryUrl: "https://localhost:80"
+xrootd:
+  sitename: Cache
+  MaxStartupWait: 20s
+Cache:
+  Port: 8101
+Server:
+  HostName: "localhost"
+  WebPort: 8100
