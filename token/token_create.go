@@ -318,8 +318,8 @@ func (config *TokenConfig) AddResourceScopes(scopes ...token_scopes.ResourceScop
 // AddRawScope appends a space-delimited, case-sensitive scope string to the Scope field.
 //
 // Examples for valid scopes:
-//   - "storage:read"
-//   - "storage:read storage:write"
+//   - "storage.read:/"
+//   - "storage.read:/ storage.modify:/"
 func (config *TokenConfig) AddRawScope(scope string) {
 	if config.scope == "" {
 		config.scope = scope
