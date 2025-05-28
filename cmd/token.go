@@ -211,7 +211,7 @@ func createToken(cmd *cobra.Command, args []string) error {
 
 	// Handle any raw scopes early -- may be useful for developers/admin who want to create arbitrarily-scoped tokens,
 	// and early handling lets us use this as another mechanism to avoid scope paths.
-	rawScopes, err := cmd.Flags().GetStringArray("scope")
+	rawScopes, err := cmd.Flags().GetStringArray("raw-scope")
 	if err != nil {
 		return errors.Wrap(err, "unable to get provided scopes")
 	}
@@ -344,7 +344,7 @@ func createToken(cmd *cobra.Command, args []string) error {
 	tokenConfig.Subject = subject
 
 	// Handle arbitrary claims
-	rawClaims, err := cmd.Flags().GetStringArray("claim")
+	rawClaims, err := cmd.Flags().GetStringArray("raw-claim")
 	if err != nil {
 		return errors.Wrap(err, "unable to get provided claims")
 	}
