@@ -32,6 +32,7 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
 
 // List all namespaces from origins registered at the director
@@ -307,7 +308,7 @@ func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
 				// Query all the servers and filter them out later
 				// We are interested in the derivative/rate of the total server IO over the past 5min
 				query := `rate(xrootd_server_io_total{job="origin_cache_servers"}[5m])`
-				queryResult, err := queryPromtheus(ddlCtx, query, true)
+				queryResult, err := server_utils.QueryMyPrometheus(ddlCtx, query)
 				if err != nil {
 					log.Debugf("Failed to update IO stat: querying Prometheus responded with an error: %v", err)
 					continue

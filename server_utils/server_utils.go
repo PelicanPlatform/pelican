@@ -34,6 +34,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -510,4 +511,76 @@ func SetFedTok(ctx context.Context, server server_structs.XRootDServer, tok stri
 	}
 
 	return nil
+}
+
+// Launch the origin/cache's concurrency monitoring routine
+//
+// The routine periodically scrapes the servers own prometheus endpoint to gather information
+// about the IO concurrency it's seen over the last period. This is used to set a health status
+// that gets reported to the Director, which can help inform the Director whether it needs to
+// cool down redirects to the server.
+func LaunchConcurrencyMonitoring(ctx context.Context, egrp *errgroup.Group, sType server_structs.ServerType) {
+
+	doLoadMonitoring := func(ctx context.Context) error {
+		var concLimit int
+		var paramName string
+		if sType == server_structs.CacheType {
+			concLimit = param.Cache_Concurrency.GetInt()
+			paramName = param.Cache_Concurrency.GetName()
+		} else if sType == server_structs.OriginType {
+			concLimit = param.Origin_Concurrency.GetInt()
+			paramName = param.Origin_Concurrency.GetName()
+		}
+
+		if concLimit <= 0 {
+			return errors.Errorf("invalid config value: %s is %d. Must be greater than 0.", paramName, concLimit)
+		}
+
+		// TODO: Do we need to make this configurable?
+		concQuery := `avg_over_time(xrootd_server_io_active[1m])`
+
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				log.Debug("Starting a new concurrency monitoring cycle")
+
+				qResult, err := QueryMyPrometheus(ctx, concQuery)
+				if err != nil {
+					log.Errorf("Failed to query prometheus for current xrootd concurrency value; query: %s; error: %v", concQuery, err)
+					continue
+				}
+
+				if qResult.ResultType != "vector" {
+					log.Errorf("Failed to query prometheus for current xrootd concurrency value: Expected a vector but Prometheus returned response of type %s", qResult.ResultType)
+					continue
+				}
+				for _, item := range qResult.Result {
+					for _, pair := range item.Values {
+						avgConc, err := strconv.ParseFloat(pair.Value, 64)
+						if err != nil {
+							log.Errorf("Could not parse Prometheus-supplied xrootd concurrency value %q as float: %v\n", pair.Value, err)
+							continue
+						}
+
+						log.Tracef("Average 1m IO concurrency value from Prometheus is %.2f", avgConc)
+						if avgConc >= float64(concLimit) {
+							log.Debugf("Putting IO Concurrency health status into degraded state; the average 1m concurrency value of %f is higher than the configured limit %d", avgConc, concLimit)
+							metrics.SetComponentHealthStatus(metrics.OriginCache_IOConcurrency, metrics.StatusDegraded, "The server is currently experiencing more than its configured IO concurrency limit, performance may degraded")
+						} else {
+							log.Debugln("Putting IO Concurrency health status into OK state")
+							metrics.SetComponentHealthStatus(metrics.OriginCache_IOConcurrency, metrics.StatusOK, "The server is within its configured IO concurrency limits")
+						}
+					}
+				}
+			}
+		}
+	}
+
+	egrp.Go(func() error {
+		return doLoadMonitoring(ctx)
+	})
 }

@@ -128,6 +128,7 @@ type (
 
 	// ** BE WARNED **
 	// This struct needs to be kept in sync with BOTH the director/director_ui.go:listServerResponse and the director/director_ui.go:serverResponse
+	// and the functions responsible for generating these structs on-demand.
 	ServerAd struct {
 		ServerBaseAd
 		RegistryPrefix      string            `json:"registryPrefix"` // The server's prefix recorded in the registry
@@ -145,6 +146,7 @@ type (
 		IOLoad              float64           `json:"io_load"`
 		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
 		RequiredFeatures    []string          `json:"requiredFeatures"`    // A list of feature names required by this server
+		Status              string            `json:"status"`
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
@@ -175,7 +177,8 @@ type (
 		DisableDirectorTest bool              `json:"directorTest"`        // Use negative attribute (disable instead of enable) to be BC with legacy servers where they don't have this field
 		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
 		RequiredFeatures    []string          `json:"requiredFeatures"`
-		Now                 time.Time         `json:"now"` // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
+		Now                 time.Time         `json:"now"`    // Populated when ad is sent to the director; otherwise, may be zero.  Used to detect time skews between client and server
+		Status              string            `json:"status"` // The status of the server ad. This is a human-readable string that describes the server's status.
 	}
 
 	OriginAdvertiseV1 struct {

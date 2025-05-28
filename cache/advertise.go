@@ -32,6 +32,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
+	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -59,12 +60,16 @@ func (server *CacheServer) CreateAdvertisement(name, originUrl, originWebUrl str
 		return nil, err
 	}
 
+	// Get the overall health status as reported by the cache.
+	status := metrics.GetHealthStatus().OverallStatus
+
 	ad := server_structs.OriginAdvertiseV2{
 		RegistryPrefix: registryPrefix,
 		DataURL:        originUrl,
 		WebURL:         originWebUrl,
 		Namespaces:     server.GetNamespaceAds(),
 		Downtimes:      downtimes,
+		Status:         status,
 	}
 	ad.Initialize(name)
 

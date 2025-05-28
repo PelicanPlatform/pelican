@@ -54,6 +54,8 @@ type (
 // HealthStatusEnum are stored as Prometheus values and internal struct
 const (
 	StatusCritical HealthStatusEnum = iota + 1
+	StatusShuttingDown
+	StatusDegraded
 	StatusWarning
 	StatusOK
 	StatusUnknown // Do not abuse this enum. Use others when possible
@@ -75,7 +77,8 @@ const (
 	OriginCache_Registry      HealthStatusComponent = "registry"   // Register namespace at the registry
 	DirectorRegistry_Topology HealthStatusComponent = "topology"   // Fetch data from OSDF topology
 	Server_WebUI              HealthStatusComponent = "web-ui"
-	Prometheus                HealthStatusComponent = "prometheus" // Prometheus server
+	OriginCache_IOConcurrency HealthStatusComponent = "IO-concurrency" // Keep track of whether or active requests are exceeding configured concurrency limits
+	Prometheus                HealthStatusComponent = "prometheus"     // Prometheus server
 )
 
 var (
@@ -92,11 +95,30 @@ var (
 	}, []string{"component"})
 )
 
+func ParseHealthStatus(status string) HealthStatusEnum {
+	switch status {
+	case "critical":
+		return StatusCritical
+	case "shutting down":
+		return StatusShuttingDown
+	case "degraded":
+		return StatusDegraded
+	case "warning":
+		return StatusWarning
+	case "ok":
+		return StatusOK
+	case "unknown":
+		return StatusUnknown
+	default:
+		return StatusUnknown
+	}
+}
+
 // Unfortunately we don't have a better way to ensure the enum constants always have
 // matched string representation, so we will return "Error: status string index out of range"
 // as an indicator
 func (status HealthStatusEnum) String() string {
-	strings := [...]string{"critical", "warning", "ok", "unknown"}
+	strings := [...]string{"critical", "shutting down", "degraded", "warning", "ok", "unknown"}
 
 	if int(status) < 1 || int(status) > len(strings) {
 		return statusIndexErrorMessage
