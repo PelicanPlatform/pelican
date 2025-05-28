@@ -209,13 +209,37 @@ type: string
 default: error
 components: ["client"]
 ---
-name: Logging.Server.Level
+name: Logging.Origin.Level
+description: |+
+  A string defining the log level of the Origin. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+  If unset, will fallback to `Logging.Level`.
+type: string
+default: info
+components: ["origin"]
+---
+name: Logging.Cache.Level
+description: |+
+  A string defining the log level of the Cache. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+  If unset, will fallback to `Logging.Level`.
+type: string
+default: info
+components: ["cache"]
+---
+name: Logging.Director.Level
 description: |+
   A string defining the log level of the server (Director, Registry, Origin, Cache). Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
   If unset, will fallback to `Logging.Level`.
 type: string
 default: info
-components: ["director", "registry", "origin", "cache"]
+components: ["director"]
+---
+name: Logging.Registry.Level
+description: |+
+  A string defining the log level of the server (Director, Registry, Origin, Cache). Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+  If unset, will fallback to `Logging.Level`.
+type: string
+default: info
+components: ["registry"]
 ---
 name: Logging.Origin.Cms
 description: |+
