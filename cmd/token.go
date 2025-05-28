@@ -100,7 +100,7 @@ func splitClaim(claim string) (string, string, error) {
 }
 
 // Given some issuer and a set of KIDs, determine whether the issuer's JWKS contains a key with a matching KID
-func verifyIssuer(issuer string, kidSet map[string]struct{}) (bool, error) {
+func issuerMatchesKey(issuer string, kidSet map[string]struct{}) (bool, error) {
 	remoteJWKS, err := server_utils.GetJWKSFromIssUrl(issuer)
 	if err != nil {
 		return false, err
@@ -276,10 +276,10 @@ func createToken(cmd *cobra.Command, args []string) error {
 		}
 	} else {
 		// If an issuer is provided, check whether it matches the signing key
-		valid, err := verifyIssuer(issuer, kidSet)
+		matches, err := issuerMatchesKey(issuer, kidSet)
 		if err != nil {
 			log.Errorf("unable to fetch public JWKS from provided issuer %s, using anyway: %v; ", issuer, err)
-		} else if !valid {
+		} else if !matches {
 			// If the user-provided issuer does not match the signing key, we should warn the user
 			// but still allow them to use it -- maybe they're creating tokens before the infrastructure is set up
 			log.Errorf("provided issuer %s does not match the signing key; using anyway", issuer)

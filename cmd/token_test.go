@@ -90,7 +90,7 @@ func TestSplitClaim(t *testing.T) {
 	}
 }
 
-func TestVerifyIssuer(t *testing.T) {
+func TestIssuerMatchesKey(t *testing.T) {
 	testCases := []struct {
 		name           string
 		useMockIssuer  bool
@@ -144,9 +144,9 @@ func TestVerifyIssuer(t *testing.T) {
 					key := it.Pair().Value.(jwk.Key)
 					kidSet[key.KeyID()] = struct{}{}
 				}
-				result, verificationErr = verifyIssuer(issuer, kidSet)
+				result, verificationErr = issuerMatchesKey(issuer, kidSet)
 			} else {
-				result, verificationErr = verifyIssuer(issuer, map[string]struct{}{"1234abcd": {}})
+				result, verificationErr = issuerMatchesKey(issuer, map[string]struct{}{"1234abcd": {}})
 			}
 
 			if tc.expectError {
