@@ -165,6 +165,19 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 		testFileCinfoLocation := filepath.Join(basePath, "self-test-cache-server.txt.cinfo")
 		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CACHE_SELF_TEST_FILE="+testFileLocation)
 		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_CACHE_SELF_TEST_FILE_CINFO="+testFileCinfoLocation)
+
+		xrootdRun := param.Origin_RunLocation.GetString()
+		authFileName := "authfile-origin-generated"
+		scitokensCfgFileName := "scitokens-origin-generated.cfg"
+		if isCache {
+			xrootdRun = param.Cache_RunLocation.GetString()
+			authFileName = "authfile-cache-generated"
+			scitokensCfgFileName = "scitokens-cache-generated.cfg"
+		}
+		authPath := filepath.Join(xrootdRun, authFileName)
+		configPath := filepath.Join(xrootdRun, scitokensCfgFileName)
+		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_AUTHFILE_GENERATED="+authPath)
+		result.ExtraEnv = append(result.ExtraEnv, "XRDHTTP_PELICAN_SCITOKENS_GENERATED="+configPath)
 	}
 	return
 }

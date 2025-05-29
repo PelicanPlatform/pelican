@@ -28,6 +28,28 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Apply the given permission bits and ownership to path in a cross-platform way.
+//   - On Windows it runs “icacls path /grant username:F”
+//   - On Linux/macOS it does os.Chmod(path, perm) then os.Chown(path, uid, gid)
+func SetOwnershipAndPermissions(path string, perm os.FileMode, user User) error {
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("icacls", path, "/grant", user.Username+":F")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return errors.Wrapf(err, "unable to modify ACLs on %q: %s", path, string(out))
+		}
+		return nil
+	}
+
+	// Assume macOS or Linux
+	if err := os.Chmod(path, perm); err != nil {
+		return errors.Wrapf(err, "unable to chmod %q to %v", path, perm)
+	}
+	if err := os.Chown(path, user.Uid, user.Gid); err != nil {
+		return errors.Wrapf(err, "unable to chown %q to %d:%d", path, user.Uid, user.Gid)
+	}
+	return nil
+}
+
 // This is the pelican version of `MkdirAll`; ensures that any created directory
 // is owned by a given uid/gid.  This allows the created directory to be owned by
 // the xrootd user.
@@ -76,26 +98,29 @@ func MkdirAll(path string, perm os.FileMode, uid int, gid int) error {
 	}
 
 	// Set ownership on the directory that we just created.
-	if runtime.GOOS == "windows" {
-		username, err := GetDaemonUser() // FIXME (brianaydemir): This is not the correct user.
-		if err != nil {
-			return err
-		}
-		cmd := exec.Command("icacls", path, "/grant", username+":F")
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return errors.Wrapf(err, "unable to modify discretionary ACLs on directory %v: %s", path, string(output))
-		}
-	} else { // Assume macOS or Linux.
-		// Any default system umask may prevent previous application of the permissions
-		// from taking effect. To override this, set the permissions explicitly
-		// after creation.
-		if err = os.Chmod(path, perm); err != nil {
-			return errors.Wrapf(err, "unable to chmod on directory %v to %v", path, perm)
-		}
+	user, err := GetPelicanUser()
+	if err != nil {
+		return errors.Wrap(err, "failed to get pelican user")
+	}
+	if err = SetOwnershipAndPermissions(path, perm, User{Uid: uid, Gid: gid, Username: user.Username}); err != nil {
+		return errors.Wrapf(err, "failed to set ownership and permissions for %s", path)
+	}
+	return nil
+}
 
-		if err = os.Chown(path, uid, gid); err != nil {
-			return errors.Wrapf(err, "unable to chown on directory %v to %v:%v", path, uid, gid)
+// Set the permissions on the targeted file only if it exists. Doesn't care about its parent or siblings
+func setFilePerms(paths []string, perm os.FileMode, uid int, gid int) error {
+	for _, path := range paths {
+		// Skip the file if it doesn't exist
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			continue
+		}
+		// Set the permissions on the file
+		if err := os.Chmod(path, perm); err != nil {
+			return errors.Wrapf(err, "failed to set permissions on file %v", path)
+		}
+		if err := os.Chown(path, uid, gid); err != nil {
+			return errors.Wrapf(err, "failed to chown file %v", path)
 		}
 	}
 	return nil

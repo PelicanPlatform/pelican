@@ -1368,7 +1368,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		// Set up the directories for the server to run as a non-root user;
 		// for the most part, we need to recursively chown and chmod the directory
 		// so either root or pelican can access it.
-		pelicanLocations := []string{}
+		pelicanLocations := []string{
+			param.Server_DbLocation.GetString(),
+		}
 		if currentServers.IsEnabled(server_structs.RegistryType) {
 			pelicanLocations = append(pelicanLocations, param.Registry_DbLocation.GetString())
 		}
@@ -1390,8 +1392,17 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			return errors.Wrap(err, "failure when setting up the file permissions for pelican")
 		}
 
+		pelicanLocationsSingleFiles := []string{
+			param.Server_UIPasswordFile.GetString(),
+			param.IssuerKey.GetString(), // Backward compatibility for legacy key file
+		}
+		if err = setFilePerms(pelicanLocationsSingleFiles, 0640, puser.Uid, 0); err != nil {
+			return errors.Wrap(err, "failure when setting up the file permissions for pelican")
+		}
+
 		pelicanDirs := []string{
 			param.Monitoring_DataLocation.GetString(),
+			param.IssuerKeysDirectory.GetString(),
 		}
 		if currentServers.IsEnabled(server_structs.LocalCacheType) {
 			pelicanDirs = append(pelicanDirs, param.LocalCache_RunLocation.GetString())
