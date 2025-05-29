@@ -24,16 +24,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGetCacheNS(t *testing.T) {
+func TestGetCacheNs(t *testing.T) {
 	t.Run("returns-empty-string-w-empty-input", func(t *testing.T) {
-		assert.Empty(t, GetCacheNS(""))
+		assert.Empty(t, GetCacheNs(""))
 	})
 
 	t.Run("returns-prefix", func(t *testing.T) {
-		assert.Equal(t, "/caches/hostname", GetCacheNS("hostname"))
-		assert.Equal(t, "/caches/127.0.0.1", GetCacheNS("127.0.0.1"))
-		assert.Equal(t, "/caches/https://example.org", GetCacheNS("https://example.org"))
-		assert.Equal(t, "/caches/localhost:2000", GetCacheNS("localhost:2000"))
+		assert.Equal(t, "/caches/hostname", GetCacheNs("hostname"))
+		assert.Equal(t, "/caches/127.0.0.1", GetCacheNs("127.0.0.1"))
+		assert.Equal(t, "/caches/https://example.org", GetCacheNs("https://example.org"))
+		assert.Equal(t, "/caches/localhost:2000", GetCacheNs("localhost:2000"))
 	})
 }
 

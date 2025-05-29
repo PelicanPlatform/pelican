@@ -2829,10 +2829,15 @@ components: ["origin", "cache"]
 ---
 name: Xrootd.Sitename
 description: |+
-  The sitename, as configured for XRootD.
+  The sitename, as configured for XRootD. It is generally used as a human readable way to convey
+  something about the institution running the service. This value will also be used by caches when
+  registering with the federation's Registry (overriding the service's hostname, which is the default).
+  Origins currently always use the hostname at the Registry.
+
+  For both cahces/origins the sitename will be displayed as the service's name in the federation's Director.
 type: string
 default: none
-components: ["origin"]
+components: ["origin", "cache"]
 ---
 name: Xrootd.MaxStartupWait
 description: |+
