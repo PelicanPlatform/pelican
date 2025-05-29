@@ -2848,6 +2848,15 @@ default: 10s
 hidden: true
 components: ["origin", "cache"]
 ---
+name: Xrootd.ShutdownTimeout
+description: |+
+  The maximum amount of time pelican will wait for the xrootd daemons to gracefully shutdown. 
+  During this period, the Director will stop redirect new transfer requests to this xrootd server, 
+  while in-flight transfers are allowed to proceed until timeout. 
+type: duration
+default: 1m
+components: ["origin", "cache"]
+---
 ############################
 # Monitoring-level configs #
 ############################
