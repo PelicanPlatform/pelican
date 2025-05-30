@@ -159,6 +159,7 @@ type (
 	StrategyType string
 	SortType     string
 
+	// OriginAdvertiseV2 is the struct used to advertise BOTH Origin and Cache server to the director
 	OriginAdvertiseV2 struct {
 		ServerBaseAd
 		// The namespace prefix to register/look up the server in the registry.

@@ -53,8 +53,8 @@ type (
 
 // HealthStatusEnum are stored as Prometheus values and internal struct
 const (
-	StatusCritical HealthStatusEnum = iota + 1
-	StatusShuttingDown
+	StatusShuttingDown HealthStatusEnum = iota + 1
+	StatusCritical
 	StatusDegraded
 	StatusWarning
 	StatusOK
@@ -118,7 +118,7 @@ func ParseHealthStatus(status string) HealthStatusEnum {
 // matched string representation, so we will return "Error: status string index out of range"
 // as an indicator
 func (status HealthStatusEnum) String() string {
-	strings := [...]string{"critical", "shutting down", "degraded", "warning", "ok", "unknown"}
+	strings := [...]string{"shutting down", "critical", "degraded", "warning", "ok", "unknown"}
 
 	if int(status) < 1 || int(status) > len(strings) {
 		return statusIndexErrorMessage
