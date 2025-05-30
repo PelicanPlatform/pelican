@@ -1748,6 +1748,12 @@ func handleOSSPacket(blobs [][]byte) error {
 		return errors.Wrap(err, "failed to parse OSS stat json")
 	}
 
+	allowedEvents := map[string]bool{"oss_stats": true}
+
+	if !allowedEvents[ossStats.Event] {
+		return errors.New(fmt.Sprintf("handleOSSPacket: Received an OSS packet with illegal event type: %s", ossStats.Event))
+	}
+
 	updateCounter := func(new int, old int, counter prometheus.Counter) int {
 		incBy := float64(new - old)
 		if new < old {
