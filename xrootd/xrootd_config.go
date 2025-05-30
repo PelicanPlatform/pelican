@@ -1052,10 +1052,19 @@ func SetUpMonitoring(ctx context.Context, egrp *errgroup.Group) error {
 func genLoggingConfig(input string, logMap loggingMap) (string, error) {
 	// If no input is configured, inherit from Pelican's log level
 	if input == "" {
-		// Grab the log level directly from param, not from the logrus object
-		// itself, which has a lot of fancy schmancy stuff that in effect makes it look
-		// like it's debug when Pelican uses its default "Error" level.
+		// this enforces the logging level hierarchy
+		// we check if a service has enabled a specific log level
+		// otherwise we fallback to the top level log level
 		input = param.Logging_Level.GetString()
+		if config.IsServerEnabled(server_structs.OriginType) {
+			if viper.IsSet(param.Logging_Origin_Level.GetName()) {
+				input = param.Logging_Origin_Level.GetString()
+			}
+		} else if config.IsServerEnabled(server_structs.CacheType) {
+			if viper.IsSet(param.Logging_Cache_Level.GetName()) {
+				input = param.Logging_Cache_Level.GetString()
+			}
+		}
 	}
 
 	orderedLevels := []string{
