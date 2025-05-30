@@ -804,6 +804,20 @@ func TestHandlePacket(t *testing.T) {
 	})
 }
 
+func TestOssPacketHandler(t *testing.T) {
+	t.Run("test-oss-packet-filtering", func(t *testing.T) {
+		goodPacket := []byte(`{"event":"oss_stats","reads":151577,"writes":0,"stats":152346,"pgreads":0,"pgwrites":0,"readvs":0,"readv_segs":0,"dirlists":0,"dirlist_ents":0,"truncates":0,"unlinks":0,"chmods":0,"opens":10754,"renames":0,"slow_reads":521,"slow_writes":0,"slow_stats":0,"slow_pgreads":0,"slow_pgwrites":0,"slow_readvs":0,"slow_readv_segs":0,"slow_dirlists":0,"slow_dirlist_ents":0,"slow_truncates":0,"slow_unlinks":0,"slow_chmods":0,"slow_opens":0,"slow_renames":0,"open_t":854.9008,"read_t":20701.8367,"readv_t":0.0000,"pgread_t":0.0000,"write_t":0.0000,"pgwrite_t":0.0000,"dirlist_t":0.0000,"stat_t":68.3124,"truncate_t":0.0000,"unlink_t":0.0000,"rename_t":0.0000,"chmod_t":0.0000,"slow_open_t":0.0000,"slow_read_t":810.3797,"slow_readv_t":0.0000,"slow_pgread_t":0.0000,"slow_write_t":0.0000,"slow_pgwrite_t":0.0000,"slow_dirlist_t":0.0000,"slow_stat_t":0.0000,"slow_truncate_t":0.0000,"slow_unlink_t":0.0000,"slow_rename_t":0.0000,"slow_chmod_t":0.0000}`)
+
+		badPacket := []byte(`{"event":"bad_packet","reads":151577,"writes":0,"stats":152346,"pgreads":0,"pgwrites":0,"readvs":0,"readv_segs":0,"dirlists":0,"dirlist_ents":0,"truncates":0,"unlinks":0,"chmods":0,"opens":10754,"renames":0,"slow_reads":521,"slow_writes":0,"slow_stats":0,"slow_pgreads":0,"slow_pgwrites":0,"slow_readvs":0,"slow_readv_segs":0,"slow_dirlists":0,"slow_dirlist_ents":0,"slow_truncates":0,"slow_unlinks":0,"slow_chmods":0,"slow_opens":0,"slow_renames":0,"open_t":854.9008,"read_t":20701.8367,"readv_t":0.0000,"pgread_t":0.0000,"write_t":0.0000,"pgwrite_t":0.0000,"dirlist_t":0.0000,"stat_t":68.3124,"truncate_t":0.0000,"unlink_t":0.0000,"rename_t":0.0000,"chmod_t":0.0000,"slow_open_t":0.0000,"slow_read_t":810.3797,"slow_readv_t":0.0000,"slow_pgread_t":0.0000,"slow_write_t":0.0000,"slow_pgwrite_t":0.0000,"slow_dirlist_t":0.0000,"slow_stat_t":0.0000,"slow_truncate_t":0.0000,"slow_unlink_t":0.0000,"slow_rename_t":0.0000,"slow_chmod_t":0.0000}`)
+
+		err := handleOSSPacket([][]byte{goodPacket})
+		assert.NoError(t, err, "Error handling a good OSS packet")
+
+		err = handleOSSPacket([][]byte{badPacket})
+		assert.Error(t, err, "Error handling a good OSS packet")
+	})
+}
+
 func TestComputePaths(t *testing.T) {
 	assert.Equal(t, "/foo", computePrefix("/foo", []PathList{{Paths: []string{"", "*"}}}))
 	assert.Equal(t, "/", computePrefix("/foo", []PathList{{Paths: []string{"", "baz"}}}))
