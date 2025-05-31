@@ -444,6 +444,7 @@ var (
 	Server_AdvertisementInterval = DurationParam{"Server.AdvertisementInterval"}
 	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
 	Server_StartupTimeout = DurationParam{"Server.StartupTimeout"}
+	Transport_BrokerEndpointCacheTTL = DurationParam{"Transport.BrokerEndpointCacheTTL"}
 	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}
 	Transport_DialerTimeout = DurationParam{"Transport.DialerTimeout"}
 	Transport_ExpectContinueTimeout = DurationParam{"Transport.ExpectContinueTimeout"}

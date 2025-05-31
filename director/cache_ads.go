@@ -35,6 +35,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
@@ -69,6 +70,9 @@ var (
 
 	// Use a single mutex to protect four global maps
 	filteredServersMutex = sync.RWMutex{}
+
+	// The broker dialer we use to connect to origin servers requiring a brokered connection
+	brokerDialer *broker.BrokerDialer = nil
 )
 
 func (f filterType) String() string {
@@ -88,6 +92,11 @@ func (f filterType) String() string {
 	default:
 		return "Unknown Type"
 	}
+}
+
+// Set the broker dialer to be used by the director
+func SetBrokerDialer(dialer *broker.BrokerDialer) {
+	brokerDialer = dialer
 }
 
 // recordAd does following for an incoming ServerAd and []NamespaceAdV2 pair:
@@ -167,6 +176,11 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 	}
 
 	serverAds.Set(ad.URL.String(), &server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}, adTTL)
+
+	// Inform the global broker dialer about the new server ad
+	if sAd.BrokerURL.Host != "" && brokerDialer != nil {
+		brokerDialer.UseBroker(sAd.AuthURL.Host, sAd.BrokerURL.String())
+	}
 
 	// Prepare `stat` call utilities for all servers regardless of its source (topology or Pelican)
 	func() {

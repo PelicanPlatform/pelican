@@ -92,6 +92,14 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		return
 	}
 
+	// If we are a director, we will potentially contact other
+	// services with the broker, so we need to set up the broker dialer
+	if modules.IsEnabled(server_structs.DirectorType) {
+		brokerDialer := broker.NewBrokerDialer(ctx, egrp)
+		config.SetTransportDialer(brokerDialer.DialContext)
+		director.SetBrokerDialer(brokerDialer)
+	}
+
 	// Print Pelican config at server start if it's in debug or info level
 	if log.GetLevel() >= log.InfoLevel {
 		if err = config.PrintConfig(); err != nil {

@@ -346,6 +346,7 @@ type Config struct {
 		DisableOrigins bool `mapstructure:"disableorigins" yaml:"DisableOrigins"`
 	} `mapstructure:"topology" yaml:"Topology"`
 	Transport struct {
+		BrokerEndpointCacheTTL time.Duration `mapstructure:"brokerendpointcachettl" yaml:"BrokerEndpointCacheTTL"`
 		DialerKeepAlive time.Duration `mapstructure:"dialerkeepalive" yaml:"DialerKeepAlive"`
 		DialerTimeout time.Duration `mapstructure:"dialertimeout" yaml:"DialerTimeout"`
 		ExpectContinueTimeout time.Duration `mapstructure:"expectcontinuetimeout" yaml:"ExpectContinueTimeout"`
@@ -701,6 +702,7 @@ type configWithType struct {
 		DisableOrigins struct { Type string; Value bool }
 	}
 	Transport struct {
+		BrokerEndpointCacheTTL struct { Type string; Value time.Duration }
 		DialerKeepAlive struct { Type string; Value time.Duration }
 		DialerTimeout struct { Type string; Value time.Duration }
 		ExpectContinueTimeout struct { Type string; Value time.Duration }

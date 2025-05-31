@@ -142,6 +142,16 @@ type: duration
 default: 10s
 components: ["client", "registry", "origin"]
 ---
+name: Transport.BrokerEndpointCacheTTL
+description: |+
+  A Pelican service can indicate that a connection broker service is needed to create connections
+  (this allows the service to live behind a firewall without any incoming connectivity).  This controls
+  how long the server remembers the broker lookup information.
+type: duration
+default: 2m
+hidden: true
+components: ["director"]
+---
 name: GeoIPOverrides
 description: |+
   A list of IP addresses whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects

@@ -20,13 +20,10 @@ package config
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	_ "embed"
 	"fmt"
 	"io"
 	"io/fs"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -130,10 +127,6 @@ var (
 	// Potentially holds a directory to cleanup
 	tempRunDir  string
 	cleanupOnce sync.Once
-
-	// Our global transports that only will get reconfigured if needed
-	transport     *http.Transport
-	onceTransport sync.Once
 
 	// Global discovery info.  Using the "once" allows us to delay discovery
 	// until it's first needed, avoiding a web lookup for invoking configuration
@@ -517,47 +510,6 @@ func getConfigBase() string {
 	return filepath.Join(home, ".config", "pelican")
 }
 
-func setupTransport() {
-	//Getting timeouts and other information from defaults.yaml
-	maxIdleConns := param.Transport_MaxIdleConns.GetInt()
-	idleConnTimeout := param.Transport_IdleConnTimeout.GetDuration()
-	transportTLSHandshakeTimeout := param.Transport_TLSHandshakeTimeout.GetDuration()
-	expectContinueTimeout := param.Transport_ExpectContinueTimeout.GetDuration()
-	responseHeaderTimeout := param.Transport_ResponseHeaderTimeout.GetDuration()
-
-	transportDialerTimeout := param.Transport_DialerTimeout.GetDuration()
-	transportKeepAlive := param.Transport_DialerKeepAlive.GetDuration()
-
-	//Set up the transport
-	transport = &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   transportDialerTimeout,
-			KeepAlive: transportKeepAlive,
-		}).DialContext,
-		MaxIdleConns:          maxIdleConns,
-		IdleConnTimeout:       idleConnTimeout,
-		TLSHandshakeTimeout:   transportTLSHandshakeTimeout,
-		ExpectContinueTimeout: expectContinueTimeout,
-		ResponseHeaderTimeout: responseHeaderTimeout,
-	}
-	if param.TLSSkipVerify.GetBool() {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	}
-	if caCert, err := LoadCertificate(param.Server_TLSCACertificateFile.GetString()); err == nil {
-		systemPool, err := x509.SystemCertPool()
-		if err == nil {
-			systemPool.AddCert(caCert)
-			// Ensure that we don't override the InsecureSkipVerify if it's present
-			if transport.TLSClientConfig == nil {
-				transport.TLSClientConfig = &tls.Config{RootCAs: systemPool}
-			} else {
-				transport.TLSClientConfig.RootCAs = systemPool
-			}
-		}
-	}
-}
-
 // GetServerIssuerURL tries to determine the correct issuer URL for the server in order of precedence:
 // - Server.IssuerUrl
 // - Server.IssuerHostname and Server.IssuerPort
@@ -608,14 +560,6 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	}
 	log.Debugf("Populating server's issuer URL as '%s' from configured value of '%s'", issuerUrl, param.Server_ExternalWebUrl.GetName())
 	return issuerUrl, nil
-}
-
-// function to get/setup the transport (only once)
-func GetTransport() *http.Transport {
-	onceTransport.Do(func() {
-		setupTransport()
-	})
-	return transport
 }
 
 // Get singleton global validate method for field validation
