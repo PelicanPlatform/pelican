@@ -1,6 +1,8 @@
 [Unit]
 Description = Pelican service osdf-registry
 After = network.target nss-lookup.target
+StartLimitIntervalSec = 60
+StartLimitBurst = 3
 
 [Service]
 EnvironmentFile = -/etc/sysconfig/osdf-registry
