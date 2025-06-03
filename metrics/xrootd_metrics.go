@@ -776,6 +776,8 @@ var (
 	monitorPaths []PathList
 )
 
+var allowedEvents = map[string]bool{"oss_stats": true}
+
 // Set up listening and parsing xrootd monitoring UDP packets into prometheus
 //
 // The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
@@ -1748,10 +1750,9 @@ func handleOSSPacket(blobs [][]byte) error {
 		return errors.Wrap(err, "failed to parse OSS stat json")
 	}
 
-	allowedEvents := map[string]bool{"oss_stats": true}
-
 	if !allowedEvents[ossStats.Event] {
-		return errors.New(fmt.Sprintf("handleOSSPacket: Received an OSS packet with illegal event type: %s", ossStats.Event))
+		log.Debugf("handleOSSPacket: received an OSS packet with event type (%s)", ossStats.Event)
+		return nil
 	}
 
 	updateCounter := func(new int, old int, counter prometheus.Counter) int {
