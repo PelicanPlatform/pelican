@@ -386,7 +386,7 @@ func TestUploadZeroLengthFile(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer test")
 	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
-	go runPut(request, responseChan, errorChan)
+	go runPut(request, responseChan, errorChan, false)
 	select {
 	case err := <-errorChan:
 		assert.NoError(t, err)
@@ -416,7 +416,7 @@ func TestFailedUpload(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer test")
 	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
-	go runPut(request, responseChan, errorChan)
+	go runPut(request, responseChan, errorChan, false)
 	select {
 	case err := <-errorChan:
 		assert.Error(t, err)
