@@ -75,3 +75,49 @@ Building is performed with the [goreleaser](https://goreleaser.com/) tool.  To b
     $ goreleaser --clean --snapshot
 
 The binaries will be located in `./dist` directory.
+
+## Building for Development
+
+To enable more rapid development you can include a `dev` goreleaser configuration. This allows you to only build the binaries that you will be using.
+
+### Example `.goreleaser.dev.yml` File
+```
+project_name: pelican
+version: 2
+
+release:
+  prerelease: true
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+    - make web-build
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - "amd64"
+      - "arm64"
+    id: "pelican"
+    dir: ./cmd
+    binary: pelican
+    tags:
+      - forceposix
+    ldflags:
+      - -s -w -X github.com/pelicanplatform/pelican/version.commit={{.Commit}} -X github.com/pelicanplatform/pelican/version.date={{.Date}} -X github.com/pelicanplatform/pelican/version.builtBy=goreleaser -X github.com/pelicanplatform/pelican/version.version={{.Version}}
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: ppc64le
+      - goos: darwin
+        goarch: ppc64le
+```
+
+### Build using the dev file
+```
+make pelican-dev-build
+```
