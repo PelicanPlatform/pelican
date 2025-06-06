@@ -146,6 +146,7 @@ type (
 		proxyHost   string
 		isUpload    bool
 		isProxyErr  bool
+		isCache     bool
 		err         error
 	}
 
@@ -698,6 +699,9 @@ func (tae *TransferAttemptError) Error() (errMsg string) {
 	} else if tae.proxyHost != "" {
 		errMsg += "+proxy=" + tae.proxyHost
 	}
+	if tae.isCache {
+		errMsg += " (cache)"
+	}
 	if tae.err != nil {
 		errMsg += ": " + tae.err.Error()
 	}
@@ -730,12 +734,13 @@ func compatToDuration(dur time.Duration, paramName string) (result time.Duration
 	return
 }
 
-func newTransferAttemptError(service string, proxy string, isProxyErr bool, isUpload bool, err error) (tae *TransferAttemptError) {
+func newTransferAttemptError(service string, proxy string, isProxyErr bool, isUpload bool, isCache bool, err error) (tae *TransferAttemptError) {
 	tae = &TransferAttemptError{
 		serviceHost: service,
 		proxyHost:   proxy,
 		isProxyErr:  isProxyErr,
 		isUpload:    isUpload,
+		isCache:     isCache,
 		err:         err,
 	}
 	return
@@ -1636,6 +1641,10 @@ func generateTransferDetails(remoteOServer string, opts transferDetailsOptions) 
 		remoteUrl.Scheme = ""
 		remoteUrl.Opaque = ""
 	}
+
+	// Check if this is a cache server
+	isCache := remoteUrl.Query().Get("cache") == "true"
+
 	if opts.NeedsToken {
 		if remoteUrl.Scheme != "unix" {
 			remoteUrl.Scheme = "https"
@@ -1644,6 +1653,7 @@ func generateTransferDetails(remoteOServer string, opts transferDetailsOptions) 
 			Url:        remoteUrl,
 			Proxy:      false,
 			PackOption: opts.PackOption,
+			CacheQuery: isCache,
 		}
 		if remoteUrl.Scheme == "unix" {
 			det.UnixSocket = remoteUrl.Path
@@ -1657,12 +1667,14 @@ func generateTransferDetails(remoteOServer string, opts transferDetailsOptions) 
 			Url:        remoteUrl,
 			Proxy:      isProxyEnabled,
 			PackOption: opts.PackOption,
+			CacheQuery: isCache,
 		})
 		if isProxyEnabled && CanDisableProxy() {
 			details = append(details, transferAttemptDetails{
 				Url:        remoteUrl,
 				Proxy:      false,
 				PackOption: opts.PackOption,
+				CacheQuery: isCache,
 			})
 		}
 	} else {
@@ -1670,6 +1682,7 @@ func generateTransferDetails(remoteOServer string, opts transferDetailsOptions) 
 			Url:        remoteUrl,
 			Proxy:      false,
 			PackOption: opts.PackOption,
+			CacheQuery: isCache,
 		}
 		if remoteUrl.Scheme == "unix" {
 			det.UnixSocket = remoteUrl.Path
@@ -2139,24 +2152,24 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				if ope.Addr != nil {
 					proxyStr += "(" + ope.Addr.String() + ")"
 				}
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, true, false, err)
+				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, true, false, transferEndpoint.CacheQuery, err)
 			} else if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, &NetworkResetError{})
+				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, transferEndpoint.CacheQuery, &NetworkResetError{})
 			} else if errors.As(err, &cse) {
 				if sce, ok := cse.Unwrap().(*StatusCodeError); ok {
-					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, sce)
+					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, transferEndpoint.CacheQuery, sce)
 				} else if ue, ok := cse.Unwrap().(*url.Error); ok {
 					httpErr := ue.Unwrap()
 					if httpErr.Error() == "net/http: timeout awaiting response headers" {
-						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, &HeaderTimeoutError{})
+						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, transferEndpoint.CacheQuery, &HeaderTimeoutError{})
 					} else {
-						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, httpErr)
+						attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, transferEndpoint.CacheQuery, httpErr)
 					}
 				} else {
-					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
+					attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, transferEndpoint.CacheQuery, err)
 				}
 			} else {
-				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, err)
+				attempt.Error = newTransferAttemptError(serviceStr, proxyStr, false, false, transferEndpoint.CacheQuery, err)
 			}
 			xferErrors.AddPastError(attempt.Error, endTime)
 		}
@@ -3185,7 +3198,7 @@ Loop:
 	transferResult.TransferredBytes = uploaded
 	attempt.TransferFileBytes = uploaded
 	if lastError != nil {
-		xferErrors.AddPastError(newTransferAttemptError(dest.Host, "", false, true, lastError), transferEndTime)
+		xferErrors.AddPastError(newTransferAttemptError(dest.Host, "", false, true, false, lastError), transferEndTime)
 		transferResult.Error = xferErrors
 		attempt.Error = lastError
 	} else {
@@ -3928,4 +3941,8 @@ func searchJobAd(attribute classAdAttr) (value string, found bool) {
 		value, found = jobAd[string(attrJobId)]
 	}
 	return
+}
+
+func (tae *TransferAttemptError) IsCache() bool {
+	return tae.isCache
 }

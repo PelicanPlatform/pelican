@@ -202,6 +202,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 type ServerPriority struct {
 	URL      *url.URL
 	Priority int
+	IsCache  bool
 }
 
 func parseServersFromDirectorResponse(resp *http.Response) (servers []*url.URL, err error) {
@@ -220,11 +221,14 @@ func parseServersFromDirectorResponse(resp *http.Response) (servers []*url.URL, 
 		// we start looking at cases where we want to duplicate from caches if we're throttling
 		// connections to the origin.
 		var pri int
+		var isCache bool
 		for _, val := range links {
 			if strings.HasPrefix(val, "<") {
 				endpoint = val[1 : len(val)-1]
 			} else if strings.HasPrefix(val, "pri") {
 				pri, _ = strconv.Atoi(val[4:])
+			} else if val == "cache=true" {
+				isCache = true
 			}
 			// } else if strings.HasPrefix(val, "rel") {
 			// 	rel = val[5 : len(val)-1]
@@ -238,7 +242,7 @@ func parseServersFromDirectorResponse(resp *http.Response) (servers []*url.URL, 
 			log.Errorln("Failed to parse server:", endpoint, "error:", err)
 			continue
 		}
-		serversPrio = append(serversPrio, ServerPriority{URL: server, Priority: pri})
+		serversPrio = append(serversPrio, ServerPriority{URL: server, Priority: pri, IsCache: isCache})
 	}
 
 	// Making the assumption that the Link header doesn't already provide the caches
@@ -251,6 +255,12 @@ func parseServersFromDirectorResponse(resp *http.Response) (servers []*url.URL, 
 	servers = make([]*url.URL, len(serversPrio))
 	for i, serverPrio := range serversPrio {
 		servers[i] = serverPrio.URL
+		// Store whether this is a cache in the URL's RawQuery
+		if serverPrio.IsCache {
+			q := servers[i].Query()
+			q.Set("cache", "true")
+			servers[i].RawQuery = q.Encode()
+		}
 	}
 
 	return
