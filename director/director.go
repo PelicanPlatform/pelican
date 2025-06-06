@@ -324,6 +324,9 @@ func generateLinkHeader(ctx *gin.Context, sAds []server_structs.ServerAd, nsAd s
 		}
 		redirectURL := getRedirectURL(reqPath, ad, !nsAd.Caps.PublicReads)
 		linkHeader += fmt.Sprintf(`<%s>; rel="duplicate"; pri=%d; depth=%d`, redirectURL.String(), idx+1, depth)
+		if ad.Type == "cache" {
+			linkHeader += `; cache=true`
+		}
 	}
 	ctx.Writer.Header()["Link"] = []string{linkHeader}
 }
