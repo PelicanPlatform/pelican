@@ -778,15 +778,38 @@ func createTransferError(err error) (transferError map[string]interface{}) {
 	transferError = make(map[string]interface{})
 	developerData := make(map[string]interface{})
 	errMsg := err.Error()
-	if strings.Contains(errMsg, "server returned 404 Not Found") {
-		developerData["PelicanErrorCode"] = 3000
+
+	var tae *client.TransferAttemptError
+	isCache := false
+	if errors.As(err, &tae) {
+		isCache = tae.IsCache()
+	}
+
+	if errors.Is(err, &client.SlowTransferError{}) {
+		developerData["PelicanErrorCode"] = 6002 // From error_codes.yaml
+		developerData["Retryable"] = true        // SlowTransferError is always retryable
+		developerData["ErrorMessage"] = "Slow transfer"
+		developerData["ErrorType"] = "Transfer.SlowTransfer"
+		transferError["ErrorType"] = "Transfer"
+	} else if strings.Contains(errMsg, "server returned 404 Not Found") {
+		developerData["PelicanErrorCode"] = 5011
 		developerData["Retryable"] = false
 		developerData["ErrorMessage"] = "404: Not Found"
-		developerData["ErrorType"] = "Contact"
+		developerData["ErrorType"] = "Specification.FileNotFound"
+		transferError["ErrorType"] = "Specification"
+	} else if errors.Is(err, &client.HeaderTimeoutError{}) {
+		if isCache {
+			developerData["PelicanErrorCode"] = 3002 // Contact.Cache
+			developerData["ErrorType"] = "Contact.Cache"
+		} else {
+			developerData["PelicanErrorCode"] = 3003 // Contact.Origin
+			developerData["ErrorType"] = "Contact.Origin"
+		}
+		developerData["Retryable"] = true
+		developerData["ErrorMessage"] = "Timeout"
+		transferError["ErrorType"] = "Contact"
 	}
 	transferError["DeveloperData"] = developerData
-	transferError["ErrorType"] = "Contact"
-
 	return transferError
 }
 
