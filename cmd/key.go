@@ -30,6 +30,6 @@ func init() {
 	keyCmd.AddCommand(keyCreateCmd)
 
 	// Attach flags to the `create` sub-command
-	keyCreateCmd.Flags().StringVar(&privateKeyPath, "private-key", "", "The path to the generate private key file. Default: ./issuer.jwk")
+	keyCreateCmd.Flags().StringVar(&privateKeyPath, "private-key", "", "The path to the generate private key file. Default: ./issuer.pem")
 	keyCreateCmd.Flags().StringVar(&publicKeyPath, "public-key", "", "The path to the generate public key file. Default: ./issuer-pub.jwks")
 }
