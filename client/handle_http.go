@@ -770,7 +770,7 @@ func NewTransferEngine(ctx context.Context) (te *TransferEngine, err error) {
 	results := make(chan *clientTransferResults, 5)
 
 	// Start the URL cache to avoid repeated metadata queries
-	pelicanUrlCache := pelican_url.StartCache()
+	pelicanUrlCache := pelican_url.StartCache(ctx, egrp)
 
 	te = &TransferEngine{
 		ctx:             ctx,
@@ -920,7 +920,6 @@ func (te *TransferEngine) Shutdown() error {
 	te.Close()
 	<-te.closeDoneChan
 	te.ewmaTick.Stop()
-	te.pelicanUrlCache.Stop()
 	te.cancel()
 
 	err := te.egrp.Wait()
