@@ -3102,7 +3102,9 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	var lastKnownWritten int64
 	uploadStart := time.Now()
 
-	go runPut(request, responseChan, errorChan, transfer.attempts[0].Proxy)
+	useProxy := transfer.attempts[0].Proxy
+
+	go runPut(request, responseChan, errorChan, useProxy)
 	var lastError error = nil
 
 	tickerDuration := 100 * time.Millisecond
