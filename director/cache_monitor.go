@@ -41,7 +41,7 @@ func runCacheTest(ctx context.Context, cacheUrl url.URL) error {
 	nowStr := time.Now().Format(time.RFC3339)
 	dirMonPath := path.Join(server_utils.MonitoringBaseNs, "directorTest")
 	cacheUrl = *cacheUrl.JoinPath(path.Join(dirMonPath, server_utils.DirectorTest.String()+"-"+nowStr+".txt"))
-	client := http.Client{Transport: config.GetTransport()}
+	client := config.GetClient()
 	req, err := http.NewRequestWithContext(ctx, "GET", cacheUrl.String(), nil)
 	if err != nil {
 		urlErr, ok := err.(*url.Error)

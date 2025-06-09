@@ -1577,7 +1577,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	cacheUrl := *sortedServers[0]
 	cacheUrl.Path = remoteUrl.Path
 
-	return objectCached(ctx, &cacheUrl, token, config.GetTransport())
+	return objectCached(ctx, &cacheUrl, token)
 }
 
 // Close the transfer client object
@@ -1924,7 +1924,6 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 		results = attempts
 		return
 	}
-	transport := config.GetTransport()
 	type checkResults struct {
 		idx  int
 		size uint64
@@ -1955,7 +1954,7 @@ func sortAttempts(ctx context.Context, path string, attempts []transferAttemptDe
 				return
 			}
 
-			if age, size, err := objectCached(ctx, tUrl, token, transport); err != nil {
+			if age, size, err := objectCached(ctx, tUrl, token); err != nil {
 				headChan <- checkResults{idx, 0, -1, err}
 				return
 			} else {
@@ -2408,8 +2407,7 @@ func fetchChecksum(ctx context.Context, types []ChecksumType, url *url.URL, toke
 		}
 		request.Header.Set("Want-Digest", val)
 	}
-	transport := config.GetTransport()
-	client := &http.Client{Transport: transport}
+	client := config.GetClient()
 	response, err := client.Do(request)
 	if err != nil {
 		return
@@ -2579,7 +2577,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}()
 
 	// Create the client, request, and context
-	client := http.Client{}
+	client := config.GetClient()
 	transport := config.GetTransport()
 	if !transfer.Proxy {
 		transport.Proxy = nil
@@ -3432,7 +3430,7 @@ func skipPrestage(object string, job *TransferJob) bool {
 	}
 
 	cache.Path = object
-	if age, _, err := objectCached(job.ctx, &cache, job.token, config.GetTransport()); err == nil {
+	if age, _, err := objectCached(job.ctx, &cache, job.token); err == nil {
 		return age >= 0
 	} else {
 		log.Warningln("Failed to check cache status of object", cache.String(), "so assuming it needs prestaging:", err)
@@ -3781,8 +3779,7 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 			return errors.New("no object servers found in director response; cannot delete object")
 		}
 
-		client := &http.Client{}
-		client.Transport = config.GetTransport()
+		client := config.GetClient()
 
 		// Object deletion command only works for a single origin in a prefix setup.
 		serverUrl := dirResp.ObjectServers[0].String()
@@ -3977,11 +3974,11 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 // Note that xrootd returns an `Age` header for GETs but only a `Content-Length`
 // header for HEADs.  If `Content-Range` is found, we will use that header; if not,
 // we will issue two commands.
-func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator, transport http.RoundTripper) (age int, size int64, err error) {
+func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator) (age int, size int64, err error) {
 
 	age = -1
 
-	headClient := &http.Client{Transport: transport}
+	headClient := config.GetClient()
 	headRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, objectUrl.String(), nil)
 	if err != nil {
 		return
