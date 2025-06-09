@@ -99,7 +99,7 @@ var (
 
 // List all the directors known to this instance
 func listDirectors(ctx *gin.Context) {
-	ads := make([]server_structs.DirectorAd, directorAds.Len())
+	ads := make([]server_structs.DirectorAd, 0, directorAds.Len())
 	func() {
 		directorAdMutex.RLock()
 		defer directorAdMutex.RUnlock()
@@ -109,7 +109,9 @@ func listDirectors(ctx *gin.Context) {
 			ads = server_utils.GetDirectorAds()
 		} else {
 			directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
-				ads = append(ads, *item.Value().ad)
+				if item.Value() != nil && item.Value().ad != nil {
+					ads = append(ads, *item.Value().ad)
+				}
 				return true
 			})
 		}
@@ -132,8 +134,16 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 		return
 	}
 
+	// copy the body to a new buffer so we can debug it
+	body, _ := io.ReadAll(ctx.Request.Body)
+	fmt.Printf("Received body: %+v\n", string(body))
+
+	// reset the body
+	ctx.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
 	fAd := forwardAd{}
 	if err = ctx.MustBindWith(&fAd, binding.JSON); err != nil {
+		log.Errorln("Failed to bind JSON:", err)
 		return
 	}
 	directorAd := fAd.DirectorAd
@@ -228,8 +238,14 @@ func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.Origi
 // functions to avoid refactoring the DirectorAd and OriginAdvertiseV2 to have
 // a common interface.
 func (dir *directorInfo) forwardDirector(ad *server_structs.DirectorAd) {
+	forwardAd := &forwardAd{
+		DirectorAd: ad,
+		AdType:     server_structs.DirectorType.String(),
+		Now:        time.Now(),
+	}
+
 	var buf *bytes.Buffer
-	if adBytes, err := json.Marshal(ad); err != nil {
+	if adBytes, err := json.Marshal(forwardAd); err != nil {
 		log.Errorln("Failed to marshal director ad to JSON when sending to", dir.ad.AdvertiseUrl, ":", err)
 		return
 	} else {
@@ -393,6 +409,8 @@ func (dir *directorInfo) sendAd(ctx context.Context, directorUrlStr string, ad *
 	}
 	if resp.StatusCode != http.StatusOK {
 		log.Errorln("Remote director at", directorUrl.String(), "rejected our forwarded ad:", err)
+		body, _ := io.ReadAll(resp.Body)
+		log.Debugln("Response body:", string(body))
 		return
 	}
 	defer resp.Body.Close()
@@ -452,8 +470,14 @@ func sendMyAd(ctx context.Context) {
 //
 // MUST be called with the directorAdMutex write lock held
 func updateInternalDirectorCache(ctx context.Context, egrp *errgroup.Group, directorAd *server_structs.DirectorAd) {
+	if directorAd == nil {
+		log.Debugln("Received nil director ad, skipping update")
+		return
+	}
+
 	info := &directorInfo{}
 	if directorAd.Name == "" {
+		log.Debugln("Received director ad with empty name, skipping update")
 		return
 	}
 	adTTL := time.Until(directorAd.Expiration)
@@ -467,15 +491,19 @@ func updateInternalDirectorCache(ctx context.Context, egrp *errgroup.Group, dire
 		return
 	}
 	if item, found := directorAds.GetOrSet(directorAd.Name, info, ttlcache.WithTTL[string, *directorInfo](adTTL)); found {
-		if after := directorAd.After(item.Value().ad); after == server_structs.AdAfterTrue || after == server_structs.AdAfterUnknown {
-			directorAds.Set(directorAd.Name, info, adTTL)
-			if after == server_structs.AdAfterTrue {
-				directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
-					if self, err := server_utils.IsDirectorAdFromSelf(ctx, item.Value().ad); err == nil && !self {
-						item.Value().forwardDirector(directorAd)
-					}
-					return true
-				})
+		if item.Value() != nil && item.Value().ad != nil {
+			if after := directorAd.After(item.Value().ad); after == server_structs.AdAfterTrue || after == server_structs.AdAfterUnknown {
+				directorAds.Set(directorAd.Name, info, adTTL)
+				if after == server_structs.AdAfterTrue {
+					directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
+						if item.Value() != nil && item.Value().ad != nil {
+							if self, err := server_utils.IsDirectorAdFromSelf(ctx, item.Value().ad); err == nil && !self {
+								item.Value().forwardDirector(directorAd)
+							}
+						}
+						return true
+					})
+				}
 			}
 		}
 	} else {

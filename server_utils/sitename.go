@@ -131,6 +131,10 @@ func GetServiceName(ctx context.Context, server server_structs.ServerType) (name
 //
 // We define "self" to be any ad with our name and instance ID.
 func IsDirectorAdFromSelf(ctx context.Context, ad server_structs.ServerBaseAdInterface) (bool, error) {
+	if ad == nil {
+		return false, fmt.Errorf("received nil advertisement")
+	}
+
 	baseAdOnce.Do(func() {
 		var name string
 		name, baseAdErr = GetServiceName(ctx, server_structs.DirectorType)
