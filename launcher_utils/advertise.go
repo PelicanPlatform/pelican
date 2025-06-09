@@ -39,6 +39,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -73,11 +74,20 @@ func LaunchPeriodicAdvertise(ctx context.Context, egrp *errgroup.Group, servers 
 		advertiseInterval = newInterval
 	}
 
+	shutdownAny := ctx.Value(director.AdvertiseShutdownKey)
+	var shutdownChannel <-chan struct{} = nil
+	if shutdownCtx, ok := shutdownAny.(context.Context); ok {
+		shutdownChannel = shutdownCtx.Done()
+	}
+
 	ticker := time.NewTicker(advertiseInterval)
 	egrp.Go(func() error {
 		defer ticker.Stop()
 		for {
 			select {
+			case <-shutdownChannel:
+				log.Infoln("Periodic advertise shut down on command")
+				return nil
 			case <-ticker.C:
 				doAdvertise(ctx, servers)
 			case <-ctx.Done():

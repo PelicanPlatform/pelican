@@ -39,8 +39,21 @@ import (
 
 // Utilities for determining the set of known directors and their advertisement endpoints
 
+type (
+	ContextKey string
+)
+
 var (
 	directorEndpoints atomic.Pointer[[]server_structs.DirectorAd]
+)
+
+const (
+	// Context value key; used to store a second context that will
+	// indicate the director discovery should stop.
+	//
+	// Meant mostly for unit tests; director discovery is essential
+	// functionality.
+	DirectorDiscoveryShutdownKey ContextKey = "discovery_shutdown"
 )
 
 // Query all known directors & metadata, return a list of unique director ads
@@ -196,6 +209,12 @@ func LaunchPeriodicDirectorDiscovery(ctx context.Context, isDirector bool) error
 		advertiseInterval = newInterval
 	}
 
+	shutdownAny := ctx.Value(DirectorDiscoveryShutdownKey)
+	var shutdownChannel <-chan struct{} = nil
+	if shutdownCtx, ok := shutdownAny.(context.Context); ok {
+		shutdownChannel = shutdownCtx.Done()
+	}
+
 	ticker := time.NewTicker(advertiseInterval)
 	egrp.Go(func() error {
 		defer ticker.Stop()
@@ -214,7 +233,9 @@ func LaunchPeriodicDirectorDiscovery(ctx context.Context, isDirector bool) error
 				} else {
 					directorEndpoints.Store(&servers)
 				}
-
+			case <-shutdownChannel:
+				log.Infoln("Periodic director discovery loop has been shutdown by command")
+				return nil
 			case <-ctx.Done():
 				log.Infoln("Periodic director discovery loop has been terminated")
 				return nil

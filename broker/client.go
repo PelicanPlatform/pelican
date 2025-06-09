@@ -644,11 +644,25 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 				if brokerResp.Status == server_structs.RespOK {
 					listener, err := doCallback(ctx, brokerResp.Request)
 					if err != nil {
+						if errors.Is(err, context.Canceled) {
+							log.Debugln("Shutdown encountered while processing callback")
+							return nil
+						}
 						log.Errorln("Failed to callback to the cache:", err)
-						resultChan <- err
+						select {
+						case <-ctx.Done():
+							return nil
+						case resultChan <- listener:
+							break
+						}
 						break
 					}
-					resultChan <- listener
+					select {
+					case <-ctx.Done():
+						return nil
+					case resultChan <- listener:
+						break
+					}
 				} else if brokerResp.Status == server_structs.RespFailed {
 					log.Errorln("Broker responded to origin retrieve with an error:", brokerResp.Msg)
 				} else if brokerResp.Status != server_structs.RespPollTimeout { // We expect timeouts; do not log them.
