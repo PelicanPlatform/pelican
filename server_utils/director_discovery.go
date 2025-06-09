@@ -206,7 +206,7 @@ func LaunchPeriodicDirectorDiscovery(ctx context.Context, isDirector bool) error
 					log.Warningln("Failed to discover available director endpoints:", err)
 					select {
 					case <-ctx.Done():
-						log.Infoln("Periodic director advertise loop has been terminated")
+						log.Infoln("Periodic director discovery loop has been terminated")
 						return nil
 					default:
 						break
@@ -216,7 +216,7 @@ func LaunchPeriodicDirectorDiscovery(ctx context.Context, isDirector bool) error
 				}
 
 			case <-ctx.Done():
-				log.Infoln("Periodic advertisement loop has been terminated")
+				log.Infoln("Periodic director discovery loop has been terminated")
 				return nil
 			}
 		}

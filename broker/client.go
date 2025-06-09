@@ -232,21 +232,21 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 
 	resp, err := client.Do(req)
 	if err != nil {
-		err = errors.Wrap(err, "Failure when invoking the broker URL")
+		err = errors.Wrap(err, "failure when invoking the broker URL")
 		return
 	}
 	defer resp.Body.Close()
 	responseBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		err = errors.Wrap(err, "Failure when reading response from broker response")
+		err = errors.Wrap(err, "failure when reading response from broker response")
 	}
 	if resp.StatusCode >= 400 {
 		errResp := server_structs.SimpleApiResp{}
 		log.Errorf("Failure (status code %d) when invoking the broker: %s", resp.StatusCode, string(responseBytes))
 		if err = json.Unmarshal(responseBytes, &errResp); err != nil {
-			err = errors.Errorf("Failure when invoking the broker (status code %d); unable to parse error message", resp.StatusCode)
+			err = errors.Errorf("failure when invoking the broker (status code %d); unable to parse error message", resp.StatusCode)
 		} else {
-			err = errors.Errorf("Failure when invoking the broker (status code %d): %s", resp.StatusCode, errResp.Msg)
+			err = errors.Errorf("failure when invoking the broker (status code %d): %s", resp.StatusCode, errResp.Msg)
 		}
 		return
 	}

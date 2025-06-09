@@ -65,9 +65,9 @@ func LaunchNamespaceKeyMaintenance(ctx context.Context, egrp *errgroup.Group) {
 			return item
 		},
 	)
-	namespaceKeys = ttlcache.New[string, *jwk.Cache](
+	namespaceKeys = ttlcache.New(
 		ttlcache.WithTTL[string, *jwk.Cache](15*time.Minute),
-		ttlcache.WithLoader[string, *jwk.Cache](loader),
+		ttlcache.WithLoader(loader),
 	)
 
 	go namespaceKeys.Start()
