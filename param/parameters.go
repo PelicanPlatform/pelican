@@ -354,6 +354,7 @@ var (
 )
 
 var (
+	Cache_EnableBroker = BoolParam{"Cache.EnableBroker"}
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
 	Cache_EnablePrefetch = BoolParam{"Cache.EnablePrefetch"}

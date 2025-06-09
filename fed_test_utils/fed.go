@@ -96,6 +96,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	})
 
 	modules := server_structs.ServerType(0)
+	modules.Set(server_structs.BrokerType)
 	modules.Set(server_structs.CacheType)
 	modules.Set(server_structs.OriginType)
 	modules.Set(server_structs.DirectorType)

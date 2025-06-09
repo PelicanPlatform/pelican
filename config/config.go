@@ -1849,6 +1849,7 @@ func ResetConfig() {
 	// Clear cached transport object
 	onceTransport = sync.Once{}
 	transport = nil
+	basicTransport = nil
 
 	// Clear the instance ID information for generated server ads
 	server_structs.Reset()

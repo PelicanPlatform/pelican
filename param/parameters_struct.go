@@ -31,6 +31,7 @@ type Config struct {
 		DataLocations []string `mapstructure:"datalocations" yaml:"DataLocations"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultCacheTimeout time.Duration `mapstructure:"defaultcachetimeout" yaml:"DefaultCacheTimeout"`
+		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
@@ -387,6 +388,7 @@ type configWithType struct {
 		DataLocations struct { Type string; Value []string }
 		DbLocation struct { Type string; Value string }
 		DefaultCacheTimeout struct { Type string; Value time.Duration }
+		EnableBroker struct { Type string; Value bool }
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		EnablePrefetch struct { Type string; Value bool }

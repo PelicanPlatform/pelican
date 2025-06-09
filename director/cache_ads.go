@@ -179,7 +179,12 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 
 	// Inform the global broker dialer about the new server ad
 	if sAd.BrokerURL.Host != "" && brokerDialer != nil {
-		brokerDialer.UseBroker(sAd.AuthURL.Host, sAd.BrokerURL.String())
+		sType := server_structs.NewServerType()
+		sType.SetString(sAd.Type)
+		brokerDialer.UseBroker(sType, sAd.WebURL.Host, sAd.BrokerURL.String())
+		if sAd.Type == server_structs.OriginType.String() {
+			brokerDialer.UseBroker(sType, sAd.URL.Host, sAd.BrokerURL.String())
+		}
 	}
 
 	// Prepare `stat` call utilities for all servers regardless of its source (topology or Pelican)

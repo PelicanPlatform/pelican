@@ -34,6 +34,15 @@ var (
 	// Our global transports that only will get reconfigured if needed
 	transport *http.Transport
 
+	// Transport that avoids any broker-aware dialer
+	basicTransport *http.Transport
+
+	// The global HTTP client
+	client *http.Client
+
+	// The global non-broker-aware HTTP client
+	basicClient *http.Client
+
 	// Once to ensure we only set up the transport once
 	onceTransport sync.Once
 
@@ -41,7 +50,10 @@ var (
 	dialerFunc atomic.Pointer[func(ctx context.Context, network, addr string) (net.Conn, error)]
 )
 
-// function to get/setup the transport (only once)
+// Returns the default transport object for Pelican.
+//
+// This transport will use the global dialer function set by SetTransportDialer,
+// allowing it to be broker-aware.
 func GetTransport() *http.Transport {
 	onceTransport.Do(func() {
 		setupTransport()
@@ -49,22 +61,52 @@ func GetTransport() *http.Transport {
 	return transport
 }
 
+// Returns the default client object for Pelican
+//
+// This uses the global dialer function set by SetTransportDialer, allowing it
+// to be broker-aware
+func GetClient() *http.Client {
+	onceTransport.Do(func() {
+		setupTransport()
+	})
+	return client
+}
+
+// Returns a basic transport object that does not use the broker-aware dialer.
+func GetBasicTransport() *http.Transport {
+	onceTransport.Do(func() {
+		setupTransport()
+	})
+	return basicTransport
+}
+
+// Returns the basic client object for Pelican
+//
+// This uses the golang default dialer and will not use the broker.
+func GetBasicClient() *http.Client {
+	onceTransport.Do(func() {
+		setupTransport()
+	})
+	return basicClient
+}
+
 // Override the global transport's dialer function.
 //
 // Intended to allow the broker-aware dialer to be setup by other packages.
 // Will panic if the dialerFunc is nil.
-func SetTransportDialer(DialerConctext func(ctx context.Context, network, addr string) (net.Conn, error)) {
-	if DialerConctext == nil {
+func SetTransportDialer(DialerContext func(ctx context.Context, network, addr string) (net.Conn, error)) {
+	if DialerContext == nil {
 		panic("dialerFunc cannot be nil")
 	}
-	dialerFunc.Store(&DialerConctext)
+	dialerFunc.Store(&DialerContext)
 }
 
 // Implement the DialContext interface for the global transport.
 //
 // Uses the global dialer function
-func brokerDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	return (*dialerFunc.Load())(ctx, network, addr)
+func globalDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialerCtx := dialerFunc.Load()
+	return (*dialerCtx)(ctx, network, addr)
 }
 
 func setupTransport() {
@@ -83,12 +125,12 @@ func setupTransport() {
 		KeepAlive: transportKeepAlive,
 	}
 	defaultDialerContext := defaultDialer.DialContext
-	dialerFunc.Store(&defaultDialerContext)
+	dialerFunc.CompareAndSwap(nil, &defaultDialerContext)
 
 	//Set up the transport
 	transport = &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           brokerDialContext,
+		DialContext:           globalDialContext,
 		MaxIdleConns:          maxIdleConns,
 		IdleConnTimeout:       idleConnTimeout,
 		TLSHandshakeTimeout:   transportTLSHandshakeTimeout,
@@ -110,4 +152,9 @@ func setupTransport() {
 			}
 		}
 	}
+	client = &http.Client{Transport: transport}
+
+	basicTransport = transport.Clone()
+	basicTransport.DialContext = defaultDialerContext
+	basicClient = &http.Client{Transport: basicTransport}
 }

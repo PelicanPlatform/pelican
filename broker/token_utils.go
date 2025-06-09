@@ -46,6 +46,13 @@ var (
 // Launches a background goroutine that periodically expires
 // the namespace key cache
 func LaunchNamespaceKeyMaintenance(ctx context.Context, egrp *errgroup.Group) {
+	// This is launched by both the director and the cache; if we are in a unit test
+	// where both are running in the same process, we only want to
+	// launch the goroutine once.
+	if namespaceKeys != nil {
+		return
+	}
+
 	loader := ttlcache.LoaderFunc[string, *jwk.Cache](
 		func(cache *ttlcache.Cache[string, *jwk.Cache], prefix string) *ttlcache.Item[string, *jwk.Cache] {
 			iss, err := getRegistryIssValue(prefix)
@@ -56,8 +63,9 @@ func LaunchNamespaceKeyMaintenance(ctx context.Context, egrp *errgroup.Group) {
 			jwksUrl := iss + "/.well-known/issuer.jwks"
 
 			ar := jwk.NewCache(ctx)
-			client := &http.Client{Transport: config.GetTransport()}
+			client := &http.Client{Transport: config.GetBasicTransport()}
 			if err = ar.Register(jwksUrl, jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
+				log.Errorln("Failed to fetch issuer information for", iss, "from JWKS URL", jwksUrl, ":", err)
 				return nil
 			}
 			log.Debugln("Setting public key cache for issuer", iss)
@@ -161,11 +169,13 @@ func getCacheHostnameFromToken(token []byte) (hostname string, err error) {
 func verifyToken(ctx context.Context, token, namespace, audience string, requiredScope token_scopes.TokenScope) (ok bool, err error) {
 	issuerUrl, keyset, err := getRegistryIssuerInfo(ctx, namespace)
 	if err != nil {
+		err = errors.Wrapf(err, "failed to get issuer info for namespace %s", namespace)
 		return
 	}
 
 	tok, err := jwt.Parse([]byte(token), jwt.WithKeySet(keyset), jwt.WithValidate(true))
 	if err != nil {
+		err = errors.Wrap(err, "failed to parse token")
 		return
 	}
 
@@ -177,6 +187,8 @@ func verifyToken(ctx context.Context, token, namespace, audience string, require
 	)
 	if err == nil {
 		ok = true
+	} else {
+		err = errors.Wrap(err, "failed to validate token")
 	}
 	return
 }

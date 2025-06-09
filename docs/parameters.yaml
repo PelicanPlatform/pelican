@@ -1421,6 +1421,16 @@ deprecated: true
 replacedby: Cache.StorageLocation
 components: ["cache"]
 ---
+name: Cache.EnableBroker
+description: |+
+  Control whether the cache will use the connection broker to talk to the director.
+
+  When enabled, the cache doesn't need an incoming network port open to communicate
+  with the director.
+type: bool
+default: true
+components: ["cache"]
+---
 name: Cache.EnablePrefetch
 description: |+
   Control whether data prefeteching is enabled in the cache.

@@ -24,14 +24,21 @@ package broker
 import (
 	"context"
 	"net"
+	"strings"
 
 	"github.com/jellydator/ttlcache/v3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 type (
+	brokerPrefixInfo struct {
+		ServerType server_structs.ServerType
+		BrokerUrl  string
+	}
+
 	// BrokerDialer is a dialer that can use the broker
 	// functionality to connect to a remote service.
 	BrokerDialer struct {
@@ -39,7 +46,7 @@ type (
 		// Map from service name to broker endpoint.
 		// If the service name is not found in the cache, then the dialer
 		// will use a normal TCP connection to the service.
-		brokerEndpoints *ttlcache.Cache[string, string]
+		brokerEndpoints *ttlcache.Cache[string, brokerPrefixInfo]
 	}
 )
 
@@ -51,8 +58,8 @@ func NewBrokerDialer(ctx context.Context, egrp *errgroup.Group) *BrokerDialer {
 		KeepAlive: param.Transport_DialerKeepAlive.GetDuration(),
 	}
 	brokerEndpoints := ttlcache.New(
-		ttlcache.WithTTL[string, string](param.Transport_BrokerEndpointCacheTTL.GetDuration()),
-		ttlcache.WithDisableTouchOnHit[string, string](),
+		ttlcache.WithTTL[string, brokerPrefixInfo](param.Transport_BrokerEndpointCacheTTL.GetDuration()),
+		ttlcache.WithDisableTouchOnHit[string, brokerPrefixInfo](),
 	)
 
 	go brokerEndpoints.Start()
@@ -71,8 +78,11 @@ func NewBrokerDialer(ctx context.Context, egrp *errgroup.Group) *BrokerDialer {
 
 // Set the dialer to use `brokerUrl` as the broker endpoint for
 // the service `name`.
-func (d *BrokerDialer) UseBroker(name, brokerUrl string) {
-	d.brokerEndpoints.Set(name, brokerUrl, ttlcache.DefaultTTL)
+func (d *BrokerDialer) UseBroker(serverType server_structs.ServerType, name, brokerUrl string) {
+	d.brokerEndpoints.Set(name, brokerPrefixInfo{
+		ServerType: serverType,
+		BrokerUrl:  brokerUrl,
+	}, ttlcache.DefaultTTL)
 }
 
 // DialContext dials a connection to the given network and address using the broker.
@@ -83,5 +93,13 @@ func (d *BrokerDialer) DialContext(ctx context.Context, network, addr string) (n
 		return d.dialerContext(ctx, network, addr)
 	}
 
-	return ConnectToOrigin(ctx, info.Value(), "/", addr)
+	sType := info.Value().ServerType
+	prefix := ""
+	if sType.IsEnabled(server_structs.CacheType) {
+		addrSplit := strings.SplitN(addr, ":", 2)
+		prefix = "/caches/" + addrSplit[0]
+	} else {
+		prefix = "/origins/" + addr
+	}
+	return ConnectToOrigin(ctx, info.Value().BrokerUrl, prefix, addr)
 }
