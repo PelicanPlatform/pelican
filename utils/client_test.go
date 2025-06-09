@@ -100,27 +100,28 @@ func TestExtractAndMaskIP(t *testing.T) {
 }
 
 func TestExtractVersionAndServiceFromUserAgent(t *testing.T) {
-	t.Run("testNormalUserAgent", func(t *testing.T) {
-		userAgent := "pelican-origin/7.9.0"
-		expectedVersion := "7.9.0"
-		expectedService := "origin"
-		version, service := ExtractVersionAndServiceFromUserAgent(userAgent)
 
-		assert.Equal(t, expectedVersion, version)
-		assert.Equal(t, expectedService, service)
-	})
+	type TestExtractCase struct {
+		Name            string
+		UserAgent       string
+		ExpectedVersion string
+		ExpectedService string
+	}
+	var testCases = []TestExtractCase{
+		{Name: "testNormalUserAgent", UserAgent: "pelican-origin/7.9.0", ExpectedVersion: "7.9.0", ExpectedService: "origin"},
+		{Name: "testMissingSlash", UserAgent: "pelican-origin.7.9.0"},
+		{Name: "testNonAlpha", UserAgent: "pelican-origin1/7.9.9"},
+		{Name: "testBigVersion", UserAgent: "pelican-origin/7.9.9.9.9"},
+		{Name: "testNonNumeric", UserAgent: "pelican-origin/7s.9.0"},
+		{Name: "testInvalidUserAgent", UserAgent: "thisisnotvalid"},
+		{Name: "testEmptyUserAgent"},
+	}
 
-	t.Run("testInvalidUserAgent", func(t *testing.T) {
-		invalidUserAgent := "thisisnotvalid"
-		version, service := ExtractVersionAndServiceFromUserAgent(invalidUserAgent)
-		assert.Equal(t, 0, len(version))
-		assert.Equal(t, 0, len(service))
-	})
-
-	t.Run("testEmptyUserAgent", func(t *testing.T) {
-		emptyUserAgent := ""
-		version, service := ExtractVersionAndServiceFromUserAgent(emptyUserAgent)
-		assert.Equal(t, 0, len(version))
-		assert.Equal(t, 0, len(service))
-	})
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			version, service := ExtractVersionAndServiceFromUserAgent(tc.UserAgent)
+			assert.Equal(t, tc.ExpectedService, service)
+			assert.Equal(t, tc.ExpectedVersion, version)
+		})
+	}
 }
