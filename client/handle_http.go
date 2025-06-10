@@ -3102,7 +3102,9 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	var lastKnownWritten int64
 	uploadStart := time.Now()
 
-	go runPut(request, responseChan, errorChan)
+	useProxy := transfer.attempts[0].Proxy
+
+	go runPut(request, responseChan, errorChan, useProxy)
 	var lastError error = nil
 
 	tickerDuration := 100 * time.Millisecond
@@ -3204,9 +3206,13 @@ Loop:
 //
 // This is executed in a separate goroutine to allow periodic progress callbacks
 // to be created within the main goroutine.
-func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error) {
-	var UploadClient = &http.Client{Transport: config.GetTransport()}
-	client := UploadClient
+func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error, proxy bool) {
+	client := http.Client{}
+	transport := config.GetTransport()
+	if !proxy {
+		transport.Proxy = nil
+	}
+	client.Transport = transport
 	dump, _ := httputil.DumpRequestOut(request, false)
 	log.Debugf("Dumping request: %s", dump)
 	response, err := client.Do(request)
