@@ -779,12 +779,6 @@ func createTransferError(err error) (transferError map[string]interface{}) {
 	developerData := make(map[string]interface{})
 	errMsg := err.Error()
 
-	var tae *client.TransferAttemptError
-	isCache := false
-	if errors.As(err, &tae) {
-		isCache = tae.IsCache()
-	}
-
 	if errors.Is(err, &client.SlowTransferError{}) {
 		developerData["PelicanErrorCode"] = 6002 // From error_codes.yaml
 		developerData["Retryable"] = true        // SlowTransferError is always retryable
@@ -798,16 +792,16 @@ func createTransferError(err error) (transferError map[string]interface{}) {
 		developerData["ErrorType"] = "Specification.FileNotFound"
 		transferError["ErrorType"] = "Specification"
 	} else if errors.Is(err, &client.HeaderTimeoutError{}) {
-		if isCache {
-			developerData["PelicanErrorCode"] = 3002 // Contact.Cache
-			developerData["ErrorType"] = "Contact.Cache"
-		} else {
-			developerData["PelicanErrorCode"] = 3003 // Contact.Origin
-			developerData["ErrorType"] = "Contact.Origin"
-		}
+		developerData["PelicanErrorCode"] = 3000
+		developerData["ErrorType"] = "Contact"
 		developerData["Retryable"] = true
 		developerData["ErrorMessage"] = "Timeout"
 		transferError["ErrorType"] = "Contact"
+	} else {
+		developerData["PelicanErrorCode"] = 0
+		developerData["ErrorType"] = "Unprocessed"
+		developerData["Retryable"] = false
+		developerData["ErrorMessage"] = "Unprocessed (for now) error type"
 	}
 	transferError["DeveloperData"] = developerData
 	return transferError
