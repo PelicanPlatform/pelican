@@ -139,10 +139,10 @@ Pelican scans the above directory every 60 seconds to detect newly added or remo
 
 With support for Multiple Keys, Pelican allows administrator to replace private keys anytime. Follow these steps to replace an existing key:
 
-- Add the new private key file to [IssuerKeysDirectory](#multiple-keys).
-- (Optional) If you don't have the corresponding public key, [obtain it](/federating-your-data/origin#obtain-the-public-key-of-the-origin) and keep it in mind. If only see the old public key appears, wait for 60 seconds and check again.
-- Visit the [Registry](https://osdf-registry.osg-htc.org/view/registry/) and download the latest registered public key set for your server under "Origins" section. Ensure the new public key is included. If it isn't, wait for 60 seconds and retry.
-- Remove the old private key from [IssuerKeysDirectory](#multiple-keys)
-- Wait for 60s, then go back to the [Registry](https://osdf-registry.osg-htc.org/view/registry/), download the latest registered public key set again. Verify the old public key has been removed.
+1. Add the new private key file to [IssuerKeysDirectory](#multiple-keys).
+2. (Optional) If you don't have the corresponding public key, [obtain it](/federating-your-data/origin#obtain-the-public-key-of-the-origin) and keep it in mind. If only see the old public key appears, wait for 60 seconds and check again.
+3. Visit the Registry and download the latest registered public key set for your server under "Origins" section. Ensure the new public key is included. If it isn't, wait for 60 seconds and retry.
+4. Remove the old private key from [IssuerKeysDirectory](#multiple-keys)
+5. Wait for 60s, then go back to the Registry, download the latest registered public key set again. Verify the old public key has been removed.
 
 > If you are using Credmon, the waiting time will be 15m / generated token lifetime configured in the credmon.
