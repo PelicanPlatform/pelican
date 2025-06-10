@@ -19,12 +19,11 @@ const ClientPage = ({ metadata }: { metadata: ParameterMetadataRecord }) => {
   return (
     <>
       <Typography variant={'subtitle1'} component={'h2'} gutterBottom>
-        Broad Requirements
+        Broad Requirements (Optional)
       </Typography>
       <Typography variant={'body1'} gutterBottom>
-        Filter authenticated users by their claims and/or groups.
+        Filter authenticated users by their user claims and/or groups.
       </Typography>
-
       <Tabs value={tabIndex} onChange={(_, i) => setTabIndex(i)}>
         <Tab label={'Claim Requirements'} {...a11yProps(1)}></Tab>
         <Tab label={'Group Requirements'} {...a11yProps(2)}></Tab>
@@ -47,6 +46,9 @@ const UserClaimConfiguration: React.FC<{
 
   return (
     <>
+      <Typography variant={'h6'} gutterBottom>
+        Define Required User Claims
+      </Typography>
       <Typography variant={'body2'} gutterBottom>
         <a
           href={'https://openid.net/specs/openid-connect-core-1_0.html#Claims'}
@@ -79,20 +81,22 @@ const GroupClaimConfiguration: React.FC<{
 
   return (
     <>
-      <GroupConfiguration metadata={metadata} />
-      <Typography variant={'h6'} gutterBottom mt={3}>
+      <Typography variant={'h6'} gutterBottom>
         Define Required Groups
       </Typography>
       <ConfigDisplay
-        config={configuration}
-        patch={patch}
-        metadata={{
-          'Issuer.GroupRequirements': metadata['Issuer.GroupRequirements'],
-        }}
-        onChange={setPatch}
-        omitLabels={true}
-        showDescription={false}
+          config={configuration}
+          patch={patch}
+          metadata={{
+            'Issuer.GroupRequirements': metadata['Issuer.GroupRequirements'],
+          }}
+          onChange={setPatch}
+          omitLabels={true}
+          showDescription={false}
       />
+      <Box mt={3}>
+        <GroupConfiguration metadata={metadata} />
+      </Box>
     </>
   );
 };

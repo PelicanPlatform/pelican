@@ -7,9 +7,7 @@
 import { secureFetch } from '@/helpers/login';
 import { getErrorMessage } from '@/helpers/util';
 import { RegistryNamespace } from '@/index';
-import { AlertDispatchContext } from '@/components/AlertProvider';
 import { DowntimeBase, DowntimePost, DowntimeRegistryPost } from '@/types';
-import { useContext } from 'react';
 
 /**
  * Wraps an api request with error handling for both the request and the response if error

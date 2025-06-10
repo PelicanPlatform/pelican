@@ -21,6 +21,7 @@ import { merge } from 'lodash';
 import _metadata from '@/public/data/parameters.json';
 import { ParameterMetadataList } from '@/components/configuration';
 import { Issuer } from './Issuer';
+import ConfigurationProvider from "@/components/ConfigurationProvider/ConfigurationProvider";
 
 const getMetadata = async () => {
   const metadataList = _metadata as unknown as ParameterMetadataList;
@@ -67,7 +68,11 @@ const getMetadata = async () => {
 const Page = async () => {
   const metadata = await getMetadata();
 
-  return <Issuer metadata={metadata} />;
+  return (
+    <ConfigurationProvider>
+      <Issuer metadata={metadata} />
+    </ConfigurationProvider>
+  )
 };
 
 export default Page;

@@ -27,7 +27,6 @@ const getMetadata = async () => {
 
   // Enumerate the fields that we want to display
   const fields = [
-    'Issuer.OIDCAuthenticationRequirements',
     'Issuer.TomcatLocation',
     'Issuer.ScitokensServerLocation',
     'Issuer.QDLLocation',

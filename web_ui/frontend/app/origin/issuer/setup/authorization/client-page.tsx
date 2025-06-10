@@ -12,9 +12,7 @@ import { Code } from '@/components';
 import { GroupConfiguration } from '@/app/origin/issuer/components';
 
 const ClientPage = ({ metadata }: { metadata: ParameterMetadataRecord }) => {
-  const [tabIndex, setTabIndex] = useState<number>(1);
-  const { configuration, merged, patch, setPatch } =
-    useContext(ConfigurationContext);
+  const [tabIndex, setTabIndex] = useState<number>(0);
 
   return (
     <>
@@ -44,13 +42,6 @@ const ClientPage = ({ metadata }: { metadata: ParameterMetadataRecord }) => {
   );
 };
 
-interface TabProps {
-  configuration: ParameterValueRecord | undefined;
-  patch: ParameterValueRecord;
-  setPatch: (patch: Record<string, any>) => void;
-  metadata: ParameterMetadataRecord;
-}
-
 const UserClaimConfiguration: React.FC<{
   metadata: ParameterMetadataRecord;
 }> = ({ metadata }) => {
@@ -59,31 +50,6 @@ const UserClaimConfiguration: React.FC<{
   return (
     <>
       <Typography variant={'h6'} gutterBottom>
-        Define the User Claim
-      </Typography>
-      <Typography variant={'body2'} gutterBottom>
-        User level authorization requires you to decide what{' '}
-        <a
-          href={'https://openid.net/specs/openid-connect-core-1_0.html#Claims'}
-          target={'_blank'}
-          rel='noopener noreferrer'
-        >
-          claim
-        </a>{' '}
-        will be used as the username, <code>`sub`</code> is the default.
-      </Typography>
-      <ConfigDisplay
-        config={configuration}
-        patch={patch}
-        metadata={{
-          'Issuer.OIDCAuthenticationUserClaim':
-            metadata['Issuer.OIDCAuthenticationUserClaim'],
-        }}
-        onChange={setPatch}
-        omitLabels={true}
-        showDescription={false}
-      />
-      <Typography variant={'h6'} gutterBottom mt={4}>
         Use `User Claim` in Authorization Template
       </Typography>
       <Typography variant={'body2'} gutterBottom>
@@ -130,6 +96,31 @@ const UserClaimConfiguration: React.FC<{
         omitLabels={true}
         showDescription={false}
       />
+      <Typography variant={'h6'} gutterBottom mt={3}>
+        Define the User Claim
+      </Typography>
+      <Typography variant={'body2'} gutterBottom>
+        User level authorization requires you to decide what{' '}
+        <a
+            href={'https://openid.net/specs/openid-connect-core-1_0.html#Claims'}
+            target={'_blank'}
+            rel='noopener noreferrer'
+        >
+          claim
+        </a>{' '}
+        will be used as the username, <code>`sub`</code> is the default.
+      </Typography>
+      <ConfigDisplay
+          config={configuration}
+          patch={patch}
+          metadata={{
+            'Issuer.OIDCAuthenticationUserClaim':
+                metadata['Issuer.OIDCAuthenticationUserClaim'],
+          }}
+          onChange={setPatch}
+          omitLabels={true}
+          showDescription={false}
+      />
     </>
   );
 };
@@ -141,8 +132,7 @@ const GroupClaimConfiguration: React.FC<{
 
   return (
     <>
-      <GroupConfiguration metadata={metadata} />
-      <Typography variant={'h6'} gutterBottom mt={3}>
+      <Typography variant={'h6'} gutterBottom>
         Use Group in Authorization Template
       </Typography>
       <Typography variant={'body2'} gutterBottom>
@@ -189,6 +179,9 @@ const GroupClaimConfiguration: React.FC<{
         omitLabels={true}
         showDescription={false}
       />
+      <Box mt={3}>
+        <GroupConfiguration metadata={metadata} />
+      </Box>
     </>
   );
 };
@@ -201,38 +194,14 @@ const BroadAccessConfiguration: React.FC<{
   return (
     <>
       <Typography variant={'body2'} gutterBottom>
-        Broad access configuration is used to provide permissions to user who
-        fit the previously defined requirements.
-      </Typography>
-      <Typography variant={'h6'} gutterBottom mt={3}>
-        Use Group in Authorization Template
+        Broad access configuration is applied to all users that pass the user claim and group requirements.
       </Typography>
       <Typography variant={'body2'} gutterBottom>
-        The group can now be referenced in the <b>group list</b>, and{' '}
-        <b>$GROUP</b> substring found in the Origin&#39;s `Authorization
-        Templates`.
-      </Typography>
-      <Typography variant={'body2'} gutterBottom>
-        If you would like to give users with claim values `user_claim_a` and
-        `user_claim_b` read and modify access to the `/home` directory, you
-        would add the following to your configuration:
+        If you would like to give all users that fit your requirements access to read and modify the `/home`
+        directory, you would add the following to your configuration:
         <code>
           <Code mt={2}>
             {[`- actions: ["read", "modify"]`, `  prefix: /home`].join('\n')}
-          </Code>
-        </code>
-      </Typography>
-      <Typography variant={'body2'} gutterBottom>
-        If you would like to give users with claim values `group_a` read access
-        to the `/home/group_a` directory, you would add the following to your
-        configuration:
-        <code>
-          <Code mt={2}>
-            {[
-              `- actions: ["read"]`,
-              `  prefix: /home/$USER`,
-              `  users: ["group_a"]`,
-            ].join('\n')}
           </Code>
         </code>
       </Typography>

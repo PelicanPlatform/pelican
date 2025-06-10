@@ -1,3 +1,5 @@
+'use client';
+
 import { Box, Grid, Paper, Typography } from '@mui/material';
 import { green, grey, blue } from '@mui/material/colors';
 

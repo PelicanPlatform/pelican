@@ -25,7 +25,7 @@ const steps = [
 ];
 
 const IssuerFlowContainer = ({ children }: { children: ReactElement }) => {
-  const { submit, submitting } = useContext(ConfigurationContext);
+  const { submit, submitting, setPatch } = useContext(ConfigurationContext);
   const alertProps = useContext(InlineAlertContext);
 
   // Get current location in the form
@@ -47,9 +47,14 @@ const IssuerFlowContainer = ({ children }: { children: ReactElement }) => {
   }, [activeIndex]);
 
   const submitAndContinue = useCallback(
-    async (e: { preventDefault: () => void }) => {
+    async (e: { preventDefault: () => void }, finish: boolean = false) => {
       if (submitting) return;
+      // If this is the final step, turn on the issuer as well
+      if (finish) {
+        setPatch({ 'Origin.EnableIssuer': false });
+      }
       const success = await submit();
+      // If not successful, prevent navigation
       if (!success) {
         e.preventDefault();
       }
@@ -92,7 +97,10 @@ const IssuerFlowContainer = ({ children }: { children: ReactElement }) => {
             </Link>
           )}
           {!alertProps && activeIndex == steps.length - 1 && (
-            <Link href={'../../'} onNavigate={(e) => submitAndContinue(e)}>
+            <Link
+                href={'../../'}
+                onNavigate={(e) => submitAndContinue(e, true)}
+            >
               <Button variant={'contained'}>Finish</Button>
             </Link>
           )}

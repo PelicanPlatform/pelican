@@ -18,23 +18,20 @@
 
 'use client';
 
-import React, { useState, useReducer, useCallback, useMemo } from 'react';
+import React, {useState, useReducer, useCallback, useMemo, useContext} from 'react';
 import {
   Box,
   Typography,
   FormGroup,
   FormControlLabel,
   Switch,
-  Skeleton,
   Grid,
   Button,
   Snackbar,
 } from '@mui/material';
 import { green, grey } from '@mui/material/colors';
-import useSWR from 'swr';
 import Link from 'next/link';
 
-import { getConfig } from '@/helpers/get';
 import {
   ParameterMetadataRecord,
   ParameterValueRecord,
@@ -45,64 +42,56 @@ import StatusSnackBar, {
   StatusSnackBarProps,
 } from '@/components/StatusSnackBar';
 import { ConfigDisplay } from '@/app/config/components';
+import {ConfigurationContext} from "@/components/ConfigurationProvider/ConfigurationProvider";
 
 export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
+
+  const { configuration, patch, merged, setPatch, mutate, submit } = useContext(ConfigurationContext);
+
   const [status, setStatus] = useState<StatusSnackBarProps | undefined>(
     undefined
   );
-  const [patch, _setPatch] = useState<ParameterValueRecord>({});
 
-  const {
-    data: serverConfig,
-    mutate,
-    isValidating,
-    error,
-  } = useSWR<ParameterValueRecord>('getConfig', getConfig, {
-    refreshInterval: 5000,
-  });
-  const setPatch = useCallback(
-    (fieldPatch: any) => {
-      _setPatch((p: any) => {
-        return { ...p, ...fieldPatch };
-      });
-    },
-    [_setPatch]
-  );
   const updatesPending = useMemo(() => {
     return !Object.keys(patch)
       .filter((key) => key !== 'Origin.EnableIssuer')
-      .every((key) => isEqual(patch[key], serverConfig?.[key]));
-  }, [serverConfig, patch]);
-  const configView = useMemo(() => {
-    return merge(structuredClone(serverConfig), structuredClone(patch));
-  }, [serverConfig, patch]);
+      .every((key) => isEqual(patch[key], configuration?.[key]));
+  }, [configuration, patch]);
 
   const submitPatch = useCallback(async (patch: any) => {
     setStatus({ message: 'Submitting', severity: 'info' });
-
     try {
-      await submitConfigChange(patch);
+      await submit()
       setStatus(undefined);
     } catch (e) {
       setStatus({ message: (e as Error).toString(), severity: 'error' });
       setPatch({});
       mutate();
     }
-  }, []);
+  }, [submit, mutate, setPatch, setStatus]);
 
   return (
     <Box>
       <Grid container>
         <Grid item xs={12} lg={8}>
-          <Typography variant={'h4'}>Issuer Configuration</Typography>
+          <Box maxWidth={"80ch"}>
+            <Typography variant={'h4'} gutterBottom>Origin Token Issuer</Typography>
+            <Typography variant={'body1'} gutterBottom>
+              The Origin Token Issuer is responsible for issuing tokens to users
+              and applications accessing the Origin&#39;s files. If you
+              are unsure how to proceed the <b>Configuration Flow</b> will guide
+              you through the setup process.
+            </Typography>
+          </Box>
           <Box my={2}>
             <Link href={'./setup/client/'}>
-              <Button variant={'outlined'}>Setup Issuer</Button>
+              <Button variant={'outlined'}>Configuration Flow</Button>
             </Link>
           </Box>
+          <Typography variant={'h5'} gutterBottom>Issuer Configuration</Typography>
           <BooleanToggle
             label={'Enable Issuer'}
-            value={configView?.['Origin.EnableIssuer'] as boolean | false}
+            value={merged?.['Origin.EnableIssuer'] as boolean | false}
             onClick={(x) => {
               const patch = { 'Origin.EnableIssuer': x };
               setPatch(patch);
@@ -110,12 +99,12 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
               mutate();
             }}
           />
-          {configView?.['Origin.EnableIssuer'] && (
+          {merged?.['Origin.EnableIssuer'] && (
             <Box pt={1}>
               <IssuerConfigForm
-                config={serverConfig}
+                config={configuration}
                 patch={patch}
-                configView={configView}
+                configView={merged}
                 metadata={metadata}
                 setPatch={setPatch}
               />
@@ -134,12 +123,11 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
                       setStatus({
                         message: 'Changes Saved, Restarting Server',
                       });
-
                       // Refresh the page after 3 seconds
                       setTimeout(() => {
                         mutate();
                         setStatus(undefined);
-                        _setPatch({});
+                        setPatch({});
                       }, 3000);
                     } catch (e) {
                       setStatus({
@@ -153,7 +141,7 @@ export function Issuer({ metadata }: { metadata: ParameterMetadataRecord }) {
                 </Button>
                 <Button
                   onClick={() => {
-                    _setPatch({});
+                    setPatch({});
                   }}
                 >
                   Clear
