@@ -189,7 +189,7 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 			return
 		}
 
-		forwardServiceAd(appCtx, fAd.ServiceAd, sType)
+		forwardServiceAd(appCtx, fAd.ServiceAd, sType, directorAd)
 
 	} else {
 		log.Debugln("Received registration of unrecognized type", fAd.AdType)
@@ -210,7 +210,9 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 //
 // If we determine this ad is from the currently-running, do not attempt to
 // forward it to 'myself'.
-func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.OriginAdvertiseV2, sType server_structs.ServerType) {
+// The 'originator' is the director that sent this server ad to the current director.
+// It can be nil if the ad comes from the server itself.
+func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, originator *server_structs.DirectorAd) {
 	directorAdMutex.RLock()
 	defer directorAdMutex.RUnlock()
 	directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
@@ -218,8 +220,12 @@ func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.Origi
 		if dinfo.ad == nil {
 			return true
 		}
+		// Do not forward to the director that sent the ad
+		if originator != nil && dinfo.ad.Name == originator.Name {
+			return true
+		}
 		if self, err := server_utils.IsDirectorAdFromSelf(engineCtx, dinfo.ad); err == nil && !self {
-			dinfo.forwardService(serviceAd, sType)
+			dinfo.forwardService(engineCtx, serviceAd, sType)
 		}
 		return true
 	})
@@ -261,11 +267,25 @@ func (dir *directorInfo) forwardDirector(ad *server_structs.DirectorAd) {
 // goroutine will do the sending.  This allows the goroutine to drop duplicate
 // updates if they are received before one update to the upstream director is
 // completed.
-func (dir *directorInfo) forwardService(ad *server_structs.OriginAdvertiseV2, sType server_structs.ServerType) {
+func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.OriginAdvertiseV2, sType server_structs.ServerType) {
+	name, err := getMyName(ctx)
+	if err != nil {
+		log.Errorln("Local service does not know its own name (cannot forward service ad):", err)
+		return
+	}
+	adUrl := param.Director_AdvertiseUrl.GetString()
+	if adUrl == "" {
+		adUrl = param.Server_ExternalWebUrl.GetString()
+	}
+	directorAd := &server_structs.DirectorAd{
+		AdvertiseUrl: adUrl,
+	}
+	directorAd.Initialize(name)
 	forwardAd := &forwardAd{
-		ServiceAd: ad,
-		AdType:    sType.String(),
-		Now:       time.Now(),
+		DirectorAd: directorAd,
+		ServiceAd:  ad,
+		AdType:     sType.String(),
+		Now:        time.Now(),
 	}
 
 	var buf *bytes.Buffer
