@@ -2719,7 +2719,6 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Worst case: do a separate HEAD request to get the size
 	if totalSize <= 0 && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusPartialContent) {
 		// If the size is unknown, we can try to get it via a HEAD request
-		headClient := &http.Client{Transport: transport}
 		headRequest, _ := http.NewRequest(http.MethodHead, transferUrl.String(), nil)
 		if token != "" {
 			headRequest.Header.Set("Authorization", "Bearer "+token)
@@ -2729,7 +2728,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			headRequest.Header.Set("X-Pelican-JobId", jobId)
 		}
 		var headResponse *http.Response
-		headResponse, err = headClient.Do(headRequest)
+		headResponse, err = client.Do(headRequest)
 		if err != nil {
 			log.WithFields(fields).Errorln("Could not successfully get response for HEAD request")
 			err = errors.Wrap(err, "Could not determine the size of the remote object")
@@ -3381,12 +3380,11 @@ Loop:
 // This is executed in a separate goroutine to allow periodic progress callbacks
 // to be created within the main goroutine.
 func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error, proxy bool) {
-	client := http.Client{}
-	transport := config.GetTransport()
+	var UploadClient = config.GetClient()
+	client := UploadClient
 	if !proxy {
-		transport.Proxy = nil
+		client.Transport.Proxy = nil
 	}
-	client.Transport = transport
 	dump, _ := httputil.DumpRequestOut(request, false)
 	log.Debugf("Dumping request: %s", dump)
 	response, err := client.Do(request)

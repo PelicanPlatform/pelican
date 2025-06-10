@@ -859,6 +859,7 @@ func TestCache(t *testing.T) {
 	)
 	initMockStatUtils()
 	t.Cleanup(cleanupMock)
+	require.NoError(t, config.InitServer(context.Background(), server_structs.DirectorType))
 
 	t.Run("repeated-cache-access-found", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
