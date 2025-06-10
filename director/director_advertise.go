@@ -134,13 +134,6 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 		return
 	}
 
-	// copy the body to a new buffer so we can debug it
-	body, _ := io.ReadAll(ctx.Request.Body)
-	fmt.Printf("Received body: %+v\n", string(body))
-
-	// reset the body
-	ctx.Request.Body = io.NopCloser(bytes.NewBuffer(body))
-
 	fAd := forwardAd{}
 	if err = ctx.MustBindWith(&fAd, binding.JSON); err != nil {
 		log.Errorln("Failed to bind JSON:", err)
@@ -269,9 +262,15 @@ func (dir *directorInfo) forwardDirector(ad *server_structs.DirectorAd) {
 // updates if they are received before one update to the upstream director is
 // completed.
 func (dir *directorInfo) forwardService(ad *server_structs.OriginAdvertiseV2, sType server_structs.ServerType) {
+	forwardAd := &forwardAd{
+		ServiceAd: ad,
+		AdType:    sType.String(),
+		Now:       time.Now(),
+	}
+
 	var buf *bytes.Buffer
-	if adBytes, err := json.Marshal(ad); err != nil {
-		log.Errorln("Failed to marshal director ad to JSON when sending to", dir.ad.AdvertiseUrl, ":", err)
+	if adBytes, err := json.Marshal(forwardAd); err != nil {
+		log.Errorln("Failed to marshal service ad to JSON when sending to", dir.ad.AdvertiseUrl, ":", err)
 		return
 	} else {
 		buf = bytes.NewBuffer(adBytes)
@@ -493,7 +492,8 @@ func updateInternalDirectorCache(ctx context.Context, egrp *errgroup.Group, dire
 	if item, found := directorAds.GetOrSet(directorAd.Name, info, ttlcache.WithTTL[string, *directorInfo](adTTL)); found {
 		if item.Value() != nil && item.Value().ad != nil {
 			if after := directorAd.After(item.Value().ad); after == server_structs.AdAfterTrue || after == server_structs.AdAfterUnknown {
-				directorAds.Set(directorAd.Name, info, adTTL)
+				item.Value().ad = directorAd
+				directorAds.Set(directorAd.Name, item.Value(), adTTL)
 				if after == server_structs.AdAfterTrue {
 					directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
 						if item.Value() != nil && item.Value().ad != nil {
