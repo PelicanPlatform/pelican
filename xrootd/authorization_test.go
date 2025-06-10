@@ -1235,7 +1235,6 @@ func TestGenerateFederationIssuer(t *testing.T) {
 
 			test_utils.MockFederationRoot(t, nil, nil)
 
-			config.InitConfig()
 			err := config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
