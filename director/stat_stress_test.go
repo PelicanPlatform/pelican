@@ -114,15 +114,32 @@ func countInterestingStacks() int {
 func TestStatMemory(t *testing.T) {
 	server_utils.ResetTestState()
 
+	// To allow for developer control over testing, we add two environment variables
+	// specific to this unit test:
+	// - PELICAN_STRESS_DURATION: Parsed as a time duration, this is the time of the
+	//   stress test loop.
+	// - PELICAN_STRESS_SNAPSHOT_HEAP: If set to `1`, then a snapshot of the in-use
+	//   heap will be written to disk before and after the main stress test; the desire
+	//   is to allow developers to compare the contents with `go tool pprof`
+	testDuration := 10 * time.Second
+	testDurationEnv := os.Getenv("PELICAN_STRESS_DURATION")
+	if testDurationEnv != "" {
+		var err error
+		testDuration, err = time.ParseDuration(testDurationEnv)
+		require.NoError(t, err)
+	}
+	snapshotHeap := os.Getenv("PELICAN_STRESS_SNAPSHOT_HEAP") == "1"
+
 	viper.Set(param.Xrootd_EnableLocalMonitoring.GetName(), false)
-	viper.Set(param.Server_AdLifetime.GetName(), "500ms")
+	// Under testing on a laptop, we saw up to 1 second long delays happen deep in the
+	// go HTTP server framework (GC?  Lock contention?  Unclear...).  By bumping the ad
+	// lifetime to 2 seconds, we get repeated ad updates through the lifetime of the
+	// test - useful for checking propagation of changes - but don't get the spurious
+	// failures if there's a short blip in availability.
+	viper.Set(param.Server_AdLifetime.GetName(), "2000ms")
 	viper.Set(param.Cache_SelfTest.GetName(), false)
 	viper.Set(param.Origin_DirectorTest.GetName(), false)
 	viper.Set(param.Origin_SelfTest.GetName(), false)
-	// Shutdown various TCP connections aggressively; after the test is done,
-	// a modest sleep will reduce the "noise" goroutines
-	viper.Set(param.Transport_DialerKeepAlive.GetName(), "50ms")
-	viper.Set(param.Transport_IdleConnTimeout.GetName(), "50ms")
 	viper.Set(param.Director_CachePresenceCapacity.GetName(), 500)
 	fed := fed_test_utils.NewFedTest(t, directorPublicCfg)
 	config.DisableLoggingCensor()
@@ -142,8 +159,12 @@ func TestStatMemory(t *testing.T) {
 	// Fill the cache before taking the baseline measurement. Otherwise,
 	// it might end up that increased memory usage is due to filling up the
 	// cache and not an actual memory leak.
+	//
+	// We make sure the warmup is for at least the size of the cache and 10%
+	// the length of the entire test duration.
 	isCanceled := false
-	for idx < cacheSize {
+	warmupDuration := testDuration / 10
+	for idx < cacheSize || time.Since(start) < warmupDuration {
 		downloadURL := fmt.Sprintf("pelican://%s%s/stress/%v.txt", discoveryUrl.Host, fed.Exports[0].FederationPrefix, idx)
 		destName := filepath.Join(t.TempDir(), fmt.Sprintf("dest.%v.txt", idx))
 		src := filepath.Join(fed.Exports[0].StoragePrefix, fmt.Sprintf("stress/%v.txt", idx))
@@ -168,17 +189,19 @@ func TestStatMemory(t *testing.T) {
 	runtime.GC()
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
-	f, err := os.Create("baseline-heap.prof")
-	require.NoError(t, err)
-	defer f.Close()
-	err = pprof.WriteHeapProfile(f)
-	require.NoError(t, err)
+	if snapshotHeap {
+		f, err := os.Create("baseline-heap.prof")
+		require.NoError(t, err)
+		defer f.Close()
+		err = pprof.WriteHeapProfile(f)
+		require.NoError(t, err)
+	}
 	goCnt := countInterestingStacks()
 
 	// Now, do enough work to fully evict and replace the cache's
 	// contents from the "warm up" stage. If we're on an unusually
 	// fast host, keep going until "enough" time has elapsed.
-	for idx < 2*cacheSize || time.Since(start) < 10*time.Second {
+	for idx < 2*cacheSize || time.Since(start) < testDuration {
 		downloadURL := fmt.Sprintf("pelican://%s%s/stress/%v.txt", discoveryUrl.Host, fed.Exports[0].FederationPrefix, idx)
 		destName := filepath.Join(t.TempDir(), fmt.Sprintf("dest.%v.txt", idx))
 		src := filepath.Join(fed.Exports[0].StoragePrefix, fmt.Sprintf("stress/%v.txt", idx))
@@ -197,8 +220,8 @@ func TestStatMemory(t *testing.T) {
 		idx += 1
 	}
 	// Cancel advertising to quiesce the services; otherwise, we advertise aggressively to the registry.
-	fed.AdvertiseCancel()
 	assert.NoError(t, grp.Wait())
+	fed.AdvertiseCancel()
 
 	log.Info("Test has wrapped up; will run GC")
 	runtime.GC()
@@ -207,12 +230,13 @@ func TestStatMemory(t *testing.T) {
 	runtime.GC()
 	var afterStats runtime.MemStats
 	runtime.ReadMemStats(&afterStats)
-	f, err = os.Create("aftertest-heap.prof")
-	require.NoError(t, err)
-	defer f.Close()
-	err = pprof.WriteHeapProfile(f)
-	require.NoError(t, err)
-
+	if snapshotHeap {
+		f, err := os.Create("aftertest-heap.prof")
+		require.NoError(t, err)
+		defer f.Close()
+		err = pprof.WriteHeapProfile(f)
+		require.NoError(t, err)
+	}
 	afterGoCnt := countInterestingStacks()
 
 	log.Infoln("Total number of queries processed:", idx, " increase after warm-up:", idx-origIdx)
