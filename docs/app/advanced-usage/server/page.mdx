@@ -16,17 +16,17 @@ Pelican services rely on a private/public key pair for creating (signing) and ve
 
 When a Pelican origin or other service is started, the server automatically generates a new private key if one is not present.  However, if someone is running the origin on your behalf, you will need to generate the keypair on your own and send the public portion to the origin operator. If you're doing the deployment, it can also be convenient to generate the key-pair in advance and mount the private key file to the Pelican server via configuration variable, especially in a container environment.
 
-The Pelican binary ships with a `pelican generate keygen` for generating a private/public key pairs:
+The Pelican binary ships with a `pelican key create` for generating a private/public key pairs (this replaces the `pelican generate keygen` command):
 
 ```bash copy
-pelican generate keygen
+pelican key create
 ```
 
 Pelican will generate both the private key and the public key under the current working directory:
 
 ```console
 Successfully generated keys at:
-Private key: /path/to/issuer.jwk
+Private key: /path/to/issuer.pem
 Public Key: /path/to/issuer-pub.jwks
 ```
 
@@ -34,17 +34,16 @@ You can change the location of the generated keys by passing in  arguments `priv
 
 
 ```bash copy
-pelican generate keygen --private-key /tmp/foo --public-key /tmp/bar
+pelican key create --private-key /tmp/foo --public-key /tmp/bar
 ```
 
-For origin operators, the generated *private key* can be specified in the a Pelican server configuration via the `IssuerKey` parameter so that the server will use the newly-generated key:
-
+To configure the Pelican server to use the newly-generated *private key*, move it into the directory specified by the `IssuerKeysDirectory` parameter:
 
 ```yaml filename="pelican.yaml" copy
-IssuerKey: /path/to/generated/issuer.jwk
+IssuerKeysDirectory: /path/to/issuer-keys
 ```
 
-If you need to use multiple private keys, place the newly generated private key into the directory specified by `IssuerKeysDirectory`. A token or payload signature will be considered valid if it can be verified by any key found at either `IssuerKey` or within `IssuerKeysDirectory`.
+This directory supports multiple private keys. A token or payload signature will be considered valid if it can be verified by any key found either within `IssuerKeysDirectory` or at `IssuerKey`.
 
 If there is a remote operator for your origin, email them the **public key** portion.  Never send anyone your private key.  A sample public key looks like the following:
 
@@ -64,9 +63,9 @@ $ cat issuer-pub.jwks
 }
 ```
 
-A sample private key has the following format:
+A sample private key has the following PEM format:
 ```bash
-$ cat issuer.jwk
+$ cat issuer.pem
 -----BEGIN PRIVATE KEY-----
 M0G+AgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgzeomq6yJvek0fg2Z
 g+NY6qklGz4ZjVlrRgTDT9hk5EShRANCAAT0giQYTPJbLB5wGwiKysmwf79eoxqX
