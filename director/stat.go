@@ -221,9 +221,16 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 			return nil, errors.Wrap(err, "unknown request error")
 		}
 	}
+	defer res.Body.Close()
 	if res.StatusCode == 404 {
+		if _, err := io.ReadAll(res.Body); err != nil {
+			log.Debugln("Failed to read 404 response body:", err)
+		}
 		return nil, &headReqNotFoundErr{"file not found on the server " + dataUrl.String()}
 	} else if res.StatusCode == 403 {
+		if _, err := io.ReadAll(res.Body); err != nil {
+			log.Debugln("Failed to read 403 response body:", err)
+		}
 		return nil, &headReqForbiddenErr{fmt.Sprintf("authorization failed for the server at %s. Token is required", dataUrl.String()), ""}
 	} else if res.StatusCode != 200 {
 		resBody, err := io.ReadAll(res.Body)

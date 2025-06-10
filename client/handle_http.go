@@ -2699,6 +2699,9 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 			err = errors.Wrap(err, "Could not determine the size of the remote object")
 			return
 		}
+		if _, err := io.Copy(io.Discard, headResponse.Body); err != nil {
+			log.Warningln("Failed to read out response body:", err)
+		}
 		headResponse.Body.Close()
 		contentLengthStr := headResponse.Header.Get("Content-Length")
 		if contentLengthStr != "" {
@@ -2733,6 +2736,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		writer: writer,
 	}
 	go func() {
+		defer resp.Body.Close()
 		_, err := io.Copy(pw, resp.Body)
 		done <- err
 		close(done)
@@ -3877,6 +3881,10 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 	if err != nil {
 		return
 	}
+	if _, err := io.Copy(io.Discard, headResponse.Body); err != nil {
+		log.Warningln("Failure when reading the HEAD response body:", err)
+	}
+	defer headResponse.Body.Close()
 	if headResponse.StatusCode <= 300 {
 		contentLengthStr := headResponse.Header.Get("Content-Length")
 		if contentLengthStr != "" {
