@@ -82,11 +82,7 @@ func getMain(cmd *cobra.Command, args []string) {
 
 	log.Debugln("Len of source:", len(args))
 	if len(args) < 2 {
-		log.Errorln("No Source or Destination")
-		err = cmd.Help()
-		if err != nil {
-			log.Errorln("Failed to print out help:", err)
-		}
+		log.Errorln("No Source or Destination\nTry 'pelican object get --help' for more information.")
 		os.Exit(1)
 	}
 	source := args[:len(args)-1]
