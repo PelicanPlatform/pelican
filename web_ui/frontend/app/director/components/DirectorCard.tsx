@@ -1,4 +1,4 @@
-import React, {useContext, useState, useEffect, useCallback} from 'react';
+import React, { useContext, useState, useEffect, useCallback } from 'react';
 import { Box, IconButton, Paper, Tooltip, Typography } from '@mui/material';
 import { grey, red } from '@mui/material/colors';
 import { User } from '@/index';
@@ -9,7 +9,10 @@ import { alertOnError } from '@/helpers/util';
 import { DirectorDropdown } from '@/app/director/components/DirectorDropdown';
 import { ServerDetailed, ServerGeneral } from '@/types';
 import { getDirectorServer } from '@/helpers/api';
-import {AlertDispatchContext, AlertReducerAction} from '@/components/AlertProvider';
+import {
+  AlertDispatchContext,
+  AlertReducerAction,
+} from '@/components/AlertProvider';
 
 export interface DirectorCardProps {
   server: ServerGeneral;
@@ -17,7 +20,6 @@ export interface DirectorCardProps {
 }
 
 export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
-
   const dispatch = useContext(AlertDispatchContext);
 
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
@@ -30,7 +32,7 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
     if (detailedServer !== undefined && dropdownOpen) {
       updateDetailedServer(server.name, setDetailedServer, dispatch);
     }
-  }, [server]);
+  }, [server, setDetailedServer, dispatch]);
 
   return (
     <>
@@ -113,18 +115,20 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
 };
 
 const updateDetailedServer = async (
-    serverName: string,
-    setDetailedServer: React.Dispatch<React.SetStateAction<ServerDetailed | undefined>>,
-    dispatch: React.Dispatch<AlertReducerAction>
+  serverName: string,
+  setDetailedServer: React.Dispatch<
+    React.SetStateAction<ServerDetailed | undefined>
+  >,
+  dispatch: React.Dispatch<AlertReducerAction>
 ) => {
   await alertOnError(
-      async () => {
-        const response = await getDirectorServer(serverName);
-        setDetailedServer(await response.json());
-      },
-      'Failed to fetch server details',
-      dispatch
+    async () => {
+      const response = await getDirectorServer(serverName);
+      setDetailedServer(await response.json());
+    },
+    'Failed to fetch server details',
+    dispatch
   );
-}
+};
 
 export default DirectorCard;
