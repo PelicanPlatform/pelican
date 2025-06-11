@@ -1152,7 +1152,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
 	if xrdConfig.Logging.OriginXrootd, err = genLoggingConfig(param.Logging_Origin_Xrootd.GetString(), loggingMap{
 		Trace: "all",
-		Debug: "debug",
+		Debug: "debug emsg login stall redirect request stall",
 		Info:  "emsg login stall redirect", // what we had set originally
 		Warn:  "emsg",                      // errors sent back to the client
 		Error: "-all",
@@ -1276,7 +1276,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
 	if xrdConfig.Logging.CacheXrootd, err = genLoggingConfig(param.Logging_Cache_Xrootd.GetString(), loggingMap{
 		Trace: "all",
-		Debug: "debug",
+		Debug: "debug emsg login stall redirect request stall",
 		Info:  "emsg login stall redirect", // what we had set originally
 		Warn:  "emsg",                      // errors sent back to the client
 		Error: "-all",
