@@ -130,7 +130,7 @@ func GetServiceName(ctx context.Context, server server_structs.ServerType) (name
 				"  Registered sitename: %q\n"+
 				"  Local sitename:      %q\n"+
 				"Pelican will use the registered sitename as your service name.\n"+
-				"Please update either the registry or local configuration to maintain consistency.",
+				"Contact the federation administrator to update the sitename in the Registry or update your local config to maintain consistency.",
 				nameFromReg, param.Xrootd_Sitename.GetString())
 		}
 	}
