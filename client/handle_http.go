@@ -2852,8 +2852,9 @@ Loop:
 		if errorStatus := trailer.Get("X-Transfer-Status"); errorStatus != "" {
 			statusCode, statusText := parseTransferStatus(errorStatus)
 			if statusCode != http.StatusOK {
-				log.WithFields(fields).Debugln("Got error from file transfer")
-				err = errors.New("transfer error: " + statusText)
+				log.WithFields(fields).Debugln("Got error from file transfer:", statusText)
+				statusText = strings.Replace(statusText, "sTREAM ioctl timeout", "cache timed out waiting on origin", 1)
+				err = errors.New("download error after server response started: " + statusText)
 				return
 			}
 		}

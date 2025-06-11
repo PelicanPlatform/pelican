@@ -366,7 +366,7 @@ func TestTrailerError(t *testing.T) {
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
 
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
+	assert.EqualError(t, err, "download error after server response started: Unable to read test.txt; input/output error")
 }
 
 func TestUploadZeroLengthFile(t *testing.T) {
