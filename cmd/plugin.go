@@ -774,6 +774,7 @@ func writeTransferErrorMessage(currentError string, transferUrl string) (errMsg 
 	return
 }
 
+// createTransferError creates a transfer error map with developer data
 func createTransferError(err error) (transferError map[string]interface{}) {
 	transferError = make(map[string]interface{})
 	developerData := make(map[string]interface{})
