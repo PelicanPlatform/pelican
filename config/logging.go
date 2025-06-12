@@ -64,6 +64,8 @@ var (
 	globalFilters      RegexpFilterHook
 	addedGlobalFilters bool
 
+	bearerTokenRegexStr string = `(?P<prefix>Bearer%20)?(?P<header>ey[A-Za-z0-9_=-]{18,})[.](?P<payload>ey[A-Za-z0-9_=-]{18,})[.]([A-Za-z0-9_=-]{64,})`
+
 	globalTransform *regexpTransformHook = &regexpTransformHook{
 		hook: &writer.Hook{
 			Writer:    os.Stderr,
@@ -71,7 +73,7 @@ var (
 		},
 		replacements: []replacement{
 			{
-				regex:    regexp.MustCompile(`(?P<prefix>Bearer%20)?(?P<header>ey[A-Za-z0-9_=-]{18,})[.](?P<payload>ey[A-Za-z0-9_=-]{18,})[.]([A-Za-z0-9_=-]{64,})`),
+				regex:    regexp.MustCompile(bearerTokenRegexStr),
 				template: "$prefix$header.$payload.REDACTED",
 			},
 		},
@@ -105,7 +107,9 @@ func (fh *RegexpFilterHook) Fire(entry *log.Entry) (err error) {
 // Process a single log entry, updating it as necessary
 func (rt *regexpTransformHook) Fire(entry *log.Entry) (err error) {
 	for _, replace := range rt.replacements {
-		entry.Message = replace.regex.ReplaceAllString(entry.Message, replace.template)
+		if replace.regex != nil {
+			entry.Message = replace.regex.ReplaceAllString(entry.Message, replace.template)
+		}
 	}
 	return rt.hook.Fire(entry)
 }
@@ -137,6 +141,11 @@ func initFilterLogging() {
 		globalTransform.hook.LogLevels = hookLevel
 		log.SetOutput(io.Discard)
 		log.AddHook(globalTransform)
+	} else {
+		// Reset the regular expression.  This is done to reduce jitter in the memory
+		// stress test; as this is called for each unit test run, this reduces the chance
+		// prior unit tests affect this one.
+		globalTransform.replacements[0].regex = regexp.MustCompile(bearerTokenRegexStr)
 	}
 }
 
@@ -197,4 +206,12 @@ func SetLogging(logLevel log.Level) {
 	} else {
 		log.SetLevel(logLevel)
 	}
+}
+
+// Disable the logging censor functionality
+//
+// Provided so we can disable the censoring in unit tests;
+// otherwise, it should not be used
+func DisableLoggingCensor() {
+	globalTransform.replacements[0].regex = nil
 }

@@ -21,6 +21,7 @@ package token
 import (
 	"context"
 	"encoding/json"
+	errors_default "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -238,36 +239,37 @@ func Verify(ctx *gin.Context, authOption AuthOption) (status int, verified bool,
 		return http.StatusForbidden, false, errors.New("Authentication is required but no token is present.")
 	}
 
-	errMsg := ""
+	compoundErr := make([]error, 0, 1)
 	for _, iss := range authOption.Issuers {
 		switch iss {
 		case FederationIssuer:
 			if err := authChecker.checkFederationIssuer(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
-				errMsg += fmt.Sprintln("Cannot verify token with federation issuer: ", err)
+				compoundErr = append(compoundErr, errors.Wrap(err, "cannot verify token with federation issuer"))
 			} else {
 				return http.StatusOK, true, nil
 			}
 		case LocalIssuer:
 			if err := authChecker.checkLocalIssuer(ctx, token, authOption.Scopes, authOption.AllScopes); err != nil {
-				errMsg += fmt.Sprintln("Cannot verify token with server issuer: ", err)
+				compoundErr = append(compoundErr, errors.Wrap(err, "cannot verify token with server issuer"))
 			} else {
 				return http.StatusOK, true, nil
 			}
 		case APITokenIssuer:
 			if err := checkApiTokenIssuer(token, authOption.Scopes, authOption.AllScopes); err != nil {
-				errMsg += fmt.Sprintln("Cannot verify token with API token issuer: ", err)
+				compoundErr = append(compoundErr, errors.Wrap(err, "cannot verify token with API token issuer"))
 			} else {
 				return http.StatusOK, true, nil
 			}
 		default:
 			log.Error("Invalid/unsupported token issuer")
-			return http.StatusInternalServerError, false, errors.New("Cannot verify token due to bad server configuration. Invalid/unsupported token issuer")
+			return http.StatusInternalServerError, false, errors.New("cannot verify token due to bad server configuration; invalid/unsupported token issuer")
 		}
 	}
 
+	err = errors_default.Join(compoundErr...)
 	// If the function reaches here, it means no token check passed
-	log.Debug("Cannot verify token:\n", errMsg)
-	return http.StatusForbidden, false, errors.New("Cannot verify token: " + errMsg)
+	log.Debugln("Cannot verify token:", err.Error())
+	return http.StatusForbidden, false, err
 }
 
 // Given a request, try to get a token from its "authz" query parameter or "Authorization" header

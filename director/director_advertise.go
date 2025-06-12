@@ -53,6 +53,9 @@ type (
 		expiry time.Time
 	}
 
+	// Helper type to ensure the context key is unique
+	ContextKey string
+
 	// Structure representing a remote director and the
 	// channel to interact with the corresponding goroutine
 	directorInfo struct {
@@ -95,6 +98,15 @@ var (
 	directorNameOnce  sync.Once
 	directorName      string
 	directorNameError error
+)
+
+const (
+	// Context value key; used to store a second context that will
+	// indicate the advertising should stop.
+	//
+	// Meant mostly for unit tests; advertising ads is essential
+	// functionality.
+	AdvertiseShutdownKey ContextKey = "advertise_shutdown"
 )
 
 // List all the directors known to this instance
@@ -512,11 +524,19 @@ func LaunchPeriodicAdvertise(ctx context.Context) {
 		adInterval = expiryTime / 3
 	}
 
+	shutdownAny := ctx.Value(AdvertiseShutdownKey)
+	var shutdownChannel <-chan struct{} = nil
+	if shutdownCtx, ok := shutdownAny.(context.Context); ok {
+		shutdownChannel = shutdownCtx.Done()
+	}
+
 	ticker := time.NewTicker(adInterval)
 	egrp.Go(func() error {
 		defer ticker.Stop()
 		for {
 			select {
+			case <-shutdownChannel:
+				return nil
 			case <-ctx.Done():
 				return nil
 			case <-ticker.C:

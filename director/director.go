@@ -651,30 +651,40 @@ func getRequestID(ctx *gin.Context) uuid.UUID {
 func processSortedAdsErr(ginCtx *gin.Context, err error, requestId uuid.UUID) {
 	switch err.(type) {
 	case noOriginsForNsErr:
+		msg := fmt.Sprintf("No sources found for the requested path: %v: Request ID: %s", err, requestId.String())
+		log.Debugln(msg)
 		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("No sources found for the requested path: %v: Request ID: %s", err, requestId.String()),
+			Msg:    msg,
 		})
 	case noOriginsForReqErr:
+		msg := fmt.Sprintf("Discovered sources for the namespace, but none support the request: %v: "+
+			"See '%s' to troubleshoot available origins/caches and their capabilities: Request ID: %s", err, param.Server_ExternalWebUrl.GetString(), requestId.String())
+		log.Debugln(msg)
 		ginCtx.JSON(http.StatusMethodNotAllowed, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg: fmt.Sprintf("Discovered sources for the namespace, but none support the request: %v: "+
-				"See '%s' to troubleshoot available origins/caches and their capabilities: Request ID: %s", err, param.Server_ExternalWebUrl.GetString(), requestId.String()),
+			Msg:    msg,
 		})
 	case objectNotFoundErr:
+		msg := fmt.Sprintf("No sources reported possession of the object: %v: Are you sure it exists?: Request ID: %s", err, requestId.String())
+		log.Debugln(msg)
 		ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("No sources reported possession of the object: %v: Are you sure it exists?: Request ID: %s", err, requestId.String()),
+			Msg:    msg,
 		})
 	case directorStartupErr:
+		msg := fmt.Sprintf("%v: Request ID: %s", err, requestId.String())
+		log.Debugln(msg)
 		ginCtx.JSON(http.StatusTooManyRequests, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("%v: Request ID: %s", err, requestId.String()),
+			Msg:    msg,
 		})
 	default:
+		msg := fmt.Sprintf("Failed to get/sort server ads for the requested path: %v: Request ID: %s", err, requestId.String())
+		log.Debugln(msg)
 		ginCtx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get/sort server ads for the requested path: %v: Request ID: %s", err, requestId.String()),
+			Msg:    msg,
 		})
 	}
 }
@@ -721,9 +731,11 @@ func redirectToCache(ginCtx *gin.Context) {
 			}
 		}
 		if len(cAds) == 0 {
+			msg := "No caches can fulfill this request and no fallback origins with the 'DirectReads' capability found for this object. Request ID: " + requestId.String()
+			log.Debugln(msg)
 			ginCtx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "No caches can fulfill this request and no fallback origins with the 'DirectReads' capability found for this object. Request ID: " + requestId.String(),
+				Msg:    msg,
 			})
 			return
 		}
