@@ -591,8 +591,6 @@ func TestPluginDirectRead(t *testing.T) {
 	defer server_utils.ResetTestState()
 
 	dirName := t.TempDir()
-	// We are purposely creating a test with a config of a single-space.
-	// The empty string indicates using the default config, which we don't want.
 
 	fed := fed_test_utils.NewFedTest(t, publicTestOrigin)
 	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
@@ -875,8 +873,6 @@ func TestPluginRecursiveDownload(t *testing.T) {
 
 	dirName := t.TempDir()
 
-	// We are purposely creating a test with a config of a single-space.
-	// The empty string indicates using the default config, which we don't want.
 	fed := fed_test_utils.NewFedTest(t, publicTestOrigin)
 	host := param.Server_Hostname.GetString() + ":" + strconv.Itoa(param.Server_WebPort.GetInt())
 

@@ -183,79 +183,66 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	require.NoError(t, err)
 
 	// Read in any config we may have set
-	var originConf interface{}
-	if originConfig != "" {
-		viper.SetConfigType("yaml")
-		err = viper.MergeConfig(strings.NewReader(originConfig))
-		require.NoError(t, err, "error reading config")
+	var importedConf any
+	viper.SetConfigType("yaml")
+	err = viper.MergeConfig(strings.NewReader(originConfig))
+	require.NoError(t, err, "error reading config")
 
-		err := yaml.Unmarshal([]byte(originConfig), &originConf)
-		require.NoError(t, err, "error unmarshalling into interface")
+	err = yaml.Unmarshal([]byte(originConfig), &importedConf)
+	require.NoError(t, err, "error unmarshalling into interface")
 
-		confMap := originConf.(map[string]interface{})
+	confMap := importedConf.(map[string]any)
 
-		originRaw, exists := confMap["Origin"]
+	if originRaw, exists := confMap["Origin"]; exists {
+		originMap := originRaw.(map[string]any)
 
-		if exists {
-			originMap := originRaw.(map[string]interface{})
+		overrideTemp := func(storageDir string, exportMap map[string]any) {
+			exportMap["StoragePrefix"] = storageDir
 
-			// Override the test directory from the config file with our temp directory
-			if exportsRaw, ok := originMap["Exports"]; ok {
-				for i, item := range exportsRaw.([]interface{}) {
-					originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%d", i))
-					assert.NoError(t, err)
-					t.Cleanup(func() {
-						err := os.RemoveAll(originDir)
-						require.NoError(t, err)
-					})
+			// Change the permissions of the temporary origin directory
+			permissions = os.FileMode(0755)
+			err = os.Chmod(storageDir, permissions)
+			require.NoError(t, err)
 
-					exportMap := item.(map[string]interface{})
-					exportMap["StoragePrefix"] = originDir
+			// Change ownership on the temporary origin directory so files can be uploaded
+			uinfo, err := config.GetDaemonUserInfo()
+			require.NoError(t, err)
+			require.NoError(t, os.Chown(storageDir, uinfo.Uid, uinfo.Gid))
 
-					// Change the permissions of the temporary origin directory
-					permissions = os.FileMode(0755)
-					err = os.Chmod(originDir, permissions)
-					require.NoError(t, err)
+			// Start off with a Hello World file we can use for testing in each of our exports
+			err = os.WriteFile(filepath.Join(storageDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
+			require.NoError(t, err)
+		}
 
-					// Change ownership on the temporary origin directory so files can be uploaded
-					uinfo, err := config.GetDaemonUserInfo()
-					require.NoError(t, err)
-					require.NoError(t, os.Chown(originDir, uinfo.Uid, uinfo.Gid))
-
-					// Start off with a Hello World file we can use for testing in each of our exports
-					err = os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
-					require.NoError(t, err)
-				}
-			} else {
-				originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%s", "test"))
+		// Override the test directory from the config file with our temp directory
+		if exportsRaw, exists := originMap["Exports"]; exists {
+			for i, item := range exportsRaw.([]any) {
+				originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%d", i))
 				assert.NoError(t, err)
 				t.Cleanup(func() {
 					err := os.RemoveAll(originDir)
 					require.NoError(t, err)
 				})
 
-				originMap["StoragePrefix"] = originDir
-
-				permissions = os.FileMode(0755)
-				err = os.Chmod(originDir, permissions)
-				require.NoError(t, err)
-
-				// Change ownership on the temporary origin directory so files can be uploaded
-				uinfo, err := config.GetDaemonUserInfo()
-				require.NoError(t, err)
-				require.NoError(t, os.Chown(originDir, uinfo.Uid, uinfo.Gid))
-
-				// Start off with a Hello World file we can use for testing in the StoragePrefix
-				err = os.WriteFile(filepath.Join(originDir, "hello_world.txt"), []byte("Hello, World!"), os.FileMode(0644))
-				require.NoError(t, err)
+				exportMap := item.(map[string]any)
+				overrideTemp(originDir, exportMap)
 			}
+		} else {
+			originDir, err := os.MkdirTemp("", fmt.Sprintf("Export%s", "test"))
+			assert.NoError(t, err)
+			t.Cleanup(func() {
+				err := os.RemoveAll(originDir)
+				require.NoError(t, err)
+			})
+
+			overrideTemp(originDir, originMap)
 		}
 	}
 
 	confDir := t.TempDir()
 	outputPath := filepath.Join(confDir, "tempfile_*.yaml")
 
-	outputData, err := yaml.Marshal(&originConf)
+	outputData, err := yaml.Marshal(&importedConf)
 	require.NoError(t, err, "error marshalling struct into yaml format")
 
 	err = os.WriteFile(outputPath, outputData, 0644)

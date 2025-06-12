@@ -900,7 +900,7 @@ func TestObjectList405Error(t *testing.T) {
 // end-to-end
 func TestClientUnpack(t *testing.T) {
 	server_utils.ResetTestState()
-	test_utils.InitClient(t, make(map[string]any))
+	test_utils.InitClient(t, nil)
 
 	fed := fed_test_utils.NewFedTest(t, bothPublicOriginCfg)
 	export := fed.Exports[0]

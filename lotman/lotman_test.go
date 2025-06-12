@@ -148,7 +148,7 @@ func TestLotmanInit(t *testing.T) {
 
 	t.Run("TestGoodInit", func(t *testing.T) {
 		viper.Set("Log.Level", "debug")
-		viper.Set("Cache.DataLocations", []string{})
+		viper.Set(param.Cache_DataLocations.GetName(), []string{})
 		server := getMockDiscoveryHost()
 		// Set the Federation.DiscoveryUrl to the test server's URL
 		// Lotman uses the discovered URLs/keys to determine some aspects of lot ownership

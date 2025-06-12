@@ -505,8 +505,9 @@ func getConfigBase() string {
 	if err != nil {
 		os := runtime.GOOS
 		if os == "windows" {
-			log.Warningln("No home directory found for user -- will check for configuration yaml in C:/ProgramData/pelican")
-			return filepath.Join("C:", "ProgramData", "pelican")
+			windowsPath := filepath.Join("C:", "ProgramData", "pelican")
+			log.Warningln("No home directory found for user -- will check for configuration yaml in ", windowsPath)
+			return windowsPath
 		}
 		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
 		return filepath.Join("/etc", "pelican")

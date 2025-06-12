@@ -478,7 +478,7 @@ func TestEmitCfg(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 	viper.Set(param.Origin_RunLocation.GetName(), dirname)
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
@@ -557,7 +557,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	test_utils.InitClient(t, map[string]any{})
+	test_utils.InitClient(t, nil)
 
 	viper.Set(param.Origin_RunLocation.GetName(), dirname)
 
@@ -595,6 +595,7 @@ func TestMergeConfig(t *testing.T) {
 	viper.Set(param.Origin_Port.GetName(), 8443)
 	viper.Set(param.Origin_StoragePrefix.GetName(), "/")
 	viper.Set(param.Origin_FederationPrefix.GetName(), "/")
+	viper.Set("ConfigDir", dirname)
 	// We don't inherit any defaults at this level of code -- in order to recognize
 	// that this is an authorized prefix, we must set either EnableReads && !EnablePublicReads
 	// or EnableWrites
