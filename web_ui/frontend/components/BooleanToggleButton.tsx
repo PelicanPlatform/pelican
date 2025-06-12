@@ -16,9 +16,9 @@ export const BooleanToggleButton = ({
     <ButtonGroup aria-label={label}>
       <Tooltip title={'Reset'}>
         <Button
-            size={'small'}
-            variant={value == undefined ? 'contained' : 'outlined'}
-            onClick={() => onChange(undefined)}
+          size={'small'}
+          variant={value == undefined ? 'contained' : 'outlined'}
+          onClick={() => onChange(undefined)}
         >
           {label}
         </Button>

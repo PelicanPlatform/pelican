@@ -1,14 +1,21 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import {Box, FormControl, Grid, InputLabel, MenuItem, Select, TextField} from '@mui/material';
+import {
+  Box,
+  FormControl,
+  Grid,
+  InputLabel,
+  MenuItem,
+  Select,
+  TextField,
+} from '@mui/material';
 import semver from 'semver';
 
 import { DirectorCard, DirectorCardProps } from './';
 import { BooleanToggleButton, CardList } from '@/components';
 import useFuse from '@/helpers/useFuse';
 import { ServerGeneral } from '@/types';
-
 
 interface DirectorCardListProps {
   data: Partial<DirectorCardProps>[];
@@ -53,7 +60,14 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
       );
     }
     return filteredData;
-  }, [searchedData, search, serverError, pelicanServer, serverDowntime, serverVersions]);
+  }, [
+    searchedData,
+    search,
+    serverError,
+    pelicanServer,
+    serverDowntime,
+    serverVersions,
+  ]);
 
   const allServerVersions = useMemo(() => {
     const versions = new Set<string>();
@@ -63,8 +77,8 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
       }
     });
 
-    return semver.sort([...versions]).reverse()
-  }, [data])
+    return semver.sort([...versions]).reverse();
+  }, [data]);
 
   return (
     <Box>
@@ -72,27 +86,29 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
         <Grid container spacing={1} pt={1}>
           <Grid item>
             <TextField
-                size={'small'}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                label='Search'
+              size={'small'}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              label='Search'
             />
           </Grid>
           <Grid item>
-            <FormControl sx={{width: 200}} size={'small'}>
-              <InputLabel id={'server-version-select-label'}>Server Version</InputLabel>
+            <FormControl sx={{ width: 200 }} size={'small'}>
+              <InputLabel id={'server-version-select-label'}>
+                Server Version
+              </InputLabel>
               <Select
-                  multiple
-                  value={serverVersions}
-                  onChange={(e) => setServerVersions(e.target.value as string[])}
-                  labelId={'server-version-select-label'}
-                  label={"Server Version"}
+                multiple
+                value={serverVersions}
+                onChange={(e) => setServerVersions(e.target.value as string[])}
+                labelId={'server-version-select-label'}
+                label={'Server Version'}
               >
-                {
-                  allServerVersions.map((version) => (
-                      <MenuItem key={version} value={version}>{version}</MenuItem>
-                  ))
-                }
+                {allServerVersions.map((version) => (
+                  <MenuItem key={version} value={version}>
+                    {version}
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
           </Grid>
