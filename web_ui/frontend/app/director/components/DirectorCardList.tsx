@@ -2,10 +2,13 @@
 
 import React, { useMemo, useState } from 'react';
 import {Box, FormControl, Grid, InputLabel, MenuItem, Select, TextField} from '@mui/material';
+import semver from 'semver';
+
 import { DirectorCard, DirectorCardProps } from './';
 import { BooleanToggleButton, CardList } from '@/components';
 import useFuse from '@/helpers/useFuse';
 import { ServerGeneral } from '@/types';
+
 
 interface DirectorCardListProps {
   data: Partial<DirectorCardProps>[];
@@ -59,7 +62,8 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
         versions.add(d.server.version);
       }
     });
-    return Array.from(versions).sort();
+
+    return semver.sort([...versions]).reverse()
   }, [data])
 
   return (
