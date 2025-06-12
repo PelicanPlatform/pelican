@@ -23,7 +23,6 @@ package client_test
 import (
 	_ "embed"
 	"fmt"
-	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -442,21 +441,22 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 func TestFailureOnOriginDisablingListings(t *testing.T) {
 	server_utils.ResetTestState()
 
-	viper.Set("Logging.Level", "debug")
-	viper.Set("Origin.StorageType", "posix")
-	viper.Set("Origin.ExportVolumes", "/test")
-	viper.Set("Origin.EnablePublicReads", true)
-	viper.Set("Origin.EnableListings", false)
-	fed := fed_test_utils.NewFedTest(t, "")
+	fed := fed_test_utils.NewFedTest(t, pubExportNoDirectRead)
 
-	destDir := filepath.Join(fed.Exports[0].StoragePrefix, "test")
-	require.NoError(t, os.MkdirAll(destDir, os.FileMode(0755)))
-	log.Debugln("Will create origin file at", destDir)
-	err := os.WriteFile(filepath.Join(destDir, "test.txt"), []byte("test file content"), fs.FileMode(0644))
-	require.NoError(t, err)
-	downloadURL := fmt.Sprintf("pelican://%s:%s%s/%s", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
-		fed.Exports[0].FederationPrefix, "test")
+	testFileContent := "test file content"
+	// Drop the testFileContent into the origin directory
+	tempFile, err := os.Create(filepath.Join(fed.Exports[0].StoragePrefix, "test.txt"))
+	require.NoError(t, err, "Error creating temp file")
+	defer os.Remove(tempFile.Name())
+	_, err = tempFile.WriteString(testFileContent)
+	require.NoError(t, err, "Error writing to temp file")
+	tempFile.Close()
 
+	// Set path for object to upload/download
+	downloadURL := fmt.Sprintf("pelican://%s:%s%s/", param.Server_Hostname.GetString(), strconv.Itoa(param.Server_WebPort.GetInt()),
+		fed.Exports[0].FederationPrefix)
+
+	// Download the directory with get, should fail due to no collections URL
 	_, err = client.DoGet(fed.Ctx, downloadURL, t.TempDir(), true)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no collections URL found in director response")
