@@ -14,23 +14,20 @@ export const BooleanToggleButton = ({
 }: BooleanToggleButtonProps) => {
   return (
     <ButtonGroup aria-label={label}>
-      <Button disabled size={'small'}>
-        {label}
-      </Button>
-      <Tooltip title={'Either'}>
+      <Tooltip title={'Reset'}>
         <Button
-          variant={value == undefined ? 'contained' : 'outlined'}
-          onClick={() => onChange(undefined)}
-          size={'small'}
+            size={'small'}
+            variant={value == undefined ? 'contained' : 'outlined'}
+            onClick={() => onChange(undefined)}
         >
-          <HorizontalRule />
+          {label}
         </Button>
       </Tooltip>
       <Tooltip title={'True'}>
         <Button
           color={'success'}
           variant={value == true ? 'contained' : 'outlined'}
-          onClick={() => onChange(true)}
+          onClick={() => onChange(value === true ? undefined : true)}
           size={'small'}
         >
           <Check />
@@ -40,7 +37,7 @@ export const BooleanToggleButton = ({
         <Button
           color={'error'}
           variant={value == false ? 'contained' : 'outlined'}
-          onClick={() => onChange(false)}
+          onClick={() => onChange(value === false ? undefined : false)}
           size={'small'}
         >
           <DoNotDisturb />
