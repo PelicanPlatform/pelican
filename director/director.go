@@ -1221,7 +1221,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 				log.Debugf("Server %s is shutting down, applying downtime to prevent new transfer requests", sn)
 			}
 			filteredServersMutex.Unlock()
-		} else if metrics.ParseHealthStatus(adV2.Status) != metrics.StatusShuttingDown {
+		} else {
 			// If the server is back online, we flush out existing shutdown filter if it exists
 			filteredServersMutex.Lock()
 			if existingFilterType, isServerFiltered := filteredServers[sn]; isServerFiltered {
