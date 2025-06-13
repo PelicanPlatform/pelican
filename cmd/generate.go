@@ -66,6 +66,6 @@ func init() {
 	passwordCmd.Flags().StringVarP(&outPasswordPath, "output", "o", "", "The path to the generate htpasswd password file. Default: ./server-web-passwd")
 	passwordCmd.Flags().StringVarP(&inPasswordPath, "password", "p", "", "The path to the file containing the password. Will take from terminal input if not provided")
 
-	keygenCmd.Flags().StringVar(&privateKeyPath, "private-key", "", "The path to the generate private key file. Default: ./issuer.jwk")
+	keygenCmd.Flags().StringVar(&privateKeyPath, "private-key", "", "The path to the generate private key file. Default: ./issuer.pem")
 	keygenCmd.Flags().StringVar(&publicKeyPath, "public-key", "", "The path to the generate public key file. Default: ./issuer-pub.jwks")
 }
