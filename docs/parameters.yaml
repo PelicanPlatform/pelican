@@ -173,7 +173,7 @@ components: ["director"]
 ############################
 name: Logging.Level
 description: |+
-  A string defining the log level of the client. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+  A string defining the Pelican wide log level. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
 
   Log levels are inherited by all components unless explicitly overridden. Levels are case-insensitive.
 type: string
@@ -201,6 +201,46 @@ type: duration
 default: 1m
 components: ["client"]
 ---
+name: Logging.Client.Level
+description: |+
+  A string defining the log level of the client. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+  If unset, will fallback to `Logging.Level`.
+type: string
+default: error
+components: ["client"]
+---
+name: Logging.Origin.Level
+description: |+
+  A string defining the log level of the Origin. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+  If unset, will fallback to `Logging.Level`.
+type: string
+default: info
+components: ["origin"]
+---
+name: Logging.Cache.Level
+description: |+
+  A string defining the log level of the Cache. Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+  If unset, will fallback to `Logging.Level`.
+type: string
+default: info
+components: ["cache"]
+---
+name: Logging.Director.Level
+description: |+
+  A string defining the log level of the server (Director, Registry, Origin, Cache). Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+  If unset, will fallback to `Logging.Level`.
+type: string
+default: info
+components: ["director"]
+---
+name: Logging.Registry.Level
+description: |+
+  A string defining the log level of the server (Director, Registry, Origin, Cache). Options include (going from most info to least): Trace, Debug, Info, Warn, Error, Fatal, Panic.
+  If unset, will fallback to `Logging.Level`.
+type: string
+default: info
+components: ["registry"]
+---
 name: Logging.Origin.Cms
 description: |+
   Trace level of XRootD cluster management service, one of the main XRootD executables.
@@ -209,7 +249,7 @@ description: |+
   could be found and cms works to report back the server for where the file is located.
   Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Origin.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: error
@@ -220,7 +260,7 @@ description: |+
   Trace level of scitokens debug output within XRootD configuration. This entails token management
   and security credentials within XRootD. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Origin.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: fatal
@@ -231,7 +271,7 @@ description: |+
   Trace level of the eXtended Request Daemon within XRootD, another main XRootD executable. This reports information
   the XRootD protocol and works with cms. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Origin.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: error
@@ -244,7 +284,7 @@ description: |+
   This is the protocol for XRootD (like http) and handles connections and requests. Accepted values: `trace`, `debug`, `info`,
   `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Origin.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: info
@@ -256,7 +296,7 @@ description: |+
   will cause the Xrootd daemon to log all headers and requests.
   Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Origin.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: error
@@ -267,7 +307,7 @@ description: |+
   Logging level of Xrootd's "Open File System" (ofs) subsystem.  The OFS manages the file descriptor table and redirection/
   error handling. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Origin.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: error
@@ -278,7 +318,7 @@ description: |+
   Logging level of Xrootd's "Open Storage System" (oss) subsystem.  The OSS manages the interaction with the underlying
   POSIX storage (open, read, write, close, etc). Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Origin.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: error
@@ -289,7 +329,7 @@ description: |+
   Logging level for the HTTP component of the cache.  Increasing to debug will cause the Xrootd daemon to log
   all headers and requests. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Cache.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: error
@@ -301,7 +341,7 @@ description: |+
   This component is build on top of the Open Storage System component, which deals with things like file creation and reads and
   writes for files and directories. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Cache.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: error
@@ -313,7 +353,7 @@ description: |+
   entails information for caches/caching within XRootD. This component instantiates its own Open Storage
   System (OSS) to write local files to. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Cache.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: info
@@ -325,7 +365,7 @@ description: |+
   number of opens that failed, number of remote file closes, and number of closes that failed. Accepted values: `trace`, `debug`,
   `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Cache.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: error
@@ -336,7 +376,7 @@ description: |+
   Trace level of XRootD Proxy System Service Set Options. This component reports detailed information about the configuration
   and operational settings of the Proxy System Service. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Cache.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: error
@@ -347,7 +387,7 @@ description: |+
   Trace level of scitokens debug output within XRootD configuration. This entails token management
   and security credentials within XRootD. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Cache.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: fatal
@@ -358,7 +398,7 @@ description: |+
   Trace level of the eXtended Request Daemon within XRootD, another main XRootD executable. This reports information
   the XRootD protocol and works with cms. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Cache.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: error
@@ -370,7 +410,7 @@ description: |+
   which is the component that sits on sockets and talks to clients as they query file-system info, open files, and read data.
   This is the protocol for XRootD (like http) and handles connections and requests. Accepted values: `trace`, `debug`, `info`, `warn`, `error`, `fatal`, `panic`
 
-  If a non-default value is configured for `Logging.Level`, that level will be inherited unless explicitly
+  If a non-default value is configured for `Logging.Cache.Level`, that level will be inherited unless explicitly
   overridden here. Levels are case-insensitive.
 type: string
 default: error
