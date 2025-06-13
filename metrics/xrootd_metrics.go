@@ -776,6 +776,8 @@ var (
 	monitorPaths []PathList
 )
 
+var allowedEvents = map[string]bool{"oss_stats": true}
+
 // Set up listening and parsing xrootd monitoring UDP packets into prometheus
 //
 // The `ctx` is the context for listening to server shutdown event in order to cleanup internal cache eviction
@@ -1738,22 +1740,90 @@ func HandleSummaryPacket(packet []byte) error {
 	return nil
 }
 
+// handleOSSPacket processes the OSS plugin stats
+// It expects the blobs to be in JSON format and will update the metrics accordingly
+// It returns an error if the blobs are empty or if there is an error in unmarshalling
+// the JSON data
+// It also handles the case where the total IO or wait time is less than the previous value
+// by resetting the increment to 0.
+// It also handles the case where the event is not in the allowed list by logging a debug message
+// and continuing to the next blob.
+//
+// When processing multiple blobs, only the last valid OSS event (with event="oss_stats")
+// in the list will be used to update the metrics. This means that if there are multiple
+// valid OSS events in the list, only the last one's values will be recorded. Invalid events
+// (wrong event type or malformed JSON) are ignored and do not affect the processing of
+// subsequent events.
+//
+// The oss_stats event schema is as follows:
+//
+//	{
+//		"event": "oss_stats",
+//		"reads": 100,
+//		"writes": 0,
+//		"stats": 0,
+//		"pgreads": 0,
+//		"pgwrites": 0,
+//		"readvs": 0,
+//		"readv_segs": 0,
+//		"dirlists": 0,
+//		"dirlist_ents": 0,
+//		"truncates": 0,
+//		"unlinks": 0,
+//		"chmods": 0,
+//		"opens": 0,
+//		"renames": 0,
+//		"slow_reads": 0,
+//		"slow_writes": 0,
+//		"slow_stats": 0,
+//		"slow_pgreads": 0,
+//		"slow_pgwrites": 0,
+//		"slow_readvs": 0,
+//		"slow_readv_segs": 0,
+//		"slow_dirlists": 0,
+//		"slow_dirlist_ents": 0,
+//		"slow_truncates": 0,
+//		"slow_unlinks": 0,
+//		"slow_chmods": 0,
+//		"slow_opens": 0,
+//		"slow_renames": 0,
+//		"open_t": 0.0000,
+//		"read_t": 0.0000,
+//		"readv_t": 0.0000,
+//		"pgread_t": 0.0000,
+//		"pgwrite_t": 0.0000,
+//		"dirlist_t": 0.0000,
+//		"stat_t": 0.0000,
+//		"truncate_t": 0.0000,
+//		"unlink_t": 0.0000,
+//		"rename_t": 0.0000,
+//		"chmod_t": 0.0000,
+//		"slow_open_t": 0.0000,
+//		"slow_read_t": 0.0000,
+//		"slow_readv_t": 0.0000,
+//		"slow_pgread_t": 0.0000,
+//		"slow_pgwrite_t": 0.0000,
+//		"slow_dirlist_t": 0.0000,
+//		"slow_stat_t": 0.0000,
+//		"slow_truncate_t": 0.0000,
+//		"slow_unlink_t": 0.0000,
+//		"slow_rename_t": 0.0000,
+//		"slow_chmod_t": 0.0000
+//	}
+//
+// The event field is used to determine if the blob is a valid OSS event.
+// The other fields are used to update the metrics accordingly.
+// The slow_ prefix fields are used to update the slow operation histograms.
+// The other fields are used to update the counters.
 func handleOSSPacket(blobs [][]byte) error {
-	if len(blobs) == 0 {
-		return errors.New("no blobs in the OSS packet")
-	}
-	finalBlob := blobs[len(blobs)-1]
-	ossStats := OSSStatsGs{}
-	if err := json.Unmarshal(finalBlob, &ossStats); err != nil {
-		return errors.Wrap(err, "failed to parse OSS stat json")
-	}
-
 	updateCounter := func(new int, old int, counter prometheus.Counter) int {
-		incBy := float64(new - old)
-		if new < old {
-			incBy = float64(new)
-		}
+		// if the new value is less than the old value, we know that that the counter shouldnt be incremented
+		incBy := math.Max(0, float64(new-old))
 		counter.Add(incBy)
+
+		if new < old {
+			return old
+		}
 		return new
 	}
 
@@ -1773,86 +1843,102 @@ func handleOSSPacket(blobs [][]byte) error {
 
 		}
 	}
+	if len(blobs) == 0 {
+		return errors.New("no blobs in the OSS packet")
+	}
 
-	updateHistogram(ossStats.ReadT, lastOssStats.ReadT, ossStats.Reads, lastOssStats.Reads, OssReadTime)
-	lastOssStats.ReadT = ossStats.ReadT
-	updateHistogram(ossStats.WriteT, lastOssStats.WriteT, ossStats.Writes, lastOssStats.Writes, OssWriteTime)
-	lastOssStats.WriteT = ossStats.WriteT
-	updateHistogram(ossStats.StatT, lastOssStats.StatT, ossStats.Stats, lastOssStats.Stats, OssStatTime)
-	lastOssStats.StatT = ossStats.StatT
-	updateHistogram(ossStats.PgreadT, lastOssStats.PgreadT, ossStats.Pgreads, lastOssStats.Pgreads, OssPgReadTime)
-	lastOssStats.PgreadT = ossStats.PgreadT
-	updateHistogram(ossStats.PgwriteT, lastOssStats.PgwriteT, ossStats.Pgwrites, lastOssStats.Pgwrites, OssPgWriteTime)
-	lastOssStats.PgwriteT = ossStats.PgwriteT
-	updateHistogram(ossStats.ReadvT, lastOssStats.ReadvT, ossStats.Readvs, lastOssStats.Readvs, OssReadvTime)
-	lastOssStats.ReadvT = ossStats.ReadvT
-	updateHistogram(ossStats.DirlistT, lastOssStats.DirlistT, ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistTime)
-	lastOssStats.DirlistT = ossStats.DirlistT
-	updateHistogram(ossStats.TruncateT, lastOssStats.TruncateT, ossStats.Truncates, lastOssStats.Truncates, OssTruncateTime)
-	lastOssStats.TruncateT = ossStats.TruncateT
-	updateHistogram(ossStats.UnlinkT, lastOssStats.UnlinkT, ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkTime)
-	lastOssStats.UnlinkT = ossStats.UnlinkT
-	updateHistogram(ossStats.ChmodT, lastOssStats.ChmodT, ossStats.Chmods, lastOssStats.Chmods, OssChmodTime)
-	lastOssStats.ChmodT = ossStats.ChmodT
-	updateHistogram(ossStats.OpenT, lastOssStats.OpenT, ossStats.Opens, lastOssStats.Opens, OssOpenTime)
-	lastOssStats.OpenT = ossStats.OpenT
-	updateHistogram(ossStats.RenameT, lastOssStats.RenameT, ossStats.Renames, lastOssStats.Renames, OssRenameTime)
-	lastOssStats.RenameT = ossStats.RenameT
+	// we need to process the blobs backwards to ensure that we are processing the last valid event
+	// the most relevant data is the last valid event in the sequence of blobs
+	for i := len(blobs) - 1; i >= 0; i-- {
+		blob := blobs[i]
+		ossStats := OSSStatsGs{}
+		if err := json.Unmarshal(blob, &ossStats); err != nil {
+			return errors.Wrap(err, "failed to parse OSS stat json")
+		}
+		if !allowedEvents[ossStats.Event] {
+			log.Debugf("handleOSSPacket received an OSS packet with an unrecognized event type (%s)", ossStats.Event)
+			continue
+		}
+		updateHistogram(ossStats.ReadT, lastOssStats.ReadT, ossStats.Reads, lastOssStats.Reads, OssReadTime)
+		lastOssStats.ReadT = ossStats.ReadT
+		updateHistogram(ossStats.WriteT, lastOssStats.WriteT, ossStats.Writes, lastOssStats.Writes, OssWriteTime)
+		lastOssStats.WriteT = ossStats.WriteT
+		updateHistogram(ossStats.StatT, lastOssStats.StatT, ossStats.Stats, lastOssStats.Stats, OssStatTime)
+		lastOssStats.StatT = ossStats.StatT
+		updateHistogram(ossStats.PgreadT, lastOssStats.PgreadT, ossStats.Pgreads, lastOssStats.Pgreads, OssPgReadTime)
+		lastOssStats.PgreadT = ossStats.PgreadT
+		updateHistogram(ossStats.PgwriteT, lastOssStats.PgwriteT, ossStats.Pgwrites, lastOssStats.Pgwrites, OssPgWriteTime)
+		lastOssStats.PgwriteT = ossStats.PgwriteT
+		updateHistogram(ossStats.ReadvT, lastOssStats.ReadvT, ossStats.Readvs, lastOssStats.Readvs, OssReadvTime)
+		lastOssStats.ReadvT = ossStats.ReadvT
+		updateHistogram(ossStats.DirlistT, lastOssStats.DirlistT, ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistTime)
+		lastOssStats.DirlistT = ossStats.DirlistT
+		updateHistogram(ossStats.TruncateT, lastOssStats.TruncateT, ossStats.Truncates, lastOssStats.Truncates, OssTruncateTime)
+		lastOssStats.TruncateT = ossStats.TruncateT
+		updateHistogram(ossStats.UnlinkT, lastOssStats.UnlinkT, ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkTime)
+		lastOssStats.UnlinkT = ossStats.UnlinkT
+		updateHistogram(ossStats.ChmodT, lastOssStats.ChmodT, ossStats.Chmods, lastOssStats.Chmods, OssChmodTime)
+		lastOssStats.ChmodT = ossStats.ChmodT
+		updateHistogram(ossStats.OpenT, lastOssStats.OpenT, ossStats.Opens, lastOssStats.Opens, OssOpenTime)
+		lastOssStats.OpenT = ossStats.OpenT
+		updateHistogram(ossStats.RenameT, lastOssStats.RenameT, ossStats.Renames, lastOssStats.Renames, OssRenameTime)
+		lastOssStats.RenameT = ossStats.RenameT
 
-	updateHistogram(ossStats.SlowReadT, lastOssStats.SlowReadT, ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadTime)
-	lastOssStats.SlowReadT = ossStats.SlowReadT
-	updateHistogram(ossStats.SlowWriteT, lastOssStats.SlowWriteT, ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWriteTime)
-	lastOssStats.SlowWriteT = ossStats.SlowWriteT
-	updateHistogram(ossStats.SlowStatT, lastOssStats.SlowStatT, ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatTime)
-	lastOssStats.SlowStatT = ossStats.SlowStatT
-	updateHistogram(ossStats.SlowPgreadT, lastOssStats.SlowPgreadT, ossStats.SlowPgreads, lastOssStats.SlowPgreads, OssSlowPgReadTime)
-	lastOssStats.SlowPgreadT = ossStats.SlowPgreadT
-	updateHistogram(ossStats.SlowPgwriteT, lastOssStats.SlowPgwriteT, ossStats.SlowPgwrites, lastOssStats.SlowPgwrites, OssSlowPgWriteTime)
-	lastOssStats.SlowPgwriteT = ossStats.SlowPgwriteT
-	updateHistogram(ossStats.SlowReadvT, lastOssStats.SlowReadvT, ossStats.SlowReadvs, lastOssStats.SlowReadvs, OssSlowReadvTime)
-	lastOssStats.SlowReadvT = ossStats.SlowReadvT
-	updateHistogram(ossStats.SlowDirlistT, lastOssStats.SlowDirlistT, ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistTime)
-	lastOssStats.SlowDirlistT = ossStats.SlowDirlistT
-	updateHistogram(ossStats.SlowTruncateT, lastOssStats.SlowTruncateT, ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateTime)
-	lastOssStats.SlowTruncateT = ossStats.SlowTruncateT
-	updateHistogram(ossStats.SlowUnlinkT, lastOssStats.SlowUnlinkT, ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkTime)
-	lastOssStats.SlowUnlinkT = ossStats.SlowUnlinkT
-	updateHistogram(ossStats.SlowChmodT, lastOssStats.SlowChmodT, ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodTime)
-	lastOssStats.SlowChmodT = ossStats.SlowChmodT
-	updateHistogram(ossStats.SlowOpenT, lastOssStats.SlowOpenT, ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpenTime)
-	lastOssStats.SlowOpenT = ossStats.SlowOpenT
-	updateHistogram(ossStats.SlowRenameT, lastOssStats.SlowRenameT, ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenameTime)
-	lastOssStats.SlowRenameT = ossStats.SlowRenameT
+		updateHistogram(ossStats.SlowReadT, lastOssStats.SlowReadT, ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadTime)
+		lastOssStats.SlowReadT = ossStats.SlowReadT
+		updateHistogram(ossStats.SlowWriteT, lastOssStats.SlowWriteT, ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWriteTime)
+		lastOssStats.SlowWriteT = ossStats.SlowWriteT
+		updateHistogram(ossStats.SlowStatT, lastOssStats.SlowStatT, ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatTime)
+		lastOssStats.SlowStatT = ossStats.SlowStatT
+		updateHistogram(ossStats.SlowPgreadT, lastOssStats.SlowPgreadT, ossStats.SlowPgreads, lastOssStats.SlowPgreads, OssSlowPgReadTime)
+		lastOssStats.SlowPgreadT = ossStats.SlowPgreadT
+		updateHistogram(ossStats.SlowPgwriteT, lastOssStats.SlowPgwriteT, ossStats.SlowPgwrites, lastOssStats.SlowPgwrites, OssSlowPgWriteTime)
+		lastOssStats.SlowPgwriteT = ossStats.SlowPgwriteT
+		updateHistogram(ossStats.SlowReadvT, lastOssStats.SlowReadvT, ossStats.SlowReadvs, lastOssStats.SlowReadvs, OssSlowReadvTime)
+		lastOssStats.SlowReadvT = ossStats.SlowReadvT
+		updateHistogram(ossStats.SlowDirlistT, lastOssStats.SlowDirlistT, ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistTime)
+		lastOssStats.SlowDirlistT = ossStats.SlowDirlistT
+		updateHistogram(ossStats.SlowTruncateT, lastOssStats.SlowTruncateT, ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateTime)
+		lastOssStats.SlowTruncateT = ossStats.SlowTruncateT
+		updateHistogram(ossStats.SlowUnlinkT, lastOssStats.SlowUnlinkT, ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkTime)
+		lastOssStats.SlowUnlinkT = ossStats.SlowUnlinkT
+		updateHistogram(ossStats.SlowChmodT, lastOssStats.SlowChmodT, ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodTime)
+		lastOssStats.SlowChmodT = ossStats.SlowChmodT
+		updateHistogram(ossStats.SlowOpenT, lastOssStats.SlowOpenT, ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpenTime)
+		lastOssStats.SlowOpenT = ossStats.SlowOpenT
+		updateHistogram(ossStats.SlowRenameT, lastOssStats.SlowRenameT, ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenameTime)
+		lastOssStats.SlowRenameT = ossStats.SlowRenameT
 
-	lastOssStats.Reads = updateCounter(ossStats.Reads, lastOssStats.Reads, OssReadsCounter)
-	lastOssStats.Writes = updateCounter(ossStats.Writes, lastOssStats.Writes, OssWritesCounter)
-	lastOssStats.Stats = updateCounter(ossStats.Stats, lastOssStats.Stats, OssStatsCounter)
-	lastOssStats.Pgreads = updateCounter(ossStats.Pgreads, lastOssStats.Pgreads, OssPgReadsCounter)
-	lastOssStats.Pgwrites = updateCounter(ossStats.Pgwrites, lastOssStats.Pgwrites, OssPgWritesCounter)
-	lastOssStats.Readvs = updateCounter(ossStats.Readvs, lastOssStats.Readvs, OssReadvCounter)
-	lastOssStats.ReadvSegs = updateCounter(ossStats.ReadvSegs, lastOssStats.ReadvSegs, OssReadvSegsCounter)
-	lastOssStats.Dirlists = updateCounter(ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistCounter)
-	lastOssStats.DirlistEnts = updateCounter(ossStats.DirlistEnts, lastOssStats.DirlistEnts, OssDirlistEntsCounter)
-	lastOssStats.Truncates = updateCounter(ossStats.Truncates, lastOssStats.Truncates, OssTruncateCounter)
-	lastOssStats.Unlinks = updateCounter(ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkCounter)
-	lastOssStats.Chmods = updateCounter(ossStats.Chmods, lastOssStats.Chmods, OssChmodCounter)
-	lastOssStats.Opens = updateCounter(ossStats.Opens, lastOssStats.Opens, OssOpensCounter)
-	lastOssStats.Renames = updateCounter(ossStats.Renames, lastOssStats.Renames, OssRenamesCounter)
+		lastOssStats.Reads = updateCounter(ossStats.Reads, lastOssStats.Reads, OssReadsCounter)
+		lastOssStats.Writes = updateCounter(ossStats.Writes, lastOssStats.Writes, OssWritesCounter)
+		lastOssStats.Stats = updateCounter(ossStats.Stats, lastOssStats.Stats, OssStatsCounter)
+		lastOssStats.Pgreads = updateCounter(ossStats.Pgreads, lastOssStats.Pgreads, OssPgReadsCounter)
+		lastOssStats.Pgwrites = updateCounter(ossStats.Pgwrites, lastOssStats.Pgwrites, OssPgWritesCounter)
+		lastOssStats.Readvs = updateCounter(ossStats.Readvs, lastOssStats.Readvs, OssReadvCounter)
+		lastOssStats.ReadvSegs = updateCounter(ossStats.ReadvSegs, lastOssStats.ReadvSegs, OssReadvSegsCounter)
+		lastOssStats.Dirlists = updateCounter(ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistCounter)
+		lastOssStats.DirlistEnts = updateCounter(ossStats.DirlistEnts, lastOssStats.DirlistEnts, OssDirlistEntsCounter)
+		lastOssStats.Truncates = updateCounter(ossStats.Truncates, lastOssStats.Truncates, OssTruncateCounter)
+		lastOssStats.Unlinks = updateCounter(ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkCounter)
+		lastOssStats.Chmods = updateCounter(ossStats.Chmods, lastOssStats.Chmods, OssChmodCounter)
+		lastOssStats.Opens = updateCounter(ossStats.Opens, lastOssStats.Opens, OssOpensCounter)
+		lastOssStats.Renames = updateCounter(ossStats.Renames, lastOssStats.Renames, OssRenamesCounter)
 
-	lastOssStats.SlowReads = updateCounter(ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadsCounter)
-	lastOssStats.SlowWrites = updateCounter(ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWritesCounter)
-	lastOssStats.SlowStats = updateCounter(ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatsCounter)
-	lastOssStats.SlowPgreads = updateCounter(ossStats.SlowPgreads, lastOssStats.SlowPgreads, OssSlowPgReadsCounter)
-	lastOssStats.SlowPgwrites = updateCounter(ossStats.SlowPgwrites, lastOssStats.SlowPgwrites, OssSlowPgWritesCounter)
-	lastOssStats.SlowReadvs = updateCounter(ossStats.SlowReadvs, lastOssStats.SlowReadvs, OssSlowReadvCounter)
-	lastOssStats.SlowReadvSegs = updateCounter(ossStats.SlowReadvSegs, lastOssStats.SlowReadvSegs, OssSlowReadvSegsCounter)
-	lastOssStats.SlowDirlists = updateCounter(ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistCounter)
-	lastOssStats.SlowDirlistEnts = updateCounter(ossStats.SlowDirlistEnts, lastOssStats.SlowDirlistEnts, OssSlowDirlistEntsCounter)
-	lastOssStats.SlowTruncates = updateCounter(ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateCounter)
-	lastOssStats.SlowUnlinks = updateCounter(ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkCounter)
-	lastOssStats.SlowChmods = updateCounter(ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodCounter)
-	lastOssStats.SlowOpens = updateCounter(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter)
-	lastOssStats.SlowRenames = updateCounter(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter)
+		lastOssStats.SlowReads = updateCounter(ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadsCounter)
+		lastOssStats.SlowWrites = updateCounter(ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWritesCounter)
+		lastOssStats.SlowStats = updateCounter(ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatsCounter)
+		lastOssStats.SlowPgreads = updateCounter(ossStats.SlowPgreads, lastOssStats.SlowPgreads, OssSlowPgReadsCounter)
+		lastOssStats.SlowPgwrites = updateCounter(ossStats.SlowPgwrites, lastOssStats.SlowPgwrites, OssSlowPgWritesCounter)
+		lastOssStats.SlowReadvs = updateCounter(ossStats.SlowReadvs, lastOssStats.SlowReadvs, OssSlowReadvCounter)
+		lastOssStats.SlowReadvSegs = updateCounter(ossStats.SlowReadvSegs, lastOssStats.SlowReadvSegs, OssSlowReadvSegsCounter)
+		lastOssStats.SlowDirlists = updateCounter(ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistCounter)
+		lastOssStats.SlowDirlistEnts = updateCounter(ossStats.SlowDirlistEnts, lastOssStats.SlowDirlistEnts, OssSlowDirlistEntsCounter)
+		lastOssStats.SlowTruncates = updateCounter(ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateCounter)
+		lastOssStats.SlowUnlinks = updateCounter(ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkCounter)
+		lastOssStats.SlowChmods = updateCounter(ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodCounter)
+		lastOssStats.SlowOpens = updateCounter(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter)
+		lastOssStats.SlowRenames = updateCounter(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter)
+	}
 
 	return nil
 }
