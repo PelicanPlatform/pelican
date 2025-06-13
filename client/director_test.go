@@ -36,6 +36,7 @@ import (
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 	"github.com/pelicanplatform/pelican/utils"
 )
 
@@ -104,7 +105,11 @@ func TestParseDirectorInfo(t *testing.T) {
 func TestQueryDirector(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
-	viper.Set(param.Client_DirectorRetries.GetName(), 3)
+	// This test assumes the debugging level is at debug or higher
+	test_utils.InitClient(t, map[string]any{
+		param.Client_DirectorRetries.GetName(): 3,
+		param.Debug.GetName():                  true,
+	})
 
 	type testCase struct {
 		name             string

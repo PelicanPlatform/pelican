@@ -32,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -508,8 +509,12 @@ func CleanupTempResources() (err error) {
 func getConfigBase() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// We currently don't handle this case in Windows (and it may not even occur)
-		// This will be revisited in the future
+		os := runtime.GOOS
+		if os == "windows" {
+			windowsPath := filepath.Join("C:", "ProgramData", "pelican")
+			log.Warningln("No home directory found for user -- will check for configuration yaml in ", windowsPath)
+			return windowsPath
+		}
 		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
 		return filepath.Join("/etc", "pelican")
 	}
@@ -726,6 +731,10 @@ func handleContinuedCfg() error {
 // Read config file from web UI changes, and call viper.Set() to explicitly override the value
 // so that env wouldn't take precedence
 func setWebConfigOverride(v *viper.Viper, configPath string) error {
+	if configPath == "" {
+		return nil
+	}
+
 	webConfigFile, err := os.OpenFile(configPath, os.O_RDONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return err
@@ -801,7 +810,12 @@ func InitConfigDir(v *viper.Viper) {
 	configDir := v.GetString("ConfigDir")
 	if configDir == "" {
 		if IsRootExecution() {
-			configDir = "/etc/pelican" // We currently don't handle this case in windows, will be revisited in the future
+			os := runtime.GOOS
+			if os == "windows" {
+				configDir = filepath.Join("C:", "ProgramData", "pelican")
+			} else {
+				configDir = filepath.Join("/etc", "pelican")
+			}
 		} else {
 			configDir = getConfigBase()
 		}
@@ -810,9 +824,9 @@ func InitConfigDir(v *viper.Viper) {
 	v.SetConfigName("pelican")
 }
 
-// InitConfig sets up the global Viper instance by loading defaults and
+// InitConfigInternal sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
-func InitConfig() {
+func InitConfigInternal() {
 	// Set a prefix so Viper knows how to parse PELICAN_* env vars
 	// This must happen before config dir initialization so that Pelican
 	// can pick up setting the config dir with PELICAN_CONFIGDIR
@@ -1306,6 +1320,19 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
+	InitConfigInternal()
+
+	webConfigPath := param.Server_WebConfigFile.GetString()
+	if webConfigPath != "" {
+		if err := os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
+			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
+		}
+	}
+	if err := setWebConfigOverride(viper.GetViper(), webConfigPath); err != nil {
+		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
+	}
+
+	logging.FlushLogs(true)
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
@@ -1325,18 +1352,6 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	if err := SetServerDefaults(viper.GetViper()); err != nil {
 		logging.FlushLogs(true)
 		return err
-	}
-
-	webConfigPath := param.Server_WebConfigFile.GetString()
-	if webConfigPath != "" {
-		if err := os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
-			logging.FlushLogs(true)
-			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
-		}
-	}
-	if err := setWebConfigOverride(viper.GetViper(), webConfigPath); err != nil {
-		logging.FlushLogs(true)
-		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
 	}
 
 	// Flush logs only after we potentially ingest changes from the web UI. This must
@@ -1863,6 +1878,7 @@ func SetClientDefaults(v *viper.Viper) error {
 }
 
 func InitClient() error {
+	InitConfigInternal()
 	logging.FlushLogs(true)
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
@@ -1928,6 +1944,8 @@ func ResetConfig() {
 	fedDiscoveryOnce = &sync.Once{}
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
+
+	setServerOnce = sync.Once{}
 
 	ResetIssuerPrivateKeys()
 

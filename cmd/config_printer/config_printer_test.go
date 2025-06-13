@@ -51,7 +51,8 @@ func setupMockConfig(t *testing.T) error {
 
 	// Set default config
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
+
+	config.InitConfigInternal()
 	if err := config.SetServerDefaults(viper.GetViper()); err != nil {
 		return err
 	}
