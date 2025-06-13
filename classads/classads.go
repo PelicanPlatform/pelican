@@ -113,10 +113,10 @@ func writeValue(buffer *bytes.Buffer, value interface{}) {
 		}
 		buffer.WriteString("]")
 	case []interface{}:
-		buffer.WriteString("[")
+		buffer.WriteString("{")
 		for i, item := range v {
 			if i > 0 {
-				buffer.WriteString(" ")
+				buffer.WriteString(", ")
 			}
 			// Try to handle maps specially
 			if m, ok := item.(map[string]any); ok {
@@ -130,7 +130,7 @@ func writeValue(buffer *bytes.Buffer, value interface{}) {
 				writeValue(buffer, item)
 			}
 		}
-		buffer.WriteString("]")
+		buffer.WriteString("}")
 	default:
 		buffer.WriteString(fmt.Sprintf("%v", value))
 	}

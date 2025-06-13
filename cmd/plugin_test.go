@@ -1295,17 +1295,17 @@ func TestTransferError404(t *testing.T) {
 	defer secondServer.Close()
 
 	// First server returns Link header pointing to second server
-	firstServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	directorServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", secondServer.URL)
 		w.Header().Set("X-Pelican-Namespace", "namespace=/test-namespace, require-token=false")
 		linkHeader := fmt.Sprintf(`<%s>; rel="duplicate"; pri=1; depth=0`, secondServer.URL)
 		w.Header().Set("Link", linkHeader)
 		w.WriteHeader(http.StatusTemporaryRedirect)
 	}))
-	defer firstServer.Close()
+	defer directorServer.Close()
 
 	fInfo := pelican_url.FederationDiscovery{
-		DirectorEndpoint: firstServer.URL,
+		DirectorEndpoint: directorServer.URL,
 	}
 
 	viper.Set(param.TLSSkipVerify.GetName(), true)
