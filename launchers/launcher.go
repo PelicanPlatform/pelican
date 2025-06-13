@@ -393,7 +393,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 func handleGracefulShutdown(ctx context.Context, modules server_structs.ServerType, servers []server_structs.XRootDServer) {
 	if modules.IsEnabled(server_structs.OriginType) || modules.IsEnabled(server_structs.CacheType) {
-		log.Warnf("Waiting %s for on-flight transfers before shutting down", param.Xrootd_ShutdownTimeout.GetDuration().String())
+		log.Warnf("Waiting %s for in-flight transfers before shutting down", param.Xrootd_ShutdownTimeout.GetDuration().String())
 
 		// Set component's health status, so the ad could pick up the shutdown flag (`Status`: `shutting down`)
 		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusShuttingDown, "The server is shutting down")
