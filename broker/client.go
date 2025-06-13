@@ -78,8 +78,8 @@ type (
 
 	// Struct holding pending requests waiting on an origin callback
 	pendingReversals struct {
-		channel chan http.ResponseWriter
-		prefix  string
+		channel  chan http.ResponseWriter
+		originNs string
 	}
 )
 
@@ -157,7 +157,7 @@ func generateRequestId() string {
 }
 
 // Given an origin's broker URL, return a connected socket to the origin
-func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) (conn net.Conn, err error) {
+func ConnectToOrigin(ctx context.Context, brokerUrl, originHost string) (conn net.Conn, err error) {
 
 	// Ensure we have a local CA for signing an origin host certificate.
 	if err = config.GenerateCACert(); err != nil {
@@ -181,8 +181,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 		RequestId:   generateRequestId(),
 		PrivateKey:  keyContents,
 		CallbackUrl: param.Server_ExternalWebUrl.GetString() + "/api/v1.0/broker/callback",
-		OriginName:  originName,
-		Prefix:      prefix,
+		OriginHost:  originHost,
 	}
 	reqBytes, err := json.Marshal(&reqC)
 	if err != nil {
@@ -194,7 +193,8 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	responseChannel := make(chan http.ResponseWriter)
 	defer close(responseChannel)
 	responseMapLock.Lock()
-	response[reqC.RequestId] = pendingReversals{channel: responseChannel, prefix: prefix}
+	originNs := "/origins/" + originHost
+	response[reqC.RequestId] = pendingReversals{channel: responseChannel, originNs: originNs}
 	responseMapLock.Unlock()
 	defer func() {
 		responseMapLock.Lock()
@@ -257,12 +257,16 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	if err != nil {
 		return
 	}
+	originHostname, _, err := net.SplitHostPort(originHost)
+	if err != nil {
+		return
+	}
 	notBefore := time.Now()
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
 			Organization: []string{"Pelican"},
-			CommonName:   originName,
+			CommonName:   originHostname,
 		},
 		NotBefore:             notBefore,
 		NotAfter:              notBefore.Add(10 * time.Minute),
@@ -270,7 +274,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 	}
-	template.DNSNames = []string{originName}
+	template.DNSNames = []string{originHostname}
 	derBytes, err := x509.CreateCertificate(rand.Reader, &template, caCert, &privKey.PublicKey, caPrivateKey)
 	if err != nil {
 		return
@@ -287,7 +291,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	// will write to the channel we originally posted.
 	tck := time.NewTicker(20 * time.Second)
 	defer tck.Stop()
-	log.Debugf("Cache waiting for up to 20 seconds for the origin %s to callback", originName)
+	log.Debugf("Cache waiting for up to 20 seconds for the origin %s to callback", originHost)
 	select {
 	case <-ctx.Done():
 		log.Debug("Context has been cancelled while waiting for callback")
@@ -415,7 +419,13 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 	}
 	cacheAud.Path = ""
 
-	token, err := createToken(param.Origin_FederationPrefix.GetString(), param.Server_Hostname.GetString(), cacheAud.String(), token_scopes.Broker_Callback)
+	originUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	if err != nil {
+		return
+	}
+	serverNs := "/origins/" + originUrl.Host
+
+	token, err := createToken(serverNs, param.Server_Hostname.GetString(), cacheAud.String(), token_scopes.Broker_Callback)
 	if err != nil {
 		err = errors.Wrap(err, "failure when constructing the cache callback token")
 		return
@@ -565,9 +575,10 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 	if err != nil {
 		return
 	}
+	serverNs := "/origins/" + originUrl.Host
 	oReq := originRequest{
-		Origin: originUrl.Hostname(),
-		Prefix: param.Origin_FederationPrefix.GetString(),
+		OriginNs: serverNs,
+		ServerNs: serverNs,
 	}
 	req, err := json.Marshal(&oReq)
 	if err != nil {
@@ -602,7 +613,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 				}
 				brokerAud.Path = ""
 
-				token, err := createToken(param.Origin_FederationPrefix.GetString(), param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
+				token, err := createToken(serverNs, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
 				if err != nil {
 					log.Errorln("Failure when constructing the broker retrieve token:", err)
 					break
