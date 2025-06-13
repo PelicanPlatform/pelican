@@ -1740,8 +1740,82 @@ func HandleSummaryPacket(packet []byte) error {
 	return nil
 }
 
+// handleOSSPacket processes the OSS plugin stats
+// It expects the blobs to be in JSON format and will update the metrics accordingly
+// It returns an error if the blobs are empty or if there is an error in unmarshalling
+// the JSON data
+// It also handles the case where the total IO or wait time is less than the previous value
+// by resetting the increment to 0.
+// It also handles the case where the event is not in the allowed list by logging a debug message
+// and continuing to the next blob.
+//
+// When processing multiple blobs, only the last valid OSS event (with event="oss_stats")
+// in the list will be used to update the metrics. This means that if there are multiple
+// valid OSS events in the list, only the last one's values will be recorded. Invalid events
+// (wrong event type or malformed JSON) are ignored and do not affect the processing of
+// subsequent events.
+//
+// The oss_stats event schema is as follows:
+//
+//	{
+//		"event": "oss_stats",
+//		"reads": 100,
+//		"writes": 0,
+//		"stats": 0,
+//		"pgreads": 0,
+//		"pgwrites": 0,
+//		"readvs": 0,
+//		"readv_segs": 0,
+//		"dirlists": 0,
+//		"dirlist_ents": 0,
+//		"truncates": 0,
+//		"unlinks": 0,
+//		"chmods": 0,
+//		"opens": 0,
+//		"renames": 0,
+//		"slow_reads": 0,
+//		"slow_writes": 0,
+//		"slow_stats": 0,
+//		"slow_pgreads": 0,
+//		"slow_pgwrites": 0,
+//		"slow_readvs": 0,
+//		"slow_readv_segs": 0,
+//		"slow_dirlists": 0,
+//		"slow_dirlist_ents": 0,
+//		"slow_truncates": 0,
+//		"slow_unlinks": 0,
+//		"slow_chmods": 0,
+//		"slow_opens": 0,
+//		"slow_renames": 0,
+//		"open_t": 0.0000,
+//		"read_t": 0.0000,
+//		"readv_t": 0.0000,
+//		"pgread_t": 0.0000,
+//		"pgwrite_t": 0.0000,
+//		"dirlist_t": 0.0000,
+//		"stat_t": 0.0000,
+//		"truncate_t": 0.0000,
+//		"unlink_t": 0.0000,
+//		"rename_t": 0.0000,
+//		"chmod_t": 0.0000,
+//		"slow_open_t": 0.0000,
+//		"slow_read_t": 0.0000,
+//		"slow_readv_t": 0.0000,
+//		"slow_pgread_t": 0.0000,
+//		"slow_pgwrite_t": 0.0000,
+//		"slow_dirlist_t": 0.0000,
+//		"slow_stat_t": 0.0000,
+//		"slow_truncate_t": 0.0000,
+//		"slow_unlink_t": 0.0000,
+//		"slow_rename_t": 0.0000,
+//		"slow_chmod_t": 0.0000
+//	}
+//
+// The event field is used to determine if the blob is a valid OSS event.
+// The other fields are used to update the metrics accordingly.
+// The slow_ prefix fields are used to update the slow operation histograms.
+// The other fields are used to update the counters.
 func handleOSSPacket(blobs [][]byte) error {
-
 	updateCounter := func(new int, old int, counter prometheus.Counter) int {
 		// if the new value is less than the old value, we know that that the counter shouldnt be incremented
 		incBy := math.Max(0, float64(new-old))
@@ -1782,7 +1856,7 @@ func handleOSSPacket(blobs [][]byte) error {
 			return errors.Wrap(err, "failed to parse OSS stat json")
 		}
 		if !allowedEvents[ossStats.Event] {
-			log.Debugf("handleOSSPacket: received an OSS packet with event type (%s)", ossStats.Event)
+			log.Debugf("handleOSSPacket received an OSS packet with an unrecognized event type (%s)", ossStats.Event)
 			continue
 		}
 		updateHistogram(ossStats.ReadT, lastOssStats.ReadT, ossStats.Reads, lastOssStats.Reads, OssReadTime)
