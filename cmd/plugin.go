@@ -482,6 +482,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			resultAd := classads.NewClassAd()
 			// Set our DeveloperData:
 			developerData := make(map[string]interface{})
+			var transferErrorData []interface{}
 			developerData["PelicanClientVersion"] = config.GetVersion()
 			developerData["Attempts"] = len(result.Attempts)
 			for _, attempt := range result.Attempts {
@@ -497,6 +498,8 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				if attempt.Error != nil {
 					developerData[fmt.Sprintf("TransferError%d", attempt.Number)] = attempt.Error.Error()
 					developerData[fmt.Sprintf("IsRetryable%d", attempt.Number)] = client.IsRetryable(attempt.Error)
+					transferError := createTransferError(attempt.Error)
+					transferErrorData = append(transferErrorData, transferError)
 				}
 			}
 			if len(result.ClientChecksums) > 0 {
@@ -515,6 +518,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 			}
 
 			resultAd.Set("DeveloperData", developerData)
+			resultAd.Set("TransferErrorData", transferErrorData)
 
 			resultAd.Set("TransferStartTime", result.TransferStartTime.Unix())
 			resultAd.Set("TransferEndTime", time.Now().Unix())
@@ -768,6 +772,40 @@ func writeTransferErrorMessage(currentError string, transferUrl string) (errMsg 
 	}
 
 	return
+}
+
+// createTransferError creates a transfer error map with developer data
+func createTransferError(err error) (transferError map[string]interface{}) {
+	transferError = make(map[string]interface{})
+	developerData := make(map[string]interface{})
+	errMsg := err.Error()
+
+	if errors.Is(err, &client.SlowTransferError{}) {
+		developerData["PelicanErrorCode"] = 6002 // From error_codes.yaml
+		developerData["Retryable"] = true        // SlowTransferError is always retryable
+		developerData["ErrorMessage"] = "Slow transfer"
+		developerData["ErrorType"] = "Transfer.SlowTransfer"
+		transferError["ErrorType"] = "Transfer"
+	} else if strings.Contains(errMsg, "server returned 404 Not Found") {
+		developerData["PelicanErrorCode"] = 5011
+		developerData["Retryable"] = false
+		developerData["ErrorMessage"] = "404: Not Found"
+		developerData["ErrorType"] = "Specification.FileNotFound"
+		transferError["ErrorType"] = "Specification"
+	} else if errors.Is(err, &client.HeaderTimeoutError{}) {
+		developerData["PelicanErrorCode"] = 3000
+		developerData["ErrorType"] = "Contact"
+		developerData["Retryable"] = true
+		developerData["ErrorMessage"] = "Timeout"
+		transferError["ErrorType"] = "Contact"
+	} else {
+		developerData["PelicanErrorCode"] = 0
+		developerData["ErrorType"] = "Unprocessed"
+		developerData["Retryable"] = false
+		developerData["ErrorMessage"] = "Unprocessed (for now) error type"
+	}
+	transferError["DeveloperData"] = developerData
+	return transferError
 }
 
 // This function parses the machine ad present with a condor job to get the site name and the physical hostname if run

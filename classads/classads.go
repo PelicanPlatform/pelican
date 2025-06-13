@@ -100,6 +100,9 @@ func writeValue(buffer *bytes.Buffer, value interface{}) {
 			case map[string]any:
 				writeValue(buffer, value)
 				fmt.Fprintf(buffer, "; ")
+			case []interface{}:
+				writeValue(buffer, value)
+				fmt.Fprintf(buffer, "; ")
 			default:
 				if str, ok := valueType.(string); ok {
 					fmt.Fprintf(buffer, "%s; ", strconv.QuoteToASCII(str))
@@ -109,6 +112,25 @@ func writeValue(buffer *bytes.Buffer, value interface{}) {
 			}
 		}
 		buffer.WriteString("]")
+	case []interface{}:
+		buffer.WriteString("{")
+		for i, item := range v {
+			if i > 0 {
+				buffer.WriteString(", ")
+			}
+			// Try to handle maps specially
+			if m, ok := item.(map[string]any); ok {
+				writeValue(buffer, m)
+			} else if str, ok := item.(string); ok {
+				// Don't quote strings in arrays
+				str = strings.ReplaceAll(str, "\n", "\\n")
+				str = strings.ReplaceAll(str, "\r", "\\r")
+				buffer.WriteString(str)
+			} else {
+				writeValue(buffer, item)
+			}
+		}
+		buffer.WriteString("}")
 	default:
 		buffer.WriteString(fmt.Sprintf("%v", value))
 	}
