@@ -53,7 +53,7 @@ When a Pelican client encounters a Pelican URL, it uses the hostname in the fede
 When using the `osdf:///` scheme, Pelican will load in the federation metadata automatically using the defaults for accessing the Open Science Data Federation (OSDF). This scheme should only be used if your federation or data can be accessed through the OSDF. When using this scheme, you should not specify the federation URL at all, as Pelican will handle this automatically. For example:
 
 ```bash
-pelican object get osdf:///<namespace-prefix></path/to/file> <local/path/to/file>
+pelican object get osdf:///<namespace-prefix></path/to/object> <local/path/to/file>
 ```
 
 >This scheme has three slashes (`///`) after the `osdf` because the hostname is left empty to be automatically populated therefore, just start the URL with the namespace prefix. Pelican currently recognizes the `osdf://` scheme (with two slashes) in case the user forgets to pass the third slash, but this is not recommended.
@@ -66,7 +66,7 @@ To use the pelican client to get public objects from a federation, use Pelican's
 To use the `pelican://` URL scheme, you need to specify the federation URL within the request URL. To do this, you would format the `object get` command like so:
 
 ```bash
-pelican object get pelican://<federation-url></namespace-prefix></path/to/file> <local/path/to/file>
+pelican object get pelican://<federation-url></namespace-prefix></path/to/object> <local/path/to/file>
 ```
 
 You can try this yourself by getting the public file that was mentioned earlier from the OSDF. Using the `object get` sub command, and providing the federation URL for the OSDF:
@@ -93,7 +93,7 @@ Protected namespaces require that a Pelican client prove it is allowed to access
 Some origins support authentication with CILogon's OIDC client. In these cases, the Pelican client is capable of guiding users through authentication with the origin, once you logged in via CILogon. To download protected objects from origins that support CILogon, run the same command as for downloading a public object:
 
 ```bash
-pelican object get pelican://<federation-url></namespace-prefix></path/to/file> <local/path/to/file>
+pelican object get pelican://<federation-url></namespace-prefix></path/to/object> <local/path/to/file>
 ```
 
 If you're doing this for the very first time, Pelican will create an encrypted token wallet on your system and you will be required to provide Pelican with a password for the wallet. If this isn't your first time, you will be asked to provide your already-configured password to unlock the token wallet.
@@ -132,7 +132,7 @@ Once you have the token, copy and paste it into a file on your machine, and pass
 
 ```bash
 # Pass the path to the file containing the token using -t flag
-pelican object get pelican://<federation-url></namespace-prefix></path/to/file> </local/path/to/file> -t </path/to/token/file>
+pelican object get pelican://<federation-url></namespace-prefix></path/to/object> </local/path/to/file> -t </path/to/token/file>
 ```
 
 For example, if a token is saved in a file named `my-token`, it can be used to get the object `/ospool/PROTECTED/auth-test.txt` by running:
@@ -146,7 +146,7 @@ $ pelican object get -f https://osg-htc.org /ospool/PROTECTED/auth-test.txt down
 Another powerful Pelican client command is the `pelican object put` command. This command does a simple PUT request to add your object to a data repository via the federation, and putting files into a data repository always requires a token. For the example, we will need a token to perform these requests (see the [previous section](#get-a-protected-object-from-your-federation) for more information). Here is how you can use `pelican object put`:
 
 ```bash
-pelican object put <path/to/local/file> pelican://<federation-url></namespace-prefix></path/to/file> -t </path/to/token/file>
+pelican object put <path/to/local/file> pelican://<federation-url></namespace-prefix></path/to/object> -t </path/to/token/file>
 ```
 
 > **Note:** you can also specify the federation url here with the `-f` flag, just be sure not to include it in the request URL as the host name if you decide to do so.
@@ -158,7 +158,7 @@ pelican object put <path/to/local/file> pelican://<federation-url></namespace-pr
 As well with Pelican's `object get` and `object put` commands, there is also an older command called `pelican object copy`. This functions the same as the `pelican object get/put` except that it works for both gets and puts. For example, to do an `object get`:
 
 ```bash
-pelican object copy pelican://<federation-url></namespace-prefix></path/to/file> <local/path/to/file>
+pelican object copy pelican://<federation-url></namespace-prefix></path/to/object> <local/path/to/file>
 ```
 
 and to do an `object put`:
@@ -174,7 +174,7 @@ The Pelican client allows users to modify the behavior of requests by passing UR
 The Pelican client has the ability to automatically compress/unpack tarballs when uploading and downloading to and from a federation. The user just needs to supply their request URL with a query. For example, to automatically unpack a tarball on downloading, run:
 
 ```bash
-pelican object get pelican://<federation-url></namespace-prefix></path/to/file/file.tar.gz>?pack=tar.gz <local/path/to/file>
+pelican object get pelican://<federation-url></namespace-prefix></path/to/object/file.tar.gz>?pack=tar.gz <local/path/to/file>
 ```
 
 To upload, specify a directory and Pelican will compress it for you:
@@ -210,7 +210,7 @@ pelican object put <local/path/to/directory> pelican://<federation-url></namespa
 The `?directread` query is used if you would like to download an object without utilizing a cache. This way, the object will come directly from the origin each time and never use the cache. To use this query, you can run:
 
 ```bash
-pelican object get pelican://<federation-url></namespace-prefix></path/to/file>?directread <local/path/to/file>
+pelican object get pelican://<federation-url></namespace-prefix></path/to/object>?directread <local/path/to/file>
 ```
 This query does not make sense to use for uploads since uploads go directly to the origin anyway. If you use this query by mistake, you should not run into any issues and your upload will function as normal.
 
@@ -240,6 +240,91 @@ The Pelican client supports a variety of command line flags that modify the clie
 - **--methods:** Takes a comma separated list of methods to try for downloads/uploads, the default is just http.
 - **-r or --recursive:** Takes no argument and indicates to Pelican that all sub paths at the level of the provided namespace should be copied recursively. This option is only supported if the origin supports the WebDav protocol.
 - **-t or --token:** Takes a path to a file containing a signed JWT, and is used to download protected objects.
+
+## Listing Objects on an Origin
+
+To use the pelican client to list objects in a collection, use Pelican's `object ls` sub-command
+
+```bash
+pelican object ls pelican://<federation-url></namespace-prefix></path/to/collection>
+```
+
+This will only be successful when listings are enabled in the Pelican origin. To learn more about origin capabilities, go to the [Origin docs](../federating-your-data/origin.mdx).
+
+If listings are not enabled, you will see the following error:
+
+```
+ERROR[2025-02-07T15:27:05-06:00] Failure getting pelican://osdf-director.osg-htc.org:443/nrao-ardg: failed to perform list request: Collections URL not found in director response. Are you sure there's an origin for prefix /<namespace-prefix> that supports listings?
+```
+
+## Getting Object Data From a Federation with Stat
+
+To use the pelican client to get object data, use Pelican's `object stat` sub-command.
+
+```bash
+pelican object stat pelican://<federation-url></namespace-prefix></path/to/object>
+```
+
+This will return data in the form of:
+
+```
+Name: </namespace-path></path/to/object>
+Size: <size>
+ModTime: <time-last-modified>
+IsCollection: false
+```
+
+This command can also be run on a collection:
+
+```bash
+pelican object stat pelican://<federation-url></namespace-prefix></path/to/collection>
+```
+
+and the data will look like:
+
+```
+Name: </namespace-path></path/to/collection>
+Size: 0
+ModTime: <time-last-modified>
+IsCollection: true
+```
+
+## Syncing Objects with an Origin
+
+Pelican also has an `object sync` command which will sync objects from a source object or collections to a destination object or collection. If the objects already exist in the destination and are the same size or larger than the source objects of the same name, they will not be overwritten, but the objects which don't exist will be added.
+
+> **Warning**: In the case where an object in the destination is smaller than an object with the same name in the source, the sync command assumes that a partial sync was interrupted and completes it by appending the necessary bytes. If it issn't the same file, but has the same name, this can result in the mashing of two files together.
+
+### Sync Objects from a Collection to a Local Directory
+
+To sync a local directory with a collection in the origin, use the following command:
+
+```bash
+pelican object sync pelican://<federation-url></namespace-prefix></path/to/collection> <local/directory>
+```
+
+This will put all the objects in the given source collection into the local directory, while maintaining directory structure.
+
+### Sync Objects from a Local Directory to a Collection
+
+To sync a collection in the origin with the files in a local directory, use the following command:
+
+```bash
+pelican object sync <local/drectory> pelican://<federation-url></namespace-prefix></path/to/collection>
+```
+
+This will upload the files from a local directory into the origin, creating namespace prefixes as necessary.
+
+### Sync Individual Objects
+
+The above `object sync` command can also work on the object level. To sync an object, run the following command:
+
+```bash
+pelican object sync <source> <destination>
+```
+
+Note that the destination can be either a collection or an object. If it's a collection, then the source object is placed within the collection.
+
 
 ## Aliases of The Pelican Binary
 
