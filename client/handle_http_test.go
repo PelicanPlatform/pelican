@@ -469,7 +469,7 @@ func TestSortAttempts(t *testing.T) {
 
 	defer cancel()
 
-	token := newTokenGenerator(nil, nil, false, false)
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("aaa")
 	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, token)
 	assert.Equal(t, int64(42), size)
@@ -1049,7 +1049,7 @@ func TestHeadRequestWithDownloadToken(t *testing.T) {
 	svrURL, err := url.Parse(svr.URL)
 	require.NoError(t, err)
 
-	token := newTokenGenerator(nil, nil, false, false)
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("test-token")
 	transfer := &transferFile{
 		ctx:       context.Background(),
