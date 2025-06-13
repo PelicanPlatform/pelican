@@ -115,6 +115,7 @@ const (
 	TokenRead
 	TokenSharedWrite
 	TokenSharedRead
+	TokenDelete
 )
 
 var (
