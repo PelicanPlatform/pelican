@@ -1171,16 +1171,15 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 		adV2.Version = "unknown"
 	}
 
+	sn := adV2.Name
 	// Process received server(origin/cache) downtimes and toggle the director's in-memory downtime tracker when necessary
 	if adV2.Downtimes != nil {
 		filteredServersMutex.Lock()
-		defer filteredServersMutex.Unlock()
 
 		// Update the cached server downtime list
-		serverDowntimes[adV2.Name] = adV2.Downtimes
+		serverDowntimes[sn] = adV2.Downtimes
 
 		now := time.Now().UTC().UnixMilli()
-		sn := adV2.Name
 		active := false // Flag to indicate if this server has active downtime in this server ad
 		for _, dt := range adV2.Downtimes {
 			if dt.StartTime <= now &&
@@ -1203,6 +1202,35 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 			if isServerFiltered && existingFilterType == serverFiltered {
 				delete(filteredServers, sn)
 			}
+		}
+		filteredServersMutex.Unlock()
+	}
+
+	// "Status" represents the server's overall health status. It is introduced in Pelican 7.17.0
+	if adV2.Status != "" { // For backward compatibility, we only process this if it is set
+		// If the server is about to shutdown, we silently put it into downtime.
+		// Then it will not receive new requests from the Director, but it will still be able to serve the existing ones.
+		if metrics.ParseHealthStatus(adV2.Status) == metrics.StatusShuttingDown {
+			filteredServersMutex.Lock()
+			// Inspect the existing downtime status for this server
+			existingFilterType, isServerFiltered := filteredServers[sn]
+
+			// Put the server in downtime only if no filter (downtime) exists or it was tempAllowed
+			if !isServerFiltered || existingFilterType == tempAllowed {
+				filteredServers[sn] = shutdownFiltered
+				log.Debugf("Server %s is shutting down, applying downtime to prevent new transfer requests", sn)
+			}
+			filteredServersMutex.Unlock()
+		} else {
+			// If the server is back online, we flush out existing shutdown filter if it exists
+			filteredServersMutex.Lock()
+			if existingFilterType, isServerFiltered := filteredServers[sn]; isServerFiltered {
+				if existingFilterType == shutdownFiltered {
+					delete(filteredServers, sn)
+					log.Debugf("Removed the active downtime for server %s as it has come back online", sn)
+				}
+			}
+			filteredServersMutex.Unlock()
 		}
 	}
 
