@@ -1238,6 +1238,10 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	if _, exists := copyUrl.Query()[pelican_url.QueryRecursive]; exists {
 		recursive = true
 	}
+	operation := config.TokenSharedRead
+	if upload {
+		operation = config.TokenSharedWrite
+	}
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
 		recursive:      recursive,
@@ -1249,7 +1253,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypeDownload,
 		uuid:           id,
 		project:        project,
-		token:          newTokenGenerator(&copyUrl, nil, upload, !tc.skipAcquire),
+		token:          newTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
 	}
 	if upload {
 		tj.xferType = transferTypeUpload
@@ -1371,7 +1375,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypePrestage,
 		uuid:           id,
 		project:        project,
-		token:          newTokenGenerator(&copyUrl, nil, false, !tc.skipAcquire),
+		token:          newTokenGenerator(&copyUrl, nil, config.TokenSharedRead, !tc.skipAcquire),
 	}
 	if tc.token != "" {
 		tj.token.SetToken(tc.token)
@@ -1469,7 +1473,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	}
 
 	var prefObjServers []*url.URL
-	token := newTokenGenerator(pelicanURL, nil, false, true)
+	token := newTokenGenerator(pelicanURL, nil, config.TokenSharedRead, true)
 	if tc.token != "" {
 		token.SetToken(tc.token)
 	}

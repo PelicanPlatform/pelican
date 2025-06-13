@@ -68,7 +68,7 @@ type (
 		Destination   *pelican_url.PelicanURL
 		TokenLocation string
 		TokenName     string
-		IsWrite       bool
+		Operation     config.TokenOperation
 		EnableAcquire bool
 		Token         atomic.Pointer[tokenInfo]
 		Iterator      *tokenContentIterator
@@ -84,11 +84,11 @@ type (
 	}
 )
 
-func newTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, isWrite bool, enableAcquire bool) *tokenGenerator {
+func newTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
 	return &tokenGenerator{
 		DirResp:       dirResp,
 		Destination:   dest,
-		IsWrite:       isWrite,
+		Operation:     operation,
 		EnableAcquire: enableAcquire,
 		Sync:          new(singleflight.Group),
 	}
@@ -128,7 +128,7 @@ func (tg *tokenGenerator) Copy() *tokenGenerator {
 	return &tokenGenerator{
 		DirResp:       tg.DirResp,
 		Destination:   tg.Destination,
-		IsWrite:       tg.IsWrite,
+		Operation:     tg.Operation,
 		EnableAcquire: tg.EnableAcquire,
 		Sync:          new(singleflight.Group),
 	}
@@ -311,10 +311,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 	}
 
 	opts := config.TokenGenerationOpts{
-		Operation: config.TokenSharedRead,
-	}
-	if tg.IsWrite {
-		opts.Operation = config.TokenSharedWrite
+		Operation: tg.Operation,
 	}
 
 	if tg.Iterator == nil {
@@ -348,10 +345,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 	}
 
 	if tg.EnableAcquire && tg.Destination != nil && tg.DirResp != nil {
-		opts := config.TokenGenerationOpts{Operation: config.TokenSharedRead}
-		if tg.IsWrite {
-			opts.Operation = config.TokenSharedWrite
-		}
+		opts := config.TokenGenerationOpts{Operation: tg.Operation}
 		var contents string
 		contents, err = AcquireToken(tg.Destination.GetRawUrl(), *tg.DirResp, opts)
 		if err == nil && contents != "" {

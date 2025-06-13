@@ -24,6 +24,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/pelicanplatform/pelican/config"
 )
 
 func TestBearerAuthenticator_Authorize(t *testing.T) {
@@ -37,7 +39,7 @@ func TestBearerAuthenticator_Authorize(t *testing.T) {
 	}))
 	defer server.Close()
 
-	token := newTokenGenerator(nil, nil, false, false)
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("some_token_1234_abc")
 	authenticator := &bearerAuthenticator{token: token}
 	client := &http.Client{}
@@ -55,7 +57,7 @@ func TestBearerAuthenticator_Authorize(t *testing.T) {
 }
 
 func TestBearerAuthenticator_Verify(t *testing.T) {
-	token := newTokenGenerator(nil, nil, false, false)
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("some_token_1234_abc")
 	authenticator := &bearerAuthenticator{token: token}
 	client := &http.Client{}

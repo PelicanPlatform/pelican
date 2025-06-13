@@ -109,6 +109,8 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_st
 	var storageScope string
 	if opts.Operation == config.TokenSharedWrite || opts.Operation == config.TokenWrite {
 		storageScope = "storage.create:"
+	} else if opts.Operation == config.TokenDelete {
+		storageScope = "storage.modify:"
 	} else {
 		storageScope = "storage.read:"
 	}
