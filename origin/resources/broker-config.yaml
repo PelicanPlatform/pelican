@@ -1,0 +1,13 @@
+# Origin export configuration to test broker functionality
+
+Director:
+  EnableBroker: true
+
+Origin:
+  StorageType: "posix"
+  EnableBroker: true
+  EnableDirectReads: true
+  Exports:
+    - StoragePrefix: /<SHOULD BE OVERRIDDEN>
+      FederationPrefix: /test
+      Capabilities: ["PublicReads", "Writes", "DirectReads", "Listings"]

@@ -28,7 +28,7 @@ import (
 
 func serveDirector(cmd *cobra.Command, args []string) error {
 	modules := server_structs.DirectorType
-	if param.Origin_EnableBroker.GetBool() {
+	if param.Director_EnableBroker.GetBool() {
 		modules.Set(server_structs.BrokerType)
 	}
 

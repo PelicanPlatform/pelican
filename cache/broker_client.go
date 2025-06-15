@@ -26,10 +26,13 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"syscall"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
@@ -37,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/broker"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
 type (
@@ -183,7 +187,7 @@ func LaunchRequestListener(ctx context.Context, egrp *errgroup.Group) error {
 			}
 			select {
 			case <-ctx.Done():
-				return
+				return nil
 			case connChannel <- conn:
 			}
 		}
@@ -199,11 +203,64 @@ func LaunchRequestListener(ctx context.Context, egrp *errgroup.Group) error {
 		for {
 			select {
 			case <-ctx.Done():
-				return
+				return nil
 			case conn := <-connChannel:
 				go handleRequest(ctx, conn)
 			}
 		}
 	})
 	return nil
+}
+
+// Launch goroutines that continuously poll the broker for requests.
+//
+// This will allow the cache to receive connection reversals from director
+// via the broker for its web API.  It allows the cache to keep its web API
+// behind a firewall, while still allowing the director to connect to it for
+// functionality such as Prometheus metrics.
+func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine) (err error) {
+	listenerChan := make(chan any)
+	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	if err != nil {
+		return
+	}
+
+	// Startup 5 continuous polling routines
+	for cnt := 0; cnt < 5; cnt += 1 {
+		err = broker.LaunchRequestMonitor(ctx, egrp, server_structs.CacheType, externalWebUrl.Hostname(), listenerChan)
+		if err != nil {
+			return
+		}
+	}
+	// Start routine which receives the reverse listener and then launches
+	// a simple proxying HTTPS server for that connection
+	egrp.Go(func() (err error) {
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case res := <-listenerChan:
+				if err, ok := res.(error); ok {
+					log.Errorln("Callback failed:", err)
+					break
+				}
+				listener, ok := res.(net.Listener)
+				if !ok {
+					log.Errorln("Failed to determine callback result:", res)
+					break
+				}
+				srv := http.Server{
+					Handler: http.HandlerFunc(engine.ServeHTTP),
+				}
+				go func() {
+					// A one-shot listener should do a single "accept" then shutdown.
+					err = srv.Serve(listener)
+					if !errors.Is(err, net.ErrClosed) {
+						log.Errorln("Failed to serve reverse connection:", err)
+					}
+				}()
+			}
+		}
+	})
+	return
 }

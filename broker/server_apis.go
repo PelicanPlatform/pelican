@@ -71,6 +71,11 @@ func newBrokerRespTimeout() (result brokerRetrievalResp) {
 	return
 }
 
+// Retrieve any pending reversal requests from the connection broker.
+//
+// This is long-polled by the service relying on the connection broker
+// (e.g., an origin); it will return any reversal requests from a public
+// service (e.g., a cache) for the origin to make a connection.
 func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
 	timeoutStr := "5s"
 	if val := ginCtx.Request.Header.Get("X-Pelican-Timeout"); val != "" {
@@ -108,7 +113,7 @@ func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
 		ginCtx.AbortWithStatusJSON(http.StatusUnauthorized, newBrokerRespFail("Authorization denied"))
 	}
 
-	req, err := handleRetrieve(ctx, ginCtx, originReq.Prefix, originReq.Origin, timeoutVal)
+	req, err := handleRetrieve(ctx, ginCtx, originReq.Origin, timeoutVal)
 	if errors.Is(err, errRetrieveTimeout) {
 		ginCtx.JSON(http.StatusOK, newBrokerRespTimeout())
 		return
@@ -120,6 +125,10 @@ func retrieveRequest(ctx context.Context, ginCtx *gin.Context) {
 	ginCtx.JSON(http.StatusOK, newBrokerReqResp(req))
 }
 
+// Service a request to the broker to initiate a connection.
+//
+// The connection reversal request will cause a listening service (e.g., an origin)
+// to connect to the endpoint provided by the public service (e.g., a cache).
 func reverseRequest(ctx context.Context, ginCtx *gin.Context) {
 	timeoutStr := "5s"
 	if val := ginCtx.Request.Header.Get("X-Pelican-Timeout"); val != "" {
@@ -178,13 +187,25 @@ func reverseRequest(ctx context.Context, ginCtx *gin.Context) {
 	}
 }
 
+// Register the central broker functionality with the gin router.
+//
+// Typically, this is done by the director; two APIs are exposed:
+//   - `retrieve`: Services needing connection brokering (e.g., origins behind a firewall)
+//     will long-poll this endpoint to retrieve any connection brokering requests from
+//     a public service (e.g., a cache).
+//   - `reverse`: Invoked by a public service (e.g., a cache) that would like to connect
+//     to a service behind a firewall (e.g., an origin).  Official request for the origin
+//     to make a connection.
 func RegisterBroker(ctx context.Context, router *gin.RouterGroup) {
 	// Establish the routes used for cache/origin redirection
 	router.POST("/api/v1.0/broker/retrieve", func(ginCtx *gin.Context) { retrieveRequest(ctx, ginCtx) })
 	router.POST("/api/v1.0/broker/reverse", func(ginCtx *gin.Context) { reverseRequest(ctx, ginCtx) })
 }
 
-// Cache's HTTP handler function for callbacks from an origin
+// Server's HTTP handler function for callbacks from a remote service behind a broker.
+//
+// The server will authorize the request then hand the go routine waiting for the connection
+// reversal.  It will return once the other routine has completed the connection reversal.
 func handleCallback(ctx context.Context, ginCtx *gin.Context) {
 	callbackReq := callbackRequest{}
 	if err := ginCtx.Bind(&callbackReq); err != nil {
