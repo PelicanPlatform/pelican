@@ -37,6 +37,7 @@ export interface Alert {
 export interface RegistryNamespace {
   id: number;
   prefix: string;
+  adjustedPrefix?: string; // This value is the same when type is 'namespace' otherwise it removes the type value
   pubkey: string;
   type: 'origin' | 'cache' | 'namespace';
   admin_metadata: NamespaceAdminMetadata;

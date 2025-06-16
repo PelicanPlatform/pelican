@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Autocomplete,
   Box,
   Button,
   Checkbox,
@@ -41,6 +42,10 @@ import { Delete } from '@mui/icons-material';
 import FormHelperText from '@mui/material/FormHelperText';
 import { RegistryNamespace } from '@/index';
 import useApiSWR from '@/hooks/useApiSWR';
+import {getExtendedNamespaces} from "@/helpers/get";
+import extendNamespace from "@/helpers/Registry/namespaceToServer";
+import { NamespaceIcon } from '@/components';
+import getUtcOffsetString from "@/helpers/getUtcOffsetString";
 
 interface DowntimeFormProps {
   downtime: Partial<DowntimeGet>;
@@ -71,48 +76,61 @@ const ServerUnknownDowntimeForm = ({
     'getNamespaces',
     getNamespaces
   );
-  const prefixes = useMemo(
-    () => namespacesToOriginAndCachePrefixes(namespaces || []),
-    [namespaces]
-  );
+  const servers = useMemo(() => {
+    return (namespaces || []).map(extendNamespace)
+        .filter(x => (x.type === 'origin' || x.type === 'cache') &&
+          x.admin_metadata.status === 'Approved'
+        )
+        .sort((a,b) => (a?.adjustedPrefix || '') > (b?.adjustedPrefix || '') ? 1 : -1);
+  }, [namespaces]);
 
   // Set a default prefix on registry
   useEffect(() => {
-    if (prefixes.length > 0 && downtime.serverName === '') {
-      setDowntime({ ...downtime, serverName: prefixes[0] });
+    if (servers.length > 0 && downtime.serverName === '') {
+      setDowntime({ ...downtime, serverName: servers[0].prefix });
     }
-  }, [prefixes, setDowntime, downtime]);
+  }, [servers, setDowntime, downtime]);
 
   return (
     <Box>
       <Box mt={2}>
-        <FormControl fullWidth>
-          <InputLabel id='server-prefix-label'>Server Prefix</InputLabel>
-          <Select
-            required
-            labelId='server-prefix-label'
-            id='server-prefix'
-            value={downtime.serverName}
-            label='Server Prefix'
-            onChange={(e) => {
-              setDowntime({ ...downtime, serverName: e.target.value });
-            }}
-          >
-            {prefixes.map((prefix) => (
-              <MenuItem
-                key={prefix}
-                value={prefix}
-                selected={prefix === downtime.serverName}
-              >
-                {prefix}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <Autocomplete
+          options={servers}
+          getOptionLabel={(servers) => servers?.adjustedPrefix || "Error"}
+          isOptionEqualToValue={(servers, value) =>
+            servers?.adjustedPrefix === value?.adjustedPrefix}
+          value={servers.filter(x => x.prefix == downtime.serverName)[0] || servers[0]}
+          onChange={(e, v) => {
+            if (!v) return;
+            setDowntime({ ...downtime, serverName: v.prefix });
+          }}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label='Server'
+              variant='outlined'
+              required
+            />
+          )}
+          renderOption={(params, option) => (
+            <Box component='li' {...params}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', width: "100%" }}>
+                <Box display={"flex"}>
+                  {option.adjustedPrefix || option.prefix}
+                </Box>
+                <Box display={"flex"}>
+                  <NamespaceIcon
+                      serverType={option.type}
+                  />
+                </Box>
+              </Box>
+            </Box>
+          )}
+        />
       </Box>
       <Box mt={2}>
         <DateTimePicker
-          label={'Start Time'}
+          label={`Start Time (${getUtcOffsetString()})`}
           value={DateTime.fromMillis(downtime.startTime)}
           onChange={(v) =>
             setDowntime({ ...downtime, startTime: v?.toMillis() || 0 })
@@ -121,7 +139,7 @@ const ServerUnknownDowntimeForm = ({
       </Box>
       <Box mt={2}>
         <DateTimePicker
-          label={'End Time'}
+          label={`End Time (${getUtcOffsetString()})`}
           disabled={endless}
           value={DateTime.fromMillis(downtime.endTime)}
           onChange={(v) =>
@@ -177,7 +195,7 @@ const ServerUnknownDowntimeForm = ({
           <Select
             variant={'outlined'}
             labelId={'class'}
-            label={'class'}
+            label={'Scheduled'}
             value={downtime?.class}
             onChange={(e) =>
               setDowntime({
@@ -280,9 +298,11 @@ const submitDowntime = async (
   }
 };
 
-const namespacesToOriginAndCachePrefixes = (
+const namespacesToRegistryServers = (
   namespaces: RegistryNamespace[]
 ): string[] => {
+
+
   const originsAndCaches = namespaces.filter(
     (n) => n.prefix.startsWith('/origin') || n.prefix.startsWith('/cache')
   );

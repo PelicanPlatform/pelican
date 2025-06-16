@@ -5,7 +5,6 @@ import { CalendarDateTimeContext } from '@/components/Downtime/CalendarContext';
 
 const EditDowntimePageHeader = () => {
   const setDowntime = useContext(DowntimeEditDispatchContext);
-  const range = useContext(CalendarDateTimeContext);
 
   return (
     <Box
@@ -18,10 +17,7 @@ const EditDowntimePageHeader = () => {
         variant={'contained'}
         color={'primary'}
         onClick={() => {
-          setDowntime({
-            startTime: range.startTime,
-            endTime: range.endTime,
-          });
+          setDowntime({});
         }}
       >
         Create Downtime
