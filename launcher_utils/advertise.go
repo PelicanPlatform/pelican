@@ -39,7 +39,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/director"
+	"github.com/pelicanplatform/pelican/database"
+  "github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -116,6 +117,11 @@ func advertiseInternal(ctx context.Context, server server_structs.XRootDServer) 
 	name, err := server_utils.GetServiceName(ctx, server.GetServerType())
 	if err != nil {
 		return errors.Wrap(err, "failed to determine service name for advertising to director")
+	}
+
+	// Keep the service name in local database up to date
+	if err = database.UpsertServiceName(name, server.GetServerType()); err != nil {
+		return errors.Wrapf(err, "failed to upsert service name %s in local database", name)
 	}
 
 	if err = server.GetNamespaceAdsFromDirector(); err != nil {

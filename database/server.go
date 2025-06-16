@@ -2,8 +2,11 @@ package database
 
 import (
 	"embed"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
@@ -148,4 +151,84 @@ func ShutdownDB() error {
 		log.Errorln("Failure when shutting down the database:", err)
 	}
 	return err
+}
+
+// Create or update a record for the given serverName
+// 1) If no such row exists, it inserts a new one.
+// 2) If a row with that name exists, it updates updated_at (and type).
+func UpsertServiceName(serverName string, typ server_structs.ServerType) error {
+	now := time.Now()
+
+	// look for existing
+	var entry server_structs.ServiceName
+	err := ServerDatabase.Where("name = ?", serverName).First(&entry).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// no existing row → insert
+		entry = server_structs.ServiceName{
+			ID:        uuid.NewString(),
+			Name:      serverName,
+			Type:      strings.ToLower(typ.String()),
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		return ServerDatabase.Create(&entry).Error
+	}
+	if err != nil {
+		return err
+	}
+
+	// found → update timestamp
+	entry.UpdatedAt = now
+	entry.Type = strings.ToLower(typ.String())
+	return ServerDatabase.Save(&entry).Error
+}
+
+// Retrieve the server name in use - lookup the entry whose UpdatedAt is the most recent
+func GetServiceName() (string, error) {
+	var entry server_structs.ServiceName
+	// There is an index in the database to speed up this query
+	err := ServerDatabase.
+		Where("deleted_at IS NULL").
+		Order("updated_at DESC").
+		First(&entry).Error
+	if err != nil {
+		// err will be gorm.ErrRecordNotFound if there's no matching row
+		return "", err
+	}
+	return entry.Name, nil
+}
+
+// Retrieve all service names from most recent to oldest
+func GetServiceNameHistory() ([]server_structs.ServiceName, error) {
+	var entries []server_structs.ServiceName
+
+	err := ServerDatabase.
+		Where("deleted_at IS NULL").
+		Order("updated_at DESC").
+		Find(&entries).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return entries, nil
+}
+
+// Mark a service name as deleted without actually removing it from the database
+func SoftDeleteServiceName(id string) error {
+	now := time.Now()
+
+	result := ServerDatabase.Model(&server_structs.ServiceName{}).
+		Where("id = ? AND deleted_at IS NULL", id).
+		Update("deleted_at", now)
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+
+	return nil
 }

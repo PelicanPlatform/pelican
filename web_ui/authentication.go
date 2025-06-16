@@ -174,8 +174,12 @@ func GetUserGroups(ctx *gin.Context) (user string, groups []string, err error) {
 
 // Create a JWT and set the "login" cookie to store that JWT
 func setLoginCookie(ctx *gin.Context, user string, groups []string) {
+
+	// Lifetime of the login token and the cookie that stores it
+	loginLifetime := 16 * time.Hour
+
 	loginCookieTokenCfg := token.NewWLCGToken()
-	loginCookieTokenCfg.Lifetime = 16 * time.Hour
+	loginCookieTokenCfg.Lifetime = loginLifetime
 	loginCookieTokenCfg.Issuer = param.Server_ExternalWebUrl.GetString()
 	loginCookieTokenCfg.AddAudiences(param.Server_ExternalWebUrl.GetString())
 	loginCookieTokenCfg.Subject = user
@@ -195,7 +199,7 @@ func setLoginCookie(ctx *gin.Context, user string, groups []string) {
 	}
 
 	// One cookie should be used for all path
-	ctx.SetCookie("login", tok, 30*60, "/", ctx.Request.URL.Host, true, true)
+	ctx.SetCookie("login", tok, int(loginLifetime.Seconds()), "/", ctx.Request.URL.Host, true, true)
 	ctx.SetSameSite(http.SameSiteStrictMode)
 }
 

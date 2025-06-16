@@ -371,6 +371,7 @@ type Config struct {
 		RobotsTxtFile string `mapstructure:"robotstxtfile" yaml:"RobotsTxtFile"`
 		RunLocation string `mapstructure:"runlocation" yaml:"RunLocation"`
 		ScitokensConfig string `mapstructure:"scitokensconfig" yaml:"ScitokensConfig"`
+		ShutdownTimeout time.Duration `mapstructure:"shutdowntimeout" yaml:"ShutdownTimeout"`
 		Sitename string `mapstructure:"sitename" yaml:"Sitename"`
 		SummaryMonitoringHost string `mapstructure:"summarymonitoringhost" yaml:"SummaryMonitoringHost"`
 		SummaryMonitoringPort int `mapstructure:"summarymonitoringport" yaml:"SummaryMonitoringPort"`
@@ -726,6 +727,7 @@ type configWithType struct {
 		RobotsTxtFile struct { Type string; Value string }
 		RunLocation struct { Type string; Value string }
 		ScitokensConfig struct { Type string; Value string }
+		ShutdownTimeout struct { Type string; Value time.Duration }
 		Sitename struct { Type string; Value string }
 		SummaryMonitoringHost struct { Type string; Value string }
 		SummaryMonitoringPort struct { Type string; Value int }

@@ -28,6 +28,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -61,25 +62,6 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	ctx, shutdownCancel = context.WithCancel(ctx)
 
 	config.LogPelicanVersion()
-
-	egrp.Go(func() error {
-		_ = config.RestartFlag
-		log.Debug("Will shutdown process on signal")
-		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-		select {
-		case sig := <-sigs:
-			log.Warningf("Received signal %v; will shutdown process", sig)
-			shutdownCancel()
-			return ErrExitOnSignal
-		case <-config.RestartFlag:
-			log.Warningf("Received restart request; will restart the process")
-			shutdownCancel()
-			return ErrRestart
-		case <-ctx.Done():
-			return nil
-		}
-	})
 
 	var engine *gin.Engine
 	engine, err = web_ui.GetEngine()
@@ -382,5 +364,45 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		egrp.Go(func() error { return web_ui.InitServerWebLogin(ctx) })
 	}
 
+	egrp.Go(func() error {
+		_ = config.RestartFlag
+		log.Debug("Will shutdown process on signal")
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+		select {
+		case sig := <-sigs:
+			log.Warningf("Received signal %v; will shutdown process", sig)
+			// Graceful shutdown if received SIGTERM
+			if sig == syscall.SIGTERM {
+				handleGracefulShutdown(ctx, modules, servers)
+			}
+			shutdownCancel()
+			return ErrExitOnSignal
+		case <-config.RestartFlag:
+			log.Warningf("Received restart request; will restart the process")
+			handleGracefulShutdown(ctx, modules, servers)
+			shutdownCancel()
+			return ErrRestart
+		case <-ctx.Done():
+			return nil
+		}
+	})
+
 	return
+}
+
+func handleGracefulShutdown(ctx context.Context, modules server_structs.ServerType, servers []server_structs.XRootDServer) {
+	if modules.IsEnabled(server_structs.OriginType) || modules.IsEnabled(server_structs.CacheType) {
+		log.Warnf("Waiting %s for in-flight transfers before shutting down", param.Xrootd_ShutdownTimeout.GetDuration().String())
+
+		// Set component's health status, so the ad could pick up the shutdown flag (`Status`: `shutting down`)
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusShuttingDown, "The server is shutting down")
+		// When the server is up again, the ShuttingDown status will be cleared
+
+		if advErr := launcher_utils.Advertise(ctx, servers); advErr != nil {
+			log.Errorf("Failed to advertise before shutdown: %v", advErr)
+		}
+		time.Sleep(param.Xrootd_ShutdownTimeout.GetDuration())
+		log.Warn("Shutdown grace period elapsed; proceeding with shutdown and discarding incomplete transfers")
+	}
 }

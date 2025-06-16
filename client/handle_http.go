@@ -2852,8 +2852,9 @@ Loop:
 		if errorStatus := trailer.Get("X-Transfer-Status"); errorStatus != "" {
 			statusCode, statusText := parseTransferStatus(errorStatus)
 			if statusCode != http.StatusOK {
-				log.WithFields(fields).Debugln("Got error from file transfer")
-				err = errors.New("transfer error: " + statusText)
+				log.WithFields(fields).Debugln("Got error from file transfer:", statusText)
+				statusText = strings.Replace(statusText, "sTREAM ioctl timeout", "cache timed out waiting on origin", 1)
+				err = errors.New("download error after server response started: " + statusText)
 				return
 			}
 		}
@@ -3102,7 +3103,9 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	var lastKnownWritten int64
 	uploadStart := time.Now()
 
-	go runPut(request, responseChan, errorChan)
+	useProxy := transfer.attempts[0].Proxy
+
+	go runPut(request, responseChan, errorChan, useProxy)
 	var lastError error = nil
 
 	tickerDuration := 100 * time.Millisecond
@@ -3204,9 +3207,13 @@ Loop:
 //
 // This is executed in a separate goroutine to allow periodic progress callbacks
 // to be created within the main goroutine.
-func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error) {
-	var UploadClient = &http.Client{Transport: config.GetTransport()}
-	client := UploadClient
+func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error, proxy bool) {
+	client := http.Client{}
+	transport := config.GetTransport()
+	if !proxy {
+		transport.Proxy = nil
+	}
+	client.Transport = transport
 	dump, _ := httputil.DumpRequestOut(request, false)
 	log.Debugf("Dumping request: %s", dump)
 	response, err := client.Do(request)
