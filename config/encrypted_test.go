@@ -19,6 +19,7 @@
 package config
 
 import (
+	"bytes"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -27,7 +28,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"os"
+
 	"github.com/pelicanplatform/pelican/param"
+	log "github.com/sirupsen/logrus"
 )
 
 func TestGetSecret(t *testing.T) {
@@ -41,7 +45,9 @@ func TestGetSecret(t *testing.T) {
 		keyDir := filepath.Join(tmp, "issuer-keys")
 		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
 
-		get, err := GetSecret()
+		currentIssuerKey, err := GetIssuerPrivateJWK()
+		require.NoError(t, err)
+		get, err := GetSecret(currentIssuerKey)
 		require.NoError(t, err)
 		assert.Len(t, get, 32)
 	})
@@ -94,7 +100,7 @@ func TestDecryptString(t *testing.T) {
 		assert.Equal(t, secret, decrypted)
 	})
 
-	t.Run("decrypt-with-wrong-key-id", func(t *testing.T) {
+	t.Run("decrypt-with-another-valid-key", func(t *testing.T) {
 		tmp := t.TempDir()
 		keyDir := filepath.Join(tmp, "issuer-keys")
 		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
@@ -103,14 +109,20 @@ func TestDecryptString(t *testing.T) {
 		encrypted, err := EncryptString(secret)
 		require.NoError(t, err)
 
-		// Change the key ID in the encrypted string
+		// Mock key rotation after encryption: change the key ID in the encrypted string
 		parts := strings.Split(encrypted, ".")
-		parts[0] = "wrong-key-id"
+		parts[0] = "another-valid-key-id"
 		encrypted = strings.Join(parts, ".")
 
-		_, err = DecryptString(encrypted)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "key ID mismatch")
+		// Capture log output
+		var logOutput bytes.Buffer
+		log.SetOutput(&logOutput)
+		defer log.SetOutput(os.Stderr)
+
+		decrypted, err := DecryptString(encrypted)
+		require.NoError(t, err)
+		assert.Equal(t, secret, decrypted)
+		assert.Contains(t, logOutput.String(), "The key used in encryption (id: another-valid-key-id) is not the current issuer key")
 	})
 
 	t.Run("decrypt-with-invalid-format", func(t *testing.T) {
@@ -136,5 +148,30 @@ func TestDecryptString(t *testing.T) {
 		_, err = DecryptString(encrypted)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to decode nonce")
+	})
+
+	t.Run("decrypt-with-multiple-keys", func(t *testing.T) {
+		tmp := t.TempDir()
+		keyDir := filepath.Join(tmp, "issuer-keys")
+		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
+
+		// Encrypt with the first key
+		secret := "Some secret to encrypt"
+		encrypted, err := EncryptString(secret)
+		require.NoError(t, err)
+		assert.NotEmpty(t, encrypted)
+
+		// Simulate key rotation: add a new key to the issuer keys directory
+		_, err = GeneratePEM(keyDir)
+		require.NoError(t, err)
+
+		keyChanged, err := RefreshKeys()
+		require.NoError(t, err)
+		assert.True(t, keyChanged)
+
+		// Now DecryptString should still be able to decrypt using the old key
+		decrypted, err := DecryptString(encrypted)
+		require.NoError(t, err)
+		assert.Equal(t, secret, decrypted)
 	})
 }

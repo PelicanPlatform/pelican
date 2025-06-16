@@ -32,6 +32,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -382,26 +383,19 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 // How we generate the secret:
 // Concatenate the byte array pelican with the DER form of the service's private key,
 // Take a hash, and use the hash's bytes as the secret.
-func GetSecret() (string, error) {
-	// Use issuer private key as the source to generate the secret
-	privateKey, err := GetIssuerPrivateJWK()
-	if err != nil {
-		return "", err
-	}
-
+func GetSecret(issuerKey jwk.Key) (string, error) {
 	// Extract the underlying ECDSA private key in native Go crypto key type
 	var rawKey interface{}
-	if err := privateKey.Raw(&rawKey); err != nil {
+	if err := issuerKey.Raw(&rawKey); err != nil {
 		return "", err
 	}
 
 	derPrivateKey, err := x509.MarshalPKCS8PrivateKey(rawKey)
-
 	if err != nil {
 		return "", err
 	}
-	byteArray := []byte("pelican")
 
+	byteArray := []byte("pelican")
 	concatenated := append(byteArray, derPrivateKey...)
 
 	hash := sha256.Sum256(concatenated)
@@ -410,8 +404,8 @@ func GetSecret() (string, error) {
 	return secret, nil
 }
 
-func getEncryptionKeyPair() (privateKey, publicKey *[32]byte, err error) {
-	secret, err := GetSecret()
+func getEncryptionKeyPair(issuerKey jwk.Key) (privateKey, publicKey *[32]byte, err error) {
+	secret, err := GetSecret(issuerKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -429,8 +423,14 @@ func getEncryptionKeyPair() (privateKey, publicKey *[32]byte, err error) {
 
 // Encrypt function
 func EncryptString(stringToEncrypt string) (encryptedString string, err error) {
+	// Use issuer private key as the source to generate the secret
+	issuerKey, err := GetIssuerPrivateJWK()
+	if err != nil {
+		return "", err
+	}
+
 	// Get the keypair for encryption
-	privateKey, publicKey, err := getEncryptionKeyPair()
+	privateKey, publicKey, err := getEncryptionKeyPair(issuerKey)
 	if err != nil {
 		return "", err
 	}
@@ -476,10 +476,8 @@ func DecryptString(encryptedString string) (decryptedString string, err error) {
 		return "", err
 	}
 
-	// Verify the key used in encryption matches currentIssuerKey
-	if keyID != currentIssuerKey.KeyID() {
-		return "", errors.New("key ID mismatch")
-	}
+	// Get all valid issuer keys
+	allIssuerKeys := GetIssuerPrivateKeys()
 
 	// Decode base64 components
 	nonceBytes, err := base64.URLEncoding.DecodeString(nonceB64)
@@ -498,16 +496,30 @@ func DecryptString(encryptedString string) (decryptedString string, err error) {
 	var nonce [24]byte
 	copy(nonce[:], nonceBytes)
 
-	// Get the keypair for decryption
-	privateKey, publicKey, err := getEncryptionKeyPair()
-	if err != nil {
-		return "", err
+	var decryptedMsg []byte
+	var decrypted bool
+	for _, issuerKey := range allIssuerKeys {
+		// Get the keypair for decryption
+		privateKey, publicKey, err := getEncryptionKeyPair(issuerKey)
+		if err != nil {
+			return "", err
+		}
+
+		// Decrypt the message
+		msg, ok := box.Open(nil, encryptedMsg, &nonce, publicKey, privateKey)
+		if ok {
+			decryptedMsg = msg
+			decrypted = true
+			// Inform the user when the key used in encryption does not match the current issuer key
+			if keyID != currentIssuerKey.KeyID() {
+				log.Infof("The key used in encryption (id: %s) is not the current issuer key (id: %s)", keyID, currentIssuerKey.KeyID())
+			}
+			break
+		}
 	}
 
-	// Decrypt the message
-	decryptedMsg, ok := box.Open(nil, encryptedMsg, &nonce, publicKey, privateKey)
-	if !ok {
-		return "", fmt.Errorf("decryption failed")
+	if !decrypted {
+		return "", errors.New("failed to decrypt message")
 	}
 
 	return string(decryptedMsg), nil
