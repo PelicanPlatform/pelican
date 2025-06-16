@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"net"
 	"os"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,7 +36,6 @@ import (
 
 var (
 	watermarkUnits = []byte{'k', 'm', 'g', 't'}
-	uaRegExp       = regexp.MustCompile(`^pelican-[^\/]+\/\d+\.\d+\.\d+`)
 )
 
 // Helper function that converts a slice of type T to a set (map) of type T.
@@ -119,14 +117,43 @@ func ExtractAndMaskIP(ipStr string) (maskedIP string, ok bool) {
 // the user agent.
 // It will return empty strings if the provided userAgent fails to match against the parser
 func ExtractVersionAndServiceFromUserAgent(userAgent string) (reqVer, service string) {
-	if matches := uaRegExp.MatchString(userAgent); !matches {
-		return "", ""
+	// Note: This implementation, hand-parsing the string, replaced an older version that
+	// leveraged regexps.  The goal is to reduce memory jitter that was coming from large
+	// backtracking in the regexp.
+	if len(userAgent) > 50 {
+		return
+	}
+	if !strings.HasPrefix(userAgent, "pelican-") {
+		return
+	}
+	userAgentSplit := strings.SplitN(userAgent[8:], "/", 2)
+	if len(userAgentSplit) != 2 {
+		return
 	}
 
-	userAgentSplit := strings.Split(userAgent, "/")
+	if strings.ContainsFunc(userAgentSplit[0], func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z')
+	}) {
+		return
+	}
+
+	splitVer := strings.SplitN(userAgentSplit[1], ".", 3)
+	if len(splitVer) != 3 {
+		return
+	}
+
+	onlyNumeric := func(str string) bool {
+		return !strings.ContainsFunc(str, func(r rune) bool {
+			return (r < '0' || r > '9')
+		})
+	}
+
+	if !onlyNumeric(splitVer[0]) || !onlyNumeric(splitVer[1]) || !onlyNumeric(splitVer[2]) {
+		return
+	}
 	reqVer = userAgentSplit[1]
-	service = (strings.Split(userAgentSplit[0], "-"))[1]
-	return reqVer, service
+	service = userAgentSplit[0]
+	return
 }
 
 // Helper function to extract project from User-Agent
