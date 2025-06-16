@@ -35,11 +35,12 @@ import {
 } from '@/components/AlertProvider';
 import { Delete } from '@mui/icons-material';
 import FormHelperText from '@mui/material/FormHelperText';
+import getUtcOffsetString from "@/helpers/getUtcOffsetString";
 
 interface DowntimeFormProps {
   downtime:
     | DowntimeGet
-    | Omit<DowntimePost, 'severity' | 'class' | 'description'>
+    | Partial<DowntimePost>
     | Omit<DowntimeRegistryPost, 'severity' | 'class' | 'description'>;
   onSuccess?: (downtime: DowntimePost) => void;
 }
@@ -53,16 +54,11 @@ const DowntimeForm = ({
   const id = 'id' in inputDowntime ? inputDowntime.id : undefined;
 
   const [downtime, setDowntime] = useState<DowntimePost>({
-    startTime: inputDowntime.startTime,
-    endTime: inputDowntime.endTime,
-    description:
-      'description' in inputDowntime ? inputDowntime.description : '',
-    severity:
-      'severity' in inputDowntime
-        ? inputDowntime.severity
-        : defaultDowntime.severity,
-    class:
-      'class' in inputDowntime ? inputDowntime.class : defaultDowntime.class,
+    startTime: inputDowntime?.startTime || Date.now(),
+    endTime: inputDowntime?.endTime || Date.now(),
+    description: '',
+    severity: defaultDowntime.severity,
+    class: defaultDowntime.class,
   });
 
   const endless = useMemo(() => downtime.endTime === -1, [downtime.endTime]);
@@ -71,7 +67,7 @@ const DowntimeForm = ({
     <Box>
       <Box mt={2}>
         <DateTimePicker
-          label={'Start Time'}
+          label={`Start Time (${getUtcOffsetString()})`}
           value={DateTime.fromMillis(downtime.startTime)}
           onChange={(v) =>
             setDowntime({ ...downtime, startTime: v?.toMillis() || 0 })
@@ -80,7 +76,7 @@ const DowntimeForm = ({
       </Box>
       <Box mt={2}>
         <DateTimePicker
-          label={'End Time'}
+          label={`End Time (${getUtcOffsetString()})`}
           disabled={endless}
           value={DateTime.fromMillis(downtime.endTime)}
           onChange={(v) =>
@@ -136,7 +132,7 @@ const DowntimeForm = ({
           <Select
             variant={'outlined'}
             labelId={'class'}
-            label={'class'}
+            label={'Scheduled'}
             value={downtime?.class}
             onChange={(e) =>
               setDowntime({
