@@ -1235,6 +1235,7 @@ func TestGenerateFederationIssuer(t *testing.T) {
 			viper.Set(param.Origin_EnableWrites.GetName(), false)
 			viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
 			viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
+			viper.Set(param.TLSSkipVerify.GetName(), true)
 
 			test_utils.MockFederationRoot(t, nil, nil)
 
