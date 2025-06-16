@@ -20,6 +20,7 @@ package config
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -58,9 +59,16 @@ func TestEncryptString(t *testing.T) {
 		keyDir := filepath.Join(tmp, "issuer-keys")
 		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
 
-		get, err := EncryptString("Some secret to encrypt")
+		encrypted, err := EncryptString("Some secret to encrypt")
 		require.NoError(t, err)
-		assert.NotEmpty(t, get)
+		assert.NotEmpty(t, encrypted)
+
+		// Verify format is $KEYID.$NONCE.$MESSAGE
+		parts := strings.Split(encrypted, ".")
+		require.Len(t, parts, 3)
+		assert.NotEmpty(t, parts[0]) // keyID
+		assert.NotEmpty(t, parts[1]) // nonce
+		assert.NotEmpty(t, parts[2]) // message
 	})
 }
 
@@ -70,39 +78,63 @@ func TestDecryptString(t *testing.T) {
 	t.Cleanup(func() {
 		ResetConfig()
 	})
+
 	t.Run("decrypt-without-err", func(t *testing.T) {
 		tmp := t.TempDir()
 		keyDir := filepath.Join(tmp, "issuer-keys")
 		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
 
 		secret := "Some secret to encrypt"
-
-		getEncrypt, err := EncryptString(secret)
+		encrypted, err := EncryptString(secret)
 		require.NoError(t, err)
-		assert.NotEmpty(t, getEncrypt)
+		assert.NotEmpty(t, encrypted)
 
-		getDecrypt, err := DecryptString(getEncrypt)
+		decrypted, err := DecryptString(encrypted)
 		require.NoError(t, err)
-		assert.Equal(t, secret, getDecrypt)
+		assert.Equal(t, secret, decrypted)
 	})
 
-	t.Run("diff-secrets-yield-diff-result", func(t *testing.T) {
+	t.Run("decrypt-with-wrong-key-id", func(t *testing.T) {
 		tmp := t.TempDir()
 		keyDir := filepath.Join(tmp, "issuer-keys")
 		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
 
 		secret := "Some secret to encrypt"
-
-		getEncrypt, err := EncryptString(secret)
+		encrypted, err := EncryptString(secret)
 		require.NoError(t, err)
-		assert.NotEmpty(t, getEncrypt)
 
-		ResetConfig()
-		newKeyDir := filepath.Join(tmp, "new-issuer-keys")
-		viper.Set(param.IssuerKeysDirectory.GetName(), newKeyDir)
+		// Change the key ID in the encrypted string
+		parts := strings.Split(encrypted, ".")
+		parts[0] = "wrong-key-id"
+		encrypted = strings.Join(parts, ".")
 
-		getDecrypt, err := DecryptString(getEncrypt)
+		_, err = DecryptString(encrypted)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "key ID mismatch")
+	})
+
+	t.Run("decrypt-with-invalid-format", func(t *testing.T) {
+		_, err := DecryptString("invalid.format")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid encrypted string format")
+	})
+
+	t.Run("decrypt-with-invalid-nonce", func(t *testing.T) {
+		tmp := t.TempDir()
+		keyDir := filepath.Join(tmp, "issuer-keys")
+		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
+
+		secret := "Some secret to encrypt"
+		encrypted, err := EncryptString(secret)
 		require.NoError(t, err)
-		assert.NotEqual(t, secret, getDecrypt)
+
+		// Change the nonce in the encrypted string
+		parts := strings.Split(encrypted, ".")
+		parts[1] = "invalid-nonce"
+		encrypted = strings.Join(parts, ".")
+
+		_, err = DecryptString(encrypted)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to decode nonce")
 	})
 }

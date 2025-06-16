@@ -19,8 +19,6 @@
 package config
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -28,12 +26,13 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/youmark/pkcs8"
@@ -378,7 +377,7 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 	return SaveEncryptedContents(pem_bytes_memory)
 }
 
-// Get a 32B secret from server IssuerKey
+// Get a 32B secret from current issuer private key
 //
 // How we generate the secret:
 // Concatenate the byte array pelican with the DER form of the service's private key,
@@ -411,55 +410,105 @@ func GetSecret() (string, error) {
 	return secret, nil
 }
 
-// Encrypt function
-func EncryptString(stringToEncrypt string) (encryptedString string, err error) {
+func getEncryptionKeyPair() (privateKey, publicKey *[32]byte, err error) {
 	secret, err := GetSecret()
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
-	key := []byte(secret)
-	plaintext := []byte(stringToEncrypt)
 
-	block, err := aes.NewCipher(key)
+	// Create a key pair from the secret
+	privateKey = new([32]byte)
+	// Use the secret as the private key (it's already 32 bytes)
+	copy(privateKey[:], []byte(secret))
+	publicKey = new([32]byte)
+	// Derive the public key from the private key
+	curve25519.ScalarBaseMult(publicKey, privateKey)
+
+	return privateKey, publicKey, nil
+}
+
+// Encrypt function
+func EncryptString(stringToEncrypt string) (encryptedString string, err error) {
+	// Get the keypair for encryption
+	privateKey, publicKey, err := getEncryptionKeyPair()
 	if err != nil {
 		return "", err
 	}
 
-	ciphertext := make([]byte, aes.BlockSize+len(plaintext))
-	iv := ciphertext[:aes.BlockSize]
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+	// Generate a random 24-byte nonce
+	var nonce [24]byte
+	if _, err := io.ReadFull(rand.Reader, nonce[:]); err != nil {
 		return "", err
 	}
 
-	stream := cipher.NewCFBEncrypter(block, iv)
-	stream.XORKeyStream(ciphertext[aes.BlockSize:], plaintext)
+	// Encrypt the message
+	message := []byte(stringToEncrypt)
+	encrypted := box.Seal(nil, message, &nonce, publicKey, privateKey)
 
-	return base64.URLEncoding.EncodeToString(ciphertext), nil
+	// Get current issuer key
+	currentIssuerKey, err := GetIssuerPrivateJWK()
+	if err != nil {
+		return "", err
+	}
+
+	// Format as $KEYID.$NONCE.$MESSAGE
+	keyID := currentIssuerKey.KeyID()
+	nonceStr := base64.URLEncoding.EncodeToString(nonce[:])
+	messageStr := base64.URLEncoding.EncodeToString(encrypted)
+
+	return fmt.Sprintf("%s.%s.%s", keyID, nonceStr, messageStr), nil
 }
 
 // Decrypt function
 func DecryptString(encryptedString string) (decryptedString string, err error) {
-	secret, err := GetSecret()
+	// Split the encrypted string into components
+	parts := strings.Split(encryptedString, ".")
+	if len(parts) != 3 {
+		return "", errors.New("invalid encrypted string format")
+	}
+	keyID := parts[0]
+	nonceB64 := parts[1]
+	messageB64 := parts[2]
+
+	// Get current (a.k.a. oldest/lexicographically lowest) issuer key
+	currentIssuerKey, err := GetIssuerPrivateJWK()
 	if err != nil {
 		return "", err
 	}
-	key := []byte(secret)
 
-	ciphertext, _ := base64.URLEncoding.DecodeString(encryptedString)
+	// Verify the key used in encryption matches currentIssuerKey
+	if keyID != currentIssuerKey.KeyID() {
+		return "", errors.New("key ID mismatch")
+	}
 
-	block, err := aes.NewCipher(key)
+	// Decode base64 components
+	nonceBytes, err := base64.URLEncoding.DecodeString(nonceB64)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to decode nonce")
+	}
+
+	encryptedMsg, err := base64.URLEncoding.DecodeString(messageB64)
+	if err != nil {
+		return "", errors.Wrapf(err, "failed to decode message")
+	}
+
+	if len(nonceBytes) != 24 {
+		return "", errors.New("invalid nonce length")
+	}
+	var nonce [24]byte
+	copy(nonce[:], nonceBytes)
+
+	// Get the keypair for decryption
+	privateKey, publicKey, err := getEncryptionKeyPair()
 	if err != nil {
 		return "", err
 	}
 
-	if len(ciphertext) < aes.BlockSize {
-		return "", fmt.Errorf("ciphertext too short")
+	// Decrypt the message
+	decryptedMsg, ok := box.Open(nil, encryptedMsg, &nonce, publicKey, privateKey)
+	if !ok {
+		return "", fmt.Errorf("decryption failed")
 	}
-	iv := ciphertext[:aes.BlockSize]
-	ciphertext = ciphertext[aes.BlockSize:]
 
-	stream := cipher.NewCFBDecrypter(block, iv)
-	stream.XORKeyStream(ciphertext, ciphertext)
-
-	return string(ciphertext), nil
+	return string(decryptedMsg), nil
 }
