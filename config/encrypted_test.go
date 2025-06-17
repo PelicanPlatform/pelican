@@ -20,18 +20,17 @@ package config
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"os"
-
 	"github.com/pelicanplatform/pelican/param"
-	log "github.com/sirupsen/logrus"
 )
 
 func TestGetSecret(t *testing.T) {
@@ -81,15 +80,15 @@ func TestEncryptString(t *testing.T) {
 func TestDecryptString(t *testing.T) {
 	ResetConfig()
 
+	tmp := t.TempDir()
+	keyDir := filepath.Join(tmp, "issuer-keys")
+	viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
+
 	t.Cleanup(func() {
 		ResetConfig()
 	})
 
 	t.Run("decrypt-without-err", func(t *testing.T) {
-		tmp := t.TempDir()
-		keyDir := filepath.Join(tmp, "issuer-keys")
-		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
-
 		secret := "Some secret to encrypt"
 		encrypted, err := EncryptString(secret)
 		require.NoError(t, err)
@@ -101,10 +100,6 @@ func TestDecryptString(t *testing.T) {
 	})
 
 	t.Run("decrypt-with-another-valid-key", func(t *testing.T) {
-		tmp := t.TempDir()
-		keyDir := filepath.Join(tmp, "issuer-keys")
-		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
-
 		secret := "Some secret to encrypt"
 		encrypted, err := EncryptString(secret)
 		require.NoError(t, err)
@@ -132,10 +127,6 @@ func TestDecryptString(t *testing.T) {
 	})
 
 	t.Run("decrypt-with-invalid-nonce", func(t *testing.T) {
-		tmp := t.TempDir()
-		keyDir := filepath.Join(tmp, "issuer-keys")
-		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
-
 		secret := "Some secret to encrypt"
 		encrypted, err := EncryptString(secret)
 		require.NoError(t, err)
@@ -151,10 +142,6 @@ func TestDecryptString(t *testing.T) {
 	})
 
 	t.Run("decrypt-with-multiple-keys", func(t *testing.T) {
-		tmp := t.TempDir()
-		keyDir := filepath.Join(tmp, "issuer-keys")
-		viper.Set(param.IssuerKeysDirectory.GetName(), keyDir)
-
 		// Encrypt with the first key
 		secret := "Some secret to encrypt"
 		encrypted, err := EncryptString(secret)
