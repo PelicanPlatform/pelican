@@ -910,6 +910,56 @@ func TestChecksumMissing(t *testing.T) {
 	assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error")
 }
 
+func TestChecksumPut(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		param.Logging_Level.GetName(): "debug",
+		param.TLSSkipVerify.GetName(): true,
+	})
+
+	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "17")
+			w.Header().Set("Digest", "crc32c=977b8112")
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+	tempFile := filepath.Join(tempDir, "testfile.txt")
+	err = os.WriteFile(tempFile, []byte("test file content"), 0644)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx:       context.Background(),
+		job:       &TransferJob{},
+		localPath: tempFile,
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+		requireChecksum:    true,
+		requestedChecksums: []ChecksumType{AlgCRC32C},
+	}
+	transferResult, err := uploadObject(transfer)
+	assert.NoError(t, err)
+	assert.NoError(t, transferResult.Error)
+
+	assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+	info := transferResult.ServerChecksums[0]
+	assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+
+	assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+	info = transferResult.ClientChecksums[0]
+	assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+}
+
 // Test behavior when resuming a transfer after an EOF
 //
 // Sets up two servers, one that returns the first 9 bytes and then an EOF (simulating a network
