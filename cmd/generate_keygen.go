@@ -54,7 +54,7 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to get the current working directory")
 	}
 	if privateKeyPath == "" {
-		privateKeyPath = filepath.Join(wd, "issuer.pem")
+		privateKeyPath = filepath.Join(wd, "private-key.pem")
 	} else {
 		privateKeyPath = filepath.Clean(strings.TrimSpace(privateKeyPath))
 	}
