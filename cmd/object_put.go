@@ -20,6 +20,7 @@ package main
 
 import (
 	"os"
+	"strings"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -42,6 +43,7 @@ func init() {
 	flagSet := putCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.BoolP("recursive", "r", false, "Recursively upload a collection.  Forces methods to only be http to get the freshest collection contents")
+	flagSet.String("checksum", "", "Checksum algorithm to use for upload and validation")
 	objectCmd.AddCommand(putCmd)
 }
 
@@ -59,8 +61,27 @@ func putMain(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	var options []client.TransferOption
+
 	// Set the progress bars to the command line option
 	tokenLocation, _ := cmd.Flags().GetString("token")
+
+	// Add checksum options if requested
+	checksumAlgorithm, _ := cmd.Flags().GetString("checksum")
+	if checksumAlgorithm != "" {
+		checksumType := client.ChecksumFromHttpDigest(checksumAlgorithm)
+		if checksumType == client.AlgUnknown {
+			log.Errorln("Unknown checksum algorithm:", checksumAlgorithm)
+			var validAlgorithms []string
+			for _, alg := range client.KnownChecksumTypes() {
+				validAlgorithms = append(validAlgorithms, client.HttpDigestFromChecksum(alg))
+			}
+			log.Errorln("Valid algorithms are:", strings.Join(validAlgorithms, ", "))
+			os.Exit(1)
+		}
+		options = append(options, client.WithRequestChecksums([]client.ChecksumType{checksumType}))
+		options = append(options, client.WithRequireChecksum())
+	}
 
 	pb := newProgressBar()
 	defer pb.shutdown()
@@ -89,9 +110,11 @@ func putMain(cmd *cobra.Command, args []string) {
 	var result error
 	lastSrc := ""
 
+	options = append(options, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation))
+
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		_, result = client.DoPut(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation))
+		_, result = client.DoPut(ctx, src, dest, isRecursive, options...)
 		if result != nil {
 			lastSrc = src
 			break
