@@ -3221,7 +3221,7 @@ Loop:
 		// If they match, we're good. If they don't, we need to return an error.
 
 		// Fetch the checksums from the server
-		result, err := fetchChecksum(putContext, transfer.job.requestedChecksums, dest, tokenContents, transfer.job.project)
+		result, err := fetchChecksum(putContext, transfer.requestedChecksums, dest, tokenContents, transfer.job.project)
 		if err != nil {
 			log.Errorln("Error fetching checksum:", err)
 			transferResult.Error = err
