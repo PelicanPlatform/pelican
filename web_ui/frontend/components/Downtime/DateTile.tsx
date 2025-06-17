@@ -1,74 +1,44 @@
 import { TileArgs } from 'react-calendar';
 import { DowntimeGet, DowntimeSeverity } from '@/types';
-import { Box, Tooltip } from '@mui/material';
+import { Box, Tooltip, alpha } from '@mui/material';
+import { red, blue, yellow } from '@mui/material/colors';
 
 interface DateTileProps extends TileArgs {
-  downtimes?: DowntimeGet[];
+  maxValue?: number;
+  binnedDowntimes?: Partial<Record<DowntimeSeverity, number>>;
 }
 
-const DateTile = ({
-  downtimes,
-  activeStartDate,
-  date,
-  view,
-}: DateTileProps) => {
-  // Pull out the downtimes that are applicable to the date
-  const applicableDowntimes = downtimes?.filter((downtime) => {
-    const start = new Date(downtime.startTime);
-    const end = new Date(downtime.endTime);
-    return date >= start && (date <= end || downtime.endTime === -1);
-  });
-
-  const severitiesBinned = binBySeverity(applicableDowntimes || []);
-
+const DateTile = ({ binnedDowntimes = {}, maxValue = 1 }: DateTileProps) => {
   return (
     <Box
       sx={{
         flexGrow: 1,
-        maxHeight: '50%',
         display: 'flex',
       }}
     >
-      {Object.entries(severitiesBinned).map(([severity, count], index) => {
+      {Object.entries(binnedDowntimes).map(([severity, count], index) => {
         return (
           <Tooltip title={severity} key={index}>
             <Box
+              className={'downtime-bar'}
               sx={{
                 backgroundColor: getSeverityColor(severity as DowntimeSeverity),
                 flexGrow: 1,
                 display: 'flex',
-                alignItems: 'center',
+                marginTop: 'auto',
+                height: `${(count / maxValue) * 100}%`,
+                alignItems: 'end',
                 justifyContent: 'center',
+                color: '#ffffff00',
               }}
             >
-              {count}
+              {count == 0 || count}
             </Box>
           </Tooltip>
         );
       })}
     </Box>
   );
-};
-
-const binBySeverity = (downtimes: DowntimeGet[]) => {
-  let binnedSeverities = {
-    'Outage (completely inaccessible)': 0,
-    'Severe (most services down)': 0,
-    'Intermittent Outage (may be up for some of the time)': 0,
-    "No Significant Outage Expected (you shouldn't notice)": 0,
-  } as Record<DowntimeSeverity, number>;
-
-  // Loop through the downtimes and bin them by severity
-  downtimes.forEach((d) => (binnedSeverities[d.severity] += 1));
-
-  // Filter out the severities that are 0
-  Object.keys(binnedSeverities).forEach((key) => {
-    if (binnedSeverities[key as DowntimeSeverity] === 0) {
-      delete binnedSeverities[key as DowntimeSeverity];
-    }
-  });
-
-  return binnedSeverities;
 };
 
 const getMaxSeverityDowntime = (downtimes: DowntimeGet[]) => {
@@ -91,13 +61,13 @@ const getMaxSeverityDowntime = (downtimes: DowntimeGet[]) => {
 const getSeverityColor = (severity: DowntimeSeverity) => {
   switch (severity) {
     case 'Outage (completely inaccessible)':
-      return 'error.light';
+      return alpha(red[300], 0.6);
     case 'Severe (most services down)':
-      return 'warning.light';
+      return alpha(yellow[300], 0.6);
     case 'Intermittent Outage (may be up for some of the time)':
-      return 'warning.light';
+      return alpha(yellow[100], 0.6);
     case "No Significant Outage Expected (you shouldn't notice)":
-      return 'info.light';
+      return alpha(blue[300], 0.6);
     default:
       return 'inherit';
   }
