@@ -51,6 +51,7 @@ for JWT signature verification.
 		`,
 		RunE:         keygenMain,
 		SilenceUsage: true,
+		Deprecated:   "This command will be removed in a future release. Use `pelican key create` instead.",
 	}
 
 	outPasswordPath string
