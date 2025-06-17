@@ -157,19 +157,47 @@ func TestKeygenMain(t *testing.T) {
 			publicKeyPath,
 		)
 	})
+}
 
-	t.Run("private-key-exists", func(t *testing.T) {
-		tempDir := t.TempDir()
-
-		err := os.WriteFile(filepath.Join(tempDir, "test.pk"), []byte{}, 0644)
-		require.NoError(t, err)
-		privateKeyPath = filepath.Join(tempDir, "test.pk")
-		publicKeyPath = filepath.Join(tempDir, "test.pub")
-		err = keygenMain(nil, []string{})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "file exists")
+func TestKeygenMainWithExistingFile(t *testing.T) {
+	server_utils.ResetTestState()
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
 	})
 
+	// If a private key file exists, the derived public key file should be created by the command
+	t.Run("private-key-exists", func(t *testing.T) {
+		tempDir := t.TempDir()
+		publicKeyPath = filepath.Join(tempDir, "issuer-pub.jwks")
+
+		// Create a private key file
+		privateKey, err := config.GeneratePEM(tempDir)
+		require.NoError(t, err)
+		assert.NotEmpty(t, privateKey.KeyID())
+
+		// There should be only one file in the temp directory, which is the private key file
+		files, err := os.ReadDir(tempDir)
+		require.NoError(t, err)
+		require.Len(t, files, 1)
+		// Set the private key path to the existing private key file
+		privateKeyPath = filepath.Join(tempDir, files[0].Name())
+
+		err = keygenMain(nil, []string{})
+		require.NoError(t, err)
+
+		// Check that the public key file is created
+		assert.FileExists(t, filepath.Join(tempDir, "issuer-pub.jwks"))
+
+		// Check that the public key file contains the correct key
+		jwks, err := jwk.ReadFile(filepath.Join(tempDir, "issuer-pub.jwks"))
+		require.NoError(t, err)
+		assert.Equal(t, 1, jwks.Len())
+		key, ok := jwks.Key(0)
+		assert.True(t, ok)
+		assert.Equal(t, privateKey.KeyID(), key.KeyID())
+	})
+
+	// If a public key file exists, the command should fail
 	t.Run("public-key-exists", func(t *testing.T) {
 		tempDir := t.TempDir()
 		err := os.WriteFile(filepath.Join(tempDir, "test.pub"), []byte{}, 0644)
@@ -178,6 +206,7 @@ func TestKeygenMain(t *testing.T) {
 		publicKeyPath = filepath.Join(tempDir, "test.pub")
 		err = keygenMain(nil, []string{})
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "file exists")
+		assert.Contains(t, err.Error(), "file exists for public key")
 	})
+
 }
