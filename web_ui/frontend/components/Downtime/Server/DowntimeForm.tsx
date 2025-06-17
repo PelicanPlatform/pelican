@@ -35,7 +35,7 @@ import {
 } from '@/components/AlertProvider';
 import { Delete } from '@mui/icons-material';
 import FormHelperText from '@mui/material/FormHelperText';
-import getUtcOffsetString from "@/helpers/getUtcOffsetString";
+import getUtcOffsetString from '@/helpers/getUtcOffsetString';
 
 interface DowntimeFormProps {
   downtime:

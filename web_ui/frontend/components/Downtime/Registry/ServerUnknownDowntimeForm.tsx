@@ -42,10 +42,10 @@ import { Delete } from '@mui/icons-material';
 import FormHelperText from '@mui/material/FormHelperText';
 import { RegistryNamespace } from '@/index';
 import useApiSWR from '@/hooks/useApiSWR';
-import {getExtendedNamespaces} from "@/helpers/get";
-import extendNamespace from "@/helpers/Registry/namespaceToServer";
+import { getExtendedNamespaces } from '@/helpers/get';
+import extendNamespace from '@/helpers/Registry/namespaceToServer';
 import { NamespaceIcon } from '@/components';
-import getUtcOffsetString from "@/helpers/getUtcOffsetString";
+import getUtcOffsetString from '@/helpers/getUtcOffsetString';
 
 interface DowntimeFormProps {
   downtime: Partial<DowntimeGet>;
@@ -77,11 +77,16 @@ const ServerUnknownDowntimeForm = ({
     getNamespaces
   );
   const servers = useMemo(() => {
-    return (namespaces || []).map(extendNamespace)
-        .filter(x => (x.type === 'origin' || x.type === 'cache') &&
+    return (namespaces || [])
+      .map(extendNamespace)
+      .filter(
+        (x) =>
+          (x.type === 'origin' || x.type === 'cache') &&
           x.admin_metadata.status === 'Approved'
-        )
-        .sort((a,b) => (a?.adjustedPrefix || '') > (b?.adjustedPrefix || '') ? 1 : -1);
+      )
+      .sort((a, b) =>
+        (a?.adjustedPrefix || '') > (b?.adjustedPrefix || '') ? 1 : -1
+      );
   }, [namespaces]);
 
   // Set a default prefix on registry
@@ -96,32 +101,35 @@ const ServerUnknownDowntimeForm = ({
       <Box mt={2}>
         <Autocomplete
           options={servers}
-          getOptionLabel={(servers) => servers?.adjustedPrefix || "Error"}
+          getOptionLabel={(servers) => servers?.adjustedPrefix || 'Error'}
           isOptionEqualToValue={(servers, value) =>
-            servers?.adjustedPrefix === value?.adjustedPrefix}
-          value={servers.filter(x => x.prefix == downtime.serverName)[0] || servers[0]}
+            servers?.adjustedPrefix === value?.adjustedPrefix
+          }
+          value={
+            servers.filter((x) => x.prefix == downtime.serverName)[0] ||
+            servers[0]
+          }
           onChange={(e, v) => {
             if (!v) return;
             setDowntime({ ...downtime, serverName: v.prefix });
           }}
           renderInput={(params) => (
-            <TextField
-              {...params}
-              label='Server'
-              variant='outlined'
-              required
-            />
+            <TextField {...params} label='Server' variant='outlined' required />
           )}
           renderOption={(params, option) => (
             <Box component='li' {...params}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', width: "100%" }}>
-                <Box display={"flex"}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  width: '100%',
+                }}
+              >
+                <Box display={'flex'}>
                   {option.adjustedPrefix || option.prefix}
                 </Box>
-                <Box display={"flex"}>
-                  <NamespaceIcon
-                      serverType={option.type}
-                  />
+                <Box display={'flex'}>
+                  <NamespaceIcon serverType={option.type} />
                 </Box>
               </Box>
             </Box>
@@ -301,8 +309,6 @@ const submitDowntime = async (
 const namespacesToRegistryServers = (
   namespaces: RegistryNamespace[]
 ): string[] => {
-
-
   const originsAndCaches = namespaces.filter(
     (n) => n.prefix.startsWith('/origin') || n.prefix.startsWith('/cache')
   );
