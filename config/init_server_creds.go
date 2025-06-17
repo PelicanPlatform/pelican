@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -505,7 +506,17 @@ func GenerateCert() error {
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 	}
+
+	// In the course of unit testing (the primary place these self-signed certs are used),
+	// it may become necessary to mix/match various configurations around the `Server.Hostname`
+	// and `Server.ExternalWebUrl` parameters. Whenever such a test needs to run config.InitServer(),
+	// it's necessary that the value of both `Server.Hostname` and `Server.ExternalWebUrl` are baked
+	// into the cert, and so even if the two don't match we add both to the cert's DNS names.
+	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	template.DNSNames = []string{hostname}
+	if err == nil && externalWebUrl.Hostname() != hostname {
+		template.DNSNames = append(template.DNSNames, externalWebUrl.Hostname())
+	}
 
 	// If there's pre-existing CA certificates, self-sign instead of using the generated CA
 	signingCert := caCert
