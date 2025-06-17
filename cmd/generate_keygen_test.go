@@ -87,7 +87,7 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
-			filepath.Join(tempDir, "issuer.pem"),
+			filepath.Join(tempDir, "private-key.pem"),
 			filepath.Join(tempDir, "issuer-pub.jwks"),
 		)
 	})
@@ -119,7 +119,7 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
-			filepath.Join(tempWd, "issuer.pem"),
+			filepath.Join(tempWd, "private-key.pem"),
 			publicKeyPath,
 		)
 	})
@@ -153,7 +153,7 @@ func TestKeygenMain(t *testing.T) {
 
 		checkKeys(
 			t,
-			filepath.Join(tempWd, "issuer.pem"),
+			filepath.Join(tempWd, "private-key.pem"),
 			publicKeyPath,
 		)
 	})
