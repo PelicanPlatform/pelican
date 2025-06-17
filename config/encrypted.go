@@ -460,20 +460,21 @@ func EncryptString(stringToEncrypt string) (encryptedString string, err error) {
 }
 
 // Decrypt function
-func DecryptString(encryptedString string) (decryptedString string, err error) {
+func DecryptString(encryptedString string) (decryptedString string, keyID string, err error) {
 	// Split the encrypted string into components
 	parts := strings.Split(encryptedString, ".")
 	if len(parts) != 3 {
-		return "", errors.New("invalid encrypted string format")
+		return "", "", errors.New("invalid encrypted string format")
 	}
-	keyID := parts[0]
+
+	keyID = parts[0] // The ID of key used in encrypting this string
 	nonceB64 := parts[1]
 	messageB64 := parts[2]
 
 	// Get current (a.k.a. oldest/lexicographically lowest) issuer key
 	currentIssuerKey, err := GetIssuerPrivateJWK()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	// Get all valid issuer keys
@@ -482,16 +483,16 @@ func DecryptString(encryptedString string) (decryptedString string, err error) {
 	// Decode base64 components
 	nonceBytes, err := base64.URLEncoding.DecodeString(nonceB64)
 	if err != nil {
-		return "", errors.Wrapf(err, "failed to decode nonce")
+		return "", "", errors.Wrapf(err, "failed to decode nonce")
 	}
 
 	encryptedMsg, err := base64.URLEncoding.DecodeString(messageB64)
 	if err != nil {
-		return "", errors.Wrapf(err, "failed to decode message")
+		return "", "", errors.Wrapf(err, "failed to decode message")
 	}
 
 	if len(nonceBytes) != 24 {
-		return "", errors.New("invalid nonce length")
+		return "", "", errors.New("invalid nonce length")
 	}
 	var nonce [24]byte
 	copy(nonce[:], nonceBytes)
@@ -502,7 +503,7 @@ func DecryptString(encryptedString string) (decryptedString string, err error) {
 		// Get the keypair for decryption
 		privateKey, publicKey, err := getEncryptionKeyPair(issuerKey)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 
 		// Decrypt the message
@@ -519,8 +520,8 @@ func DecryptString(encryptedString string) (decryptedString string, err error) {
 	}
 
 	if !decrypted {
-		return "", errors.New("failed to decrypt message")
+		return "", "", errors.New("failed to decrypt message")
 	}
 
-	return string(decryptedMsg), nil
+	return string(decryptedMsg), keyID, nil
 }

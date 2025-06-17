@@ -94,7 +94,7 @@ func TestDecryptString(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEmpty(t, encrypted)
 
-		decrypted, err := DecryptString(encrypted)
+		decrypted, _, err := DecryptString(encrypted)
 		require.NoError(t, err)
 		assert.Equal(t, secret, decrypted)
 	})
@@ -114,14 +114,14 @@ func TestDecryptString(t *testing.T) {
 		log.SetOutput(&logOutput)
 		defer log.SetOutput(os.Stderr)
 
-		decrypted, err := DecryptString(encrypted)
+		decrypted, _, err := DecryptString(encrypted)
 		require.NoError(t, err)
 		assert.Equal(t, secret, decrypted)
 		assert.Contains(t, logOutput.String(), "The key used in encryption (id: another-valid-key-id) is not the current issuer key")
 	})
 
 	t.Run("decrypt-with-invalid-format", func(t *testing.T) {
-		_, err := DecryptString("invalid.format")
+		_, _, err := DecryptString("invalid.format")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "invalid encrypted string format")
 	})
@@ -136,29 +136,49 @@ func TestDecryptString(t *testing.T) {
 		parts[1] = "invalid-nonce"
 		encrypted = strings.Join(parts, ".")
 
-		_, err = DecryptString(encrypted)
+		_, _, err = DecryptString(encrypted)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to decode nonce")
 	})
 
 	t.Run("decrypt-with-multiple-keys", func(t *testing.T) {
+		firstKey, err := GetIssuerPrivateJWK()
+		require.NoError(t, err)
+		firstKeyID := firstKey.KeyID()
+
 		// Encrypt with the first key
 		secret := "Some secret to encrypt"
 		encrypted, err := EncryptString(secret)
 		require.NoError(t, err)
 		assert.NotEmpty(t, encrypted)
 
-		// Simulate key rotation: add a new key to the issuer keys directory
+		// Simulate key rotation
+		// 1. rename the first key file to increase its lexical order
+		keyFiles, err := os.ReadDir(keyDir)
+		require.NoError(t, err)
+		require.Len(t, keyFiles, 1)
+		// Note: Pelican generates key files with current timestamp + random number, e.g. pelican_generated_1746649043717835139_2388454454.pem
+		err = os.Rename(filepath.Join(keyDir, keyFiles[0].Name()), filepath.Join(keyDir, "pelican_generated_2.pem"))
+		require.NoError(t, err)
+
+		// 2. add a new key to the issuer keys directory
 		_, err = GeneratePEM(keyDir)
 		require.NoError(t, err)
 
+		// Note: Pelican uses the lexical order of the key files to determine current key (lower lexical order is the current key)
 		keyChanged, err := RefreshKeys()
 		require.NoError(t, err)
 		assert.True(t, keyChanged)
 
-		// Now DecryptString should still be able to decrypt using the old key
-		decrypted, err := DecryptString(encrypted)
+		secondKey, err := GetIssuerPrivateJWK()
 		require.NoError(t, err)
+		secondKeyID := secondKey.KeyID()
+		assert.NotEqual(t, firstKeyID, secondKeyID)
+
+		// Now DecryptString should still be able to decrypt using the old key
+		decrypted, keyIdUsedInEncryption, err := DecryptString(encrypted)
+		require.NoError(t, err)
+		assert.Equal(t, firstKeyID, keyIdUsedInEncryption)
 		assert.Equal(t, secret, decrypted)
 	})
 }
