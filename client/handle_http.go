@@ -3013,7 +3013,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	for _, checksum := range transfer.job.requestedChecksums {
 		switch checksum {
 		case AlgCRC32:
-			hashes = append(hashes, crc32.New(crc32cTable))
+			hashes = append(hashes, crc32.NewIEEE())
 		case AlgCRC32C:
 			hashes = append(hashes, crc32.New(crc32cTable))
 		case AlgMD5:
