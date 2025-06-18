@@ -43,7 +43,7 @@ func init() {
 	flagSet := putCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.BoolP("recursive", "r", false, "Recursively upload a collection.  Forces methods to only be http to get the freshest collection contents")
-	flagSet.String("checksum", "crc32c", "Checksum algorithm to use for upload and validation")
+	flagSet.String("checksum", "", "Checksum algorithm to use for upload and validation")
 	objectCmd.AddCommand(putCmd)
 }
 
