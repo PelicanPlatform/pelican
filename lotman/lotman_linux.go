@@ -1177,7 +1177,7 @@ func InitLotman(adsFromFed []server_structs.NamespaceAdV2) bool {
 	// We've created the lotman home directory, but the database lotman creates will still be
 	// owned by the uid:gid that started the cache. Recursively set ownership to XRootD, but set
 	// permissions such that the Pelican user can still modify it.
-	if err := filepath.WalkDir(lotHome, func(path string, d os.DirEntry, err error) error {
+	if err := filepath.WalkDir(filepath.Join(lotHome, ".lot"), func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return errors.Wrapf(err, "the path %s cannot be accessed", path)
 		}
