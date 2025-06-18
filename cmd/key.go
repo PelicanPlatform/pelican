@@ -18,9 +18,7 @@ var (
 		Long: `Generate a public-private key-pair for a Pelican server.
 The private key is an ECDSA key with P256 curve. The corresponding public key
 is a JSON Web Key Set (JWKS), which can be used for JWT signature verification.`,
-		RunE: keygenMain,
-		// Note: no new tests are needed for this new command, because it reuses the `keygenMain` function,
-		// which is already tested in `pelican/cmd/generate_keygen_test.go`.
+		RunE:         keygenMain,
 		SilenceUsage: true,
 	}
 )
@@ -29,6 +27,6 @@ func init() {
 	keyCmd.AddCommand(keyCreateCmd)
 
 	// Attach flags to the `create` sub-command
-	keyCreateCmd.Flags().StringVar(&privateKeyPath, "private-key", "./private-key.pem", "The file path where the generated private key will be saved.")
+	keyCreateCmd.Flags().StringVar(&privateKeyPath, "private-key", "./private-key.pem", "The file path where the generated private key will be saved. If a key already exists at the provided path, it will not be overwritten but will be used to derive a public key")
 	keyCreateCmd.Flags().StringVar(&publicKeyPath, "public-key", "./issuer-pub.jwks", "The file path where the generated public key (derived from the generated private key) will be saved.")
 }
