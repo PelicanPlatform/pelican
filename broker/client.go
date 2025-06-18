@@ -157,7 +157,7 @@ func generateRequestId() string {
 }
 
 // Given an origin's broker URL, return a connected socket to the origin
-func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) (conn net.Conn, err error) {
+func ConnectToService(ctx context.Context, brokerUrl, prefix, originName string) (conn net.Conn, err error) {
 
 	// Ensure we have a local CA for signing an origin host certificate.
 	if err = config.GenerateCACert(); err != nil {

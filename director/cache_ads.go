@@ -71,7 +71,10 @@ var (
 	// Use a single mutex to protect four global maps
 	filteredServersMutex = sync.RWMutex{}
 
-	// The broker dialer we use to connect to origin servers requiring a brokered connection
+	// The broker dialer we use to connect to services requiring a brokered connection.
+	// Typically, this is for connecting to origins behind a firewall but can also be used
+	// for contacting caches whose web port (necessary for Prometheus monitoring) is behind
+	// a firewall.
 	brokerDialer *broker.BrokerDialer = nil
 )
 

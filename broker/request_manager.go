@@ -32,7 +32,7 @@ type (
 		PrivateKey  string `json:"private_key,omitempty"`
 		RequestId   string `json:"request_id,omitempty"`
 		Prefix      string `json:"prefix,omitempty"`
-		OriginName  string `json:"origin,omitempty"`
+		OriginName  string `json:"origin,omitempty"` // Name of the service for the reversal request.  Originally, brokers were for origins-only (hence the inexact name of the parameter).
 	}
 
 	requestInfo struct {

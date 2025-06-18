@@ -210,7 +210,7 @@ func TestBroker(t *testing.T) {
 	query.Set("origin", param.Server_Hostname.GetString())
 	query.Set("prefix", "/caches/"+externalWebUrl.Hostname())
 	brokerUrl.RawQuery = query.Encode()
-	clientConn, err := ConnectToOrigin(ctxQuick, brokerUrl.String(), "/caches/"+externalWebUrl.Hostname(), param.Server_Hostname.GetString())
+	clientConn, err := ConnectToService(ctxQuick, brokerUrl.String(), "/caches/"+externalWebUrl.Hostname(), param.Server_Hostname.GetString())
 	require.NoError(t, err)
 	log.Debugf("Cache got reversed client connection with cache side %s and origin side %s", clientConn.LocalAddr(), clientConn.RemoteAddr())
 

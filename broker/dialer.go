@@ -101,5 +101,5 @@ func (d *BrokerDialer) DialContext(ctx context.Context, network, addr string) (n
 	} else {
 		prefix = "/origins/" + addr
 	}
-	return ConnectToOrigin(ctx, info.Value().BrokerUrl, prefix, addr)
+	return ConnectToService(ctx, info.Value().BrokerUrl, prefix, addr)
 }
