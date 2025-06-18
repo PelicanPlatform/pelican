@@ -623,7 +623,7 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 			if (path != dir) && dirEnt.IsDir() {
 				return filepath.SkipDir
 			}
-			if dirEnt.Type().IsRegular() && filepath.Ext(dirEnt.Name()) == ".pem" {
+			if dirEnt.Type().IsRegular() && (filepath.Ext(dirEnt.Name()) == ".pem" || filepath.Ext(dirEnt.Name()) == ".jwk") {
 				// Parse the private key in this file and add to the in-memory keys map
 				key, err := LoadSinglePEM(path)
 				if err != nil {
