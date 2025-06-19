@@ -206,6 +206,7 @@ func (f *FedTest) Spinup() {
 
 	_, f.FedCancel, err = launchers.LaunchModules(ctx, modules)
 	if err != nil {
+		f.FedCancel()
 		f.T.Fatalf("Failure in fedServeInternal: %v", err)
 	}
 
