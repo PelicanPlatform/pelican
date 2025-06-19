@@ -157,7 +157,7 @@ func generateRequestId() string {
 }
 
 // Given an origin's broker URL, return a connected socket to the origin
-func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) (conn net.Conn, err error) {
+func ConnectToService(ctx context.Context, brokerUrl, prefix, originName string) (conn net.Conn, err error) {
 
 	// Ensure we have a local CA for signing an origin host certificate.
 	if err = config.GenerateCACert(); err != nil {
@@ -226,7 +226,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 	// Create a cloned transport which disables HTTP/2 (as that TCP string can't
 	// be hijacked which we will need to do below).  The clone ensures that we're
 	// not going to be reusing TCP connections.
-	tr := config.GetTransport().Clone()
+	tr := config.GetBasicTransport().Clone()
 	tr.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
 	client := &http.Client{Transport: tr}
 
@@ -385,7 +385,7 @@ func ConnectToOrigin(ctx context.Context, brokerUrl, prefix, originName string) 
 //
 // The TCP socket used for the callback will be converted to a one-shot listener
 // and reused with the origin as the "server".
-func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.Listener, err error) {
+func doCallback(ctx context.Context, sType server_structs.ServerType, brokerResp reversalRequest) (listener net.Listener, err error) {
 	log.Debugln("Origin starting callback to cache at", brokerResp.CallbackUrl)
 
 	privateKey, err := privateKeyFromBytes(brokerResp.PrivateKey)
@@ -415,7 +415,18 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 	}
 	cacheAud.Path = ""
 
-	token, err := createToken(param.Origin_FederationPrefix.GetString(), param.Server_Hostname.GetString(), cacheAud.String(), token_scopes.Broker_Callback)
+	servicePrefix := ""
+	url, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	if err != nil {
+		err = errors.Wrap(err, "failure when parsing the external web URL")
+		return
+	}
+	if sType.IsEnabled(server_structs.CacheType) {
+		servicePrefix = server_structs.GetCacheNs(url.Hostname())
+	} else {
+		servicePrefix = server_structs.GetOriginNs(url.Host)
+	}
+	token, err := createToken(servicePrefix, url.Hostname(), cacheAud.String(), token_scopes.Broker_Callback)
 	if err != nil {
 		err = errors.Wrap(err, "failure when constructing the cache callback token")
 		return
@@ -550,10 +561,21 @@ func doCallback(ctx context.Context, brokerResp reversalRequest) (listener net.L
 // TLS listener where you can invoke "Accept" once before it automatically
 // closes itself.  It is the result of a successful connection reversal to
 // a cache.
-func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan chan any) (err error) {
+//
+// The request monitor is used by the "private service" (the service behind the
+// firewall) to know when to setup connections requested by the "public service"
+// (e.g., a cache).
+func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, sType server_structs.ServerType, privateName string, resultChan chan any) (err error) {
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
 		return err
+	}
+
+	prefix := ""
+	if sType.IsEnabled(server_structs.CacheType) {
+		prefix = server_structs.GetCacheNs(privateName)
+	} else {
+		prefix = server_structs.GetOriginNs(privateName)
 	}
 
 	brokerUrl := fedInfo.BrokerEndpoint
@@ -561,13 +583,9 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 		return errors.New("Broker service is not set or discovered; cannot enable broker functionality.  Try setting Federation.BrokerUrl")
 	}
 	brokerEndpoint := brokerUrl + "/api/v1.0/broker/retrieve"
-	originUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
-	if err != nil {
-		return
-	}
 	oReq := originRequest{
-		Origin: originUrl.Hostname(),
-		Prefix: param.Origin_FederationPrefix.GetString(),
+		Origin: privateName,
+		Prefix: prefix,
 	}
 	req, err := json.Marshal(&oReq)
 	if err != nil {
@@ -575,7 +593,27 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 	}
 	reqReader := bytes.NewReader(req)
 
+	// Create a token that will be used to retrieve requests from the broker;
+	// this is done before the goroutine starts to guarantee that we are looking up
+	// the Viper config from a single-threaded context.  Otherwise, during startup,
+	// we may have concurrent read and write operations to the Viper config, which
+	// can lead to a panic.
+	brokerAud, err := url.Parse(fedInfo.BrokerEndpoint)
+	if err != nil {
+		log.Errorln("Failure when parsing broker URL:", err)
+		return
+	}
+	brokerAud.Path = ""
+	token, err := createToken(prefix, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
+	if err != nil {
+		log.Errorln("Failure when constructing the broker retrieve token:", err)
+		return
+	}
+
+	client := &http.Client{Transport: config.GetBasicTransport()}
+
 	egrp.Go(func() (err error) {
+		firstLoop := true
 		for {
 			sleepDuration := time.Second + time.Duration(mrand.Intn(500))*time.Microsecond
 			select {
@@ -595,25 +633,21 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("User-Agent", "pelican-origin/"+config.GetVersion())
 
-				brokerAud, err := url.Parse(fedInfo.BrokerEndpoint)
-				if err != nil {
-					log.Errorln("Failure when parsing broker URL:", err)
-					break
+				if !firstLoop {
+					token, err = createToken(prefix, param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
+					if err != nil {
+						log.Errorln("Failure when constructing the broker retrieve token:", err)
+						break
+					}
 				}
-				brokerAud.Path = ""
-
-				token, err := createToken(param.Origin_FederationPrefix.GetString(), param.Server_Hostname.GetString(), brokerAud.String(), token_scopes.Broker_Retrieve)
-				if err != nil {
-					log.Errorln("Failure when constructing the broker retrieve token:", err)
-					break
-				}
+				firstLoop = false
 				req.Header.Set("Authorization", "Bearer "+token)
-
-				tr := config.GetTransport()
-				client := &http.Client{Transport: tr}
 
 				resp, err := client.Do(req)
 				if err != nil {
+					if errors.Is(err, context.Canceled) {
+						break
+					}
 					log.Errorln("Failure when invoking the broker URL for retrieving requests", err)
 					break
 				}
@@ -642,7 +676,7 @@ func LaunchRequestMonitor(ctx context.Context, egrp *errgroup.Group, resultChan 
 				}
 
 				if brokerResp.Status == server_structs.RespOK {
-					listener, err := doCallback(ctx, brokerResp.Request)
+					listener, err := doCallback(ctx, sType, brokerResp.Request)
 					if err != nil {
 						if errors.Is(err, context.Canceled) {
 							log.Debugln("Shutdown encountered while processing callback")

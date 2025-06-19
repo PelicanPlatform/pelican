@@ -110,6 +110,7 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	})
 	require.NoError(t, err)
 
+	namespaceKeys = nil
 	LaunchNamespaceKeyMaintenance(ctx, egrp)
 }
 
@@ -193,7 +194,11 @@ func TestBroker(t *testing.T) {
 	viper.Set("Federation.RegistryUrl", param.Server_ExternalWebUrl.GetString())
 	listenerChan := make(chan any)
 	ctxQuick, deadlineCancel := context.WithTimeout(ctx, 5*time.Second) // Have shorter timeout for this handshake
-	err = LaunchRequestMonitor(ctxQuick, egrp, listenerChan)
+
+	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
+	require.NoError(t, err)
+
+	err = LaunchRequestMonitor(ctxQuick, egrp, server_structs.CacheType, externalWebUrl.Hostname(), listenerChan)
 	require.NoError(t, err)
 
 	// Initiate the callback using the cache-based routines.
@@ -203,9 +208,9 @@ func TestBroker(t *testing.T) {
 	brokerUrl.Path = "/api/v1.0/broker/reverse"
 	query := brokerUrl.Query()
 	query.Set("origin", param.Server_Hostname.GetString())
-	query.Set("prefix", "/foo")
+	query.Set("prefix", "/caches/"+externalWebUrl.Hostname())
 	brokerUrl.RawQuery = query.Encode()
-	clientConn, err := ConnectToOrigin(ctxQuick, brokerUrl.String(), "/foo", param.Server_Hostname.GetString())
+	clientConn, err := ConnectToService(ctxQuick, brokerUrl.String(), "/caches/"+externalWebUrl.Hostname(), param.Server_Hostname.GetString())
 	require.NoError(t, err)
 	log.Debugf("Cache got reversed client connection with cache side %s and origin side %s", clientConn.LocalAddr(), clientConn.RemoteAddr())
 

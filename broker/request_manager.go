@@ -32,7 +32,7 @@ type (
 		PrivateKey  string `json:"private_key,omitempty"`
 		RequestId   string `json:"request_id,omitempty"`
 		Prefix      string `json:"prefix,omitempty"`
-		OriginName  string `json:"origin,omitempty"`
+		OriginName  string `json:"origin,omitempty"` // Name of the service for the reversal request.  Originally, brokers were for origins-only (hence the inexact name of the parameter).
 	}
 
 	requestInfo struct {
@@ -68,7 +68,7 @@ func getOriginQueue(prefix, origin string) chan reversalRequest {
 // Send a request to a given origin's queue.
 // Return a requestTimeout error if no origin retrieved the request before the context timed out.
 func handleRequest(ctx context.Context, origin string, req reversalRequest, timeout time.Duration) (err error) {
-	queue := getOriginQueue(req.Prefix, origin)
+	queue := getOriginQueue("/", origin)
 	maxTime := timeout - 500*time.Millisecond - time.Duration(rand.Intn(500))*time.Millisecond
 	if maxTime <= 0 {
 		maxTime = time.Millisecond
@@ -90,7 +90,7 @@ func handleRequest(ctx context.Context, origin string, req reversalRequest, time
 }
 
 // Handle the origin's request to retrieve any pending reversals.
-func handleRetrieve(appCtx context.Context, ginCtx context.Context, prefix, origin string, timeout time.Duration) (req reversalRequest, err error) {
+func handleRetrieve(appCtx context.Context, ginCtx context.Context, origin string, timeout time.Duration) (req reversalRequest, err error) {
 	// Return randomly short of the timeout.
 	maxTime := timeout - 500*time.Millisecond - time.Duration(rand.Intn(500))*time.Millisecond
 	if maxTime <= 0 {
@@ -99,7 +99,7 @@ func handleRetrieve(appCtx context.Context, ginCtx context.Context, prefix, orig
 	tick := time.NewTicker(maxTime)
 	defer tick.Stop()
 	select {
-	case req = <-getOriginQueue(prefix, origin):
+	case req = <-getOriginQueue("/", origin):
 		break
 	case <-tick.C:
 		err = errRetrieveTimeout
