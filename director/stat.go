@@ -70,6 +70,10 @@ type (
 		// Available when status==failure. The values are AuthURLs from servers with 403 responses
 		// The AuthURLs are for obtaining a token and retry the query.
 		DeniedServers []string `json:"deniedServers,omitempty"`
+		// Set when status==failure.  The values are AuthURLs from servers with 404 responses
+		NotFoundServers []string `json:"notFoundServers,omitempty"`
+		// Set when status==failure.  The values are AuthURLs that returned an error that is neither 403 nor 404.
+		OtherErrorServers []string `json:"errorServers,omitempty"`
 	}
 
 	// A struct to implement `object stat`, by querying against origins/caches with namespaces match the prefix of an object name
@@ -97,12 +101,18 @@ type (
 	}
 
 	headReqNotFoundErr struct {
-		Message string
+		Message   string
+		ServerUrl string
 	}
 
 	headReqForbiddenErr struct {
 		Message   string
 		IssuerUrl string
+	}
+
+	headReqOtherErr struct {
+		Message   string
+		ServerUrl string
 	}
 
 	headReqCancelledErr struct {
@@ -137,6 +147,10 @@ func (*headReqNotFoundErr) Is(target error) bool {
 }
 
 func (e *headReqForbiddenErr) Error() string {
+	return e.Message
+}
+
+func (e *headReqOtherErr) Error() string {
 	return e.Message
 }
 
@@ -221,16 +235,23 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 			return nil, errors.Wrap(err, "unknown request error")
 		}
 	}
+	defer res.Body.Close()
 	if res.StatusCode == 404 {
-		return nil, &headReqNotFoundErr{"file not found on the server " + dataUrl.String()}
+		if _, err := io.ReadAll(res.Body); err != nil {
+			log.Debugln("Failed to read 404 response body:", err)
+		}
+		return nil, &headReqNotFoundErr{"file not found on the server " + dataUrl.String(), dataUrl.String()}
 	} else if res.StatusCode == 403 {
+		if _, err := io.ReadAll(res.Body); err != nil {
+			log.Debugln("Failed to read 403 response body:", err)
+		}
 		return nil, &headReqForbiddenErr{fmt.Sprintf("authorization failed for the server at %s. Token is required", dataUrl.String()), ""}
 	} else if res.StatusCode != 200 {
 		resBody, err := io.ReadAll(res.Body)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to read error response body")
 		}
-		return nil, errors.New(fmt.Sprintf("unknown origin response with status code %d and message: %s", res.StatusCode, string(resBody)))
+		return nil, &headReqOtherErr{fmt.Sprintf("unknown origin response with status code %d and message: %s", res.StatusCode, string(resBody)), dataUrl.String()}
 	} else {
 		cLenStr := res.Header.Get("Content-Length")
 		checksumStr := res.Header.Get("Digest")
@@ -337,6 +358,8 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 	numFileNotFound := 0
 	successResult := make([]*objectMetadata, 0)
 	deniedResult := make([]*headReqForbiddenErr, 0)
+	notFoundResult := make([]*headReqNotFoundErr, 0)
+	otherErrResult := make([]*headReqOtherErr, 0)
 
 	if len(ads) < 1 {
 		maxCancel()
@@ -479,6 +502,41 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 	}
 
 	for {
+		if numTotalReq == len(ads) {
+			maxCancel()
+			if len(successResult) == 0 && numFileNotFound > 0 && numFileNotFound >= minReq && numTotalReq == numFileNotFound {
+				// In this case, we had a quorum of origins indicating this object didn't exist, no servers
+				// showing an unknown status (HTTP 500, HTTP 403, etc).  We're fairly sure the object doesn't exist.
+				qResult.Status = queryFailed
+				qResult.ErrorType = queryNoSourcesErr
+				qResult.Msg = "Object does not exist."
+				return
+			} else if len(successResult) < minReq {
+				qResult.Status = queryFailed
+				qResult.ErrorType = queryInsufficientResErr
+				qResult.Msg = fmt.Sprintf("Number of success response: %d is less than MinStatResponse (%d) required.", len(successResult), minReq)
+				serverIssuers := make([]string, len(deniedResult))
+				for idx, dErr := range deniedResult {
+					serverIssuers[idx] = dErr.IssuerUrl
+				}
+				qResult.DeniedServers = serverIssuers
+				serverIssuers = make([]string, len(notFoundResult))
+				for idx, nErr := range notFoundResult {
+					serverIssuers[idx] = nErr.ServerUrl
+				}
+				qResult.NotFoundServers = serverIssuers
+				serverIssuers = make([]string, len(otherErrResult))
+				for idx, oErr := range otherErrResult {
+					serverIssuers[idx] = oErr.ServerUrl
+				}
+				qResult.OtherErrorServers = serverIssuers
+				return
+			}
+			qResult.Status = querySuccessful
+			qResult.Msg = "Stat finished with required number of responses."
+			qResult.Objects = successResult
+			return
+		}
 		select {
 		case deErr := <-deniedReqChan:
 			numTotalReq += 1
@@ -486,6 +544,11 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 		case negErr := <-negativeReqChan:
 			if errors.Is(negErr, &headReqNotFoundErr{}) {
 				numFileNotFound += 1
+				notFoundResult = append(notFoundResult, negErr.(*headReqNotFoundErr))
+			}
+			var otherErr *headReqOtherErr
+			if errors.As(negErr, &otherErr) {
+				otherErrResult = append(otherErrResult, otherErr)
 			}
 			numTotalReq += 1
 		case metaRes := <-positiveReqChan:
@@ -505,33 +568,6 @@ func (stat *ObjectStat) queryServersForObject(ctx context.Context, objectName st
 			qResult.ErrorType = queryCancelledErr
 			qResult.Msg = fmt.Sprintf("Director stat for object %q is cancelled", objectName)
 			return
-		default:
-			// All requests finished
-			if numTotalReq == len(ads) {
-				maxCancel()
-				if len(successResult) == 0 && numFileNotFound > 0 && numFileNotFound >= minReq && numTotalReq == numFileNotFound {
-					// In this case, we had a quorum of origins indicating this object didn't exist, no servers
-					// showing an unknown status (HTTP 500, HTTP 403, etc).  We're fairly sure the object doesn't exist.
-					qResult.Status = queryFailed
-					qResult.ErrorType = queryNoSourcesErr
-					qResult.Msg = "Object does not exist."
-					return
-				} else if len(successResult) < minReq {
-					qResult.Status = queryFailed
-					qResult.ErrorType = queryInsufficientResErr
-					qResult.Msg = fmt.Sprintf("Number of success response: %d is less than MinStatResponse (%d) required.", len(successResult), minReq)
-					serverIssuers := make([]string, len(deniedResult))
-					for idx, dErr := range deniedResult {
-						serverIssuers[idx] = dErr.IssuerUrl
-					}
-					qResult.DeniedServers = serverIssuers
-					return
-				}
-				qResult.Status = querySuccessful
-				qResult.Msg = "Stat finished with required number of responses."
-				qResult.Objects = successResult
-				return
-			}
 		}
 	}
 }
@@ -655,11 +691,37 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 		}
 	}
 
+	// If we have not discovered any origins then we throw in any whose response
+	// was inconclusive (may have been a temporary overload or a permission denied).
+	//
+	// If we have an origin that claims to have the object and everything else is an
+	// error then we'll use that origin.
+	//
+	// We are extra aggressive about adding back in origins under the assumption that
+	// missing an origin due to error is going to be more catastrophic to a client than
+	// missing a cache.
+	addExtraOrigins := true
+	foundOrigins := false
+	if statOrigins && len(origins) > 0 {
+		for _, origin := range origins {
+			if originAvailabilityMap[origin.URL.String()] {
+				foundOrigins = true
+				break
+			}
+		}
+		if !foundOrigins {
+			addExtraOrigins = true
+		}
+	}
+
 	// Handle denied servers
 	for _, ds := range qr.DeniedServers {
-		for _, origin := range origins {
-			if origin.AuthURL.String() == ds {
-				originAvailabilityMap[origin.URL.String()] = true
+		if addExtraOrigins {
+			for _, origin := range origins {
+				if origin.AuthURL.String() == ds {
+					foundOrigins = true
+					originAvailabilityMap[origin.URL.String()] = true
+				}
 			}
 		}
 		for _, cache := range caches {
@@ -668,22 +730,24 @@ func generateAvailabilityMaps(ctx *gin.Context, origins, caches []server_structs
 			}
 		}
 	}
+	if addExtraOrigins {
+		for _, es := range qr.OtherErrorServers {
+			for _, origin := range origins {
+				if origin.AuthURL.String() == es {
+					foundOrigins = true
+					originAvailabilityMap[origin.URL.String()] = true
+				}
+			}
+		}
+	}
 
 	// If we issued stat requests against the Origin but none have the object,
 	// it likely doesn't exist. This constitutes an actual error that we can propagate
 	// back to the client.
-	if statOrigins && len(origins) > 0 {
-		found := false
-		for _, origin := range origins {
-			if originAvailabilityMap[origin.URL.String()] {
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			return nil, nil, objectNotFoundErr{msg: "no queried origins possess the object", object: reqPath}
-		}
+	if statOrigins && len(origins) > 0 && !foundOrigins {
+		msg := "no queried origins possess the object"
+		log.Debugln(msg, reqPath)
+		return nil, nil, objectNotFoundErr{msg: msg, object: reqPath}
 	}
 
 	return originAvailabilityMap, cacheAvailabilityMap, nil
