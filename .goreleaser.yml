@@ -462,7 +462,7 @@ nfpms:
           - "pelican-director = 7"
         dependencies:
           - "pelican >= 7.11.0"
-          - "xrootd-server >= 1:5.7.0"
+          - "xrootd-server >= 1:5.8.2"
           - "xrootd-scitokens"
           - "xrootd-voms"
       deb:
@@ -473,7 +473,7 @@ nfpms:
           - "pelican-director (= 7)"
         dependencies:
           - "pelican (>= 7.11.0)"
-          - "xrootd-server (>= 5.7.0)"
+          - "xrootd-server (>= 5.8.2)"
           - "xrootd-scitokens-plugins"
           - "xrootd-voms-plugins"
   # end package pelican-server
