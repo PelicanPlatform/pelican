@@ -2577,15 +2577,16 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	}()
 
 	// Create the client, request, and context
-	client := config.GetClient()
-	transport := config.GetTransport()
-	if !transfer.Proxy {
-		transport.Proxy = nil
+	var client *http.Client
+	if transfer.Proxy {
+		client = config.GetClient()
+	} else {
+		client = config.GetClientNoProxy()
 	}
 	transferUrl := *transfer.Url
 	if transfer.Url.Scheme == "unix" {
-		transport.Proxy = nil // Proxies make no sense when reading via a Unix socket
-		transport = transport.Clone()
+		transport := config.GetTransport().Clone()
+		transport.Proxy = nil
 		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
 			dialer := net.Dialer{}
 			return dialer.DialContext(ctx, "unix", transfer.UnixSocket)
@@ -2594,9 +2595,9 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		// The host is ignored since we override the dial function; however, I find it useful
 		// in debug messages to see that this went to the local cache.
 		transferUrl.Host = "localhost"
+		client = &http.Client{Transport: transport}
 	}
-	client.Transport = transport
-	headerTimeout := transport.ResponseHeaderTimeout
+	headerTimeout := config.GetTransport().ResponseHeaderTimeout
 	if headerTimeout > time.Second {
 		headerTimeout -= 500 * time.Millisecond
 	} else {
@@ -3380,11 +3381,7 @@ Loop:
 // This is executed in a separate goroutine to allow periodic progress callbacks
 // to be created within the main goroutine.
 func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error, proxy bool) {
-	var UploadClient = config.GetClient()
-	client := UploadClient
-	if !proxy {
-		client.Transport.Proxy = nil
-	}
+	client := config.GetClientNoProxy()
 	dump, _ := httputil.DumpRequestOut(request, false)
 	log.Debugf("Dumping request: %s", dump)
 	response, err := client.Do(request)
@@ -3907,7 +3904,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 			for {
 				if disableProxy {
 					log.Debugln("Performing request (without proxy)", endpoint.String())
-					transport.Proxy = nil
+					transport = config.GetTransportNoProxy()
 				} else {
 					log.Debugln("Performing request", endpoint.String())
 				}
