@@ -66,9 +66,14 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 		err = errors.Wrap(err, "failed to create temporary directory for launching local cache socket")
 		return
 	}
+	// Allow other users to access the socket
+	if err = os.Chmod(startupDir, 0755); err != nil {
+		err = errors.Wrap(err, "failed to set permissions on temporary directory for local cache socket")
+		return
+	}
 	defer func() {
 		var matches []string
-		matches, err2 := filepath.Glob(filepath.Join(startupDir, "lc-*"))
+		matches, err2 := filepath.Glob(filepath.Join(socketDir, "lc-*"))
 		if err2 != nil {
 			err2 = errors.Wrap(err2, "failed to list temporary directories for cleaning up local cache socket")
 			if err == nil {
@@ -88,6 +93,15 @@ func (lc *LocalCache) LaunchListener(ctx context.Context, egrp *errgroup.Group) 
 	if listener, err = net.ListenUnix("unix", &net.UnixAddr{Name: startupSockName, Net: "unix"}); err != nil {
 		err = errors.Wrap(err, "failed to create unix socket for local cache")
 		log.Warningf("Failed to create socket %s: %v", startupSockName, err)
+		return err
+	}
+
+	// Allow other users to write to the socket
+	if err = os.Chmod(startupSockName, 0777); err != nil {
+		err = errors.Wrap(err, "failed to set permissions on local cache socket")
+		if err2 := listener.Close(); err2 != nil {
+			log.Errorf("Failed to close socket listener: %v", err2)
+		}
 		return err
 	}
 
