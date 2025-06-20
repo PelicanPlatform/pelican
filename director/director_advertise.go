@@ -76,7 +76,7 @@ type (
 	// We provided both the director that produced the ad and the
 	// ad itself.  Having the director ad helps detect forwarding
 	// loops -- we can break early if we detect we're talking to ourself!
-	forwardAd struct {
+	ForwardAd struct {
 		DirectorAd *server_structs.DirectorAd        `json:"director-ad"`
 		AdType     string                            `json:"ad-type"`
 		Now        time.Time                         `json:"now"`
@@ -134,7 +134,7 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 		return
 	}
 
-	fAd := forwardAd{}
+	fAd := ForwardAd{}
 	if err = ctx.MustBindWith(&fAd, binding.JSON); err != nil {
 		log.Errorln("Failed to bind JSON:", err)
 		return
@@ -237,7 +237,7 @@ func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.Origi
 // functions to avoid refactoring the DirectorAd and OriginAdvertiseV2 to have
 // a common interface.
 func (dir *directorInfo) forwardDirector(ad *server_structs.DirectorAd) {
-	forwardAd := &forwardAd{
+	forwardAd := &ForwardAd{
 		DirectorAd: ad,
 		AdType:     server_structs.DirectorType.String(),
 		Now:        time.Now(),
@@ -281,7 +281,7 @@ func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.
 		AdvertiseUrl: adUrl,
 	}
 	directorAd.Initialize(name)
-	forwardAd := &forwardAd{
+	forwardAd := &ForwardAd{
 		DirectorAd: directorAd,
 		ServiceAd:  ad,
 		AdType:     sType.String(),
