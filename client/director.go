@@ -68,14 +68,7 @@ func queryDirector(ctx context.Context, verb string, pUrl *pelican_url.PelicanUR
 	// Here we use http.Transport to prevent the client from following the director's
 	// redirect. We use the Location url elsewhere (plus we still need to do the token
 	// dance!)
-	var client *http.Client
-	tr := config.GetTransport()
-	client = &http.Client{
-		Transport: tr,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	client := config.GetClientNoRedirect()
 
 	var errMsg string
 	var body []byte

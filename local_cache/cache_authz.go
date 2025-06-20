@@ -66,7 +66,7 @@ func newAuthConfig(ctx context.Context, egrp *errgroup.Group) (ac *authConfig) {
 				log.Errorln("Failed to lookup JWKS URL:", err)
 			} else {
 				ar = jwk.NewCache(ctx)
-				client := &http.Client{Transport: config.GetTransport()}
+				client := &http.Client{Transport: config.GetBasicTransport()}
 				if err = ar.Register(jwksUrl.String(), jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(client)); err != nil {
 					log.Errorln("Failed to register JWKS URL with cache: ", err)
 				} else {
