@@ -209,6 +209,8 @@ func NewObjectStat() *ObjectStat {
 func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error) {
 	client := config.GetClient()
 	reqUrl := dataUrl.JoinPath(objectName)
+	ctx, cancelFunc := context.WithTimeout(ctx, timeout)
+	defer cancelFunc()
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, reqUrl.String(), nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create request")
