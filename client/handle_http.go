@@ -3224,14 +3224,14 @@ Loop:
 		result, err := fetchChecksum(putContext, transfer.requestedChecksums, dest, tokenContents, transfer.job.project)
 		if err != nil {
 			log.Errorln("Error fetching checksum:", err)
-			transferResult.Error = err
 			attempt.Error = err
 
 			if transfer.job.requireChecksum {
 				transferResult.Error = errors.New("checksum is required but endpoint was not able to provide it")
 			}
+		} else {
+			transferResult.ServerChecksums = result
 		}
-		transferResult.ServerChecksums = result
 
 		checksumHashes := transfer.requestedChecksums
 		if len(checksumHashes) == 0 {
@@ -3241,6 +3241,7 @@ Loop:
 			"url": transfer.remoteURL.String(),
 			"job": transfer.job.ID(),
 		}
+		successCtr := 0
 		transferResult.ClientChecksums = make([]ChecksumInfo, 0, len(checksumHashes))
 		for idx, checksum := range checksumHashes {
 			computedValue := hashes[idx].(hash.Hash).Sum(nil)
@@ -3262,6 +3263,7 @@ Loop:
 						}
 						log.WithFields(fields).Errorln(transferResult.Error)
 					} else {
+						successCtr++
 						log.WithFields(fields).Debugf("Checksum %s matches: %s",
 							HttpDigestFromChecksum(checksumInfo.Algorithm),
 							checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
@@ -3273,6 +3275,46 @@ Loop:
 			if !found {
 				log.WithFields(fields).Debugf("Client requested checksum %s but server did not provide it",
 					HttpDigestFromChecksum(checksum))
+			}
+		}
+		if successCtr == 0 && transfer.job.requireChecksum && transferResult.Error == nil {
+			if len(transfer.requestedChecksums) == 0 {
+				log.WithFields(fields).Errorln(
+					"Client requires checksum to succeed and it was not provided by server; client computed crc32c value is",
+					hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
+				)
+			} else {
+				log.WithFields(fields).Errorln(
+					"Client requires checksum to succeed and it was not provided by server; client computed",
+					HttpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
+					checksumValueToHttpDigest(transfer.requestedChecksums[0], hashes[0].(hash.Hash).Sum(nil)),
+				)
+			}
+			transferResult.Error = ErrServerChecksumMissing
+		} else if successCtr == 0 && len(transferResult.ServerChecksums) == 0 && transferResult.Error == nil {
+			log.WithFields(fields).Debugln(
+				"Client computed crc32c value is", hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
+				"(server did not provide any checksum values to compare)",
+			)
+		} else if successCtr == 0 && transferResult.Error == nil {
+			for _, checksumInfo := range transferResult.ServerChecksums {
+				log.WithFields(fields).Debugf(
+					"Server provided checksum not requested by client (cannot compare to local) %s=%x",
+					HttpDigestFromChecksum(checksumInfo.Algorithm),
+					checksumValueToHttpDigest(checksumInfo.Algorithm, checksumInfo.Value),
+				)
+			}
+			if len(transfer.requestedChecksums) == 0 {
+				log.WithFields(fields).Debugln(
+					"Checksum algorithms provided by server were not the requested crc32c; client-computed crc32c value is",
+					hex.EncodeToString(hashes[0].(hash.Hash).Sum(nil)),
+				)
+			} else {
+				log.WithFields(fields).Debugln(
+					"Checksum algorithms provided by server were not the requested ones; client computed",
+					HttpDigestFromChecksum(transfer.requestedChecksums[0]), "value as",
+					checksumValueToHttpDigest(transfer.requestedChecksums[0], hashes[0].(hash.Hash).Sum(nil)),
+				)
 			}
 		}
 	}
