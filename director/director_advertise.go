@@ -428,8 +428,11 @@ func (dir *directorInfo) sendAd(ctx context.Context, directorUrlStr string, ad *
 	}
 	if resp.StatusCode != http.StatusOK {
 		log.Errorln("Remote director at", directorUrl.String(), "rejected our forwarded ad:", err)
-		body, _ := io.ReadAll(resp.Body)
-		log.Debugln("Response body:", string(body))
+		body := make([]byte, 4096) // Read at most 4KB
+		n, _ := io.ReadFull(resp.Body, body)
+		if n > 0 {
+			log.Debugln("Response body:", string(body[:n]))
+		}
 		return
 	}
 	defer resp.Body.Close()
@@ -510,7 +513,7 @@ func updateInternalDirectorCache(ctx context.Context, egrp *errgroup.Group, dire
 		return
 	}
 	if item, found := directorAds.GetOrSet(directorAd.Name, info, ttlcache.WithTTL[string, *directorInfo](adTTL)); found {
-		if item.Value() != nil && item.Value().ad != nil {
+		if item.Value() != nil {
 			if after := directorAd.After(item.Value().ad); after == server_structs.AdAfterTrue || after == server_structs.AdAfterUnknown {
 				item.Value().ad = directorAd
 				directorAds.Set(directorAd.Name, item.Value(), adTTL)
