@@ -46,8 +46,9 @@ import (
 	"github.com/pelicanplatform/pelican/test_utils"
 )
 
-func setupXrootd(t *testing.T) {
+func setupXrootd(t *testing.T, ctx context.Context, server server_structs.ServerType) {
 	tmpDir := t.TempDir()
+	server_utils.ResetTestState()
 
 	viper.Set("ConfigDir", tmpDir)
 	viper.Set("Xrootd.RunLocation", tmpDir)
@@ -56,7 +57,10 @@ func setupXrootd(t *testing.T) {
 	viper.Set("Origin.StoragePrefix", "/")
 	viper.Set("Origin.FederationPrefix", "/")
 	viper.Set("Server.IssuerUrl", "https://my-xrootd.com:8444")
-	config.InitConfig()
+
+	err := config.InitServer(ctx, server)
+	require.NoError(t, err)
+
 }
 
 func TestXrootDOriginConfig(t *testing.T) {
@@ -84,7 +88,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			defer server_utils.ResetTestState()
-			setupXrootd(t)
+			setupXrootd(t, ctx, server_structs.OriginType)
 
 			if tt.configKey != "" {
 				viper.Set(tt.configKey, tt.configValue)
@@ -115,7 +119,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 	// Additional configuration tests
 	t.Run("TestOsdfWithXRDHOSTAndPort", func(t *testing.T) {
 		defer os.Unsetenv("XRDHOST")
-		setupXrootd(t)
+		setupXrootd(t, ctx, server_structs.OriginType)
 
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to OSDF")
@@ -131,7 +135,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 
 	t.Run("TestOsdfWithXRDHOSTAndNoPort", func(t *testing.T) {
 		defer os.Unsetenv("XRDHOST")
-		setupXrootd(t)
+		setupXrootd(t, ctx, server_structs.OriginType)
 
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to OSDF")
@@ -149,7 +153,7 @@ func TestXrootDOriginConfig(t *testing.T) {
 		// We don't expect XRDHOST to be set for Pelican proper. However, if it is set,
 		// we must unset it on test failure.
 		defer os.Unsetenv("XRDHOST")
-		setupXrootd(t)
+		setupXrootd(t, ctx, server_structs.OriginType)
 
 		_, err := config.SetPreferredPrefix(config.PelicanPrefix)
 		require.NoError(t, err, "Failed to set preferred prefix to Pelican")
@@ -179,7 +183,10 @@ func TestXrootDCacheConfig(t *testing.T) {
 
 	viper.Set("Cache.RunLocation", dirname)
 	viper.Set("ConfigDir", dirname)
-	config.InitConfig()
+
+	err = config.InitServer(ctx, server_structs.CacheType)
+	require.NoError(t, err)
+
 	configPath, err := ConfigXrootd(ctx, false)
 	require.NoError(t, err)
 	assert.NotNil(t, configPath)
@@ -211,7 +218,7 @@ func TestXrootDCacheConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			defer server_utils.ResetTestState()
-			setupXrootd(t)
+			setupXrootd(t, ctx, server_structs.CacheType)
 
 			if tt.configKey != "" {
 				viper.Set(tt.configKey, tt.configValue)
@@ -285,7 +292,6 @@ func TestUpdateAuth(t *testing.T) {
 	viper.Set("Xrootd.ScitokensConfig", scitokensName)
 	viper.Set("Origin.FederationPrefix", "/test")
 	viper.Set("Origin.StoragePrefix", "/")
-	config.InitConfig()
 
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
@@ -373,7 +379,6 @@ func TestCopyCertificates(t *testing.T) {
 	viper.Set("Logging.Level", "Debug")
 	viper.Set("Origin.RunLocation", runDirname)
 	viper.Set("ConfigDir", configDirname)
-	config.InitConfig()
 
 	// First, invoke CopyXrootdCertificates directly, ensure it works.
 	err := copyXrootdCertificates(&origin.OriginServer{})
