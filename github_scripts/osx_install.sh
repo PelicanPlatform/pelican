@@ -61,7 +61,7 @@ cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"
 ninja install
 sudo mkdir -p /etc/xrootd/client.plugins.d/
-sudo cp release_dir/etc/xrootd/client.plugins.d/pelican-plugin.conf /etc/xrootd/client.plugins.d/
+sudo cp release_dir/etc/xrootd/client.plugins.d/{curl,pelican}-plugin.conf /etc/xrootd/client.plugins.d/
 popd
 
 git clone --recurse-submodules --branch v0.2.1 https://github.com/PelicanPlatform/xrootd-s3-http.git
