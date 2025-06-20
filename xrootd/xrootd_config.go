@@ -74,9 +74,21 @@ lib = libXrdClPelican.so
 enable = true
 `
 
+	clientHttpPluginDefault = `
+url = http://*;https://*
+lib = libXrdClCurl.so
+enable = true
+`
+
 	clientPluginMac = `
 url = pelican://*
 lib = libXrdClPelican.dylib
+enable = true
+`
+
+	clientHttpPluginMac = `
+url = http://*;https://*
+lib = libXrdClCurl.dylib
 enable = true
 `
 )
@@ -459,8 +471,14 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 		}
 		if runtime.GOOS == "darwin" {
 			err = os.WriteFile(filepath.Join(clientPluginsDir, "pelican-plugin.conf"), []byte(clientPluginMac), os.FileMode(0644))
+			if err == nil {
+				err = os.WriteFile(filepath.Join(clientPluginsDir, "http-plugin.conf"), []byte(clientHttpPluginMac), os.FileMode(0644))
+			}
 		} else {
 			err = os.WriteFile(filepath.Join(clientPluginsDir, "pelican-plugin.conf"), []byte(clientPluginDefault), os.FileMode(0644))
+			if err == nil {
+				err = os.WriteFile(filepath.Join(clientPluginsDir, "http-plugin.conf"), []byte(clientHttpPluginDefault), os.FileMode(0644))
+			}
 		}
 		if err != nil {
 			return errors.Wrap(err, "Unable to configure cache client plugin")
