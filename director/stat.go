@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/version"
 )
 
 type (
@@ -219,6 +220,7 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 		// Request checksum
 		req.Header.Set("Want-Digest", "crc32c")
 	}
+	req.Header.Set("User-Agent", "pelican-director/"+version.GetVersion())
 
 	res, err := client.Do(req)
 	if err != nil {
