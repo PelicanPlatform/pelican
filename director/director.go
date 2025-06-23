@@ -204,10 +204,11 @@ func getLinkDepth(filepath, prefix string) (int, error) {
 	// To make the final calculation easier, we also remove the head slash from the file path.
 	// e.g. filepath = /foo/bar/barz.txt   prefix = /foo
 	// we want commonPath = bar/barz.txt
-	if !strings.HasSuffix(prefix, "/") && prefix != "/" {
-		prefix += "/"
-	}
 	commonPath := strings.TrimPrefix(filepath, prefix)
+	commonPath = strings.TrimPrefix(commonPath, "/")
+	if len(commonPath) == 0 {
+		return 0, nil
+	}
 	pathDepth := len(strings.Split(commonPath, "/"))
 	return pathDepth, nil
 }
