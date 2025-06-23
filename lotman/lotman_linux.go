@@ -762,14 +762,17 @@ func configLotsFromFedPrefixes(nsAds []server_structs.NamespaceAdV2) (map[string
 			issuer = federationIssuer
 		}
 
-		directorLotMap[nsAd.Path] = Lot{
-			LotName: nsAd.Path,
+		// Incoming namespace prefixes have a trailing "/". Until Lotman handles it
+		// correctly for various database queries, we need to trim it.
+		path := strings.TrimSuffix(nsAd.Path, "/")
+		directorLotMap[path] = Lot{
+			LotName: path,
 			Owner:   issuer, // grab the first issuer -- lotman doesn't currently support multiple direct owners
 			// Assign parent as the root lot at the cache. This lets root edit the lot, but still allows the owner of the namespace to further subdivide
 			Parents: []string{"root"},
 			Paths: []LotPath{
 				{
-					Path:      nsAd.Path,
+					Path:      path,
 					Recursive: true,
 				},
 			},
@@ -869,6 +872,16 @@ func ensureLotExistsOrUpdate(lotName string, initializedLots []Lot, federationIs
 		for _, lot := range initializedLots {
 			if lot.LotName == lotName {
 				log.Debugf("Creating lot %s defined by %v", lotName, lot)
+
+				// Validate that none of the paths have a trailing / -- while I'd argue Lotman
+				// should handle this, it breaks things as of Lotman v0.0.4 and causes all lot
+				// usage to show up as belonging to the default lot.
+				for _, path := range lot.Paths {
+					if lotName != "root" {
+						strings.TrimSuffix(path.Path, "/")
+					}
+				}
+
 				lotJSON, err := json.Marshal(lot)
 				if err != nil {
 					log.Errorf("Unable to marshal %s lot JSON: %v", lotName, err)
