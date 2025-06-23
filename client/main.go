@@ -114,7 +114,7 @@ func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL,
 	}
 
 	// Set up options that get passed from Parse --> PopulateFedInfo and may be used when querying the Director
-	client := &http.Client{Transport: config.GetTransport()}
+	client := config.GetClient()
 	pOptions := []pelican_url.ParseOption{pelican_url.ShouldDiscover(true), pelican_url.ValidateQueryParams(true)}
 	dOptions := []pelican_url.DiscoveryOption{pelican_url.UseCached(true), pelican_url.WithContext(ctx), pelican_url.WithClient(client), pelican_url.WithUserAgent(getUserAgent(""))}
 

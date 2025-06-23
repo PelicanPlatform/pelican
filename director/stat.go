@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/version"
 )
 
 type (
@@ -192,8 +193,10 @@ func NewObjectStat() *ObjectStat {
 
 // Implementation of sending a HEAD request to an origin for an object
 func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error) {
-	client := http.Client{Transport: config.GetTransport(), Timeout: timeout}
+	client := config.GetClient()
 	reqUrl := dataUrl.JoinPath(objectName)
+	ctx, cancelFunc := context.WithTimeout(ctx, timeout)
+	defer cancelFunc()
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, reqUrl.String(), nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create request")
@@ -205,6 +208,7 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 		// Request checksum
 		req.Header.Set("Want-Digest", "crc32c")
 	}
+	req.Header.Set("User-Agent", "pelican-director/"+version.GetVersion())
 
 	res, err := client.Do(req)
 	if err != nil {
@@ -221,9 +225,16 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 			return nil, errors.Wrap(err, "unknown request error")
 		}
 	}
+	defer res.Body.Close()
 	if res.StatusCode == 404 {
+		if _, err := io.ReadAll(res.Body); err != nil {
+			log.Debugln("Failed to read 404 response body:", err)
+		}
 		return nil, &headReqNotFoundErr{"file not found on the server " + dataUrl.String()}
 	} else if res.StatusCode == 403 {
+		if _, err := io.ReadAll(res.Body); err != nil {
+			log.Debugln("Failed to read 403 response body:", err)
+		}
 		return nil, &headReqForbiddenErr{fmt.Sprintf("authorization failed for the server at %s. Token is required", dataUrl.String()), ""}
 	} else if res.StatusCode != 200 {
 		resBody, err := io.ReadAll(res.Body)
