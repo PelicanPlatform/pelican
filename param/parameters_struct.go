@@ -147,6 +147,7 @@ type Config struct {
 	Logging struct {
 		Cache struct {
 			Http string `mapstructure:"http" yaml:"Http"`
+			Level string `mapstructure:"level" yaml:"Level"`
 			Ofs string `mapstructure:"ofs" yaml:"Ofs"`
 			Pfc string `mapstructure:"pfc" yaml:"Pfc"`
 			Pss string `mapstructure:"pss" yaml:"Pss"`
@@ -156,20 +157,28 @@ type Config struct {
 			Xrootd string `mapstructure:"xrootd" yaml:"Xrootd"`
 		} `mapstructure:"cache" yaml:"Cache"`
 		Client struct {
+			Level string `mapstructure:"level" yaml:"Level"`
 			ProgressInterval time.Duration `mapstructure:"progressinterval" yaml:"ProgressInterval"`
 		} `mapstructure:"client" yaml:"Client"`
+		Director struct {
+			Level string `mapstructure:"level" yaml:"Level"`
+		} `mapstructure:"director" yaml:"Director"`
 		DisableProgressBars bool `mapstructure:"disableprogressbars" yaml:"DisableProgressBars"`
 		Level string `mapstructure:"level" yaml:"Level"`
 		LogLocation string `mapstructure:"loglocation" yaml:"LogLocation"`
 		Origin struct {
 			Cms string `mapstructure:"cms" yaml:"Cms"`
 			Http string `mapstructure:"http" yaml:"Http"`
+			Level string `mapstructure:"level" yaml:"Level"`
 			Ofs string `mapstructure:"ofs" yaml:"Ofs"`
 			Oss string `mapstructure:"oss" yaml:"Oss"`
 			Scitokens string `mapstructure:"scitokens" yaml:"Scitokens"`
 			Xrd string `mapstructure:"xrd" yaml:"Xrd"`
 			Xrootd string `mapstructure:"xrootd" yaml:"Xrootd"`
 		} `mapstructure:"origin" yaml:"Origin"`
+		Registry struct {
+			Level string `mapstructure:"level" yaml:"Level"`
+		} `mapstructure:"registry" yaml:"Registry"`
 	} `mapstructure:"logging" yaml:"Logging"`
 	Lotman struct {
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
@@ -505,6 +514,7 @@ type configWithType struct {
 	Logging struct {
 		Cache struct {
 			Http struct { Type string; Value string }
+			Level struct { Type string; Value string }
 			Ofs struct { Type string; Value string }
 			Pfc struct { Type string; Value string }
 			Pss struct { Type string; Value string }
@@ -514,7 +524,11 @@ type configWithType struct {
 			Xrootd struct { Type string; Value string }
 		}
 		Client struct {
+			Level struct { Type string; Value string }
 			ProgressInterval struct { Type string; Value time.Duration }
+		}
+		Director struct {
+			Level struct { Type string; Value string }
 		}
 		DisableProgressBars struct { Type string; Value bool }
 		Level struct { Type string; Value string }
@@ -522,11 +536,15 @@ type configWithType struct {
 		Origin struct {
 			Cms struct { Type string; Value string }
 			Http struct { Type string; Value string }
+			Level struct { Type string; Value string }
 			Ofs struct { Type string; Value string }
 			Oss struct { Type string; Value string }
 			Scitokens struct { Type string; Value string }
 			Xrd struct { Type string; Value string }
 			Xrootd struct { Type string; Value string }
+		}
+		Registry struct {
+			Level struct { Type string; Value string }
 		}
 	}
 	Lotman struct {
