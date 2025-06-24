@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -802,6 +803,102 @@ func TestHandlePacket(t *testing.T) {
 
 		sessions.DeleteAll()
 	})
+}
+
+// setupTestPrometheusRegistry creates a new registry and registers the OSS metrics for testing
+func setupTestPrometheusRegistry(t testing.TB) prometheus.TransactionalGatherer {
+	oldCounter := OssReadsCounter
+
+	t.Cleanup(func() {
+		OssReadsCounter = oldCounter
+		lastOssStats = OSSStatsGs{}
+	})
+	reg := prometheus.NewRegistry()
+
+	// Create a new counter for each test
+	counter := prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_oss_reads_total",
+		Help: "The total number of read operations on the OSS",
+	})
+
+	reg.MustRegister(counter)
+
+	// Replace the global counter with our test counter
+	OssReadsCounter = counter
+
+	return prometheus.ToTransactionalGatherer(reg)
+}
+
+type ossPacketTestCase struct {
+	name          string
+	packets       [][]byte
+	expectedError bool
+	expectedReads float64
+}
+
+func TestOssPacketHandler(t *testing.T) {
+	testCases := []ossPacketTestCase{
+		{
+			name: "test-oss-packet-filtering",
+			packets: [][]byte{
+				[]byte(`{"event":"oss_stats","reads":151577,"writes":0,"stats":152346,"pgreads":0,"pgwrites":0,"readvs":0,"readv_segs":0,"dirlists":0,"dirlist_ents":0,"truncates":0,"unlinks":0,"chmods":0,"opens":10754,"renames":0,"slow_reads":521,"slow_writes":0,"slow_stats":0,"slow_pgreads":0,"slow_pgwrites":0,"slow_readvs":0,"slow_readv_segs":0,"slow_dirlists":0,"slow_dirlist_ents":0,"slow_truncates":0,"slow_unlinks":0,"slow_chmods":0,"slow_opens":0,"slow_renames":0,"open_t":854.9008,"read_t":20701.8367,"readv_t":0.0000,"pgread_t":0.0000,"write_t":0.0000,"pgwrite_t":0.0000,"dirlist_t":0.0000,"stat_t":68.3124,"truncate_t":0.0000,"unlink_t":0.0000,"rename_t":0.0000,"chmod_t":0.0000,"slow_open_t":0.0000,"slow_read_t":810.3797,"slow_readv_t":0.0000,"slow_pgread_t":0.0000,"slow_write_t":0.0000,"slow_pgwrite_t":0.0000,"slow_dirlist_t":0.0000,"slow_stat_t":0.0000,"slow_truncate_t":0.0000,"slow_unlink_t":0.0000,"slow_rename_t":0.0000,"slow_chmod_t":0.0000}`),
+				[]byte(`{"event":"bad_packet","reads":151577,"writes":0,"stats":152346,"pgreads":0,"pgwrites":0,"readvs":0,"readv_segs":0,"dirlists":0,"dirlist_ents":0,"truncates":0,"unlinks":0,"chmods":0,"opens":10754,"renames":0,"slow_reads":521,"slow_writes":0,"slow_stats":0,"slow_pgreads":0,"slow_pgwrites":0,"slow_readvs":0,"slow_readv_segs":0,"slow_dirlists":0,"slow_dirlist_ents":0,"slow_truncates":0,"slow_unlinks":0,"slow_chmods":0,"slow_opens":0,"slow_renames":0,"open_t":854.9008,"read_t":20701.8367,"readv_t":0.0000,"pgread_t":0.0000,"write_t":0.0000,"pgwrite_t":0.0000,"dirlist_t":0.0000,"stat_t":68.3124,"truncate_t":0.0000,"unlink_t":0.0000,"rename_t":0.0000,"chmod_t":0.0000,"slow_open_t":0.0000,"slow_read_t":810.3797,"slow_readv_t":0.0000,"slow_pgread_t":0.0000,"slow_write_t":0.0000,"slow_pgwrite_t":0.0000,"slow_dirlist_t":0.0000,"slow_stat_t":0.0000,"slow_truncate_t":0.0000,"slow_unlink_t":0.0000,"slow_rename_t":0.0000,"slow_chmod_t":0.0000}`),
+			},
+			expectedError: false,
+			expectedReads: 151577,
+		},
+		{
+			name: "test-multiple-events-in-packet",
+			packets: [][]byte{
+				[]byte(`{"event":"oss_stats","reads":100,"writes":0,"stats":0,"pgreads":0,"pgwrites":0,"readvs":0,"readv_segs":0,"dirlists":0,"dirlist_ents":0,"truncates":0,"unlinks":0,"chmods":0,"opens":0,"renames":0,"slow_reads":0,"slow_writes":0,"slow_stats":0,"slow_pgreads":0,"slow_pgwrites":0,"slow_readvs":0,"slow_readv_segs":0,"slow_dirlists":0,"slow_dirlist_ents":0,"slow_truncates":0,"slow_unlinks":0,"slow_chmods":0,"slow_opens":0,"slow_renames":0,"open_t":0,"read_t":0,"readv_t":0,"pgread_t":0,"write_t":0,"pgwrite_t":0,"dirlist_t":0,"stat_t":0,"truncate_t":0,"unlink_t":0,"rename_t":0,"chmod_t":0,"slow_open_t":0,"slow_read_t":0,"slow_readv_t":0,"slow_pgread_t":0,"slow_write_t":0,"slow_pgwrite_t":0,"slow_dirlist_t":0,"slow_stat_t":0,"slow_truncate_t":0,"slow_unlink_t":0,"slow_rename_t":0,"slow_chmod_t":0}`),
+				[]byte(`{"event":"oss_stats","reads":200,"writes":0,"stats":0,"pgreads":0,"pgwrites":0,"readvs":0,"readv_segs":0,"dirlists":0,"dirlist_ents":0,"truncates":0,"unlinks":0,"chmods":0,"opens":0,"renames":0,"slow_reads":0,"slow_writes":0,"slow_stats":0,"slow_pgreads":0,"slow_pgwrites":0,"slow_readvs":0,"slow_readv_segs":0,"slow_dirlists":0,"slow_dirlist_ents":0,"slow_truncates":0,"slow_unlinks":0,"slow_chmods":0,"slow_opens":0,"slow_renames":0,"open_t":0,"read_t":0,"readv_t":0,"pgread_t":0,"write_t":0,"pgwrite_t":0,"dirlist_t":0,"stat_t":0,"truncate_t":0,"unlink_t":0,"rename_t":0,"chmod_t":0,"slow_open_t":0,"slow_read_t":0,"slow_readv_t":0,"slow_pgread_t":0,"slow_write_t":0,"slow_pgwrite_t":0,"slow_dirlist_t":0,"slow_stat_t":0,"slow_truncate_t":0,"slow_unlink_t":0,"slow_rename_t":0,"slow_chmod_t":0}`),
+			},
+			expectedError: false,
+			expectedReads: 200,
+		},
+		{
+			name: "test-no-parseable-events",
+			packets: [][]byte{
+				[]byte(`{"event":"invalid_event","reads":100}`),
+				[]byte(`{"event":"oss_stats","reads":200,invalid_json}`),
+			},
+			expectedError: true,
+			expectedReads: 0,
+		},
+		{
+			name: "test-first-event-only-parseable",
+			packets: [][]byte{
+				[]byte(`{"event":"oss_stats","reads":300,"writes":0,"stats":0,"pgreads":0,"pgwrites":0,"readvs":0,"readv_segs":0,"dirlists":0,"dirlist_ents":0,"truncates":0,"unlinks":0,"chmods":0,"opens":0,"renames":0,"slow_reads":0,"slow_writes":0,"slow_stats":0,"slow_pgreads":0,"slow_pgwrites":0,"slow_readvs":0,"slow_readv_segs":0,"slow_dirlists":0,"slow_dirlist_ents":0,"slow_truncates":0,"slow_unlinks":0,"slow_chmods":0,"slow_opens":0,"slow_renames":0,"open_t":0,"read_t":0,"readv_t":0,"pgread_t":0,"write_t":0,"pgwrite_t":0,"dirlist_t":0,"stat_t":0,"truncate_t":0,"unlink_t":0,"rename_t":0,"chmod_t":0,"slow_open_t":0,"slow_read_t":0,"slow_readv_t":0,"slow_pgread_t":0,"slow_write_t":0,"slow_pgwrite_t":0,"slow_dirlist_t":0,"slow_stat_t":0,"slow_truncate_t":0,"slow_unlink_t":0,"slow_rename_t":0,"slow_chmod_t":0}`),
+				[]byte(`{"event":"invalid_event","reads":400}`),
+			},
+			expectedError: false,
+			expectedReads: 300,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gatherer := setupTestPrometheusRegistry(t)
+
+			err := handleOSSPacket(tc.packets)
+			if tc.expectedError {
+				assert.Error(t, err, "Expected error but got none")
+			} else {
+				assert.NoError(t, err, "Unexpected error")
+			}
+
+			expectedStats := fmt.Sprintf(`
+			# HELP xrootd_oss_reads_total The total number of read operations on the OSS
+			# TYPE xrootd_oss_reads_total counter
+			xrootd_oss_reads_total %g
+			`, tc.expectedReads)
+			expectedReader := strings.NewReader(expectedStats)
+
+			if err := testutil.TransactionalGatherAndCompare(gatherer, expectedReader, "xrootd_oss_reads_total"); err != nil {
+				require.NoError(t, err, "Collected metric is different from expected")
+			}
+		})
+	}
 }
 
 func TestComputePaths(t *testing.T) {

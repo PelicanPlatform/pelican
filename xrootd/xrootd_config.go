@@ -611,10 +611,10 @@ func copyXrootdCertificates(server server_structs.XRootDServer) error {
 	return nil
 }
 
-func SelfTestFileCopy(cmd int, file *os.File) error {
-	log.Debug("Transplanting a self-test file")
-	if err := sendChildFD(false, cmd, file); err != nil {
-		return errors.Wrap(err, "Failed to copy the self-test file via FD")
+func FileCopyToXrootdDir(isOrigin bool, cmd int, file *os.File) error {
+	log.Debugf("Transplanting file %s to a directory owned by the xrootd process", file.Name())
+	if err := sendChildFD(isOrigin, cmd, file); err != nil {
+		return errors.Wrapf(err, "Failed to copy the file %s via FD", file.Name())
 	}
 	return nil
 }
@@ -633,6 +633,14 @@ func dropPrivilegeCopy(server server_structs.XRootDServer) error {
 		destination = filepath.Join(param.Cache_RunLocation.GetString(), "pelican")
 	}
 	destination = filepath.Join(destination, "copied-tls-creds.crt")
+
+	// If the file already exists, delete it so that OpenFile will create a new one.
+	// Because the destination file is read-only (0400), user cannot update it (os.O_TRUNC will hit an permission denied error).
+	err := os.Remove(destination)
+	if err != nil && !os.IsNotExist(err) {
+		return errors.Wrapf(err, "Failure when removing existing certificate key pair file for xrootd")
+	}
+
 	destFile, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fs.FileMode(0400))
 	if err != nil {
 		return errors.Wrap(err, "Failure when opening certificate key pair file to pass to xrootd")
@@ -1152,7 +1160,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
 	if xrdConfig.Logging.OriginXrootd, err = genLoggingConfig(param.Logging_Origin_Xrootd.GetString(), loggingMap{
 		Trace: "all",
-		Debug: "debug",
+		Debug: "debug emsg login stall redirect request stall",
 		Info:  "emsg login stall redirect", // what we had set originally
 		Warn:  "emsg",                      // errors sent back to the client
 		Error: "-all",
@@ -1174,8 +1182,12 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 
 	// Origin Oss
 	if xrdConfig.Logging.OriginOss, err = genLoggingConfig(param.Logging_Origin_Oss.GetString(), loggingMap{
-		Trace: "all",
-		Info:  "-all",
+		Trace: "dump debug info warning error",
+		Debug: "debug info warning error",
+		Info:  "info warning error",
+		Warn:  "warning error",
+		Error: "error",
+		Fatal: "-all",
 	}); err != nil {
 		return errors.Wrapf(err, "failed to map logging level for Logging.Origin.Oss")
 	}
@@ -1276,7 +1288,7 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 	// https://xrootd.slac.stanford.edu/doc/dev56/xrd_config.htm
 	if xrdConfig.Logging.CacheXrootd, err = genLoggingConfig(param.Logging_Cache_Xrootd.GetString(), loggingMap{
 		Trace: "all",
-		Debug: "debug",
+		Debug: "debug emsg login stall redirect request stall",
 		Info:  "emsg login stall redirect", // what we had set originally
 		Warn:  "emsg",                      // errors sent back to the client
 		Error: "-all",

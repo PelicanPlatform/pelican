@@ -59,8 +59,8 @@ ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.6
 ARG XROOTD_LOTMAN_SRC_BUILD=false
 ARG XROOTD_LOTMAN_VER=0.0.3
-ARG XROOTD_S3_HTTP_SRC_BUILD=false
-ARG XROOTD_S3_HTTP_VER=0.2.1
+ARG XROOTD_S3_HTTP_SRC_BUILD=true
+ARG XROOTD_S3_HTTP_VER=0.4.1
 
 # Set scitokens-oauth2-server image as a build stage so that we can copy its
 # OA4MP installation into the images being built here.
@@ -215,8 +215,8 @@ RUN groupadd -g 10940 xrootd \
 # Pelican's patches are ingested into the OSG repositories.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh
-ARG XROOTD_VER="5.8.2"
-ARG XROOTD_RELEASE="1.5.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_VER="5.8.3"
+ARG XROOTD_RELEASE="1.2.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
 # The packages from Koji need to be installed in a single dnf command in

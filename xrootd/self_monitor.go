@@ -236,18 +236,17 @@ func generateTestFileViaPlugin() (string, error) {
 	// Transplant the test file to selfTestDir using the xrdhttp-pelican plugin.
 	// Command "4" instructs the plugin to put the test file into the designated location, which is specified in `xrootd/launch.go`.
 	// Check `src/XrdHttpPelican.cc` in https://github.com/PelicanPlatform/xrdhttp-pelican for the counterpart in the plugin.
-	if err = SelfTestFileCopy(4, file); err != nil {
+	if err = FileCopyToXrootdDir(false, 4, file); err != nil {
 		return "", errors.Wrap(err, "failed to copy the test file to the self-test directory")
 	}
 	// Transplant the cinfo file to selfTestDir using the xrdhttp-pelican plugin.
 	// Command "5" instructs the plugin to put the cinfo file into the designated location, which is specified in `xrootd/launch.go`.
-	if err = SelfTestFileCopy(5, cinfoFile); err != nil {
+	if err = FileCopyToXrootdDir(false, 5, cinfoFile); err != nil {
 		return "", errors.Wrap(err, "failed to copy the test cinfo file to the self-test directory")
 	}
 
 	// Construct and return the URL of the copied test file in the selfTestDir
-	cachePort := param.Cache_Port.GetInt()
-	baseUrlStr := fmt.Sprintf("https://%s:%d", param.Server_Hostname.GetString(), cachePort)
+	baseUrlStr := fmt.Sprintf("https://%s:%d", param.Server_Hostname.GetString(), param.Cache_Port.GetInt())
 	baseUrl, err := url.Parse(baseUrlStr)
 	if err != nil {
 		return "", errors.Wrap(err, "failed to validate the base url for self-test download")

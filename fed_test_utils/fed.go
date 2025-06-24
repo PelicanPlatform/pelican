@@ -52,11 +52,12 @@ import (
 
 type (
 	FedTest struct {
-		Exports []server_utils.OriginExport
-		Token   string
-		Ctx     context.Context
-		Egrp    *errgroup.Group
-		Pids    []int
+		AdvertiseCancel context.CancelFunc
+		Exports         []server_utils.OriginExport
+		Token           string
+		Ctx             context.Context
+		Egrp            *errgroup.Group
+		Pids            []int
 	}
 )
 
@@ -65,6 +66,7 @@ var (
 	fedTestDefaultConfig string
 )
 
+// Start up a new Pelican federation for unit testing
 func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	ft = &FedTest{}
 	director.ResetState()
@@ -74,7 +76,11 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	}
 
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
+	shutdownCtx, shutdownCancel := context.WithCancel(ctx)
+	ctx = context.WithValue(ctx, director.AdvertiseShutdownKey, shutdownCtx)
+	ctx = context.WithValue(ctx, server_utils.DirectorDiscoveryShutdownKey, shutdownCtx)
 	ft.Ctx = ctx
+	ft.AdvertiseCancel = shutdownCancel
 	ft.Egrp = egrp
 
 	tmpPathPattern := "Pelican-FedTest*"
@@ -96,6 +102,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	})
 
 	modules := server_structs.ServerType(0)
+	modules.Set(server_structs.BrokerType)
 	modules.Set(server_structs.CacheType)
 	modules.Set(server_structs.OriginType)
 	modules.Set(server_structs.DirectorType)

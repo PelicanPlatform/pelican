@@ -28,6 +28,7 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
 	"github.com/pelicanplatform/pelican/config"
@@ -54,7 +55,7 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to get the current working directory")
 	}
 	if privateKeyPath == "" {
-		privateKeyPath = filepath.Join(wd, "issuer.jwk")
+		privateKeyPath = filepath.Join(wd, "private-key.pem")
 	} else {
 		privateKeyPath = filepath.Clean(strings.TrimSpace(privateKeyPath))
 	}
@@ -73,18 +74,26 @@ func keygenMain(cmd *cobra.Command, args []string) error {
 		return errors.Wrapf(err, "failed to create directory for public key at %s", filepath.Dir(publicKeyPath))
 	}
 
-	_, err = os.Stat(privateKeyPath)
-	if err == nil {
-		return fmt.Errorf("file exists for private key under %s", privateKeyPath)
-	}
-
+	// Check if public key file exists; if so, fail
 	_, err = os.Stat(publicKeyPath)
 	if err == nil {
 		return fmt.Errorf("file exists for public key under %s", publicKeyPath)
 	}
 
-	if err := config.GeneratePrivateKey(privateKeyPath, elliptic.P256(), false); err != nil {
-		return errors.Wrapf(err, "failed to generate new private key at %s", privateKeyPath)
+	// Check if private key file exists
+	privKeyExists := false
+	_, err = os.Stat(privateKeyPath)
+	if err == nil {
+		privKeyExists = true
+		log.Warnf("Private key file already exists at %s. Using existing key to generate public key.", privateKeyPath)
+	} else if !os.IsNotExist(err) {
+		return errors.Wrapf(err, "error checking private key at %s", privateKeyPath)
+	}
+
+	if !privKeyExists {
+		if err := config.GeneratePrivateKey(privateKeyPath, elliptic.P256(), false); err != nil {
+			return errors.Wrapf(err, "failed to generate new private key at %s", privateKeyPath)
+		}
 	}
 
 	privKey, err := config.LoadSinglePEM(privateKeyPath)

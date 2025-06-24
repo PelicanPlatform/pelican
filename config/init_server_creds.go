@@ -623,7 +623,7 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 			if (path != dir) && dirEnt.IsDir() {
 				return filepath.SkipDir
 			}
-			if dirEnt.Type().IsRegular() && filepath.Ext(dirEnt.Name()) == ".pem" {
+			if dirEnt.Type().IsRegular() && (filepath.Ext(dirEnt.Name()) == ".pem" || filepath.Ext(dirEnt.Name()) == ".jwk") {
 				// Parse the private key in this file and add to the in-memory keys map
 				key, err := LoadSinglePEM(path)
 				if err != nil {
@@ -671,6 +671,7 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 func GeneratePEM(dir string) (key jwk.Key, err error) {
 	var fname string
 	var keyFile *os.File
+
 	if dir == "" {
 		issuerKeyLocation := param.IssuerKey.GetString()
 		if issuerKeyLocation == "" {
@@ -685,8 +686,7 @@ func GeneratePEM(dir string) (key jwk.Key, err error) {
 			return
 		}
 	} else {
-		// Generate a unique filename using a POSIX mkstemp-like logic
-		// Create a temp file, store its filename, then immediately delete this temp file
+		// Generate a unique filename
 		filenamePattern := fmt.Sprintf("pelican_generated_%d_*.pem",
 			time.Now().UnixNano())
 		if err = createDirForKeys(dir); err != nil {
@@ -695,13 +695,22 @@ func GeneratePEM(dir string) (key jwk.Key, err error) {
 		}
 		keyFile, err = os.CreateTemp(dir, filenamePattern)
 		if err != nil {
-			err = errors.Wrap(err, "failed to remove temp file")
+			err = errors.Wrap(err, "failed to create private key file")
 			return
 		}
 		fname = keyFile.Name()
 		log.Debugln("Generating new private key in the IssuerKeys directory at", fname)
 	}
 	defer keyFile.Close()
+
+	user, err := GetPelicanUser()
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get pelican user for setting ownership")
+	}
+
+	if err = SetOwnershipAndPermissions(fname, 0640, user); err != nil {
+		return nil, errors.Wrapf(err, "failed to set ownership and permissions for %s", fname)
+	}
 
 	if err = generatePrivateKeyToFile(keyFile, elliptic.P256()); err != nil {
 		return nil, errors.Wrapf(err, "failed to generate private key in file %s", fname)

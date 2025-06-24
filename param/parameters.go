@@ -354,6 +354,7 @@ var (
 )
 
 var (
+	Cache_EnableBroker = BoolParam{"Cache.EnableBroker"}
 	Cache_EnableLotman = BoolParam{"Cache.EnableLotman"}
 	Cache_EnableOIDC = BoolParam{"Cache.EnableOIDC"}
 	Cache_EnablePrefetch = BoolParam{"Cache.EnablePrefetch"}
@@ -444,6 +445,7 @@ var (
 	Server_AdvertisementInterval = DurationParam{"Server.AdvertisementInterval"}
 	Server_RegistrationRetryInterval = DurationParam{"Server.RegistrationRetryInterval"}
 	Server_StartupTimeout = DurationParam{"Server.StartupTimeout"}
+	Transport_BrokerEndpointCacheTTL = DurationParam{"Transport.BrokerEndpointCacheTTL"}
 	Transport_DialerKeepAlive = DurationParam{"Transport.DialerKeepAlive"}
 	Transport_DialerTimeout = DurationParam{"Transport.DialerTimeout"}
 	Transport_ExpectContinueTimeout = DurationParam{"Transport.ExpectContinueTimeout"}
@@ -452,6 +454,7 @@ var (
 	Transport_TLSHandshakeTimeout = DurationParam{"Transport.TLSHandshakeTimeout"}
 	Xrootd_AuthRefreshInterval = DurationParam{"Xrootd.AuthRefreshInterval"}
 	Xrootd_MaxStartupWait = DurationParam{"Xrootd.MaxStartupWait"}
+	Xrootd_ShutdownTimeout = DurationParam{"Xrootd.ShutdownTimeout"}
 )
 
 var (

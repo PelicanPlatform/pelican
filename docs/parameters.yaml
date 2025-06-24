@@ -142,6 +142,16 @@ type: duration
 default: 10s
 components: ["client", "registry", "origin"]
 ---
+name: Transport.BrokerEndpointCacheTTL
+description: |+
+  A Pelican service can indicate that a connection broker service is needed to create connections
+  (this allows the service to live behind a firewall without any incoming connectivity).  This controls
+  how long the server remembers the broker lookup information.
+type: duration
+default: 2m
+hidden: true
+components: ["director"]
+---
 name: GeoIPOverrides
 description: |+
   A list of IP addresses whose GeoIP resolution should be overridden with the supplied Lat/Long coordinates (in decimal form). This affects
@@ -1409,6 +1419,16 @@ root_default: /run/pelican/cache
 default: $XDG_RUNTIME_DIR/pelican/cache
 deprecated: true
 replacedby: Cache.StorageLocation
+components: ["cache"]
+---
+name: Cache.EnableBroker
+description: |+
+  Control whether the cache will use the connection broker to talk to the director.
+
+  When enabled, the cache doesn't need an incoming network port open to communicate
+  with the director.
+type: bool
+default: true
 components: ["cache"]
 ---
 name: Cache.EnablePrefetch
@@ -2846,6 +2866,15 @@ description: |+
 type: duration
 default: 10s
 hidden: true
+components: ["origin", "cache"]
+---
+name: Xrootd.ShutdownTimeout
+description: |+
+  The maximum amount of time pelican will wait for the xrootd daemons to gracefully shutdown before killing ongoing transfers.
+  During this period, the Director will stop redirecting clients to the Origin/Cache,
+  while in-flight transfers are allowed to proceed until timeout.
+type: duration
+default: 1m
 components: ["origin", "cache"]
 ---
 ############################

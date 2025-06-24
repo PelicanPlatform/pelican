@@ -28,6 +28,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -35,6 +36,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/broker"
+	"github.com/pelicanplatform/pelican/cache"
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/launcher_utils"
@@ -61,25 +63,6 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	ctx, shutdownCancel = context.WithCancel(ctx)
 
 	config.LogPelicanVersion()
-
-	egrp.Go(func() error {
-		_ = config.RestartFlag
-		log.Debug("Will shutdown process on signal")
-		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-		select {
-		case sig := <-sigs:
-			log.Warningf("Received signal %v; will shutdown process", sig)
-			shutdownCancel()
-			return ErrExitOnSignal
-		case <-config.RestartFlag:
-			log.Warningf("Received restart request; will restart the process")
-			shutdownCancel()
-			return ErrRestart
-		case <-ctx.Done():
-			return nil
-		}
-	})
 
 	var engine *gin.Engine
 	engine, err = web_ui.GetEngine()
@@ -175,16 +158,6 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		if err != nil && !ok {
 			return
 		}
-
-		// Ordering: `LaunchBrokerListener` depends on the "right" value of Origin.FederationPrefix
-		// which is possibly not set until `OriginServe` is called.
-		// NOTE: Until the Broker supports multi-export origins, we've made the assumption that there
-		// is only one namespace prefix available here and that it lives in Origin.FederationPrefix
-		if param.Origin_EnableBroker.GetBool() {
-			if err = origin.LaunchBrokerListener(ctx, egrp); err != nil {
-				return
-			}
-		}
 	}
 
 	var lc *local_cache.LocalCache
@@ -248,6 +221,15 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
 		return
+	}
+
+	// Launch the broker listener.  Needs the federation information to determine the broker endpoint.
+	if fedInfo.BrokerEndpoint != "" {
+		if modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableBroker.GetBool() {
+			if err = origin.LaunchBrokerListener(ctx, egrp, engine); err != nil {
+				return
+			}
+		}
 	}
 
 	// Origin needs to advertise once before the cache starts
@@ -343,6 +325,25 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		}
 	}
 
+	// Launch the broker listener.  Needs the federation information to determine the broker endpoint.
+	if fedInfo.BrokerEndpoint != "" && !(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableBroker.GetBool()) && modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableBroker.GetBool() {
+		// Note we unconditionally launch the broker listener for the cache if there
+		// is one available.  This is to reduce the need for the cache to have a second
+		// incoming TCP connection to function.
+		if err = cache.LaunchBrokerListener(ctx, egrp, engine); err != nil {
+			return
+		}
+	}
+
+	// If we are a director, we will potentially contact other
+	// services with the broker, so we need to set up the broker dialer
+	if modules.IsEnabled(server_structs.DirectorType) {
+		fmt.Println("Setting up broker dialer for director")
+		brokerDialer := broker.NewBrokerDialer(ctx, egrp)
+		config.SetTransportDialer(brokerDialer.DialContext)
+		director.SetBrokerDialer(brokerDialer)
+	}
+
 	// Now that we've launched XRootD (which should drop their privileges to the xrootd user), we can drop our own
 	if config.IsRootExecution() && param.Server_DropPrivileges.GetBool() {
 		if err = dropPrivileges(); err != nil {
@@ -382,5 +383,45 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		egrp.Go(func() error { return web_ui.InitServerWebLogin(ctx) })
 	}
 
+	egrp.Go(func() error {
+		_ = config.RestartFlag
+		log.Debug("Will shutdown process on signal")
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+		select {
+		case sig := <-sigs:
+			log.Warningf("Received signal %v; will shutdown process", sig)
+			// Graceful shutdown if received SIGTERM
+			if sig == syscall.SIGTERM {
+				handleGracefulShutdown(ctx, modules, servers)
+			}
+			shutdownCancel()
+			return ErrExitOnSignal
+		case <-config.RestartFlag:
+			log.Warningf("Received restart request; will restart the process")
+			handleGracefulShutdown(ctx, modules, servers)
+			shutdownCancel()
+			return ErrRestart
+		case <-ctx.Done():
+			return nil
+		}
+	})
+
 	return
+}
+
+func handleGracefulShutdown(ctx context.Context, modules server_structs.ServerType, servers []server_structs.XRootDServer) {
+	if modules.IsEnabled(server_structs.OriginType) || modules.IsEnabled(server_structs.CacheType) {
+		log.Warnf("Waiting %s for in-flight transfers before shutting down", param.Xrootd_ShutdownTimeout.GetDuration().String())
+
+		// Set component's health status, so the ad could pick up the shutdown flag (`Status`: `shutting down`)
+		metrics.SetComponentHealthStatus(metrics.OriginCache_XRootD, metrics.StatusShuttingDown, "The server is shutting down")
+		// When the server is up again, the ShuttingDown status will be cleared
+
+		if advErr := launcher_utils.Advertise(ctx, servers); advErr != nil {
+			log.Errorf("Failed to advertise before shutdown: %v", advErr)
+		}
+		time.Sleep(param.Xrootd_ShutdownTimeout.GetDuration())
+		log.Warn("Shutdown grace period elapsed; proceeding with shutdown and discarding incomplete transfers")
+	}
 }

@@ -35,6 +35,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/client"
+	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -59,6 +60,7 @@ func TestStatMemory(t *testing.T) {
 	viper.Set(param.Origin_DirectorTest.GetName(), false)
 	viper.Set(param.Origin_SelfTest.GetName(), false)
 	fed := fed_test_utils.NewFedTest(t, directorPublicCfg)
+	config.DisableLoggingCensor()
 	discoveryUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
 	assert.NoError(t, err)
 

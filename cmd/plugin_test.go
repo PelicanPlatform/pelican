@@ -55,6 +55,7 @@ import (
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -205,6 +206,7 @@ func (f *FedTest) Spinup() {
 
 	_, f.FedCancel, err = launchers.LaunchModules(ctx, modules)
 	if err != nil {
+		f.FedCancel()
 		f.T.Fatalf("Failure in fedServeInternal: %v", err)
 	}
 
@@ -1274,5 +1276,330 @@ func TestWriteTransferErrorMessage(t *testing.T) {
 			baseResultMessage := fmt.Sprintf("Pelican Client Error: Test Error Message (Version: %s", config.GetVersion())
 			require.Equal(t, errMsg, fmt.Sprintf("%s%s", baseResultMessage, test.resultMessage))
 		})
+	}
+}
+
+func TestTransferError404(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Isolate the test so it doesn't use system config
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	err := config.InitClient()
+	require.NoError(t, err)
+
+	// Second server that returns 404
+	secondServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer secondServer.Close()
+
+	// First server returns Link header pointing to second server
+	directorServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", secondServer.URL)
+		w.Header().Set("X-Pelican-Namespace", "namespace=/test-namespace, require-token=false")
+		linkHeader := fmt.Sprintf(`<%s>; rel="duplicate"; pri=1; depth=0`, secondServer.URL)
+		w.Header().Set("Link", linkHeader)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer directorServer.Close()
+
+	fInfo := pelican_url.FederationDiscovery{
+		DirectorEndpoint: directorServer.URL,
+	}
+
+	viper.Set(param.TLSSkipVerify.GetName(), true)
+
+	test_utils.MockFederationRoot(t, &fInfo, nil)
+	ctx, _, egrp := test_utils.TestContext(context.Background(), t)
+	objectUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	if err != nil {
+		t.Fatalf("Error parsing URL: %v", err)
+	}
+
+	objectUrl.Path = "/test-namespace/object"
+	objectUrl.Scheme = "pelican"
+
+	workChan := make(chan PluginTransfer, 1)
+	workChan <- PluginTransfer{url: objectUrl, localFile: "/tmp/targetfile"}
+	close(workChan)
+	results := make(chan *classads.ClassAd, 2)
+	egrp.Go(func() error {
+		return runPluginWorker(ctx, false, workChan, results)
+	})
+
+	done := false
+	for !done {
+		select {
+		case <-ctx.Done():
+			break
+		case resultAd, ok := <-results:
+			if !ok {
+				done = true
+				break
+			}
+			transferSuccess, err := resultAd.Get("TransferSuccess")
+			assert.NoError(t, err)
+			boolVal, ok := transferSuccess.(bool)
+			require.True(t, ok)
+			assert.False(t, boolVal)
+
+			log.Debugln("Got result ad:", resultAd)
+
+			errData, err := resultAd.Get("TransferErrorData")
+			require.NoError(t, err)
+			errorDataList := errData.([]interface{})
+			require.Equal(t, 1, len(errorDataList))
+			errorData := errorDataList[0].(map[string]interface{})
+			errorTypeStr, ok := errorData["ErrorType"].(string)
+			require.True(t, ok)
+			assert.Equal(t, "Specification", errorTypeStr)
+			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
+			require.True(t, ok)
+
+			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
+			require.True(t, ok)
+			assert.Equal(t, 5011, pelicanErrorCode)
+
+			pelicanErrorMessage, ok := developerData["ErrorMessage"].(string)
+			require.True(t, ok)
+			assert.Equal(t, "404: Not Found", pelicanErrorMessage)
+
+			pelicanErrorType, ok := developerData["ErrorType"].(string)
+			require.True(t, ok)
+			assert.Equal(t, "Specification.FileNotFound", pelicanErrorType)
+
+			retryable, ok := developerData["Retryable"].(bool)
+			require.True(t, ok)
+			assert.False(t, retryable)
+		}
+	}
+}
+
+func TestTransferErrorSlowTransfer(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Isolate the test so it doesn't use system config
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	err := config.InitClient()
+	require.NoError(t, err)
+
+	// Create a server that sends data very slowly
+	body := strings.Repeat("Hello, World!", 1000) // ~13KB of data
+	slowServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.WriteHeader(http.StatusOK)
+		// Write small chunks with long delays to ensure we trigger the slow transfer detection
+		chunk := make([]byte, 100)
+		for i := 0; i < len(body); i += len(chunk) {
+			end := i + len(chunk)
+			if end > len(body) {
+				end = len(body)
+			}
+			time.Sleep(500 * time.Millisecond) // Long delay between chunks
+			_, err := w.Write([]byte(body[i:end]))
+			if err != nil {
+				return
+			}
+			w.(http.Flusher).Flush()
+		}
+	}))
+	defer slowServer.Close()
+
+	// Create a director server that points to our slow server
+	directorServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", slowServer.URL+r.URL.Path)
+		w.Header().Set("X-Pelican-Namespace", "namespace=/test-namespace, require-token=false")
+		linkHeader := fmt.Sprintf(`<%s%s>; rel="duplicate"; pri=1; depth=0`, slowServer.URL, r.URL.Path)
+		w.Header().Set("Link", linkHeader)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer directorServer.Close()
+
+	// Set up federation info pointing to our slow server
+	fInfo := pelican_url.FederationDiscovery{
+		DirectorEndpoint: directorServer.URL,
+	}
+
+	viper.Set(param.TLSSkipVerify.GetName(), true)
+	viper.Set(param.Client_StoppedTransferTimeout.GetName(), 1*time.Second)
+	viper.Set(param.Client_MinimumDownloadSpeed.GetName(), 10000)                  // 10KB/s minimum speed
+	viper.Set(param.Client_SlowTransferWindow.GetName(), 500*time.Millisecond)     // Short window to detect slow transfer quickly
+	viper.Set(param.Client_SlowTransferRampupTime.GetName(), 100*time.Millisecond) // Short rampup time
+
+	test_utils.MockFederationRoot(t, &fInfo, nil)
+	ctx, _, egrp := test_utils.TestContext(context.Background(), t)
+	objectUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
+
+	objectUrl.Path = "/test-namespace/object"
+	objectUrl.Scheme = "pelican"
+
+	workChan := make(chan PluginTransfer, 1)
+	workChan <- PluginTransfer{url: objectUrl, localFile: "/tmp/targetfile"}
+	close(workChan)
+	results := make(chan *classads.ClassAd, 2)
+	egrp.Go(func() error {
+		return runPluginWorker(ctx, false, workChan, results)
+	})
+
+	done := false
+	for !done {
+		select {
+		case <-ctx.Done():
+			break
+		case resultAd, ok := <-results:
+			if !ok {
+				done = true
+				break
+			}
+			transferSuccess, err := resultAd.Get("TransferSuccess")
+			assert.NoError(t, err)
+			boolVal, ok := transferSuccess.(bool)
+			require.True(t, ok)
+			assert.False(t, boolVal)
+
+			errData, err := resultAd.Get("TransferErrorData")
+			require.NoError(t, err)
+			errorDataList := errData.([]interface{})
+			require.Equal(t, 1, len(errorDataList))
+			errorData := errorDataList[0].(map[string]interface{})
+			errorTypeStr, ok := errorData["ErrorType"].(string)
+			require.True(t, ok)
+			assert.Equal(t, "Transfer", errorTypeStr)
+			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
+			require.True(t, ok)
+
+			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
+			require.True(t, ok)
+			assert.Equal(t, 6002, pelicanErrorCode)
+
+			retryable, ok := developerData["Retryable"].(bool)
+			require.True(t, ok)
+			assert.True(t, retryable)
+
+			errorType, ok := developerData["ErrorType"].(string)
+			require.True(t, ok)
+			assert.Equal(t, "Transfer.SlowTransfer", errorType)
+		}
+	}
+}
+
+func TestTransferErrorHeaderTimeout(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Isolate the test so it doesn't use system config
+	viper.Set("ConfigDir", t.TempDir())
+	config.InitConfig()
+	err := config.InitClient()
+	require.NoError(t, err)
+
+	// Create a server that sleeps before sending any response
+	timeoutServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			// HEAD requests succeed quickly so we can get past the director phase
+			w.Header().Set("Content-Length", "13")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		// Sleep longer than the response header timeout
+		time.Sleep(2 * time.Second)
+		w.WriteHeader(http.StatusOK)
+		_, err := w.Write([]byte("Hello, World!"))
+		if err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
+	}))
+	defer timeoutServer.Close()
+
+	// Create a director server that points to our timeout server
+	directorServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", timeoutServer.URL+r.URL.Path)
+		w.Header().Set("X-Pelican-Namespace", "namespace=/test-namespace, require-token=false")
+		linkHeader := fmt.Sprintf(`<%s%s>; rel="duplicate"; pri=1; depth=0`, timeoutServer.URL, r.URL.Path)
+		w.Header().Set("Link", linkHeader)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer directorServer.Close()
+
+	// Set up federation info pointing to our timeout server
+	fInfo := pelican_url.FederationDiscovery{
+		DirectorEndpoint: directorServer.URL,
+	}
+
+	viper.Set(param.TLSSkipVerify.GetName(), true)
+	// Set a very short response header timeout to ensure we hit it first
+	viper.Set(param.Transport_ResponseHeaderTimeout.GetName(), "100ms")
+	// Set a longer stopped transfer timeout to ensure we don't hit it first
+	viper.Set(param.Client_StoppedTransferTimeout.GetName(), "30s")
+	// Set a longer idle timeout to ensure we don't hit it first
+	viper.Set(param.Transport_IdleConnTimeout.GetName(), "30s")
+	// Set a longer TLS handshake timeout to ensure we don't hit it first
+	viper.Set(param.Transport_TLSHandshakeTimeout.GetName(), "30s")
+
+	test_utils.MockFederationRoot(t, &fInfo, nil)
+	ctx, _, egrp := test_utils.TestContext(context.Background(), t)
+	objectUrl, err := url.Parse(param.Federation_DiscoveryUrl.GetString())
+	require.NoError(t, err)
+
+	objectUrl.Path = "/test-namespace/object"
+	objectUrl.Scheme = "pelican"
+
+	workChan := make(chan PluginTransfer, 1)
+	workChan <- PluginTransfer{url: objectUrl, localFile: "/tmp/targetfile"}
+	close(workChan)
+	results := make(chan *classads.ClassAd, 2)
+	egrp.Go(func() error {
+		return runPluginWorker(ctx, false, workChan, results)
+	})
+
+	done := false
+	for !done {
+		select {
+		case <-ctx.Done():
+			break
+		case resultAd, ok := <-results:
+			if !ok {
+				done = true
+				break
+			}
+			transferSuccess, err := resultAd.Get("TransferSuccess")
+			assert.NoError(t, err)
+			boolVal, ok := transferSuccess.(bool)
+			require.True(t, ok)
+			assert.False(t, boolVal)
+
+			errData, err := resultAd.Get("TransferErrorData")
+			require.NoError(t, err)
+			errorDataList := errData.([]interface{})
+			require.Equal(t, 1, len(errorDataList))
+			errorData := errorDataList[0].(map[string]interface{})
+			errorTypeStr, ok := errorData["ErrorType"].(string)
+			require.True(t, ok)
+			assert.Equal(t, "Contact", errorTypeStr)
+			developerData, ok := errorData["DeveloperData"].(map[string]interface{})
+			require.True(t, ok)
+
+			pelicanErrorCode, ok := developerData["PelicanErrorCode"].(int)
+			require.True(t, ok)
+			assert.Equal(t, 3000, pelicanErrorCode)
+
+			retryable, ok := developerData["Retryable"].(bool)
+			require.True(t, ok)
+			assert.True(t, retryable)
+
+			errorType, ok := developerData["ErrorType"].(string)
+			require.True(t, ok)
+			assert.Equal(t, "Contact", errorType)
+		}
 	}
 }

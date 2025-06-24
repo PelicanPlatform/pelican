@@ -366,7 +366,7 @@ func TestTrailerError(t *testing.T) {
 	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
 
 	assert.NotNil(t, err)
-	assert.EqualError(t, err, "transfer error: Unable to read test.txt; input/output error")
+	assert.EqualError(t, err, "download error after server response started: Unable to read test.txt; input/output error")
 }
 
 func TestUploadZeroLengthFile(t *testing.T) {
@@ -386,7 +386,7 @@ func TestUploadZeroLengthFile(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer test")
 	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
-	go runPut(request, responseChan, errorChan)
+	go runPut(request, responseChan, errorChan, false)
 	select {
 	case err := <-errorChan:
 		assert.NoError(t, err)
@@ -416,7 +416,7 @@ func TestFailedUpload(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer test")
 	errorChan := make(chan error, 1)
 	responseChan := make(chan *http.Response)
-	go runPut(request, responseChan, errorChan)
+	go runPut(request, responseChan, errorChan, false)
 	select {
 	case err := <-errorChan:
 		assert.Error(t, err)
@@ -469,7 +469,7 @@ func TestSortAttempts(t *testing.T) {
 
 	defer cancel()
 
-	token := newTokenGenerator(nil, nil, false, false)
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("aaa")
 	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, token)
 	assert.Equal(t, int64(42), size)
@@ -1049,7 +1049,7 @@ func TestHeadRequestWithDownloadToken(t *testing.T) {
 	svrURL, err := url.Parse(svr.URL)
 	require.NoError(t, err)
 
-	token := newTokenGenerator(nil, nil, false, false)
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
 	token.SetToken("test-token")
 	transfer := &transferFile{
 		ctx:       context.Background(),

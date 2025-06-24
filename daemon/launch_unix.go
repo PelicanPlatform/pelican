@@ -40,6 +40,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/metrics"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
@@ -233,9 +234,14 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 				if !ok {
 					panic(errors.New("Unable to convert signal to syscall.Signal"))
 				}
+				if sys_sig == syscall.SIGTERM {
+					log.Warnf("Received SIGTERM, pausing the signal forwarding to daemons for %s", param.Xrootd_ShutdownTimeout.GetDuration().String())
+					time.Sleep(param.Xrootd_ShutdownTimeout.GetDuration())
+				}
 				log.Warnf("Forwarding signal %v to daemons\n", sys_sig)
 				var lastErr error
-				for idx, daemon := range daemons {
+				for idx := range daemons {
+					daemon := &daemons[idx]
 					if err = daemon.killFunc(daemon.pid, int(sys_sig)); err != nil {
 						lastErr = errors.Wrapf(err, "Failed to forward signal to %s process", launchers[idx].Name())
 					}

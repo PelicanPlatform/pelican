@@ -23,10 +23,16 @@ package cache
 import (
 	"context"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
 	"golang.org/x/sync/errgroup"
 )
 
 func LaunchRequestListener(ctx context.Context, egrp *errgroup.Group) error {
 	return errors.New("Broker functionality not supported on Windows")
+}
+
+func LaunchBrokerListener(ctx context.Context, egrp *errgroup.Group, engine *gin.Engine) (err error) {
+	err = errors.New("Broker functionality not supported on Windows")
+	return
 }

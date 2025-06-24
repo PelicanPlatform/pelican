@@ -1192,7 +1192,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 			ad := baseAd
 			ad.Downtimes = []server_structs.Downtime{
-				makeDT(now-1_000, now+1_000),
+				makeDT(now-86400_000, now+86400_000), // now - 1 day, now + 1 day
 			}
 			ad.Initialize("test-cache")
 
@@ -1202,11 +1202,13 @@ func TestDirectorRegistration(t *testing.T) {
 			r.ServeHTTP(w, c.Request)
 			assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 
-			filteredServersMutex.RLock()
-			f, ok := filteredServers["test-cache"]
-			filteredServersMutex.RUnlock()
-			assert.True(t, ok, "expected filter entry")
-			assert.Equal(t, serverFiltered, f)
+			// Verify the downtime filter is set, waiting up to 500ms
+			assert.Eventually(t, func() bool {
+				filteredServersMutex.RLock()
+				defer filteredServersMutex.RUnlock()
+				f, ok := filteredServers["test-cache"]
+				return ok && f == serverFiltered
+			}, 500*time.Millisecond, 10*time.Millisecond, "expected server filter set")
 		})
 
 		t.Run("future-downtime-clears-filter", func(t *testing.T) {
@@ -1220,7 +1222,7 @@ func TestDirectorRegistration(t *testing.T) {
 
 			ad := baseAd
 			ad.Downtimes = []server_structs.Downtime{
-				makeDT(now+5_000, now+6_000),
+				makeDT(now+86400_000, now+172800_000), // now + 1 day, now + 2 days
 			}
 			ad.Initialize("test-cache")
 
@@ -1235,10 +1237,13 @@ func TestDirectorRegistration(t *testing.T) {
 			r.ServeHTTP(w, c.Request)
 			assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 
-			filteredServersMutex.RLock()
-			_, ok := filteredServers["test-cache"]
-			filteredServersMutex.RUnlock()
-			assert.False(t, ok, "expected stale filter removed")
+			// Verify the downtime filter is removed, waiting up to 500ms
+			assert.Eventually(t, func() bool {
+				filteredServersMutex.RLock()
+				defer filteredServersMutex.RUnlock()
+				_, ok := filteredServers["test-cache"]
+				return !ok
+			}, 500*time.Millisecond, 10*time.Millisecond, "expected stale filter removed")
 		})
 
 		t.Run("future-to-active-toggle", func(t *testing.T) {
@@ -1578,6 +1583,8 @@ func TestDiscoverOriginCache(t *testing.T) {
 	assert.NoError(t, err, "Error fetching public key for test")
 	privateKey, err := config.GetIssuerPrivateJWK()
 	assert.NoError(t, err, "Error fetching private key for test")
+
+	viper.Set(param.TLSSkipVerify.GetName(), true)
 
 	// Set up the mock federation, which must exist for the auth handler to fetch federation keys
 	test_utils.MockFederationRoot(t, nil, &pKeySet)

@@ -46,7 +46,7 @@ popd
 # Add patches to xrootd source code if needed
 git clone https://github.com/PelicanPlatform/xrootd.git
 pushd xrootd
-git checkout v5.8.2-pelican
+git checkout v5.8.3-pelican
 mkdir xrootd_build
 cd xrootd_build
 cmake .. -GNinja
@@ -66,7 +66,7 @@ popd
 
 git clone --recurse-submodules --branch v0.2.1 https://github.com/PelicanPlatform/xrootd-s3-http.git
 pushd xrootd-s3-http
-git checkout v0.2.1
+git checkout v0.4.1
 mkdir build
 cd build
 cmake .. -GNinja -DCMAKE_INSTALL_PREFIX="$PWD/release_dir"

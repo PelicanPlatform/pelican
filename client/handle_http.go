@@ -1238,6 +1238,10 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	if _, exists := copyUrl.Query()[pelican_url.QueryRecursive]; exists {
 		recursive = true
 	}
+	operation := config.TokenSharedRead
+	if upload {
+		operation = config.TokenSharedWrite
+	}
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
 		recursive:      recursive,
@@ -1249,7 +1253,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypeDownload,
 		uuid:           id,
 		project:        project,
-		token:          newTokenGenerator(&copyUrl, nil, upload, !tc.skipAcquire),
+		token:          newTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
 	}
 	if upload {
 		tj.xferType = transferTypeUpload
@@ -1371,7 +1375,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypePrestage,
 		uuid:           id,
 		project:        project,
-		token:          newTokenGenerator(&copyUrl, nil, false, !tc.skipAcquire),
+		token:          newTokenGenerator(&copyUrl, nil, config.TokenSharedRead, !tc.skipAcquire),
 	}
 	if tc.token != "" {
 		tj.token.SetToken(tc.token)
@@ -1469,7 +1473,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	}
 
 	var prefObjServers []*url.URL
-	token := newTokenGenerator(pelicanURL, nil, false, true)
+	token := newTokenGenerator(pelicanURL, nil, config.TokenSharedRead, true)
 	if tc.token != "" {
 		token.SetToken(tc.token)
 	}
@@ -2852,8 +2856,9 @@ Loop:
 		if errorStatus := trailer.Get("X-Transfer-Status"); errorStatus != "" {
 			statusCode, statusText := parseTransferStatus(errorStatus)
 			if statusCode != http.StatusOK {
-				log.WithFields(fields).Debugln("Got error from file transfer")
-				err = errors.New("transfer error: " + statusText)
+				log.WithFields(fields).Debugln("Got error from file transfer:", statusText)
+				statusText = strings.Replace(statusText, "sTREAM ioctl timeout", "cache timed out waiting on origin", 1)
+				err = errors.New("download error after server response started: " + statusText)
 				return
 			}
 		}
@@ -3102,7 +3107,9 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	var lastKnownWritten int64
 	uploadStart := time.Now()
 
-	go runPut(request, responseChan, errorChan)
+	useProxy := transfer.attempts[0].Proxy
+
+	go runPut(request, responseChan, errorChan, useProxy)
 	var lastError error = nil
 
 	tickerDuration := 100 * time.Millisecond
@@ -3204,9 +3211,13 @@ Loop:
 //
 // This is executed in a separate goroutine to allow periodic progress callbacks
 // to be created within the main goroutine.
-func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error) {
-	var UploadClient = &http.Client{Transport: config.GetTransport()}
-	client := UploadClient
+func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan chan<- error, proxy bool) {
+	client := http.Client{}
+	transport := config.GetTransport()
+	if !proxy {
+		transport.Proxy = nil
+	}
+	client.Transport = transport
 	dump, _ := httputil.DumpRequestOut(request, false)
 	log.Debugf("Dumping request: %s", dump)
 	response, err := client.Do(request)
