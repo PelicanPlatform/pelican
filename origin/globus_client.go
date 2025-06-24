@@ -64,13 +64,21 @@ var (
 const (
 	globusIssuerEndpoint          = "https://auth.globus.org/" // Globus issuer endpoint
 	globusTransferServer          = "transfer.api.globus.org"  // The resource name for the Globus transfer API server
-	globusTransferEndpointBaseUrl = "https://transfer.api.globus.org/v0.10/endpoint/"
+	globusTransferEndpointBaseUrl = "https://transfer.api.globusonline.org/v0.10/"
 	globusTransferBaseScope       = "urn:globus:auth:scope:transfer.api.globus.org:all"
 )
 
 const (
 	// We render the frontend and call the API from there for better user experience
 	globusCallbackPath = "/view/origin/globus/callback"
+)
+
+// TokenType represents the type of Globus token
+type TokenType string
+
+const (
+	TokenTypeCollection TokenType = "collection"
+	TokenTypeTransfer   TokenType = "transfer"
 )
 
 // Setup the OAuth2 config for Globus backend
@@ -124,7 +132,9 @@ func setupGlobusOAuthCfg() {
 
 	redirUrl, err := pelican_oauth2.GetRedirectURL(globusCallbackPath)
 	if err != nil {
-		globusOAuthCfgError = err
+		errMsg := err.Error()
+		errMsg += fmt.Sprintf(". The Globus app expects the following redirect URL: %s", redirUrl)
+		globusOAuthCfgError = errors.New(errMsg)
 		return
 	}
 
@@ -132,7 +142,7 @@ func setupGlobusOAuthCfg() {
 		RedirectURL:  redirUrl,
 		ClientID:     clientID,
 		ClientSecret: clientSecret,
-		Scopes:       append(iss.ScopesSupported, globusTransferBaseScope),
+		Scopes:       iss.ScopesSupported,
 		Endpoint: oauth2.Endpoint{
 			AuthURL:       iss.AuthURL,
 			DeviceAuthURL: iss.DeviceAuthURL,
@@ -161,7 +171,7 @@ func getGlobusResourceToken(token *oauth2.Token, name string) (globusTok *oauth2
 	for _, tokInt := range tokArr {
 		tok, ok := tokInt.(map[string]interface{})
 		if !ok {
-			err = fmt.Errorf("Globus resource token is not a map with string keys and interface values: %T", tokInt)
+			err = fmt.Errorf("the Globus resource token is not a map with string keys and interface values: %T", tokInt)
 			return
 		}
 		rs, ok := tok["resource_server"]
@@ -356,6 +366,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 			})
 		return
 	}
+	log.Debugf("Globus token response - transfer token: %+v", transferToken)
 
 	// For accessing files in the collection
 	collectionToken, err := getGlobusResourceToken(token, cid)
@@ -370,7 +381,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 	}
 
 	// Get the https server of the collection from Globus transfer API server
-	transferReq, err := http.NewRequest(http.MethodGet, globusTransferEndpointBaseUrl+cid, nil)
+	transferReq, err := http.NewRequest(http.MethodGet, globusTransferEndpointBaseUrl+"endpoint/"+cid, nil)
 	if err != nil {
 		log.Errorf("Error creating http request for Globus transfer API: %v", err)
 		ctx.JSON(http.StatusInternalServerError,
@@ -438,15 +449,19 @@ func handleGlobusCallback(ctx *gin.Context) {
 	}
 
 	// We have all the data in place, let's create/update related data structures:
-	// 1. Pesist access token to disk for XRootD to read
-	// 2.	Update in-memory globusExports struct with the OAuth token (both access and refresh token),
-	//    	HttpsServer, and display name (from Globus API)
-	// 3. Update origin DB to persist the refresh token, HttpsServer, and display name
+	// 1. Persist access tokens to disk for XRootD to read (both transfer and collection tokens)
+	// 2. Update in-memory globusExports struct with the OAuth token (both access and refresh token),
+	//    HttpsServer, and display name (from Globus API)
+	// 3. Update origin DB to persist the refresh tokens, HttpsServer, and display name
 	err = func() error {
 		globusExportsMutex.Lock()
 		defer globusExportsMutex.Unlock()
 
-		if err := persistAccessToken(cid, collectionToken); err != nil {
+		if err := persistToken(cid, collectionToken, TokenTypeCollection); err != nil {
+			return err
+		}
+
+		if err := persistToken(cid, transferToken, TokenTypeTransfer); err != nil {
 			return err
 		}
 
@@ -454,6 +469,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 			log.Infof("Updating existing Globus export %s with new token", cid)
 			globusExports[cid].HttpsServer = transferJSON.HttpsServer
 			globusExports[cid].Token = collectionToken
+			globusExports[cid].TransferToken = transferToken
 			globusExports[cid].Status = GlobusActivated
 			globusExports[cid].Description = ""
 			if globusExports[cid].DisplayName == "" || globusExports[cid].DisplayName == cid {
@@ -461,7 +477,7 @@ func handleGlobusCallback(ctx *gin.Context) {
 			}
 		} else {
 			// We should never go here
-			return fmt.Errorf("Globus collection %s with name %s does not exist in Pelican", cid, transferJSON.DisplayName)
+			return fmt.Errorf("the Globus collection %s with name %s does not exist in Pelican", cid, transferJSON.DisplayName)
 		}
 
 		ok, err := collectionExistsByUUID(cid)
@@ -470,19 +486,21 @@ func handleGlobusCallback(ctx *gin.Context) {
 		}
 		if !ok { // First time activate this collection
 			gc := GlobusCollection{
-				UUID:         cid,
-				Name:         transferJSON.DisplayName,
-				ServerURL:    transferJSON.HttpsServer,
-				RefreshToken: collectionToken.RefreshToken,
+				UUID:                 cid,
+				Name:                 transferJSON.DisplayName,
+				ServerURL:            transferJSON.HttpsServer,
+				RefreshToken:         collectionToken.RefreshToken,
+				TransferRefreshToken: transferToken.RefreshToken,
 			}
 			return createCollection(&gc)
 		} else { // Activated this collection before, but for some reason we want to update the credentials
 			// although in the token refresh logic, if any of the credentials expires,
 			// we should hard-delete this collection entry
 			gc := GlobusCollection{
-				Name:         transferJSON.DisplayName,
-				ServerURL:    transferJSON.HttpsServer,
-				RefreshToken: collectionToken.RefreshToken,
+				Name:                 transferJSON.DisplayName,
+				ServerURL:            transferJSON.HttpsServer,
+				RefreshToken:         collectionToken.RefreshToken,
+				TransferRefreshToken: transferToken.RefreshToken,
 			}
 			return updateCollection(cid, &gc)
 		}
@@ -549,9 +567,11 @@ func handleGlobusAuth(ctx *gin.Context) {
 	baseScopes := client.Scopes
 	reqScopes := append(
 		baseScopes,
+		fmt.Sprintf("%s[*https://auth.globus.org/scopes/%s/data_access]", globusTransferBaseScope, cid),
 		fmt.Sprintf("https://auth.globus.org/scopes/%s/https", cid),
 		fmt.Sprintf("https://auth.globus.org/scopes/%s/data_access", cid),
 	)
+	log.Debugf("reqScopes: %v", reqScopes)
 	redirectUrl := client.AuthCodeURL(
 		csrfState,
 		oauth2.AccessTypeOffline,
@@ -560,75 +580,97 @@ func handleGlobusAuth(ctx *gin.Context) {
 	ctx.Redirect(http.StatusTemporaryRedirect, redirectUrl)
 }
 
-// Persist the access token on the disk
-func persistAccessToken(collectionID string, token *oauth2.Token) error {
+// Persist a Globus access token on the disk
+func persistToken(collectionID string, token *oauth2.Token, tokenType TokenType) error {
 	uid, err := config.GetDaemonUID()
 	if err != nil {
-		return errors.Wrap(err, "failed to persist Globus access token on disk: failed to get uid")
+		return errors.Wrap(err, fmt.Sprintf("failed to persist Globus %s access token on disk: failed to get uid", tokenType))
 	}
 
 	gid, err := config.GetDaemonGID()
 	if err != nil {
-		return errors.Wrap(err, "failed to persist Globus access token on disk: failed to get gid")
+		return errors.Wrap(err, fmt.Sprintf("failed to persist Globus %s access token on disk: failed to get gid", tokenType))
 	}
 	globusFdr := param.Origin_GlobusConfigLocation.GetString()
 	tokBase := filepath.Join(globusFdr, "tokens")
 	if filepath.Clean(tokBase) == "" {
-		return fmt.Errorf("failed to update Globus token: Origin.GlobusTokenLocation is not a valid path: %s", tokBase)
+		return fmt.Errorf("failed to update Globus %s token: Origin.GlobusTokenLocation is not a valid path: %s", tokenType, tokBase)
 	}
-	tokFileName := filepath.Join(tokBase, collectionID+GlobusTokenFileExt)
-	tmpTokFile, err := os.CreateTemp(tokBase, collectionID+GlobusTokenFileExt)
+
+	var filename string
+	switch tokenType {
+	case TokenTypeCollection:
+		filename = collectionID + GlobusTokenFileExt
+	case TokenTypeTransfer:
+		filename = collectionID + ".transfer" + GlobusTokenFileExt
+	default:
+		return fmt.Errorf("unknown token type: %s", tokenType)
+	}
+
+	tokFileName := filepath.Join(tokBase, filename)
+	tmpTokFile, err := os.CreateTemp(tokBase, filename)
 	if err != nil {
-		return errors.Wrap(err, "failed to update Globus token: unable to create a temporary Globus token file")
+		return errors.Wrap(err, fmt.Sprintf("failed to update Globus %s token: unable to create a temporary Globus %s token file", tokenType, tokenType))
 	}
 	// We need to change the directory and file permission to XRootD user/group so that it can access the token
 	if err = tmpTokFile.Chown(uid, gid); err != nil {
-		return errors.Wrapf(err, "unable to change the ownership of Globus token file at %s to xrootd daemon", tmpTokFile.Name())
+		return errors.Wrapf(err, "unable to change the ownership of Globus %s token file at %s to xrootd daemon", tokenType, tmpTokFile.Name())
 	}
 	defer tmpTokFile.Close()
 
 	_, err = tmpTokFile.Write([]byte(token.AccessToken + "\n"))
 	if err != nil {
-		return errors.Wrap(err, "failed to update Globus token: unable to write token to the tmp file")
+		return errors.Wrap(err, fmt.Sprintf("failed to update Globus %s token: unable to write token to the tmp file", tokenType))
 	}
 
 	if err = tmpTokFile.Sync(); err != nil {
-		return errors.Wrap(err, "failed to update Globus token: unable to flush tmp file to disk")
+		return errors.Wrap(err, fmt.Sprintf("failed to update Globus %s token: unable to flush tmp file to disk", tokenType))
 	}
 
 	if err := os.Rename(tmpTokFile.Name(), tokFileName); err != nil {
-		return errors.Wrap(err, "failed to update Globus token: unable to rename tmp file to the token file")
+		return errors.Wrap(err, fmt.Sprintf("failed to update Globus %s token: unable to rename tmp file to the token file", tokenType))
 	}
 	return nil
 }
 
-// Refresh a Globus OAuth2 token for collection access
+// Refresh a Globus OAuth2 token
 //
-// Returns nil if the token is still valid (expire time > 5min) or the refreshed token.
+// Returns nil if the token is still valid (expire time > 10 min) or the refreshed token.
 // Returns error if any
-func refreshGlobusToken(cid string, token *oauth2.Token) (*oauth2.Token, error) {
+func refreshGlobusToken(cid string, token *oauth2.Token, tokenType TokenType) (*oauth2.Token, error) {
 	if token == nil {
-		return nil, fmt.Errorf("failed to update Globus token for collection %s: token is nil", cid)
+		return nil, fmt.Errorf("failed to update Globus %s token for collection %s: token is nil", tokenType, cid)
 	}
-	// If token is not expired in the next 5min, return
-	if !token.Expiry.Before(time.Now().Add(5 * time.Minute)) {
+	// If token is not expired in the next 10 min, return
+	if !token.Expiry.Before(time.Now().Add(10 * time.Minute)) {
 		return nil, nil
 	}
 	config, err := GetGlobusOAuthCfg()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get Globus client to update Globus token for collection %s:", cid)
+		return nil, fmt.Errorf("failed to get Globus client to update Globus %s token for collection %s", tokenType, cid)
 	}
 	ts := config.TokenSource(context.Background(), token)
 	newTok, err := ts.Token()
 	if err != nil {
-		return nil, fmt.Errorf("failed to update Globus token for collection %s:", cid)
+		return nil, fmt.Errorf("failed to update Globus %s token for collection %s", tokenType, cid)
 	}
 	// Update access token location with the new token
-	if err := persistAccessToken(cid, token); err != nil {
+	if err := persistToken(cid, newTok, tokenType); err != nil {
 		return nil, err
 	}
 
-	if err := updateCollection(cid, &GlobusCollection{RefreshToken: newTok.RefreshToken}); err != nil {
+	// Update the appropriate refresh token in the database
+	var updateData *GlobusCollection
+	switch tokenType {
+	case TokenTypeCollection:
+		updateData = &GlobusCollection{RefreshToken: newTok.RefreshToken}
+	case TokenTypeTransfer:
+		updateData = &GlobusCollection{TransferRefreshToken: newTok.RefreshToken}
+	default:
+		return nil, fmt.Errorf("unknown token type: %s", tokenType)
+	}
+
+	if err := updateCollection(cid, updateData); err != nil {
 		return nil, err
 	}
 

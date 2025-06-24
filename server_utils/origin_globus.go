@@ -52,13 +52,13 @@ func (o *GlobusOrigin) validateExtra(e *OriginExport, numExports int) (err error
 		return errors.Errorf("GlobusCollectionName is required for export '%s'", e.FederationPrefix)
 	}
 
-	if e.Capabilities.Writes {
-		return errors.Errorf("export %s sets the 'Writes' capability; writes are not yet supported for origins with %s of 'globus'", e.FederationPrefix, param.Origin_StorageType.GetName())
-	}
+	// if e.Capabilities.Writes {
+	// 	return errors.Errorf("export %s sets the 'Writes' capability; writes are not yet supported for origins with %s of 'globus'", e.FederationPrefix, param.Origin_StorageType.GetName())
+	// }
 
-	if e.Capabilities.Listings {
-		return errors.Errorf("export %s sets the 'Listings' capability; listings are not yet supported for origins with %s of 'globus'", e.FederationPrefix, param.Origin_StorageType.GetName())
-	}
+	// if e.Capabilities.Listings {
+	// 	return errors.Errorf("export %s sets the 'Listings' capability; listings are not yet supported for origins with %s of 'globus'", e.FederationPrefix, param.Origin_StorageType.GetName())
+	// }
 
 	if viper.GetString(param.OIDC_Issuer.GetName()) != "globus" {
 		clientIDFile := param.Origin_GlobusClientIDFile.GetString()

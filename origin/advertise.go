@@ -220,11 +220,12 @@ func (server *OriginServer) CreateAdvertisement(name, originUrlStr, originWebUrl
 		if isGlobusBackend {
 			activateUrl := param.Server_ExternalWebUrl.GetString() + "/view/origin/globus"
 			callbackUrl, err := pelican_oauth2.GetRedirectURL(globusCallbackPath)
-			err_msg := fmt.Sprintf("failed to create advertisement: no activated Globus collection. Go to %s to activate your collection", activateUrl)
-			if err != nil {
-				err_msg += fmt.Sprintf(". The Globus app expects the following redirect URL: %s", callbackUrl)
+			errMsg := fmt.Sprintf("failed to create advertisement: no activated Globus collection. Go to %s to activate your collection", activateUrl)
+			if err == nil {
+				errMsg += fmt.Sprintf(". The Globus app expects the following redirect URL: %s; ", callbackUrl)
+				errMsg += fmt.Sprintf("ensure the %s configuration parameter is set correctly.", param.OIDC_ClientRedirectHostname.GetName())
 			}
-			return nil, errors.New(err_msg)
+			return nil, errors.New(errMsg)
 		} else {
 			return nil, errors.New("failed to create advertisement: no valid export")
 		}
