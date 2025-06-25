@@ -23,8 +23,14 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
 	"io/fs"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1347,4 +1353,84 @@ func TestUnexpectedEOFInTransferStatus(t *testing.T) {
 	require.Error(t, err)
 	t.Logf("error: %v", err)
 	assert.True(t, IsRetryable(err), "Unexpected EOF error should be retryable")
+}
+
+func TestTLSCertificateError(t *testing.T) {
+	// Generate a self-signed certificate
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization: []string{"Test Org"},
+			CommonName:   "localhost",
+		},
+		DNSNames:  []string{"localhost"},
+		NotBefore: time.Now(),
+		NotAfter:  time.Now().Add(time.Hour),
+		KeyUsage:  x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+		},
+		BasicConstraintsValid: true,
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	require.NoError(t, err)
+
+	svr := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
+	svr.TLS = &tls.Config{
+		Certificates: []tls.Certificate{{
+			Certificate: [][]byte{derBytes},
+			PrivateKey:  priv,
+		}},
+	}
+	svr.StartTLS()
+	defer svr.Close()
+
+	// Use the server's URL but with localhost
+	serverURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+	serverURL.Host = "localhost:" + strings.Split(serverURL.Host, ":")[1]
+
+	// Create a test file to upload
+	testData := []byte("test data")
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	err = os.WriteFile(fname, testData, 0o644)
+	require.NoError(t, err)
+
+	// Create the PUT request
+	file, err := os.Open(fname)
+	require.NoError(t, err)
+	defer file.Close()
+
+	request, err := http.NewRequest("PUT", serverURL.String(), file)
+	require.NoError(t, err)
+
+	// Set up channels for response and error handling
+	errorChan := make(chan error, 1)
+	responseChan := make(chan *http.Response, 1)
+
+	// Run the PUT request
+	go runPut(request, responseChan, errorChan, false)
+
+	// Wait for either an error or response
+	select {
+	case err := <-errorChan:
+		require.Error(t, err)
+		t.Logf("error: %v", err)
+		assert.Contains(t, err.Error(), "certificate signed by unknown authority")
+		assert.True(t, IsRetryable(err), "TLS certificate error should be retryable")
+	case response := <-responseChan:
+		t.Fatalf("Expected error but got response: %v", response)
+	case <-time.After(time.Second * 2):
+		t.Fatal("Timeout while waiting for response")
+	}
 }

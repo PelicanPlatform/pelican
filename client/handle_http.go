@@ -3265,6 +3265,10 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			log.Errorln("Error with PUT:", err)
+			// Wrap TLS errors in a ConnectionSetupError
+			if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "tls") {
+				err = &ConnectionSetupError{URL: request.URL.String(), Err: err}
+			}
 		}
 		errorChan <- err
 		close(errorChan)
