@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -505,7 +506,17 @@ func GenerateCert() error {
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 	}
+
+	// In the course of unit testing (the primary place these self-signed certs are used),
+	// it may become necessary to mix/match various configurations around the `Server.Hostname`
+	// and `Server.ExternalWebUrl` parameters. Whenever such a test needs to run config.InitServer(),
+	// it's necessary that the value of both `Server.Hostname` and `Server.ExternalWebUrl` are baked
+	// into the cert, and so even if the two don't match we add both to the cert's DNS names.
+	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
 	template.DNSNames = []string{hostname}
+	if err == nil && externalWebUrl.Hostname() != hostname {
+		template.DNSNames = append(template.DNSNames, externalWebUrl.Hostname())
+	}
 
 	// If there's pre-existing CA certificates, self-sign instead of using the generated CA
 	signingCert := caCert
@@ -543,6 +554,31 @@ func GenerateCert() error {
 	}
 
 	return nil
+}
+
+// Check whether a provided hostname matches the DNS names (SANs) or Common Name (CN) in the
+// config-specified TLS certificate file.
+//
+// To avoid difficult-to-interpret errors, we can protect users starting a Pelican server from
+// mismatches between the provided TLS cert and their configured hostname.
+// RFC 6125 section 6.4.4 specifies that we may match against the CN ONLY if there are no DNS names.
+// This logic is implemented by x509.Certificate.VerifyHostname.
+func ValidateHostCertificateHostname(hostname string) error {
+	tlsCert := param.Server_TLSCertificateChain.GetString()
+	if tlsCert == "" {
+		return errors.Errorf("TLS certificate file is not set. See documentation for %s", param.Server_TLSCertificateChain.GetName())
+	}
+
+	// Load the TLS certificate -- the server cert will be the first cert in the chain
+	cert, err := LoadCertificate(tlsCert)
+	if err != nil {
+		return errors.Wrapf(err, "failed to load TLS certificate from %s", tlsCert)
+	}
+	if cert == nil {
+		return errors.Errorf("failed to load TLS certificate from %s: certificate is nil", tlsCert)
+	}
+
+	return cert.VerifyHostname(hostname)
 }
 
 // Helper function to initialize the in-memory map to save all private keys

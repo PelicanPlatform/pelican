@@ -1627,6 +1627,62 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		return err
 	}
 
+	// The certificate was either generated or has been provided by now. Verify that any configured
+	// hostnames are valid w.r.t the given certificate.
+	//
+	// We'll always check both Server.Hostname, Server.ExternalWebUrl because we don't enforce that
+	// these point to the same hostname (maybe we should?), and we'll conditionally check
+	// Origin.Url/Cache.Url, depending on whether the origin/cache servers are enabled.
+	// See https://github.com/PelicanPlatform/pelican/issues/1802 for a description of why we check
+	// these particular hostnames.
+	if param.Server_Hostname.IsSet() {
+		serverHostname := param.Server_Hostname.GetString()
+		if err := ValidateHostCertificateHostname(serverHostname); err != nil {
+			return errors.Wrapf(err, "unable to validate server hostname '%s' configured via %s against the TLS certificate"+
+				" configured via %s",
+				serverHostname, param.Server_Hostname.GetName(), param.Server_TLSCertificateChain.GetName())
+		}
+	}
+
+	// Helper func to deal with params that may include ports, which must be parsed so
+	// we can grab only the hostname
+	validateUrlHostname := func(urlParam param.StringParam) error {
+		urlStr := urlParam.GetString()
+		parsed, err := url.Parse(urlStr)
+		if err != nil {
+			return errors.Wrapf(err, "unable to parse %s as a URL", urlParam.GetName())
+		} else if parsed == nil {
+			return errors.New(fmt.Sprintf("the url configured via %s was parsed as nil; is it set?", urlParam.GetName()))
+		}
+
+		if err := ValidateHostCertificateHostname(parsed.Hostname()); err != nil {
+			return errors.Wrapf(err, "unable to validate hostname '%s' configured via %s against the TLS certificate"+
+				" configured via %s",
+				parsed.Hostname(), urlParam.GetName(), param.Server_TLSCertificateChain.GetName())
+		}
+		return nil
+	}
+
+	if param.Server_ExternalWebUrl.IsSet() {
+		if err = validateUrlHostname(param.Server_ExternalWebUrl); err != nil {
+			return err
+		}
+	}
+
+	// While I (Justin) cannot currently fathom a situation where the hostname of the Cache.Url
+	// or Origin.Url would not match either the Server.Hostname or the Server.ExternalWebUrl,
+	// we still validate them just in case.
+	if currentServers.IsEnabled(server_structs.CacheType) && param.Cache_Url.IsSet() {
+		if err = validateUrlHostname(param.Cache_Url); err != nil {
+			return err
+		}
+	}
+	if currentServers.IsEnabled(server_structs.OriginType) && param.Origin_Url.IsSet() {
+		if err = validateUrlHostname(param.Origin_Url); err != nil {
+			return err
+		}
+	}
+
 	// Generate the session secret and save it as the default value
 	if err := GenerateSessionSecret(); err != nil {
 		return err
