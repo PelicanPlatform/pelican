@@ -121,6 +121,12 @@ func TestGetLinkDepth(t *testing.T) {
 			prefix:   "/foo",
 			depth:    1,
 		},
+		{
+			name:     "exact-match",
+			filepath: "/foo/bar",
+			prefix:   "/foo/bar",
+			depth:    0,
+		},
 	}
 
 	for _, tt := range tests {
