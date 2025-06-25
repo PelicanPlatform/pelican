@@ -143,9 +143,9 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			// Only record lastConnErr if it's not a context error. Otherwise we  risk overwriting
-			// something useful like "no route to host" with a generic "context canceled".
-			if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+			// Only record lastConnErr if it's not a context error or we haven't yet recorded any errors.
+			// Otherwise we risk overwriting something useful like "no route to host" with a generic "context canceled".
+			if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) || lastConnErr == nil {
 				lastConnErr = err
 			}
 			if !loggedConn {
@@ -206,7 +206,7 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 			if lastConnErr != nil {
 				return errors.Wrapf(lastConnErr, msg)
 			}
-			return ctx.Err() // context was canceled or deadline exceeded
+			return errors.Wrap(ctx.Err(), msg) // context was canceled or deadline exceeded
 		}
 	}
 }
