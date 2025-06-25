@@ -385,6 +385,7 @@ const (
 	ProcStat  SummaryStatType = "proc"  // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968507
 )
 
+// These are the names of the events that are sent by XRootD over the g-stream from the OSS layer
 const (
 	OssStatsEvent    = "oss_stats"
 	S3FileStatsEvent = "s3file_stats"
@@ -1792,23 +1793,13 @@ func HandleSummaryPacket(packet []byte) error {
 	return nil
 }
 
-func updateIntCounter(new int, old int, counter prometheus.Counter) int {
+func updateCounter[T int | uint | float32 | float64](new T, old T, counter prometheus.Counter) T {
 	incBy := math.Max(0, float64(new-old))
 	counter.Add(incBy)
 	if new < old {
 		return old
 	}
-	return new
-}
-func updateFloat64Counter(new float64, old float64, counter prometheus.Counter) float64 {
-	incBy := new - old
-	if incBy < 0 {
-		incBy = 0
-	}
-	counter.Add(incBy)
-	if new < old {
-		return old
-	}
+
 	return new
 }
 
@@ -1822,21 +1813,21 @@ func updateFloat64Counter(new float64, old float64, counter prometheus.Counter) 
 //
 //	{
 //	  "event": "s3file_stats",
-//	  "hit_b": 0,
-//	  "miss_b": 0,
-//	  "full_hit": 0,
-//	  "part_hit": 0,
-//	  "miss": 0,
-//	  "bypass_b": 12265,
-//	  "bypass": 6,
-//	  "fetch_b": 0,
-//	  "fetch": 0,
-//	  "unused_b": 0,
-//	  "prefetch_b": 0,
-//	  "prefetch": 0,
-//	  "errors": 0,
-//	  "bypass_s": 1.27,
-//	  "fetch_s": 0
+//	  "hit_b": uint,
+//	  "miss_b": uint,
+//	  "full_hit": uint,
+//	  "part_hit": uint,
+//	  "miss": uint,
+//	  "bypass_b": uint,
+//	  "bypass": uint,
+//	  "fetch_b": uint,
+//	  "fetch": uint,
+//	  "unused_b": uint,
+//	  "prefetch_b": uint,
+//	  "prefetch": uint,
+//	  "errors": uint,
+//	  "bypass_s": float,
+//	  "fetch_s": float
 //	}
 func handleS3CacheStats(blobs [][]byte) error {
 
@@ -1846,31 +1837,32 @@ func handleS3CacheStats(blobs [][]byte) error {
 		blob := blobs[i]
 		s3fileStats := OssS3CacheGs{}
 		if err := json.Unmarshal(blob, &s3fileStats); err != nil {
-			return errors.Wrap(err, "failed to parse S3 file stats json")
-		}
-		if !allowedEvents[s3fileStats.Event] {
-			log.Debugf("handleS3CacheStats received an S3 file stats packet with an unrecognized event type (%s)", s3fileStats.Event)
+			log.Warningf("Failed to unmarshal S3 file stats json: %s", string(blob))
 			continue
 		}
-		lastS3CacheStats.HitB = updateIntCounter(s3fileStats.HitB, lastS3CacheStats.HitB, S3CacheBytes.WithLabelValues("hit"))
-		lastS3CacheStats.MissB = updateIntCounter(s3fileStats.MissB, lastS3CacheStats.MissB, S3CacheBytes.WithLabelValues("miss"))
-		lastS3CacheStats.BypassB = updateIntCounter(s3fileStats.BypassB, lastS3CacheStats.BypassB, S3CacheBytes.WithLabelValues("bypass"))
-		lastS3CacheStats.FetchB = updateIntCounter(s3fileStats.FetchB, lastS3CacheStats.FetchB, S3CacheBytes.WithLabelValues("fetch"))
-		lastS3CacheStats.UnusedB = updateIntCounter(s3fileStats.UnusedB, lastS3CacheStats.UnusedB, S3CacheBytes.WithLabelValues("unused"))
-		lastS3CacheStats.PrefetchB = updateIntCounter(s3fileStats.PrefetchB, lastS3CacheStats.PrefetchB, S3CacheBytes.WithLabelValues("prefetch"))
+		if !allowedEvents[s3fileStats.Event] {
+			log.Warningf("handleS3CacheStats received an S3 file stats packet with an unrecognized event type (%s)", s3fileStats.Event)
+			continue
+		}
+		lastS3CacheStats.HitB = updateCounter(s3fileStats.HitB, lastS3CacheStats.HitB, S3CacheBytes.WithLabelValues("hit"))
+		lastS3CacheStats.MissB = updateCounter(s3fileStats.MissB, lastS3CacheStats.MissB, S3CacheBytes.WithLabelValues("miss"))
+		lastS3CacheStats.BypassB = updateCounter(s3fileStats.BypassB, lastS3CacheStats.BypassB, S3CacheBytes.WithLabelValues("bypass"))
+		lastS3CacheStats.FetchB = updateCounter(s3fileStats.FetchB, lastS3CacheStats.FetchB, S3CacheBytes.WithLabelValues("fetch"))
+		lastS3CacheStats.UnusedB = updateCounter(s3fileStats.UnusedB, lastS3CacheStats.UnusedB, S3CacheBytes.WithLabelValues("unused"))
+		lastS3CacheStats.PrefetchB = updateCounter(s3fileStats.PrefetchB, lastS3CacheStats.PrefetchB, S3CacheBytes.WithLabelValues("prefetch"))
 
-		lastS3CacheStats.FullHit = updateIntCounter(s3fileStats.FullHit, lastS3CacheStats.FullHit, S3CacheHits.WithLabelValues("full"))
-		lastS3CacheStats.PartHit = updateIntCounter(s3fileStats.PartHit, lastS3CacheStats.PartHit, S3CacheHits.WithLabelValues("partial"))
-		lastS3CacheStats.Miss = updateIntCounter(s3fileStats.Miss, lastS3CacheStats.Miss, S3CacheHits.WithLabelValues("miss"))
+		lastS3CacheStats.FullHit = updateCounter(s3fileStats.FullHit, lastS3CacheStats.FullHit, S3CacheHits.WithLabelValues("full"))
+		lastS3CacheStats.PartHit = updateCounter(s3fileStats.PartHit, lastS3CacheStats.PartHit, S3CacheHits.WithLabelValues("partial"))
+		lastS3CacheStats.Miss = updateCounter(s3fileStats.Miss, lastS3CacheStats.Miss, S3CacheHits.WithLabelValues("miss"))
 
-		lastS3CacheStats.Bypass = updateIntCounter(s3fileStats.Bypass, lastS3CacheStats.Bypass, S3CacheRequests.WithLabelValues("bypass"))
-		lastS3CacheStats.Fetch = updateIntCounter(s3fileStats.Fetch, lastS3CacheStats.Fetch, S3CacheRequests.WithLabelValues("fetch"))
-		lastS3CacheStats.Prefetch = updateIntCounter(s3fileStats.Prefetch, lastS3CacheStats.Prefetch, S3CacheRequests.WithLabelValues("prefetch"))
+		lastS3CacheStats.Bypass = updateCounter(s3fileStats.Bypass, lastS3CacheStats.Bypass, S3CacheRequests.WithLabelValues("bypass"))
+		lastS3CacheStats.Fetch = updateCounter(s3fileStats.Fetch, lastS3CacheStats.Fetch, S3CacheRequests.WithLabelValues("fetch"))
+		lastS3CacheStats.Prefetch = updateCounter(s3fileStats.Prefetch, lastS3CacheStats.Prefetch, S3CacheRequests.WithLabelValues("prefetch"))
 
-		lastS3CacheStats.Errors = updateIntCounter(s3fileStats.Errors, lastS3CacheStats.Errors, S3CacheErrors)
+		lastS3CacheStats.Errors = updateCounter(s3fileStats.Errors, lastS3CacheStats.Errors, S3CacheErrors)
 
-		lastS3CacheStats.BypassS = updateFloat64Counter(s3fileStats.BypassS, lastS3CacheStats.BypassS, S3CacheRequestSeconds.WithLabelValues("bypass"))
-		lastS3CacheStats.FetchS = updateFloat64Counter(s3fileStats.FetchS, lastS3CacheStats.FetchS, S3CacheRequestSeconds.WithLabelValues("fetch"))
+		lastS3CacheStats.BypassS = updateCounter(s3fileStats.BypassS, lastS3CacheStats.BypassS, S3CacheRequestSeconds.WithLabelValues("bypass"))
+		lastS3CacheStats.FetchS = updateCounter(s3fileStats.FetchS, lastS3CacheStats.FetchS, S3CacheRequestSeconds.WithLabelValues("fetch"))
 	}
 	return nil
 }
@@ -1973,10 +1965,11 @@ func handleOSSStats(blobs [][]byte) error {
 		blob := blobs[i]
 		ossStats := OSSStatsGs{}
 		if err := json.Unmarshal(blob, &ossStats); err != nil {
-			return errors.Wrap(err, "failed to parse OSS stat json")
+			log.Debugf("Failed to unmarshal S3 file stats json: %s", string(blob))
+			continue
 		}
 		if !allowedEvents[ossStats.Event] {
-			log.Debugf("handleOSSPacket received an OSS packet with an unrecognized event type (%s)", ossStats.Event)
+			log.Warningf("handleOSSStats received an OSS packet with an unrecognized event type (%s)", ossStats.Event)
 			continue
 		}
 		updateHistogram(ossStats.ReadT, lastOssStats.ReadT, ossStats.Reads, lastOssStats.Reads, OssReadTime)
@@ -2029,35 +2022,35 @@ func handleOSSStats(blobs [][]byte) error {
 		updateHistogram(ossStats.SlowRenameT, lastOssStats.SlowRenameT, ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenameTime)
 		lastOssStats.SlowRenameT = ossStats.SlowRenameT
 
-		lastOssStats.Reads = updateIntCounter(ossStats.Reads, lastOssStats.Reads, OssReadsCounter)
-		lastOssStats.Writes = updateIntCounter(ossStats.Writes, lastOssStats.Writes, OssWritesCounter)
-		lastOssStats.Stats = updateIntCounter(ossStats.Stats, lastOssStats.Stats, OssStatsCounter)
-		lastOssStats.Pgreads = updateIntCounter(ossStats.Pgreads, lastOssStats.Pgreads, OssPgReadsCounter)
-		lastOssStats.Pgwrites = updateIntCounter(ossStats.Pgwrites, lastOssStats.Pgwrites, OssPgWritesCounter)
-		lastOssStats.Readvs = updateIntCounter(ossStats.Readvs, lastOssStats.Readvs, OssReadvCounter)
-		lastOssStats.ReadvSegs = updateIntCounter(ossStats.ReadvSegs, lastOssStats.ReadvSegs, OssReadvSegsCounter)
-		lastOssStats.Dirlists = updateIntCounter(ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistCounter)
-		lastOssStats.DirlistEnts = updateIntCounter(ossStats.DirlistEnts, lastOssStats.DirlistEnts, OssDirlistEntsCounter)
-		lastOssStats.Truncates = updateIntCounter(ossStats.Truncates, lastOssStats.Truncates, OssTruncateCounter)
-		lastOssStats.Unlinks = updateIntCounter(ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkCounter)
-		lastOssStats.Chmods = updateIntCounter(ossStats.Chmods, lastOssStats.Chmods, OssChmodCounter)
-		lastOssStats.Opens = updateIntCounter(ossStats.Opens, lastOssStats.Opens, OssOpensCounter)
-		lastOssStats.Renames = updateIntCounter(ossStats.Renames, lastOssStats.Renames, OssRenamesCounter)
+		lastOssStats.Reads = updateCounter(ossStats.Reads, lastOssStats.Reads, OssReadsCounter)
+		lastOssStats.Writes = updateCounter(ossStats.Writes, lastOssStats.Writes, OssWritesCounter)
+		lastOssStats.Stats = updateCounter(ossStats.Stats, lastOssStats.Stats, OssStatsCounter)
+		lastOssStats.Pgreads = updateCounter(ossStats.Pgreads, lastOssStats.Pgreads, OssPgReadsCounter)
+		lastOssStats.Pgwrites = updateCounter(ossStats.Pgwrites, lastOssStats.Pgwrites, OssPgWritesCounter)
+		lastOssStats.Readvs = updateCounter(ossStats.Readvs, lastOssStats.Readvs, OssReadvCounter)
+		lastOssStats.ReadvSegs = updateCounter(ossStats.ReadvSegs, lastOssStats.ReadvSegs, OssReadvSegsCounter)
+		lastOssStats.Dirlists = updateCounter(ossStats.Dirlists, lastOssStats.Dirlists, OssDirlistCounter)
+		lastOssStats.DirlistEnts = updateCounter(ossStats.DirlistEnts, lastOssStats.DirlistEnts, OssDirlistEntsCounter)
+		lastOssStats.Truncates = updateCounter(ossStats.Truncates, lastOssStats.Truncates, OssTruncateCounter)
+		lastOssStats.Unlinks = updateCounter(ossStats.Unlinks, lastOssStats.Unlinks, OssUnlinkCounter)
+		lastOssStats.Chmods = updateCounter(ossStats.Chmods, lastOssStats.Chmods, OssChmodCounter)
+		lastOssStats.Opens = updateCounter(ossStats.Opens, lastOssStats.Opens, OssOpensCounter)
+		lastOssStats.Renames = updateCounter(ossStats.Renames, lastOssStats.Renames, OssRenamesCounter)
 
-		lastOssStats.SlowReads = updateIntCounter(ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadsCounter)
-		lastOssStats.SlowWrites = updateIntCounter(ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWritesCounter)
-		lastOssStats.SlowStats = updateIntCounter(ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatsCounter)
-		lastOssStats.SlowPgreads = updateIntCounter(ossStats.SlowPgreads, lastOssStats.SlowPgreads, OssSlowPgReadsCounter)
-		lastOssStats.SlowPgwrites = updateIntCounter(ossStats.SlowPgwrites, lastOssStats.SlowPgwrites, OssSlowPgWritesCounter)
-		lastOssStats.SlowReadvs = updateIntCounter(ossStats.SlowReadvs, lastOssStats.SlowReadvs, OssSlowReadvCounter)
-		lastOssStats.SlowReadvSegs = updateIntCounter(ossStats.SlowReadvSegs, lastOssStats.SlowReadvSegs, OssSlowReadvSegsCounter)
-		lastOssStats.SlowDirlists = updateIntCounter(ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistCounter)
-		lastOssStats.SlowDirlistEnts = updateIntCounter(ossStats.SlowDirlistEnts, lastOssStats.SlowDirlistEnts, OssSlowDirlistEntsCounter)
-		lastOssStats.SlowTruncates = updateIntCounter(ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateCounter)
-		lastOssStats.SlowUnlinks = updateIntCounter(ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkCounter)
-		lastOssStats.SlowChmods = updateIntCounter(ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodCounter)
-		lastOssStats.SlowOpens = updateIntCounter(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter)
-		lastOssStats.SlowRenames = updateIntCounter(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter)
+		lastOssStats.SlowReads = updateCounter(ossStats.SlowReads, lastOssStats.SlowReads, OssSlowReadsCounter)
+		lastOssStats.SlowWrites = updateCounter(ossStats.SlowWrites, lastOssStats.SlowWrites, OssSlowWritesCounter)
+		lastOssStats.SlowStats = updateCounter(ossStats.SlowStats, lastOssStats.SlowStats, OssSlowStatsCounter)
+		lastOssStats.SlowPgreads = updateCounter(ossStats.SlowPgreads, lastOssStats.SlowPgreads, OssSlowPgReadsCounter)
+		lastOssStats.SlowPgwrites = updateCounter(ossStats.SlowPgwrites, lastOssStats.SlowPgwrites, OssSlowPgWritesCounter)
+		lastOssStats.SlowReadvs = updateCounter(ossStats.SlowReadvs, lastOssStats.SlowReadvs, OssSlowReadvCounter)
+		lastOssStats.SlowReadvSegs = updateCounter(ossStats.SlowReadvSegs, lastOssStats.SlowReadvSegs, OssSlowReadvSegsCounter)
+		lastOssStats.SlowDirlists = updateCounter(ossStats.SlowDirlists, lastOssStats.SlowDirlists, OssSlowDirlistCounter)
+		lastOssStats.SlowDirlistEnts = updateCounter(ossStats.SlowDirlistEnts, lastOssStats.SlowDirlistEnts, OssSlowDirlistEntsCounter)
+		lastOssStats.SlowTruncates = updateCounter(ossStats.SlowTruncates, lastOssStats.SlowTruncates, OssSlowTruncateCounter)
+		lastOssStats.SlowUnlinks = updateCounter(ossStats.SlowUnlinks, lastOssStats.SlowUnlinks, OssSlowUnlinkCounter)
+		lastOssStats.SlowChmods = updateCounter(ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodCounter)
+		lastOssStats.SlowOpens = updateCounter(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter)
+		lastOssStats.SlowRenames = updateCounter(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter)
 	}
 
 	return nil
@@ -2081,7 +2074,7 @@ func handleOSSPacket(blobs [][]byte) error {
 			return errors.Wrap(err, "failed to parse OSS event json")
 		}
 		if !allowedEvents[ossEvent.Event] {
-			log.Debugf("handleOSSPacket received an OSS packet with an unrecognized event type (%s)", ossEvent.Event)
+			log.Warningf("handleOSSPacket received an OSS packet with an unrecognized event type (%s)", ossEvent.Event)
 			continue
 		}
 		groupedEvents[ossEvent.Event] = append(groupedEvents[ossEvent.Event], blob)

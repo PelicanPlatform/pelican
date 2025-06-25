@@ -862,7 +862,7 @@ func TestOssPacketHandler(t *testing.T) {
 				[]byte(`{"event":"invalid_event","reads":100}`),
 				[]byte(`{"event":"oss_stats","reads":200,invalid_json}`),
 			},
-			expectedError: true,
+			expectedError: false,
 			expectedReads: 0,
 		},
 		{
