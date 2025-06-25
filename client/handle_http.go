@@ -123,6 +123,10 @@ type (
 
 	HeaderTimeoutError struct{}
 
+	InvalidByteInChunkLengthError struct {
+		Err error
+	}
+
 	NetworkResetError struct{}
 
 	allocateMemoryError struct {
@@ -586,6 +590,19 @@ func (e *dirListingNotSupportedError) Unwrap() error {
 
 func (e *dirListingNotSupportedError) Is(target error) bool {
 	_, ok := target.(*dirListingNotSupportedError)
+	return ok
+}
+
+func (e *InvalidByteInChunkLengthError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *InvalidByteInChunkLengthError) Unwrap() error {
+	return e.Err
+}
+
+func (e *InvalidByteInChunkLengthError) Is(target error) bool {
+	_, ok := target.(*InvalidByteInChunkLengthError)
 	return ok
 }
 
@@ -2847,6 +2864,10 @@ Loop:
 			errors.Is(err, syscall.ECONNABORTED) {
 			err = &ConnectionSetupError{URL: req.URL.String()}
 			return
+		}
+		// Add a check for InvalidByteInChunkLengthError
+		if strings.Contains(err.Error(), "invalid byte in chunk length") {
+			err = &InvalidByteInChunkLengthError{Err: err}
 		}
 		log.WithFields(fields).Debugln("Got error from HTTP download", err)
 		return

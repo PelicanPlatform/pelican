@@ -1255,3 +1255,65 @@ func TestListHttp(t *testing.T) {
 		})
 	}
 }
+
+func TestInvalidByteInChunkLength(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Create a test server that sends an invalid chunk length
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("server does not support hijacking")
+		}
+		conn, bufrw, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack failed: %v", err)
+		}
+		defer conn.Close()
+
+		// Write a properly formatted HTTP response with an invalid chunk length
+		if _, err := bufrw.WriteString("HTTP/1.1 200 OK\r\n"); err != nil {
+			t.Fatalf("failed to write status line: %v", err)
+		}
+		if _, err := bufrw.WriteString("Content-Type: text/plain\r\n"); err != nil {
+			t.Fatalf("failed to write content-type: %v", err)
+		}
+		if _, err := bufrw.WriteString("Transfer-Encoding: chunked\r\n"); err != nil {
+			t.Fatalf("failed to write transfer-encoding: %v", err)
+		}
+		if _, err := bufrw.WriteString("Connection: close\r\n"); err != nil {
+			t.Fatalf("failed to write connection: %v", err)
+		}
+		if _, err := bufrw.WriteString("\r\n"); err != nil {
+			t.Fatalf("failed to write header separator: %v", err)
+		}
+		if _, err := bufrw.WriteString("1g\r\n"); err != nil { // Invalid chunk length
+			t.Fatalf("failed to write chunk length: %v", err)
+		}
+		if _, err := bufrw.WriteString("data\r\n"); err != nil {
+			t.Fatalf("failed to write chunk data: %v", err)
+		}
+		if _, err := bufrw.WriteString("0\r\n\r\n"); err != nil {
+			t.Fatalf("failed to write chunk terminator: %v", err)
+		}
+		if err := bufrw.Flush(); err != nil {
+			t.Fatalf("failed to flush buffer: %v", err)
+		}
+	}))
+
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+
+	transfers := generateTransferDetails(svr.URL, transferDetailsOptions{false, ""})
+	require.Equal(t, 1, len(transfers))
+
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
+	require.Error(t, err)
+	t.Logf("error: %v", err)
+	assert.True(t, IsRetryable(err), "Invalid chunk length error should be retryable")
+}
