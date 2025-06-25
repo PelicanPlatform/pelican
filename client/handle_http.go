@@ -129,6 +129,10 @@ type (
 
 	NetworkResetError struct{}
 
+	UnexpectedEOFError struct {
+		Err error
+	}
+
 	allocateMemoryError struct {
 		Err error
 	}
@@ -603,6 +607,19 @@ func (e *InvalidByteInChunkLengthError) Unwrap() error {
 
 func (e *InvalidByteInChunkLengthError) Is(target error) bool {
 	_, ok := target.(*InvalidByteInChunkLengthError)
+	return ok
+}
+
+func (e *UnexpectedEOFError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *UnexpectedEOFError) Unwrap() error {
+	return e.Err
+}
+
+func (e *UnexpectedEOFError) Is(target error) bool {
+	_, ok := target.(*UnexpectedEOFError)
 	return ok
 }
 
@@ -2880,6 +2897,9 @@ Loop:
 				log.WithFields(fields).Debugln("Got error from file transfer:", statusText)
 				statusText = strings.Replace(statusText, "sTREAM ioctl timeout", "cache timed out waiting on origin", 1)
 				err = errors.New("download error after server response started: " + statusText)
+				if strings.Contains(statusText, "unexpected EOF") {
+					err = &UnexpectedEOFError{Err: err}
+				}
 				return
 			}
 		}

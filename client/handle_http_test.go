@@ -1317,3 +1317,34 @@ func TestInvalidByteInChunkLength(t *testing.T) {
 	t.Logf("error: %v", err)
 	assert.True(t, IsRetryable(err), "Invalid chunk length error should be retryable")
 }
+
+func TestUnexpectedEOFInTransferStatus(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Create a test server that sends an EOF error in the X-Transfer-Status trailer
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Trailer", "X-Transfer-Status")
+
+		// Write the body
+		_, err := w.Write([]byte("hello"))
+		require.NoError(t, err)
+
+		// Set the trailer
+		w.Header().Set("X-Transfer-Status", "500: unexpected EOF")
+	}))
+	defer svr.Close()
+
+	transfers := generateTransferDetails(svr.URL, transferDetailsOptions{false, ""})
+	require.Equal(t, 1, len(transfers))
+
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
+	require.Error(t, err)
+	t.Logf("error: %v", err)
+	assert.True(t, IsRetryable(err), "Unexpected EOF error should be retryable")
+}
