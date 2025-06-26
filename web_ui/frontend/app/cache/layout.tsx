@@ -23,7 +23,6 @@ import NavigationConfiguration from '@/app/navigation';
 
 export const metadata = {
   title: 'Cache',
-  description: 'Software designed to make data distribution easy',
 };
 
 export default function RootLayout({
