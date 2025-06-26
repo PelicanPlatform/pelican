@@ -1267,17 +1267,6 @@ func SetServerDefaults(v *viper.Viper) error {
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
 	InitConfigInternal()
 
-	webConfigPath := param.Server_WebConfigFile.GetString()
-	if webConfigPath != "" {
-		if err := os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
-			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
-		}
-	}
-	if err := setWebConfigOverride(viper.GetViper(), webConfigPath); err != nil {
-		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
-	}
-
-	logging.FlushLogs(true)
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
@@ -1297,6 +1286,16 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 	if err := SetServerDefaults(viper.GetViper()); err != nil {
 		logging.FlushLogs(true)
 		return err
+	}
+
+	webConfigPath := param.Server_WebConfigFile.GetString()
+	if webConfigPath != "" {
+		if err := os.MkdirAll(filepath.Dir(webConfigPath), 0700); err != nil {
+			cobra.CheckErr(errors.Wrapf(err, "failed to create directory for web config file at %s", webConfigPath))
+		}
+	}
+	if err := setWebConfigOverride(viper.GetViper(), webConfigPath); err != nil {
+		cobra.CheckErr(errors.Wrapf(err, "failed to override configuration based on changes from web UI"))
 	}
 
 	// Flush logs only after we potentially ingest changes from the web UI. This must
