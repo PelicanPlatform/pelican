@@ -637,6 +637,7 @@ func GenerateOriginIssuers() (issuers []Issuer, err error) {
 			MapSubject:      param.Origin_ScitokensMapSubject.GetBool(),
 			DefaultUser:     param.Origin_ScitokensDefaultUser.GetString(),
 			UsernameClaim:   param.Origin_ScitokensUsernameClaim.GetString(),
+			NameMapfile:     param.Origin_ScitokensNameMapFile.GetString(),
 		})
 	}
 
