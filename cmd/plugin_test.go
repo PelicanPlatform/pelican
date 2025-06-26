@@ -1268,7 +1268,6 @@ func TestTransferError404(t *testing.T) {
 
 	// Isolate the test so it doesn't use system config
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -1366,7 +1365,6 @@ func TestTransferErrorSlowTransfer(t *testing.T) {
 
 	// Isolate the test so it doesn't use system config
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	err := config.InitClient()
 	require.NoError(t, err)
 
@@ -1482,7 +1480,6 @@ func TestTransferErrorHeaderTimeout(t *testing.T) {
 
 	// Isolate the test so it doesn't use system config
 	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
 	err := config.InitClient()
 	require.NoError(t, err)
 
