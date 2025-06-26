@@ -22,7 +22,7 @@ import { Navigation } from '@/components/layout/Navigation';
 import NavigationConfiguration from '@/app/navigation';
 
 export const metadata = {
-  title: 'Pelican Cache',
+  title: 'Cache',
   description: 'Software designed to make data distribution easy',
 };
 
