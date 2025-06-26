@@ -14,9 +14,7 @@ import {
 } from 'react';
 import { DowntimeGet, DowntimePost } from '@/types';
 
-type DowntimeFormProps =
-  | DowntimeGet
-  | Omit<DowntimePost, 'severity' | 'class' | 'description'>;
+type DowntimeFormProps = DowntimeGet | Partial<DowntimePost>;
 
 export const DowntimeEditContext = createContext<DowntimeFormProps | undefined>(
   undefined
