@@ -24,7 +24,6 @@ package broker
 import (
 	"context"
 	"net"
-	"strings"
 
 	"github.com/jellydator/ttlcache/v3"
 	"golang.org/x/sync/errgroup"
@@ -37,14 +36,15 @@ type (
 	brokerPrefixInfo struct {
 		ServerType server_structs.ServerType
 		BrokerUrl  string
+		Prefix     string
 	}
 
 	// BrokerDialer is a dialer that can use the broker
 	// functionality to connect to a remote service.
 	BrokerDialer struct {
 		dialerContext func(ctx context.Context, network, addr string) (net.Conn, error)
-		// Map from service name to broker endpoint.
-		// If the service name is not found in the cache, then the dialer
+		// Map from service's network address (hostname:port) to broker endpoint.
+		// If service's network address is not found in the cache, then the dialer
 		// will use a normal TCP connection to the service.
 		brokerEndpoints *ttlcache.Cache[string, brokerPrefixInfo]
 	}
@@ -78,10 +78,11 @@ func NewBrokerDialer(ctx context.Context, egrp *errgroup.Group) *BrokerDialer {
 
 // Set the dialer to use `brokerUrl` as the broker endpoint for
 // the service `name`.
-func (d *BrokerDialer) UseBroker(serverType server_structs.ServerType, name, brokerUrl string) {
+func (d *BrokerDialer) UseBroker(serverType server_structs.ServerType, name, brokerUrl, prefix string) {
 	d.brokerEndpoints.Set(name, brokerPrefixInfo{
 		ServerType: serverType,
 		BrokerUrl:  brokerUrl,
+		Prefix:     prefix,
 	}, ttlcache.DefaultTTL)
 }
 
@@ -93,13 +94,5 @@ func (d *BrokerDialer) DialContext(ctx context.Context, network, addr string) (n
 		return d.dialerContext(ctx, network, addr)
 	}
 
-	sType := info.Value().ServerType
-	prefix := ""
-	if sType.IsEnabled(server_structs.CacheType) {
-		addrSplit := strings.SplitN(addr, ":", 2)
-		prefix = "/caches/" + addrSplit[0]
-	} else {
-		prefix = "/origins/" + addr
-	}
-	return ConnectToService(ctx, info.Value().BrokerUrl, prefix, addr)
+	return ConnectToService(ctx, info.Value().BrokerUrl, info.Value().Prefix, addr)
 }
