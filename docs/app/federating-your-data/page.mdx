@@ -1,0 +1,42 @@
+export const metadata = {
+	asIndexPage: true,
+}
+
+import { Callout } from 'nextra/components'
+
+# Federating Your Data
+
+## The Role of Origins in Pelican Federations
+Data is made accessible via Pelican through Origins -- the service that acts like a universal adapter plug allowing Pelican clients to interact with a wide variety of
+underlying storage technologies. From posix filesystems to S3 cloud storage, Origins translate Pelican client commands into requests that work natively with whatever
+holds the actual objects/files. It's important to note that Origins often do not store the objects themselves, which is why we say data is access _via_ Pelican and not
+_from_ Pelican.
+
+Not only do Origins translate requests to/from the data repository, but they're also the component responsible for telling the federation they have data from some
+namespace in the federation. That is, you may have one Origin that ties the S3 bucket `foo` to the namespace `/my-origin/foo` while also tying the bucket `bar` to the
+federation prefix `/my-origin/bar`. When this Origin talks to the Director, it tells the Director which namespaces it supports so that requests for `/my-origin/foo` are
+forwarded by the Director to the correct Origin.
+
+For those who want to make their data accessible via Pelican, the Origin is the service they'll get to know most intimately. It's the place where data owners can define
+what data is federated, craft fine-grained access policies to describe who/how the objects are accessed, and monitor how users are interacting with the data.
+
+Generally speaking, an Origin's configuration has a few key elements (not including stuff like TLS configuration, which is needed by all Pelican servers).
+These include:
+- **Storage Type**: The underlying storage technology the Origin will be translating on behalf of. Valid options include (but may not be limited to) POSIX, S3, HTTP, Globus
+and XRootD.
+- **Exports**: The actual sections of the storage instance that are going to be made available through the Origin. For each export, some namespace prefix is tied to some portion
+of the underlying storage. For example, in posix, each export generally points to some distinct directory tree, allowing the origin admin to map unique namespaces to certain
+pieces of the filesystem. For S3, exports usually point to individual buckets.
+- **Capabilities (per export)**: The access policy imposed on users when accessing objects from this part of the namespace.
+
+Understanding how these pieces fit together and what each one enables allow Origin administrators to realize a vast array of conceivable configurations. Documents in this
+section should help guide Origin administrators, both new and experienced, through the steps needed to add their data to their Pelican federation of choice.
+
+## Namespaces and their Relationship with Origins
+In general, the origin-namespace relationship should be thought of as many-to-many. One Origin may export multiple prefixes, as in the previous example, but one prefix
+may also be [striped](https://en.wikipedia.org/wiki/Data_striping) across multiple Origins.
+
+<Callout type="warning">
+Pelican developers are still working on full support for situations where one prefix is spread across multiple Origins. At this time, certain client commands,
+like those that involve object listing, may not behave entirely as expected in multi-origin, single-namespace setups.
+</Callout>
