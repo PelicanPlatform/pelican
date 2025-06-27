@@ -20,8 +20,7 @@ import { Header } from '@/components/layout/Header';
 import { Main, PaddedContent } from '@/components/layout';
 
 export const metadata = {
-  title: 'Pelican Login',
-  description: 'Software designed to make data distribution easy',
+  title: 'Login',
 };
 
 export default function RootLayout({

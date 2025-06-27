@@ -22,8 +22,10 @@ import { Navigation } from '@/components/layout/Navigation';
 import NavigationConfiguration from '@/app/navigation';
 
 export const metadata = {
-  title: 'Pelican Registry',
-  description: 'Register your service with this Federation',
+  title: {
+    template: '%s | Registry',
+    default: 'Registry',
+  },
 };
 
 export default function RootLayout({

@@ -22,8 +22,7 @@ import { Navigation } from '@/components/layout/Navigation';
 import NavigationConfiguration from '@/app/navigation';
 
 export const metadata = {
-  title: 'Pelican Cache',
-  description: 'Software designed to make data distribution easy',
+  title: 'Cache',
 };
 
 export default function RootLayout({
