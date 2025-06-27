@@ -468,11 +468,16 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 		acceptableScope := false
 		for _, scope := range strings.Split(scopes, " ") {
 			scope_info := strings.Split(scope, ":")
-			scopeOK := false
-			if (opts.Operation == config.TokenWrite || opts.Operation == config.TokenSharedWrite) && (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create") {
-				scopeOK = true
-			} else if scope_info[0] == "storage.read" {
-				scopeOK = true
+			var scopeOK bool
+			switch opts.Operation {
+			case config.TokenWrite, config.TokenSharedWrite:
+				scopeOK = (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create")
+			case config.TokenDelete:
+				scopeOK = (scope_info[0] == "storage.modify")
+			case config.TokenRead, config.TokenSharedRead:
+				scopeOK = (scope_info[0] == "storage.read")
+			default:
+				scopeOK = false
 			}
 			if !scopeOK {
 				continue
