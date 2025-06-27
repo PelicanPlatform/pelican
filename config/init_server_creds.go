@@ -564,6 +564,11 @@ func GenerateCert() error {
 // RFC 6125 section 6.4.4 specifies that we may match against the CN ONLY if there are no DNS names.
 // This logic is implemented by x509.Certificate.VerifyHostname.
 func ValidateHostCertificateHostname(hostname string) error {
+	if param.TLSSkipVerify.GetBool() {
+		log.Warnf("Skipping TLS certificate hostname verification for %s because %s is set to true", hostname, param.TLSSkipVerify.GetName())
+		return nil
+	}
+
 	tlsCert := param.Server_TLSCertificateChain.GetString()
 	if tlsCert == "" {
 		return errors.Errorf("TLS certificate file is not set. See documentation for %s", param.Server_TLSCertificateChain.GetName())
