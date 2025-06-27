@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -507,15 +508,29 @@ func GenerateCert() error {
 		BasicConstraintsValid: true,
 	}
 
+	template.DNSNames = []string{}
+	template.IPAddresses = []net.IP{}
+
+	// Some internal tests may not use a hostname, but an IP address like 127.0.0.1 instead
+	// In this case, the IP address will be used as the SAN but it needs to be added as an IP and
+	// not a DNS name.
+	addSAN := func(s string) {
+		if ip := net.ParseIP(s); ip != nil {
+			template.IPAddresses = append(template.IPAddresses, ip)
+		} else {
+			template.DNSNames = append(template.DNSNames, s)
+		}
+	}
+
 	// In the course of unit testing (the primary place these self-signed certs are used),
 	// it may become necessary to mix/match various configurations around the `Server.Hostname`
 	// and `Server.ExternalWebUrl` parameters. Whenever such a test needs to run config.InitServer(),
 	// it's necessary that the value of both `Server.Hostname` and `Server.ExternalWebUrl` are baked
 	// into the cert, and so even if the two don't match we add both to the cert's DNS names.
+	addSAN(hostname)
 	externalWebUrl, err := url.Parse(param.Server_ExternalWebUrl.GetString())
-	template.DNSNames = []string{hostname}
 	if err == nil && externalWebUrl.Hostname() != hostname {
-		template.DNSNames = append(template.DNSNames, externalWebUrl.Hostname())
+		addSAN(externalWebUrl.Hostname())
 	}
 
 	// If there's pre-existing CA certificates, self-sign instead of using the generated CA
