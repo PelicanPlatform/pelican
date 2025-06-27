@@ -19,6 +19,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 
 	"github.com/pkg/errors"
@@ -51,6 +52,7 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.StringP("cache-list-name", "n", "xroot", "(Deprecated) Cache list to use, currently either xroot or xroots; may be ignored")
 	flagSet.Lookup("cache-list-name").Hidden = true
 	flagSet.String("caches", "", "A JSON file containing the list of caches")
+	flagSet.String("transfer-stats", "", "A path to a file to write transfer statistics to")
 	objectCmd.AddCommand(getCmd)
 }
 
@@ -109,38 +111,55 @@ func getMain(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	var result error
+	var attemptErr error
 	lastSrc := ""
+
+	finalResults := make([][]client.TransferResults, 0)
 
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		_, result = client.DoGet(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...))
-		if result != nil {
+		transferResults, err := client.DoGet(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation), client.WithCaches(caches...))
+		if err != nil {
+			attemptErr = err
 			lastSrc = src
 			break
 		}
+		finalResults = append(finalResults, transferResults)
 	}
 
 	// Exit with failure
-	if result != nil {
+	if attemptErr != nil {
 		// Print the list of errors
-		errMsg := result.Error()
+		errMsg := attemptErr.Error()
 		var pe error_codes.PelicanError
 		var te *client.TransferErrors
-		if errors.As(result, &te) {
+		if errors.As(attemptErr, &te) {
 			errMsg = te.UserError()
 		}
-		if errors.Is(result, &pe) {
+		if errors.Is(attemptErr, &pe) {
 			errMsg = pe.Error()
 			log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
 			os.Exit(pe.ExitCode())
 		} else { // For now, keeping this else here to catch any errors that are not classified PelicanErrors
 			log.Errorln("Failure getting " + lastSrc + ": " + errMsg)
-			if client.ShouldRetry(result) {
+			if client.ShouldRetry(attemptErr) {
 				log.Errorln("Errors are retryable")
 				os.Exit(11)
 			}
 			os.Exit(1)
+		}
+	}
+
+	// No failures so we can write the transfer stats
+	transferStatsFile, _ := cmd.Flags().GetString("transfer-stats")
+	if transferStatsFile != "" {
+		transferStats, err := json.MarshalIndent(finalResults, "", "  ")
+		if err != nil {
+			log.Errorln("Failed to marshal transfer results:", err)
+		}
+		err = os.WriteFile(transferStatsFile, transferStats, 0644)
+		if err != nil {
+			log.Errorln("Failed to write transfer stats to file:", err)
 		}
 	}
 }

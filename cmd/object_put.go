@@ -19,6 +19,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 
 	"github.com/pkg/errors"
@@ -42,6 +43,7 @@ func init() {
 	flagSet := putCmd.Flags()
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.BoolP("recursive", "r", false, "Recursively upload a collection.  Forces methods to only be http to get the freshest collection contents")
+	flagSet.String("transfer-stats", "", "File to write transfer stats to")
 	objectCmd.AddCommand(putCmd)
 }
 
@@ -89,13 +91,17 @@ func putMain(cmd *cobra.Command, args []string) {
 	var result error
 	lastSrc := ""
 
+	finalResults := make([][]client.TransferResults, 0)
+
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		_, result = client.DoPut(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation))
-		if result != nil {
+		transferResults, err := client.DoPut(ctx, src, dest, isRecursive, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation))
+		if err != nil {
+			result = err
 			lastSrc = src
 			break
 		}
+		finalResults = append(finalResults, transferResults)
 	}
 
 	// Exit with failure
@@ -112,6 +118,18 @@ func putMain(cmd *cobra.Command, args []string) {
 			os.Exit(11)
 		}
 		os.Exit(1)
+	}
+
+	transferStatsFile, _ := cmd.Flags().GetString("transfer-stats")
+	if transferStatsFile != "" {
+		transferStats, err := json.MarshalIndent(finalResults, "", "  ")
+		if err != nil {
+			log.Errorln("Failed to marshal transfer results:", err)
+		}
+		err = os.WriteFile(transferStatsFile, transferStats, 0644)
+		if err != nil {
+			log.Errorln("Failed to write transfer stats to file:", err)
+		}
 	}
 
 }
