@@ -75,12 +75,15 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
     data.forEach((d) => {
       if (d.server?.version && semver.valid(d.server.version) !== null) {
         semverVersions.add(d.server.version);
-      } else if(d.server?.version && semver.valid(d.server.version) === null) {
+      } else if (d.server?.version && semver.valid(d.server.version) === null) {
         nonSemverVersions.add(d.server.version);
       }
     });
 
-    return [...semver.sort([...semverVersions]).reverse(), [...nonSemverVersions].sort().reverse()];
+    return [
+      ...semver.sort([...semverVersions]).reverse(),
+      ...[...nonSemverVersions].sort().reverse(),
+    ];
   }, [data]);
 
   return (
@@ -102,6 +105,7 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
               </InputLabel>
               <Select
                 multiple
+                id={'server-version-select'}
                 value={serverVersions}
                 onChange={(e) => setServerVersions(e.target.value as string[])}
                 labelId={'server-version-select-label'}
