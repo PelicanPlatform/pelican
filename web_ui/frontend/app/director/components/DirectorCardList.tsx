@@ -70,14 +70,20 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
   ]);
 
   const allServerVersions = useMemo(() => {
-    const versions = new Set<string>();
+    const semverVersions = new Set<string>();
+    const nonSemverVersions = new Set<string>();
     data.forEach((d) => {
-      if (d.server?.version) {
-        versions.add(d.server.version);
+      if (d.server?.version && semver.valid(d.server.version) !== null) {
+        semverVersions.add(d.server.version);
+      } else if (d.server?.version && semver.valid(d.server.version) === null) {
+        nonSemverVersions.add(d.server.version);
       }
     });
 
-    return semver.sort([...versions]).reverse();
+    return [
+      ...semver.sort([...semverVersions]).reverse(),
+      ...[...nonSemverVersions].sort().reverse(),
+    ];
   }, [data]);
 
   return (
@@ -99,6 +105,7 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
               </InputLabel>
               <Select
                 multiple
+                id={'server-version-select'}
                 value={serverVersions}
                 onChange={(e) => setServerVersions(e.target.value as string[])}
                 labelId={'server-version-select-label'}
