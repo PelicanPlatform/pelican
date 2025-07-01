@@ -444,6 +444,61 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		return
 	}
 
+	// Check if SiteName already exists for origin and cache namespaces (applies to both CREATE and UPDATE)
+	if server_structs.IsOriginNS(ns.Prefix) || server_structs.IsCacheNS(ns.Prefix) {
+		if ns.AdminMetadata.SiteName == "" {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "SiteName is required and cannot be empty"})
+			return
+		}
+
+		// Ensure the requested SiteName is unique for this server type (origin or cache)
+		countOfSitename, err := serverSiteNameExists(ns.AdminMetadata.SiteName, ns.Prefix)
+		if err != nil {
+			log.Errorf("Failed to check if Sitename already exists: %v", err)
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Server encountered an error checking if Sitename already exists"})
+			return
+		}
+		if countOfSitename > 0 {
+			// CREATE: For new registrations, always reject duplicate SiteNames
+			if !isUpdate {
+				ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+					Status: server_structs.RespFailed,
+					Msg:    fmt.Sprintf("The SiteName '%s' is already in use by another origin or cache registration", ns.AdminMetadata.SiteName)})
+				return
+			} else {
+				// UPDATE: only allow if sitename is unchanged and refers to this record alone
+				existingNs, err := getNamespaceById(ns.ID)
+				if err != nil {
+					log.Errorf("Failed to get existing namespace during Sitename validation: %v", err)
+					ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    "Server encountered an error during Sitename validation"})
+					return
+				}
+				if existingNs.AdminMetadata.SiteName == ns.AdminMetadata.SiteName {
+					// Unchanged sitename must only appear once (itself)
+					if countOfSitename > 1 {
+						ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+							Status: server_structs.RespFailed,
+							Msg:    fmt.Sprintf("The SiteName '%s' is already in use by another origin or cache registration", ns.AdminMetadata.SiteName)})
+						return
+					}
+				} else {
+					// Reject if the new sitename is already in use by another registration
+					ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+						Status: server_structs.RespFailed,
+						Msg:    fmt.Sprintf("The SiteName '%s' is already in use by another origin or cache registration", ns.AdminMetadata.SiteName)})
+					return
+				}
+
+			}
+		}
+	}
+
 	formatCustomFields(ns.CustomFields)
 
 	if validCF, err := validateCustomFields(ns.CustomFields); !validCF {
@@ -738,6 +793,7 @@ func getNamespace(ctx *gin.Context) {
 					Status: server_structs.RespFailed,
 					Msg:    fmt.Sprintf("Failed to verify the scope of the token. Require %s", token_scopes.Registry_EditRegistration.String()),
 				})
+			return
 		}
 	}
 

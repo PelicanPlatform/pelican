@@ -969,6 +969,130 @@ func TestCreateNamespace(t *testing.T) {
 		assert.Contains(t, string(body), `not in the list of available institutions to register`)
 	})
 
+	t.Run("empty-sitename-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		mockNs := server_structs.Namespace{
+			Prefix: "/origins/empty-sitename.example.com",
+			Pubkey: pubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "", // Empty SiteName should fail
+			},
+		}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "SiteName is required and cannot be empty")
+	})
+
+	t.Run("duplicate-sitename-returns-400", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// First, create an origin namespace with a specific SiteName
+		existingNs := server_structs.Namespace{
+			Prefix: "/origins/existing.example.com",
+			Pubkey: pubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "TestSite",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = insertMockDBData([]server_structs.Namespace{existingNs})
+		require.NoError(t, err)
+
+		// Now try to create a new cache namespace with the same SiteName (should fail)
+		newPubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		mockNs := server_structs.Namespace{
+			Prefix: "/origins/new.example.com",
+			Pubkey: newPubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "TestSite", // Same SiteName should fail
+			},
+		}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "The SiteName 'TestSite' is already in use by another origin or cache registration")
+	})
+
+	t.Run("regular-namespace-duplicate-sitename-allowed", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// First, create a regular namespace with a specific SiteName
+		existingNs := server_structs.Namespace{
+			Prefix: "/existing-regular",
+			Pubkey: pubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "SharedSite",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = insertMockDBData([]server_structs.Namespace{existingNs})
+		require.NoError(t, err)
+
+		// Now try to create another regular namespace with the same SiteName (should succeed)
+		newPubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		mockNs := server_structs.Namespace{
+			Prefix: "/new-regular",
+			Pubkey: newPubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "SharedSite", // Same SiteName should be allowed for regular namespaces
+			},
+		}
+		mockNsBytes, err := json.Marshal(mockNs)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/namespaces", bytes.NewReader(mockNsBytes))
+		req.Header.Set("Context-Type", "application/json")
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+		assert.JSONEq(t, `{"msg":"Prefix /new-regular successfully registered", "status":"success"}`, string(body))
+	})
+
 	t.Run("valid-request-gives-200", func(t *testing.T) {
 		resetNamespaceDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
@@ -977,7 +1101,7 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
-		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "ValidTestSite"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -1032,7 +1156,7 @@ func TestCreateNamespace(t *testing.T) {
 		mockNs := server_structs.Namespace{
 			Prefix:        "/foo",
 			Pubkey:        pubKeyStr,
-			AdminMetadata: server_structs.AdminMetadata{Institution: "1000"},
+			AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "CustomFieldsTestSite"},
 			CustomFields:  customFieldsVals,
 		}
 		mockNsBytes, err := json.Marshal(mockNs)
@@ -1075,7 +1199,7 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
-		mockNs := server_structs.Namespace{Prefix: "/topo/foo/bar", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Namespace{Prefix: "/topo/foo/bar", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "TopologySubspaceTestSite"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -1117,7 +1241,7 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
-		mockNs := server_structs.Namespace{Prefix: "/topo/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Namespace{Prefix: "/topo/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "TopologySamePrefixTestSite"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -1210,7 +1334,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
-		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "TestUpdateSite"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -1233,7 +1357,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
-		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", UserID: "notYourNs"}}
+		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", UserID: "notYourNs", SiteName: "NotOwnerTestSite"}}
 
 		err = insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
@@ -1270,6 +1394,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 				Institution: "1000",
 				UserID:      "mockUser",                 // same as currently sign-in user
 				Status:      server_structs.RegApproved, // but it's approved
+				SiteName:    "ApprovedTestSite",
 			},
 		}
 
@@ -1309,6 +1434,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 				Institution: "1000",
 				UserID:      "mockUser",                // same as currently sign-in user
 				Status:      server_structs.RegPending, // but it's approved
+				SiteName:    "SuccessChangeTestSite",
 			},
 		}
 
@@ -1354,6 +1480,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 				Institution: "1000",
 				UserID:      "mockUser",                 // same as currently sign-in user
 				Status:      server_structs.RegApproved, // but it's approved
+				SiteName:    "AdminChangeTestSite",
 			},
 		}
 
@@ -1391,6 +1518,168 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		assert.Equal(t, "/foo", nss[0].Prefix)
 		assert.Equal(t, "newDescription", nss[0].AdminMetadata.Description)
 		assert.Equal(t, updatedPubKeyStr, nss[0].Pubkey)
+	})
+
+	t.Run("update-same-namespace-same-sitename-succeeds", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// Create an existing namespace
+		existingNs := server_structs.Namespace{
+			Prefix: "/test-update",
+			Pubkey: pubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "UpdateTestSite",
+				Status:      server_structs.RegPending,
+				UserID:      "mockUser",
+			},
+		}
+		err = insertMockDBData([]server_structs.Namespace{existingNs})
+		require.NoError(t, err)
+
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		// Update the same namespace with the same SiteName (should succeed)
+		updateNs := server_structs.Namespace{
+			Prefix: "/test-update",
+			Pubkey: pubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "UpdateTestSite", // Same SiteName for same namespace should work
+				UserID:      "mockUser",
+			},
+		}
+		updateNsBytes, err := json.Marshal(updateNs)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/"+strconv.Itoa(id), bytes.NewReader(updateNsBytes))
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	t.Run("update-namespace-duplicate-sitename-fails", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr1, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		pubKeyStr2, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// Create two existing origin/cache namespaces with different SiteNames
+		existingNs1 := server_structs.Namespace{
+			Prefix: "/origins/test-update1.example.com",
+			Pubkey: pubKeyStr1,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "Site1",
+				Status:      server_structs.RegPending,
+				UserID:      "mockUser",
+			},
+		}
+		existingNs2 := server_structs.Namespace{
+			Prefix: "/origins/test-update2.example.com",
+			Pubkey: pubKeyStr2,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "Site2",
+				Status:      server_structs.RegPending,
+				UserID:      "mockUser",
+			},
+		}
+		err = insertMockDBData([]server_structs.Namespace{existingNs1, existingNs2})
+		require.NoError(t, err)
+
+		// Get the ID of the first namespace
+		nss, err := getAllNamespaces()
+		require.NoError(t, err)
+		var ns1ID int
+		for _, ns := range nss {
+			if ns.Prefix == "/origins/test-update1.example.com" {
+				ns1ID = ns.ID
+				break
+			}
+		}
+		require.NotZero(t, ns1ID)
+
+		// Try to update the first namespace to use the second namespace's SiteName
+		updateNs := server_structs.Namespace{
+			Prefix: "/origins/test-update1.example.com",
+			Pubkey: pubKeyStr1,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "Site2", // Trying to use Site2's name should fail
+				UserID:      "mockUser",
+			},
+		}
+		updateNsBytes, err := json.Marshal(updateNs)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/"+strconv.Itoa(ns1ID), bytes.NewReader(updateNsBytes))
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "The SiteName 'Site2' is already in use by another origin or cache registration")
+	})
+
+	t.Run("update-namespace-empty-sitename-fails", func(t *testing.T) {
+		resetNamespaceDB(t)
+		mockInsts := []registrationFieldOption{{ID: "1000"}}
+		viper.Set("Registry.Institutions", mockInsts)
+
+		pubKeyStr, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// Create an existing namespace
+		existingNs := server_structs.Namespace{
+			Prefix: "/origins/test-update.example.com",
+			Pubkey: pubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "ExistingSite",
+				Status:      server_structs.RegPending,
+				UserID:      "mockUser",
+			},
+		}
+		err = insertMockDBData([]server_structs.Namespace{existingNs})
+		require.NoError(t, err)
+
+		id, err := getLastNamespaceId()
+		require.NoError(t, err)
+
+		// Try to update with empty SiteName (should fail)
+		updateNs := server_structs.Namespace{
+			Prefix: "/origins/test-update.example.com",
+			Pubkey: pubKeyStr,
+			AdminMetadata: server_structs.AdminMetadata{
+				Institution: "1000",
+				SiteName:    "", // Empty SiteName should fail
+				UserID:      "mockUser",
+			},
+		}
+		updateNsBytes, err := json.Marshal(updateNs)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/namespaces/"+strconv.Itoa(id), bytes.NewReader(updateNsBytes))
+		router.ServeHTTP(w, req)
+
+		body, err := io.ReadAll(w.Result().Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		assert.Contains(t, string(body), "SiteName is required and cannot be empty")
 	})
 }
 

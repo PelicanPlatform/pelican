@@ -308,6 +308,23 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		return false, returnMsg, nil
 	}
 
+	// Validate SiteName is not empty
+	if data.SiteName == "" {
+		return false, nil, badRequestError{Message: "SiteName is required and cannot be empty"}
+	}
+
+	// Check if SiteName already exists for origin and cache namespaces
+	if server_structs.IsOriginNS(data.Prefix) || server_structs.IsCacheNS(data.Prefix) {
+		countOfSitename, err := serverSiteNameExists(data.SiteName, data.Prefix)
+		if err != nil {
+			log.Errorf("Failed to check if SiteName already exists: %v", err)
+			return false, nil, errors.Wrap(err, "Server encountered an error checking if SiteName already exists")
+		}
+		if countOfSitename > 0 {
+			return false, nil, badRequestError{Message: fmt.Sprintf("The SiteName '%s' is already in use by another registered origin or cache namespace", data.SiteName)}
+		}
+	}
+
 	inTopo, topoNss, valErr, sysErr := validateKeyChaining(data.Prefix, key)
 	if valErr != nil {
 		log.Errorln(err)
