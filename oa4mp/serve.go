@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"text/template"
@@ -68,10 +69,11 @@ type (
 	}
 
 	authzTemplate struct {
-		Actions []string `mapstructure:"actions"`
-		Prefix  string   `mapstructure:"prefix"`
-		Users   []string `mapstructure:"users"`
-		Groups  []string `mapstructure:"groups"`
+		Actions      []string `mapstructure:"actions"`
+		Prefix       string   `mapstructure:"prefix"`
+		Users        []string `mapstructure:"users"`
+		Groups       []string `mapstructure:"groups"`
+		GroupRegexes []string `mapstructure:"group_regexes"`
 	}
 )
 
@@ -88,6 +90,44 @@ var (
 	//go:embed resources/id_token_policies.qdl
 	idTokenPoliciesQdlTmpl string
 )
+
+type compiledAuthz struct {
+	Actions       []string
+	Prefix        string
+	UserSet       map[string]struct{}
+	GroupLiterals map[string]struct{}
+	GroupRegexes  []*regexp.Regexp
+}
+
+var compiledAuthzRules []*compiledAuthz
+
+func compileAuthzRules(raw authzTemplate) (*compiledAuthz, error) {
+	compiled := &compiledAuthz{
+		Actions:       raw.Actions,
+		Prefix:        raw.Prefix,
+		UserSet:       make(map[string]struct{}),
+		GroupLiterals: make(map[string]struct{}),
+		GroupRegexes:  make([]*regexp.Regexp, len(raw.GroupRegexes)),
+	}
+
+	for _, user := range raw.Users {
+		compiled.UserSet[user] = struct{}{}
+	}
+
+	for _, group := range raw.Groups {
+		compiled.GroupLiterals[group] = struct{}{}
+	}
+
+	for _, rgx := range raw.GroupRegexes {
+		rx, err := regexp.Compile(rgx)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to compile group regex: %s", rgx)
+		}
+		compiled.GroupRegexes = append(compiled.GroupRegexes, rx)
+	}
+
+	return compiled, nil
+}
 
 func writeOA4MPFile(fname string, data []byte, perm os.FileMode) error {
 	user, err := config.GetOA4MPUser()
@@ -204,6 +244,17 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 		err = errors.Wrap(err, "Failed to parse the Issuer.AuthorizationTemplates config")
 		return
 	}
+
+	compiledAuthzRules = nil
+	for _, authz := range authzTemplates {
+		compiled, cErr := compileAuthzRules(authz)
+		if cErr != nil {
+			err = errors.Wrapf(cErr, "failed to compile authorization template: %v", authz)
+			return
+		}
+		compiledAuthzRules = append(compiledAuthzRules, compiled)
+	}
+
 	groupAuthzTemplates := []authzTemplate{}
 	userAuthzTemplates := []authzTemplate{}
 	for _, authz := range authzTemplates {

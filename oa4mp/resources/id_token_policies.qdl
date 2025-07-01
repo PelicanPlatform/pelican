@@ -25,6 +25,7 @@ if [exec_phase == 'pre_auth'] [
      userInfo. := from_json(decode(claims.sub));
      claims.sub := userInfo.u;
      claims.groups := userInfo.g;
+     claims.scopes := userInfo.s;
      say('Got user name from pelican: ' + claims.sub);
 ];
 

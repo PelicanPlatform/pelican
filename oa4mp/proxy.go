@@ -65,6 +65,50 @@ func getTransport() *http.Transport {
 	return transport
 }
 
+func calculateAllowedScopes(user string, groupsList []string) []string {
+	if len(compiledAuthzRules) == 0 {
+		return nil
+	}
+
+	scopeSet := make(map[string]struct{})
+	for _, rule := range compiledAuthzRules {
+		if len(rule.UserSet) > 0 {
+			if _, ok := rule.UserSet[user]; !ok {
+				continue
+			}
+		}
+
+		for _, group := range groupsList {
+			_, literalMatch := rule.GroupLiterals[group]
+			regexMatch := false
+			for _, rgx := range rule.GroupRegexes {
+				if rgx.MatchString(group) {
+					regexMatch = true
+					break
+				}
+			}
+
+			if !literalMatch && !regexMatch {
+				continue
+			}
+
+			for _, action := range rule.Actions {
+				s := strings.ReplaceAll(rule.Prefix+action, "$GROUP", group)
+				s = strings.ReplaceAll(s, "$USER", user)
+				scopeSet[s] = struct{}{}
+			}
+		}
+
+	}
+
+	allowedScopes := make([]string, 0, len(scopeSet))
+	for scope := range scopeSet {
+		allowedScopes = append(allowedScopes, scope)
+	}
+
+	return allowedScopes
+}
+
 // Proxy a HTTP request from the Pelican server to the OA4MP server
 //
 // Maps a request to /api/v1.0/issuer/foo to /scitokens-server/foo.  Most
@@ -102,6 +146,12 @@ func oa4mpProxy(ctx *gin.Context) {
 		userInfo := make(map[string]interface{})
 		userInfo["u"] = user
 		userInfo["g"] = groupsList
+
+		allowedScopes := calculateAllowedScopes(user, groupsList)
+		if len(allowedScopes) > 0 {
+			userInfo["s"] = allowedScopes
+		}
+
 		userBytes, err := json.Marshal(userInfo)
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
