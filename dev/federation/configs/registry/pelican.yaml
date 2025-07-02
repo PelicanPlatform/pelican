@@ -1,0 +1,12 @@
+TLSSkipVerify: true
+Federation:
+  DiscoveryUrl: "https://localhost:80"
+Registry:
+  DBLocation: /etc/pelican
+  InstitutionsUrl: "https://topology-institutions.osg-htc.org/api/institution_ids"
+OIDC:
+  ClientIDFile: /etc/pelican/oidc/oidc-client-id
+  ClientSecretFile: /etc/pelican/oidc/oidc-client-secret
+Server:
+  HostName: "localhost"
+  WebPort: 8300
