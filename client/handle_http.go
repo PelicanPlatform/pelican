@@ -158,27 +158,28 @@ type (
 	// Represents the results of a single object transfer,
 	// potentially across multiple attempts / retries.
 	TransferResults struct {
-		jobId             uuid.UUID // The job ID this result corresponds to
+		JobId             uuid.UUID `json:"jobId"` // The job ID this result corresponds to
 		job               *TransferJob
-		Error             error
-		TransferredBytes  int64
-		ServerChecksums   []ChecksumInfo // Checksums returned by the server
-		ClientChecksums   []ChecksumInfo // Checksums calculated by the client
-		TransferStartTime time.Time
-		Scheme            string
-		Attempts          []TransferResult
+		Error             error            `json:"error"`
+		TransferredBytes  int64            `json:"transferredBytes"`
+		ServerChecksums   []ChecksumInfo   `json:"serverChecksums"` // Checksums returned by the server
+		ClientChecksums   []ChecksumInfo   `json:"clientChecksums"` // Checksums calculated by the client
+		TransferStartTime time.Time        `json:"transferStartTime"`
+		Scheme            string           `json:"scheme"`
+		Source            string           `json:"source"`
+		Attempts          []TransferResult `json:"attempts"`
 	}
 
 	TransferResult struct {
-		Number            int           // indicates which attempt this is
-		TransferFileBytes int64         // how much each attempt downloaded
-		TimeToFirstByte   time.Duration // how long it took to download the first byte
-		TransferEndTime   time.Time     // when the transfer ends
-		TransferTime      time.Duration // amount of time we were transferring per attempt (in seconds)
-		CacheAge          time.Duration // age of the data reported by the cache
-		Endpoint          string        // which origin did it use
-		ServerVersion     string        // version of the server
-		Error             error         // what error the attempt returned (if any)
+		Number            int           `json:"attemptNumber"`     // indicates which attempt this is
+		TransferFileBytes int64         `json:"transferFileBytes"` // how much each attempt downloaded
+		TimeToFirstByte   time.Duration `json:"timeToFirstByte"`   // how long it took to download the first byte
+		TransferEndTime   time.Time     `json:"transferEndTime"`   // when the transfer ends
+		TransferTime      time.Duration `json:"transferTime"`      // amount of time we were transferring per attempt (in seconds)
+		CacheAge          time.Duration `json:"cacheAge"`          // age of the data reported by the cache
+		Endpoint          string        `json:"endpoint"`          // which origin did it use
+		ServerVersion     string        `json:"serverVersion"`     // version of the server
+		Error             error         `json:"error"`             // what error the attempt returned (if any)
 	}
 
 	clientTransferResults struct {
@@ -745,13 +746,14 @@ func newTransferAttemptError(service string, proxy string, isProxyErr bool, isUp
 func newTransferResults(job *TransferJob) TransferResults {
 	return TransferResults{
 		job:      job,
-		jobId:    job.uuid,
+		JobId:    job.uuid,
 		Attempts: make([]TransferResult, 0),
+		Source:   job.remoteURL.String(),
 	}
 }
 
 func (tr TransferResults) ID() string {
-	return tr.jobId.String()
+	return tr.JobId.String()
 }
 
 // Returns a new transfer engine object whose lifetime is tied
@@ -1843,7 +1845,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				results <- &clientTransferResults{
 					id: file.uuid,
 					results: TransferResults{
-						jobId: file.jobId,
+						JobId: file.jobId,
 						Error: file.file.ctx.Err(),
 					},
 				}
@@ -1853,7 +1855,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				results <- &clientTransferResults{
 					id: file.uuid,
 					results: TransferResults{
-						jobId: file.jobId,
+						JobId: file.jobId,
 						Error: file.file.err,
 					},
 				}
@@ -1866,7 +1868,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			} else {
 				transferResults, err = downloadObject(file.file)
 			}
-			transferResults.jobId = file.jobId
+			transferResults.JobId = file.jobId
 			transferResults.Scheme = file.file.remoteURL.Scheme
 			if err != nil {
 				log.Errorf("Error when attempting to transfer object %s for client %s: %v", file.file.remoteURL, file.uuid.String(), err)
