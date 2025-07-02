@@ -315,7 +315,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 
 	// Check if SiteName already exists for origin and cache namespaces
 	if server_structs.IsOriginNS(data.Prefix) || server_structs.IsCacheNS(data.Prefix) {
-		countOfSitename, err := serverSiteNameExists(data.SiteName, data.Prefix)
+		countOfSitename, err := serverSiteNameExists(data.SiteName)
 		if err != nil {
 			log.Errorf("Failed to check if SiteName already exists: %v", err)
 			return false, nil, errors.Wrap(err, "Server encountered an error checking if SiteName already exists")

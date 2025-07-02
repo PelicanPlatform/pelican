@@ -1025,7 +1025,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 
 		mockNs := server_structs.Namespace{
-			Prefix: "/origins/new.example.com",
+			Prefix: "/caches/new.example.com",
 			Pubkey: newPubKeyStr,
 			AdminMetadata: server_structs.AdminMetadata{
 				Institution: "1000",
@@ -1587,7 +1587,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 			},
 		}
 		existingNs2 := server_structs.Namespace{
-			Prefix: "/origins/test-update2.example.com",
+			Prefix: "/caches/test-update2.example.com",
 			Pubkey: pubKeyStr2,
 			AdminMetadata: server_structs.AdminMetadata{
 				Institution: "1000",

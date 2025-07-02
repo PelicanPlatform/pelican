@@ -453,8 +453,8 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			return
 		}
 
-		// Ensure the requested SiteName is unique for this server type (origin or cache)
-		countOfSitename, err := serverSiteNameExists(ns.AdminMetadata.SiteName, ns.Prefix)
+		// Ensure the requested SiteName is unique across all servers
+		countOfSitename, err := serverSiteNameExists(ns.AdminMetadata.SiteName)
 		if err != nil {
 			log.Errorf("Failed to check if Sitename already exists: %v", err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{

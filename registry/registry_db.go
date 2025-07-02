@@ -639,29 +639,19 @@ func ShutdownRegistryDB() error {
 	return server_utils.ShutdownDB(db)
 }
 
-// Check if a server's sitename has already been taken by any same-type server in Registry.
-// Returns the number of Origin or Cache servers that has the same sitename, or -1 if an error occurs
-func serverSiteNameExists(siteName, prefix string) (int64, error) {
+// Check if a server's sitename has already been taken by any server in Registry.
+// Returns the number of Origin AND Cache servers that has the same sitename, or -1 if an error occurs
+func serverSiteNameExists(siteName string) (int64, error) {
 	if siteName == "" {
 		return -1, errors.New("sitename must not be empty")
-	}
-
-	// The server type is inferred from prefix:
-	// - prefixes starting with "/origins/" are treated as origins;
-	// - all others as caches ("/caches/").
-	var serverTypePrefix string
-	isOrigin := strings.HasPrefix(prefix, server_structs.OriginPrefix.String())
-	if isOrigin {
-		serverTypePrefix = server_structs.OriginPrefix.String()
-	} else {
-		serverTypePrefix = server_structs.CachePrefix.String()
 	}
 
 	var count int64
 	err := db.Model(&server_structs.Namespace{}).
 		Where("JSON_EXTRACT(admin_metadata, '$.site_name') = ?", siteName).
-		Where("prefix LIKE ?", serverTypePrefix+"%"). // GORM injects literal single-quotes around the ? in the query string
+		Where("prefix LIKE ? OR prefix LIKE ?", server_structs.OriginPrefix.String()+"%", server_structs.CachePrefix.String()+"%").
 		Count(&count).Error
+	// Note: GORM injects literal single-quotes around the ? in the query
 	if err != nil {
 		return -1, err
 	}
