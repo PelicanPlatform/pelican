@@ -2580,6 +2580,17 @@ type: object
 default: []
 components: ["origin"]
 ---
+name: Issuer.RedirectUris
+description: |+
+  The list of redirect URIs for Issuer Clients to use in the Authorization Code Flow. Used to enable the use of a
+  Pelican Web Client at the redirect target. The URIs must use the `https` scheme.
+
+  More information on using the [Pelican Web Client](https://github.com/PelicanPlatform/web-client).
+type: stringSlice
+root_default: []
+default: []
+components: ["origin"]
+---
 ###################################
 #   Server's OIDC Configuration   #
 ###################################

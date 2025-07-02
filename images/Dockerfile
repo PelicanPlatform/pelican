@@ -458,6 +458,7 @@ COPY --chown=root:tomcat oa4mp/resources/server.xml /opt/tomcat/conf/server.xml
 # authenticates the user and proxies requests.
 COPY --chown=tomcat:tomcat oa4mp/resources/client-template.xml /opt/scitokens-server/etc/templates/client-template.xml
 RUN sed -i -e 's/action="\${actionToTake}" //' /opt/tomcat/webapps/scitokens-server/device-consent.jsp
+RUN sed -i -e 's|action="\${actionToTake}"|action="/api/v1.0/issuer/authorize"|' /opt/tomcat/webapps/scitokens-server/authorize-remote-user.jsp
 
 # This script is a documented part of OA4MP's bootstrap process, but we
 # otherwise do not need it.
