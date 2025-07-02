@@ -638,3 +638,22 @@ func PeriodicTopologyReload(ctx context.Context) {
 func ShutdownRegistryDB() error {
 	return server_utils.ShutdownDB(db)
 }
+
+// Check if a server's sitename has already been taken by any server in Registry.
+// Returns the number of Origin AND Cache servers that has the same sitename, or -1 if an error occurs
+func serverSiteNameExists(siteName string) (int64, error) {
+	if siteName == "" {
+		return -1, errors.New("sitename must not be empty")
+	}
+
+	var count int64
+	err := db.Model(&server_structs.Namespace{}).
+		Where("JSON_EXTRACT(admin_metadata, '$.site_name') = ?", siteName).
+		Where("prefix LIKE ? OR prefix LIKE ?", server_structs.OriginPrefix.String()+"%", server_structs.CachePrefix.String()+"%").
+		Count(&count).Error
+	// Note: GORM injects literal single-quotes around the ? in the query
+	if err != nil {
+		return -1, err
+	}
+	return count, nil
+}
