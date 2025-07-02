@@ -329,6 +329,14 @@ func generateLinkHeader(ctx *gin.Context, sAds []server_structs.ServerAd, nsAd s
 	ctx.Writer.Header()["Link"] = []string{linkHeader}
 }
 
+// Generates the CORS headers needed to enable communication with web client
+func corsHeadersMiddleware(ginCtx *gin.Context) {
+	ginCtx.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+	ginCtx.Writer.Header().Set("Access-Control-Allow-Methods", "GET, PUT, OPTIONS")
+	ginCtx.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization") // TODO: , X-Pelican-User, X-Pelican-Timeout, X-Pelican-Token-Generation, X-Pelican-Authorization, X-Pelican-Namespace
+	ginCtx.Writer.Header().Set("Access-Control-Expose-Headers", "Content-Type, Authorization, X-Pelican-User, X-Pelican-Timeout, X-Pelican-Token-Generation, X-Pelican-Authorization, X-Pelican-Namespace")
+}
+
 // Generates the X-Pelican-Authorization header (when applicable) for responses that have
 // issued a request where token generation may be needed. This header informs the client
 // of the issuer that can be used to generate a token for the requested resource.
@@ -599,7 +607,6 @@ func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.Serve
 		return
 	}
 
-	// Generate headers
 	generateLinkHeader(ctx, chosenAds, nsAd)
 	generateXAuthHeader(ctx, nsAd)
 	generateXTokenGenHeader(ctx, nsAd)
@@ -623,6 +630,12 @@ func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.Serve
 			// and continue with the redirect.
 			log.Errorf("Failed to marshal redirect info to JSON: %v", err)
 		}
+	}
+
+	// Check if the request has asked to not be redirected and return directly if so
+	if (reqParams.Has("redirect") && reqParams.Get("redirect") == "false") || ctx.Request.Method == http.MethodOptions {
+		ctx.Status(http.StatusOK)
+		return
 	}
 
 	// Note we only append the `authz` query parameter in the case of the redirect response and not the
@@ -863,6 +876,14 @@ func checkHostnameRedirects(c *gin.Context, incomingHost string) {
 func ShortcutMiddleware(defaultResponse string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		web_ui.ServerHeaderMiddleware(c)
+		corsHeadersMiddleware(c)
+
+		// If this is a OPTIONS request, we should just return OK
+		if c.Request.Method == http.MethodOptions {
+			c.Status(http.StatusOK)
+			c.Abort()
+			return
+		}
 
 		// If this is a request for getting public key, don't modify the path
 		// If this is a request to the Prometheus API, don't modify the path
@@ -1645,16 +1666,27 @@ func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 	egrp := ctx.Value(config.EgrpKey).(*errgroup.Group)
 
+	// Print out a log statement so we know what version is running
+	log.Debugf("Starting Pelican Director API v%s", "s")
+	gin.SetMode(gin.DebugMode)
+
 	directorAPIV1 := router.Group("/api/v1.0/director", web_ui.ServerHeaderMiddleware)
 	{
+		// Answer CORS preflight requests, trivial response inlined
+		directorAPIV1.OPTIONS("/*any", corsHeadersMiddleware, func(ctx *gin.Context) {
+			ctx.String(http.StatusOK, "")
+		})
+
 		// Establish the routes used for cache/origin redirection
-		directorAPIV1.GET("/object/*any", redirectToCache)
-		directorAPIV1.HEAD("/object/*any", redirectToCache)
-		directorAPIV1.GET("/origin/*any", redirectToOrigin)
-		directorAPIV1.HEAD("/origin/*any", redirectToOrigin)
-		directorAPIV1.PUT("/origin/*any", redirectToOrigin)
-		directorAPIV1.DELETE("/origin/*any", redirectToOrigin)
-		directorAPIV1.Handle("PROPFIND", "/origin/*any", redirectToOrigin)
+		directorAPIV1.GET("/object/*any", corsHeadersMiddleware, redirectToCache)
+		directorAPIV1.HEAD("/object/*any", corsHeadersMiddleware, redirectToCache)
+		directorAPIV1.GET("/origin/*any", corsHeadersMiddleware, redirectToOrigin)
+		directorAPIV1.HEAD("/origin/*any", corsHeadersMiddleware, redirectToOrigin)
+		directorAPIV1.PUT("/origin/*any", corsHeadersMiddleware, redirectToOrigin)
+		directorAPIV1.DELETE("/origin/*any", corsHeadersMiddleware, redirectToOrigin)
+		directorAPIV1.Handle("PROPFIND", "/origin/*any", corsHeadersMiddleware, redirectToOrigin)
+
+		// Other API endpoints
 		directorAPIV1.GET("/directors", listDirectors)
 		directorAPIV1.POST("/registerDirector", serverAdMetricMiddleware, func(gctx *gin.Context) { registerDirectorAd(ctx, egrp, gctx) })
 		directorAPIV1.POST("/registerOrigin", serverAdMetricMiddleware, func(gctx *gin.Context) { registerServerAd(ctx, gctx, server_structs.OriginType) })

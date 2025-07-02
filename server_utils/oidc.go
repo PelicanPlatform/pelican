@@ -116,9 +116,11 @@ func createOidcConfigExporter(isDirector bool) func(ctx *gin.Context) {
 			cfg.TokenAuthMethods = []string{"client_secret_basic", "client_secret_post"}
 			cfg.RegistrationEndpoint = serviceUri + "/oidc-cm"
 			cfg.DeviceEndpoint = serviceUri + "/device_authorization"
+			cfg.AuthorizationEndpoint = serviceUri + "/authorize"
 		}
 
 		ctx.Header("Content-Disposition", "attachment; filename=pelican-oidc-configuration.json")
+		ctx.Header("Access-Control-Allow-Origin", "*")
 
 		ctx.JSON(http.StatusOK, cfg)
 	}

@@ -19,12 +19,14 @@
 package oa4mp
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -73,7 +75,7 @@ func oa4mpProxy(ctx *gin.Context) {
 	var userEncoded string
 	var user string
 	var groupsList []string
-	if ctx.Request.URL.Path == "/api/v1.0/issuer/device" {
+	if ctx.Request.URL.Path == "/api/v1.0/issuer/device" || ctx.Request.URL.Path == "/api/v1.0/issuer/authorize" {
 		web_ui.RequireAuthMiddleware(ctx)
 		if ctx.IsAborted() {
 			return
@@ -146,13 +148,96 @@ func oa4mpProxy(ctx *gin.Context) {
 	}
 }
 
+// CORs middleware to allow cross-origin requests to the OA4MP proxy
+// Echos the origin header back as the Access-Control-Allow-Origin header if present in Issuer.RedirectUris
+func addCORSHeadersMiddleware(ctx *gin.Context) {
+
+	// Convert Issuer.RedirectUris into a map of hostnames
+	allowedHostsMap := make(map[string]bool)
+	for _, uri := range param.Issuer_RedirectUris.GetStringSlice() {
+		parsedUrl, err := url.Parse(uri)
+		if err != nil {
+			log.Printf("Failed to parse URI %s: %v", uri, err)
+			continue
+		}
+		allowedHostsMap[parsedUrl.Scheme+"://"+parsedUrl.Host] = true
+	}
+
+	// Check if the request's host exists in the map
+	host := ctx.Request.Header.Get("Origin")
+	if allowedHostsMap[host] {
+		ctx.Header("Access-Control-Allow-Origin", host)
+	} else {
+		ctx.Header("Access-Control-Allow-Origin", "")
+	}
+
+	// Print out a debug log of all the relevant values to help me see what state is present here
+	log.Debugf("CORS middleware: Issuer.RedirectUris: %v", param.Issuer_RedirectUris.GetStringSlice())
+	log.Debugf("CORS middleware: Allowed hosts map: %v", allowedHostsMap)
+	log.Debugf("CORS middleware: Request Origin: %s", host)
+
+	ctx.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	ctx.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization")
+}
+
+// Middleware to reject requests with unregistered CORS origins
+func rejectUnregisteredRedirects(ctx *gin.Context) {
+
+	// If this request is not to register a dynamic client skip the check ( POST to /oidc-cm )
+	if !(strings.HasSuffix(ctx.Request.URL.Path, "oidc-cm") && ctx.Request.Method == http.MethodPost) {
+		ctx.Next()
+		return
+	}
+
+	// Parse the JSON body
+	bodyBytes, err := io.ReadAll(ctx.Request.Body)
+	if err != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Failed to read request body"})
+		return
+	}
+
+	// Restore the body for subsequent handlers
+	ctx.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+	var requestBody struct {
+		RedirectUris []string `json:"redirect_uris"`
+	}
+	if err := json.Unmarshal(bodyBytes, &requestBody); err != nil {
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid JSON body",
+		})
+		return
+	}
+
+	// Convert Issuer.RedirectUris into a map for quick lookup
+	allowedUris := make(map[string]bool)
+	for _, uri := range param.Issuer_RedirectUris.GetStringSlice() {
+		allowedUris[uri] = true
+	}
+
+	// Check if any redirect_uri is not in the allowed list
+	for _, uri := range requestBody.RedirectUris {
+		if !allowedUris[uri] {
+			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "Unregistered redirect_uri, make sure you have registered this uri in your Origins configuration under Issuer.RedirectUris: " + uri,
+			})
+			return
+		}
+	}
+
+	// If all redirect_uris are valid, proceed to the next handler
+	ctx.Next()
+}
 func ConfigureOA4MPProxy(router *gin.Engine) error {
 	if router == nil {
 		return errors.New("Origin configuration passed a nil pointer")
 	}
 
+	// Add a middleware to handle CORS headers
+	router.Use(addCORSHeadersMiddleware)
+
 	router.Any("/api/v1.0/issuer", oa4mpProxy)
-	router.Any("/api/v1.0/issuer/*path", oa4mpProxy)
+	router.Any("/api/v1.0/issuer/*path", rejectUnregisteredRedirects, oa4mpProxy)
 
 	return nil
 }
