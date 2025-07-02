@@ -2877,6 +2877,20 @@ type: duration
 default: 1m
 components: ["origin", "cache"]
 ---
+name: Xrootd.EvictionMonitoringInterval
+description: |+
+  The interval of which the eviction monitoring will be reported. Valid values are 60, 300, 600, 900, 1800, 3600.
+type: int
+default: 60
+components: ["cache"]
+---
+name: Xrootd.EvictionMonitoringMaxDepth
+description: |+
+  The maximum depth of the eviction monitoring. Where depth 0 is root only.
+type: int
+default: 3
+components: ["cache"]
+---
 ############################
 # Monitoring-level configs #
 ############################
