@@ -2888,7 +2888,7 @@ name: Xrootd.EvictionMonitoringMaxDepth
 description: |+
   The maximum depth of the eviction monitoring. Where depth 0 is root only.
 type: int
-default: 3
+default: 1
 components: ["cache"]
 ---
 ############################
