@@ -52,6 +52,7 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
+	"github.com/pelicanplatform/pelican/utils"
 )
 
 // GetTopologyJSON returns the namespaces and caches from OSDF topology
@@ -125,14 +126,15 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 	)
 
 	// Helper function to handle request logic.
-	// I'm slightly abusing the error return to get a ternary success/fail/retry indicator:
-	// - if it returns io.EOF, it means the request was successful and the server is functioning as expected
-	// - if it returns an error, it means the request failed or the server returned an unexpected status code
-	// - if it returns nil, it means the request failed but we are allowed to retry (e.g., statusMismatch is true)
-	doRequest := func() error {
+	// Has three return cases:
+	// - Tern_True: the probe was successful and the calling function can safely return nil
+	// - Tern_Unknown: the probe failed, but there is not yet an error to report because we'll keep trying
+	// - Tern_False: the probe failed and we've decided not to continue trying. This indicates a startup failure
+	// An error should only be returned alongside Tern_False.
+	doRequest := func() (utils.Ternary, error) {
 		req, err := http.NewRequestWithContext(ctx, method, reqUrl, nil)
 		if err != nil {
-			return err
+			return utils.Tern_False, err
 		}
 		client := http.Client{
 			Transport: config.GetTransport(),
@@ -152,14 +154,13 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 				log.Infof("Failed to send request to %s at %s; likely server is not up (will retry in 50ms): %v", server, reqUrl, err)
 				loggedConn = true
 			}
-			return nil
+			return utils.Tern_Unknown, nil
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode == expectedStatus {
 			log.Debugf("%s server appears to be functioning at %s", server, reqUrl)
-			// Using io.EOF as a sentinel value to indicate the probe succeeded
-			return io.EOF
+			return utils.Tern_True, nil
 		}
 
 		body, readErr := io.ReadAll(resp.Body)
@@ -178,21 +179,30 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 				log.Info(statusErr, "Will retry until timeout")
 				loggedStatus = true
 			}
-			return nil
+			return utils.Tern_Unknown, nil
 		}
-		return statusErr // fail immediately if status code mismatch is not permitted
+		return utils.Tern_False, statusErr // fail immediately if status code mismatch is not permitted
 	}
 
 	// Main work loop to fire the test against the url
 	for {
 		select {
 		case <-ticker.C:
-			err := doRequest()
-			if err == io.EOF {
-				return nil // success
-			}
-			if err != nil {
-				return err // fail on immediate error (e.g., statusMismatch==false)
+			result, err := doRequest()
+			switch result {
+			case utils.Tern_True:
+				return nil
+			case utils.Tern_Unknown:
+				// continue retrying until success or timeout
+				continue
+			case utils.Tern_False:
+				if err != nil {
+					return err // unrecoverable error, or we got a bad status code and statusMismatch is false
+				} else {
+					// We shouldn't get here because `doRequest` isn't setup to return a false with no
+					// error, but just in case...
+					return errors.New("unexpected result while testing server startup -- no error was provided, but the result was not a success")
+				}
 			}
 		case <-ctx.Done():
 			// Outside of context errors, there are two main classifications of errors we might see:
