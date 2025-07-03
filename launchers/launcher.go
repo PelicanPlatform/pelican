@@ -189,7 +189,8 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	healthCheckUrl := param.Server_ExternalWebUrl.GetString() + "/api/v1.0/health"
 	if err = server_utils.WaitUntilWorking(ctx, "GET", healthCheckUrl, "Web UI", http.StatusOK, true); err != nil {
-		log.Errorln("Web engine check failed: ", err)
+		log.Errorf("The server was unable to unable to ping its health test endpoint at the configured %s during startup: %v",
+			param.Server_ExternalWebUrl.GetName(), err)
 		return
 	}
 
