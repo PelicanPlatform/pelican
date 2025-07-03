@@ -89,6 +89,10 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	// Register OIDC endpoint
 	if param.Server_EnableUI.GetBool() {
+		// Warn if Prometheus is disabled, but Web UI is enabled. Metrics via Web UI will not be available.
+		if !param.Monitoring_EnablePrometheus.GetBool() {
+			log.Warn("Prometheus is disabled, but Web UI is enabled. Metrics via Web UI will not be available.")
+		}
 		if modules.IsEnabled(server_structs.RegistryType) ||
 			(modules.IsEnabled(server_structs.OriginType) && param.Origin_EnableOIDC.GetBool()) ||
 			(modules.IsEnabled(server_structs.CacheType) && param.Cache_EnableOIDC.GetBool()) ||
@@ -370,7 +374,7 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	}
 
-	if param.Server_EnableUI.GetBool() {
+	if param.Monitoring_EnablePrometheus.GetBool() {
 		metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusWarning, "Prometheus not started")
 		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
 			err = errors.Wrap(err, "Failed to configure embedded prometheus instance")

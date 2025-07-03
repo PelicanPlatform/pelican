@@ -534,6 +534,10 @@ func SetFedTok(ctx context.Context, server server_structs.XRootDServer, tok stri
 // that gets reported to the Director, which can help inform the Director whether it needs to
 // cool down redirects to the server.
 func LaunchConcurrencyMonitoring(ctx context.Context, egrp *errgroup.Group, sType server_structs.ServerType) {
+	if !param.Monitoring_EnablePrometheus.GetBool() {
+		log.Infoln("Prometheus is not enabled, skipping IO concurrency monitoring")
+		return
+	}
 
 	doLoadMonitoring := func(ctx context.Context) error {
 		var concLimit int
