@@ -558,4 +558,19 @@ func TestTokenIsAcceptableForSciTokens(t *testing.T) {
 	// 3b) Negative case: resource "/other/bar" lies outside the declared namespace
 	accepted = tokenIsAcceptable(sciTok, "/other/bar", dirResp, opts)
 	assert.False(t, accepted, "expected SciToken for /other/bar to be rejected")
+
+	// 3c) Test with TokenDelete operation and storage.modify scope
+	opts.Operation = config.TokenDelete
+	// Create a new token config to ensure we don't have the "storage.read" scope from the previous test
+	tc, err = token.NewTokenConfig(token.Scitokens2Profile{})
+	require.NoError(t, err)
+	tc.Lifetime = time.Hour
+	tc.Issuer = "https://issuer.example"
+	tc.AddAudienceAny()
+	tc.AddResourceScopes(token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, "/bar"))
+	sciTokBytes, err = tc.CreateTokenWithKey(jwkKey)
+	require.NoError(t, err)
+	sciTok = string(sciTokBytes)
+	accepted = tokenIsAcceptable(sciTok, "/foo/bar/baz", dirResp, opts)
+	assert.True(t, accepted, "expected SciToken with storage.modify scope to be acceptable for TokenDelete operation")
 }
