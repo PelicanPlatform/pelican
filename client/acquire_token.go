@@ -529,7 +529,6 @@ func registerClient(dirResp server_structs.DirectorResponse) (*config.PrefixEntr
 	}
 
 	drcp := oauth2.DCRPConfig{ClientRegistrationEndpointURL: issuer.RegistrationURL, Transport: config.GetTransport(), Metadata: oauth2.Metadata{
-		RedirectURIs:            []string{"https://localhost/osdf-client"},
 		TokenEndpointAuthMethod: "client_secret_basic",
 		GrantTypes:              []string{"refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 		ResponseTypes:           []string{"code"},

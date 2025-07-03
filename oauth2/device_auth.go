@@ -61,6 +61,7 @@ import (
 
 const (
 	errAuthorizationPending = "authorization_pending"
+	errConsentRequired      = "consent_required"
 	errSlowDown             = "slow_down"
 	errAccessDenied         = "access_denied"
 	errExpiredToken         = "expired_token"
@@ -323,6 +324,8 @@ func (c *Config) Poll(ctx context.Context, da *DeviceAuth) (*oauth2_upstream.Tok
 			log.Debugf("Remote server requested we slow down; set poll interval to %v seconds", interval)
 		case errAuthorizationPending:
 			log.Debugf("Remote server responded that our authorization is pending")
+		case errConsentRequired:
+			log.Debugf("Remote server responded that the user's consent is required")
 
 		default:
 			return tok, err

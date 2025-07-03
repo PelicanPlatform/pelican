@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">
+<!--
+    Template for clients. This should be referenced in the server
+    configuration so that any client created in the client management API
+    is auto approved and starts with the properties here.
+-->
+<properties>
+<comment>OA4MP stream store</comment>
+<entry key="at_lifetime">-1</entry>
+<entry key="public_key">4b289478ab9e80f43a837620fd09e3484b10bb77</entry>
+<entry key="last_modified_ts">2025-06-25T23:38:36.254Z</entry>
+<entry key="rt_lifetime">1209600000</entry>
+<entry key="cfg">
+{
+  "tokens": {
+    "access": {
+      "audience": "ANY",
+      "type": "sci_token",
+      "qdl": {
+        "load": "vfs#/scripts/scitokens/policies.qdl",
+        "xmd": {
+          "exec_phase": [
+            "post_token",
+            "post_refresh",
+            "post_exchange"
+          ]
+        }
+      }
+    },
+    "identity": {
+      "type": "identity",
+      "qdl": {
+        "load": "vfs#/scripts/scitokens/id_token_policies.qdl",
+        "xmd": {
+          "exec_phase": [
+            "pre_auth",
+            "post_token",
+            "post_refresh",
+            "post_exchange"
+          ]
+        }
+      }
+    }
+  }
+}
+</entry>
+<entry key="proxy_limited">false</entry>
+<entry key="home_url">https://localhost:9443/client2</entry>
+<entry key="sign_tokens">true</entry>
+<entry key="debug_on">false</entry>
+<entry key="client_id">localhost:template</entry>
+<entry key="strict_scopes">false</entry>
+<entry key="public_client">false</entry>
+<entry key="forward_scopes_to_proxy">false</entry>
+<entry key="callback_uri">["https://localhost:9443/client2/ready"]</entry>
+<entry key="name">SciToken client template</entry>
+<entry key="creation_ts">2022-01-19T19:55:55.172Z</entry>
+<entry key="df_lifetime">-1</entry>
+<entry key="scopes">["openid", "wlcg"]</entry>
+<entry key="email">gaynor@illinois.edu</entry>
+<entry key="df_interval">-1</entry>
+</properties>
