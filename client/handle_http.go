@@ -123,7 +123,15 @@ type (
 
 	HeaderTimeoutError struct{}
 
+	InvalidByteInChunkLengthError struct {
+		Err error
+	}
+
 	NetworkResetError struct{}
+
+	UnexpectedEOFError struct {
+		Err error
+	}
 
 	allocateMemoryError struct {
 		Err error
@@ -587,6 +595,32 @@ func (e *dirListingNotSupportedError) Unwrap() error {
 
 func (e *dirListingNotSupportedError) Is(target error) bool {
 	_, ok := target.(*dirListingNotSupportedError)
+	return ok
+}
+
+func (e *InvalidByteInChunkLengthError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *InvalidByteInChunkLengthError) Unwrap() error {
+	return e.Err
+}
+
+func (e *InvalidByteInChunkLengthError) Is(target error) bool {
+	_, ok := target.(*InvalidByteInChunkLengthError)
+	return ok
+}
+
+func (e *UnexpectedEOFError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *UnexpectedEOFError) Unwrap() error {
+	return e.Err
+}
+
+func (e *UnexpectedEOFError) Is(target error) bool {
+	_, ok := target.(*UnexpectedEOFError)
 	return ok
 }
 
@@ -2850,6 +2884,10 @@ Loop:
 			err = &ConnectionSetupError{URL: req.URL.String()}
 			return
 		}
+		// Add a check for InvalidByteInChunkLengthError
+		if strings.Contains(err.Error(), "invalid byte in chunk length") {
+			err = &InvalidByteInChunkLengthError{Err: err}
+		}
 		log.WithFields(fields).Debugln("Got error from HTTP download", err)
 		return
 	} else {
@@ -2861,6 +2899,9 @@ Loop:
 				log.WithFields(fields).Debugln("Got error from file transfer:", statusText)
 				statusText = strings.Replace(statusText, "sTREAM ioctl timeout", "cache timed out waiting on origin", 1)
 				err = errors.New("download error after server response started: " + statusText)
+				if strings.Contains(statusText, "unexpected EOF") {
+					err = &UnexpectedEOFError{Err: err}
+				}
 				return
 			}
 		}
@@ -3226,6 +3267,10 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			log.Errorln("Error with PUT:", err)
+			// Wrap TLS errors in a ConnectionSetupError
+			if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "tls") {
+				err = &ConnectionSetupError{URL: request.URL.String(), Err: err}
+			}
 		}
 		errorChan <- err
 		close(errorChan)

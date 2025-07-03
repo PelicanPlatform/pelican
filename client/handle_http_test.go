@@ -23,8 +23,14 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
 	"io/fs"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1307,5 +1313,178 @@ func TestListHttp(t *testing.T) {
 				assert.NoError(t, err)
 			}
 		})
+	}
+}
+
+func TestInvalidByteInChunkLength(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Create a test server that sends an invalid chunk length
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("server does not support hijacking")
+		}
+		conn, bufrw, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack failed: %v", err)
+		}
+		defer conn.Close()
+
+		// Write a properly formatted HTTP response with an invalid chunk length
+		if _, err := bufrw.WriteString("HTTP/1.1 200 OK\r\n"); err != nil {
+			t.Fatalf("failed to write status line: %v", err)
+		}
+		if _, err := bufrw.WriteString("Content-Type: text/plain\r\n"); err != nil {
+			t.Fatalf("failed to write content-type: %v", err)
+		}
+		if _, err := bufrw.WriteString("Transfer-Encoding: chunked\r\n"); err != nil {
+			t.Fatalf("failed to write transfer-encoding: %v", err)
+		}
+		if _, err := bufrw.WriteString("Connection: close\r\n"); err != nil {
+			t.Fatalf("failed to write connection: %v", err)
+		}
+		if _, err := bufrw.WriteString("\r\n"); err != nil {
+			t.Fatalf("failed to write header separator: %v", err)
+		}
+		if _, err := bufrw.WriteString("1g\r\n"); err != nil { // Invalid chunk length
+			t.Fatalf("failed to write chunk length: %v", err)
+		}
+		if _, err := bufrw.WriteString("data\r\n"); err != nil {
+			t.Fatalf("failed to write chunk data: %v", err)
+		}
+		if _, err := bufrw.WriteString("0\r\n\r\n"); err != nil {
+			t.Fatalf("failed to write chunk terminator: %v", err)
+		}
+		if err := bufrw.Flush(); err != nil {
+			t.Fatalf("failed to flush buffer: %v", err)
+		}
+	}))
+
+	defer svr.CloseClientConnections()
+	defer svr.Close()
+
+	transfers := generateTransferDetails(svr.URL, transferDetailsOptions{false, ""})
+	require.Equal(t, 1, len(transfers))
+
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
+	require.Error(t, err)
+	t.Logf("error: %v", err)
+	assert.True(t, IsRetryable(err), "Invalid chunk length error should be retryable")
+}
+
+func TestUnexpectedEOFInTransferStatus(t *testing.T) {
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Create a test server that sends an EOF error in the X-Transfer-Status trailer
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Trailer", "X-Transfer-Status")
+
+		// Write the body
+		_, err := w.Write([]byte("hello"))
+		require.NoError(t, err)
+
+		// Set the trailer
+		w.Header().Set("X-Transfer-Status", "500: unexpected EOF")
+	}))
+	defer svr.Close()
+
+	transfers := generateTransferDetails(svr.URL, transferDetailsOptions{false, ""})
+	require.Equal(t, 1, len(transfers))
+
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	writer, err := os.OpenFile(fname, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+	require.NoError(t, err)
+	defer writer.Close()
+
+	_, _, _, _, err = downloadHTTP(ctx, nil, nil, transfers[0], fname, writer, 0, -1, "", "")
+	require.Error(t, err)
+	t.Logf("error: %v", err)
+	assert.True(t, IsRetryable(err), "Unexpected EOF error should be retryable")
+}
+
+func TestTLSCertificateError(t *testing.T) {
+	// Generate a self-signed certificate
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			Organization: []string{"Test Org"},
+			CommonName:   "localhost",
+		},
+		DNSNames:  []string{"localhost"},
+		NotBefore: time.Now(),
+		NotAfter:  time.Now().Add(time.Hour),
+		KeyUsage:  x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+		},
+		BasicConstraintsValid: true,
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	require.NoError(t, err)
+
+	svr := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}))
+	svr.TLS = &tls.Config{
+		Certificates: []tls.Certificate{{
+			Certificate: [][]byte{derBytes},
+			PrivateKey:  priv,
+		}},
+	}
+	svr.StartTLS()
+	defer svr.Close()
+
+	// Use the server's URL but with localhost
+	serverURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+	serverURL.Host = "localhost:" + strings.Split(serverURL.Host, ":")[1]
+
+	// Create a test file to upload
+	testData := []byte("test data")
+	fname := filepath.Join(t.TempDir(), "test.txt")
+	err = os.WriteFile(fname, testData, 0o644)
+	require.NoError(t, err)
+
+	// Create the PUT request
+	file, err := os.Open(fname)
+	require.NoError(t, err)
+	defer file.Close()
+
+	request, err := http.NewRequest("PUT", serverURL.String(), file)
+	require.NoError(t, err)
+
+	// Set up channels for response and error handling
+	errorChan := make(chan error, 1)
+	responseChan := make(chan *http.Response, 1)
+
+	// Run the PUT request
+	go runPut(request, responseChan, errorChan, false)
+
+	// Wait for either an error or response
+	select {
+	case err := <-errorChan:
+		require.Error(t, err)
+		t.Logf("error: %v", err)
+		assert.Contains(t, err.Error(), "certificate signed by unknown authority")
+		assert.True(t, IsRetryable(err), "TLS certificate error should be retryable")
+	case response := <-responseChan:
+		t.Fatalf("Expected error but got response: %v", response)
+	case <-time.After(time.Second * 2):
+		t.Fatal("Timeout while waiting for response")
 	}
 }
