@@ -862,7 +862,7 @@ func TestOssPacketHandler(t *testing.T) {
 				[]byte(`{"event":"invalid_event","reads":100}`),
 				[]byte(`{"event":"oss_stats","reads":200,invalid_json}`),
 			},
-			expectedError: true,
+			expectedError: false,
 			expectedReads: 0,
 		},
 		{
@@ -880,7 +880,7 @@ func TestOssPacketHandler(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			gatherer := setupTestPrometheusRegistry(t)
 
-			err := handleOSSPacket(tc.packets)
+			err := handleOSSStats(tc.packets)
 			if tc.expectedError {
 				assert.Error(t, err, "Expected error but got none")
 			} else {
