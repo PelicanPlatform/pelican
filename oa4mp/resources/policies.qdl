@@ -81,7 +81,7 @@ user_scopes. := mask(scopes., -1 < starts_with(scopes., ~default_scopes));
  */
 user_scopes_loose. := mask(~default_scopes, -1 < starts_with(~default_scopes, scopes.));
 
-access_token.'scope' := detokenize(sort(|^user_scopes. \/ |^user_scopes_loose.), ' ', 2);
+access_token.'scope' := detokenize(unique(sort(user_scopes. ~ user_scopes_loose.)), ' ', 2);
 
 /*
  * Pelican generates WLCG-style token scopes,
