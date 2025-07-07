@@ -3107,6 +3107,22 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	xferErrors := NewTransferErrors()
 	transferResult.job = transfer.job
 
+	// Check if the remote object already exists using statHttp
+	if transfer.remoteURL != nil && transfer.job != nil {
+		remoteUrl, dirResp, token := transfer.job.remoteURL, transfer.job.dirResp, transfer.job.token
+		_, statErr := statHttp(remoteUrl, dirResp, token)
+		if statErr == nil {
+			// Object exists, abort upload
+			transferResult.Error = errors.New("remote object already exists, upload aborted")
+			return transferResult, transferResult.Error
+		} else if !strings.Contains(statErr.Error(), "not found") && !strings.Contains(statErr.Error(), "no such object") && !strings.Contains(statErr.Error(), "cannot remove remote path") {
+			// If the error is not a 'not found' error, treat as fatal
+			transferResult.Error = errors.Wrap(statErr, "failed to stat remote object before upload")
+			return transferResult, transferResult.Error
+		}
+		// If not found, proceed with upload
+	}
+
 	var sizer Sizer = &ConstantSizer{size: 0}
 	var uploaded int64 = 0
 	if transfer.callback != nil {
