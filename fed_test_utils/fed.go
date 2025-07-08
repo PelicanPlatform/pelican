@@ -317,17 +317,5 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	ft.Exports, err = server_utils.GetOriginExports()
 	require.NoError(t, err)
 
-	// Explicitly run tmpPath cleanup AFTER cancel and egrp are done -- otherwise we end up
-	// with a race condition where removing tmpPath might happen while the server is still
-	// using it, resulting in "error: unlinkat <tmpPath>: directory not empty"
-	t.Cleanup(func() {
-		cancel()
-		if err := egrp.Wait(); err != nil && err != context.Canceled && err != http.ErrServerClosed {
-			require.NoError(t, err)
-		}
-		err := os.RemoveAll(tmpPath)
-		require.NoError(t, err)
-	})
-
 	return
 }
