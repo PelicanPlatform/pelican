@@ -3069,6 +3069,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 			hashes = append(hashes, sha1.New())
 		}
 	}
+	// If no checksums are requested, use crc32c by default
 	if len(hashes) == 0 {
 		hashes = append(hashes, crc32.New(crc32cTable))
 	}
@@ -3280,7 +3281,7 @@ Loop:
 			transferResult.ServerChecksums = result
 		}
 
-		checksumHashes := transfer.requestedChecksums
+		checksumHashes := transfer.job.requestedChecksums
 		if len(checksumHashes) == 0 {
 			checksumHashes = []ChecksumType{AlgDefault}
 		}

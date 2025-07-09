@@ -52,7 +52,7 @@ func init() {
 	flagSet.StringP("token", "t", "", "Token file to use for transfer")
 	flagSet.BoolP("recursive", "r", false, "Recursively upload a collection.  Forces methods to only be http to get the freshest collection contents")
 	flagSet.String("checksum-algorithm", "", "Checksum algorithm to use for upload and validation")
-	flagSet.Bool("require-checksum", false, "Require the server to return a checksum for the uploaded file")
+	flagSet.Bool("require-checksum", false, "Require the server to return a checksum for the uploaded file (uses crc32c algorithm if no specific algorithm is specified)")
 	flagSet.String("checksums", "", "Verify files against a checksums manifest. The format is ALGORITHM:FILENAME")
 	flagSet.String("transfer-stats", "", "File to write transfer stats to")
 	objectCmd.AddCommand(putCmd)

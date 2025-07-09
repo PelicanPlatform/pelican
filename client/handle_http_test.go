@@ -972,8 +972,11 @@ func TestChecksumPut(t *testing.T) {
 		require.NoError(t, err)
 
 		transfer := &transferFile{
-			ctx:       context.Background(),
-			job:       &TransferJob{},
+			ctx: context.Background(),
+			job: &TransferJob{
+				requireChecksum:    true,
+				requestedChecksums: []ChecksumType{AlgCRC32C},
+			},
 			localPath: tempFile,
 			remoteURL: svrURL,
 			attempts: []transferAttemptDetails{
@@ -981,8 +984,6 @@ func TestChecksumPut(t *testing.T) {
 					Url: svrURL,
 				},
 			},
-			requireChecksum:    true,
-			requestedChecksums: []ChecksumType{AlgCRC32C},
 		}
 		transferResult, err := uploadObject(transfer)
 		assert.NoError(t, err)
@@ -1029,8 +1030,11 @@ func TestChecksumPut(t *testing.T) {
 		require.NoError(t, err)
 
 		transfer := &transferFile{
-			ctx:       context.Background(),
-			job:       &TransferJob{},
+			ctx: context.Background(),
+			job: &TransferJob{
+				requireChecksum:    true,
+				requestedChecksums: []ChecksumType{AlgCRC32C},
+			},
 			localPath: tempFile,
 			remoteURL: svrURL,
 			attempts: []transferAttemptDetails{
@@ -1038,8 +1042,6 @@ func TestChecksumPut(t *testing.T) {
 					Url: svrURL,
 				},
 			},
-			requireChecksum:    true,
-			requestedChecksums: []ChecksumType{AlgCRC32C},
 		}
 		transferResult, err := uploadObject(transfer)
 		assert.NoError(t, err)
@@ -1056,6 +1058,187 @@ func TestChecksumPut(t *testing.T) {
 
 		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
 		info = transferResult.ClientChecksums[0]
+		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+	})
+
+	t.Run("test-algorithm-mismatch", func(t *testing.T) {
+		test_utils.InitClient(t, map[string]any{
+			param.Logging_Level.GetName(): "debug",
+			param.TLSSkipVerify.GetName(): true,
+		})
+
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" {
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				assert.Equal(t, "test file content", string(body))
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if r.Method == "HEAD" {
+				w.Header().Set("Content-Length", "17")
+				// Server returns MD5 checksum but client requested CRC32C
+				w.Header().Set("Digest", "md5=5eb63bbbe01eeed093cb22bb8f5acdc3")
+				w.WriteHeader(http.StatusOK)
+			}
+		}))
+		defer svr.Close()
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		tempDir := t.TempDir()
+		tempFile := filepath.Join(tempDir, "testfile.txt")
+		err = os.WriteFile(tempFile, []byte("test file content"), 0644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				requireChecksum:    true,
+				requestedChecksums: []ChecksumType{AlgCRC32C},
+			},
+			localPath: tempFile,
+			remoteURL: svrURL,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+		}
+		transferResult, err := uploadObject(transfer)
+		assert.NoError(t, err)
+		require.Error(t, transferResult.Error)
+		assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error when algorithms don't match")
+
+		// Server provided MD5 checksum but client requested CRC32C
+		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		info := transferResult.ServerChecksums[0]
+		assert.Equal(t, "5eb63bbbe01eeed093cb22bb8f5acdc3", checksumValueToHttpDigest(info.Algorithm, info.Value))
+		assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
+
+		// Client computed CRC32C checksum
+		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		info = transferResult.ClientChecksums[0]
+		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+	})
+
+	t.Run("test-no-error-when-requireChecksum-false", func(t *testing.T) {
+		test_utils.InitClient(t, map[string]any{
+			param.Logging_Level.GetName(): "debug",
+			param.TLSSkipVerify.GetName(): true,
+		})
+
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" {
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				assert.Equal(t, "test file content", string(body))
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if r.Method == "HEAD" {
+				w.Header().Set("Content-Length", "17")
+				// Server returns different algorithm than requested
+				w.Header().Set("Digest", "md5=5eb63bbbe01eeed093cb22bb8f5acdc3")
+				w.WriteHeader(http.StatusOK)
+			}
+		}))
+		defer svr.Close()
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		tempDir := t.TempDir()
+		tempFile := filepath.Join(tempDir, "testfile.txt")
+		err = os.WriteFile(tempFile, []byte("test file content"), 0644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				requireChecksum:    false, // Don't require checksum
+				requestedChecksums: []ChecksumType{AlgCRC32C},
+			},
+			localPath: tempFile,
+			remoteURL: svrURL,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+		}
+		transferResult, err := uploadObject(transfer)
+		assert.NoError(t, err)
+		assert.NoError(t, transferResult.Error, "Should not error when requireChecksum is false")
+
+		// Server provided MD5 checksum
+		assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+		info := transferResult.ServerChecksums[0]
+		assert.Equal(t, "5eb63bbbe01eeed093cb22bb8f5acdc3", checksumValueToHttpDigest(info.Algorithm, info.Value))
+		assert.Equal(t, ChecksumType(AlgMD5), info.Algorithm)
+
+		// Client computed CRC32C checksum
+		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		info = transferResult.ClientChecksums[0]
+		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+	})
+
+	t.Run("test-missing-checksum-when-required", func(t *testing.T) {
+		test_utils.InitClient(t, map[string]any{
+			param.Logging_Level.GetName(): "debug",
+			param.TLSSkipVerify.GetName(): true,
+		})
+
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" {
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				assert.Equal(t, "test file content", string(body))
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if r.Method == "HEAD" {
+				w.Header().Set("Content-Length", "17")
+				// No Digest header - server doesn't provide checksum
+				w.WriteHeader(http.StatusOK)
+			}
+		}))
+		defer svr.Close()
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		tempDir := t.TempDir()
+		tempFile := filepath.Join(tempDir, "testfile.txt")
+		err = os.WriteFile(tempFile, []byte("test file content"), 0644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				requireChecksum:    true,
+				requestedChecksums: []ChecksumType{AlgCRC32C},
+			},
+			localPath: tempFile,
+			remoteURL: svrURL,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+		}
+		transferResult, err := uploadObject(transfer)
+		assert.NoError(t, err)
+		require.Error(t, transferResult.Error)
+		assert.True(t, errors.Is(transferResult.Error, ErrServerChecksumMissing), "Expected checksum missing error when server provides no checksum")
+
+		// No server checksums provided
+		assert.Equal(t, 0, len(transferResult.ServerChecksums), "Checksum count is %d but should be 0", len(transferResult.ServerChecksums))
+
+		// Client still computed CRC32C checksum
+		assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+		info := transferResult.ClientChecksums[0]
 		assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
 		assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
 	})
