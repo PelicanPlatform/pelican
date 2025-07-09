@@ -478,13 +478,12 @@ func TestEmitCfg(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	viper.Set("Origin.RunLocation", dirname)
-	err := config.InitClient()
-	assert.Nil(t, err)
+	test_utils.InitClient(t, nil)
+	viper.Set(param.Origin_RunLocation.GetName(), dirname)
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
-			err = writeScitokensConfiguration(server_structs.OriginType, cfg)
+			err := writeScitokensConfiguration(server_structs.OriginType, cfg)
 			assert.NoError(t, err)
 
 			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -558,9 +557,9 @@ func TestLoadScitokensConfig(t *testing.T) {
 
 	defer server_utils.ResetTestState()
 
-	viper.Set("Origin.RunLocation", dirname)
-	err := config.InitClient()
-	assert.Nil(t, err)
+	test_utils.InitClient(t, nil)
+
+	viper.Set(param.Origin_RunLocation.GetName(), dirname)
 
 	configTester := func(configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -592,17 +591,17 @@ func TestMergeConfig(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	viper.Set(param.Logging_Level.GetName(), "debug")
-	viper.Set("Origin.RunLocation", dirname)
-	viper.Set("Origin.Port", 8443)
-	viper.Set("Origin.StoragePrefix", "/")
-	viper.Set("Origin.FederationPrefix", "/")
+	viper.Set(param.Origin_RunLocation.GetName(), dirname)
+	viper.Set(param.Origin_Port.GetName(), 8443)
+	viper.Set(param.Origin_StoragePrefix.GetName(), "/")
+	viper.Set(param.Origin_FederationPrefix.GetName(), "/")
+	viper.Set("ConfigDir", dirname)
 	// We don't inherit any defaults at this level of code -- in order to recognize
 	// that this is an authorized prefix, we must set either EnableReads && !EnablePublicReads
 	// or EnableWrites
-	viper.Set("Origin.EnableReads", true)
+	viper.Set(param.Origin_EnableReads.GetName(), true)
 	scitokensConfigFile := filepath.Join(dirname, "scitokens-input.cfg")
-	viper.Set("Xrootd.ScitokensConfig", scitokensConfigFile)
+	viper.Set(param.Xrootd_ScitokensConfig.GetName(), scitokensConfigFile)
 
 	configTester := func(configInput string, postProcess func(*testing.T, ScitokensCfg)) func(t *testing.T) {
 		return func(t *testing.T) {
@@ -613,7 +612,6 @@ func TestMergeConfig(t *testing.T) {
 			err := os.WriteFile(scitokensConfigFile, []byte(configInput), fs.FileMode(0600))
 			require.NoError(t, err)
 
-			config.InitConfigDir(viper.GetViper())
 			err = config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
@@ -814,7 +812,6 @@ func TestGenerateOriginIssuer(t *testing.T) {
 			viper.SetConfigType("yaml")
 			err := viper.MergeConfig(strings.NewReader(tc.yamlConfig))
 			require.NoError(t, err, "error reading config")
-			config.InitConfig()
 			err = config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
@@ -1235,10 +1232,10 @@ func TestGenerateFederationIssuer(t *testing.T) {
 			viper.Set(param.Origin_EnableWrites.GetName(), false)
 			viper.Set(param.Origin_StoragePrefix.GetName(), "/does/not/matter")
 			viper.Set(param.Origin_FederationPrefix.GetName(), "/foo/bar")
+			viper.Set(param.TLSSkipVerify.GetName(), true)
 
 			test_utils.MockFederationRoot(t, nil, nil)
 
-			config.InitConfig()
 			err := config.InitServer(ctx, server_structs.OriginType)
 			require.NoError(t, err)
 
@@ -1271,7 +1268,6 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	viper.Set(param.Server_Hostname.GetName(), "origin.example.com")
 	viper.Set(param.Origin_StorageType.GetName(), string(server_structs.OriginStoragePosix))
 
-	config.InitConfig()
 	err := config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 

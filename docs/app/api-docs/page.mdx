@@ -1,0 +1,10 @@
+import "swagger-ui-react/swagger-ui.css"
+import SwaggerUI from "swagger-ui-react";
+
+export async function SwaggerSpec() {
+	const specResponse = await fetch("https://raw.githubusercontent.com/PelicanPlatform/pelican/main/swagger/pelican-swagger.yaml")
+	const spec = await specResponse.text()
+	return spec
+}
+
+<SwaggerUI spec={await SwaggerSpec()} />

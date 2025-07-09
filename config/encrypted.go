@@ -97,7 +97,7 @@ func GetEncryptedContents() (string, error) {
 			}
 			if len(password) > 0 {
 				if err := SavePassword(password); err != nil {
-					fmt.Fprintln(os.Stderr, "Failed to save password:", err)
+					log.Debugln("Failed to save password:", err)
 				}
 			} else {
 				setEmptyPassword = true
@@ -246,7 +246,7 @@ func GetCredentialConfigContents() (OSDFConfig, error) {
 			}
 			if typedPassword {
 				if err := SavePassword(password); err != nil {
-					fmt.Fprintln(os.Stderr, "Failed to save password:", err)
+					log.Debugln("Failed to save password:", err)
 				}
 			}
 			foundKey = true
@@ -371,7 +371,7 @@ func SaveConfigContents_internal(config *OSDFConfig, forcePassword bool) error {
 	if len(password) > 0 {
 		err = SavePassword(password)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to save password to session keychain:", err)
+			log.Debugln("Failed to save password to session keychain:", err)
 		}
 	}
 

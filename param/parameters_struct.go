@@ -31,6 +31,7 @@ type Config struct {
 		DataLocations []string `mapstructure:"datalocations" yaml:"DataLocations"`
 		DbLocation string `mapstructure:"dblocation" yaml:"DbLocation"`
 		DefaultCacheTimeout time.Duration `mapstructure:"defaultcachetimeout" yaml:"DefaultCacheTimeout"`
+		EnableBroker bool `mapstructure:"enablebroker" yaml:"EnableBroker"`
 		EnableLotman bool `mapstructure:"enablelotman" yaml:"EnableLotman"`
 		EnableOIDC bool `mapstructure:"enableoidc" yaml:"EnableOIDC"`
 		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
@@ -346,6 +347,7 @@ type Config struct {
 		DisableOrigins bool `mapstructure:"disableorigins" yaml:"DisableOrigins"`
 	} `mapstructure:"topology" yaml:"Topology"`
 	Transport struct {
+		BrokerEndpointCacheTTL time.Duration `mapstructure:"brokerendpointcachettl" yaml:"BrokerEndpointCacheTTL"`
 		DialerKeepAlive time.Duration `mapstructure:"dialerkeepalive" yaml:"DialerKeepAlive"`
 		DialerTimeout time.Duration `mapstructure:"dialertimeout" yaml:"DialerTimeout"`
 		ExpectContinueTimeout time.Duration `mapstructure:"expectcontinuetimeout" yaml:"ExpectContinueTimeout"`
@@ -387,6 +389,7 @@ type configWithType struct {
 		DataLocations struct { Type string; Value []string }
 		DbLocation struct { Type string; Value string }
 		DefaultCacheTimeout struct { Type string; Value time.Duration }
+		EnableBroker struct { Type string; Value bool }
 		EnableLotman struct { Type string; Value bool }
 		EnableOIDC struct { Type string; Value bool }
 		EnablePrefetch struct { Type string; Value bool }
@@ -702,6 +705,7 @@ type configWithType struct {
 		DisableOrigins struct { Type string; Value bool }
 	}
 	Transport struct {
+		BrokerEndpointCacheTTL struct { Type string; Value time.Duration }
 		DialerKeepAlive struct { Type string; Value time.Duration }
 		DialerTimeout struct { Type string; Value time.Duration }
 		ExpectContinueTimeout struct { Type string; Value time.Duration }

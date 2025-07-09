@@ -23,7 +23,6 @@ package server_utils
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -37,6 +36,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/test_utils"
 )
@@ -47,8 +47,10 @@ func TestWaitUntilWorking(t *testing.T) {
 	ctx, cancel, _ := test_utils.TestContext(context.Background(), t)
 	t.Cleanup(func() {
 		cancel()
+		ResetTestState()
 	})
 
+	viper.Set(param.Server_StartupTimeout.GetName(), "10s")
 	t.Run("success-with-HTTP-200", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK) // 200
@@ -58,8 +60,9 @@ func TestWaitUntilWorking(t *testing.T) {
 		err := WaitUntilWorking(ctx, "GET", server.URL, "testServer", http.StatusOK, false)
 		require.NoError(t, err)
 
+		require.NotNil(t, hook.LastEntry())
 		assert.Equal(t, logrus.DebugLevel, hook.LastEntry().Level)
-		assert.Equal(t, "testServer server appears to be functioning at "+server.URL, hook.LastEntry().Message, "Expected log message not found")
+		assert.Contains(t, hook.LastEntry().Message, "server appears to be functioning")
 		hook.Reset()
 	})
 
@@ -71,8 +74,11 @@ func TestWaitUntilWorking(t *testing.T) {
 
 		err := WaitUntilWorking(ctx, "GET", server.URL, "testServer", http.StatusOK, false)
 		require.Error(t, err)
-		expectedErrorMsg := fmt.Sprintf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body is empty.", server.URL, 500, 200)
-		assert.Contains(t, err.Error(), expectedErrorMsg)
+
+		// Check for various things we expect to show up in the error message
+		assert.Contains(t, err.Error(), "received bad status code")
+		assert.Contains(t, err.Error(), "500")
+		assert.Contains(t, err.Error(), "expected 200")
 	})
 
 	t.Run("server-returns-unexpected-status-code-str-body", func(t *testing.T) {
@@ -85,8 +91,9 @@ func TestWaitUntilWorking(t *testing.T) {
 
 		err := WaitUntilWorking(ctx, "GET", server.URL, "testServer", http.StatusOK, false)
 		require.Error(t, err)
-		expectedErrorMsg := fmt.Sprintf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body: %s", server.URL, 404, 200, "404 page not found")
-		assert.Equal(t, expectedErrorMsg, err.Error())
+		assert.Contains(t, err.Error(), "received bad status code")
+		assert.Contains(t, err.Error(), "404 page not found")
+		assert.Contains(t, err.Error(), "expected 200")
 	})
 
 	t.Run("server-returns-unexpected-status-code-json-body", func(t *testing.T) {
@@ -96,15 +103,16 @@ func TestWaitUntilWorking(t *testing.T) {
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest) // 400
-			_, err := w.Write([]byte(jsonBytes))
+			_, err := w.Write(jsonBytes)
 			require.NoError(t, err)
 		}))
 		defer server.Close()
 
 		err = WaitUntilWorking(ctx, "GET", server.URL, "testServer", http.StatusOK, false)
 		require.Error(t, err)
-		expectedErrorMsg := fmt.Sprintf("Received bad status code in reply to server ping at %s: %d. Expected %d. Response body: %s", server.URL, 400, 200, string(jsonBytes))
-		assert.Equal(t, expectedErrorMsg, err.Error())
+		assert.Contains(t, err.Error(), "received bad status code")
+		assert.Contains(t, err.Error(), "400")
+		assert.Contains(t, err.Error(), string(jsonBytes))
 	})
 
 	t.Run("server-does-not-exist", func(t *testing.T) {
@@ -116,9 +124,7 @@ func TestWaitUntilWorking(t *testing.T) {
 		}()
 		err := WaitUntilWorking(earlyCancelCtx, "GET", "https://noserverexists.com", "testServer", http.StatusOK, false)
 		require.Error(t, err)
-		expectedErrorMsg := fmt.Sprintf("Failed to send request to testServer at %s; likely server is not up (will retry in 50ms):", "https://noserverexists.com")
-		assert.Equal(t, logrus.InfoLevel, hook.LastEntry().Level)
-		assert.Contains(t, hook.LastEntry().Message, expectedErrorMsg)
+		assert.Contains(t, err.Error(), "no such host")
 		hook.Reset()
 	})
 
@@ -138,13 +144,14 @@ func TestWaitUntilWorking(t *testing.T) {
 
 		err := WaitUntilWorking(earlyCancelCtx, "GET", server.URL, "testServer", http.StatusOK, false)
 		require.Error(t, err)
-		expectedErrorMsg := fmt.Sprintf("Failed to send request to testServer at %s; likely server is not up (will retry in 50ms):", server.URL)
+		assert.Contains(t, err.Error(), "exceeded while awaiting headers")
+		require.NotNil(t, hook.LastEntry())
 		assert.Equal(t, logrus.InfoLevel, hook.LastEntry().Level)
-		assert.Contains(t, hook.LastEntry().Message, expectedErrorMsg)
+		assert.Contains(t, hook.LastEntry().Message, "Failed to send request")
 	})
 
 	t.Run("server-short-timeout", func(t *testing.T) {
-		viper.Set("Server.StartupTimeout", "1s")
+		viper.Set(param.Server_StartupTimeout.GetName(), "1s")
 		earlyCancelCtx, earlyCancel := context.WithCancel(ctx)
 		go func() {
 			<-time.After(1500 * time.Millisecond)
@@ -159,8 +166,7 @@ func TestWaitUntilWorking(t *testing.T) {
 
 		err := WaitUntilWorking(earlyCancelCtx, "GET", server.URL, "testServer", http.StatusOK, false)
 		require.Error(t, err)
-		expectedErrorMsg := fmt.Sprintf("The testServer server at %s either did not startup or did not respond quickly enough after 1s of waiting", server.URL)
-		assert.Equal(t, expectedErrorMsg, err.Error())
+		assert.Contains(t, err.Error(), "didn't respond with the expected status code 200 within the timeout of 1s")
 	})
 }
 

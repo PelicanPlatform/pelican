@@ -21,7 +21,7 @@
    This is a workaround for the fact that the HTTP header claim source
    doesn't function with the device code flow.
  */
-if [exec_phase == 'post_token'] [
+if [exec_phase == 'pre_auth'] [
      userInfo. := from_json(decode(claims.sub));
      claims.sub := userInfo.u;
      claims.groups := userInfo.g;

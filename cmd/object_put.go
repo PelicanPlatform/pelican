@@ -23,6 +23,7 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"hash"
 	"hash/crc32"
 	"io"
@@ -53,6 +54,7 @@ func init() {
 	flagSet.String("checksum-algorithm", "", "Checksum algorithm to use for upload and validation")
 	flagSet.Bool("require-checksum", false, "Require the server to return a checksum for the uploaded file")
 	flagSet.String("checksums", "", "Verify files against a checksums manifest. The format is ALGORITHM:FILENAME")
+	flagSet.String("transfer-stats", "", "File to write transfer stats to")
 	objectCmd.AddCommand(putCmd)
 }
 
@@ -229,14 +231,16 @@ func putMain(cmd *cobra.Command, args []string) {
 	lastSrc := ""
 
 	options = append(options, client.WithCallback(pb.callback), client.WithTokenLocation(tokenLocation))
+	finalResults := make([][]client.TransferResults, 0)
 
 	for _, src := range source {
 		isRecursive, _ := cmd.Flags().GetBool("recursive")
-		_, result = client.DoPut(ctx, src, dest, isRecursive, options...)
+		transferResults, result := client.DoPut(ctx, src, dest, isRecursive, options...)
 		if result != nil {
 			lastSrc = src
 			break
 		}
+		finalResults = append(finalResults, transferResults)
 	}
 
 	// Exit with failure
@@ -253,6 +257,18 @@ func putMain(cmd *cobra.Command, args []string) {
 			os.Exit(11)
 		}
 		os.Exit(1)
+	}
+
+	transferStatsFile, _ := cmd.Flags().GetString("transfer-stats")
+	if transferStatsFile != "" {
+		transferStats, err := json.MarshalIndent(finalResults, "", "  ")
+		if err != nil {
+			log.Errorln("Failed to marshal transfer results:", err)
+		}
+		err = os.WriteFile(transferStatsFile, transferStats, 0644)
+		if err != nil {
+			log.Errorln("Failed to write transfer stats to file:", err)
+		}
 	}
 
 }

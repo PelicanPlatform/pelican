@@ -169,7 +169,6 @@ func TestDropPrivilegeSignaling(t *testing.T) {
 			viper.Set("Origin.RunLocation", runDir)
 			viper.Set("Cache.RunLocation", runDir)
 			viper.Set("ConfigDir", runDir)
-			config.InitConfig()
 
 			pelicanDir := filepath.Join(runDir, "pelican")
 			err := os.Mkdir(pelicanDir, 0755)

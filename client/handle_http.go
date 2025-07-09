@@ -123,7 +123,15 @@ type (
 
 	HeaderTimeoutError struct{}
 
+	InvalidByteInChunkLengthError struct {
+		Err error
+	}
+
 	NetworkResetError struct{}
+
+	UnexpectedEOFError struct {
+		Err error
+	}
 
 	allocateMemoryError struct {
 		Err error
@@ -158,27 +166,28 @@ type (
 	// Represents the results of a single object transfer,
 	// potentially across multiple attempts / retries.
 	TransferResults struct {
-		jobId             uuid.UUID // The job ID this result corresponds to
+		JobId             uuid.UUID `json:"jobId"` // The job ID this result corresponds to
 		job               *TransferJob
-		Error             error
-		TransferredBytes  int64
-		ServerChecksums   []ChecksumInfo // Checksums returned by the server
-		ClientChecksums   []ChecksumInfo // Checksums calculated by the client
-		TransferStartTime time.Time
-		Scheme            string
-		Attempts          []TransferResult
+		Error             error            `json:"error"`
+		TransferredBytes  int64            `json:"transferredBytes"`
+		ServerChecksums   []ChecksumInfo   `json:"serverChecksums"` // Checksums returned by the server
+		ClientChecksums   []ChecksumInfo   `json:"clientChecksums"` // Checksums calculated by the client
+		TransferStartTime time.Time        `json:"transferStartTime"`
+		Scheme            string           `json:"scheme"`
+		Source            string           `json:"source"`
+		Attempts          []TransferResult `json:"attempts"`
 	}
 
 	TransferResult struct {
-		Number            int           // indicates which attempt this is
-		TransferFileBytes int64         // how much each attempt downloaded
-		TimeToFirstByte   time.Duration // how long it took to download the first byte
-		TransferEndTime   time.Time     // when the transfer ends
-		TransferTime      time.Duration // amount of time we were transferring per attempt (in seconds)
-		CacheAge          time.Duration // age of the data reported by the cache
-		Endpoint          string        // which origin did it use
-		ServerVersion     string        // version of the server
-		Error             error         // what error the attempt returned (if any)
+		Number            int           `json:"attemptNumber"`     // indicates which attempt this is
+		TransferFileBytes int64         `json:"transferFileBytes"` // how much each attempt downloaded
+		TimeToFirstByte   time.Duration `json:"timeToFirstByte"`   // how long it took to download the first byte
+		TransferEndTime   time.Time     `json:"transferEndTime"`   // when the transfer ends
+		TransferTime      time.Duration `json:"transferTime"`      // amount of time we were transferring per attempt (in seconds)
+		CacheAge          time.Duration `json:"cacheAge"`          // age of the data reported by the cache
+		Endpoint          string        `json:"endpoint"`          // which origin did it use
+		ServerVersion     string        `json:"serverVersion"`     // version of the server
+		Error             error         `json:"error"`             // what error the attempt returned (if any)
 	}
 
 	clientTransferResults struct {
@@ -589,6 +598,32 @@ func (e *dirListingNotSupportedError) Is(target error) bool {
 	return ok
 }
 
+func (e *InvalidByteInChunkLengthError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *InvalidByteInChunkLengthError) Unwrap() error {
+	return e.Err
+}
+
+func (e *InvalidByteInChunkLengthError) Is(target error) bool {
+	_, ok := target.(*InvalidByteInChunkLengthError)
+	return ok
+}
+
+func (e *UnexpectedEOFError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *UnexpectedEOFError) Unwrap() error {
+	return e.Err
+}
+
+func (e *UnexpectedEOFError) Is(target error) bool {
+	_, ok := target.(*UnexpectedEOFError)
+	return ok
+}
+
 type HttpErrResp struct {
 	Code int
 	Str  string
@@ -745,13 +780,14 @@ func newTransferAttemptError(service string, proxy string, isProxyErr bool, isUp
 func newTransferResults(job *TransferJob) TransferResults {
 	return TransferResults{
 		job:      job,
-		jobId:    job.uuid,
+		JobId:    job.uuid,
 		Attempts: make([]TransferResult, 0),
+		Source:   job.remoteURL.String(),
 	}
 }
 
 func (tr TransferResults) ID() string {
-	return tr.jobId.String()
+	return tr.JobId.String()
 }
 
 // Returns a new transfer engine object whose lifetime is tied
@@ -1238,6 +1274,10 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	if _, exists := copyUrl.Query()[pelican_url.QueryRecursive]; exists {
 		recursive = true
 	}
+	operation := config.TokenSharedRead
+	if upload {
+		operation = config.TokenSharedWrite
+	}
 	tj = &TransferJob{
 		prefObjServers: tc.prefObjServers,
 		recursive:      recursive,
@@ -1249,7 +1289,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypeDownload,
 		uuid:           id,
 		project:        project,
-		token:          newTokenGenerator(&copyUrl, nil, upload, !tc.skipAcquire),
+		token:          newTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
 	}
 	if upload {
 		tj.xferType = transferTypeUpload
@@ -1371,7 +1411,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypePrestage,
 		uuid:           id,
 		project:        project,
-		token:          newTokenGenerator(&copyUrl, nil, false, !tc.skipAcquire),
+		token:          newTokenGenerator(&copyUrl, nil, config.TokenSharedRead, !tc.skipAcquire),
 	}
 	if tc.token != "" {
 		tj.token.SetToken(tc.token)
@@ -1469,7 +1509,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	}
 
 	var prefObjServers []*url.URL
-	token := newTokenGenerator(pelicanURL, nil, false, true)
+	token := newTokenGenerator(pelicanURL, nil, config.TokenSharedRead, true)
 	if tc.token != "" {
 		token.SetToken(tc.token)
 	}
@@ -1839,7 +1879,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				results <- &clientTransferResults{
 					id: file.uuid,
 					results: TransferResults{
-						jobId: file.jobId,
+						JobId: file.jobId,
 						Error: file.file.ctx.Err(),
 					},
 				}
@@ -1849,7 +1889,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				results <- &clientTransferResults{
 					id: file.uuid,
 					results: TransferResults{
-						jobId: file.jobId,
+						JobId: file.jobId,
 						Error: file.file.err,
 					},
 				}
@@ -1862,7 +1902,7 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 			} else {
 				transferResults, err = downloadObject(file.file)
 			}
-			transferResults.jobId = file.jobId
+			transferResults.JobId = file.jobId
 			transferResults.Scheme = file.file.remoteURL.Scheme
 			if err != nil {
 				log.Errorf("Error when attempting to transfer object %s for client %s: %v", file.file.remoteURL, file.uuid.String(), err)
@@ -2844,6 +2884,10 @@ Loop:
 			err = &ConnectionSetupError{URL: req.URL.String()}
 			return
 		}
+		// Add a check for InvalidByteInChunkLengthError
+		if strings.Contains(err.Error(), "invalid byte in chunk length") {
+			err = &InvalidByteInChunkLengthError{Err: err}
+		}
 		log.WithFields(fields).Debugln("Got error from HTTP download", err)
 		return
 	} else {
@@ -2855,6 +2899,9 @@ Loop:
 				log.WithFields(fields).Debugln("Got error from file transfer:", statusText)
 				statusText = strings.Replace(statusText, "sTREAM ioctl timeout", "cache timed out waiting on origin", 1)
 				err = errors.New("download error after server response started: " + statusText)
+				if strings.Contains(statusText, "unexpected EOF") {
+					err = &UnexpectedEOFError{Err: err}
+				}
 				return
 			}
 		}
@@ -3344,6 +3391,10 @@ func runPut(request *http.Request, responseChan chan<- *http.Response, errorChan
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			log.Errorln("Error with PUT:", err)
+			// Wrap TLS errors in a ConnectionSetupError
+			if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "tls") {
+				err = &ConnectionSetupError{URL: request.URL.String(), Err: err}
+			}
 		}
 		errorChan <- err
 		close(errorChan)

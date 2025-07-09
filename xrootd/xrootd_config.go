@@ -1182,8 +1182,12 @@ func mapXrootdLogLevels(xrdConfig *XrootdConfig) error {
 
 	// Origin Oss
 	if xrdConfig.Logging.OriginOss, err = genLoggingConfig(param.Logging_Origin_Oss.GetString(), loggingMap{
-		Trace: "all",
-		Info:  "-all",
+		Trace: "dump debug info warning error",
+		Debug: "debug info warning error",
+		Info:  "info warning error",
+		Warn:  "warning error",
+		Error: "error",
+		Fatal: "-all",
 	}); err != nil {
 		return errors.Wrapf(err, "failed to map logging level for Logging.Origin.Oss")
 	}

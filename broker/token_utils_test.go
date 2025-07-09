@@ -27,15 +27,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func TestGetCacheHostnameFromToken(t *testing.T) {
 	server_utils.ResetTestState()
-	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
-	require.NoError(t, config.InitClient())
+	test_utils.InitClient(t, nil)
 
 	viper.Set("Federation.RegistryUrl", "https://your-registry.com")
 

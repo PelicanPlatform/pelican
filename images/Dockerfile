@@ -64,7 +64,7 @@ ARG XROOTD_S3_HTTP_VER=0.4.1
 
 # Set scitokens-oauth2-server image as a build stage so that we can copy its
 # OA4MP installation into the images being built here.
-FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20231118-1823 AS scitokens-oauth2-server
+FROM --platform=linux/amd64 hub.opensciencegrid.org/sciauth/scitokens-oauth2-server:release-20250625-2352 AS scitokens-oauth2-server
 
 #################################################################
 # Pelican Build Base
@@ -216,7 +216,7 @@ RUN groupadd -g 10940 xrootd \
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh
 ARG XROOTD_VER="5.8.3"
-ARG XROOTD_RELEASE="1.2.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_RELEASE="1.3.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
 # The packages from Koji need to be installed in a single dnf command in
@@ -453,6 +453,11 @@ RUN useradd -r -s /sbin/nologin tomcat && \
 # Replace the Tomcat server's default configuration so that Pelican can
 # communicate with it over a socket.
 COPY --chown=root:tomcat oa4mp/resources/server.xml /opt/tomcat/conf/server.xml
+
+# Replace other bits and bobs to take into account the fact that Pelican
+# authenticates the user and proxies requests.
+COPY --chown=tomcat:tomcat oa4mp/resources/client-template.xml /opt/scitokens-server/etc/templates/client-template.xml
+RUN sed -i -e 's/action="\${actionToTake}" //' /opt/tomcat/webapps/scitokens-server/device-consent.jsp
 
 # This script is a documented part of OA4MP's bootstrap process, but we
 # otherwise do not need it.

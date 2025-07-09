@@ -121,6 +121,12 @@ func TestGetLinkDepth(t *testing.T) {
 			prefix:   "/foo",
 			depth:    1,
 		},
+		{
+			name:     "exact-match",
+			filepath: "/foo/bar",
+			prefix:   "/foo/bar",
+			depth:    0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1520,10 +1526,6 @@ func TestDiscoverOriginCache(t *testing.T) {
 	server_utils.ResetTestState()
 	defer server_utils.ResetTestState()
 
-	// Isolate the test so it doesn't use system config
-	viper.Set("ConfigDir", t.TempDir())
-	config.InitConfig()
-
 	mockPelicanOriginServerAd := server_structs.ServerAd{
 		URL: url.URL{
 			Scheme: "https",
@@ -1577,15 +1579,25 @@ func TestDiscoverOriginCache(t *testing.T) {
 	}
 
 	// Generate the keys we need for the test
-	ctx, _, _ := test_utils.TestContext(context.Background(), t)
 	viper.Set(param.IssuerKeysDirectory.GetName(), filepath.Join(t.TempDir(), "testKeyDir"))
+
 	pKeySet, err := config.GetIssuerPublicJWKS()
 	assert.NoError(t, err, "Error fetching public key for test")
+
 	privateKey, err := config.GetIssuerPrivateJWK()
 	assert.NoError(t, err, "Error fetching private key for test")
 
+	viper.Set(param.TLSSkipVerify.GetName(), true)
+
 	// Set up the mock federation, which must exist for the auth handler to fetch federation keys
 	test_utils.MockFederationRoot(t, nil, &pKeySet)
+	ctx, _, _ := test_utils.TestContext(context.Background(), t)
+
+	// Isolate the test so it doesn't use system config
+	viper.Set("ConfigDir", t.TempDir())
+	err = config.InitServer(ctx, server_structs.DirectorType)
+	require.NoError(t, err)
+
 	fedInfo, err := config.GetFederation(ctx)
 	assert.NoError(t, err, "Error fetching federation info for test")
 

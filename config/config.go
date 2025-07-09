@@ -20,18 +20,16 @@ package config
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	_ "embed"
 	"fmt"
 	"io"
 	"io/fs"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -115,6 +113,7 @@ const (
 	TokenRead
 	TokenSharedWrite
 	TokenSharedRead
+	TokenDelete
 )
 
 var (
@@ -130,10 +129,6 @@ var (
 	// Potentially holds a directory to cleanup
 	tempRunDir  string
 	cleanupOnce sync.Once
-
-	// Our global transports that only will get reconfigured if needed
-	transport     *http.Transport
-	onceTransport sync.Once
 
 	// Global discovery info.  Using the "once" allows us to delay discovery
 	// until it's first needed, avoiding a web lookup for invoking configuration
@@ -508,54 +503,17 @@ func CleanupTempResources() (err error) {
 func getConfigBase() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// We currently don't handle this case in Windows (and it may not even occur)
-		// This will be revisited in the future
+		os := runtime.GOOS
+		if os == "windows" {
+			windowsPath := filepath.Join("C:", "ProgramData", "pelican")
+			log.Warningln("No home directory found for user -- will check for configuration yaml in ", windowsPath)
+			return windowsPath
+		}
 		log.Warningln("No home directory found for user -- will check for configuration yaml in /etc/pelican/")
 		return filepath.Join("/etc", "pelican")
 	}
 
 	return filepath.Join(home, ".config", "pelican")
-}
-
-func setupTransport() {
-	//Getting timeouts and other information from defaults.yaml
-	maxIdleConns := param.Transport_MaxIdleConns.GetInt()
-	idleConnTimeout := param.Transport_IdleConnTimeout.GetDuration()
-	transportTLSHandshakeTimeout := param.Transport_TLSHandshakeTimeout.GetDuration()
-	expectContinueTimeout := param.Transport_ExpectContinueTimeout.GetDuration()
-	responseHeaderTimeout := param.Transport_ResponseHeaderTimeout.GetDuration()
-
-	transportDialerTimeout := param.Transport_DialerTimeout.GetDuration()
-	transportKeepAlive := param.Transport_DialerKeepAlive.GetDuration()
-
-	//Set up the transport
-	transport = &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   transportDialerTimeout,
-			KeepAlive: transportKeepAlive,
-		}).DialContext,
-		MaxIdleConns:          maxIdleConns,
-		IdleConnTimeout:       idleConnTimeout,
-		TLSHandshakeTimeout:   transportTLSHandshakeTimeout,
-		ExpectContinueTimeout: expectContinueTimeout,
-		ResponseHeaderTimeout: responseHeaderTimeout,
-	}
-	if param.TLSSkipVerify.GetBool() {
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	}
-	if caCert, err := LoadCertificate(param.Server_TLSCACertificateFile.GetString()); err == nil {
-		systemPool, err := x509.SystemCertPool()
-		if err == nil {
-			systemPool.AddCert(caCert)
-			// Ensure that we don't override the InsecureSkipVerify if it's present
-			if transport.TLSClientConfig == nil {
-				transport.TLSClientConfig = &tls.Config{RootCAs: systemPool}
-			} else {
-				transport.TLSClientConfig.RootCAs = systemPool
-			}
-		}
-	}
 }
 
 // GetServerIssuerURL tries to determine the correct issuer URL for the server in order of precedence:
@@ -608,14 +566,6 @@ func GetServerIssuerURL() (issuerUrl string, err error) {
 	}
 	log.Debugf("Populating server's issuer URL as '%s' from configured value of '%s'", issuerUrl, param.Server_ExternalWebUrl.GetName())
 	return issuerUrl, nil
-}
-
-// function to get/setup the transport (only once)
-func GetTransport() *http.Transport {
-	onceTransport.Do(func() {
-		setupTransport()
-	})
-	return transport
 }
 
 // Get singleton global validate method for field validation
@@ -726,6 +676,10 @@ func handleContinuedCfg() error {
 // Read config file from web UI changes, and call viper.Set() to explicitly override the value
 // so that env wouldn't take precedence
 func setWebConfigOverride(v *viper.Viper, configPath string) error {
+	if configPath == "" {
+		return nil
+	}
+
 	webConfigFile, err := os.OpenFile(configPath, os.O_RDONLY|os.O_CREATE, 0644)
 	if err != nil {
 		return err
@@ -801,7 +755,12 @@ func InitConfigDir(v *viper.Viper) {
 	configDir := v.GetString("ConfigDir")
 	if configDir == "" {
 		if IsRootExecution() {
-			configDir = "/etc/pelican" // We currently don't handle this case in windows, will be revisited in the future
+			os := runtime.GOOS
+			if os == "windows" {
+				configDir = filepath.Join("C:", "ProgramData", "pelican")
+			} else {
+				configDir = filepath.Join("/etc", "pelican")
+			}
 		} else {
 			configDir = getConfigBase()
 		}
@@ -810,9 +769,9 @@ func InitConfigDir(v *viper.Viper) {
 	v.SetConfigName("pelican")
 }
 
-// InitConfig sets up the global Viper instance by loading defaults and
+// InitConfigInternal sets up the global Viper instance by loading defaults and
 // user-defined config files, validates config params, and initializes logging.
-func InitConfig() {
+func InitConfigInternal() {
 	// Set a prefix so Viper knows how to parse PELICAN_* env vars
 	// This must happen before config dir initialization so that Pelican
 	// can pick up setting the config dir with PELICAN_CONFIGDIR
@@ -1306,6 +1265,8 @@ func SetServerDefaults(v *viper.Viper) error {
 // Note not all configurations are supported: currently, if you enable both cache and origin then an error
 // is thrown
 func InitServer(ctx context.Context, currentServers server_structs.ServerType) error {
+	InitConfigInternal()
+
 	setEnabledServer(currentServers)
 
 	// Output warnings before the defaults are set. The SetServerDefaults function sets the default values
@@ -1682,6 +1643,62 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 		return err
 	}
 
+	// The certificate was either generated or has been provided by now. Verify that any configured
+	// hostnames are valid w.r.t the given certificate.
+	//
+	// We'll always check both Server.Hostname, Server.ExternalWebUrl because we don't enforce that
+	// these point to the same hostname (maybe we should?), and we'll conditionally check
+	// Origin.Url/Cache.Url, depending on whether the origin/cache servers are enabled.
+	// See https://github.com/PelicanPlatform/pelican/issues/1802 for a description of why we check
+	// these particular hostnames.
+	if param.Server_Hostname.IsSet() {
+		serverHostname := param.Server_Hostname.GetString()
+		if err := ValidateHostCertificateHostname(serverHostname); err != nil {
+			return errors.Wrapf(err, "unable to validate server hostname '%s' configured via %s against the TLS certificate"+
+				" configured via %s",
+				serverHostname, param.Server_Hostname.GetName(), param.Server_TLSCertificateChain.GetName())
+		}
+	}
+
+	// Helper func to deal with params that may include ports, which must be parsed so
+	// we can grab only the hostname
+	validateUrlHostname := func(urlParam param.StringParam) error {
+		urlStr := urlParam.GetString()
+		parsed, err := url.Parse(urlStr)
+		if err != nil {
+			return errors.Wrapf(err, "unable to parse %s as a URL", urlParam.GetName())
+		} else if parsed == nil {
+			return errors.New(fmt.Sprintf("the url configured via %s was parsed as nil; is it set?", urlParam.GetName()))
+		}
+
+		if err := ValidateHostCertificateHostname(parsed.Hostname()); err != nil {
+			return errors.Wrapf(err, "unable to validate hostname '%s' configured via %s against the TLS certificate"+
+				" configured via %s",
+				parsed.Hostname(), urlParam.GetName(), param.Server_TLSCertificateChain.GetName())
+		}
+		return nil
+	}
+
+	if param.Server_ExternalWebUrl.IsSet() {
+		if err = validateUrlHostname(param.Server_ExternalWebUrl); err != nil {
+			return err
+		}
+	}
+
+	// While I (Justin) cannot currently fathom a situation where the hostname of the Cache.Url
+	// or Origin.Url would not match either the Server.Hostname or the Server.ExternalWebUrl,
+	// we still validate them just in case.
+	if currentServers.IsEnabled(server_structs.CacheType) && param.Cache_Url.IsSet() {
+		if err = validateUrlHostname(param.Cache_Url); err != nil {
+			return err
+		}
+	}
+	if currentServers.IsEnabled(server_structs.OriginType) && param.Origin_Url.IsSet() {
+		if err = validateUrlHostname(param.Origin_Url); err != nil {
+			return err
+		}
+	}
+
 	// Generate the session secret and save it as the default value
 	if err := GenerateSessionSecret(); err != nil {
 		return err
@@ -1863,6 +1880,7 @@ func SetClientDefaults(v *viper.Viper) error {
 }
 
 func InitClient() error {
+	InitConfigInternal()
 	logging.FlushLogs(true)
 	if err := SetClientDefaults(viper.GetViper()); err != nil {
 		return err
@@ -1917,6 +1935,7 @@ func ResetConfig() {
 	// Clear cached transport object
 	onceTransport = sync.Once{}
 	transport = nil
+	basicTransport = nil
 
 	// Clear the instance ID information for generated server ads
 	server_structs.Reset()
@@ -1928,6 +1947,8 @@ func ResetConfig() {
 	fedDiscoveryOnce = &sync.Once{}
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
+
+	setServerOnce = sync.Once{}
 
 	ResetIssuerPrivateKeys()
 

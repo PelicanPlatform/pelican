@@ -132,7 +132,6 @@ func restartProgram() error {
 }
 
 func init() {
-	cobra.OnInitialize(config.InitConfig)
 	rootCmd.AddCommand(objectCmd)
 	objectCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.AddCommand(directorCmd)
@@ -145,6 +144,7 @@ func init() {
 	rootCmd.AddCommand(rootPluginCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(generateCmd)
+	rootCmd.AddCommand(keyCmd)
 	rootCmd.AddCommand(downtimeCmd)
 	rootCmd.AddCommand(config_printer.ConfigCmd)
 	preferredPrefix := config.GetPreferredPrefix()

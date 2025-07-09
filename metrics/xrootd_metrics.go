@@ -203,6 +203,27 @@ type (
 		IOTotal    int     `json:"io_total"`
 	}
 
+	OssGStreamEvent struct {
+		Event string `json:"event"`
+	}
+	OssS3CacheGs struct {
+		Event     string  `json:"event"`
+		HitB      int     `json:"hit_b"`      // Bytes that were served to the client directly from the cache (a "cache hit")
+		MissB     int     `json:"miss_b"`     // Bytes that were served to the client that were a cache miss (not immediately available).
+		FullHit   int     `json:"full_hit"`   // Count of read requests from the client that were completely served from the cache.
+		PartHit   int     `json:"part_hit"`   // Count of read requests from the client that were partially served from the cache.
+		Miss      int     `json:"miss"`       // Count of read requests that were entirely a miss.
+		BypassB   int     `json:"bypass_b"`   // Bytes that were read in "bypass mode", skipping the cache. Typically, this is from read requests that are larger than the cache size.
+		Bypass    int     `json:"bypass"`     // Count of read requests that were served by bypassing the cache.
+		FetchB    int     `json:"fetch_b"`    // Bytes fetched from S3 triggered by cache misses. Note the cache may read in more bytes than requested for the miss.
+		Fetch     int     `json:"fetch"`      // Count of GET requests sent to S3.
+		UnusedB   int     `json:"unused_b"`   // Count of bytes that were fetched from S3 but not sent to the client.
+		PrefetchB int     `json:"prefetch_b"` // Bytes prefetched from S3 independent of a client request.
+		Prefetch  int     `json:"prefetch"`   // Count of prefetch requests sent to S3.
+		Errors    int     `json:"errors"`     // Count of errors encountered.
+		BypassS   float64 `json:"bypass_s"`   // Seconds spent in GET requests serving bypass requests.
+		FetchS    float64 `json:"fetch_s"`    // Seconds spent in GET requests serving cache misses.
+	}
 	OSSStatsGs struct {
 		Event           string  `json:"event"`
 		Reads           int     `json:"reads"`
@@ -362,6 +383,12 @@ const (
 	OssStat   SummaryStatType = "oss"   // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653741
 	CacheStat SummaryStatType = "cache" // https://xrootd.slac.stanford.edu/doc/dev55/xrd_monitoring.htm#_Toc99653733
 	ProcStat  SummaryStatType = "proc"  // https://xrootd.web.cern.ch/doc/dev57/xrd_monitoring.htm#_Toc138968507
+)
+
+// These are the names of the events that are sent by XRootD over the g-stream from the OSS layer
+const (
+	OssStatsEvent    = "oss_stats"
+	S3FileStatsEvent = "s3file_stats"
 )
 
 var (
@@ -758,8 +785,34 @@ var (
 		Help: "CPU utilization of the XRootD server",
 	})
 
-	lastStats    SummaryStat
-	lastOssStats OSSStatsGs
+	S3CacheBytes = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_s3_cache_bytes_total",
+		Help: "Bytes transferred by the S3 cache plugin.",
+	}, []string{"type"})
+
+	S3CacheHits = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_s3_cache_hits_total",
+		Help: "Number of cache hits, partial hits, or misses.",
+	}, []string{"type"})
+
+	S3CacheRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_s3_cache_requests_total",
+		Help: "Number of cache requests.",
+	}, []string{"type"})
+
+	S3CacheErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_s3_cache_errors_total",
+		Help: "Number of errors encountered by the S3 cache plugin.",
+	})
+
+	S3CacheRequestSeconds = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_s3_cache_request_seconds_total",
+		Help: "Total time spent in S3 requests.",
+	}, []string{"type"})
+
+	lastStats        SummaryStat
+	lastOssStats     OSSStatsGs
+	lastS3CacheStats OssS3CacheGs
 
 	procState = processUtilizationState{}
 
@@ -776,7 +829,7 @@ var (
 	monitorPaths []PathList
 )
 
-var allowedEvents = map[string]bool{"oss_stats": true}
+var allowedEvents = map[string]bool{OssStatsEvent: true, S3FileStatsEvent: true}
 
 // Set up listening and parsing xrootd monitoring UDP packets into prometheus
 //
@@ -1740,7 +1793,81 @@ func HandleSummaryPacket(packet []byte) error {
 	return nil
 }
 
-// handleOSSPacket processes the OSS plugin stats
+func updateCounter[T int | uint | float32 | float64](new T, old T, counter prometheus.Counter) T {
+	incBy := math.Max(0, float64(new-old))
+	counter.Add(incBy)
+	if new < old {
+		return old
+	}
+
+	return new
+}
+
+// handleS3CacheStats processes the S3 cache stats
+// It expects the blobs to be in JSON format and will update the metrics accordingly
+// It returns an error if the blobs are empty or if there is an error in unmarshalling
+// the JSON data
+// It also handles the case where the total IO or wait time is less than the previous value
+// by resetting the increment to 0.
+// The s3file_stats event schema is as follows:
+//
+//	{
+//	  "event": "s3file_stats",
+//	  "hit_b": uint,
+//	  "miss_b": uint,
+//	  "full_hit": uint,
+//	  "part_hit": uint,
+//	  "miss": uint,
+//	  "bypass_b": uint,
+//	  "bypass": uint,
+//	  "fetch_b": uint,
+//	  "fetch": uint,
+//	  "unused_b": uint,
+//	  "prefetch_b": uint,
+//	  "prefetch": uint,
+//	  "errors": uint,
+//	  "bypass_s": float,
+//	  "fetch_s": float
+//	}
+func handleS3CacheStats(blobs [][]byte) error {
+
+	// we need to process the blobs backwards to ensure that we are processing the last valid event
+	// the most relevant data is the last valid event in the sequence of blobs
+	for i := len(blobs) - 1; i >= 0; i-- {
+		blob := blobs[i]
+		s3fileStats := OssS3CacheGs{}
+		if err := json.Unmarshal(blob, &s3fileStats); err != nil {
+			log.Warningf("Failed to unmarshal S3 file stats json: %s", string(blob))
+			continue
+		}
+		if !allowedEvents[s3fileStats.Event] {
+			log.Warningf("handleS3CacheStats received an S3 file stats packet with an unrecognized event type (%s)", s3fileStats.Event)
+			continue
+		}
+		lastS3CacheStats.HitB = updateCounter(s3fileStats.HitB, lastS3CacheStats.HitB, S3CacheBytes.WithLabelValues("hit"))
+		lastS3CacheStats.MissB = updateCounter(s3fileStats.MissB, lastS3CacheStats.MissB, S3CacheBytes.WithLabelValues("miss"))
+		lastS3CacheStats.BypassB = updateCounter(s3fileStats.BypassB, lastS3CacheStats.BypassB, S3CacheBytes.WithLabelValues("bypass"))
+		lastS3CacheStats.FetchB = updateCounter(s3fileStats.FetchB, lastS3CacheStats.FetchB, S3CacheBytes.WithLabelValues("fetch"))
+		lastS3CacheStats.UnusedB = updateCounter(s3fileStats.UnusedB, lastS3CacheStats.UnusedB, S3CacheBytes.WithLabelValues("unused"))
+		lastS3CacheStats.PrefetchB = updateCounter(s3fileStats.PrefetchB, lastS3CacheStats.PrefetchB, S3CacheBytes.WithLabelValues("prefetch"))
+
+		lastS3CacheStats.FullHit = updateCounter(s3fileStats.FullHit, lastS3CacheStats.FullHit, S3CacheHits.WithLabelValues("full"))
+		lastS3CacheStats.PartHit = updateCounter(s3fileStats.PartHit, lastS3CacheStats.PartHit, S3CacheHits.WithLabelValues("partial"))
+		lastS3CacheStats.Miss = updateCounter(s3fileStats.Miss, lastS3CacheStats.Miss, S3CacheHits.WithLabelValues("miss"))
+
+		lastS3CacheStats.Bypass = updateCounter(s3fileStats.Bypass, lastS3CacheStats.Bypass, S3CacheRequests.WithLabelValues("bypass"))
+		lastS3CacheStats.Fetch = updateCounter(s3fileStats.Fetch, lastS3CacheStats.Fetch, S3CacheRequests.WithLabelValues("fetch"))
+		lastS3CacheStats.Prefetch = updateCounter(s3fileStats.Prefetch, lastS3CacheStats.Prefetch, S3CacheRequests.WithLabelValues("prefetch"))
+
+		lastS3CacheStats.Errors = updateCounter(s3fileStats.Errors, lastS3CacheStats.Errors, S3CacheErrors)
+
+		lastS3CacheStats.BypassS = updateCounter(s3fileStats.BypassS, lastS3CacheStats.BypassS, S3CacheRequestSeconds.WithLabelValues("bypass"))
+		lastS3CacheStats.FetchS = updateCounter(s3fileStats.FetchS, lastS3CacheStats.FetchS, S3CacheRequestSeconds.WithLabelValues("fetch"))
+	}
+	return nil
+}
+
+// handleOSSStats processes the OSS plugin stats
 // It expects the blobs to be in JSON format and will update the metrics accordingly
 // It returns an error if the blobs are empty or if there is an error in unmarshalling
 // the JSON data
@@ -1815,18 +1942,7 @@ func HandleSummaryPacket(packet []byte) error {
 // The other fields are used to update the metrics accordingly.
 // The slow_ prefix fields are used to update the slow operation histograms.
 // The other fields are used to update the counters.
-func handleOSSPacket(blobs [][]byte) error {
-	updateCounter := func(new int, old int, counter prometheus.Counter) int {
-		// if the new value is less than the old value, we know that that the counter shouldnt be incremented
-		incBy := math.Max(0, float64(new-old))
-		counter.Add(incBy)
-
-		if new < old {
-			return old
-		}
-		return new
-	}
-
+func handleOSSStats(blobs [][]byte) error {
 	// updateHistogram updates the histogram with the average latency per operation for the given delta.
 	// newTotalTime and oldTotalTime are the cumulative times (in seconds).
 	// newCount and oldCount are the cumulative counts.
@@ -1843,20 +1959,17 @@ func handleOSSPacket(blobs [][]byte) error {
 
 		}
 	}
-	if len(blobs) == 0 {
-		return errors.New("no blobs in the OSS packet")
-	}
-
 	// we need to process the blobs backwards to ensure that we are processing the last valid event
 	// the most relevant data is the last valid event in the sequence of blobs
 	for i := len(blobs) - 1; i >= 0; i-- {
 		blob := blobs[i]
 		ossStats := OSSStatsGs{}
 		if err := json.Unmarshal(blob, &ossStats); err != nil {
-			return errors.Wrap(err, "failed to parse OSS stat json")
+			log.Debugf("Failed to unmarshal S3 file stats json: %s", string(blob))
+			continue
 		}
 		if !allowedEvents[ossStats.Event] {
-			log.Debugf("handleOSSPacket received an OSS packet with an unrecognized event type (%s)", ossStats.Event)
+			log.Warningf("handleOSSStats received an OSS packet with an unrecognized event type (%s)", ossStats.Event)
 			continue
 		}
 		updateHistogram(ossStats.ReadT, lastOssStats.ReadT, ossStats.Reads, lastOssStats.Reads, OssReadTime)
@@ -1938,6 +2051,46 @@ func handleOSSPacket(blobs [][]byte) error {
 		lastOssStats.SlowChmods = updateCounter(ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodCounter)
 		lastOssStats.SlowOpens = updateCounter(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter)
 		lastOssStats.SlowRenames = updateCounter(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter)
+	}
+
+	return nil
+}
+
+// handlesOSSPacket handles the OSS g-stream packets
+// It expects the blobs to be in JSON format
+// The blobs can be of different event types and come intermixed
+// When grouping we preserve the order of the blobs in the original packet
+// We will dispatch the blobs to the appropriate handler based on the event type
+func handleOSSPacket(blobs [][]byte) error {
+	if len(blobs) == 0 {
+		return errors.New("no blobs in the OSS g-stream packet")
+	}
+
+	// This map will map the event type to the list of blobs that have that event type
+	groupedEvents := make(map[string][][]byte)
+	for _, blob := range blobs {
+		ossEvent := OssGStreamEvent{}
+		if err := json.Unmarshal(blob, &ossEvent); err != nil {
+			return errors.Wrap(err, "failed to parse OSS event json")
+		}
+		if !allowedEvents[ossEvent.Event] {
+			log.Warningf("handleOSSPacket received an OSS packet with an unrecognized event type (%s)", ossEvent.Event)
+			continue
+		}
+		groupedEvents[ossEvent.Event] = append(groupedEvents[ossEvent.Event], blob)
+	}
+
+	for eventType, eventBlobs := range groupedEvents {
+		switch eventType {
+		case OssStatsEvent:
+			if err := handleOSSStats(eventBlobs); err != nil {
+				return errors.Wrap(err, "failed to handle OSS stats")
+			}
+		case S3FileStatsEvent:
+			if err := handleS3CacheStats(eventBlobs); err != nil {
+				return errors.Wrap(err, "failed to handle S3 file stats")
+			}
+		}
 	}
 
 	return nil
