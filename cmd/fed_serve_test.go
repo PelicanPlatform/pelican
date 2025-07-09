@@ -80,7 +80,6 @@ func TestFedServePosixOrigin(t *testing.T) {
 
 	// Increase the log level; otherwise, its difficult to debug failures
 	viper.Set("Logging.Level", "Debug")
-	config.InitConfig()
 
 	viper.Set("Origin.StoragePrefix", t.TempDir())
 	viper.Set("Origin.FederationPrefix", "/test")

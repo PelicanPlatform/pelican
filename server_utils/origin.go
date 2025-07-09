@@ -236,6 +236,7 @@ func (b *BaseOrigin) populateOriginCaps() {
 		Reads:       param.Origin_EnableReads.GetBool() || pubReads,
 		DirectReads: param.Origin_EnableDirectReads.GetBool(),
 	}
+
 }
 
 // Each origin may have different requirements for these functions. In the event they do,

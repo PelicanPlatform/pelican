@@ -203,7 +203,6 @@ func InitClient(t *testing.T, initCfg map[string]any) {
 		viper.Set(key, val)
 	}
 
-	config.InitConfig()
 	require.NoError(t, config.InitClient())
 }
 

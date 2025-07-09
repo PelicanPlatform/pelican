@@ -153,7 +153,7 @@ func TestInitConfig(t *testing.T) {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
 
-	InitConfig() // Should set up pelican.yaml, osdf.yaml and defaults.yaml
+	InitConfigInternal() // Should set up pelican.yaml, osdf.yaml and defaults.yaml
 
 	// Check if server address is correct by defaults.yaml
 	assert.Equal(t, "0.0.0.0", param.Server_WebHost.GetString())
@@ -166,7 +166,7 @@ func TestInitConfig(t *testing.T) {
 	}
 	ResetConfig()
 	viper.Set("config", tempCfgFile.Name()) // Set the temp file as the new 'pelican.yaml'
-	InitConfig()
+	InitConfigInternal()
 
 	// Check if server address overrides the default
 	assert.Equal(t, "1.1.1.1", param.Server_WebHost.GetString())
@@ -179,7 +179,7 @@ func TestInitConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to make temp file: %v", err)
 	}
-	InitConfig()
+	InitConfigInternal()
 	assert.Equal(t, "", param.Federation_DiscoveryUrl.GetString())
 }
 
@@ -400,6 +400,10 @@ func TestExtraCfg(t *testing.T) {
 // a warning message is displayed. Additionally, the value of the deprecated parameter
 // is used as the default value for its replacement.
 func TestDeprecationHandling(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
 	tmpConfigPath := "testconfigdir"
 	tmpConfigDirPath, err := os.MkdirTemp("", tmpConfigPath)
 	require.NoError(t, err)
@@ -410,9 +414,6 @@ func TestDeprecationHandling(t *testing.T) {
 	require.NoError(t, err)
 
 	tlsCertPath := filepath.Join(tmpConfigDirPath, "somerandomfile.txt")
-
-	ResetConfig()
-	defer ResetConfig()
 
 	viper.Set("ConfigDir", tmpConfigDirPath)
 	viper.Set("Logging.Level", "Warning")
@@ -425,7 +426,8 @@ func TestDeprecationHandling(t *testing.T) {
 	logrus.SetOutput(&logBuffer)
 	defer logrus.SetOutput(os.Stdout) // Restore stdout after the test
 
-	InitConfig()
+	err = InitServer(context.Background(), server_structs.DirectorType)
+	require.NoError(t, err)
 	err = SetServerDefaults(viper.GetViper())
 	require.NoError(t, err)
 
@@ -439,6 +441,10 @@ func TestDeprecationHandling(t *testing.T) {
 }
 
 func TestEnabledServers(t *testing.T) {
+	ResetConfig()
+	t.Cleanup(func() {
+		ResetConfig()
+	})
 	allServerTypes := []server_structs.ServerType{server_structs.OriginType, server_structs.CacheType, server_structs.DirectorType, server_structs.RegistryType}
 	allServerStrs := make([]string, 0)
 	allServerStrsLower := make([]string, 0)
@@ -565,12 +571,10 @@ func TestInitServerUrl(t *testing.T) {
 	t.Cleanup(func() {
 		ResetConfig()
 	})
-
 	initConfig := func() {
 		ResetConfig()
 		tempDir := t.TempDir()
 		viper.Set("ConfigDir", tempDir)
-		viper.Set(param.Logging_Level.GetName(), "debug")
 	}
 
 	initDirectoryConfig := func() {
