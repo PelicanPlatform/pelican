@@ -30,6 +30,25 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 )
 
+// rawSetuid and rawSetgid perform setuid and setgid using syscall.RawSyscall()
+// to avoid syscall.Setgid() and syscall.Setuid(). The latter internally use
+// AllThreadsSyscall(), which fails when CGO is disabled.
+func rawSetuid(uid int) error {
+	_, _, errno := syscall.RawSyscall(syscall.SYS_SETUID, uintptr(uid), 0, 0)
+	if errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+func rawSetgid(gid int) error {
+	_, _, errno := syscall.RawSyscall(syscall.SYS_SETGID, uintptr(gid), 0, 0)
+	if errno != 0 {
+		return errno
+	}
+	return nil
+}
+
 func dropPrivileges() (err error) {
 	log.Info("Dropping privileges to user ", param.Server_UnprivilegedUser.GetString())
 	var puser config.User
@@ -45,11 +64,13 @@ func dropPrivileges() (err error) {
 		err = errors.Errorf("unable to drop privileges to user (user %s, group %s) with GID 0", puser.Username, puser.Groupname)
 		return
 	}
-	if err = syscall.Setgid(puser.Gid); err != nil {
+
+	// Use raw syscalls to avoid failures when CGO is disabled
+	if err = rawSetgid(puser.Gid); err != nil {
 		err = errors.Wrap(err, "failed to drop group privileges")
 		return
 	}
-	if err = syscall.Setuid(puser.Uid); err != nil {
+	if err = rawSetuid(puser.Uid); err != nil {
 		err = errors.Wrap(err, "failed to drop user privileges")
 		return
 	}
