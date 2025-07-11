@@ -3116,9 +3116,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 			transferResult.Error = errors.New("remote object already exists, upload aborted")
 			return transferResult, transferResult.Error
 		} else if !strings.Contains(statErr.Error(), "not found") && !strings.Contains(statErr.Error(), "no such object") && !strings.Contains(statErr.Error(), "cannot remove remote path") {
-			// If the error is not a 'not found' error, treat as fatal
-			transferResult.Error = errors.Wrap(statErr, "failed to stat remote object before upload")
-			return transferResult, transferResult.Error
+			log.Warningln("Failed to check if object exists at the origin, proceeding with upload")
 		}
 		// If not found, proceed with upload
 	}
