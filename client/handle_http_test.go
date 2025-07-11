@@ -1459,6 +1459,13 @@ func TestFailedUploadError(t *testing.T) {
 				Host:   svrURL.Host,
 				Path:   svrURL.Path + "/test.txt",
 			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					Namespace:      "/test",
+					RequireToken:   false,
+					CollectionsUrl: svrURL,
+				},
+			},
 		},
 		localPath: testfileLocation,
 		remoteURL: svrURL,
@@ -1520,6 +1527,13 @@ func TestFailedLargeUploadError(t *testing.T) {
 				Scheme: "pelican://",
 				Host:   svrURL.Host,
 				Path:   svrURL.Path + "/test.txt",
+			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					Namespace:      "/test",
+					RequireToken:   false,
+					CollectionsUrl: svrURL,
+				},
 			},
 		},
 		localPath: testfileLocation,
