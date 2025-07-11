@@ -222,3 +222,118 @@ func TestMultiPrivateKey(t *testing.T) {
 		assert.Len(t, allKeys, 2)
 	})
 }
+
+func TestSymlinkIssuerKeys(t *testing.T) {
+	t.Run("load-symlinked-key", func(t *testing.T) {
+		ResetConfig()
+		defer ResetConfig()
+		tempDir := t.TempDir()
+		issuerKeysDir := filepath.Join(tempDir, "issuer-keys")
+		externalKeysDir := filepath.Join(tempDir, "external-keys")
+
+		// Create directories
+		err := os.MkdirAll(issuerKeysDir, 0750)
+		require.NoError(t, err)
+		err = os.MkdirAll(externalKeysDir, 0750)
+		require.NoError(t, err)
+
+		// Generate a key file outside the issuer keys directory
+		externalKeyFile := filepath.Join(externalKeysDir, "external-key.pem")
+		err = generatePrivateKey(externalKeyFile, "ecdsa", "pkcs8")
+		require.NoError(t, err)
+
+		// Load the external key to get its expected key ID
+		expectedKey, err := LoadSinglePEM(externalKeyFile)
+		require.NoError(t, err)
+
+		// Create a symlink in the issuer keys directory pointing to the external key
+		symlinkPath := filepath.Join(issuerKeysDir, "symlinked-key.pem")
+		err = os.Symlink(externalKeyFile, symlinkPath)
+		require.NoError(t, err)
+
+		// Load the key and verify it works
+		currentKey, err := loadPEMFiles(issuerKeysDir)
+		require.NoError(t, err)
+		require.NotNil(t, currentKey)
+		require.Equal(t, expectedKey.KeyID(), currentKey.KeyID())
+
+		// Verify the key is loaded correctly
+		allKeys := getIssuerPrivateKeysCopy()
+		assert.Len(t, allKeys, 1)
+		assert.Contains(t, allKeys, expectedKey.KeyID())
+	})
+
+	t.Run("mixed-regular-and-symlinked-keys", func(t *testing.T) {
+		ResetConfig()
+		defer ResetConfig()
+		tempDir := t.TempDir()
+		issuerKeysDir := filepath.Join(tempDir, "issuer-keys")
+		externalKeysDir := filepath.Join(tempDir, "external-keys")
+
+		// Create directories
+		err := os.MkdirAll(issuerKeysDir, 0750)
+		require.NoError(t, err)
+		err = os.MkdirAll(externalKeysDir, 0750)
+		require.NoError(t, err)
+
+		// Generate a regular key file in the issuer keys directory
+		regularKeyFile := filepath.Join(issuerKeysDir, "regular-key.pem")
+		err = generatePrivateKey(regularKeyFile, "ecdsa", "pkcs8")
+		require.NoError(t, err)
+
+		// Generate a key file outside the issuer keys directory
+		externalKeyFile := filepath.Join(externalKeysDir, "external-key.pem")
+		err = generatePrivateKey(externalKeyFile, "ecdsa", "pkcs8")
+		require.NoError(t, err)
+
+		// Create a symlink in the issuer keys directory pointing to the external key
+		symlinkPath := filepath.Join(issuerKeysDir, "symlinked-key.pem")
+		err = os.Symlink(externalKeyFile, symlinkPath)
+		require.NoError(t, err)
+
+		// Load the keys and verify both are loaded
+		key, err := loadPEMFiles(issuerKeysDir)
+		require.NoError(t, err)
+		require.NotNil(t, key)
+
+		// Verify both keys are loaded
+		allKeys := getIssuerPrivateKeysCopy()
+		assert.Len(t, allKeys, 2)
+
+		// Verify the current key is the one with the lexicographically first filename
+		// "regular-key.pem" should come before "symlinked-key.pem"
+		assert.Equal(t, "regular-key.pem", filepath.Base(regularKeyFile))
+		assert.Equal(t, "symlinked-key.pem", filepath.Base(symlinkPath))
+	})
+
+	t.Run("broken-symlink-should-be-skipped", func(t *testing.T) {
+		ResetConfig()
+		defer ResetConfig()
+		tempDir := t.TempDir()
+		issuerKeysDir := filepath.Join(tempDir, "issuer-keys")
+
+		// Create directory
+		err := os.MkdirAll(issuerKeysDir, 0750)
+		require.NoError(t, err)
+
+		// Create a symlink pointing to a non-existent file
+		brokenSymlinkPath := filepath.Join(issuerKeysDir, "broken-symlink.pem")
+		err = os.Symlink("/non/existent/path/key.pem", brokenSymlinkPath)
+		require.NoError(t, err)
+
+		// Generate a valid key file
+		validKeyFile := filepath.Join(issuerKeysDir, "valid-key.pem")
+		err = generatePrivateKey(validKeyFile, "ecdsa", "pkcs8")
+		require.NoError(t, err)
+
+		// Load the keys - should skip the broken symlink and load the valid key
+		key, err := loadPEMFiles(issuerKeysDir)
+		require.NoError(t, err)
+		require.NotNil(t, key)
+
+		// Verify only the valid key is loaded
+		allKeys := getIssuerPrivateKeysCopy()
+		assert.Len(t, allKeys, 1)
+		assert.Contains(t, allKeys, key.KeyID())
+	})
+}
