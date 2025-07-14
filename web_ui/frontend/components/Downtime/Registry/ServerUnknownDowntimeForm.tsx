@@ -73,7 +73,7 @@ const ServerUnknownDowntimeForm = ({
   // Get the cache and origin prefixes to key the downtimes for the director
   const { data: namespaces } = useApiSWR<RegistryNamespace[]>(
     'Could not fetch Origins and Caches to populate downtime form',
-    'getNamespaces',
+    'getNamespaces-TODO-update-this-key-to-share-cache',
     getNamespaces
   );
   const servers = useMemo(() => {
