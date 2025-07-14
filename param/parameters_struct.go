@@ -186,6 +186,7 @@ type Config struct {
 		AggregatePrefixes []string `mapstructure:"aggregateprefixes" yaml:"AggregatePrefixes"`
 		DataLocation string `mapstructure:"datalocation" yaml:"DataLocation"`
 		DataRetention time.Duration `mapstructure:"dataretention" yaml:"DataRetention"`
+		EnablePrometheus bool `mapstructure:"enableprometheus" yaml:"EnablePrometheus"`
 		LabelLimit int `mapstructure:"labellimit" yaml:"LabelLimit"`
 		LabelNameLengthLimit int `mapstructure:"labelnamelengthlimit" yaml:"LabelNameLengthLimit"`
 		LabelValueLengthLimit int `mapstructure:"labelvaluelengthlimit" yaml:"LabelValueLengthLimit"`
@@ -544,6 +545,7 @@ type configWithType struct {
 		AggregatePrefixes struct { Type string; Value []string }
 		DataLocation struct { Type string; Value string }
 		DataRetention struct { Type string; Value time.Duration }
+		EnablePrometheus struct { Type string; Value bool }
 		LabelLimit struct { Type string; Value int }
 		LabelNameLengthLimit struct { Type string; Value int }
 		LabelValueLengthLimit struct { Type string; Value int }
