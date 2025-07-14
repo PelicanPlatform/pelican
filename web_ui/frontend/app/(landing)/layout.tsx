@@ -21,8 +21,7 @@ import { Box } from '@mui/material';
 import { Header } from '@/components/layout/Header';
 
 export const metadata = {
-  title: 'Pelican Platform',
-  description: 'Software designed to make data distribution easy',
+  title: 'Landing',
 };
 
 export default function RootLayout({
