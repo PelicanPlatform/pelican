@@ -457,8 +457,10 @@ COPY --chown=root:tomcat oa4mp/resources/server.xml /opt/tomcat/conf/server.xml
 # Replace other bits and bobs to take into account the fact that Pelican
 # authenticates the user and proxies requests.
 COPY --chown=tomcat:tomcat oa4mp/resources/client-template.xml /opt/scitokens-server/etc/templates/client-template.xml
-RUN sed -i -e 's/action="\${actionToTake}" //' /opt/tomcat/webapps/scitokens-server/device-consent.jsp
-RUN sed -i -e 's|action="\${actionToTake}"|action="/api/v1.0/issuer/authorize"|' /opt/tomcat/webapps/scitokens-server/authorize-remote-user.jsp
+COPY --chown=tomcat:tomcat oa4mp/resources/device-consent.jsp /opt/tomcat/webapps/scitokens-server/device-consent.jsp
+COPY --chown=tomcat:tomcat oa4mp/resources/authorize-remote-user.jsp /opt/tomcat/webapps/scitokens-server/authorize-remote-user.jsp
+COPY --chown=tomcat:tomcat oa4mp/resources/device-fail.jsp /opt/tomcat/webapps/scitokens-server/device-fail.jsp
+COPY --chown=tomcat:tomcat oa4mp/resources/device-ok.jsp /opt/tomcat/webapps/scitokens-server/device-ok.jsp
 
 # This script is a documented part of OA4MP's bootstrap process, but we
 # otherwise do not need it.
