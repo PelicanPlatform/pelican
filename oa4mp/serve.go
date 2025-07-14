@@ -107,7 +107,7 @@ func compileAuthzRules(raw authzTemplate) (*compiledAuthz, error) {
 		Prefix:        raw.Prefix,
 		UserSet:       make(map[string]struct{}),
 		GroupLiterals: make(map[string]struct{}),
-		GroupRegexes:  make([]*regexp.Regexp, len(raw.GroupRegexes)),
+		GroupRegexes:  make([]*regexp.Regexp, 0, len(raw.GroupRegexes)),
 	}
 
 	for _, user := range raw.Users {

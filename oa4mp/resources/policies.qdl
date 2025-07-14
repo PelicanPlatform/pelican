@@ -32,7 +32,7 @@ if [0 == size(|^group_list. /\ { {{- range $idx, $grp := .GroupRequirements -}}{
 {{- end }}
 
 default_scopes := {};
-default_scopes := default_scopes \/ claims.scopes;
+default_scopes := claims.scopes;
 {{ range .GroupAuthzTemplates }}
 {{ if eq 0 (len .Groups) -}}
 while [has_value(key, group_list.)]

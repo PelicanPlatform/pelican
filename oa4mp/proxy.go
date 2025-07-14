@@ -67,38 +67,91 @@ func getTransport() *http.Transport {
 
 func calculateAllowedScopes(user string, groupsList []string) []string {
 	if len(compiledAuthzRules) == 0 {
-		return nil
+		return []string{}
 	}
 
 	scopeSet := make(map[string]struct{})
+	userEscaped := url.PathEscape(user)
 	for _, rule := range compiledAuthzRules {
+		// First, check if the user is allowed by this rule
 		if len(rule.UserSet) > 0 {
 			if _, ok := rule.UserSet[user]; !ok {
 				continue
 			}
 		}
 
-		for _, group := range groupsList {
-			_, literalMatch := rule.GroupLiterals[group]
-			regexMatch := false
-			for _, rgx := range rule.GroupRegexes {
-				if rgx.MatchString(group) {
-					regexMatch = true
-					break
+		// Next, check if the rule has group requirements.
+		hasGroupRequirements := len(rule.GroupLiterals) > 0 || len(rule.GroupRegexes) > 0
+		matchingGroups := make([]string, 0)
+		if hasGroupRequirements {
+			for _, group := range groupsList {
+				_, literalMatch := rule.GroupLiterals[group]
+				regexMatch := false
+				if !literalMatch {
+					for _, rgx := range rule.GroupRegexes {
+						if rgx.MatchString(group) {
+							regexMatch = true
+							break
+						}
+					}
+				}
+				if literalMatch || regexMatch {
+					matchingGroups = append(matchingGroups, group)
 				}
 			}
-
-			if !literalMatch && !regexMatch {
+			if len(matchingGroups) == 0 {
 				continue
-			}
-
-			for _, action := range rule.Actions {
-				s := strings.ReplaceAll(rule.Prefix+action, "$GROUP", group)
-				s = strings.ReplaceAll(s, "$USER", user)
-				scopeSet[s] = struct{}{}
 			}
 		}
 
+		// Finally, generate the scopes
+		if strings.Contains(rule.Prefix, "$GROUP") {
+			groupsToIterate := groupsList
+			if hasGroupRequirements {
+				groupsToIterate = matchingGroups
+			}
+			for _, group := range groupsToIterate {
+				groupEscaped := url.PathEscape(group)
+				for _, action := range rule.Actions {
+					scope := ""
+					switch action {
+					case "read":
+						scope = "storage.read"
+					case "write":
+						scope = "storage.modify"
+					case "create":
+						scope = "storage.create"
+					case "modify":
+						scope = "storage.modify"
+					default:
+						scope = action
+					}
+					prefix := strings.ReplaceAll(rule.Prefix, "$GROUP", groupEscaped)
+					prefix = strings.ReplaceAll(prefix, "$USER", userEscaped)
+					s := scope + ":" + prefix
+					scopeSet[s] = struct{}{}
+				}
+			}
+		} else {
+			for _, action := range rule.Actions {
+				scope := ""
+				switch action {
+				case "read":
+					scope = "storage.read"
+				case "write":
+					scope = "storage.modify"
+				case "create":
+					scope = "storage.create"
+				case "modify":
+					scope = "storage.modify"
+				default:
+					scope = action
+				}
+				prefix := strings.ReplaceAll(rule.Prefix, "$USER", userEscaped)
+				s := scope + ":" + prefix
+				scopeSet[s] = struct{}{}
+			}
+		}
 	}
 
 	allowedScopes := make([]string, 0, len(scopeSet))
@@ -147,10 +200,9 @@ func oa4mpProxy(ctx *gin.Context) {
 		userInfo["u"] = user
 		userInfo["g"] = groupsList
 
-		allowedScopes := calculateAllowedScopes(user, groupsList)
-		if len(allowedScopes) > 0 {
-			userInfo["s"] = allowedScopes
-		}
+		// The QDL script on the remote server expects the scopes "s" to be present,
+		// even if empty.
+		userInfo["s"] = calculateAllowedScopes(user, groupsList)
 
 		userBytes, err := json.Marshal(userInfo)
 		if err != nil {
