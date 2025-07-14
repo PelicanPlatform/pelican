@@ -51,14 +51,14 @@ ARG NODEJS_VER=20
 #     claims to be will *always* come from the .spec file. The upstream Git
 #     repository must have a correct .spec file, or confusion will ensue.
 #
-ARG LOTMAN_SRC_BUILD=false
+ARG LOTMAN_SRC_BUILD=true
 ARG LOTMAN_VER=0.0.4
 ARG XRDCL_PELICAN_SRC_BUILD=false
 ARG XRDCL_PELICAN_VER=1.2.3
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.7
-ARG XROOTD_LOTMAN_SRC_BUILD=false
-ARG XROOTD_LOTMAN_VER=0.0.3
+ARG XROOTD_LOTMAN_SRC_BUILD=true
+ARG XROOTD_LOTMAN_VER=0.0.5
 ARG XROOTD_S3_HTTP_SRC_BUILD=true
 ARG XROOTD_S3_HTTP_VER=0.4.1
 
