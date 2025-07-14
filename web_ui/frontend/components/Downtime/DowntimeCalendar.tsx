@@ -5,10 +5,10 @@ import 'react-calendar/dist/Calendar.css';
 import './calendar.css';
 
 import DateTile from './DateTile';
-import {useContext, useMemo, useState} from 'react';
+import { useContext, useMemo, useState } from 'react';
 import { DowntimeGet, DowntimeSeverity } from '@/types';
 import { CalendarDateTimeDispatchContext } from '@/components/Downtime/CalendarContext';
-import getDaysInMonth from "@/helpers/getDaysInMonth";
+import getDaysInMonth from '@/helpers/getDaysInMonth';
 
 const DowntimeCalendar = ({ data = [] }: { data?: DowntimeGet[] }) => {
   const setRange = useContext(CalendarDateTimeDispatchContext);
@@ -16,37 +16,52 @@ const DowntimeCalendar = ({ data = [] }: { data?: DowntimeGet[] }) => {
   const [activeStartDate, setActiveStartDate] = useState<Date>(new Date());
 
   // Downtimes for this month binned by date for use in the DateTile component
-  const binnedDowntimes: Record<string, Record<DowntimeSeverity, number>> = useMemo(() => {
-
+  const binnedDowntimes: Record<
+    string,
+    Record<DowntimeSeverity, number>
+  > = useMemo(() => {
     // Iterate the dates in the current month and bin the downtimes by date
-    return getDaysInMonth(activeStartDate).reduce((a, d) => {
+    return getDaysInMonth(activeStartDate).reduce(
+      (a, d) => {
+        // Determine downtimes that intersect with the current date
+        const dateRelevantDowntimes = data?.filter((downtime) => {
+          const start = new Date(downtime.startTime);
+          const end = new Date(downtime.endTime);
 
-      // Determine downtimes that intersect with the current date
-      const dateRelevantDowntimes = data?.filter((downtime) => {
-        const start = new Date(downtime.startTime);
-        const end = new Date(downtime.endTime);
+          const dateStart = new Date(
+            d.getFullYear(),
+            d.getMonth(),
+            d.getDate()
+          );
+          const dateEnd = new Date(
+            d.getFullYear(),
+            d.getMonth(),
+            d.getDate() + 1
+          );
 
-        const dateStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-        const dateEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+          return (
+            (start >= dateStart && start < dateEnd) || // Starts on this date
+            (end > dateStart && end <= dateEnd) || // Ends on this date
+            (start < dateStart && end > dateEnd) // Is contained within this date
+          );
+        });
 
-        return (
-          (start >= dateStart && start < dateEnd) || // Starts on this date
-          (end > dateStart && end <= dateEnd) ||     // Ends on this date
-          (start < dateStart && end > dateEnd)       // Is contained within this date
-        );
+        a[d.toISOString()] = binBySeverity(dateRelevantDowntimes || []);
 
-      });
-
-      a[d.toISOString()] = binBySeverity(dateRelevantDowntimes || []);
-
-      return a
-
-    }, {} as Record<string, Record<DowntimeSeverity, number>>);
+        return a;
+      },
+      {} as Record<string, Record<DowntimeSeverity, number>>
+    );
   }, [activeStartDate, data]);
 
   // Unpack the month of downtimes and determine the maximum value in a single day + category to scale visualizations
   const maxValue = useMemo(() => {
-    return Math.max(...Object.values(binnedDowntimes).map(o => Math.max(...Object.values(o))), 0);
+    return Math.max(
+      ...Object.values(binnedDowntimes).map((o) =>
+        Math.max(...Object.values(o))
+      ),
+      0
+    );
   }, [binnedDowntimes]);
 
   return (
@@ -55,7 +70,6 @@ const DowntimeCalendar = ({ data = [] }: { data?: DowntimeGet[] }) => {
       returnValue={'range'}
       calendarType={'gregory'}
       onActiveStartDateChange={(v) => {
-
         // Update the active start date if it is not null
         v.activeStartDate !== null && setActiveStartDate(v.activeStartDate);
 
