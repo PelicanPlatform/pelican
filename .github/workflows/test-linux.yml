@@ -61,6 +61,9 @@ jobs:
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
         restore-keys: |
           ${{ runner.os }}-go-
+    - name: Install build tools
+      run: |
+        dnf -y install gcc gcc-c++ || (apt-get -y update && apt-get -y install gcc g++)
     - name: Test
       run: |
         make web-build
