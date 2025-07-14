@@ -70,7 +70,12 @@ builds:
   # also use this to filter which modules are built into the binary.
   - id: pelican-server
     env:
-      - CGO_ENABLED=0
+      # Enable CGO for the build that includes lotman. Lotman uses purego, which implements
+      # a fakecgo and persuades runtime that CGO is enabled. Then in the drop-privs feature,
+      # CGO_ENABLED=0 would make syscall.Setgid and syscall.Setuid call AllThreadsSyscall(),
+      # while this function is incompatible with binaries that use cgo (and fakecgo also counts).
+      # Set CGO_ENABLED=1 to avoid calling AllThreadsSyscall(), which causes this panic.
+      - CGO_ENABLED=1
     goos:
       - linux
     goarch:
