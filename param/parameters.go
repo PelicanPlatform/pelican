@@ -348,6 +348,8 @@ var (
 	Shoveler_PortLower = IntParam{"Shoveler.PortLower"}
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
 	Xrootd_DetailedMonitoringPort = IntParam{"Xrootd.DetailedMonitoringPort"}
+	Xrootd_EvictionMonitoringInterval = IntParam{"Xrootd.EvictionMonitoringInterval"}
+	Xrootd_EvictionMonitoringMaxDepth = IntParam{"Xrootd.EvictionMonitoringMaxDepth"}
 	Xrootd_ManagerPort = IntParam{"Xrootd.ManagerPort"}
 	Xrootd_Port = IntParam{"Xrootd.Port"}
 	Xrootd_SummaryMonitoringPort = IntParam{"Xrootd.SummaryMonitoringPort"}
