@@ -35,7 +35,8 @@
 
     <Connector
             protocol="org.apache.coyote.http11.Http11NioProtocol"
-            unixDomainSocketPath="/opt/scitokens-server/var/http.sock" />
+            unixDomainSocketPath="/opt/scitokens-server/var/http.sock"
+            maxHttpHeaderSize="1048576" />
 
     <Engine name="Catalina" defaultHost="localhost">
 
