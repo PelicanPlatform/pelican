@@ -2556,6 +2556,10 @@ description: |+
     `$GROUP`, then authorizations will be generated only for the groups
     listed here.
 
+  - `group_regexes` (optional): A list of regular expressions. If non-empty, at least one authenticated group must match one of the regular expressions
+    in order for this template to generate any authorizations. If `prefix` contains the substring `$GROUP`, then authorizations will be generated only
+    for the matching groups.  An authenticated group will match if it is listed in either the `groups` or the `group_regexes` list.
+
   For example, if the request is authenticated as username `bbockelm` and
   groups `dept_a` and `dept_b`, then the list of templates
 
@@ -2568,6 +2572,9 @@ description: |+
   - actions: ["read", "create"]
     prefix: /projects/$GROUP
     groups: ["dept_a", "dept_c"]
+  - actions: ["read"]
+    prefix: /data/$GROUP
+    group_regexes: ["^dept_"]
   ```
 
   will result in the following authorizations:
@@ -2576,6 +2583,8 @@ description: |+
   - modify /home/bbockelm
   - read /projects/dept_a
   - create /projects_dept_a
+  - read /data/dept_a
+  - read /data/dept_b
 type: object
 default: []
 components: ["origin"]

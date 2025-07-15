@@ -65,6 +65,114 @@ func getTransport() *http.Transport {
 	return transport
 }
 
+func calculateAllowedScopes(user string, groupsList []string) ([]string, []string) {
+	if len(compiledAuthzRules) == 0 {
+		return []string{}, []string{}
+	}
+
+	scopeSet := make(map[string]struct{})
+	groupSet := make(map[string]struct{})
+	userEscaped := url.PathEscape(user)
+	for _, rule := range compiledAuthzRules {
+		// First, check if the user is allowed by this rule
+		if len(rule.UserSet) > 0 {
+			if _, ok := rule.UserSet[user]; !ok {
+				continue
+			}
+		}
+
+		// Next, check if the rule has group requirements.
+		hasGroupRequirements := len(rule.GroupLiterals) > 0 || len(rule.GroupRegexes) > 0
+		currentMatchingGroups := make([]string, 0)
+		if hasGroupRequirements {
+			for _, group := range groupsList {
+				_, literalMatch := rule.GroupLiterals[group]
+				regexMatch := false
+				if !literalMatch {
+					for _, rgx := range rule.GroupRegexes {
+						if rgx.MatchString(group) {
+							regexMatch = true
+							break
+						}
+					}
+				}
+				if literalMatch || regexMatch {
+					currentMatchingGroups = append(currentMatchingGroups, group)
+				}
+			}
+			if len(currentMatchingGroups) == 0 {
+				continue
+			}
+		}
+
+		// This rule applies; any groups that matched are now considered "active"
+		for _, group := range currentMatchingGroups {
+			groupSet[group] = struct{}{}
+		}
+
+		// Finally, generate the scopes
+		if strings.Contains(rule.Prefix, "$GROUP") {
+			groupsToIterate := groupsList
+			if hasGroupRequirements {
+				groupsToIterate = currentMatchingGroups
+			}
+			for _, group := range groupsToIterate {
+				groupEscaped := url.PathEscape(group)
+				for _, action := range rule.Actions {
+					scope := ""
+					switch action {
+					case "read":
+						scope = "storage.read"
+					case "write":
+						scope = "storage.modify"
+					case "create":
+						scope = "storage.create"
+					case "modify":
+						scope = "storage.modify"
+					default:
+						scope = action
+					}
+					prefix := strings.ReplaceAll(rule.Prefix, "$GROUP", groupEscaped)
+					prefix = strings.ReplaceAll(prefix, "$USER", userEscaped)
+					s := scope + ":" + prefix
+					scopeSet[s] = struct{}{}
+				}
+			}
+		} else {
+			for _, action := range rule.Actions {
+				scope := ""
+				switch action {
+				case "read":
+					scope = "storage.read"
+				case "write":
+					scope = "storage.modify"
+				case "create":
+					scope = "storage.create"
+				case "modify":
+					scope = "storage.modify"
+				default:
+					scope = action
+				}
+				prefix := strings.ReplaceAll(rule.Prefix, "$USER", userEscaped)
+				s := scope + ":" + prefix
+				scopeSet[s] = struct{}{}
+			}
+		}
+	}
+
+	allowedScopes := make([]string, 0, len(scopeSet))
+	for scope := range scopeSet {
+		allowedScopes = append(allowedScopes, scope)
+	}
+
+	matchedGroups := make([]string, 0, len(groupSet))
+	for group := range groupSet {
+		matchedGroups = append(matchedGroups, group)
+	}
+
+	return allowedScopes, matchedGroups
+}
+
 // Proxy a HTTP request from the Pelican server to the OA4MP server
 //
 // Maps a request to /api/v1.0/issuer/foo to /scitokens-server/foo.  Most
@@ -75,6 +183,7 @@ func oa4mpProxy(ctx *gin.Context) {
 	var userEncoded string
 	var user string
 	var groupsList []string
+	var matchedGroups []string
 	if ctx.Request.URL.Path == "/api/v1.0/issuer/device" || ctx.Request.URL.Path == "/api/v1.0/issuer/authorize" {
 		web_ui.RequireAuthMiddleware(ctx)
 		if ctx.IsAborted() {
@@ -101,7 +210,10 @@ func oa4mpProxy(ctx *gin.Context) {
 		// side will appropriately unwrap this information.
 		userInfo := make(map[string]interface{})
 		userInfo["u"] = user
-		userInfo["g"] = groupsList
+		allowedScopes, matchedGroups := calculateAllowedScopes(user, groupsList)
+		userInfo["g"] = matchedGroups
+		userInfo["s"] = allowedScopes
+
 		userBytes, err := json.Marshal(userInfo)
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -125,7 +237,7 @@ func oa4mpProxy(ctx *gin.Context) {
 	}
 
 	if user != "" {
-		log.Debugf("Will proxy request to URL %s with user '%s' and groups '%s'", ctx.Request.URL.String(), user, strings.Join(groupsList, ","))
+		log.Debugf("Will proxy request to URL %s with user '%s' and groups '%s'", ctx.Request.URL.String(), user, strings.Join(matchedGroups, ","))
 	} else {
 		log.Debugln("Will proxy request to URL", ctx.Request.URL.String())
 	}
