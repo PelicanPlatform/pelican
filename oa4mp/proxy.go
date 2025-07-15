@@ -183,6 +183,7 @@ func oa4mpProxy(ctx *gin.Context) {
 	var userEncoded string
 	var user string
 	var groupsList []string
+	var matchedGroups []string
 	if ctx.Request.URL.Path == "/api/v1.0/issuer/device" || ctx.Request.URL.Path == "/api/v1.0/issuer/authorize" {
 		web_ui.RequireAuthMiddleware(ctx)
 		if ctx.IsAborted() {
@@ -236,7 +237,7 @@ func oa4mpProxy(ctx *gin.Context) {
 	}
 
 	if user != "" {
-		log.Debugf("Will proxy request to URL %s with user '%s' and groups '%s'", ctx.Request.URL.String(), user, strings.Join(groupsList, ","))
+		log.Debugf("Will proxy request to URL %s with user '%s' and groups '%s'", ctx.Request.URL.String(), user, strings.Join(matchedGroups, ","))
 	} else {
 		log.Debugln("Will proxy request to URL", ctx.Request.URL.String())
 	}
