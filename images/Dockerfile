@@ -192,7 +192,12 @@ RUN --mount=type=cache,id=dnf-${TARGETPLATFORM},target=/var/cache/dnf,sharing=lo
   printf '%s\n' "metadata_expire=1800" >> /etc/dnf/dnf.conf
 
   dnf install -y tini 'dnf-command(versionlock)'
+
+  mkdir -p /etc/pelican/config.d
+  mkdir -p /usr/share/pelican/config.d
 ENDRUN
+
+COPY images/pelican.yaml /etc/pelican/pelican.yaml
 
 #################################################################
 # XRootD Software Init
