@@ -130,6 +130,7 @@ type Config struct {
 		OIDCGroupClaim string `mapstructure:"oidcgroupclaim" yaml:"OIDCGroupClaim"`
 		OIDCPreferClaimsFromIDToken bool `mapstructure:"oidcpreferclaimsfromidtoken" yaml:"OIDCPreferClaimsFromIDToken"`
 		QDLLocation string `mapstructure:"qdllocation" yaml:"QDLLocation"`
+		RedirectUris []string `mapstructure:"redirecturis" yaml:"RedirectUris"`
 		ScitokensServerLocation string `mapstructure:"scitokensserverlocation" yaml:"ScitokensServerLocation"`
 		TomcatLocation string `mapstructure:"tomcatlocation" yaml:"TomcatLocation"`
 		UserStripDomain bool `mapstructure:"userstripdomain" yaml:"UserStripDomain"`
@@ -488,6 +489,7 @@ type configWithType struct {
 		OIDCGroupClaim struct { Type string; Value string }
 		OIDCPreferClaimsFromIDToken struct { Type string; Value bool }
 		QDLLocation struct { Type string; Value string }
+		RedirectUris struct { Type string; Value []string }
 		ScitokensServerLocation struct { Type string; Value string }
 		TomcatLocation struct { Type string; Value string }
 		UserStripDomain struct { Type string; Value bool }
