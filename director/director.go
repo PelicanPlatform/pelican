@@ -1666,10 +1666,6 @@ func collectDirectorRedirectionMetric(ctx *gin.Context, destination string) {
 func RegisterDirectorAPI(ctx context.Context, router *gin.RouterGroup) {
 	egrp := ctx.Value(config.EgrpKey).(*errgroup.Group)
 
-	// Print out a log statement so we know what version is running
-	log.Debugf("Starting Pelican Director API v%s", "s")
-	gin.SetMode(gin.DebugMode)
-
 	directorAPIV1 := router.Group("/api/v1.0/director", web_ui.ServerHeaderMiddleware)
 	{
 		// Answer CORS preflight requests, trivial response inlined
