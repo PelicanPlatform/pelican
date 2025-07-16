@@ -377,8 +377,13 @@ func (tg *tokenGenerator) get() (token string, err error) {
 	// First, see if the existing token is valid
 	info := tg.Token.Load()
 	if info != nil && time.Until(info.Expiry) > 0 && info.Contents != "" {
-		token = info.Contents
-		return
+		// if AcquireToken is enabled and the token is unacceptable, clear the cache and force a new token to be generated
+		if tg.EnableAcquire && tg.DirResp != nil && !tokenIsAcceptable(info.Contents, tg.Destination.Path, *tg.DirResp, config.TokenGenerationOpts{Operation: tg.Operation}) {
+			tg.Token.Store(nil) // clear the cache and force a new token to be generated
+			log.Debugln("Token is not acceptable; clearing cache")
+		} else {
+			return info.Contents, nil
+		}
 	}
 
 	// If not, always invoke the synchronized "Do".  It will
@@ -514,6 +519,11 @@ func tokenIsValid(jwtSerialized string) (valid bool, expiry time.Time) {
 		return
 	}
 
+	if err := jwt.Validate(token); err != nil {
+		log.Warningln("Token is invalid:", err)
+		return false, token.Expiration()
+	}
+
 	valid = true
 	expiry = token.Expiration()
 	return
@@ -637,36 +647,30 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 		}
 	}
 
-	// For now, a fairly useless token-selection algorithm - take the first in the list.
-	// In the future, we should:
-	// - Check scopes
-	var acceptableToken *config.TokenEntry = nil
-	acceptableUnexpiredToken := ""
-	for idx, token := range prefixEntry.Tokens {
-		if !tokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
-			continue
+	// First search for an acceptable and unexpired token.
+	for _, token := range prefixEntry.Tokens {
+		if tokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
+			if valid, _ := tokenIsValid(token.AccessToken); valid {
+				log.Debugln("Returning an unexpired token from cache")
+				return token.AccessToken, nil
+			}
 		}
-		if acceptableToken == nil {
-			acceptableToken = &prefixEntry.Tokens[idx]
-		} else if acceptableUnexpiredToken != "" {
-			// Both tokens are non-empty; let's use them
+	}
+
+	// If no acceptable and unexpired token is found, search for an acceptable token to refresh.
+	var tokenToRefresh *config.TokenEntry = nil
+	for idx, token := range prefixEntry.Tokens {
+		if tokenIsAcceptable(token.AccessToken, destination.Path, dirResp, opts) {
+			tokenToRefresh = &prefixEntry.Tokens[idx]
 			break
 		}
-		if valid, _ := tokenIsValid(token.AccessToken); valid {
-			acceptableUnexpiredToken = token.AccessToken
-		}
-	}
-	if len(acceptableUnexpiredToken) > 0 {
-		log.Debugln("Returning an unexpired token from cache")
-		return acceptableUnexpiredToken, nil
 	}
 
-	if acceptableToken != nil && len(acceptableToken.RefreshToken) > 0 {
-
+	if tokenToRefresh != nil {
 		// We have a reasonable token; let's try refreshing it.
 		upstreamToken := oauth2_upstream.Token{
-			AccessToken:  acceptableToken.AccessToken,
-			RefreshToken: acceptableToken.RefreshToken,
+			AccessToken:  tokenToRefresh.AccessToken,
+			RefreshToken: tokenToRefresh.RefreshToken,
 			Expiry:       time.Unix(0, 0),
 		}
 		issuerInfo, err := config.GetIssuerMetadata(issuer)
@@ -685,10 +689,10 @@ func AcquireToken(destination *url.URL, dirResp server_structs.DirectorResponse,
 			if err != nil {
 				log.Warningln("Failed to renew an expired token:", err)
 			} else {
-				acceptableToken.AccessToken = newToken.AccessToken
-				acceptableToken.Expiration = newToken.Expiry.Unix()
+				tokenToRefresh.AccessToken = newToken.AccessToken
+				tokenToRefresh.Expiration = newToken.Expiry.Unix()
 				if len(newToken.RefreshToken) != 0 {
-					acceptableToken.RefreshToken = newToken.RefreshToken
+					tokenToRefresh.RefreshToken = newToken.RefreshToken
 				}
 				if err = config.SaveConfigContents(&osdfConfig); err != nil {
 					log.Warningln("Failed to save new token to configuration file:", err)
@@ -825,7 +829,7 @@ func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse
 	tc.Lifetime = time.Hour
 	tc.Subject = "client_token"
 	ts := token_scopes.Wlcg_Storage_Read
-	if opts.Operation == config.TokenSharedWrite {
+	if opts.Operation == config.TokenWrite || opts.Operation == config.TokenSharedWrite || opts.Operation == config.TokenDelete {
 		ts = token_scopes.Wlcg_Storage_Modify
 	}
 	if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
