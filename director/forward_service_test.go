@@ -77,7 +77,7 @@ func TestForwardService(t *testing.T) {
 	data, err := io.ReadAll(info.contents)
 	require.NoError(t, err)
 
-	var fwd ForwardAd
+	var fwd forwardAd
 	require.NoError(t, json.Unmarshal(data, &fwd))
 	assert.Equal(t, viper.GetString(param.Director_AdvertiseUrl.GetName()), fwd.DirectorAd.AdvertiseUrl)
 	assert.Equal(t, server_structs.OriginType.String(), fwd.AdType)
@@ -141,7 +141,7 @@ func TestForwardServiceAd(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	forwardServiceAd(ctx, svcAd, server_structs.OriginType, dir1.ad)
+	forwardServiceAd(ctx, svcAd, server_structs.OriginType, dir1.ad.Name)
 
 	// We should have received an ad on channel 2 but not channel 1
 	select {

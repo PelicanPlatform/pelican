@@ -76,7 +76,7 @@ type (
 	// We provided both the director that produced the ad and the
 	// ad itself.  Having the director ad helps detect forwarding
 	// loops -- we can break early if we detect we're talking to ourself!
-	ForwardAd struct {
+	forwardAd struct {
 		DirectorAd *server_structs.DirectorAd        `json:"director-ad"`
 		AdType     string                            `json:"ad-type"`
 		Now        time.Time                         `json:"now"`
@@ -134,7 +134,7 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 		return
 	}
 
-	fAd := ForwardAd{}
+	fAd := forwardAd{}
 	if err = ctx.MustBindWith(&fAd, binding.JSON); err != nil {
 		log.Errorln("Failed to bind JSON:", err)
 		return
@@ -189,7 +189,7 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 			return
 		}
 
-		forwardServiceAd(appCtx, fAd.ServiceAd, sType, directorAd)
+		forwardServiceAd(appCtx, fAd.ServiceAd, sType, directorAd.Name)
 
 	} else {
 		log.Debugln("Received registration of unrecognized type", fAd.AdType)
@@ -212,7 +212,7 @@ func registerDirectorAd(appCtx context.Context, egrp *errgroup.Group, ctx *gin.C
 // forward it to 'myself'.
 // The 'originator' is the director that sent this server ad to the current director.
 // It can be nil if the ad comes from the server itself.
-func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, originator *server_structs.DirectorAd) {
+func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.OriginAdvertiseV2, sType server_structs.ServerType, originatorName string) {
 	directorAdMutex.RLock()
 	defer directorAdMutex.RUnlock()
 	directorAds.Range(func(item *ttlcache.Item[string, *directorInfo]) bool {
@@ -221,7 +221,7 @@ func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.Origi
 			return true
 		}
 		// Do not forward to the director that sent the ad
-		if originator != nil && dinfo.ad.Name == originator.Name {
+		if originatorName != "" && dinfo.ad.Name == originatorName {
 			return true
 		}
 		if self, err := server_utils.IsDirectorAdFromSelf(engineCtx, dinfo.ad); err == nil && !self {
@@ -237,7 +237,7 @@ func forwardServiceAd(engineCtx context.Context, serviceAd *server_structs.Origi
 // functions to avoid refactoring the DirectorAd and OriginAdvertiseV2 to have
 // a common interface.
 func (dir *directorInfo) forwardDirector(ad *server_structs.DirectorAd) {
-	forwardAd := &ForwardAd{
+	forwardAd := &forwardAd{
 		DirectorAd: ad,
 		AdType:     server_structs.DirectorType.String(),
 		Now:        time.Now(),
@@ -281,7 +281,7 @@ func (dir *directorInfo) forwardService(ctx context.Context, ad *server_structs.
 		AdvertiseUrl: adUrl,
 	}
 	directorAd.Initialize(name)
-	forwardAd := &ForwardAd{
+	forwardAd := &forwardAd{
 		DirectorAd: directorAd,
 		ServiceAd:  ad,
 		AdType:     sType.String(),
