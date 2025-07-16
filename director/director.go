@@ -1269,7 +1269,7 @@ func registerServerAd(engineCtx context.Context, ctx *gin.Context, sType server_
 	}
 
 	// Forward to other directors, if applicable
-	forwardServiceAd(engineCtx, &adV2, sType)
+	forwardServiceAd(engineCtx, &adV2, sType, "")
 
 	// Correct any clock skews detected in the client
 	now := time.Now()

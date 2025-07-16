@@ -72,8 +72,9 @@ func (t TestType) String() string {
 }
 
 func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
-	// Issuer is whichever server that initiates the test, so it's the server itself
-	issuerUrl := param.Server_ExternalWebUrl.GetString()
+	// The origin/cache server is using the federation issuer to verify the token
+	// See server_utils/monitor.go:HandleDirectorTestResponse
+	issuerUrl := param.Federation_DiscoveryUrl.GetString()
 	if t.issuerUrl != "" { // Get from param if it's not empty
 		issuerUrl = t.issuerUrl
 	}
