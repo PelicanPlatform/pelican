@@ -1442,6 +1442,10 @@ func TestFailedUploadError(t *testing.T) {
 
 	shutdownChan := make(chan bool)
 	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PROPFIND" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		<-shutdownChan
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -1511,6 +1515,10 @@ func TestFailedLargeUploadError(t *testing.T) {
 
 	shutdownChan := make(chan bool)
 	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PROPFIND" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		<-shutdownChan
 		w.WriteHeader(http.StatusOK)
 	}))
