@@ -1,4 +1,4 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext, useState, useEffect, useCallback } from 'react';
 import { Box, IconButton, Paper, Tooltip, Typography } from '@mui/material';
 import { grey, red } from '@mui/material/colors';
 import { User } from '@/index';
@@ -9,7 +9,10 @@ import { alertOnError } from '@/helpers/util';
 import { DirectorDropdown } from '@/app/director/components/DirectorDropdown';
 import { ServerDetailed, ServerGeneral } from '@/types';
 import { getDirectorServer } from '@/helpers/api';
-import { AlertDispatchContext } from '@/components/AlertProvider';
+import {
+  AlertDispatchContext,
+  AlertReducerAction,
+} from '@/components/AlertProvider';
 
 export interface DirectorCardProps {
   server: ServerGeneral;
@@ -17,12 +20,19 @@ export interface DirectorCardProps {
 }
 
 export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
+  const dispatch = useContext(AlertDispatchContext);
+
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
   const [detailedServer, setDetailedServer] = useState<
     ServerDetailed | undefined
   >();
 
-  const dispatch = useContext(AlertDispatchContext);
+  // Update the detailed server when the server prop changes
+  useEffect(() => {
+    if (detailedServer !== undefined && dropdownOpen) {
+      updateDetailedServer(server.name, setDetailedServer, dispatch);
+    }
+  }, [server, setDetailedServer, dispatch, dropdownOpen, detailedServer]);
 
   return (
     <>
@@ -46,16 +56,6 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
           }}
           onClick={async () => {
             setDropdownOpen(!dropdownOpen);
-            if (detailedServer === undefined) {
-              alertOnError(
-                async () => {
-                  const response = await getDirectorServer(server.name);
-                  setDetailedServer(await response.json());
-                },
-                'Failed to fetch server details',
-                dispatch
-              );
-            }
           }}
         >
           <Box my={'auto'} ml={1} display={'flex'} flexDirection={'row'}>
@@ -106,6 +106,23 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
         transition={dropdownOpen}
       />
     </>
+  );
+};
+
+const updateDetailedServer = async (
+  serverName: string,
+  setDetailedServer: React.Dispatch<
+    React.SetStateAction<ServerDetailed | undefined>
+  >,
+  dispatch: React.Dispatch<AlertReducerAction>
+) => {
+  await alertOnError(
+    async () => {
+      const response = await getDirectorServer(serverName);
+      setDetailedServer(await response.json());
+    },
+    'Failed to fetch server details',
+    dispatch
   );
 };
 
