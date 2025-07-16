@@ -32,7 +32,7 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
     if (detailedServer !== undefined && dropdownOpen) {
       updateDetailedServer(server.name, setDetailedServer, dispatch);
     }
-  }, [server, setDetailedServer, dispatch]);
+  }, [server, setDetailedServer, dispatch, dropdownOpen, detailedServer]);
 
   return (
     <>
@@ -56,11 +56,6 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
           }}
           onClick={async () => {
             setDropdownOpen(!dropdownOpen);
-
-            // Update detailed server when the dropdown is opened
-            if (dropdownOpen) {
-              updateDetailedServer(server.name, setDetailedServer, dispatch);
-            }
           }}
         >
           <Box my={'auto'} ml={1} display={'flex'} flexDirection={'row'}>
