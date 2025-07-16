@@ -3108,7 +3108,9 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	transferResult.job = transfer.job
 
 	// Check if the remote object already exists using statHttp
-	if transfer.remoteURL != nil && transfer.job != nil {
+	// If the job is recursive, we skip this check as the check is already performed in walkDirUpload
+	// If the job is not recursive, we check if the object exists at the origin
+	if transfer.remoteURL != nil && transfer.job != nil && (transfer.job.syncLevel == SyncNone || !transfer.job.recursive) {
 		remoteUrl, dirResp, token := transfer.job.remoteURL, transfer.job.dirResp, transfer.job.token
 		_, statErr := statHttp(remoteUrl, dirResp, token)
 		if statErr == nil {
