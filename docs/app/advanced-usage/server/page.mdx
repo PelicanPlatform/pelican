@@ -16,17 +16,17 @@ Pelican services rely on a private/public key pair for creating (signing) and ve
 
 When a Pelican origin or other service is started, the server automatically generates a new private key if one is not present.  However, if someone is running the origin on your behalf, you will need to generate the keypair on your own and send the public portion to the origin operator. If you're doing the deployment, it can also be convenient to generate the key-pair in advance and mount the private key file to the Pelican server via configuration variable, especially in a container environment.
 
-The Pelican binary ships with a `pelican generate keygen` for generating a private/public key pairs:
+The Pelican binary ships with a `pelican key create` for generating a private/public key pairs (this replaces the `pelican generate keygen` command):
 
 ```bash copy
-pelican generate keygen
+pelican key create
 ```
 
 Pelican will generate both the private key and the public key under the current working directory:
 
 ```console
 Successfully generated keys at:
-Private key: /path/to/issuer.jwk
+Private key: /path/to/private-key.pem
 Public Key: /path/to/issuer-pub.jwks
 ```
 
@@ -34,15 +34,18 @@ You can change the location of the generated keys by passing in  arguments `priv
 
 
 ```bash copy
-pelican generate keygen --private-key /tmp/foo --public-key /tmp/bar
+pelican key create --private-key /tmp/foo --public-key /tmp/bar
 ```
 
-For origin operators, the generated *private key* can be specified in the a Pelican server configuration via the `IssuerKey` parameter so that the server will use the newly-generated key:
+You can also use this command to derive the public of an existing private key.
 
+To configure the Pelican server to use the newly-generated *private key*, move it into the directory specified by the `IssuerKeysDirectory` parameter:
 
 ```yaml filename="pelican.yaml" copy
-IssuerKey: /path/to/generated/issuer.jwk
+IssuerKeysDirectory: /path/to/issuer-keys
 ```
+
+This directory supports multiple private keys. A token or payload signature will be considered valid if it can be verified by any key found either within `IssuerKeysDirectory` or at `IssuerKey`.
 
 If there is a remote operator for your origin, email them the **public key** portion.  Never send anyone your private key.  A sample public key looks like the following:
 
@@ -62,9 +65,9 @@ $ cat issuer-pub.jwks
 }
 ```
 
-A sample private key has the following format:
+A sample private key has the following PEM format:
 ```bash
-$ cat issuer.jwk
+$ cat private-key.pem
 -----BEGIN PRIVATE KEY-----
 M0G+AgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgzeomq6yJvek0fg2Z
 g+NY6qklGz4ZjVlrRgTDT9hk5EShRANCAAT0giQYTPJbLB5wGwiKysmwf79eoxqX
@@ -103,3 +106,46 @@ The generated htpasswd file can then be passed to the Pelican server via `Server
 Server:
   UIPasswordFile: /path/to/generated-htpasswd-file
 ```
+
+## Key Auto-Generation, Multiple Keys and Key Replacement
+
+### Key Auto-Generation
+
+Starting with Pelican v7.13.0, if no pre-generated private key is found at either `IssuerKey` or within `IssuerKeysDirectory`, Pelican server will automatically generated a new private key file in PEM format inside `IssuerKeysDirectory`.
+
+```
+IssuerKeysDirectory/
+├── pelican_generated_<TIMESTAMP_IN_MILLISECONDS>_<RANDOM_CHARS>.pem
+└── ...
+```
+
+> The [Privacy-Enhanced Mail (PEM) format](https://en.wikipedia.org/wiki/Privacy-Enhanced_Mail) is a standardized format for sending and storing cryptographic data.
+
+### Multiple Keys
+
+Pelican supports multiple keys from v7.13.0. Server administrator can place additional `.pem` file into `IssuerKeysDirectory`, and any valid private key in this directory or at `IssuerKey` can be used to verify token or payload signature.
+
+When selecting a key for signing, Pelican automatically chooses the private key with the lexicographical smallest filename.
+
+```
+ConfigBase
+├──IssuerKey
+└──IssuerKeysDirectory/
+	├── pelican_generated_<TIMESTAMP_IN_MILLISECONDS>_<RANDOM_CHARS>.pem
+	├── <ANY_NAME>.pem
+	└── ...
+```
+
+Pelican scans the above directory every 60 seconds to detect newly added or removed private keys. When [retrieving public keys](/federating-your-data/origin#obtain-the-public-key-of-the-origin), Pelican dynamically generate them from the current set of private keys on-the-fly. If `Server.IssuerJwks` is specified, Pelican also includes public keys from that `.jwks` file.
+
+### Key Replacement
+
+With support for Multiple Keys, Pelican allows administrator to replace private keys anytime. Follow these steps to replace an existing key:
+
+1. Generate a new pair of private and public key by the `pelican key create` command.
+2. Make sure your Pelican server is running. Copy the new private key file to [IssuerKeysDirectory](#multiple-keys).
+3. Visit the Registry and download the latest registered public key set for your server under "Origins" section. Ensure the new public key is included. If it isn't, wait for 60 seconds and retry.
+4. Remove the old private key from [IssuerKeysDirectory](#multiple-keys)
+5. Wait for 60s, then go back to the Registry, download the latest registered public key set again. Verify the old public key has been removed.
+
+> If you are using HTCondor Credmon, the waiting time will be 15m OR generated token lifetime configured in the credmon.
