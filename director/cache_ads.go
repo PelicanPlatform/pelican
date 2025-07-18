@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"net/url"
@@ -32,6 +33,7 @@ import (
 
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 
@@ -105,6 +107,101 @@ func SetBrokerDialer(dialer *broker.BrokerDialer) {
 	brokerDialer = dialer
 }
 
+// Given a server status, return the raw weight that will eventually
+// be smoothed in the EWMA status calculation.
+// Weights should be bounded by (0, 1], where 1 does not adjust the
+// server's ordering and 0 would stick the server at the very end of the list.
+// However, 0 is not included because its multiplication with other load-based
+// weights would destroy information.
+func getRawStatusWeight(status metrics.HealthStatusEnum) float64 {
+	var xt float64
+	if status <= metrics.StatusDegraded {
+		// Set low weight for degraded or worse.
+		// Note that this also covers StatusShuttingDown, although
+		// that status is completely filtered via a different mechanism.
+		xt = 0.01
+	} else if status == metrics.StatusWarning {
+		// Warnings may be unrelated to IO load, but it's still probably
+		// not great to heavily weight servers reporting warnings.
+		xt = 0.5
+	} else {
+		// This triggers for StatusOk and StatusUnknown (which would be the case
+		// for older servers that don't report their status or for ads generated
+		// via parsing Topology). This weight is used when ordering servers on redirects,
+		// and is only meant to _decrease_ a server's priority, never _increase_ it.
+		// Since these weights are factored into sorting multiplicatively, we assign
+		// "unknown" the multiplicative identity weight.
+		//
+		// There's an additional question about what to do here if the current status
+		// is "unknown" but the previous ad had a known status -- should the status be
+		// imputed, or should we default to 1? For now, it feels safer to make the choice
+		// that doesn't affect sorting, thus "1".
+		xt = 1
+	}
+
+	return xt
+}
+
+// populateEWMAStatusWeight calculates the EWMA status weight for a server advertisement.
+// Each calculation needs several inputs that come from the previous and current server advertisements:
+//   - The previously-derived EWMA status weight (st_1, from oldSAd)
+//   - The current "server status" value (xt, derived from newSAd.Status) -- is bounded by (0, 1] because
+//     0 would completely remove the server from sorting, while 1 has no effect on the server's priority.
+//   - The time since the last status update (deltaT, derived from oldSAd.StatusWeightLastUpdate)
+//
+// For more information about EWMA calculations, see https://en.wikipedia.org/wiki/Exponential_smoothing
+func populateEWMAStatusWeight(newSAd, oldSAd *server_structs.ServerAd) {
+	if newSAd == nil {
+		log.Errorf("internal error; populateEWMAStatusWeight called with nil newSAd")
+		return
+	}
+
+	// Start building pieces from the server ads to apply an EWMA filter
+	// to the server's status weight
+	var statusWeight float64
+	ioStatus := metrics.ParseHealthStatus(newSAd.Status)
+	xt := getRawStatusWeight(ioStatus)
+	t := time.Now()
+
+	// If there is no existing ad, the weight is just the current status
+	if oldSAd == nil {
+		newSAd.StatusWeight = xt
+		newSAd.StatusWeightLastUpdate = t.Unix()
+		return
+	}
+
+	st_1 := oldSAd.StatusWeight
+	// If we received an out-of-bounds previous status weight,
+	// reset it to 1 -- This points to something having gone wrong,
+	// so the safest choice is to avoid affecting the server's sorting.
+	if st_1 <= 0 || st_1 > 1 {
+		st_1 = 1.0
+	}
+	t_1 := oldSAd.StatusWeightLastUpdate
+	deltaT := t.Sub(time.Unix(t_1, 0))
+	// Using time constant of 5m based on some experimental hand tests -- this feels
+	// reasonably responsive, whereas 10m felt like it overly smoothed things.
+	alpha := 1 - math.Exp(-float64(deltaT)/float64(5*time.Minute))
+
+	// Calculate the new status weight using the EWMA formula
+	statusWeight = st_1 + alpha*(xt-st_1)
+	if statusWeight <= 0 || statusWeight > 1 {
+		log.Errorf("Invalid EWMA status weight %f for server %s with status %s (should be bounded by (0,1]). Resetting to 1.0, which will have no effect on sorting",
+			newSAd.StatusWeight, newSAd.Name, newSAd.Status)
+		statusWeight = 1.0
+	}
+	newSAd.StatusWeight = statusWeight
+	newSAd.StatusWeightLastUpdate = t.Unix()
+
+	metrics.PelicanDirectorStatusWeight.With(
+		prometheus.Labels{
+			"server_name": newSAd.Name,
+			"server_url":  newSAd.AuthURL.String(),
+			"server_type": newSAd.Type,
+		},
+	).Set(statusWeight)
+}
+
 // recordAd does following for an incoming ServerAd and []NamespaceAdV2 pair:
 //
 //  1. Update the ServerAd by setting server location and updating server topology attribute
@@ -165,6 +262,10 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 		if !sAd.FromTopology && !existing.Value().FromTopology { // Only copy the IO Load value for Pelican server
 			sAd.IOLoad = existing.Value().GetIOLoad() // we copy the value from the existing serverAD to be consistent
 		}
+
+		populateEWMAStatusWeight(&sAd, &(existing.Value().ServerAd))
+	} else {
+		populateEWMAStatusWeight(&sAd, nil)
 	}
 
 	ad := server_structs.Advertisement{ServerAd: sAd, NamespaceAds: *namespaceAds}

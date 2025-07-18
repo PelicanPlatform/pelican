@@ -131,22 +131,24 @@ type (
 	// and the functions responsible for generating these structs on-demand.
 	ServerAd struct {
 		ServerBaseAd
-		RegistryPrefix      string            `json:"registryPrefix"` // The server's prefix recorded in the registry
-		StorageType         OriginStorageType `json:"storageType"`    // Always POSIX for caches
-		DisableDirectorTest bool              `json:"directorTest"`
-		AuthURL             url.URL           `json:"auth_url"`
-		BrokerURL           url.URL           `json:"broker_url"` // The URL of the broker service to use for this host.
-		URL                 url.URL           `json:"url"`        // This is server's XRootD URL for file transfer
-		WebURL              url.URL           `json:"web_url"`    // This is server's Web interface and API
-		Type                string            `json:"type"`
-		Latitude            float64           `json:"latitude"`
-		Longitude           float64           `json:"longitude"`
-		Caps                Capabilities      `json:"capabilities"`
-		FromTopology        bool              `json:"from_topology"`
-		IOLoad              float64           `json:"io_load"`
-		Downtimes           []Downtime        `json:"downtimes,omitempty"` // Allow null values if no downtime
-		RequiredFeatures    []string          `json:"requiredFeatures"`    // A list of feature names required by this server
-		Status              string            `json:"status"`
+		RegistryPrefix         string            `json:"registryPrefix"` // The server's prefix recorded in the registry
+		StorageType            OriginStorageType `json:"storageType"`    // Always POSIX for caches
+		DisableDirectorTest    bool              `json:"directorTest"`
+		AuthURL                url.URL           `json:"auth_url"`
+		BrokerURL              url.URL           `json:"broker_url"` // The URL of the broker service to use for this host.
+		URL                    url.URL           `json:"url"`        // This is server's XRootD URL for file transfer
+		WebURL                 url.URL           `json:"web_url"`    // This is server's Web interface and API
+		Type                   string            `json:"type"`
+		Latitude               float64           `json:"latitude"`
+		Longitude              float64           `json:"longitude"`
+		Caps                   Capabilities      `json:"capabilities"`
+		FromTopology           bool              `json:"from_topology"`
+		IOLoad                 float64           `json:"io_load"`
+		StatusWeight           float64           `json:"statusWeight"`           // The current EWMA-derived weight for this server's status, populated by the Director
+		StatusWeightLastUpdate int64             `json:"statusWeightLastUpdate"` // The last time the status weight was updated, in epoch seconds
+		Downtimes              []Downtime        `json:"downtimes,omitempty"`    // Allow null values if no downtime
+		RequiredFeatures       []string          `json:"requiredFeatures"`       // A list of feature names required by this server
+		Status                 string            `json:"status"`
 	}
 
 	// The struct holding a server's advertisement (including ServerAd and NamespaceAd)
@@ -246,10 +248,11 @@ type (
 	}
 
 	ServerRedirectInfo struct {
-		Lat        float64 `json:"lat"`
-		Lon        float64 `json:"lon"`
-		HasObject  string  `json:"hasObject"`
-		LoadWeight float64 `json:"loadWeight"`
+		Lat          float64 `json:"lat"`
+		Lon          float64 `json:"lon"`
+		HasObject    string  `json:"hasObject"`
+		LoadWeight   float64 `json:"loadWeight"`
+		StatusWeight float64 `json:"statusWeight"` // The current EWMA-derived weight for this server's status, populated by the Director
 	}
 
 	RedirectInfo struct {
