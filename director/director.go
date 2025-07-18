@@ -21,7 +21,6 @@ package director
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net/http"
@@ -619,17 +618,10 @@ func generateRedirectResponse(ctx *gin.Context, chosenAds []server_structs.Serve
 
 	// Use debugging redirect info if available and it was asked for
 	if redirectInfo, exists := ctx.Get("redirectInfo"); exists && ctx.GetHeader("X-Pelican-Debug") == "true" {
-		redirectInfoJSON, err := json.Marshal(redirectInfo)
-		if err == nil {
-			// If using ctx.JSON, we need to set the Location header manually.
-			ctx.Writer.Header().Set("Location", getFinalRedirectURL(redirectURL, reqParams))
-			ctx.JSON(http.StatusTemporaryRedirect, redirectInfoJSON)
-			return
-		} else {
-			// Don't treat this is a redirect failure, just log it for director admins to see
-			// and continue with the redirect.
-			log.Errorf("Failed to marshal redirect info to JSON: %v", err)
-		}
+		ctx.Writer.Header().Set("Location", getFinalRedirectURL(redirectURL, reqParams))
+		ctx.Header("Content-Type", "application/json")
+		ctx.JSON(http.StatusTemporaryRedirect, redirectInfo)
+		return
 	}
 
 	// Check if the request has asked to not be redirected and return directly if so

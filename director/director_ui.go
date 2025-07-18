@@ -63,12 +63,14 @@ type (
 		// bringing them into a single concept would be a breaking change.
 		// HealthStatus is for the director-->XRootDServer health test, while
 		// ServerStatus is for the Origin/Cache to report other aspects of its health
-		HealthStatus      HealthTestStatus `json:"healthStatus"`
-		ServerStatus      string           `json:"serverStatus"`
-		IOLoad            float64          `json:"ioLoad"`
-		RegistryPrefix    string           `json:"registryPrefix"`
-		NamespacePrefixes []string         `json:"namespacePrefixes"`
-		Version           string           `json:"version"`
+		HealthStatus           HealthTestStatus `json:"healthStatus"`
+		ServerStatus           string           `json:"serverStatus"`
+		IOLoad                 float64          `json:"ioLoad"`
+		StatusWeight           float64          `json:"statusWeight"`           // The current EWMA-derived weight for this server's status, populated by the Director
+		StatusWeightLastUpdate int64            `json:"statusWeightLastUpdate"` // The last time the status weight was updated, in epoch seconds
+		RegistryPrefix         string           `json:"registryPrefix"`
+		NamespacePrefixes      []string         `json:"namespacePrefixes"`
+		Version                string           `json:"version"`
 	}
 
 	// A response struct for a server Ad that provides a detailed view into the servers data
@@ -83,23 +85,25 @@ type (
 		// AuthURL is Deprecated. For Pelican severs, URL is used as the base URL for object access.
 		// This is to maintain compatibility with the topology servers, where it uses AuthURL for
 		// accessing protected objects and URL for public objects.
-		AuthURL      string                      `json:"authUrl"`
-		BrokerURL    string                      `json:"brokerUrl"`
-		URL          string                      `json:"url"`    // This is server's XRootD URL for file transfer
-		WebURL       string                      `json:"webUrl"` // This is server's Web interface and API
-		Type         string                      `json:"type"`
-		Latitude     float64                     `json:"latitude"`
-		Longitude    float64                     `json:"longitude"`
-		Caps         server_structs.Capabilities `json:"capabilities"`
-		Filtered     bool                        `json:"filtered"`
-		FilteredType string                      `json:"filteredType"`
-		Downtimes    []server_structs.Downtime   `json:"downtimes"`
-		FromTopology bool                        `json:"fromTopology"`
-		HealthStatus HealthTestStatus            `json:"healthStatus"`
-		ServerStatus string                      `json:"serverStatus"` // see comment in listServerResponse
-		IOLoad       float64                     `json:"ioLoad"`
-		Namespaces   []NamespaceAdV2Response     `json:"namespaces"`
-		Version      string                      `json:"version"`
+		AuthURL                string                      `json:"authUrl"`
+		BrokerURL              string                      `json:"brokerUrl"`
+		URL                    string                      `json:"url"`    // This is server's XRootD URL for file transfer
+		WebURL                 string                      `json:"webUrl"` // This is server's Web interface and API
+		Type                   string                      `json:"type"`
+		Latitude               float64                     `json:"latitude"`
+		Longitude              float64                     `json:"longitude"`
+		Caps                   server_structs.Capabilities `json:"capabilities"`
+		Filtered               bool                        `json:"filtered"`
+		FilteredType           string                      `json:"filteredType"`
+		Downtimes              []server_structs.Downtime   `json:"downtimes"`
+		FromTopology           bool                        `json:"fromTopology"`
+		HealthStatus           HealthTestStatus            `json:"healthStatus"`
+		ServerStatus           string                      `json:"serverStatus"` // see comment in listServerResponse
+		IOLoad                 float64                     `json:"ioLoad"`
+		StatusWeight           float64                     `json:"statusWeight"`           // The current EWMA-derived weight for this server's status, populated by the Director
+		StatusWeightLastUpdate int64                       `json:"statusWeightLastUpdate"` // The last time the status weight was updated, in epoch seconds
+		Namespaces             []NamespaceAdV2Response     `json:"namespaces"`
+		Version                string                      `json:"version"`
 	}
 
 	// TokenIssuerResponse creates a response struct for TokenIssuer

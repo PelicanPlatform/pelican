@@ -478,7 +478,7 @@ func TestSortServerAds(t *testing.T) {
 		}
 
 		// Run the sort 1000 times to get a good idea of how the servers are being sorted
-		for i := 0; i < 1000; i++ {
+		for range 1000 {
 			sorted, err := sortServerAds(ctx, clientIP, randDistanceLoadAds, availMap, rInfo)
 			require.NoError(t, err)
 
@@ -540,6 +540,33 @@ func TestSortServerAds(t *testing.T) {
 		}
 
 		assert.NotEqualValues(t, notExpected, sorted)
+	})
+
+	t.Run("test-status-weight-sort", func(t *testing.T) {
+		viper.Set("Director.CacheSortMethod", "adaptive")
+
+		sAds := []server_structs.ServerAd{
+			{
+				StatusWeight: 0.5,
+			},
+			{
+				StatusWeight: 0.2,
+			},
+			{
+				StatusWeight: 0.8,
+			},
+		}
+
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
+		redirectInfo := server_structs.NewRedirectInfoFromIP(clientIP.String())
+		sorted, err := sortServerAds(ctx, clientIP, sAds, nil, redirectInfo)
+		require.NoError(t, err)
+
+		assert.Equal(t, len(sorted), 3)
+		assert.Equal(t, sorted[0].StatusWeight, 0.8)
+		assert.Equal(t, sorted[1].StatusWeight, 0.5)
+		assert.Equal(t, sorted[2].StatusWeight, 0.2)
 	})
 }
 
