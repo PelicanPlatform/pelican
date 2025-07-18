@@ -679,7 +679,14 @@ func loadPEMFiles(dir string) (jwk.Key, error) {
 			if (path != dir) && dirEnt.IsDir() {
 				return filepath.SkipDir
 			}
-			if dirEnt.Type().IsRegular() && (filepath.Ext(dirEnt.Name()) == ".pem" || filepath.Ext(dirEnt.Name()) == ".jwk") {
+			// Check if this is a regular file or a symlink that points to a regular file
+			// Use os.Stat() to follow symlinks, unlike dirEnt.Type() which doesn't follow symlinks
+			fileInfo, statErr := os.Stat(path)
+			if statErr != nil {
+				log.Warnf("Failed to stat file %s: %v", path, statErr)
+				return nil
+			}
+			if fileInfo.Mode().IsRegular() && (filepath.Ext(dirEnt.Name()) == ".pem" || filepath.Ext(dirEnt.Name()) == ".jwk") {
 				// Parse the private key in this file and add to the in-memory keys map
 				key, err := LoadSinglePEM(path)
 				if err != nil {
