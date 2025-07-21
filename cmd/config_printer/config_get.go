@@ -67,10 +67,6 @@ func configGet(cmd *cobra.Command, args []string) {
 				continue
 			}
 
-			if docParam.Deprecated && !includeDeprecated {
-				continue
-			}
-
 			if len(components) > 0 {
 				componentsCheckFailed := true
 				for _, c := range components {
@@ -105,6 +101,12 @@ func configGet(cmd *cobra.Command, args []string) {
 		}
 
 		if matchesFound {
+			// Check for deprecated parameter only when it matches the search criteria
+			if exists && docParam.Deprecated && !includeDeprecated {
+				fmt.Printf("%s: This parameter is DEPRECATED. If you still need to view it, run: pelican config get %s --include-deprecated\n", key, key)
+				continue
+			}
+
 			matches = append(matches, Match{
 				OriginalKey:      key,
 				HighlightedKey:   highlightedKey,
