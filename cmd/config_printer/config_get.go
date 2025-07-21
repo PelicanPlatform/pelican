@@ -88,14 +88,28 @@ func configGet(cmd *cobra.Command, args []string) {
 			for _, arg := range args {
 				argLower := strings.ToLower(arg)
 
-				if strings.Contains(strings.ToLower(key), argLower) {
-					highlightedKey = highlightSubstring(key, arg, color.FgYellow)
-					matchesFound = true
-				}
+				if exactMatch {
+					// Exact match comparison
+					if strings.EqualFold(key, arg) {
+						highlightedKey = highlightSubstring(key, arg, color.FgYellow)
+						matchesFound = true
+					}
 
-				if strings.Contains(strings.ToLower(valueStr), argLower) {
-					highlightedValue = highlightSubstring(valueStr, arg, color.FgYellow)
-					matchesFound = true
+					if strings.EqualFold(valueStr, arg) {
+						highlightedValue = highlightSubstring(valueStr, arg, color.FgYellow)
+						matchesFound = true
+					}
+				} else {
+					// Substring match (existing behavior)
+					if strings.Contains(strings.ToLower(key), argLower) {
+						highlightedKey = highlightSubstring(key, arg, color.FgYellow)
+						matchesFound = true
+					}
+
+					if strings.Contains(strings.ToLower(valueStr), argLower) {
+						highlightedValue = highlightSubstring(valueStr, arg, color.FgYellow)
+						matchesFound = true
+					}
 				}
 			}
 		}
