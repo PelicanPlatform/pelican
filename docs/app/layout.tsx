@@ -68,6 +68,10 @@ export default async function RootLayout({ children }) {
 					editLink="Edit this page on GitHub"
 					sidebar={{ defaultMenuCollapseLevel: 1 }}
 					footer={footer}
+					darkMode={false}
+					nextThemes={{
+						forcedTheme: "light",
+					}}
 					// ...Your additional theme config options
 			>
 				{}
