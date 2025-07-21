@@ -1231,6 +1231,13 @@ func SetServerDefaults(v *viper.Viper) error {
 			cacheConcurrency, param.Cache_Concurrency.GetName())
 	}
 
+	if directorStatusWeightTimeConstant := v.GetDuration(param.Director_AdaptiveSortEWMATimeConstant.GetName()); directorStatusWeightTimeConstant <= 0 {
+		p := param.Director_AdaptiveSortEWMATimeConstant
+		pDuration := p.GetDuration()
+		log.Warningf("Invalid value of '%s' for config param %s; must be greater than 0. Resetting to default", pDuration.String(), p.GetName())
+		v.Set(param.Director_AdaptiveSortEWMATimeConstant.GetName(), 5*time.Minute)
+	}
+
 	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
 	// a `0` for the port number; to make the audience predictable (it goes into the xrootd
 	// configuration but we don't know the origin's port until after xrootd has started), we

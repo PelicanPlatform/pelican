@@ -426,6 +426,7 @@ var (
 	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
 	Client_SlowTransferWindow = DurationParam{"Client.SlowTransferWindow"}
 	Client_StoppedTransferTimeout = DurationParam{"Client.StoppedTransferTimeout"}
+	Director_AdaptiveSortEWMATimeConstant = DurationParam{"Director.AdaptiveSortEWMATimeConstant"}
 	Director_AdvertisementTTL = DurationParam{"Director.AdvertisementTTL"}
 	Director_CachePresenceTTL = DurationParam{"Director.CachePresenceTTL"}
 	Director_FedTokenLifetime = DurationParam{"Director.FedTokenLifetime"}

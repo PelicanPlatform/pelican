@@ -181,7 +181,14 @@ func populateEWMAStatusWeight(newSAd, oldSAd *server_structs.ServerAd) {
 	deltaT := t.Sub(time.Unix(t_1, 0))
 	// Using time constant of 5m based on some experimental hand tests -- this feels
 	// reasonably responsive, whereas 10m felt like it overly smoothed things.
-	alpha := 1 - math.Exp(-float64(deltaT)/float64(5*time.Minute))
+	tao := param.Director_AdaptiveSortEWMATimeConstant.GetDuration()
+	if tao <= 0 {
+		// This should never happen for real servers because config will re-set the value
+		// to the default, but this if statement is in place for unit tests so we can
+		// avoid dividing by zero without adding a bunch of extra config to tests.
+		tao = 5 * time.Minute
+	}
+	alpha := 1 - math.Exp(-float64(deltaT)/float64(tao))
 
 	// Calculate the new status weight using the EWMA formula
 	statusWeight = st_1 + alpha*(xt-st_1)

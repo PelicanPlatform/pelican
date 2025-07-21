@@ -75,6 +75,7 @@ type Config struct {
 	ConfigLocations []string `mapstructure:"configlocations" yaml:"ConfigLocations"`
 	Debug bool `mapstructure:"debug" yaml:"Debug"`
 	Director struct {
+		AdaptiveSortEWMATimeConstant time.Duration `mapstructure:"adaptivesortewmatimeconstant" yaml:"AdaptiveSortEWMATimeConstant"`
 		AdvertiseUrl string `mapstructure:"advertiseurl" yaml:"AdvertiseUrl"`
 		AdvertisementTTL time.Duration `mapstructure:"advertisementttl" yaml:"AdvertisementTTL"`
 		AssumePresenceAtSingleOrigin bool `mapstructure:"assumepresenceatsingleorigin" yaml:"AssumePresenceAtSingleOrigin"`
@@ -433,6 +434,7 @@ type configWithType struct {
 	ConfigLocations struct { Type string; Value []string }
 	Debug struct { Type string; Value bool }
 	Director struct {
+		AdaptiveSortEWMATimeConstant struct { Type string; Value time.Duration }
 		AdvertiseUrl struct { Type string; Value string }
 		AdvertisementTTL struct { Type string; Value time.Duration }
 		AssumePresenceAtSingleOrigin struct { Type string; Value bool }
