@@ -2681,6 +2681,7 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		log.WithFields(fields).Errorln("Failed to download:", err)
 		return
 	}
+	defer resp.Body.Close()
 
 	serverVersion = resp.Header.Get("Server")
 
@@ -2767,10 +2768,11 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Run the GET request, reading from the response body, in a separate goroutine.
 	// The main go routine will wait for the download to finish and send out progress
 	// updates.
-	done := make(chan error)
+	done := make(chan error, 1)
 	pw := &progressWriter{
 		writer: writer,
 	}
+	// IDEA: we can use the same context with the cancel to listen to the for done channel
 	go func() {
 		_, err := io.Copy(pw, resp.Body)
 		done <- err
@@ -2796,23 +2798,28 @@ Loop:
 
 		case <-t.C:
 			// Check that progress is being made and that it is not too slow
-			downloaded = pw.BytesComplete()
-			if downloaded == lastBytesComplete {
+			currentDownloaded := pw.BytesComplete()
+			if currentDownloaded == lastBytesComplete {
 				if noProgressStartTime.IsZero() {
 					noProgressStartTime = time.Now()
 				} else if time.Since(noProgressStartTime) > stoppedTransferTimeout {
+					downloaded = currentDownloaded
 					err = &StoppedTransferError{
 						BytesTransferred: downloaded,
 						StoppedTime:      time.Since(noProgressStartTime),
 						CacheHit:         cacheAge > 0,
 					}
 					log.WithFields(fields).Errorln(err.Error())
+
+					cancel()
+					// wait for the copy goroutine to exit
+					<-done
 					return
 				}
 			} else {
 				noProgressStartTime = time.Time{}
 			}
-			lastBytesComplete = downloaded
+			lastBytesComplete = currentDownloaded
 
 			// Check if we are downloading fast enough
 			limit := int64(downloadLimit)
@@ -2849,6 +2856,8 @@ Loop:
 				}
 				// The download is below the threshold for more than `SlowTransferWindow` seconds, cancel the download
 				cancel()
+				// wait for the copy goroutine to exit
+				<-done
 
 				if concurrency > 1 {
 					log.WithFields(fields).Errorf("Cancelling download attempt of %s: Download speed of %s/s is below the computed limit of %s/s (configured limit of %s/s divided by estimated %.1f concurrent transfers on average)", transferUrl.String(), ByteCountSI(transferRate), ByteCountSI(int64(limit)), ByteCountSI(int64(downloadLimit)), concurrency)
@@ -2856,8 +2865,9 @@ Loop:
 					log.WithFields(fields).Errorf("Cancelling download attempt of %s: Download speed of %s/s is below the limit of %s/s", transferUrl.String(), ByteCountSI(transferRate), ByteCountSI(int64(downloadLimit)))
 				}
 
+				downloaded = pw.BytesComplete()
 				err = &SlowTransferError{
-					BytesTransferred: pw.BytesComplete(),
+					BytesTransferred: downloaded,
 					BytesPerSecond:   transferRate,
 					Duration:         time.Since(downloadStart),
 					BytesTotal:       totalSize,
