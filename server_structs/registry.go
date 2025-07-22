@@ -19,8 +19,12 @@
 package server_structs
 
 import (
+	"crypto/rand"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
+	"gorm.io/gorm"
 )
 
 type RegistrationStatus string
@@ -132,4 +136,145 @@ func (Namespace) TableName() string {
 
 func IsValidRegStatus(s string) bool {
 	return s == "Pending" || s == "Approved" || s == "Denied" || s == "Unknown"
+}
+
+// Server represents a Pelican server (origin or cache) in the registry
+type Server struct {
+	ID        string    `json:"id" gorm:"primaryKey" validate:"len=7,regexp=^[a-z0-9]{7}$" description:"Auto-generated 7-character random string composed of a-z and 0-9"`
+	Name      string    `json:"name" gorm:"uniqueIndex" validate:"required"`
+	IsOrigin  bool      `json:"is_origin" gorm:"default:false"`
+	IsCache   bool      `json:"is_cache" gorm:"default:false"`
+	Note      string    `json:"note"`
+	CreatedAt time.Time `json:"created_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt time.Time `json:"updated_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
+}
+
+// Service maps a server to its namespace representation
+type Service struct {
+	ID          int       `json:"id" post:"exclude" gorm:"primaryKey"`
+	ServerID    string    `json:"server_id" validate:"required" gorm:"index"`
+	NamespaceID int       `json:"namespace_id" validate:"required" gorm:"index"`
+	CreatedAt   time.Time `json:"created_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt   time.Time `json:"updated_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
+
+	// Foreign key relationships
+	Server    Server    `json:"server" gorm:"foreignKey:ServerID;references:ID;constraint:OnDelete:CASCADE"`
+	Namespace Namespace `json:"namespace" gorm:"foreignKey:NamespaceID;references:ID;constraint:OnDelete:CASCADE"`
+}
+
+// Endpoint represents a network address for a server
+type Endpoint struct {
+	ID        int       `json:"id" post:"exclude" gorm:"primaryKey"`
+	ServerID  string    `json:"server_id" validate:"required" gorm:"index"`
+	Endpoint  string    `json:"endpoint" validate:"required"`
+	CreatedAt time.Time `json:"created_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt time.Time `json:"updated_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
+
+	// Foreign key relationship
+	Server Server `json:"server" gorm:"foreignKey:ServerID;references:ID;constraint:OnDelete:CASCADE"`
+}
+
+// Contact represents contact information for a server
+type Contact struct {
+	ID          int       `json:"id" post:"exclude" gorm:"primaryKey"`
+	ServerID    string    `json:"server_id" validate:"required" gorm:"index"`
+	FullName    string    `json:"full_name" validate:"required"`
+	ContactInfo string    `json:"contact_info" validate:"required" description:"Email, phone, or other contact information"`
+	CreatedAt   time.Time `json:"created_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt   time.Time `json:"updated_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
+
+	// Foreign key relationship
+	Server Server `json:"server" gorm:"foreignKey:ServerID;references:ID;constraint:OnDelete:CASCADE"`
+}
+
+// Define the table name for each struct for GORM
+func (Server) TableName() string {
+	return "servers"
+}
+
+func (Service) TableName() string {
+	return "services"
+}
+
+func (Endpoint) TableName() string {
+	return "endpoints"
+}
+
+func (Contact) TableName() string {
+	return "contacts"
+}
+
+// ServerNamespace combines Server and Namespace structs with flattened fields
+type ServerNamespace struct {
+	// Server fields
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	IsOrigin  bool      `json:"is_origin"`
+	IsCache   bool      `json:"is_cache"`
+	Note      string    `json:"note"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Namespace fields (ID renamed to NsID to avoid conflict)
+	NsID          int                    `json:"ns_id"`
+	Prefix        string                 `json:"prefix"`
+	Pubkey        string                 `json:"pubkey"`
+	Identity      string                 `json:"identity"`
+	AdminMetadata AdminMetadata          `json:"admin_metadata"`
+	CustomFields  map[string]interface{} `json:"custom_fields"`
+}
+
+// BeforeCreate GORM hook to auto-generate Server ID
+func (s *Server) BeforeCreate(tx *gorm.DB) error {
+	if s.ID == "" {
+		id, err := generateUniqueServerID(tx)
+		if err != nil {
+			return err
+		}
+		s.ID = id
+	}
+	return nil
+}
+
+// Ensure the Server ID is unique in the database
+func generateUniqueServerID(tx *gorm.DB) (string, error) {
+	const maxRetries = 10
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		id, err := generateServerID()
+		if err != nil {
+			return "", err
+		}
+
+		// Check if ID already exists
+		var count int64
+		err = tx.Model(&Server{}).Where("id = ?", id).Count(&count).Error
+		if err != nil {
+			return "", err
+		}
+
+		// If ID doesn't exist, we found a unique one
+		if count == 0 {
+			return id, nil
+		}
+
+		// ID exists, try again (collision detected)
+	}
+
+	return "", errors.Errorf("failed to generate unique server ID after %d attempts", maxRetries)
+}
+
+// Create a 7-character random string using a-z and 0-9
+func generateServerID() (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, 7)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+
+	for i := range b {
+		b[i] = charset[b[i]%byte(len(charset))]
+	}
+	return string(b), nil
 }
