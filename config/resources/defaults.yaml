@@ -103,6 +103,7 @@ Monitoring:
   PortHigher: 9999
   TokenExpiresIn: 1h
   TokenRefreshInterval: 5m
+  EnablePrometheus: true
   MetricAuthorization: true
   PromQLAuthorization: true
   AggregatePrefixes: ["/*"]

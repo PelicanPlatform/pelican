@@ -2882,7 +2882,7 @@ components: ["origin", "cache"]
 ############################
 name: Monitoring.EnablePrometheus
 description: |+
-  Enable the internal Prometheus server.
+  Enable the internal Prometheus server. This server is binded to the Server.WebPort
 type: bool
 default: true
 components: ["origin", "cache", "director", "registry"]
