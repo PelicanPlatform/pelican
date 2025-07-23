@@ -115,6 +115,7 @@ pelican config summary`,
 	components        []string
 	includeHidden     bool
 	includeDeprecated bool
+	exactMatch        bool
 )
 
 func init() {
@@ -129,6 +130,7 @@ func init() {
 		"Specify modules to filter the output of `config get`. The recognized modules are `client`, `registry`, `director`, `origin`, `cache`, and `localcache`. Multiple modules can be specified at the same time, for example: `config get -m cache -m origin`. If multiple modules are provided, parameters related to any of the modules will be retrieved. If no modules are specified, no module-based filter is applied to the search space.")
 	configGetCmd.Flags().BoolVar(&includeHidden, "include-hidden", false, "Include hidden configuration parameters")
 	configGetCmd.Flags().BoolVar(&includeDeprecated, "include-deprecated", false, "Include deprecated configuration parameters")
+	configGetCmd.Flags().BoolVar(&exactMatch, "exact-match", false, "Match configuration parameter names exactly instead of using substring matching")
 
 	configSummaryCmd.Flags().StringVarP(&format, "format", "o", "yaml", "Output format (yaml or json)")
 
