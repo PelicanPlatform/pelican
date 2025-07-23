@@ -154,7 +154,11 @@ func TestStatMemory(t *testing.T) {
 	start := time.Now()
 	cacheSize := param.Director_CachePresenceCapacity.GetInt()
 
-	require.NoError(t, os.Mkdir(filepath.Join(fed.Exports[0].StoragePrefix, "stress"), os.FileMode(0700)))
+	testdir := filepath.Join(fed.Exports[0].StoragePrefix, "stress")
+	require.NoError(t, os.Mkdir(testdir, os.FileMode(0700)))
+	ui, err := config.GetDaemonUserInfo()
+	require.NoError(t, err)
+	require.NoError(t, os.Chown(testdir, ui.Uid, ui.Gid))
 
 	// Fill the cache before taking the baseline measurement. Otherwise,
 	// it might end up that increased memory usage is due to filling up the
@@ -170,6 +174,7 @@ func TestStatMemory(t *testing.T) {
 		src := filepath.Join(fed.Exports[0].StoragePrefix, fmt.Sprintf("stress/%v.txt", idx))
 		fmt.Println(src)
 		require.NoError(t, os.WriteFile(src, []byte("foo"), os.FileMode(0600)))
+		require.NoError(t, os.Chown(src, ui.Uid, ui.Gid))
 		grp.Go(func() error {
 			_, err := client.DoGet(fed.Ctx, downloadURL, destName, false)
 			if errors.Is(err, context.Canceled) {
@@ -215,6 +220,7 @@ func TestStatMemory(t *testing.T) {
 		src := filepath.Join(fed.Exports[0].StoragePrefix, fmt.Sprintf("stress/%v.txt", idx))
 		fmt.Println(src)
 		require.NoError(t, os.WriteFile(src, []byte("foo"), os.FileMode(0600)))
+		require.NoError(t, os.Chown(src, ui.Uid, ui.Gid))
 		grp.Go(func() error {
 			fmt.Println("Launched download URL", downloadURL, err)
 			_, err := client.DoGet(fed.Ctx, downloadURL, destName, false)
