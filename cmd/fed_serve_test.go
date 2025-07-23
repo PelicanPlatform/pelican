@@ -100,6 +100,7 @@ func TestFedServePosixOrigin(t *testing.T) {
 	viper.Set("Director.DbLocation", filepath.Join(t.TempDir(), "director.sqlite"))
 	viper.Set(param.Origin_DbLocation.GetName(), filepath.Join(t.TempDir(), "origin.sqlite"))
 	viper.Set(param.Cache_DbLocation.GetName(), filepath.Join(t.TempDir(), "cache.sqlite"))
+	viper.Set(param.Monitoring_EnablePrometheus.GetName(), false)
 
 	defer cancel()
 
