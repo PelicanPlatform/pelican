@@ -394,6 +394,88 @@ func TestEmitAuthfile(t *testing.T) {
 	}
 }
 
+func TestEmitAuthfileFirstRun(t *testing.T) {
+	tests := []struct {
+		desc           string
+		authIn         string
+		authOut        string
+		dropPrivileges bool
+		server         server_structs.XRootDServer
+	}{
+		{
+			desc:           "origin-first-run-no-drop-privileges",
+			authIn:         "",
+			authOut:        "u * /.well-known lr\n",
+			dropPrivileges: false,
+			server:         &origin.OriginServer{},
+		},
+		{
+			desc:           "origin-first-run-with-drop-privileges",
+			authIn:         "",
+			authOut:        "u * /.well-known lr\n",
+			dropPrivileges: true,
+			server:         &origin.OriginServer{},
+		},
+		{
+			desc:           "cache-first-run-no-drop-privileges",
+			authIn:         "",
+			authOut:        "",
+			dropPrivileges: false,
+			server:         &cache.CacheServer{},
+		},
+		{
+			desc:           "cache-first-run-with-drop-privileges",
+			authIn:         "",
+			authOut:        "",
+			dropPrivileges: true,
+			server:         &cache.CacheServer{},
+		},
+	}
+
+	for _, testInput := range tests {
+		t.Run(testInput.desc, func(t *testing.T) {
+			dirName := t.TempDir()
+			server_utils.ResetTestState()
+			defer server_utils.ResetTestState()
+
+			viper.Set("Xrootd.Authfile", filepath.Join(dirName, "authfile"))
+
+			// Set the appropriate run location based on server type
+			if testInput.server.GetServerType().IsEnabled(server_structs.CacheType) {
+				viper.Set("Cache.RunLocation", dirName)
+			} else {
+				viper.Set("Origin.RunLocation", dirName)
+			}
+			viper.Set("Origin.FederationPrefix", "/")
+			viper.Set("Origin.StoragePrefix", "/")
+			viper.Set("Server.DropPrivileges", testInput.dropPrivileges)
+
+			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
+			require.NoError(t, err)
+
+			// Test first run (isFirstRun = true)
+			err = EmitAuthfile(testInput.server, true)
+			require.NoError(t, err)
+
+			// Verify the authfile was created correctly
+			finalAuthPath := filepath.Join(dirName, "authfile-origin-generated")
+			if testInput.server.GetServerType().IsEnabled(server_structs.CacheType) {
+				finalAuthPath = filepath.Join(dirName, "authfile-cache-generated")
+			}
+
+			contents, err := os.ReadFile(finalAuthPath)
+			require.NoError(t, err)
+
+			assert.Equal(t, testInput.authOut, string(contents))
+
+			// Verify file exists and has correct permissions
+			fileInfo, err := os.Stat(finalAuthPath)
+			require.NoError(t, err)
+			assert.Equal(t, fs.FileMode(0640), fileInfo.Mode().Perm())
+		})
+	}
+}
+
 func TestEmitOriginAuthfileWithCacheAuth(t *testing.T) {
 	dirName := t.TempDir()
 	server_utils.ResetTestState()
