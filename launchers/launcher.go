@@ -52,6 +52,10 @@ import (
 var (
 	ErrExitOnSignal error = errors.New("Exit program on signal")
 	ErrRestart      error = errors.New("Restart program")
+
+	// oncePrometheus is used to ensure that the embedded prometheus instance is only configured once,
+	// even when LaunchModules is called multiple times in test scenarios.
+	oncePrometheus sync.Once
 )
 
 func LaunchModules(ctx context.Context, modules server_structs.ServerType) (servers []server_structs.XRootDServer, shutdownCancel context.CancelFunc, err error) {
@@ -376,7 +380,12 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	if param.Monitoring_EnablePrometheus.GetBool() {
 		metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusWarning, "Prometheus not started")
-		if err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine); err != nil {
+		// Due to federation tests / fed-in-a-box, we need to configure the embedded prometheus instance only once
+		// and not for each server. This is why we use a sync.Once here.
+		oncePrometheus.Do(func() {
+			err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine)
+		})
+		if err != nil {
 			err = errors.Wrap(err, "Failed to configure embedded prometheus instance")
 			metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusCritical, err.Error())
 			return
