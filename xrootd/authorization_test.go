@@ -322,7 +322,7 @@ func TestOSDFAuthCreation(t *testing.T) {
 			err = os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
 			require.NoError(t, err, "Failure writing test input authfile")
 
-			err = EmitAuthfile(testInput.server)
+			err = EmitAuthfile(testInput.server, false)
 			require.NoError(t, err, "Failure generating authfile")
 
 			finalAuthPath := filepath.Join(xrootdRun, "authfile-origin-generated")
@@ -383,7 +383,7 @@ func TestEmitAuthfile(t *testing.T) {
 			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(testInput.authIn), fs.FileMode(0600))
 			require.NoError(t, err)
 
-			err = EmitAuthfile(server)
+			err = EmitAuthfile(server, false)
 			require.NoError(t, err)
 
 			contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
@@ -412,7 +412,7 @@ func TestEmitOriginAuthfileWithCacheAuth(t *testing.T) {
 	err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(""), fs.FileMode(0600))
 	require.NoError(t, err)
 
-	err = EmitAuthfile(originServer)
+	err = EmitAuthfile(originServer, false)
 	require.NoError(t, err)
 
 	contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
@@ -461,7 +461,7 @@ func TestEmitOriginAuthfileWithCapabilities(t *testing.T) {
 			err := os.WriteFile(filepath.Join(dirName, "authfile"), []byte(""), fs.FileMode(0600))
 			require.NoError(t, err)
 
-			err = EmitAuthfile(originServer)
+			err = EmitAuthfile(originServer, false)
 			require.NoError(t, err)
 
 			contents, err := os.ReadFile(filepath.Join(dirName, "authfile-origin-generated"))
@@ -1059,7 +1059,7 @@ func TestWriteOriginAuthFiles(t *testing.T) {
 			err := os.WriteFile(authfileProvided, []byte(authStart), 0600)
 			assert.NoError(t, err)
 
-			err = EmitAuthfile(server)
+			err = EmitAuthfile(server, false)
 			assert.NoError(t, err)
 
 			authGen, err := os.ReadFile(xAuthFile)
@@ -1112,7 +1112,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 
 			assert.Equal(t, sciTokenResult, string(genSciToken))
 
-			err = EmitAuthfile(server)
+			err = EmitAuthfile(server, false)
 			assert.NoError(t, err)
 
 			authGen, err := os.ReadFile(authFile)

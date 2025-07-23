@@ -297,7 +297,10 @@ func getOSDFAuthFiles(server server_structs.XRootDServer) ([]byte, error) {
 
 // Parse the input xrootd authfile, add any default configurations, and then save it
 // into the xrootd runtime directory
-func EmitAuthfile(server server_structs.XRootDServer) error {
+// isFirstRun is true if this is the first time we are writing the authfile, false otherwise.
+// If the drop privileges feature is enabled, the first run will write the authfile as root user,
+// and the subsequent runs will write the authfile as the unprivileged pelican user via the xrdhttp-pelican plugin.
+func EmitAuthfile(server server_structs.XRootDServer, isFirstRun bool) error {
 	authfile := param.Xrootd_Authfile.GetString()
 	log.Debugln("Location of input authfile:", authfile)
 	contents, err := os.ReadFile(authfile)
@@ -402,7 +405,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 	}
 
 	// If Pelican is run by unprivileged user, we use xrdhttp-pelican plugin to make sure the final authfile is owned by xrootd
-	if param.Server_DropPrivileges.GetBool() {
+	if !isFirstRun && param.Server_DropPrivileges.GetBool() {
 		// Create a temporary authfile
 		tempAuthFile, err := os.CreateTemp("", "temp-authfile-generated-*")
 		if err != nil {

@@ -322,7 +322,7 @@ default_user = user2
 	err = EmitScitokensConfig(server)
 	require.NoError(t, err)
 
-	err = EmitAuthfile(server)
+	err = EmitAuthfile(server, false)
 	require.NoError(t, err)
 
 	destScitokensName := filepath.Join(param.Origin_RunLocation.GetString(), "scitokens-origin-generated.cfg")
