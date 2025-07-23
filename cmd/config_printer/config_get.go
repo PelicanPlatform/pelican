@@ -121,6 +121,11 @@ func configGet(cmd *cobra.Command, args []string) {
 				continue
 			}
 
+			if exists && docParam.Hidden && !includeHidden {
+				fmt.Printf("%s: This parameter is HIDDEN. If you still need to view it, run: pelican config get %s --include-hidden\n", key, key)
+				continue
+			}
+
 			matches = append(matches, Match{
 				OriginalKey:      key,
 				HighlightedKey:   highlightedKey,
