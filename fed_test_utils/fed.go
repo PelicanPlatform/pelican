@@ -172,6 +172,7 @@ func NewFedTest(t *testing.T, originConfig string) (ft *FedTest) {
 	// names, so we need to make sure our socket path is short enough to fit within that limit.
 	viper.Set(param.LocalCache_RunLocation.GetName(), filepath.Join(tmpPath, "lc"))
 	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(t.TempDir(), "server.sqlite"))
+	viper.Set(param.Monitoring_EnablePrometheus.GetName(), false)
 
 	// Set the Director's start time to 6 minutes ago. This prevents it from sending an HTTP 429 for
 	// unknown prefixes.
