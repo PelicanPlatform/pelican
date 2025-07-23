@@ -73,7 +73,8 @@ jobs:
       if: runner.os == 'macOS'
       run: |
         make web-build
-        go test -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
+        go test -timeout 15m -coverpkg=./director -covermode=count -coverprofile=coverage.out ./director -run TestStatMemory
+        go test -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./... -skip TestStatMemory
     - name: Test Windows
       if: runner.os == 'Windows'
       env:
