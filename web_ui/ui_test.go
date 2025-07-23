@@ -206,12 +206,12 @@ func TestHandleWebUIAuth(t *testing.T) {
 
 		r = httptest.NewRecorder()
 		// This route **is** in ui.go/adminAccessPages,
-		// but the user is not logged in, so we will hand it over to the frontend for the redirect
+		// so we will check if the user is logged in and if not redirect to login
 		req, err = http.NewRequest("GET", "/view/origin", nil)
 		require.NoError(t, err)
 		route.ServeHTTP(r, req)
 
-		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
+		assert.Equal(t, http.StatusFound, r.Result().StatusCode)
 
 		authDB.Store(nil)
 	})
@@ -259,26 +259,27 @@ func TestHandleWebUIAuth(t *testing.T) {
 		assert.Equal(t, http.StatusOK, r.Result().StatusCode)
 
 		r = httptest.NewRecorder()
-		// This route **is** in ui.go/adminAccessPages, and the user is not logged in, so we return 403
+		// This route **is** in ui.go/adminAccessPages, and the user is not logged in as admin.
+		// Send them to the 403 page to explain why they can't access the page
 		req, err = http.NewRequest("GET", "/view/origin", nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
 		route.ServeHTTP(r, req)
-		assert.Equal(t, http.StatusForbidden, r.Result().StatusCode)
+		assert.Equal(t, http.StatusFound, r.Result().StatusCode)
 
 		r = httptest.NewRecorder()
 		req, err = http.NewRequest("GET", "/view/cache/", nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
 		route.ServeHTTP(r, req)
-		assert.Equal(t, http.StatusForbidden, r.Result().StatusCode)
+		assert.Equal(t, http.StatusFound, r.Result().StatusCode)
 
 		r = httptest.NewRecorder()
 		req, err = http.NewRequest("GET", "/view/config/", nil)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: tok})
 		route.ServeHTTP(r, req)
-		assert.Equal(t, http.StatusForbidden, r.Result().StatusCode)
+		assert.Equal(t, http.StatusFound, r.Result().StatusCode)
 
 		authDB.Store(nil)
 	})
