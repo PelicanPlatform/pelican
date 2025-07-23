@@ -36,6 +36,7 @@ type (
 		Gid        int
 		ExtraEnv   []string
 		InheritFds []int
+		RunDir     string
 	}
 )
 

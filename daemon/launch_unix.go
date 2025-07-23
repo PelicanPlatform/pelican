@@ -122,6 +122,7 @@ func (launcher DaemonLauncher) Launch(ctx context.Context) (context.Context, int
 	if err != nil {
 		return ctx, -1, err
 	}
+	cmd.Dir = launcher.RunDir
 
 	if launcher.Uid != -1 && launcher.Gid != -1 {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}

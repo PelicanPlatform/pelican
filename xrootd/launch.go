@@ -47,6 +47,7 @@ type (
 		daemonName string
 		configPath string
 		fds        [2]int
+		runDir     string
 	}
 
 	UnprivilegedXrootdLauncher struct {
@@ -96,7 +97,7 @@ func (launcher UnprivilegedXrootdLauncher) KillFunc() func(pid int, sig int) err
 	}
 }
 
-func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCache bool) (result UnprivilegedXrootdLauncher, err error) {
+func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configPath string, isCache bool) (result UnprivilegedXrootdLauncher, err error) {
 	result.DaemonName = daemonName + ".origin"
 	if isCache {
 		result.DaemonName = daemonName + ".cache"
@@ -113,10 +114,8 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 	} else {
 		setOriginFds(result.fds)
 	}
-	xrootdRun := param.Origin_RunLocation.GetString()
-	if isCache {
-		xrootdRun = param.Cache_RunLocation.GetString()
-	}
+
+	result.RunDir = xrootdRun
 	pidFile := filepath.Join(xrootdRun, "xrootd.pid")
 	result.Args = []string{daemonName, "-s", pidFile, "-c", configPath}
 
@@ -183,12 +182,17 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 }
 
 func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool, enableCache bool) (launchers []daemon.Launcher, err error) {
+	xrootdRun := param.Origin_RunLocation.GetString()
+	if enableCache {
+		xrootdRun = param.Cache_RunLocation.GetString()
+	}
+
 	if privileged {
 		fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to create socket pair for xrootd")
 		}
-		launchers = append(launchers, PrivilegedXrootdLauncher{"xrootd", configPath, fds})
+		launchers = append(launchers, PrivilegedXrootdLauncher{"xrootd", configPath, fds, xrootdRun})
 		if enableCache {
 			setCacheFds(fds)
 		} else {
@@ -199,17 +203,17 @@ func ConfigureLaunchers(privileged bool, configPath string, useCMSD bool, enable
 			if err != nil {
 				return nil, errors.Wrap(err, "failed to create socket pair for xrootd")
 			}
-			launchers = append(launchers, PrivilegedXrootdLauncher{"cmsd", configPath, cmsdFds})
+			launchers = append(launchers, PrivilegedXrootdLauncher{"cmsd", configPath, cmsdFds, xrootdRun})
 		}
 	} else {
 		var result UnprivilegedXrootdLauncher
-		result, err = makeUnprivilegedXrootdLauncher("xrootd", configPath, enableCache)
+		result, err = makeUnprivilegedXrootdLauncher("xrootd", xrootdRun, configPath, enableCache)
 		if err != nil {
 			return
 		}
 		launchers = append(launchers, result)
 		if useCMSD {
-			result, err = makeUnprivilegedXrootdLauncher("cmsd", configPath, false)
+			result, err = makeUnprivilegedXrootdLauncher("cmsd", xrootdRun, configPath, false)
 			if err != nil {
 				return
 			}
