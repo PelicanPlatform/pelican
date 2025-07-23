@@ -650,7 +650,9 @@ func TestSyncUpload(t *testing.T) {
 
 		// Attempt to sync an upload of a single file to a collection, should fail
 		_, err = client.DoPut(fed.Ctx, smallTestFile.Name(), uploadUrl, true, client.WithTokenLocation(tempToken.Name()), client.WithSynchronize(client.SyncSize))
-		require.ErrorContains(t, err, "request failed (HTTP status 409)")
+		// The correct error code is a 409 but the way XRootD currently tears down connections, the server response can be
+		// lost and the client will see a broken connection error.  See the knowledge in https://github.com/PelicanPlatform/pelican/issues/2515
+		require.True(t, strings.Contains(err.Error(), "request failed (HTTP status 409)") || strings.Contains(err.Error(), "the existing TCP connection was broken"), "Expected a 409 error when trying to sync upload a file to a collection, got: %v", err)
 	})
 }
 
