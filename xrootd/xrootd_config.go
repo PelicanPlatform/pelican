@@ -551,7 +551,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	} else if !errors.Is(err, os.ErrExist) {
 		return err
 	}
-	if err := EmitAuthfile(server); err != nil {
+	if err := EmitAuthfile(server, true); err != nil {
 		return err
 	}
 
@@ -712,7 +712,7 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 				log.Debugln("Successfully updated the Xrootd TLS certificates")
 			}
 			lastErr := err
-			if err := EmitAuthfile(server); err != nil {
+			if err := EmitAuthfile(server, false); err != nil {
 				if lastErr != nil {
 					log.Errorln("Failure when generating authfile:", err)
 				}
