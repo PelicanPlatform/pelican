@@ -175,7 +175,12 @@ func TestStatMemory(t *testing.T) {
 			if errors.Is(err, context.Canceled) {
 				isCanceled = true
 			}
-			assert.NoError(t, err)
+			gatewayTimeout := client.StatusCodeError(504)
+			if errors.Is(err, client.CacheTimedOutReadingFromOrigin) || errors.Is(err, &gatewayTimeout) {
+				log.Warnf("Cache timed out reading from origin for %s", downloadURL)
+			} else {
+				assert.NoError(t, err)
+			}
 			return nil
 		})
 		idx += 1
@@ -183,6 +188,9 @@ func TestStatMemory(t *testing.T) {
 	}
 	assert.NoError(t, grp.Wait())
 	origIdx := idx
+	if t.Failed() {
+		t.Fatal("Failed to warm up the cache; exiting early")
+	}
 	runtime.GC()
 	time.Sleep(100 * time.Millisecond)
 
@@ -213,7 +221,12 @@ func TestStatMemory(t *testing.T) {
 			if errors.Is(err, context.Canceled) {
 				isCanceled = true
 			}
-			assert.NoError(t, err)
+			gatewayTimeout := client.StatusCodeError(504)
+			if errors.Is(err, client.CacheTimedOutReadingFromOrigin) || errors.Is(err, &gatewayTimeout) {
+				log.Warnf("Cache timed out reading from origin for %s", downloadURL)
+			} else {
+				assert.NoError(t, err)
+			}
 			return nil
 		})
 		require.False(t, isCanceled)

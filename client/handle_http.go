@@ -75,6 +75,9 @@ var (
 
 	// Regex to match the class ad lines
 	adLineRegex *regexp.Regexp = regexp.MustCompile(`^\s*([A-Za-z0-9]+)\s=\s"(.*)"\n?$`)
+
+	// Indicates the origin responded too slowly after the cache tried to download from it
+	CacheTimedOutReadingFromOrigin = errors.New("cache timed out waiting on origin")
 )
 
 type (
@@ -2898,8 +2901,12 @@ Loop:
 			statusCode, statusText := parseTransferStatus(errorStatus)
 			if statusCode != http.StatusOK {
 				log.WithFields(fields).Debugln("Got error from file transfer:", statusText)
-				statusText = strings.Replace(statusText, "sTREAM ioctl timeout", "cache timed out waiting on origin", 1)
-				err = errors.New("download error after server response started: " + statusText)
+				if strings.Contains(statusText, "sTREAM ioctl timeout") {
+					err = CacheTimedOutReadingFromOrigin
+				} else {
+					err = errors.New(statusText)
+				}
+				err = errors.Wrap(err, "download error after server response started")
 				if strings.Contains(statusText, "unexpected EOF") {
 					err = &UnexpectedEOFError{Err: err}
 				}
