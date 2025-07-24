@@ -2900,6 +2900,13 @@ components: ["origin", "cache"]
 ############################
 # Monitoring-level configs #
 ############################
+name: Monitoring.EnablePrometheus
+description: |+
+  Enable the internal Prometheus server. This server is bound to the ${Server.WebPort}.
+type: bool
+default: true
+components: ["origin", "cache", "director", "registry"]
+---
 name: Monitoring.DataLocation
 description: |+
   A filepath where Prometheus should host its monitoring data.

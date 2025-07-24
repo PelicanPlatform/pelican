@@ -380,6 +380,7 @@ var (
 	Issuer_UserStripDomain = BoolParam{"Issuer.UserStripDomain"}
 	Logging_DisableProgressBars = BoolParam{"Logging.DisableProgressBars"}
 	Lotman_EnableAPI = BoolParam{"Lotman.EnableAPI"}
+	Monitoring_EnablePrometheus = BoolParam{"Monitoring.EnablePrometheus"}
 	Monitoring_MetricAuthorization = BoolParam{"Monitoring.MetricAuthorization"}
 	Monitoring_PromQLAuthorization = BoolParam{"Monitoring.PromQLAuthorization"}
 	Origin_DirectorTest = BoolParam{"Origin.DirectorTest"}
