@@ -133,10 +133,17 @@ func makeUnprivilegedXrootdLauncher(daemonName string, configPath string, isCach
 
 	if isCache {
 		result.Args = append(result.Args, "-n", "cache")
+
+		// Determine the correct CA bundle path based on if drop privilege mode is enabled
+		caBundlePath := filepath.Join(xrootdRun, "ca-bundle.crt")
+		if param.Server_DropPrivileges.GetBool() {
+			caBundlePath = filepath.Join(xrootdRun, "pelican", "ca-bundle.crt")
+		}
+
 		result.ExtraEnv = []string{
 			"XRD_PELICANBROKERSOCKET=" + filepath.Join(xrootdRun, "cache-reversal.sock"),
 			"XRD_PLUGINCONFDIR=" + filepath.Join(xrootdRun, "cache-client.plugins.d"),
-			"X509_CERT_FILE=" + filepath.Join(xrootdRun, "ca-bundle.crt"),
+			"X509_CERT_FILE=" + caBundlePath,
 			"XRD_PELICANCLIENTCERTFILE=" + filepath.Join(xrootdRun, "copied-tls-creds.crt"),
 			"XRD_PELICANCLIENTKEYFILE=" + filepath.Join(xrootdRun, "copied-tls-creds.crt"),
 		}
