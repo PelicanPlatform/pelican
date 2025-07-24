@@ -36,6 +36,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-kit/log/term"
 	"github.com/go-playground/locales/en"
 	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
@@ -856,7 +857,7 @@ func printConfigHelper(bytes []byte) {
 		log.SetFormatter(originalFormatter)
 	}()
 
-	isStdout := param.Logging_LogLocation.GetString() == ""
+	isStdout := param.Logging_LogLocation.GetString() == "" && term.IsTerminal(log.StandardLogger().Out)
 
 	log.SetFormatter(&log.TextFormatter{
 		DisableQuote:           true,
