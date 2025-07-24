@@ -703,6 +703,9 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 			var err error
 			if param.Server_DropPrivileges.GetBool() {
 				err = dropPrivilegeCopy(server)
+				if err != nil {
+					log.Errorln("Failure when copying the TLS certificates to the xrootd process:", err)
+				}
 			} else {
 				err = copyXrootdCertificates(server)
 			}
