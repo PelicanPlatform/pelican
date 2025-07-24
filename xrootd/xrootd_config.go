@@ -285,7 +285,8 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 	}
 	// If the scitokens.cfg does not exist, create one
 	if _, ok := server.(*origin.OriginServer); ok {
-		err = WriteOriginScitokensConfig()
+		// This is the first time we write the scitokens.cfg file, so isFirstRun = true
+		err = WriteOriginScitokensConfig(true)
 		if err != nil {
 			return err
 		}
@@ -405,7 +406,7 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 	}
 
 	if cacheServer, ok := server.(*cache.CacheServer); ok {
-		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
+		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds(), true)
 		if err != nil {
 			return errors.Wrap(err, "Failed to create scitokens configuration for the cache")
 		}
@@ -551,7 +552,7 @@ func CheckXrootdEnv(server server_structs.XRootDServer) error {
 	} else if !errors.Is(err, os.ErrExist) {
 		return err
 	}
-	if err := EmitAuthfile(server); err != nil {
+	if err := EmitAuthfile(server, true); err != nil {
 		return err
 	}
 
@@ -702,6 +703,9 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 			var err error
 			if param.Server_DropPrivileges.GetBool() {
 				err = dropPrivilegeCopy(server)
+				if err != nil {
+					log.Errorln("Failure when copying the TLS certificates to the xrootd process:", err)
+				}
 			} else {
 				err = copyXrootdCertificates(server)
 			}
@@ -712,7 +716,7 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 				log.Debugln("Successfully updated the Xrootd TLS certificates")
 			}
 			lastErr := err
-			if err := EmitAuthfile(server); err != nil {
+			if err := EmitAuthfile(server, false); err != nil {
 				if lastErr != nil {
 					log.Errorln("Failure when generating authfile:", err)
 				}

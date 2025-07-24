@@ -159,7 +159,11 @@ func deduplicateBasePaths(cfg *ScitokensCfg) {
 
 // Given a reference to a Scitokens configuration, write it out to a known location
 // on disk for the xrootd server
-func writeScitokensConfiguration(modules server_structs.ServerType, cfg *ScitokensCfg) error {
+//
+// isFirstRun is true if this is the first time we write the scitokens.cfg file, false otherwise.
+// If the drop privileges feature is enabled, the first run is by the root user,
+// and the subsequent runs are by the unprivileged pelican user via the xrdhttp-pelican plugin.
+func writeScitokensConfiguration(modules server_structs.ServerType, cfg *ScitokensCfg, isFirstRun bool) error {
 
 	JSONify := func(v any) (string, error) {
 		result, err := json.Marshal(v)
@@ -169,8 +173,9 @@ func writeScitokensConfiguration(modules server_structs.ServerType, cfg *Scitoke
 		Funcs(template.FuncMap{"StringsJoin": strings.Join, "JSONify": JSONify}).
 		Parse(scitokensCfgTemplate))
 
-	// If Pelican is run by unprivileged user, we use xrdhttp-pelican plugin to make sure the final scitokens.cfg file is owned by xrootd
-	if param.Server_DropPrivileges.GetBool() {
+	// After startup (the first run), if Pelican is run by unprivileged user, we use
+	// xrdhttp-pelican plugin to make sure the final scitokens.cfg file is owned by xrootd
+	if !isFirstRun && param.Server_DropPrivileges.GetBool() {
 		// Create a temporary file to assemble the scitokens configuration
 		tempCfgFile, err := os.CreateTemp("", "scitokens-generated-*.cfg.tmp")
 		if err != nil {
@@ -297,7 +302,11 @@ func getOSDFAuthFiles(server server_structs.XRootDServer) ([]byte, error) {
 
 // Parse the input xrootd authfile, add any default configurations, and then save it
 // into the xrootd runtime directory
-func EmitAuthfile(server server_structs.XRootDServer) error {
+//
+// isFirstRun is true if this is the first time we are writing the authfile, false otherwise.
+// If the drop privileges feature is enabled, the first run is by the root user,
+// and the subsequent runs are by the unprivileged pelican user via the xrdhttp-pelican plugin.
+func EmitAuthfile(server server_structs.XRootDServer, isFirstRun bool) error {
 	authfile := param.Xrootd_Authfile.GetString()
 	log.Debugln("Location of input authfile:", authfile)
 	contents, err := os.ReadFile(authfile)
@@ -402,7 +411,7 @@ func EmitAuthfile(server server_structs.XRootDServer) error {
 	}
 
 	// If Pelican is run by unprivileged user, we use xrdhttp-pelican plugin to make sure the final authfile is owned by xrootd
-	if param.Server_DropPrivileges.GetBool() {
+	if !isFirstRun && param.Server_DropPrivileges.GetBool() {
 		// Create a temporary authfile
 		tempAuthFile, err := os.CreateTemp("", "temp-authfile-generated-*")
 		if err != nil {
@@ -694,7 +703,7 @@ func makeSciTokensCfg() (cfg ScitokensCfg, err error) {
 // Writes out the server's scitokens.cfg configuration
 func EmitScitokensConfig(server server_structs.XRootDServer) error {
 	if _, ok := server.(*origin.OriginServer); ok {
-		return WriteOriginScitokensConfig()
+		return WriteOriginScitokensConfig(false)
 	} else if cacheServer, ok := server.(*cache.CacheServer); ok {
 		directorAds := cacheServer.GetNamespaceAds()
 		if param.Cache_SelfTest.GetBool() {
@@ -718,14 +727,14 @@ func EmitScitokensConfig(server server_structs.XRootDServer) error {
 			}
 			directorAds = append(directorAds, cacheIssuer)
 		}
-		return WriteCacheScitokensConfig(directorAds)
+		return WriteCacheScitokensConfig(directorAds, false)
 	} else {
 		return errors.New("internal error: server object is neither cache nor origin")
 	}
 }
 
 // Writes out the origin's scitokens.cfg configuration
-func WriteOriginScitokensConfig() error {
+func WriteOriginScitokensConfig(isFirstRun bool) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
@@ -792,7 +801,7 @@ func WriteOriginScitokensConfig() error {
 		return errors.Wrap(err, "failed to generate xrootd issuer for federation")
 	}
 
-	return writeScitokensConfiguration(server_structs.OriginType, &cfg)
+	return writeScitokensConfiguration(server_structs.OriginType, &cfg, isFirstRun)
 }
 
 // GenerateCacheIssuers takes a slice of NamespaceAdV2 and generates a list of Issuer objects
@@ -830,7 +839,7 @@ func GenerateCacheIssuers(nsAds []server_structs.NamespaceAdV2) []Issuer {
 }
 
 // Writes out the cache's scitokens.cfg configuration
-func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAdV2) error {
+func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAdV2, isFirstRun bool) error {
 	cfg, err := makeSciTokensCfg()
 	if err != nil {
 		return err
@@ -846,7 +855,7 @@ func WriteCacheScitokensConfig(nsAds []server_structs.NamespaceAdV2) error {
 		}
 	}
 
-	return writeScitokensConfiguration(server_structs.CacheType, &cfg)
+	return writeScitokensConfiguration(server_structs.CacheType, &cfg, isFirstRun)
 }
 
 func EmitIssuerMetadata(exportPath string, xServeUrl string) error {

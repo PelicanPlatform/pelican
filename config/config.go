@@ -1346,7 +1346,9 @@ func InitServer(ctx context.Context, currentServers server_structs.ServerType) e
 			return errors.Wrap(err, "failure when setting up the file permissions for pelican")
 		}
 
-		pelicanLocationsNoRecursive := []string{}
+		pelicanLocationsNoRecursive := []string{
+			param.Server_TLSKey.GetString(),
+		}
 		if (currentServers.IsEnabled(server_structs.OriginType) || currentServers.IsEnabled(server_structs.CacheType)) && param.Shoveler_Enable.GetBool() {
 			pelicanLocationsNoRecursive = append(pelicanLocationsNoRecursive, param.Shoveler_AMQPTokenLocation.GetString())
 		}
