@@ -412,7 +412,11 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 		isWLCG = true
 	}
 	if ver, ok := tok.Get("ver"); ok {
-		if s, ok2 := ver.(string); ok2 && strings.HasPrefix(s, "scitokens:") {
+		// Based on the scitoken official docs(https://scitokens.org/technical_docs/Verification),
+		// the correct behavior for the `ver` claim is `scitoken:2.0` (singular). However, to maintain
+		// backward compatibility and typo tolerance, Pelican should keep accepting `scitokens:2.0` too.
+		// This implementation is inspired by the scitoken check in scitokens-cpp library.
+		if s, ok2 := ver.(string); ok2 && (strings.HasPrefix(s, "scitoken:2.0") || strings.HasPrefix(s, "scitokens:2.0")) {
 			isSci = true
 		}
 	}
