@@ -378,20 +378,27 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 
 	}
 
+	var prometheusInitErr error
 	if param.Monitoring_EnablePrometheus.GetBool() {
-		metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusWarning, "Prometheus not started")
 		// Due to federation tests / fed-in-a-box, we need to configure the embedded prometheus instance only once
 		// and not for each server. This is why we use a sync.Once here.
 		oncePrometheus.Do(func() {
-			err = web_ui.ConfigureEmbeddedPrometheus(ctx, engine)
+			metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusWarning, "Prometheus not started")
+			prometheusInitErr = web_ui.ConfigureEmbeddedPrometheus(ctx, engine)
+			if prometheusInitErr != nil {
+				prometheusInitErr = errors.Wrap(prometheusInitErr, "failed to configure embedded Prometheus instance")
+				metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusCritical, prometheusInitErr.Error())
+				return
+			}
+			metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusOK, "Prometheus started")
 		})
-		if err != nil {
-			err = errors.Wrap(err, "Failed to configure embedded prometheus instance")
-			metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusCritical, err.Error())
+		if prometheusInitErr != nil {
+			err = prometheusInitErr
 			return
 		}
-		metrics.SetComponentHealthStatus(metrics.Prometheus, metrics.StatusOK, "Prometheus started")
+	}
 
+	if param.Server_EnableUI.GetBool() {
 		log.Info("Starting web login...")
 		egrp.Go(func() error { return web_ui.InitServerWebLogin(ctx) })
 	}
