@@ -285,7 +285,8 @@ func CheckOriginXrootdEnv(exportPath string, server server_structs.XRootDServer,
 	}
 	// If the scitokens.cfg does not exist, create one
 	if _, ok := server.(*origin.OriginServer); ok {
-		err = WriteOriginScitokensConfig()
+		// This is the first time we write the scitokens.cfg file, so isFirstRun = true
+		err = WriteOriginScitokensConfig(true)
 		if err != nil {
 			return err
 		}
@@ -405,7 +406,7 @@ func CheckCacheXrootdEnv(server server_structs.XRootDServer, uid int, gid int) e
 	}
 
 	if cacheServer, ok := server.(*cache.CacheServer); ok {
-		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds())
+		err := WriteCacheScitokensConfig(cacheServer.GetNamespaceAds(), true)
 		if err != nil {
 			return errors.Wrap(err, "Failed to create scitokens configuration for the cache")
 		}

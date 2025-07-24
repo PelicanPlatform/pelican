@@ -565,7 +565,7 @@ func TestEmitCfg(t *testing.T) {
 
 	configTester := func(cfg *ScitokensCfg, configResult string) func(t *testing.T) {
 		return func(t *testing.T) {
-			err := writeScitokensConfiguration(server_structs.OriginType, cfg)
+			err := writeScitokensConfiguration(server_structs.OriginType, cfg, false)
 			assert.NoError(t, err)
 
 			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -652,7 +652,7 @@ func TestLoadScitokensConfig(t *testing.T) {
 			cfg, err := LoadScitokensConfig(cfgFname)
 			require.NoError(t, err)
 
-			err = writeScitokensConfiguration(server_structs.OriginType, &cfg)
+			err = writeScitokensConfiguration(server_structs.OriginType, &cfg, false)
 			assert.NoError(t, err)
 
 			genCfg, err := os.ReadFile(filepath.Join(dirname, "scitokens-origin-generated.cfg"))
@@ -1185,7 +1185,7 @@ func TestWriteCacheAuthFiles(t *testing.T) {
 			err := os.WriteFile(authFile, []byte(""), 0600)
 			assert.NoError(t, err)
 
-			err = WriteCacheScitokensConfig(server.GetNamespaceAds())
+			err = WriteCacheScitokensConfig(server.GetNamespaceAds(), false)
 			assert.NoError(t, err)
 
 			sciFile := param.Xrootd_ScitokensConfig.GetString()
@@ -1359,7 +1359,7 @@ func TestWriteOriginScitokensConfig(t *testing.T) {
 	err = os.WriteFile(scitokensCfg, []byte(toMergeOutput), 0640)
 	require.NoError(t, err)
 
-	err = WriteOriginScitokensConfig()
+	err = WriteOriginScitokensConfig(false)
 	require.NoError(t, err)
 
 	genCfg, err := os.ReadFile(filepath.Join(tmpDir, "scitokens-origin-generated.cfg"))
