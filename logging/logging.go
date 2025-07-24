@@ -85,7 +85,6 @@ func FlushLogs(pushToFile bool) {
 	flushOnce.Do(func() {
 		hook := bufferedHook.Load()
 		if hook == nil {
-			fmt.Fprintln(os.Stderr, "FlushLogs called but no bufferedHook exists")
 			return
 		}
 
