@@ -33,6 +33,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -47,6 +48,8 @@ import (
 // this global flag will be set to true.  This prevents us from asking for
 // the password again later.
 var setEmptyPassword = false
+
+var ErrIncorrectPassword = errors.New("incorrect password")
 
 func GetEncryptedConfigName() (string, error) {
 	configDir := viper.GetString("ConfigDir")
@@ -77,6 +80,18 @@ func EncryptedConfigExists() (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// Delete the user's local credential file
+func DeleteCredentials() error {
+	filename, err := GetEncryptedConfigName()
+	if err != nil {
+		return err
+	}
+	if err = os.Remove(filename); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // Return the PEM-formatted contents of the encrypted configuration file
@@ -242,6 +257,9 @@ func GetCredentialConfigContents() (OSDFConfig, error) {
 				return config, errors.New("Encrypted key present; must have non-empty password")
 			}
 			if key, err = pkcs8.ParsePKCS8PrivateKey(block.Bytes, password); err != nil {
+				if strings.Contains(err.Error(), "pkcs8: incorrect password") {
+					err = ErrIncorrectPassword
+				}
 				return config, err
 			}
 			if typedPassword {

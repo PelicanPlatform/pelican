@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
@@ -101,12 +102,29 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 		Run: func(cmd *cobra.Command, args []string) {
 			err := config.ResetPassword()
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "Failed to get reset password:", err)
+				if errors.Is(err, config.ErrIncorrectPassword) {
+					fmt.Fprintln(os.Stderr, "Failed to reset password - entered incorrect local decryption password")
+					fmt.Fprintln(os.Stderr, "If you have forgotten your password, you can reset the local state (deleting all on-disk credentials)")
+					fmt.Fprintf(os.Stderr, "by running '%s credentials reset-local'\n", os.Args[0])
+				} else {
+					fmt.Fprintln(os.Stderr, "Failed to reset password:", err)
+				}
 				os.Exit(1)
 			}
 		},
 	})
 
+	configCmd.AddCommand(&cobra.Command{
+		Use:   "reset-local",
+		Short: "Delete all local credentials for the current user",
+		Long:  "Delete all local credentials for the current user",
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := config.DeleteCredentials(); err != nil {
+				fmt.Fprintln(os.Stderr, "Failed to delete local credentials:", err)
+				os.Exit(1)
+			}
+		},
+	})
 }
 
 func printOauthConfig() {
