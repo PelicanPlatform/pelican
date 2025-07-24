@@ -114,7 +114,16 @@ func SetBrokerDialer(dialer *broker.BrokerDialer) {
 // However, 0 is not included because its multiplication with other load-based
 // weights would destroy information.
 func getRawStatusWeight(status metrics.HealthStatusEnum) float64 {
-	var xt float64
+	// This weight is used when ordering servers on redirects,
+	// and is only meant to _decrease_ a server's priority, never _increase_ it.
+	// Since these weights are factored into sorting multiplicatively, we assign
+	// "unknown" the multiplicative identity weight.
+	//
+	// There's an additional question about what to do here if the current status
+	// is "unknown" but the previous ad had a known status -- should the status be
+	// imputed, or should we default to 1? For now, it feels safer to make the choice
+	// that doesn't affect sorting, thus "1".
+	xt := 1.0
 	if status <= metrics.StatusDegraded {
 		// Set low weight for degraded or worse.
 		// Note that this also covers StatusShuttingDown, although
@@ -124,19 +133,6 @@ func getRawStatusWeight(status metrics.HealthStatusEnum) float64 {
 		// Warnings may be unrelated to IO load, but it's still probably
 		// not great to heavily weight servers reporting warnings.
 		xt = 0.5
-	} else {
-		// This triggers for StatusOk and StatusUnknown (which would be the case
-		// for older servers that don't report their status or for ads generated
-		// via parsing Topology). This weight is used when ordering servers on redirects,
-		// and is only meant to _decrease_ a server's priority, never _increase_ it.
-		// Since these weights are factored into sorting multiplicatively, we assign
-		// "unknown" the multiplicative identity weight.
-		//
-		// There's an additional question about what to do here if the current status
-		// is "unknown" but the previous ad had a known status -- should the status be
-		// imputed, or should we default to 1? For now, it feels safer to make the choice
-		// that doesn't affect sorting, thus "1".
-		xt = 1
 	}
 
 	return xt
@@ -179,6 +175,12 @@ func populateEWMAStatusWeight(newSAd, oldSAd *server_structs.ServerAd) {
 	}
 	t_1 := oldSAd.StatusWeightLastUpdate
 	deltaT := t.Sub(time.Unix(t_1, 0))
+	if deltaT < 0 {
+		log.Warningf("Negative deltaT detected while calculating EWMA status weight for server %s: %s (previous time: '%d', current time: '%d'). Resetting to 0.",
+			newSAd.Name, deltaT.String(), t_1, t.Unix())
+		deltaT = 0
+	}
+
 	// Using time constant of 5m based on some experimental hand tests -- this feels
 	// reasonably responsive, whereas 10m felt like it overly smoothed things.
 	tao := param.Director_AdaptiveSortEWMATimeConstant.GetDuration()
@@ -193,8 +195,10 @@ func populateEWMAStatusWeight(newSAd, oldSAd *server_structs.ServerAd) {
 	// Calculate the new status weight using the EWMA formula
 	statusWeight = st_1 + alpha*(xt-st_1)
 	if statusWeight <= 0 || statusWeight > 1 {
-		log.Errorf("Invalid EWMA status weight %f for server %s with status %s (should be bounded by (0,1]). Resetting to 1.0, which will have no effect on sorting",
-			newSAd.StatusWeight, newSAd.Name, newSAd.Status)
+		log.Errorf(
+			"Invalid EWMA status weight for server '%s': computed=%f, previous=%f, raw weight=%f, current status='%s'. "+
+				"Value should be in (0,1]. Resetting to 1.0 (will have no effect on sorting).",
+			newSAd.Name, statusWeight, st_1, xt, newSAd.Status)
 		statusWeight = 1.0
 	}
 	newSAd.StatusWeight = statusWeight
@@ -272,6 +276,7 @@ func recordAd(ctx context.Context, sAd server_structs.ServerAd, namespaceAds *[]
 
 		populateEWMAStatusWeight(&sAd, &(existing.Value().ServerAd))
 	} else {
+		// If there is no existing ad, the status weight will be set to the current raw weight
 		populateEWMAStatusWeight(&sAd, nil)
 	}
 

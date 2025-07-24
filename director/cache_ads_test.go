@@ -473,6 +473,19 @@ func TestPopulateEWMAStatusWeightSequence(t *testing.T) {
 				1.0,
 			},
 		},
+		{
+			name: "negative-deltaT-case",
+			adSequence: []server_structs.ServerAd{
+				{StatusWeight: 0.5},
+				{Status: metrics.StatusCritical.String()},
+			},
+			deltaTs: []time.Duration{
+				time.Minute * -1,
+			},
+			expectedWeights: []float64{
+				0.5, // the previous weight will be imputed because alpha --> 0
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -484,7 +497,8 @@ func TestPopulateEWMAStatusWeightSequence(t *testing.T) {
 
 				// Check status weight calculation. Epsilon accounts for time lag, and mult by i+1 accounts
 				// for that lag accumulating over iterations
-				assert.InEpsilon(t, tc.expectedWeights[i], tc.adSequence[i+1].StatusWeight, float64(i+1)*0.0035)
+				assert.InEpsilon(t, tc.expectedWeights[i], tc.adSequence[i+1].StatusWeight, float64(i+1)*0.0035,
+					"status weight is %d at index %d", tc.adSequence[i+1].StatusWeight, i+1)
 			}
 		})
 	}
