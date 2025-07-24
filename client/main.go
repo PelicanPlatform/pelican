@@ -499,6 +499,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse remote destination while performing PUT")
 	}
+	dOpts = append(dOpts, pelican_url.WithContext(ctx))
 
 	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
 	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {
@@ -570,6 +571,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse remote source while performing GET")
 	}
+	dOpts = append(dOpts, pelican_url.WithContext(ctx))
 
 	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
 	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {
