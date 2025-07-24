@@ -56,7 +56,7 @@ ARG LOTMAN_VER=0.0.4
 # Note: github_scripts/osx_install.sh also (separately) specifies the version to use
 # Until the two places are programmatically synchronized, please double-check by hand
 # when doing version changes.
-ARG XRDCL_PELICAN_SRC_BUILD=true
+ARG XRDCL_PELICAN_SRC_BUILD=false
 ARG XRDCL_PELICAN_VER=1.4.0
 ARG XRDHTTP_PELICAN_SRC_BUILD=false
 ARG XRDHTTP_PELICAN_VER=0.0.7
@@ -223,8 +223,8 @@ RUN groupadd -g 10940 xrootd \
 # Pelican's patches are ingested into the OSG repositories.
 # NOTE: If you update this version, you must also update the version in
 # github_scripts/osx_install.sh
-ARG XROOTD_VER="5.8.3"
-ARG XROOTD_RELEASE="1.3.osg${OSG_SERIES}.${BASE_OS}"
+ARG XROOTD_VER="5.8.4"
+ARG XROOTD_RELEASE="1.2.osg${OSG_SERIES}.${BASE_OS}"
 ARG KOJIHUB_BASE_URL="https://kojihub2000.chtc.wisc.edu/kojifiles/packages/xrootd/${XROOTD_VER}/${XROOTD_RELEASE}"
 
 # The packages from Koji need to be installed in a single dnf command in
