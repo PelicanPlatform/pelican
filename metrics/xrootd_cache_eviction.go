@@ -345,6 +345,7 @@ func LaunchXrootdCacheEvictionMonitoring(ctx context.Context, egrp *errgroup.Gro
 				stats, err := os.ReadFile(statsFile)
 				if err != nil {
 					log.Errorf("Xrootd cache eviction monitoring: failed to read stats file: %v", err)
+					continue
 				}
 				var dirStatistics DirStatistics
 				if err := json.Unmarshal(stats, &dirStatistics); err != nil {
