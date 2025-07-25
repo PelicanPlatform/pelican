@@ -2598,6 +2598,8 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 		// The host is ignored since we override the dial function; however, I find it useful
 		// in debug messages to see that this went to the local cache.
 		transferUrl.Host = "localhost"
+		// Note we aren't reusing a common client from the config module; this is because
+		// the transport is actually reading from a Unix socket and is rather unique.
 		client = &http.Client{Transport: transport}
 	}
 	headerTimeout := config.GetTransport().ResponseHeaderTimeout

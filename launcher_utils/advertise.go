@@ -58,7 +58,7 @@ func doAdvertise(ctx context.Context, servers []server_structs.XRootDServer) {
 	err := Advertise(ctx, servers)
 	duration := time.Since(start)
 	if err != nil {
-		log.Warningf("XRootD server advertise failed (duration %v): %s", duration.String(), err)
+		log.Warningf("XRootD server advertise failed (duration %s): %v", duration.String(), err)
 		metrics.SetComponentHealthStatus(metrics.OriginCache_Federation, metrics.StatusCritical, fmt.Sprintf("XRootD server failed to advertise to the director: %v", err))
 	} else {
 		log.Debugf("XRootD server advertise successful (duration %v)", duration.String())

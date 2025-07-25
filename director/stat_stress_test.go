@@ -172,7 +172,6 @@ func TestStatMemory(t *testing.T) {
 		downloadURL := fmt.Sprintf("pelican://%s%s/stress/%v.txt", discoveryUrl.Host, fed.Exports[0].FederationPrefix, idx)
 		destName := filepath.Join(t.TempDir(), fmt.Sprintf("dest.%v.txt", idx))
 		src := filepath.Join(fed.Exports[0].StoragePrefix, fmt.Sprintf("stress/%v.txt", idx))
-		fmt.Println(src)
 		require.NoError(t, os.WriteFile(src, []byte("foo"), os.FileMode(0600)))
 		require.NoError(t, os.Chown(src, ui.Uid, ui.Gid))
 		grp.Go(func() error {
@@ -218,11 +217,9 @@ func TestStatMemory(t *testing.T) {
 		downloadURL := fmt.Sprintf("pelican://%s%s/stress/%v.txt", discoveryUrl.Host, fed.Exports[0].FederationPrefix, idx)
 		destName := filepath.Join(t.TempDir(), fmt.Sprintf("dest.%v.txt", idx))
 		src := filepath.Join(fed.Exports[0].StoragePrefix, fmt.Sprintf("stress/%v.txt", idx))
-		fmt.Println(src)
 		require.NoError(t, os.WriteFile(src, []byte("foo"), os.FileMode(0600)))
 		require.NoError(t, os.Chown(src, ui.Uid, ui.Gid))
 		grp.Go(func() error {
-			fmt.Println("Launched download URL", downloadURL, err)
 			_, err := client.DoGet(fed.Ctx, downloadURL, destName, false)
 			if errors.Is(err, context.Canceled) {
 				isCanceled = true
