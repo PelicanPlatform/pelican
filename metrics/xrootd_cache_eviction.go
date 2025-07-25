@@ -178,24 +178,24 @@ func LaunchXrootdCacheEvictionMonitoring(ctx context.Context, egrp *errgroup.Gro
 		for {
 			select {
 			case <-ctx.Done():
-				log.Info("Xrootd cache eviction monitoring: context done")
+				log.Trace("Xrootd cache eviction monitoring (context done)")
 				return nil
 			case <-ticker.C:
-				log.Info("Xrootd cache eviction monitoring: tick")
+				log.Trace("Xrootd cache eviction monitoring (attempting to ingest eviction data)")
 				stats, err := os.ReadFile(statsFile)
 				if err != nil {
 					log.Errorf("Xrootd cache eviction monitoring: failed to read stats file: %v", err)
 				}
 				var dirStatistics DirStatistics
-				err = json.Unmarshal(stats, &dirStatistics)
-				if err != nil {
-					log.Errorf("Xrootd cache eviction monitoring: failed to unmarshal stats file: %v", err)
+				if err := json.Unmarshal(stats, &dirStatistics); err != nil {
+					log.Warningf("Xrootd cache eviction monitoring: failed to unmarshal stats: %v", err)
+					continue
 				}
 
-				log.Infof("Xrootd cache eviction monitoring: dirStatistics: %+v", dirStatistics)
+				log.Tracef("Xrootd cache eviction monitoring (dirStatistics: %s)", stats)
 
 				if dirStatistics.UsageUpdateTime <= lastUpdateTime {
-					log.Infof("Xrootd cache eviction monitoring: directory stats is stale")
+					log.Tracef("Xrootd cache eviction monitoring (stats file has not been updated since last read at %d, but current file timestamp is %d)", lastUpdateTime, dirStatistics.UsageUpdateTime)
 					continue
 				}
 
