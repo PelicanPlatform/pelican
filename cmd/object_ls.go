@@ -100,6 +100,12 @@ func listMain(cmd *cobra.Command, args []string) error {
 		// Print the list of errors
 		errMsg := err.Error()
 		var te *client.TransferErrors
+		if errors.Is(err, config.ErrIncorrectPassword) {
+			fmt.Fprintln(os.Stderr, "Failed to access local credential file - entered incorrect local decryption password")
+			fmt.Fprintln(os.Stderr, "If you have forgotten your password, you can reset the local state (deleting all on-disk credentials)")
+			fmt.Fprintf(os.Stderr, "by running '%s credentials reset-local'\n", os.Args[0])
+			os.Exit(1)
+		}
 		if errors.As(err, &te) {
 			errMsg = te.UserError()
 		}
