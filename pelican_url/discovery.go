@@ -32,6 +32,7 @@ import (
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -99,7 +100,7 @@ func SetOsdfDiscoveryHost(host string) (oldHost string, er error) {
 	return
 }
 
-func StartCache() *Cache {
+func StartCache(ctx context.Context, egrp *errgroup.Group) *Cache {
 	// Start the cache with a default suppressed loader. Later on when we need to call
 	// Get() on the cache, we can pass in a loader that uses specific DiscoveryOptions
 	baseLoader := getDynamicLoader(
@@ -115,6 +116,14 @@ func StartCache() *Cache {
 	// Start our cache for url metadata
 	// This is stopped in the `Shutdown` method
 	go pelicanURLCache.Start()
+	if egrp != nil {
+		egrp.Go(func() error {
+			<-ctx.Done()
+			pelicanURLCache.DeleteAll()
+			pelicanURLCache.Stop()
+			return nil
+		})
+	}
 	return pelicanURLCache
 }
 
@@ -402,7 +411,7 @@ func (p *PelicanURL) PopulateFedInfo(opts ...DiscoveryOption) error {
 
 	if options.useCached {
 		if pelicanUrlCache == nil {
-			pelicanUrlCache = StartCache()
+			pelicanUrlCache = StartCache(ctx, nil)
 		}
 
 		item := pelicanUrlCache.Get(discoveryUrl.String(), ttlcache.WithLoader(getDynamicLoader(WithClient(httpClient), WithContext(ctx))))

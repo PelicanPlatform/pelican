@@ -422,7 +422,7 @@ func (dir *directorInfo) sendAd(ctx context.Context, directorUrlStr string, ad *
 		return
 	}
 
-	client := http.Client{Transport: config.GetTransport()}
+	client := config.GetClient()
 	req, err := http.NewRequestWithContext(ctx, "POST", directorUrl.String(), ad.contents)
 	if err != nil {
 		log.Errorln("Failed to generate a new HTTP request:", err)

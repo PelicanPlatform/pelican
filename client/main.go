@@ -114,7 +114,7 @@ func ParseRemoteAsPUrl(ctx context.Context, rp string) (*pelican_url.PelicanURL,
 	}
 
 	// Set up options that get passed from Parse --> PopulateFedInfo and may be used when querying the Director
-	client := &http.Client{Transport: config.GetTransport()}
+	client := config.GetClient()
 	pOptions := []pelican_url.ParseOption{pelican_url.ShouldDiscover(true), pelican_url.ValidateQueryParams(true)}
 	dOptions := []pelican_url.DiscoveryOption{pelican_url.UseCached(true), pelican_url.WithContext(ctx), pelican_url.WithClient(client), pelican_url.WithUserAgent(getUserAgent(""))}
 
@@ -499,6 +499,7 @@ func DoPut(ctx context.Context, localObject string, remoteDestination string, re
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse remote destination while performing PUT")
 	}
+	dOpts = append(dOpts, pelican_url.WithContext(ctx))
 
 	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
 	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {
@@ -570,6 +571,7 @@ func DoGet(ctx context.Context, remoteObject string, localDestination string, re
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to parse remote source while performing GET")
 	}
+	dOpts = append(dOpts, pelican_url.WithContext(ctx))
 
 	// If the incoming path has no scheme, we need to tell the pelican_url parser to use the configured discovery URL
 	if err = handleSchemelessIfNeeded(ctx, rpUrl, &dOpts); err != nil {

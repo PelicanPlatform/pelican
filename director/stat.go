@@ -40,6 +40,7 @@ import (
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/version"
 )
 
 type (
@@ -206,8 +207,10 @@ func NewObjectStat() *ObjectStat {
 
 // Implementation of sending a HEAD request to an origin for an object
 func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, dataUrl url.URL, digest bool, token string, timeout time.Duration) (*objectMetadata, error) {
-	client := http.Client{Transport: config.GetTransport(), Timeout: timeout}
+	client := config.GetClient()
 	reqUrl := dataUrl.JoinPath(objectName)
+	ctx, cancelFunc := context.WithTimeout(ctx, timeout)
+	defer cancelFunc()
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, reqUrl.String(), nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create request")
@@ -219,6 +222,7 @@ func (stat *ObjectStat) sendHeadReq(ctx context.Context, objectName string, data
 		// Request checksum
 		req.Header.Set("Want-Digest", "crc32c")
 	}
+	req.Header.Set("User-Agent", "pelican-director/"+version.GetVersion())
 
 	res, err := client.Do(req)
 	if err != nil {

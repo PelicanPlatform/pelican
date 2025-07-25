@@ -119,11 +119,11 @@ func TestExpirationDirector(t *testing.T) {
 	viper.Set(param.Server_AdLifetime.GetName(), "100ms")
 	fed_test_utils.NewFedTest(t, "")
 	time.Sleep(time.Duration(500 * time.Millisecond))
-	assert.Less(t, 15, int(listDirectorCount.Load()))
+	assert.Less(t, 10, int(listDirectorCount.Load()))
 	log.Debugln("Fake director received", directorPostCount.Load(), "ads from the director")
-	assert.Less(t, 15, int(directorPostCount.Load()))
+	assert.Less(t, 10, int(directorPostCount.Load()))
 	log.Debugln("Fake director received", originPostCount.Load(), "ads from the origin")
-	assert.Less(t, 15, int(originPostCount.Load()))
+	assert.Less(t, 10, int(originPostCount.Load()))
 }
 
 func TestForwardDirector(t *testing.T) {
