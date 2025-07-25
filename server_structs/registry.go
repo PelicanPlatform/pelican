@@ -212,16 +212,16 @@ type ServerNamespace struct {
 	IsOrigin  bool      `json:"is_origin"`
 	IsCache   bool      `json:"is_cache"`
 	Note      string    `json:"note"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time `json:"created_at" post:"exclude"`
+	UpdatedAt time.Time `json:"updated_at" post:"exclude"`
 
 	// Namespace fields (ID renamed to NsID to avoid conflict)
-	NsID          int                    `json:"ns_id"`
+	NsID          int                    `json:"ns_id" post:"exclude"`
 	Prefix        string                 `json:"prefix"`
 	Pubkey        string                 `json:"pubkey"`
-	Identity      string                 `json:"identity"`
-	AdminMetadata AdminMetadata          `json:"admin_metadata"`
-	CustomFields  map[string]interface{} `json:"custom_fields"`
+	Identity      string                 `json:"identity" post:"exclude"`
+	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
+	CustomFields  map[string]interface{} `json:"custom_fields" gorm:"serializer:json"`
 }
 
 // BeforeCreate GORM hook to auto-generate Server ID
