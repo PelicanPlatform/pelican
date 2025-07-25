@@ -1876,22 +1876,31 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				}
 			}
 			if file.file.ctx.Err() == context.Canceled {
-				results <- &clientTransferResults{
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case results <- &clientTransferResults{
 					id: file.uuid,
 					results: TransferResults{
 						JobId: file.jobId,
 						Error: file.file.ctx.Err(),
 					},
+				}:
 				}
 				break
 			}
 			if file.file.err != nil {
-				results <- &clientTransferResults{
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+
+				case results <- &clientTransferResults{
 					id: file.uuid,
 					results: TransferResults{
 						JobId: file.jobId,
 						Error: file.file.err,
 					},
+				}:
 				}
 				break
 			}
@@ -1910,7 +1919,11 @@ func runTransferWorker(ctx context.Context, workChan <-chan *clientTransferFile,
 				transferResults.Scheme = file.file.remoteURL.Scheme
 				transferResults.Error = err
 			}
-			results <- &clientTransferResults{id: file.uuid, results: transferResults}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case results <- &clientTransferResults{id: file.uuid, results: transferResults}:
+			}
 		}
 	}
 }
