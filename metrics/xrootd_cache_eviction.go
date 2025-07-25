@@ -135,11 +135,11 @@ var (
 	}, []string{"dir_name"})
 	XrootdCacheEvictionDirFiles = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "xrootd_cache_eviction_dir_files_count",
-		Help: "File operations per directory",
+		Help: "File operations per directory (opened, closed, created, removed)",
 	}, []string{"dir_name", "type"})
 	XrootdCacheEvictionDirDirectories = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "xrootd_cache_eviction_dir_directories_count",
-		Help: "Directory operations per directory",
+		Help: "Directory operations (created, removed) per directory",
 	}, []string{"dir_name", "type"})
 
 	XrootdCacheEvictionDirLastAccessTime = promauto.NewGaugeVec(prometheus.GaugeOpts{
