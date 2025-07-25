@@ -23,6 +23,7 @@ import (
 	"crypto/tls"
 	"embed"
 	"fmt"
+	builtin_log "log"
 	"math/rand"
 	"mime"
 	"net"
@@ -880,10 +881,16 @@ func runEngineWithListener(ctx context.Context, ln net.Listener, engine *gin.Eng
 	config := &tls.Config{
 		GetCertificate: getCert,
 	}
+	logWriter := builtin_log.New(
+		log.StandardLogger().WriterLevel(log.WarnLevel),
+		"",
+		0,
+	)
 	server := &http.Server{
 		Addr:      addr,
 		Handler:   engine.Handler(),
 		TLSConfig: config,
+		ErrorLog:  logWriter,
 	}
 	log.Debugln("Starting web engine at address", addr)
 
