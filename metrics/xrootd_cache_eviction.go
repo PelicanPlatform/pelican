@@ -85,31 +85,31 @@ type (
 
 var (
 	XrootdCacheEvictionLastUpdateTime = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_last_update_time",
-		Help: "The last time the xrootd cache eviction was updated",
+		Name: "xrootd_cache_eviction_last_update_time_seconds",
+		Help: "The last time xrootd cache eviction metrics were updated",
 	})
 	XrootdCacheEvictionDiskUsage = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_disk_usage",
-		Help: "The disk usage of the xrootd cache eviction",
+		Name: "xrootd_cache_eviction_disk_usage_bytes",
+		Help: "The disk usage of the xrootd cache",
 	})
 	XrootdCacheEvictionSnapshotStatsResetTime = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_snapshot_stats_reset_time",
+		Name: "xrootd_cache_eviction_snapshot_stats_reset_time_seconds",
 		Help: "The time when the snapshot statistics were last reset",
 	})
 	XrootdCacheEvictionDiskTotal = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_disk_total",
+		Name: "xrootd_cache_eviction_disk_total_bytes",
 		Help: "The total disk space available for the cache",
 	})
 	XrootdCacheEvictionFileUsage = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_file_usage",
+		Name: "xrootd_cache_eviction_file_usage_bytes",
 		Help: "The file usage of the xrootd cache",
 	})
 	XrootdCacheEvictionMetaTotal = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_meta_total",
+		Name: "xrootd_cache_eviction_meta_total_bytes",
 		Help: "The total metadata storage available for the cache",
 	})
 	XrootdCacheEvictionMetaUsed = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_meta_used",
+		Name: "xrootd_cache_eviction_meta_used_bytes",
 		Help: "The used metadata storage for the cache",
 	})
 
@@ -134,32 +134,32 @@ var (
 		Help: "Number of checksum errors per directory",
 	}, []string{"dir_name"})
 	XrootdCacheEvictionDirFiles = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_dir_files",
+		Name: "xrootd_cache_eviction_dir_files_count",
 		Help: "File operations per directory",
 	}, []string{"dir_name", "type"})
 	XrootdCacheEvictionDirDirectories = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_dir_directories",
+		Name: "xrootd_cache_eviction_dir_directories_count",
 		Help: "Directory operations per directory",
 	}, []string{"dir_name", "type"})
 
 	XrootdCacheEvictionDirLastAccessTime = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_dir_last_access_time",
+		Name: "xrootd_cache_eviction_dir_last_access_time_seconds",
 		Help: "Last access time per directory",
 	}, []string{"dir_name", "type"})
 	XrootdCacheEvictionDirStBlocksUsage = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_dir_st_blocks_usage",
+		Name: "xrootd_cache_eviction_dir_st_blocks_usage_count",
 		Help: "Storage blocks usage per directory",
 	}, []string{"dir_name"})
 	XrootdCacheEvictionDirNFilesOpen = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_dir_n_files_open",
+		Name: "xrootd_cache_eviction_dir_n_files_open_count",
 		Help: "Number of open files per directory",
 	}, []string{"dir_name"})
 	XrootdCacheEvictionDirNFiles = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_dir_n_files",
+		Name: "xrootd_cache_eviction_dir_n_files_count",
 		Help: "Number of files per directory",
 	}, []string{"dir_name"})
 	XrootdCacheEvictionDirNDirectories = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "xrootd_cache_eviction_dir_n_directories",
+		Name: "xrootd_cache_eviction_dir_n_directories_count",
 		Help: "Number of directories per directory",
 	}, []string{"dir_name"})
 )
