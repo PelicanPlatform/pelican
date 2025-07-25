@@ -478,7 +478,7 @@ func TestSortServerAds(t *testing.T) {
 		}
 
 		// Run the sort 1000 times to get a good idea of how the servers are being sorted
-		for i := 0; i < 1000; i++ {
+		for range 1000 {
 			sorted, err := sortServerAds(ctx, clientIP, randDistanceLoadAds, availMap, rInfo)
 			require.NoError(t, err)
 
@@ -528,7 +528,7 @@ func TestSortServerAds(t *testing.T) {
 		// To mitigate risk of this failing because of that, we'll run the sort 3 times to get a 1/720^3 = 1/373,248,000 chance
 		// of failure. If you run thrice and you still get the distance-sorted slice, you might consider buying a powerball ticket
 		// (1/292,201,338 chance of winning).
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			redirectInfo := server_structs.NewRedirectInfoFromIP(clientIP.String())
 			sorted, err = sortServerAds(ctx, clientIP, randAds, nil, redirectInfo)
 			require.NoError(t, err)
@@ -540,6 +540,59 @@ func TestSortServerAds(t *testing.T) {
 		}
 
 		assert.NotEqualValues(t, notExpected, sorted)
+	})
+
+	t.Run("test-status-weight-sort", func(t *testing.T) {
+		viper.Set("Director.CacheSortMethod", "adaptive")
+
+		// Pin all other factors used in adaptive sorting to isolate the status weight factor.
+		sAds := []server_structs.ServerAd{
+			{StatusWeight: 0.5, IOLoad: 1.0, Latitude: 32.8761, Longitude: -117.2318},
+			{StatusWeight: 0.2, IOLoad: 1.0, Latitude: 32.8761, Longitude: -117.2318},
+			{StatusWeight: 0.8, IOLoad: 1.0, Latitude: 32.8761, Longitude: -117.2318},
+		}
+
+		ctx := context.Background()
+		ctx = context.WithValue(ctx, ProjectContextKey{}, "pelican-client/1.0.0 project/test")
+		redirectInfo := server_structs.NewRedirectInfoFromIP(clientIP.String())
+		require.NoError(t, err)
+
+		// To get around stochastic jiggle, run the test multiple times and grab average indices
+		iters := 1000
+		positionCounts := make([][]int, len(sAds))
+		for i := range positionCounts {
+			positionCounts[i] = make([]int, len(sAds))
+		}
+
+		for range iters {
+			sorted, err := sortServerAds(ctx, clientIP, sAds, nil, redirectInfo)
+			require.NoError(t, err)
+			for pos, ad := range sorted {
+				if ad.StatusWeight == 0.8 {
+					// These indices correspond to the initial ad values
+					// and how they should be sorted
+					positionCounts[2][pos]++
+				} else if ad.StatusWeight == 0.5 {
+					positionCounts[0][pos]++
+				} else {
+					positionCounts[1][pos]++
+				}
+			}
+		}
+
+		// Calculate the average index for each ad
+		avgsPos := make([]float64, len(sAds))
+		for i, counts := range positionCounts {
+			for j, count := range counts {
+				avgsPos[i] += float64(j) * float64(count)
+			}
+
+			avgsPos[i] /= float64(iters)
+		}
+
+		// Now assert the ordering: lower average index means higher position
+		assert.Less(t, avgsPos[2], avgsPos[0], "Status weight 0.8 should be sorted higher than 0.5")
+		assert.Less(t, avgsPos[0], avgsPos[1], "Status weight 0.5 should be sorted higher than 0.2")
 	})
 }
 

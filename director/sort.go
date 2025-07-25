@@ -358,10 +358,11 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 	// For each ad, we apply the configured sort method to determine a priority weight.
 	for idx, ad := range ads {
 		redirectInfo.ServersInfo[ad.URL.String()] = &server_structs.ServerRedirectInfo{
-			Lat:        ad.Latitude,
-			Lon:        ad.Longitude,
-			LoadWeight: ad.IOLoad,
-			HasObject:  "unknown",
+			Lat:          ad.Latitude,
+			Lon:          ad.Longitude,
+			LoadWeight:   ad.IOLoad,
+			StatusWeight: ad.StatusWeight,
+			HasObject:    "unknown",
 		}
 
 		switch server_structs.SortType(sortMethod) {
@@ -417,9 +418,14 @@ func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_stru
 				redirectInfo.ServersInfo[ad.URL.String()].HasObject = "false"
 			}
 
-			// Load weight
+			// IO Load weight
 			lWeighted := gatedHalvingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
 			weight *= invertWeightIfNeeded(isRand, lWeighted)
+
+			// Status weight
+			if ad.StatusWeight > 0 { // older Origins/Caches may not have a status weight
+				weight *= ad.StatusWeight
+			}
 
 			weights[idx] = SwapMap{weight, idx}
 		case server_structs.RandomType:

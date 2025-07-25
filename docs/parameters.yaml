@@ -1746,11 +1746,32 @@ description: |+
     and returns the same ordering as "distance".
   - "random": Sorts caches randomly.
   - "adaptive": Sorts caches according to stochastically-generated weights that consider a combination of factors,
-      including a cache's distance from the client, its IO load, and whether the cache already has the requested object.
-      See details at https://github.com/PelicanPlatform/pelican/discussions/1198.  Note that if `Director.CheckCachePresence`
-      is set to false, then the adaptive algorithm cannot use the cache locality information.
+      including a cache's distance from the client, its IO load, server status and whether the cache already has the requested
+      object.
+
+  See details at https://github.com/PelicanPlatform/pelican/discussions/1198.  Note that if `Director.CheckCachePresence`
+  is set to false, then the adaptive algorithm cannot use the cache locality information.
 type: string
 default: distance
+components: ["director"]
+---
+name: Director.AdaptiveSortEWMATimeConstant
+description: |+
+  The time constant used for calculating alpha in the Director's EWMA smoothing of server status weights.
+  This number can be thought of as a "lookback" window used by the Director when deciding how heavily
+  to consider past observations related to the server's status.
+
+  Large values decrease the impact of recent observations, leading to a smoother and more stable time-series
+  for status weights, while small values increase impact and result in more responsive behavior to recent changes.
+
+  When this value is set too high, the Director may not respond quickly enough to changes in server status, leading
+  to suboptimal cache selection. When set too low, the Director may not give overloaded caches sufficient time to
+  drain their queues before re-prioritizing them.
+
+  For more information, see https://en.wikipedia.org/wiki/Exponential_smoothing
+type: duration
+default: 5m
+hidden: true
 components: ["director"]
 ---
 name: Director.OriginResponseHostnames
