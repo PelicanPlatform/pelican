@@ -28,6 +28,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path"
@@ -311,57 +312,59 @@ func handleWebUIAuth(ctx *gin.Context) {
 		return
 	}
 
-	// For all routes other than /login and /initialization,
-	if !strings.HasPrefix(requestPath, "/login") {
-		// / -> ""
-		// /origin/ -> origin
-		// /registry/origin/edit/ -> registry/origin/edit
-		rootPage := strings.TrimPrefix(strings.TrimSuffix(requestPath, "/"), "/")
-		// If the page is a public page, pass the check
-		if slices.Contains(publicAccessPages, rootPage) {
+	// For all routes other than /login and /initialization
+	// / -> ""
+	// /origin/ -> origin
+	// /registry/origin/edit/ -> registry
+	rootPage := strings.Split(strings.TrimPrefix(requestPath, "/"), "/")[0]
+
+	// If the root is public, pass the check
+	if slices.Contains(publicAccessPages, rootPage) {
+		ctx.Next()
+		return
+	}
+
+	// If user is not logged in
+	if err != nil || user == "" {
+		// If director or registry server is up and user is at /view/
+		// then we allow them to choose the server without logging in
+		if (config.IsServerEnabled(server_structs.DirectorType) ||
+			config.IsServerEnabled(server_structs.RegistryType)) &&
+			rootPage == "" {
 			ctx.Next()
 			return
 		}
+	}
 
-		// If user is not logged in
-		if err != nil || user == "" {
-			// If director or registry server is up and user is at /view/
-			// then we allow them to choose the server without logging in
-			if (config.IsServerEnabled(server_structs.DirectorType) ||
-				config.IsServerEnabled(server_structs.RegistryType)) &&
-				rootPage == "" {
-				ctx.Next()
-				return
-			}
-			// For other pages, pass the check so that the frontend can handle it
+	// If rootPage requires admin privilege
+	if slices.Contains(adminAccessPages, rootPage) {
+		isAdmin, _ := CheckAdmin(user)
+		if isAdmin {
+
+			// If user is admin, pass the check
 			ctx.Next()
 			return
-		}
+		} else {
 
-		// If rootPage requires admin privilege
-		if slices.Contains(adminAccessPages, rootPage) {
-			// If director or registry server is up and user is at /view/
-			// then we allow them to choose the server without being an admin
-			if (config.IsServerEnabled(server_structs.DirectorType) ||
-				config.IsServerEnabled(server_structs.RegistryType)) &&
-				rootPage == "" {
-				ctx.Next()
+			// If user is not admin, rewrite the request to 403 page
+			if err == nil && user != "" {
+
+				ctx.Redirect(http.StatusFound, "/view/403/")
+				ctx.Abort()
 				return
-			}
-			isAdmin, _ := CheckAdmin(user)
-			if isAdmin {
-				ctx.Next()
-				return
+
+				// If user is not logged in, redirect to login page
 			} else {
-				ctx.String(http.StatusForbidden, "You don't have the permission to view this page. If you think this is wrong, please contact your server admin.")
+
+				ctx.Redirect(http.StatusFound, "/view/login/?returnURL=/view"+url.QueryEscape(requestPath))
 				ctx.Abort()
 				return
 			}
-		} else {
-			// If the page does not require admin privilege
-			ctx.Next()
 		}
 	}
+
+	// If it made it this far, it doesn't need special handling
+	ctx.Next()
 }
 
 func handleWebUIResource(ctx *gin.Context) {
