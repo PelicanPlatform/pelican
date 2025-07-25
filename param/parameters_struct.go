@@ -37,6 +37,8 @@ type Config struct {
 		EnablePrefetch bool `mapstructure:"enableprefetch" yaml:"EnablePrefetch"`
 		EnableTLSClientAuth bool `mapstructure:"enabletlsclientauth" yaml:"EnableTLSClientAuth"`
 		EnableVoms bool `mapstructure:"enablevoms" yaml:"EnableVoms"`
+		EvictionMonitoringInterval time.Duration `mapstructure:"evictionmonitoringinterval" yaml:"EvictionMonitoringInterval"`
+		EvictionMonitoringMaxDepth int `mapstructure:"evictionmonitoringmaxdepth" yaml:"EvictionMonitoringMaxDepth"`
 		ExportLocation string `mapstructure:"exportlocation" yaml:"ExportLocation"`
 		FedTokenLocation string `mapstructure:"fedtokenlocation" yaml:"FedTokenLocation"`
 		FilesBaseSize string `mapstructure:"filesbasesize" yaml:"FilesBaseSize"`
@@ -363,8 +365,6 @@ type Config struct {
 		DetailedMonitoringHost string `mapstructure:"detailedmonitoringhost" yaml:"DetailedMonitoringHost"`
 		DetailedMonitoringPort int `mapstructure:"detailedmonitoringport" yaml:"DetailedMonitoringPort"`
 		EnableLocalMonitoring bool `mapstructure:"enablelocalmonitoring" yaml:"EnableLocalMonitoring"`
-		EvictionMonitoringInterval int `mapstructure:"evictionmonitoringinterval" yaml:"EvictionMonitoringInterval"`
-		EvictionMonitoringMaxDepth int `mapstructure:"evictionmonitoringmaxdepth" yaml:"EvictionMonitoringMaxDepth"`
 		LocalMonitoringHost string `mapstructure:"localmonitoringhost" yaml:"LocalMonitoringHost"`
 		MacaroonsKeyFile string `mapstructure:"macaroonskeyfile" yaml:"MacaroonsKeyFile"`
 		ManagerHost string `mapstructure:"managerhost" yaml:"ManagerHost"`
@@ -397,6 +397,8 @@ type configWithType struct {
 		EnablePrefetch struct { Type string; Value bool }
 		EnableTLSClientAuth struct { Type string; Value bool }
 		EnableVoms struct { Type string; Value bool }
+		EvictionMonitoringInterval struct { Type string; Value time.Duration }
+		EvictionMonitoringMaxDepth struct { Type string; Value int }
 		ExportLocation struct { Type string; Value string }
 		FedTokenLocation struct { Type string; Value string }
 		FilesBaseSize struct { Type string; Value string }
@@ -723,8 +725,6 @@ type configWithType struct {
 		DetailedMonitoringHost struct { Type string; Value string }
 		DetailedMonitoringPort struct { Type string; Value int }
 		EnableLocalMonitoring struct { Type string; Value bool }
-		EvictionMonitoringInterval struct { Type string; Value int }
-		EvictionMonitoringMaxDepth struct { Type string; Value int }
 		LocalMonitoringHost struct { Type string; Value string }
 		MacaroonsKeyFile struct { Type string; Value string }
 		ManagerHost struct { Type string; Value string }

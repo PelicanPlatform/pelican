@@ -321,6 +321,7 @@ var (
 var (
 	Cache_BlocksToPrefetch = IntParam{"Cache.BlocksToPrefetch"}
 	Cache_Concurrency = IntParam{"Cache.Concurrency"}
+	Cache_EvictionMonitoringMaxDepth = IntParam{"Cache.EvictionMonitoringMaxDepth"}
 	Cache_Port = IntParam{"Cache.Port"}
 	Client_DirectorRetries = IntParam{"Client.DirectorRetries"}
 	Client_MaximumDownloadSpeed = IntParam{"Client.MaximumDownloadSpeed"}
@@ -348,8 +349,6 @@ var (
 	Shoveler_PortLower = IntParam{"Shoveler.PortLower"}
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
 	Xrootd_DetailedMonitoringPort = IntParam{"Xrootd.DetailedMonitoringPort"}
-	Xrootd_EvictionMonitoringInterval = IntParam{"Xrootd.EvictionMonitoringInterval"}
-	Xrootd_EvictionMonitoringMaxDepth = IntParam{"Xrootd.EvictionMonitoringMaxDepth"}
 	Xrootd_ManagerPort = IntParam{"Xrootd.ManagerPort"}
 	Xrootd_Port = IntParam{"Xrootd.Port"}
 	Xrootd_SummaryMonitoringPort = IntParam{"Xrootd.SummaryMonitoringPort"}
@@ -424,6 +423,7 @@ var (
 
 var (
 	Cache_DefaultCacheTimeout = DurationParam{"Cache.DefaultCacheTimeout"}
+	Cache_EvictionMonitoringInterval = DurationParam{"Cache.EvictionMonitoringInterval"}
 	Cache_SelfTestInterval = DurationParam{"Cache.SelfTestInterval"}
 	Client_SlowTransferRampupTime = DurationParam{"Client.SlowTransferRampupTime"}
 	Client_SlowTransferWindow = DurationParam{"Client.SlowTransferWindow"}

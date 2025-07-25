@@ -169,8 +169,7 @@ func LaunchXrootdCacheEvictionMonitoring(ctx context.Context, egrp *errgroup.Gro
 
 		statsFile := filepath.Join(param.Cache_StorageLocation.GetString(), "namespace", "pfc-stats", "DirStat.json")
 
-		interval := param.Xrootd_EvictionMonitoringInterval.GetInt()
-		ticker := time.NewTicker(time.Duration(interval) * time.Second)
+		ticker := time.NewTicker(param.Cache_EvictionMonitoringInterval.GetDuration())
 
 		// We use this to detect if the stats file is stale
 		var lastUpdateTime int
