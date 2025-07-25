@@ -2768,17 +2768,46 @@ func downloadHTTP(ctx context.Context, te *TransferEngine, callback TransferCall
 	// Run the GET request, reading from the response body, in a separate goroutine.
 	// The main go routine will wait for the download to finish and send out progress
 	// updates.
+
+	// This channel is used to signal the main goroutine that the download is done
+	// In a deferred function, we wait on the done channel to get the signal that the download is done
 	done := make(chan error, 1)
 	pw := &progressWriter{
 		writer: writer,
 	}
-	// IDEA: we can use the same context with the cancel to listen to the for done channel
+
 	go func() {
+		// Copy the response body to the progress writer
+		// When we are done, we will send an error (could be nil) to the done channel
+		// and then close the done channel
 		_, err := io.Copy(pw, resp.Body)
-		done <- err
-		close(done)
+		done <- err // send the error
+		close(done) // signal that the download is done
 	}()
 	defer pw.Close()
+
+	// This defer is used to clean up the goroutine that is copying the response body to the progress writer
+	defer func() {
+		// Ensure the context is cancelled to stop the io.Copy if it's still running
+		cancel()
+		// Wait for the copy goroutine to finish
+		// We can ignore the error from the done channel as the final check on `downloaded`
+		// bytes vs totalSize will catch any read errors
+		<-done
+
+		// Now that the goroutine is done, get the final byte count
+		finalDownloaded := pw.BytesComplete()
+		downloaded = finalDownloaded
+
+		// If the function is returning an error that contains byte counts, update it
+		var ste *SlowTransferError
+		var stpe *StoppedTransferError
+		if errors.As(err, &ste) {
+			ste.BytesTransferred = finalDownloaded
+		} else if errors.As(err, &stpe) {
+			stpe.BytesTransferred = finalDownloaded
+		}
+	}()
 
 	// Loop of the download
 	lastProgressUpdate := time.Now()
@@ -2810,10 +2839,6 @@ Loop:
 						CacheHit:         cacheAge > 0,
 					}
 					log.WithFields(fields).Errorln(err.Error())
-
-					cancel()
-					// wait for the copy goroutine to exit
-					<-done
 					return
 				}
 			} else {
@@ -2854,10 +2879,6 @@ Loop:
 					// If the download is below the threshold for less than `SlowTransferWindow` (default 30) seconds, continue
 					continue
 				}
-				// The download is below the threshold for more than `SlowTransferWindow` seconds, cancel the download
-				cancel()
-				// wait for the copy goroutine to exit
-				<-done
 
 				if concurrency > 1 {
 					log.WithFields(fields).Errorf("Cancelling download attempt of %s: Download speed of %s/s is below the computed limit of %s/s (configured limit of %s/s divided by estimated %.1f concurrent transfers on average)", transferUrl.String(), ByteCountSI(transferRate), ByteCountSI(int64(limit)), ByteCountSI(int64(downloadLimit)), concurrency)
@@ -2865,9 +2886,8 @@ Loop:
 					log.WithFields(fields).Errorf("Cancelling download attempt of %s: Download speed of %s/s is below the limit of %s/s", transferUrl.String(), ByteCountSI(transferRate), ByteCountSI(int64(downloadLimit)))
 				}
 
-				downloaded = pw.BytesComplete()
 				err = &SlowTransferError{
-					BytesTransferred: downloaded,
+					BytesTransferred: pw.BytesComplete(),
 					BytesPerSecond:   transferRate,
 					Duration:         time.Since(downloadStart),
 					BytesTotal:       totalSize,

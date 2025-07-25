@@ -48,6 +48,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/error_codes"
@@ -146,8 +147,12 @@ func TestNewTransferDetailsEnv(t *testing.T) {
 }
 
 func TestSlowTransfers(t *testing.T) {
+	defer goleak.VerifyNone(t,
+		// Ignore the progress bars
+		goleak.IgnoreTopFunction("github.com/vbauerster/mpb/v8.(*Progress).serve"),
+		goleak.IgnoreTopFunction("github.com/vbauerster/mpb/v8.heapManager.run"),
+	)
 	ctx, _, _ := test_utils.TestContext(context.Background(), t)
-
 	// Adjust down some timeouts to speed up the test
 	test_utils.InitClient(t, map[string]any{
 		"Client.SlowTransferWindow":     "2s",
