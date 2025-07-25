@@ -164,6 +164,166 @@ var (
 	}, []string{"dir_name"})
 )
 
+/*
+LaunchXrootdCacheEvictionMonitoring is a function that launches the xrootd cache eviction monitoring.
+It reads the stats file from the cache storage location and updates the metrics.
+It runs as a goroutine and is responsible for:
+  - Reading the stats file
+  - Unmarshalling the stats
+  - Updating the metrics
+
+The function looks at the file at the path specified by Cache.StorageLocation/namespace/pfc-stats/DirStat.json.
+The JSON schema is as follows:
+
+	{
+	  "$schema": "http://json-schema.org/draft-07/schema#",
+	  "title": "Xrootd Cache Directory Statistics",
+	  "description": "Schema for the JSON data from xrootd's cache eviction monitoring (DirStat.json)",
+	  "type": "object",
+	  "required": [
+	    "m_sshot_stats_reset_time",
+	    "m_usage_update_time",
+	    "m_disk_total",
+	    "m_disk_used",
+	    "m_file_usage",
+	    "m_meta_total",
+	    "m_meta_used",
+	    "m_dir_states"
+	  ],
+	  "properties": {
+	    "m_sshot_stats_reset_time": {
+	      "type": "integer",
+	      "description": "The time when the snapshot statistics were last reset (Unix timestamp)."
+	    },
+	    "m_usage_update_time": {
+	      "type": "integer",
+	      "description": "The last time the usage statistics were updated (Unix timestamp)."
+	    },
+	    "m_disk_total": {
+	      "type": "integer",
+	      "description": "Total disk space available for the cache in bytes."
+	    },
+	    "m_disk_used": {
+	      "type": "integer",
+	      "description": "Disk space used by the cache in bytes."
+	    },
+	    "m_file_usage": {
+	      "type": "integer",
+	      "description": "The file usage of the xrootd cache."
+	    },
+	    "m_meta_total": {
+	      "type": "integer",
+	      "description": "Total metadata storage available for the cache in bytes."
+	    },
+	    "m_meta_used": {
+	      "type": "integer",
+	      "description": "Used metadata storage for the cache in bytes."
+	    },
+	    "m_dir_states": {
+	      "type": "array",
+	      "description": "An array of statistics for each directory in the cache.",
+	      "items": {
+	        "$ref": "#/$defs/dirState"
+	      }
+	    }
+	  },
+	  "$defs": {
+	    "dirState": {
+	      "type": "object",
+	      "required": [
+	        "m_dir_name",
+	        "m_stats",
+	        "m_usage",
+	        "m_parent",
+	        "m_daughters_begin",
+	        "m_daughters_end"
+	      ],
+	      "properties": {
+	        "m_dir_name": {
+	          "type": "string",
+	          "description": "The name of the directory."
+	        },
+	        "m_stats": {
+	          "$ref": "#/$defs/dirStats"
+	        },
+	        "m_usage": {
+	          "$ref": "#/$defs/usage"
+	        },
+	        "m_parent": {
+	          "type": "integer",
+	          "description": "Index of the parent directory in the m_dir_states array. -1 for the root."
+	        },
+	        "m_daughters_begin": {
+	          "type": "integer",
+	          "description": "Start index in m_dir_states for subdirectories. -1 if no subdirectories."
+	        },
+	        "m_daughters_end": {
+	          "type": "integer",
+	          "description": "End index in m_dir_states for subdirectories. -1 if no subdirectories."
+	        }
+	      }
+	    },
+	    "dirStats": {
+	      "type": "object",
+	      "description": "Performance and event statistics for a directory.",
+	      "required": [
+	        "m_NumIos",
+	        "m_Duration",
+	        "m_BytesHit",
+	        "m_BytesMissed",
+	        "m_BytesBypassed",
+	        "m_BytesWritten",
+	        "m_StBlocksAdded",
+	        "m_NCksumErrors",
+	        "m_StBlocksRemoved",
+	        "m_NFilesOpened",
+	        "m_NFilesClosed",
+	        "m_NFilesCreated",
+	        "m_NFilesRemoved",
+	        "m_NDirectoriesCreated",
+	        "m_NDirectoriesRemoved"
+	      ],
+	      "properties": {
+	        "m_NumIos": { "type": "integer", "description": "Number of I/O operations." },
+	        "m_Duration": { "type": "integer", "description": "Duration of I/O operations." },
+	        "m_BytesHit": { "type": "integer", "description": "Bytes served from cache." },
+	        "m_BytesMissed": { "type": "integer", "description": "Bytes missed in cache." },
+	        "m_BytesBypassed": { "type": "integer", "description": "Bytes that bypassed the cache." },
+	        "m_BytesWritten": { "type": "integer", "description": "Bytes written to the cache." },
+	        "m_StBlocksAdded": { "type": "integer", "description": "Storage blocks added." },
+	        "m_NCksumErrors": { "type": "integer", "description": "Number of checksum errors." },
+	        "m_StBlocksRemoved": { "type": "integer", "description": "Storage blocks removed." },
+	        "m_NFilesOpened": { "type": "integer", "description": "Number of files opened." },
+	        "m_NFilesClosed": { "type": "integer", "description": "Number of files closed." },
+	        "m_NFilesCreated": { "type": "integer", "description": "Number of files created." },
+	        "m_NFilesRemoved": { "type": "integer", "description": "Number of files removed." },
+	        "m_NDirectoriesCreated": { "type": "integer", "description": "Number of directories created." },
+	        "m_NDirectoriesRemoved": { "type": "integer", "description": "Number of directories removed." }
+	      }
+	    },
+	    "usage": {
+	      "type": "object",
+	      "description": "Usage statistics for a directory.",
+	      "required": [
+	        "m_LastOpenTime",
+	        "m_LastCloseTime",
+	        "m_StBlocks",
+	        "m_NFilesOpen",
+	        "m_NFiles",
+	        "m_NDirectories"
+	      ],
+	      "properties": {
+	        "m_LastOpenTime": { "type": "integer", "description": "Time of the last file open in the directory (Unix timestamp)." },
+	        "m_LastCloseTime": { "type": "integer", "description": "Time of the last file close in the directory (Unix timestamp)." },
+	        "m_StBlocks": { "type": "integer", "description": "Storage blocks in use." },
+	        "m_NFilesOpen": { "type": "integer", "description": "Number of currently open files." },
+	        "m_NFiles": { "type": "integer", "description": "Total number of files in the directory." },
+	        "m_NDirectories": { "type": "integer", "description": "Total number of subdirectories." }
+	      }
+	    }
+	  }
+	}
+*/
 func LaunchXrootdCacheEvictionMonitoring(ctx context.Context, egrp *errgroup.Group) {
 	egrp.Go(func() error {
 
