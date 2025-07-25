@@ -1693,7 +1693,9 @@ components: ["cache"]
 ---
 name: Cache.EvictionMonitoringMaxDepth
 description: |+
-  The maximum depth of the eviction monitoring. Where depth 0 is root only.
+  The maximum depth of the eviction monitoring within the namespace hierarchy. Depth is measured by the number of /-delimited levels in a namespace path. For example, a depth of 0 refers to the root of the namespace ('/'), while a depth of 1 refers to top-level namespaces like '/foo' and '/bar'.
+
+  When eviction monitoring data is generated, it will aggregate usage statistics up to the specified depth. For example, if a cache serves the namespaces `/projectA/dataset1` and `/projectA/dataset2`, and `EvictionMonitoringMaxDepth` is set to 1, the usage for both namespaces will be aggregated and reported under `/projectA`. If the depth is set to 2, usage for `/projectA/dataset1` and `/projectA/dataset2` will be reported separately. A depth of 0 will report only the total usage for the entire cache, aggregated at the root level.
 type: int
 default: 1
 components: ["cache"]
