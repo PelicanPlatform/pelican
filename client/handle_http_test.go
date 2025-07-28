@@ -1907,7 +1907,8 @@ func TestPutOverwrite(t *testing.T) {
     </D:propstat>
   </D:response>
 </D:multistatus>`
-				w.Write([]byte(response))
+				_, err := w.Write([]byte(response))
+				require.NoError(t, err)
 				return
 			}
 			if r.Method == "PUT" {
