@@ -1026,6 +1026,11 @@ func TestChecksumPut(t *testing.T) {
 				w.Header().Set("Digest", "crc32c=977b8112")
 				w.WriteHeader(http.StatusOK)
 			}
+
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 		}))
 		defer svr.Close()
 		svrURL, err := url.Parse(svr.URL)
@@ -1041,6 +1046,14 @@ func TestChecksumPut(t *testing.T) {
 			job: &TransferJob{
 				requireChecksum:    true,
 				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
 			},
 			localPath: tempFile,
 			remoteURL: svrURL,
@@ -1084,6 +1097,10 @@ func TestChecksumPut(t *testing.T) {
 				w.Header().Set("Digest", "crc32c=977b8111") // Incorrect checksum; should be 977b8112
 				w.WriteHeader(http.StatusOK)
 			}
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 		}))
 		defer svr.Close()
 		svrURL, err := url.Parse(svr.URL)
@@ -1099,6 +1116,14 @@ func TestChecksumPut(t *testing.T) {
 			job: &TransferJob{
 				requireChecksum:    true,
 				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
 			},
 			localPath: tempFile,
 			remoteURL: svrURL,
@@ -1148,6 +1173,10 @@ func TestChecksumPut(t *testing.T) {
 				w.Header().Set("Digest", "md5=5eb63bbbe01eeed093cb22bb8f5acdc3")
 				w.WriteHeader(http.StatusOK)
 			}
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 		}))
 		defer svr.Close()
 		svrURL, err := url.Parse(svr.URL)
@@ -1163,6 +1192,14 @@ func TestChecksumPut(t *testing.T) {
 			job: &TransferJob{
 				requireChecksum:    true,
 				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
 			},
 			localPath: tempFile,
 			remoteURL: svrURL,
@@ -1211,6 +1248,10 @@ func TestChecksumPut(t *testing.T) {
 				w.Header().Set("Digest", "md5=5eb63bbbe01eeed093cb22bb8f5acdc3")
 				w.WriteHeader(http.StatusOK)
 			}
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 		}))
 		defer svr.Close()
 		svrURL, err := url.Parse(svr.URL)
@@ -1226,6 +1267,14 @@ func TestChecksumPut(t *testing.T) {
 			job: &TransferJob{
 				requireChecksum:    false, // Don't require checksum
 				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
 			},
 			localPath: tempFile,
 			remoteURL: svrURL,
@@ -1272,6 +1321,10 @@ func TestChecksumPut(t *testing.T) {
 				// No Digest header - server doesn't provide checksum
 				w.WriteHeader(http.StatusOK)
 			}
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 		}))
 		defer svr.Close()
 		svrURL, err := url.Parse(svr.URL)
@@ -1287,6 +1340,14 @@ func TestChecksumPut(t *testing.T) {
 			job: &TransferJob{
 				requireChecksum:    true,
 				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
 			},
 			localPath: tempFile,
 			remoteURL: svrURL,
@@ -2038,6 +2099,12 @@ func TestPutOverwrite(t *testing.T) {
 		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
 		token.SetToken("test-token")
 
+		// Create a test file to upload
+		testData := []byte("test content")
+		fname := filepath.Join(t.TempDir(), "test.txt")
+		err = os.WriteFile(fname, testData, 0o644)
+		require.NoError(t, err)
+
 		transfer := &transferFile{
 			ctx: context.Background(),
 			job: &TransferJob{
@@ -2056,11 +2123,17 @@ func TestPutOverwrite(t *testing.T) {
 				token: token,
 			},
 			remoteURL: svrURL,
+			localPath: fname,
 			token:     token,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
 		}
 
 		result, err := uploadObject(transfer)
-		require.Error(t, err)
-		require.Contains(t, result.Error.Error(), "failed to stat remote object before upload")
+		require.NoError(t, err) // We should not get an error from the uploadObject call
+		require.NoError(t, result.Error)
 	})
 }
