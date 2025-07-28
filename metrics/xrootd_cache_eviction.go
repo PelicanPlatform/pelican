@@ -371,53 +371,58 @@ func LaunchXrootdCacheEvictionMonitoring(ctx context.Context, egrp *errgroup.Gro
 				XrootdCacheEvictionMetaTotal.Set(float64(dirStatistics.MetaTotal))
 				XrootdCacheEvictionMetaUsed.Set(float64(dirStatistics.MetaUsed))
 
-				for i, dirState := range dirStatistics.DirStates {
-					// Build the full path by traversing up the parent hierarchy
-					var pathParts []string
-					curr := i
-					for curr != -1 {
-						pathParts = append(pathParts, dirStatistics.DirStates[curr].DirName)
-						curr = dirStatistics.DirStates[curr].Parent
-					}
-
-					// Reverse the parts to get the correct order from root to leaf
-					for i, j := 0, len(pathParts)-1; i < j; i, j = i+1, j-1 {
-						pathParts[i], pathParts[j] = pathParts[j], pathParts[i]
-					}
-
-					// Join the path parts. The root directory is an empty string, so we prepend "/"
-					dirName := path.Join(pathParts...)
-					if dirName == "" {
-						dirName = "/"
-					} else if dirName[0] != '/' {
-						dirName = "/" + dirName
-					}
-					// DirStats
-					XrootdCacheEvictionDirNumIos.WithLabelValues(dirName).Set(float64(dirState.Stats.NumIos))
-					XrootdCacheEvictionDirDuration.WithLabelValues(dirName).Set(float64(dirState.Stats.Duration))
-					XrootdCacheEvictionDirBytes.WithLabelValues(dirName, "hit").Set(float64(dirState.Stats.BytesHit))
-					XrootdCacheEvictionDirBytes.WithLabelValues(dirName, "missed").Set(float64(dirState.Stats.BytesMissed))
-					XrootdCacheEvictionDirBytes.WithLabelValues(dirName, "bypassed").Set(float64(dirState.Stats.BytesBypassed))
-					XrootdCacheEvictionDirBytes.WithLabelValues(dirName, "written").Set(float64(dirState.Stats.BytesWritten))
-					XrootdCacheEvictionDirStBlockBytes.WithLabelValues(dirName, "added").Set(float64(dirState.Stats.StBlocksAdded) * 512)
-					XrootdCacheEvictionDirStBlockBytes.WithLabelValues(dirName, "removed").Set(float64(dirState.Stats.StBlocksRemoved) * 512)
-					XrootdCacheEvictionDirNCksumErrors.WithLabelValues(dirName).Set(float64(dirState.Stats.NCksumErrors))
-					XrootdCacheEvictionDirFiles.WithLabelValues(dirName, "opened").Set(float64(dirState.Stats.NFilesOpened))
-					XrootdCacheEvictionDirFiles.WithLabelValues(dirName, "closed").Set(float64(dirState.Stats.NFilesClosed))
-					XrootdCacheEvictionDirFiles.WithLabelValues(dirName, "created").Set(float64(dirState.Stats.NFilesCreated))
-					XrootdCacheEvictionDirFiles.WithLabelValues(dirName, "removed").Set(float64(dirState.Stats.NFilesRemoved))
-					XrootdCacheEvictionDirDirectories.WithLabelValues(dirName, "created").Set(float64(dirState.Stats.NDirectoriesCreated))
-					XrootdCacheEvictionDirDirectories.WithLabelValues(dirName, "removed").Set(float64(dirState.Stats.NDirectoriesRemoved))
-
-					// Usage
-					XrootdCacheEvictionDirLastAccessTime.WithLabelValues(dirName, "open").Set(float64(dirState.Usage.LastOpenTime))
-					XrootdCacheEvictionDirLastAccessTime.WithLabelValues(dirName, "close").Set(float64(dirState.Usage.LastCloseTime))
-					XrootdCacheEvictionDirStBlocksUsage.WithLabelValues(dirName).Set(float64(dirState.Usage.StBlocks))
-					XrootdCacheEvictionDirNFilesOpen.WithLabelValues(dirName).Set(float64(dirState.Usage.NFilesOpen))
-					XrootdCacheEvictionDirNFiles.WithLabelValues(dirName).Set(float64(dirState.Usage.NFiles))
-					XrootdCacheEvictionDirNDirectories.WithLabelValues(dirName).Set(float64(dirState.Usage.NDirectories))
-				}
+				updateXrootdCacheEvictionMetrics(dirStatistics)
 			}
 		}
 	})
+}
+
+func updateXrootdCacheEvictionMetrics(dirStatistics DirStatistics) {
+	for i, dirState := range dirStatistics.DirStates {
+		// Build the full path by traversing up the parent hierarchy
+		var pathParts []string
+		curr := i
+		for curr != -1 {
+			pathParts = append(pathParts, dirStatistics.DirStates[curr].DirName)
+			curr = dirStatistics.DirStates[curr].Parent
+		}
+
+		// Reverse the parts to get the correct order from root to leaf
+		for i, j := 0, len(pathParts)-1; i < j; i, j = i+1, j-1 {
+			pathParts[i], pathParts[j] = pathParts[j], pathParts[i]
+		}
+
+		// Join the path parts. The root directory is an empty string, so we prepend "/"
+		dirName := path.Join(pathParts...)
+		if dirName == "" {
+			dirName = "/"
+		} else if dirName[0] != '/' {
+			dirName = "/" + dirName
+		}
+		// DirStats
+		XrootdCacheEvictionDirNumIos.WithLabelValues(dirName).Set(float64(dirState.Stats.NumIos))
+		XrootdCacheEvictionDirDuration.WithLabelValues(dirName).Set(float64(dirState.Stats.Duration))
+		XrootdCacheEvictionDirBytes.WithLabelValues(dirName, "hit").Set(float64(dirState.Stats.BytesHit))
+		XrootdCacheEvictionDirBytes.WithLabelValues(dirName, "missed").Set(float64(dirState.Stats.BytesMissed))
+		XrootdCacheEvictionDirBytes.WithLabelValues(dirName, "bypassed").Set(float64(dirState.Stats.BytesBypassed))
+		XrootdCacheEvictionDirBytes.WithLabelValues(dirName, "written").Set(float64(dirState.Stats.BytesWritten))
+		XrootdCacheEvictionDirStBlockBytes.WithLabelValues(dirName, "added").Set(float64(dirState.Stats.StBlocksAdded) * 512)
+		XrootdCacheEvictionDirStBlockBytes.WithLabelValues(dirName, "removed").Set(float64(dirState.Stats.StBlocksRemoved) * 512)
+		XrootdCacheEvictionDirNCksumErrors.WithLabelValues(dirName).Set(float64(dirState.Stats.NCksumErrors))
+		XrootdCacheEvictionDirFiles.WithLabelValues(dirName, "opened").Set(float64(dirState.Stats.NFilesOpened))
+		XrootdCacheEvictionDirFiles.WithLabelValues(dirName, "closed").Set(float64(dirState.Stats.NFilesClosed))
+		XrootdCacheEvictionDirFiles.WithLabelValues(dirName, "created").Set(float64(dirState.Stats.NFilesCreated))
+		XrootdCacheEvictionDirFiles.WithLabelValues(dirName, "removed").Set(float64(dirState.Stats.NFilesRemoved))
+		XrootdCacheEvictionDirDirectories.WithLabelValues(dirName, "created").Set(float64(dirState.Stats.NDirectoriesCreated))
+		XrootdCacheEvictionDirDirectories.WithLabelValues(dirName, "removed").Set(float64(dirState.Stats.NDirectoriesRemoved))
+
+		// Usage
+		XrootdCacheEvictionDirLastAccessTime.WithLabelValues(dirName, "open").Set(float64(dirState.Usage.LastOpenTime))
+		XrootdCacheEvictionDirLastAccessTime.WithLabelValues(dirName, "close").Set(float64(dirState.Usage.LastCloseTime))
+		XrootdCacheEvictionDirStBlocksUsage.WithLabelValues(dirName).Set(float64(dirState.Usage.StBlocks))
+		XrootdCacheEvictionDirNFilesOpen.WithLabelValues(dirName).Set(float64(dirState.Usage.NFilesOpen))
+		XrootdCacheEvictionDirNFiles.WithLabelValues(dirName).Set(float64(dirState.Usage.NFiles))
+		XrootdCacheEvictionDirNDirectories.WithLabelValues(dirName).Set(float64(dirState.Usage.NDirectories))
+	}
+
 }
