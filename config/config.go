@@ -738,14 +738,46 @@ func setLoggingInternal() error {
 	if param.Debug.GetBool() {
 		SetLogging(log.DebugLevel)
 		log.Warnf("Debug is set as a flag or in config, this will override anything set for '%s' within your configuration", param.Logging_Level.GetName())
-	} else {
-		logLevel := param.Logging_Level.GetString()
-		level, err := log.ParseLevel(logLevel)
-		if err != nil {
-			return errors.Wrapf(err, "failed to parse value of config param %s", param.Logging_Level.GetString())
-		}
-		SetLogging(level)
+		return nil
 	}
+
+	// Default to the general logging level. This will be used if no specific level is found or applicable.
+	logLevelParam := param.Logging_Level
+
+	if len(GetEnabledServerString(true)) > 0 { // Server context
+		// Check for server-specific log levels.
+		// If a server type is matched, its specific log setting (if available) or the general
+		// setting is used, and subsequent server types are not checked for logging.
+		if IsServerEnabled(server_structs.DirectorType) {
+			if viper.IsSet(param.Logging_Director_Level.GetName()) {
+				logLevelParam = param.Logging_Director_Level
+			}
+		} else if IsServerEnabled(server_structs.OriginType) {
+			if viper.IsSet(param.Logging_Origin_Level.GetName()) {
+				logLevelParam = param.Logging_Origin_Level
+			}
+		} else if IsServerEnabled(server_structs.CacheType) {
+			if viper.IsSet(param.Logging_Cache_Level.GetName()) {
+				logLevelParam = param.Logging_Cache_Level
+			}
+		} else if IsServerEnabled(server_structs.RegistryType) {
+			if viper.IsSet(param.Logging_Registry_Level.GetName()) {
+				logLevelParam = param.Logging_Registry_Level
+			}
+		}
+	} else { // Client context
+		if viper.IsSet(param.Logging_Client_Level.GetName()) {
+			logLevelParam = param.Logging_Client_Level
+		}
+	}
+
+	logLevel := logLevelParam.GetString()
+	level, err := log.ParseLevel(logLevel)
+	if err != nil {
+		// Provide more context in the error message, including the value that failed to parse.
+		return errors.Wrapf(err, "failed to parse log level '%s' from config param %s", logLevel, logLevelParam.GetName())
+	}
+	SetLogging(level)
 
 	return nil
 }
@@ -1044,6 +1076,11 @@ func SetServerDefaults(v *viper.Viper) error {
 	// we want to be able to check if this is user-provided (which we can't do for defaults.yaml)
 	v.SetDefault(param.Origin_S3UrlStyle.GetName(), "path")
 
+	v.SetDefault(param.Logging_Director_Level.GetName(), log.InfoLevel.String())
+	v.SetDefault(param.Logging_Origin_Level.GetName(), log.InfoLevel.String())
+	v.SetDefault(param.Logging_Cache_Level.GetName(), log.InfoLevel.String())
+	v.SetDefault(param.Logging_Registry_Level.GetName(), log.InfoLevel.String())
+	v.SetDefault(param.Logging_Client_Level.GetName(), log.ErrorLevel.String())
 	// At the time of this comment, Pelican's default log level is set to "Error". However, that's still
 	// too verbose for some XRootD parameters. Because we generally want to use Pelican's configured log level as a
 	// default for the XRootD parameters, we only set the corrected default values for these special XRootD directives
