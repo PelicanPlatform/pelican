@@ -149,6 +149,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -187,6 +188,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -218,6 +220,7 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -348,6 +351,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -376,6 +380,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -404,6 +409,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -432,6 +438,7 @@ func TestRecursiveUploadsAndDownloadsWithQuery(t *testing.T) {
 			}
 			require.NoError(t, err)
 			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 }
@@ -538,6 +545,7 @@ func TestSyncUpload(t *testing.T) {
 		transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadUrl, t.TempDir(), true, client.WithTokenLocation(tempToken.Name()))
 		require.NoError(t, err)
 		verifySuccessfulTransfer(t, transferDetailsDownload)
+		require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 	})
 
 	t.Run("testSyncUploadNone", func(t *testing.T) {
@@ -556,6 +564,7 @@ func TestSyncUpload(t *testing.T) {
 
 		// Should have already been uploaded once
 		require.Len(t, transferDetailsUpload, 0)
+		require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 	})
 
 	t.Run("testSyncUploadPartial", func(t *testing.T) {
@@ -589,6 +598,7 @@ func TestSyncUpload(t *testing.T) {
 		contentBytes, err := os.ReadFile(filepath.Join(downloadDir, filepath.Base(innerTempDir), filepath.Base(innerTempFile.Name())))
 		require.NoError(t, err)
 		require.Equal(t, innerTestFileContent, string(contentBytes))
+		require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 	})
 
 	t.Run("testSyncUploadFile", func(t *testing.T) {
@@ -862,6 +872,7 @@ func TestSyncDownload(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, newTestFileContent, string(contentBytes))
 	})
+	require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
 }
 
 // This test verifies the behavior when a directory path is passed to the object put command without the recursive option.

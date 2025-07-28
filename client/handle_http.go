@@ -3084,6 +3084,22 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	xferErrors := NewTransferErrors()
 	transferResult.job = transfer.job
 
+	// Check if the remote object already exists using statHttp
+	// If the job is recursive, we skip this check as the check is already performed in walkDirUpload
+	// If the job is not recursive, we check if the object exists at the origin
+	if transfer.remoteURL != nil && transfer.job != nil && transfer.job.syncLevel != SyncNone && !transfer.job.recursive {
+		remoteUrl, dirResp, token := transfer.job.remoteURL, transfer.job.dirResp, transfer.job.token
+		_, statErr := statHttp(remoteUrl, dirResp, token)
+		if statErr == nil {
+			// Object exists, abort upload
+			transferResult.Error = errors.New("remote object already exists, upload aborted")
+			return transferResult, transferResult.Error
+		} else if !strings.Contains(statErr.Error(), "not found") && !strings.Contains(statErr.Error(), "no such object") && !strings.Contains(statErr.Error(), "cannot remove remote path") {
+			log.Warningln("Failed to check if object exists at the origin, proceeding with upload")
+		}
+		// If not found, proceed with upload
+	}
+
 	var sizer Sizer = &ConstantSizer{size: 0}
 	var uploaded int64 = 0
 	if transfer.callback != nil {
