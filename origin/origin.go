@@ -51,6 +51,7 @@ func RegisterOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.G
 	group := router.Group("/api/v1.0/origin")
 	{
 		group.POST("/directorTest", func(ctx *gin.Context) { server_utils.HandleDirectorTestResponse(ctx, notificationChan) })
+		group.POST("/collections", handleCreateCollection)
 	}
 	return nil
 }
