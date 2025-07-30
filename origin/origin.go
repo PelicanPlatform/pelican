@@ -66,6 +66,10 @@ func RegisterOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.G
 		group.GET("/collections/:id/acl", web_ui.AuthHandler, handleGetCollectionAcls)
 		group.POST("/collections/:id/acl", web_ui.AuthHandler, handleGrantCollectionAcl)
 		group.DELETE("/collections/:id/acl", web_ui.AuthHandler, handleRevokeCollectionAcl)
+
+		group.POST("/groups", web_ui.AuthHandler, handleCreateGroup)
+		group.POST("/groups/:id/members", web_ui.AuthHandler, handleAddGroupMember)
+		group.DELETE("/groups/:id/members", web_ui.AuthHandler, handleRemoveGroupMember)
 	}
 	return nil
 }

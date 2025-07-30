@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
+
+	"github.com/pelicanplatform/pelican/server_utils"
 
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/pelican_url"
@@ -24,6 +27,7 @@ type CreateCollectionReq struct {
 	Description string            `json:"description"`
 	Visibility  string            `json:"visibility"`
 	Metadata    map[string]string `json:"metadata"`
+	Namespace   string            `json:"namespace"`
 }
 
 type UpdateCollectionReq struct {
@@ -37,14 +41,14 @@ type MetadataValue struct {
 }
 
 type GrantAclReq struct {
-	Principal string     `json:"principal"`
+	GroupID   string     `json:"group_id"`
 	Role      string     `json:"role"`
 	ExpiresAt *time.Time `json:"expires_at"`
 }
 
 type RevokeAclReq struct {
-	Principal string `json:"principal"`
-	Role      string `json:"role"`
+	GroupID string `json:"group_id"`
+	Role    string `json:"role"`
 }
 
 type AddCollectionMembersReq struct {
@@ -80,22 +84,47 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	if req.Name == "" {
+	if req.Name == "" || req.Namespace == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "A name for the collection is required",
+			Msg:    "A name and namespace for the collection are required",
 		})
 		return
 	}
 
-	owner, _, err := web_ui.GetUserGroups(ctx)
+	// Validate that the namespace is one that this origin exports
+	exports, err := server_utils.GetOriginExports()
+	if err != nil {
+		log.Errorf("Failed to get origin exports: %v", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to validate namespace",
+		})
+		return
+	}
+	validNamespace := false
+	for _, export := range exports {
+		if export.FederationPrefix == req.Namespace {
+			validNamespace = true
+			break
+		}
+	}
+	if !validNamespace {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Namespace '%s' is not a valid export for this origin", req.Namespace),
+		})
+		return
+	}
+
+	user, _, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
 		})
 	}
-	if owner == "" {
+	if user == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "Failed to get user from context",
@@ -112,7 +141,7 @@ func handleCreateCollection(ctx *gin.Context) {
 		return
 	}
 
-	coll, err := database.CreateCollectionWithMetadata(database.ServerDatabase, req.Name, req.Description, owner, visibility, req.Metadata)
+	coll, err := database.CreateCollectionWithMetadata(database.ServerDatabase, req.Name, req.Description, user, req.Namespace, visibility, req.Metadata)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -149,7 +178,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -182,7 +211,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 		visPtr = &visibility
 	}
 
-	err = database.UpdateCollection(database.ServerDatabase, ctx.Param("id"), user, req.Name, req.Description, visPtr)
+	err = database.UpdateCollection(database.ServerDatabase, ctx.Param("id"), user, groups, req.Name, req.Description, visPtr)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -219,7 +248,7 @@ func handleRemoveCollectionMembers(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -234,7 +263,7 @@ func handleRemoveCollectionMembers(ctx *gin.Context) {
 		return
 	}
 
-	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user)
+	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user, groups)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -271,7 +300,7 @@ func handleRemoveCollectionMember(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -286,7 +315,7 @@ func handleRemoveCollectionMember(ctx *gin.Context) {
 		return
 	}
 
-	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), []string{objectURL}, user)
+	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), []string{objectURL}, user, groups)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -335,7 +364,7 @@ func handleAddCollectionMembers(ctx *gin.Context) {
 		}
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -350,7 +379,7 @@ func handleAddCollectionMembers(ctx *gin.Context) {
 		return
 	}
 
-	err = database.AddCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user)
+	err = database.AddCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user, groups)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -377,7 +406,7 @@ func handleListCollectionMembers(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -424,7 +453,7 @@ func handleListCollectionMembers(ctx *gin.Context) {
 		}
 	}
 
-	members, err := database.GetCollectionMembers(database.ServerDatabase, ctx.Param("id"), user, since, limit)
+	members, err := database.GetCollectionMembers(database.ServerDatabase, ctx.Param("id"), user, groups, since, limit)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -451,7 +480,7 @@ func handleGetCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -466,7 +495,7 @@ func handleGetCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	metadata, err := database.GetCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user)
+	metadata, err := database.GetCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -526,7 +555,7 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 		value = string(bodyBytes)
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -541,7 +570,7 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	err = database.UpsertCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, key, value)
+	err = database.UpsertCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, value)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -577,7 +606,7 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -592,7 +621,7 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	err = database.DeleteCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, key)
+	err = database.DeleteCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -619,7 +648,7 @@ func handleGetCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -634,7 +663,7 @@ func handleGetCollection(ctx *gin.Context) {
 		return
 	}
 
-	coll, err := database.GetCollection(database.ServerDatabase, ctx.Param("id"), user)
+	coll, err := database.GetCollection(database.ServerDatabase, ctx.Param("id"), user, groups)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -661,7 +690,7 @@ func handleDeleteCollection(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -677,7 +706,7 @@ func handleDeleteCollection(ctx *gin.Context) {
 		return
 	}
 
-	err = database.DeleteCollection(database.ServerDatabase, ctx.Param("id"), user)
+	err = database.DeleteCollection(database.ServerDatabase, ctx.Param("id"), user, groups)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -704,7 +733,7 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -719,7 +748,7 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 		return
 	}
 
-	acls, err := database.GetCollectionAcls(database.ServerDatabase, ctx.Param("id"), user)
+	acls, err := database.GetCollectionAcls(database.ServerDatabase, ctx.Param("id"), user, groups)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -756,10 +785,10 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	if req.Principal == "" || req.Role == "" {
+	if req.GroupID == "" || req.Role == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Principal and role are required",
+			Msg:    "GroupID and role are required",
 		})
 		return
 	}
@@ -773,7 +802,7 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -788,7 +817,7 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, req.Principal, role, req.ExpiresAt)
+	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, req.ExpiresAt)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -826,17 +855,17 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 			})
 			return
 		}
-		principal = req.Principal
+		principal = req.GroupID
 		roleStr = req.Role
 	} else {
-		principal = ctx.Query("principal")
+		principal = ctx.Query("group_id")
 		roleStr = ctx.Query("role")
 	}
 
 	if principal == "" || roleStr == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Principal and role are required",
+			Msg:    "GroupID and role are required",
 		})
 		return
 	}
@@ -850,7 +879,7 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	user, _, err := web_ui.GetUserGroups(ctx)
+	user, groups, err := web_ui.GetUserGroups(ctx)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -865,11 +894,171 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, principal, role)
+	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, principal, role)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Failed to revoke collection acl: %v", err),
+		})
+		return
+	}
+
+	ctx.Status(http.StatusNoContent)
+}
+
+type CreateGroupReq struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type AddGroupMemberReq struct {
+	Member string `json:"member"`
+}
+
+func handleCreateGroup(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access}, // Or a new scope for group management
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	var req CreateGroupReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid request body",
+		})
+		return
+	}
+
+	if req.Name == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Group name is required",
+		})
+		return
+	}
+
+	user, _, err := web_ui.GetUserGroups(ctx)
+	if err != nil || user == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to identify group creator",
+		})
+		return
+	}
+
+	group, err := database.CreateGroup(database.ServerDatabase, req.Name, req.Description, user, nil)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to create group: %v", err),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusCreated, group)
+}
+
+func handleAddGroupMember(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access}, // Or a new scope for group management
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	var req AddGroupMemberReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid request body",
+		})
+		return
+	}
+
+	if req.Member == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Group member is required",
+		})
+		return
+	}
+
+	user, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil || user == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to identify user adding member",
+		})
+		return
+	}
+
+	err = database.AddGroupMember(database.ServerDatabase, ctx.Param("id"), req.Member, user, groups)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to add group member: %v", err),
+		})
+		return
+	}
+
+	ctx.Status(http.StatusNoContent)
+}
+
+func handleRemoveGroupMember(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access}, // Or a new scope for group management
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	member := ctx.Query("member")
+	if member == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Group member is required",
+		})
+		return
+	}
+
+	user, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil || user == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to identify user removing member",
+		})
+		return
+	}
+
+	err = database.RemoveGroupMember(database.ServerDatabase, ctx.Param("id"), member, user, groups)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to remove group member: %v", err),
 		})
 		return
 	}

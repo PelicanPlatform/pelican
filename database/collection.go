@@ -41,6 +41,7 @@ type Collection struct {
 	Name        string               `gorm:"not null;uniqueIndex:idx_owner_name" json:"name"`
 	Description string               `json:"description"`
 	Owner       string               `gorm:"not null;uniqueIndex:idx_owner_name" json:"owner"`
+	Namespace   string               `gorm:"not null" json:"namespace"`
 	Visibility  Visibility           `gorm:"not null;default:private" json:"visibility"`
 	CreatedAt   time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
 	UpdatedAt   time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updated_at"`
@@ -58,7 +59,7 @@ type CollectionMember struct {
 
 type CollectionACL struct {
 	CollectionID string     `gorm:"primaryKey" json:"collection_id"`
-	Principal    string     `gorm:"primaryKey" json:"principal"`
+	GroupID      string     `gorm:"primaryKey" json:"group_id"`
 	Role         AclRole    `gorm:"primaryKey;not null" json:"role"`
 	GrantedBy    string     `gorm:"not null" json:"granted_by"`
 	GrantedAt    time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"granted_at"`
@@ -69,6 +70,22 @@ type CollectionMetadata struct {
 	CollectionID string `gorm:"primaryKey" json:"collection_id"`
 	Key          string `gorm:"primaryKey;not null" json:"key"`
 	Value        string `gorm:"not null" json:"value"`
+}
+
+type Group struct {
+	ID          string        `gorm:"primaryKey" json:"id"`
+	Name        string        `gorm:"not null;unique" json:"name"`
+	Description string        `json:"description"`
+	CreatedBy   string        `gorm:"not null" json:"created_by"`
+	CreatedAt   time.Time     `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
+	Members     []GroupMember `gorm:"foreignKey:GroupID" json:"members"`
+}
+
+type GroupMember struct {
+	GroupID string    `gorm:"primaryKey" json:"group_id"`
+	Member  string    `gorm:"primaryKey" json:"member"`
+	AddedBy string    `gorm:"not null" json:"added_by"`
+	AddedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"added_at"`
 }
 
 func generateSlug() (string, error) {
@@ -82,7 +99,7 @@ func generateSlug() (string, error) {
 	return slugStr, nil
 }
 
-func CreateCollection(db *gorm.DB, name, description, owner string, visibility Visibility) (*Collection, error) {
+func CreateCollection(db *gorm.DB, name, description, owner, namespace string, visibility Visibility) (*Collection, error) {
 	slug, err := generateSlug()
 	if err != nil {
 		return nil, err
@@ -93,6 +110,7 @@ func CreateCollection(db *gorm.DB, name, description, owner string, visibility V
 		Name:        name,
 		Description: description,
 		Owner:       owner,
+		Namespace:   namespace,
 		Visibility:  visibility,
 	}
 
@@ -101,10 +119,11 @@ func CreateCollection(db *gorm.DB, name, description, owner string, visibility V
 			return result.Error
 		}
 
-		// Also create the owner ACL
+		// Also create the owner ACL for the owner's primary group
+		ownerGroup := "user-" + owner
 		ownerAcl := &CollectionACL{
 			CollectionID: collection.ID,
-			Principal:    owner,
+			GroupID:      ownerGroup,
 			Role:         AclRoleOwner,
 			GrantedBy:    owner,
 		}
@@ -122,7 +141,7 @@ func CreateCollection(db *gorm.DB, name, description, owner string, visibility V
 	return collection, nil
 }
 
-func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner string, visibility Visibility, metadata map[string]string) (*Collection, error) {
+func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner, namespace string, visibility Visibility, metadata map[string]string) (*Collection, error) {
 	slug, err := generateSlug()
 	if err != nil {
 		return nil, err
@@ -133,6 +152,7 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner string, 
 		Name:        name,
 		Description: description,
 		Owner:       owner,
+		Namespace:   namespace,
 		Visibility:  visibility,
 	}
 
@@ -155,10 +175,11 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner string, 
 			}
 		}
 
-		// Also create the owner ACL
+		// Also create the owner ACL for the owner's primary group
+		ownerGroup := "user-" + owner
 		ownerAcl := &CollectionACL{
 			CollectionID: collection.ID,
-			Principal:    owner,
+			GroupID:      ownerGroup,
 			Role:         AclRoleOwner,
 			GrantedBy:    owner,
 		}
@@ -176,7 +197,7 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner string, 
 	return collection, nil
 }
 
-func GetCollection(db *gorm.DB, id string, accessor string) (*Collection, error) {
+func GetCollection(db *gorm.DB, id string, user string, groups []string) (*Collection, error) {
 	collection := &Collection{}
 	if result := db.Preload("Members").Preload("ACLs").Preload("Metadata").Where("id = ?", id).First(collection); result.Error != nil {
 		return nil, result.Error
@@ -186,7 +207,7 @@ func GetCollection(db *gorm.DB, id string, accessor string) (*Collection, error)
 		return collection, nil
 	}
 
-	err := validateACL(collection, accessor, token_scopes.Collection_Read)
+	err := validateACL(collection, user, groups, token_scopes.Collection_Read)
 	if err != nil {
 		return nil, err
 	}
@@ -194,13 +215,14 @@ func GetCollection(db *gorm.DB, id string, accessor string) (*Collection, error)
 	return collection, nil
 }
 
-func GetCollectionMembers(db *gorm.DB, id, accessor string, since *time.Time, limit int) ([]CollectionMember, error) {
+func GetCollectionMembers(db *gorm.DB, id, user string, groups []string, since *time.Time, limit int) ([]CollectionMember, error) {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return nil, result.Error
 	}
 
-	if err := validateACL(collection, accessor, token_scopes.Collection_Read); err != nil {
+	err := validateACL(collection, user, groups, token_scopes.Collection_Read)
+	if err != nil {
 		return nil, err
 	}
 
@@ -219,13 +241,14 @@ func GetCollectionMembers(db *gorm.DB, id, accessor string, since *time.Time, li
 	return members, nil
 }
 
-func GetCollectionMetadata(db *gorm.DB, id, accessor string) ([]CollectionMetadata, error) {
+func GetCollectionMetadata(db *gorm.DB, id, user string, groups []string) ([]CollectionMetadata, error) {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return nil, result.Error
 	}
 
-	if err := validateACL(collection, accessor, token_scopes.Collection_Read); err != nil {
+	err := validateACL(collection, user, groups, token_scopes.Collection_Read)
+	if err != nil {
 		return nil, err
 	}
 
@@ -236,7 +259,7 @@ func GetCollectionMetadata(db *gorm.DB, id, accessor string) ([]CollectionMetada
 	return metadata, nil
 }
 
-func GetCollectionAcls(db *gorm.DB, id, accessor string) ([]CollectionACL, error) {
+func GetCollectionAcls(db *gorm.DB, id, user string, groups []string) ([]CollectionACL, error) {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return nil, result.Error
@@ -244,64 +267,68 @@ func GetCollectionAcls(db *gorm.DB, id, accessor string) ([]CollectionACL, error
 
 	// The spec says that owners and writers should be able to see the ACLs.
 	// We can reuse the Collection_Modify scope for this.
-	if err := validateACL(collection, accessor, token_scopes.Collection_Modify); err != nil {
+	err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
+	if err != nil {
 		return nil, err
 	}
 
 	return collection.ACLs, nil
 }
 
-func GrantCollectionAcl(db *gorm.DB, id, accessor, principal string, role AclRole, expiresAt *time.Time) error {
+func GrantCollectionAcl(db *gorm.DB, id, user string, groups []string, groupId string, role AclRole, expiresAt *time.Time) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	if err := validateACL(collection, accessor, token_scopes.Collection_Delete); err != nil {
+	err := validateACL(collection, user, groups, token_scopes.Collection_Delete)
+	if err != nil {
 		return err
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		acl := CollectionACL{
 			CollectionID: id,
-			Principal:    principal,
+			GroupID:      groupId,
 			Role:         role,
-			GrantedBy:    accessor,
+			GrantedBy:    user,
 			ExpiresAt:    expiresAt,
 		}
 		// Use OnConflict to either create or update the ACL
 		return tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "collection_id"}, {Name: "principal"}, {Name: "role"}},
+			Columns:   []clause.Column{{Name: "collection_id"}, {Name: "group_id"}, {Name: "role"}},
 			DoUpdates: clause.AssignmentColumns([]string{"granted_by", "expires_at"}),
 		}).Create(&acl).Error
 	})
 }
 
-func RevokeCollectionAcl(db *gorm.DB, id, accessor, principal string, role AclRole) error {
+func RevokeCollectionAcl(db *gorm.DB, id, user string, groups []string, groupId string, role AclRole) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	if err := validateACL(collection, accessor, token_scopes.Collection_Delete); err != nil {
+	err := validateACL(collection, user, groups, token_scopes.Collection_Delete)
+	if err != nil {
 		return err
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
-		if result := tx.Where("collection_id = ? AND principal = ? AND role = ?", id, principal, role).Delete(&CollectionACL{}); result.Error != nil {
+		if result := tx.Where("collection_id = ? AND group_id = ? AND role = ?", id, groupId, role).Delete(&CollectionACL{}); result.Error != nil {
 			return result.Error
 		}
 		return nil
 	})
 }
 
-func UpsertCollectionMetadata(db *gorm.DB, id, accessor, key, value string) error {
+func UpsertCollectionMetadata(db *gorm.DB, id, user string, groups []string, key, value string) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	if err := validateACL(collection, accessor, token_scopes.Collection_Modify); err != nil {
+	err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
+	if err != nil {
 		return err
 	}
 
@@ -319,13 +346,14 @@ func UpsertCollectionMetadata(db *gorm.DB, id, accessor, key, value string) erro
 	})
 }
 
-func DeleteCollectionMetadata(db *gorm.DB, id, accessor, key string) error {
+func DeleteCollectionMetadata(db *gorm.DB, id, user string, groups []string, key string) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	if err := validateACL(collection, accessor, token_scopes.Collection_Modify); err != nil {
+	err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
+	if err != nil {
 		return err
 	}
 
@@ -337,13 +365,14 @@ func DeleteCollectionMetadata(db *gorm.DB, id, accessor, key string) error {
 	})
 }
 
-func UpdateCollection(db *gorm.DB, id, accessor string, name, description *string, visibility *Visibility) error {
+func UpdateCollection(db *gorm.DB, id, user string, groups []string, name, description *string, visibility *Visibility) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	if err := validateACL(collection, accessor, token_scopes.Collection_Modify); err != nil {
+	err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
+	if err != nil {
 		return err
 	}
 
@@ -365,13 +394,14 @@ func UpdateCollection(db *gorm.DB, id, accessor string, name, description *strin
 	return db.Model(&Collection{}).Where("id = ?", id).Updates(updates).Error
 }
 
-func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy string) error {
+func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy string, groups []string) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	if err := validateACL(collection, addedBy, token_scopes.Collection_Modify); err != nil {
+	err := validateACL(collection, addedBy, groups, token_scopes.Collection_Modify)
+	if err != nil {
 		return err
 	}
 
@@ -383,7 +413,7 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy stri
 			AddedBy:      addedBy,
 		})
 	}
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err = db.Transaction(func(tx *gorm.DB) error {
 		if result := tx.Create(&records); result.Error != nil {
 			return result.Error
 		}
@@ -395,13 +425,14 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy stri
 	return nil
 }
 
-func RemoveCollectionMembers(db *gorm.DB, id string, members []string, accessor string) error {
+func RemoveCollectionMembers(db *gorm.DB, id string, members []string, user string, groups []string) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	if err := validateACL(collection, accessor, token_scopes.Collection_Modify); err != nil {
+	err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
+	if err != nil {
 		return err
 	}
 
@@ -413,13 +444,14 @@ func RemoveCollectionMembers(db *gorm.DB, id string, members []string, accessor 
 	})
 }
 
-func DeleteCollection(db *gorm.DB, id string, owner string) error {
+func DeleteCollection(db *gorm.DB, id string, owner string, groups []string) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	if err := validateACL(collection, owner, token_scopes.Collection_Delete); err != nil {
+	err := validateACL(collection, owner, groups, token_scopes.Collection_Delete)
+	if err != nil {
 		return err
 	}
 
@@ -441,21 +473,74 @@ func DeleteCollection(db *gorm.DB, id string, owner string) error {
 	})
 }
 
-func validateACL(collection *Collection, accessor string, scope token_scopes.TokenScope) error {
+func validateACL(collection *Collection, user string, groups []string, scope token_scopes.TokenScope) error {
 	roles, ok := ScopeToRole[scope]
 	if !ok {
 		return fmt.Errorf("invalid scope: %s", scope.String())
 	}
 
-	// for each acl, check if the accessor is the principal and has the required role
+	// Every user is part of their own user group, ensure this is in the slice
+	userGroup := "user-" + user
+	if !slices.Contains(groups, userGroup) {
+		groups = append(groups, userGroup)
+	}
+
+	// for each acl, check if a user's group is the group in the ACL and has the required role
 	for _, acl := range collection.ACLs {
-		if acl.Principal == accessor && slices.Contains(roles, acl.Role) {
-			if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
-				return fmt.Errorf("access denied. grant for '%s' on collection '%s' has expired", accessor, collection.ID)
+		for _, group := range groups {
+			if acl.GroupID == group && slices.Contains(roles, acl.Role) {
+				if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
+					return fmt.Errorf("access denied. grant for group '%s' on collection '%s' has expired", group, collection.ID)
+				}
+				return nil
 			}
-			return nil
 		}
 	}
 
-	return fmt.Errorf("access denied. accessor '%s' does not have required scope '%s' for collection '%s'", accessor, scope.String(), collection.ID)
+	return fmt.Errorf("access denied. user '%s' in groups %v does not have required scope '%s' for collection '%s'", user, groups, scope.String(), collection.ID)
+}
+
+func CreateGroup(db *gorm.DB, name, description, createdBy string, groups []string) (*Group, error) {
+	// For now, let's say anyone can create a group.
+	// In the future, this might require a specific scope.
+	slug, err := generateSlug()
+	if err != nil {
+		return nil, err
+	}
+
+	group := &Group{
+		ID:          slug,
+		Name:        name,
+		Description: description,
+		CreatedBy:   createdBy,
+	}
+
+	if result := db.Create(group); result.Error != nil {
+		return nil, result.Error
+	}
+
+	return group, nil
+}
+
+func AddGroupMember(db *gorm.DB, groupId, member, addedBy string, groups []string) error {
+	// For now, let's say anyone can add a member to any group.
+	// In the future, we would check if 'addedBy' has 'write' or 'owner' on the group.
+	groupMember := &GroupMember{
+		GroupID: groupId,
+		Member:  member,
+		AddedBy: addedBy,
+	}
+	if result := db.Create(groupMember); result.Error != nil {
+		return result.Error
+	}
+	return nil
+}
+
+func RemoveGroupMember(db *gorm.DB, groupId, member, removedBy string, groups []string) error {
+	// For now, let's say anyone can remove a member from any group.
+	// In the future, we would check if 'removedBy' has 'write' or 'owner' on the group.
+	if result := db.Where("group_id = ? AND member = ?", groupId, member).Delete(&GroupMember{}); result.Error != nil {
+		return result.Error
+	}
+	return nil
 }
