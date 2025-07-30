@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
@@ -193,6 +194,177 @@ func GetCollection(db *gorm.DB, id string, accessor string) (*Collection, error)
 	return collection, nil
 }
 
+func GetCollectionMembers(db *gorm.DB, id, accessor string, since *time.Time, limit int) ([]CollectionMember, error) {
+	collection := &Collection{}
+	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
+		return nil, result.Error
+	}
+
+	if err := validateACL(collection, accessor, token_scopes.Collection_Read); err != nil {
+		return nil, err
+	}
+
+	members := []CollectionMember{}
+	query := db.Where("collection_id = ?", id)
+	if since != nil {
+		query = query.Where("added_at > ?", *since)
+	}
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	if result := query.Find(&members); result.Error != nil {
+		return nil, result.Error
+	}
+	return members, nil
+}
+
+func GetCollectionMetadata(db *gorm.DB, id, accessor string) ([]CollectionMetadata, error) {
+	collection := &Collection{}
+	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
+		return nil, result.Error
+	}
+
+	if err := validateACL(collection, accessor, token_scopes.Collection_Read); err != nil {
+		return nil, err
+	}
+
+	metadata := []CollectionMetadata{}
+	if result := db.Where("collection_id = ?", id).Find(&metadata); result.Error != nil {
+		return nil, result.Error
+	}
+	return metadata, nil
+}
+
+func GetCollectionAcls(db *gorm.DB, id, accessor string) ([]CollectionACL, error) {
+	collection := &Collection{}
+	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
+		return nil, result.Error
+	}
+
+	// The spec says that owners and writers should be able to see the ACLs.
+	// We can reuse the Collection_Modify scope for this.
+	if err := validateACL(collection, accessor, token_scopes.Collection_Modify); err != nil {
+		return nil, err
+	}
+
+	return collection.ACLs, nil
+}
+
+func GrantCollectionAcl(db *gorm.DB, id, accessor, principal string, role AclRole, expiresAt *time.Time) error {
+	collection := &Collection{}
+	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
+		return result.Error
+	}
+
+	if err := validateACL(collection, accessor, token_scopes.Collection_Delete); err != nil {
+		return err
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		acl := CollectionACL{
+			CollectionID: id,
+			Principal:    principal,
+			Role:         role,
+			GrantedBy:    accessor,
+			ExpiresAt:    expiresAt,
+		}
+		// Use OnConflict to either create or update the ACL
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "collection_id"}, {Name: "principal"}, {Name: "role"}},
+			DoUpdates: clause.AssignmentColumns([]string{"granted_by", "expires_at"}),
+		}).Create(&acl).Error
+	})
+}
+
+func RevokeCollectionAcl(db *gorm.DB, id, accessor, principal string, role AclRole) error {
+	collection := &Collection{}
+	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
+		return result.Error
+	}
+
+	if err := validateACL(collection, accessor, token_scopes.Collection_Delete); err != nil {
+		return err
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		if result := tx.Where("collection_id = ? AND principal = ? AND role = ?", id, principal, role).Delete(&CollectionACL{}); result.Error != nil {
+			return result.Error
+		}
+		return nil
+	})
+}
+
+func UpsertCollectionMetadata(db *gorm.DB, id, accessor, key, value string) error {
+	collection := &Collection{}
+	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
+		return result.Error
+	}
+
+	if err := validateACL(collection, accessor, token_scopes.Collection_Modify); err != nil {
+		return err
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		metadata := CollectionMetadata{
+			CollectionID: id,
+			Key:          key,
+			Value:        value,
+		}
+		// Use OnConflict to either create or update the metadata
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "collection_id"}, {Name: "key"}},
+			DoUpdates: clause.AssignmentColumns([]string{"value"}),
+		}).Create(&metadata).Error
+	})
+}
+
+func DeleteCollectionMetadata(db *gorm.DB, id, accessor, key string) error {
+	collection := &Collection{}
+	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
+		return result.Error
+	}
+
+	if err := validateACL(collection, accessor, token_scopes.Collection_Modify); err != nil {
+		return err
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		if result := tx.Where("collection_id = ? AND key = ?", id, key).Delete(&CollectionMetadata{}); result.Error != nil {
+			return result.Error
+		}
+		return nil
+	})
+}
+
+func UpdateCollection(db *gorm.DB, id, accessor string, name, description *string, visibility *Visibility) error {
+	collection := &Collection{}
+	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
+		return result.Error
+	}
+
+	if err := validateACL(collection, accessor, token_scopes.Collection_Modify); err != nil {
+		return err
+	}
+
+	updates := make(map[string]interface{})
+	if name != nil {
+		updates["name"] = *name
+	}
+	if description != nil {
+		updates["description"] = *description
+	}
+	if visibility != nil {
+		updates["visibility"] = *visibility
+	}
+
+	if len(updates) == 0 {
+		return nil
+	}
+
+	return db.Model(&Collection{}).Where("id = ?", id).Updates(updates).Error
+}
+
 func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy string) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
@@ -221,6 +393,24 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy stri
 		return err
 	}
 	return nil
+}
+
+func RemoveCollectionMembers(db *gorm.DB, id string, members []string, accessor string) error {
+	collection := &Collection{}
+	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
+		return result.Error
+	}
+
+	if err := validateACL(collection, accessor, token_scopes.Collection_Modify); err != nil {
+		return err
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		if result := tx.Where("collection_id = ? AND object_url IN ?", id, members).Delete(&CollectionMember{}); result.Error != nil {
+			return result.Error
+		}
+		return nil
+	})
 }
 
 func DeleteCollection(db *gorm.DB, id string, owner string) error {
@@ -260,6 +450,9 @@ func validateACL(collection *Collection, accessor string, scope token_scopes.Tok
 	// for each acl, check if the accessor is the principal and has the required role
 	for _, acl := range collection.ACLs {
 		if acl.Principal == accessor && slices.Contains(roles, acl.Role) {
+			if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
+				return fmt.Errorf("access denied. grant for '%s' on collection '%s' has expired", accessor, collection.ID)
+			}
 			return nil
 		}
 	}

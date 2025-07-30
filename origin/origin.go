@@ -53,9 +53,19 @@ func RegisterOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.G
 	{
 		group.POST("/directorTest", func(ctx *gin.Context) { server_utils.HandleDirectorTestResponse(ctx, notificationChan) })
 		group.POST("/collections", web_ui.AuthHandler, handleCreateCollection)
+		group.PATCH("/collections/:id", web_ui.AuthHandler, handleUpdateCollection)
 		group.DELETE("/collections/:id", web_ui.AuthHandler, handleDeleteCollection)
 		group.GET("/collections/:id", web_ui.AuthHandler, handleGetCollection)
-		group.PATCH("/collections/:id/members", web_ui.AuthHandler, handleAddCollectionMembers)
+		group.POST("/collections/:id/members", web_ui.AuthHandler, handleAddCollectionMembers)
+		group.DELETE("/collections/:id/members", web_ui.AuthHandler, handleRemoveCollectionMembers)
+		group.DELETE("/collections/:id/members/:encoded_object_url", web_ui.AuthHandler, handleRemoveCollectionMember)
+		group.GET("/collections/:id/members", web_ui.AuthHandler, handleListCollectionMembers)
+		group.GET("/collections/:id/metadata", web_ui.AuthHandler, handleGetCollectionMetadata)
+		group.PUT("/collections/:id/metadata/:key", web_ui.AuthHandler, handlePutCollectionMetadata)
+		group.DELETE("/collections/:id/metadata/:key", web_ui.AuthHandler, handleDeleteCollectionMetadata)
+		group.GET("/collections/:id/acl", web_ui.AuthHandler, handleGetCollectionAcls)
+		group.POST("/collections/:id/acl", web_ui.AuthHandler, handleGrantCollectionAcl)
+		group.DELETE("/collections/:id/acl", web_ui.AuthHandler, handleRevokeCollectionAcl)
 	}
 	return nil
 }
