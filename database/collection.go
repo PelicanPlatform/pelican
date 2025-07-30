@@ -3,9 +3,13 @@ package database
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
+	"slices"
 	"time"
 
 	"gorm.io/gorm"
+
+	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
 type Visibility string
@@ -23,39 +27,47 @@ const (
 	AclRoleOwner AclRole = "owner"
 )
 
+var (
+	ScopeToRole map[token_scopes.TokenScope][]AclRole = map[token_scopes.TokenScope][]AclRole{
+		token_scopes.Collection_Read:   {AclRoleRead, AclRoleWrite, AclRoleOwner},
+		token_scopes.Collection_Modify: {AclRoleWrite, AclRoleOwner},
+		token_scopes.Collection_Delete: {AclRoleOwner},
+	}
+)
+
 type Collection struct {
-	ID          string `gorm:"primaryKey"`
-	Name        string `gorm:"not null;uniqueIndex:idx_owner_name"`
-	Description string
-	Owner       string               `gorm:"not null;uniqueIndex:idx_owner_name"`
-	Visibility  Visibility           `gorm:"not null;default:private"`
-	CreatedAt   time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt   time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP"`
-	Members     []CollectionMember   `gorm:"foreignKey:CollectionID"`
-	ACLs        []CollectionACL      `gorm:"foreignKey:CollectionID"`
-	Metadata    []CollectionMetadata `gorm:"foreignKey:CollectionID"`
+	ID          string               `gorm:"primaryKey" json:"id"`
+	Name        string               `gorm:"not null;uniqueIndex:idx_owner_name" json:"name"`
+	Description string               `json:"description"`
+	Owner       string               `gorm:"not null;uniqueIndex:idx_owner_name" json:"owner"`
+	Visibility  Visibility           `gorm:"not null;default:private" json:"visibility"`
+	CreatedAt   time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt   time.Time            `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updated_at"`
+	Members     []CollectionMember   `gorm:"foreignKey:CollectionID" json:"members"`
+	ACLs        []CollectionACL      `gorm:"foreignKey:CollectionID" json:"acls"`
+	Metadata    []CollectionMetadata `gorm:"foreignKey:CollectionID" json:"metadata"`
 }
 
 type CollectionMember struct {
-	CollectionID string    `gorm:"primaryKey"`
-	ObjectURL    string    `gorm:"primaryKey"` // full pelican:// URL
-	AddedBy      string    `gorm:"not null"`
-	AddedAt      time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`
+	CollectionID string    `gorm:"primaryKey" json:"collection_id"`
+	ObjectURL    string    `gorm:"primaryKey" json:"object_url"` // full pelican:// URL
+	AddedBy      string    `gorm:"not null" json:"added_by"`
+	AddedAt      time.Time `gorm:"not null;default:CURRENT_TIMESTAMP" json:"added_at"`
 }
 
 type CollectionACL struct {
-	CollectionID string    `gorm:"primaryKey"`
-	Principal    string    `gorm:"primaryKey"`
-	Role         AclRole   `gorm:"primaryKey;not null"`
-	GrantedBy    string    `gorm:"not null"`
-	GrantedAt    time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`
-	ExpiresAt    *time.Time
+	CollectionID string     `gorm:"primaryKey" json:"collection_id"`
+	Principal    string     `gorm:"primaryKey" json:"principal"`
+	Role         AclRole    `gorm:"primaryKey;not null" json:"role"`
+	GrantedBy    string     `gorm:"not null" json:"granted_by"`
+	GrantedAt    time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"granted_at"`
+	ExpiresAt    *time.Time `json:"expires_at"`
 }
 
 type CollectionMetadata struct {
-	CollectionID string `gorm:"primaryKey"`
-	Key          string `gorm:"primaryKey;not null"`
-	Value        string `gorm:"not null"`
+	CollectionID string `gorm:"primaryKey" json:"collection_id"`
+	Key          string `gorm:"primaryKey;not null" json:"key"`
+	Value        string `gorm:"not null" json:"value"`
 }
 
 func generateSlug() (string, error) {
@@ -70,8 +82,6 @@ func generateSlug() (string, error) {
 }
 
 func CreateCollection(db *gorm.DB, name, description, owner string, visibility Visibility) (*Collection, error) {
-	// generate a human readable slug
-	// using random bytes
 	slug, err := generateSlug()
 	if err != nil {
 		return nil, err
@@ -85,9 +95,27 @@ func CreateCollection(db *gorm.DB, name, description, owner string, visibility V
 		Visibility:  visibility,
 	}
 
-	result := db.Create(collection)
-	if result.Error != nil {
-		return nil, result.Error
+	err = db.Transaction(func(tx *gorm.DB) error {
+		if result := tx.Create(collection); result.Error != nil {
+			return result.Error
+		}
+
+		// Also create the owner ACL
+		ownerAcl := &CollectionACL{
+			CollectionID: collection.ID,
+			Principal:    owner,
+			Role:         AclRoleOwner,
+			GrantedBy:    owner,
+		}
+		if result := tx.Create(ownerAcl); result.Error != nil {
+			return result.Error
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
 	return collection, nil
@@ -145,4 +173,68 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner string, 
 	}
 
 	return collection, nil
+}
+
+func GetCollection(db *gorm.DB, id string, accessor string) (*Collection, error) {
+	collection := &Collection{}
+	if result := db.Preload("Members").Preload("ACLs").Preload("Metadata").Where("id = ?", id).First(collection); result.Error != nil {
+		return nil, result.Error
+	}
+
+	if collection.Visibility == VisibilityPublic {
+		return collection, nil
+	}
+
+	err := validateACL(collection, accessor, token_scopes.Collection_Read)
+	if err != nil {
+		return nil, err
+	}
+
+	return collection, nil
+}
+
+func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy string) error {
+	collection := &Collection{}
+	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
+		return result.Error
+	}
+
+	if err := validateACL(collection, addedBy, token_scopes.Collection_Modify); err != nil {
+		return err
+	}
+
+	records := make([]CollectionMember, 0, len(members))
+	for _, member := range members {
+		records = append(records, CollectionMember{
+			CollectionID: id,
+			ObjectURL:    member,
+			AddedBy:      addedBy,
+		})
+	}
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if result := tx.Create(&records); result.Error != nil {
+			return result.Error
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateACL(collection *Collection, accessor string, scope token_scopes.TokenScope) error {
+	roles, ok := ScopeToRole[scope]
+	if !ok {
+		return fmt.Errorf("invalid scope: %s", scope.String())
+	}
+
+	// for each acl, check if the accessor is the principal and has the required role
+	for _, acl := range collection.ACLs {
+		if acl.Principal == accessor && slices.Contains(roles, acl.Role) {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("access denied. accessor '%s' does not have required scope '%s' for collection '%s'", accessor, scope.String(), collection.ID)
 }

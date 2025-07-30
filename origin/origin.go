@@ -27,6 +27,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/server_utils"
+	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 var (
@@ -51,7 +52,9 @@ func RegisterOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.G
 	group := router.Group("/api/v1.0/origin")
 	{
 		group.POST("/directorTest", func(ctx *gin.Context) { server_utils.HandleDirectorTestResponse(ctx, notificationChan) })
-		group.POST("/collections", handleCreateCollection)
+		group.POST("/collections", web_ui.AuthHandler, handleCreateCollection)
+		group.GET("/collections/:id", web_ui.AuthHandler, handleGetCollection)
+		group.PATCH("/collections/:id/members", web_ui.AuthHandler, handleAddCollectionMembers)
 	}
 	return nil
 }
