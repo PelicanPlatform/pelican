@@ -53,6 +53,7 @@ func RegisterOriginAPI(router *gin.Engine, ctx context.Context, egrp *errgroup.G
 	{
 		group.POST("/directorTest", func(ctx *gin.Context) { server_utils.HandleDirectorTestResponse(ctx, notificationChan) })
 		group.POST("/collections", web_ui.AuthHandler, handleCreateCollection)
+		group.DELETE("/collections/:id", web_ui.AuthHandler, handleDeleteCollection)
 		group.GET("/collections/:id", web_ui.AuthHandler, handleGetCollection)
 		group.PATCH("/collections/:id/members", web_ui.AuthHandler, handleAddCollectionMembers)
 	}

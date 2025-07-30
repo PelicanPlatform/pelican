@@ -223,6 +223,34 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy stri
 	return nil
 }
 
+func DeleteCollection(db *gorm.DB, id string, owner string) error {
+	collection := &Collection{}
+	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
+		return result.Error
+	}
+
+	if err := validateACL(collection, owner, token_scopes.Collection_Delete); err != nil {
+		return err
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		// delete all references to the collection
+		if result := tx.Where("collection_id = ?", id).Delete(&CollectionMember{}); result.Error != nil {
+			return result.Error
+		}
+		if result := tx.Where("collection_id = ?", id).Delete(&CollectionACL{}); result.Error != nil {
+			return result.Error
+		}
+		if result := tx.Where("collection_id = ?", id).Delete(&CollectionMetadata{}); result.Error != nil {
+			return result.Error
+		}
+		if result := tx.Delete(collection); result.Error != nil {
+			return result.Error
+		}
+		return nil
+	})
+}
+
 func validateACL(collection *Collection, accessor string, scope token_scopes.TokenScope) error {
 	roles, ok := ScopeToRole[scope]
 	if !ok {
