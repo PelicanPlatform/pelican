@@ -2287,14 +2287,19 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 				if checksumInfo.Algorithm == checksum {
 					found = true
 					if !bytes.Equal(checksumInfo.Value, computedValue) {
-						transferResults.Error = &ChecksumMismatchError{
+						mismatchErr := &ChecksumMismatchError{
 							Info: ChecksumInfo{
 								Algorithm: checksumInfo.Algorithm,
 								Value:     computedValue,
 							},
 							ServerValue: checksumInfo.Value,
 						}
-						log.WithFields(fields).Errorln(transferResults.Error)
+						if transfer.requireChecksum {
+							transferResults.Error = mismatchErr
+							log.WithFields(fields).Errorln(transferResults.Error)
+						} else {
+							log.WithFields(fields).Warnln(mismatchErr.Error() + " (not required, continuing)")
+						}
 					} else {
 						successCtr++
 						log.WithFields(fields).Debugf("Checksum %s matches: %s",
@@ -3108,7 +3113,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Create a checksum hash instance for each requested checksum.
 	// Will all be joined into a single writer
 	hashes := make([]io.Writer, 0, 1)
-	for _, checksum := range transfer.job.requestedChecksums {
+	for _, checksum := range transfer.requestedChecksums {
 		switch checksum {
 		case AlgCRC32:
 			hashes = append(hashes, crc32.NewIEEE())
@@ -3323,16 +3328,23 @@ Loop:
 		result, err := fetchChecksum(putContext, transfer.requestedChecksums, dest, tokenContents, transfer.job.project)
 		if err != nil {
 			log.Errorln("Error fetching checksum:", err)
-			attempt.Error = err
-
-			if transfer.job.requireChecksum {
+			if transfer.requireChecksum {
 				transferResult.Error = errors.New("checksum is required but endpoint was not able to provide it")
+				attempt.Error = &ChecksumMismatchError{
+					Info: ChecksumInfo{
+						Algorithm: transfer.requestedChecksums[0],
+						Value:     hashes[0].(hash.Hash).Sum(nil),
+					},
+					ServerValue: nil,
+				}
+			} else {
+				log.Warnln("Checksum is not required, but endpoint was not able to provide it. Continuing without verification.")
 			}
 		} else {
 			transferResult.ServerChecksums = result
 		}
 
-		checksumHashes := transfer.job.requestedChecksums
+		checksumHashes := transfer.requestedChecksums
 		if len(checksumHashes) == 0 {
 			checksumHashes = []ChecksumType{AlgDefault}
 		}
@@ -3353,14 +3365,21 @@ Loop:
 				if checksumInfo.Algorithm == checksum {
 					found = true
 					if !bytes.Equal(checksumInfo.Value, computedValue) {
-						transferResult.Error = &ChecksumMismatchError{
+						mismatchErr := &ChecksumMismatchError{
 							Info: ChecksumInfo{
 								Algorithm: checksum,
 								Value:     computedValue,
 							},
 							ServerValue: checksumInfo.Value,
 						}
-						log.WithFields(fields).Errorln(transferResult.Error)
+						if transfer.requireChecksum {
+							transferResult.Error = mismatchErr
+							log.WithFields(fields).Errorln(transferResult.Error)
+							attempt.Error = transferResult.Error
+							break
+						} else {
+							log.WithFields(fields).Warnln(mismatchErr.Error() + " (not required, continuing)")
+						}
 					} else {
 						successCtr++
 						log.WithFields(fields).Debugf("Checksum %s matches: %s",
@@ -3376,7 +3395,7 @@ Loop:
 					HttpDigestFromChecksum(checksum))
 			}
 		}
-		if successCtr == 0 && transfer.job.requireChecksum && transferResult.Error == nil {
+		if successCtr == 0 && transfer.requireChecksum && transferResult.Error == nil {
 			if len(transfer.requestedChecksums) == 0 {
 				log.WithFields(fields).Errorln(
 					"Client requires checksum to succeed and it was not provided by server; client computed crc32c value is",
