@@ -840,7 +840,7 @@ func TestChecksum(t *testing.T) {
 }
 
 // Test behavior when checksum is incorrect
-func TestChecksumIncorrect(t *testing.T) {
+func TestChecksumIncorrectWhenRequired(t *testing.T) {
 	test_utils.InitClient(t, map[string]any{
 		param.Logging_Level.GetName(): "debug",
 	})
@@ -879,6 +879,7 @@ func TestChecksumIncorrect(t *testing.T) {
 				Url: svrURL,
 			},
 		},
+		requireChecksum: true,
 	}
 	transferResult, err := downloadObject(transfer)
 	assert.NoError(t, err)
@@ -886,6 +887,63 @@ func TestChecksumIncorrect(t *testing.T) {
 	incorrectChecksumError := &ChecksumMismatchError{}
 	assert.True(t, errors.As(transferResult.Error, &incorrectChecksumError), "Expected a checksum mismatch error")
 	assert.Equal(t, "checksum mismatch for crc32c; client computed 977b8112, server reported 977b8111", incorrectChecksumError.Error())
+
+	// Checksum validation
+	assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
+	info := transferResult.ServerChecksums[0]
+	assert.Equal(t, "977b8111", hex.EncodeToString(info.Value))
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+
+	assert.Equal(t, 1, len(transferResult.ClientChecksums), "Checksum count is %d but should be 1", len(transferResult.ClientChecksums))
+	info = transferResult.ClientChecksums[0]
+	assert.Equal(t, "977b8112", hex.EncodeToString(info.Value))
+	assert.Equal(t, ChecksumType(AlgCRC32C), info.Algorithm)
+}
+
+func TestChecksumIncorrectWhenNotRequired(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		param.Logging_Level.GetName(): "debug",
+	})
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "17")
+			w.Header().Set("Digest", "crc32c=977b8111") // Incorrect checksum; should be 977b8112
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			w.Header().Set("Content-Length", "17")
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte("test file content"))
+			assert.NoError(t, err)
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	transfer := &transferFile{
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
+		localPath: "/dev/null",
+		remoteURL: svrURL,
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+		requireChecksum: false,
+	}
+	transferResult, err := downloadObject(transfer)
+	assert.NoError(t, err)
+	assert.NoError(t, transferResult.Error, "Should not error when requireChecksum is false")
 
 	// Checksum validation
 	assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
@@ -1047,6 +1105,7 @@ func TestChecksumPut(t *testing.T) {
 					Url: svrURL,
 				},
 			},
+			requireChecksum: true,
 		}
 		transferResult, err := uploadObject(transfer)
 		assert.NoError(t, err)
@@ -1110,6 +1169,7 @@ func TestChecksumPut(t *testing.T) {
 					Url: svrURL,
 				},
 			},
+			requireChecksum: true,
 		}
 		transferResult, err := uploadObject(transfer)
 		assert.NoError(t, err)
@@ -1172,6 +1232,7 @@ func TestChecksumPut(t *testing.T) {
 					Url: svrURL,
 				},
 			},
+			requireChecksum: false,
 		}
 		transferResult, err := uploadObject(transfer)
 		assert.NoError(t, err)
@@ -1232,6 +1293,7 @@ func TestChecksumPut(t *testing.T) {
 					Url: svrURL,
 				},
 			},
+			requireChecksum: true,
 		}
 		transferResult, err := uploadObject(transfer)
 		assert.NoError(t, err)
