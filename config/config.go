@@ -1975,6 +1975,9 @@ func ResetConfig() {
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
 
+	warnIssuerKeyOnce = sync.Once{}
+	warnDeprecatedOnce = sync.Once{}
+
 	setServerOnce = sync.Once{}
 
 	ResetIssuerPrivateKeys()
