@@ -1023,6 +1023,13 @@ func warnIssuerKey(v *viper.Viper) {
 	})
 }
 
+// Set all defaults relevant to servers (defaults can be set only for active servers)
+// but only for the passed viper instance.
+// We operate on the passed viper instance instead of the global because it lets us
+// construct two config instances for comparing defaults and overrides in the config
+// tool. As such, you SHOULD NOT do a `viper.Set()` or a `param.<some param>.Get*()`
+// here as part of the logic for setting defaults on the passed `v` because you'll be
+// operating on two different config structs!
 func SetServerDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 	v.SetConfigType("yaml")
@@ -1243,10 +1250,10 @@ func SetServerDefaults(v *viper.Viper) error {
 	}
 
 	if directorStatusWeightTimeConstant := v.GetDuration(param.Director_AdaptiveSortEWMATimeConstant.GetName()); directorStatusWeightTimeConstant <= 0 {
+		duration := v.GetDuration(param.Director_AdaptiveSortEWMATimeConstant.GetName())
 		p := param.Director_AdaptiveSortEWMATimeConstant
-		pDuration := p.GetDuration()
-		log.Warningf("Invalid value of '%s' for config param %s; must be greater than 0. Resetting to default", pDuration.String(), p.GetName())
-		v.Set(param.Director_AdaptiveSortEWMATimeConstant.GetName(), 5*time.Minute)
+		log.Warningf("Invalid value of '%s' for config param %s; must be greater than 0. Resetting to default", duration.String(), p.GetName())
+		v.Set(p.GetName(), 5*time.Minute)
 	}
 
 	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
@@ -1753,6 +1760,12 @@ func ResetClientInitialized() {
 	clientInitialized = false
 }
 
+// Set all defaults relevant to the client but only for the passed viper instance.
+// We operate on the passed viper instance instead of the global because it lets us
+// construct two config instances for comparing defaults and overrides in the config
+// tool. As such, you SHOULD NOT do a `viper.Set()` or a `param.<some param>.Get*()`
+// here as part of the logic for setting defaults on the passed `v` because you'll be
+// operating on two different config structs!
 func SetClientDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 
@@ -1768,11 +1781,12 @@ func SetClientDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), filepath.Join(configDir, "certificates", "tlsca.pem"))
 
 	// Default is set outside of defaults.yaml to allow SetDefault call below to override
-	viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), 102400)
-	if param.MinimumDownloadSpeed.IsSet() {
-		viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), param.MinimumDownloadSpeed.GetInt())
+	v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), 102400)
+	if v.IsSet(param.MinimumDownloadSpeed.GetName()) {
+		v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), v.GetInt(param.MinimumDownloadSpeed.GetName()))
 	}
 
+	// This is the only block where we can assume the passed and global viper instances are the same.
 	if v == viper.GetViper() {
 		viper.AutomaticEnv()
 		upperPrefix := GetPreferredPrefix()
@@ -1884,11 +1898,12 @@ func SetClientDefaults(v *viper.Viper) error {
 	// Some client actions may take different defaults depending on whether we detect the plugin
 	v.SetDefault(param.Client_IsPlugin.GetName(), false)
 	v.SetDefault(param.Client_DirectorRetries.GetName(), 5)
-	if param.Client_IsPlugin.GetBool() {
+	if v.GetBool(param.Client_IsPlugin.GetName()) {
 		// If we _are_ the plugin, be more aggressive about retries
-		v.Set(param.Client_DirectorRetries.GetName(), 2*param.Client_DirectorRetries.GetInt())
+		v.Set(param.Client_DirectorRetries.GetName(), 2*v.GetInt(param.Client_DirectorRetries.GetName()))
 	}
-	if param.Client_DirectorRetries.GetInt() < 1 {
+
+	if v.GetInt(param.Client_DirectorRetries.GetName()) < 1 {
 		log.Warningf("Client.DirectorRetries was set to %d, but it must be at least 1. Falling back to default of 5.", param.Client_DirectorRetries.GetInt())
 		v.Set(param.Client_DirectorRetries.GetName(), 5)
 	}
