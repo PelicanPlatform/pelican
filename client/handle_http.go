@@ -1247,7 +1247,11 @@ func (te *TransferEngine) runJobHandler() error {
 				err := te.createTransferFiles(job)
 				job.job.lookupErr = err
 			}
-			te.jobLookupDone <- job
+			select {
+			case <-te.ctx.Done():
+				log.Debugln("Transfer engine has been cancelled, not returning job lookup notification")
+			case te.jobLookupDone <- job:
+			}
 		}
 	}
 }
@@ -1832,7 +1836,10 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 
 	job.job.totalXfer += 1
 	job.job.activeXfer.Add(1)
-	te.files <- &clientTransferFile{
+	select {
+	case <-te.ctx.Done():
+		log.Debugln("Transfer engine has been cancelled, not queuing new transfer file information")
+	case te.files <- &clientTransferFile{
 		uuid:  job.uuid,
 		jobId: job.job.uuid,
 		file: &transferFile{
@@ -1850,6 +1857,7 @@ func (te *TransferEngine) createTransferFiles(job *clientTransferJob) (err error
 			attempts:           transfers,
 			project:            job.job.project,
 		},
+	}:
 	}
 
 	return
