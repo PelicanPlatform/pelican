@@ -26,7 +26,33 @@ import (
 	"syscall"
 
 	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 )
+
+// Check if the given path already has the correct permissions and ownership
+func hasCorrectPermsAndOwnership(path string, dirPerm, filePerm os.FileMode, expectedUid int, expectedGid int) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+
+	expectedPerm := filePerm
+	if info.IsDir() {
+		expectedPerm = dirPerm
+	}
+
+	// Check permissions
+	if info.Mode().Perm() != expectedPerm.Perm() {
+		return false, nil
+	}
+
+	// Check ownership using platform-specific implementation
+	if !checkOwnership(info, expectedUid, expectedGid) {
+		return false, nil
+	}
+
+	return true, nil
+}
 
 // Apply the given permission bits and ownership to path in a cross-platform way.
 //   - On Windows it runs “icacls path /grant username:F”
@@ -115,6 +141,13 @@ func setFilePerms(paths []string, perm os.FileMode, uid int, gid int) error {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			continue
 		}
+		// Skip the file if it already has the correct permissions and ownership,
+		// to avoid unnecessary failed chown/chmod on mounted files in kubernetes deployments.
+		hasCorrectPerms, _ := hasCorrectPermsAndOwnership(path, 0, perm, uid, gid)
+		if hasCorrectPerms {
+			log.Debugf("Skipping chown/chmod for %v because it already has the correct permissions and ownership", path)
+			continue
+		}
 		// Set the permissions on the file
 		if err := os.Chmod(path, perm); err != nil {
 			return errors.Wrapf(err, "failed to set permissions on file %v", path)
@@ -129,6 +162,14 @@ func setFilePerms(paths []string, perm os.FileMode, uid int, gid int) error {
 func setFileAndDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, uid int, gid int, recursive bool) error {
 	dirs := map[string]bool{}
 	for _, path := range paths {
+		// Skip the dir/file if it already has the correct permissions and ownership,
+		// to avoid unnecessary failed chown/chmod on mounted files in kubernetes deployments.
+		hasCorrectPerms, _ := hasCorrectPermsAndOwnership(path, dirPerm, perm, uid, gid)
+		if hasCorrectPerms {
+			log.Debugf("Skipping chown/chmod for %v because it already has the correct permissions and ownership", path)
+			continue
+		}
+
 		// Create the parent directory if it doesn't exist
 		dir := filepath.Dir(path)
 		err := MkdirAll(dir, dirPerm, uid, gid)
@@ -186,6 +227,13 @@ func setDirPerms(paths []string, dirPerm os.FileMode, perm os.FileMode, uid int,
 	dirs := map[string]bool{}
 	for _, path := range paths {
 		if path == "" {
+			continue
+		}
+		// Skip the dir if it already has the correct permissions and ownership,
+		// to avoid unnecessary failed chown/chmod on mounted files in kubernetes deployments.
+		hasCorrectPerms, _ := hasCorrectPermsAndOwnership(path, dirPerm, perm, uid, gid)
+		if hasCorrectPerms {
+			log.Debugf("Skipping chown/chmod for %v because it already has the correct permissions and ownership", path)
 			continue
 		}
 		dirs[path] = true

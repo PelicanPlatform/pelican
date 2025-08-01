@@ -32,3 +32,8 @@ func fixRootDirectory(p string) string {
 	}
 	return p
 }
+
+// On Windows, we don't check uid/gid ownership since it works differently
+func checkOwnership(info os.FileInfo, expectedUid int, expectedGid int) bool {
+	return false
+}

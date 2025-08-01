@@ -20,6 +20,20 @@
 
 package config
 
+import (
+	"os"
+	"syscall"
+)
+
 func fixRootDirectory(p string) string {
 	return p
+}
+
+// Check if the given path has the correct ownership on Unix systems
+func checkOwnership(info os.FileInfo, expectedUid int, expectedGid int) bool {
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		return int(stat.Uid) == expectedUid && int(stat.Gid) == expectedGid
+	}
+	// If we can't get ownership info, assume we need to set it
+	return false
 }
