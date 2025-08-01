@@ -154,6 +154,11 @@ var (
 	enabledServers server_structs.ServerType
 	setServerOnce  sync.Once
 
+	// Some config parsing tools will init both client and server config, but both
+	// warn about several config params. Only warn once per process.
+	warnIssuerKeyOnce  sync.Once
+	warnDeprecatedOnce sync.Once
+
 	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 
 	validPrefixes = map[ConfigPrefix]bool{
@@ -582,24 +587,26 @@ func GetEnTranslator() ut.Translator {
 // along with printing out a warning to let them know they should update. Whether or not keys are mapped is
 // configured in docs/parameters.yaml using the `deprecated: true` and replacedby: `<list of new keys>` fields.
 func handleDeprecatedConfig() {
-	deprecatedMap := param.GetDeprecated()
-	for deprecated, replacement := range deprecatedMap {
-		if viper.IsSet(deprecated) {
-			if replacement[0] == "none" {
-				log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
-			} else {
-				for _, rep := range replacement {
-					if viper.IsSet(rep) {
-						log.Warningf("The configuration key '%s' is deprecated. The value from its replacement '%s' will be used instead, and the value of the deprecated configuration key '%s' will be ignored.", deprecated, rep, deprecated)
-					} else {
-						log.Warningf("The configuration key '%s' is deprecated. Please use '%s' instead. Will use the value of deprecated config key '%s' for the new config key '%s'.", deprecated, rep, deprecated, rep)
-						value := viper.Get(deprecated)
-						viper.Set(rep, value)
+	warnDeprecatedOnce.Do(func() {
+		deprecatedMap := param.GetDeprecated()
+		for deprecated, replacement := range deprecatedMap {
+			if viper.IsSet(deprecated) {
+				if replacement[0] == "none" {
+					log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
+				} else {
+					for _, rep := range replacement {
+						if viper.IsSet(rep) {
+							log.Warningf("The configuration key '%s' is deprecated. The value from its replacement '%s' will be used instead, and the value of the deprecated configuration key '%s' will be ignored.", deprecated, rep, deprecated)
+						} else {
+							log.Warningf("The configuration key '%s' is deprecated. Please use '%s' instead. Will use the value of deprecated config key '%s' for the new config key '%s'.", deprecated, rep, deprecated, rep)
+							value := viper.Get(deprecated)
+							viper.Set(rep, value)
+						}
 					}
 				}
 			}
 		}
-	}
+	})
 }
 
 func setupTranslation() error {
@@ -984,35 +991,45 @@ func PrintClientConfig() error {
 // This function serves as a transitional step to help users migrate from IssuerKey to
 // IssuerKeysDirectory. It should be removed if the transition is done.
 func warnIssuerKey(v *viper.Viper) {
-	legacyKey := v.GetString(param.IssuerKey.GetName())
-	if legacyKey != "" {
-		if _, err := os.Stat(legacyKey); err == nil {
-			issuerKeyConfigBy := "default"
-			issuerKeysDirectoryConfigBy := "default"
-			changeExtension := ""
+	warnIssuerKeyOnce.Do(func() {
+		legacyKey := v.GetString(param.IssuerKey.GetName())
+		if legacyKey != "" {
 
-			configDir := v.GetString("ConfigDir")
-			if filepath.Join(configDir, "issuer.jwk") != param.IssuerKey.GetString() {
-				issuerKeyConfigBy = "custom"
-			}
-			if filepath.Join(configDir, "issuer-keys") != param.IssuerKeysDirectory.GetString() {
-				issuerKeysDirectoryConfigBy = "custom"
-			}
-			if !strings.HasSuffix(param.IssuerKey.GetString(), ".pem") {
-				changeExtension = "renamed to use '.pem' extension and "
-			}
+			if _, err := os.Stat(legacyKey); err == nil {
+				issuerKeyConfigBy := "default"
+				issuerKeysDirectoryConfigBy := "default"
+				changeExtension := ""
 
-			log.Errorf(
-				"File %q should be %smoved into directory %q. "+
-					"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). ",
-				param.IssuerKey.GetString(), changeExtension, param.IssuerKeysDirectory.GetString(),
-				param.IssuerKey.GetName(), param.IssuerKey.GetString(), issuerKeyConfigBy,
-				param.IssuerKeysDirectory.GetName(), param.IssuerKeysDirectory.GetString(), issuerKeysDirectoryConfigBy,
-			)
+				configDir := v.GetString("ConfigDir")
+				if filepath.Join(configDir, "issuer.jwk") != v.GetString(param.IssuerKey.GetName()) {
+					issuerKeyConfigBy = "custom"
+				}
+				if filepath.Join(configDir, "issuer-keys") != v.GetString(param.IssuerKeysDirectory.GetName()) {
+					issuerKeysDirectoryConfigBy = "custom"
+				}
+				if !strings.HasSuffix(v.GetString(param.IssuerKey.GetName()), ".pem") {
+					changeExtension = "renamed to use '.pem' extension and "
+				}
+
+				log.Errorf(
+					"File %q should be %smoved into directory %q. "+
+						"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). ",
+					v.GetString(param.IssuerKey.GetName()), changeExtension, v.GetString(param.IssuerKeysDirectory.GetName()),
+					param.IssuerKey.GetName(), param.IssuerKey.GetString(), issuerKeyConfigBy,
+					param.IssuerKeysDirectory.GetName(), v.GetString(param.IssuerKeysDirectory.GetName()), issuerKeysDirectoryConfigBy,
+				)
+			}
 		}
-	}
+	})
 }
 
+// Set all defaults relevant to servers (defaults can be set only for active servers)
+// but only for the passed viper instance.
+// We operate on the passed viper instance instead of the global because it lets us
+// construct two config instances for comparing defaults and overrides in the config
+// tool. As such, you SHOULD NOT do a `viper.Set()` or a `param.<some param>.Get*()`
+// here as part of the logic for setting defaults on the passed `v` because you'll be
+// operating on two different config structs!
 func SetServerDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 	v.SetConfigType("yaml")
@@ -1233,10 +1250,10 @@ func SetServerDefaults(v *viper.Viper) error {
 	}
 
 	if directorStatusWeightTimeConstant := v.GetDuration(param.Director_AdaptiveSortEWMATimeConstant.GetName()); directorStatusWeightTimeConstant <= 0 {
+		duration := v.GetDuration(param.Director_AdaptiveSortEWMATimeConstant.GetName())
 		p := param.Director_AdaptiveSortEWMATimeConstant
-		pDuration := p.GetDuration()
-		log.Warningf("Invalid value of '%s' for config param %s; must be greater than 0. Resetting to default", pDuration.String(), p.GetName())
-		v.Set(param.Director_AdaptiveSortEWMATimeConstant.GetName(), 5*time.Minute)
+		log.Warningf("Invalid value of '%s' for config param %s; must be greater than 0. Resetting to default", duration.String(), p.GetName())
+		v.Set(p.GetName(), 5*time.Minute)
 	}
 
 	// Setup the audience to use.  We may customize the Origin.URL in the future if it has
@@ -1743,6 +1760,12 @@ func ResetClientInitialized() {
 	clientInitialized = false
 }
 
+// Set all defaults relevant to the client but only for the passed viper instance.
+// We operate on the passed viper instance instead of the global because it lets us
+// construct two config instances for comparing defaults and overrides in the config
+// tool. As such, you SHOULD NOT do a `viper.Set()` or a `param.<some param>.Get*()`
+// here as part of the logic for setting defaults on the passed `v` because you'll be
+// operating on two different config structs!
 func SetClientDefaults(v *viper.Viper) error {
 	configDir := v.GetString("ConfigDir")
 
@@ -1758,11 +1781,12 @@ func SetClientDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Server_TLSCACertificateFile.GetName(), filepath.Join(configDir, "certificates", "tlsca.pem"))
 
 	// Default is set outside of defaults.yaml to allow SetDefault call below to override
-	viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), 102400)
-	if param.MinimumDownloadSpeed.IsSet() {
-		viper.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), param.MinimumDownloadSpeed.GetInt())
+	v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), 102400)
+	if v.IsSet(param.MinimumDownloadSpeed.GetName()) {
+		v.SetDefault(param.Client_MinimumDownloadSpeed.GetName(), v.GetInt(param.MinimumDownloadSpeed.GetName()))
 	}
 
+	// This is the only block where we can assume the passed and global viper instances are the same.
 	if v == viper.GetViper() {
 		viper.AutomaticEnv()
 		upperPrefix := GetPreferredPrefix()
@@ -1874,11 +1898,12 @@ func SetClientDefaults(v *viper.Viper) error {
 	// Some client actions may take different defaults depending on whether we detect the plugin
 	v.SetDefault(param.Client_IsPlugin.GetName(), false)
 	v.SetDefault(param.Client_DirectorRetries.GetName(), 5)
-	if param.Client_IsPlugin.GetBool() {
+	if v.GetBool(param.Client_IsPlugin.GetName()) {
 		// If we _are_ the plugin, be more aggressive about retries
-		v.Set(param.Client_DirectorRetries.GetName(), 2*param.Client_DirectorRetries.GetInt())
+		v.Set(param.Client_DirectorRetries.GetName(), 2*v.GetInt(param.Client_DirectorRetries.GetName()))
 	}
-	if param.Client_DirectorRetries.GetInt() < 1 {
+
+	if v.GetInt(param.Client_DirectorRetries.GetName()) < 1 {
 		log.Warningf("Client.DirectorRetries was set to %d, but it must be at least 1. Falling back to default of 5.", param.Client_DirectorRetries.GetInt())
 		v.Set(param.Client_DirectorRetries.GetName(), 5)
 	}
@@ -1957,6 +1982,9 @@ func ResetConfig() {
 	fedDiscoveryOnce = &sync.Once{}
 	globalFedInfo = pelican_url.FederationDiscovery{}
 	globalFedErr = nil
+
+	warnIssuerKeyOnce = sync.Once{}
+	warnDeprecatedOnce = sync.Once{}
 
 	setServerOnce = sync.Once{}
 
