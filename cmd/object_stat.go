@@ -107,6 +107,12 @@ func statMain(cmd *cobra.Command, args []string) {
 	// Exit with failure
 	if err != nil {
 		// Print the list of errors
+		if errors.Is(err, config.ErrIncorrectPassword) {
+			fmt.Fprintln(os.Stderr, "Failed to access local credential file - entered incorrect local decryption password")
+			fmt.Fprintln(os.Stderr, "If you have forgotten your password, you can reset the local state (deleting all on-disk credentials)")
+			fmt.Fprintf(os.Stderr, "by running '%s credentials reset-local'\n", os.Args[0])
+			os.Exit(1)
+		}
 		errMsg := err.Error()
 		var te *client.TransferErrors
 		if errors.As(err, &te) {
