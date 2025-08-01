@@ -154,6 +154,11 @@ var (
 	enabledServers server_structs.ServerType
 	setServerOnce  sync.Once
 
+	// Some config parsing tools will init both client and server config, but both
+	// warn about several config params. Only warn once per process.
+	warnIssuerKeyOnce  sync.Once
+	warnDeprecatedOnce sync.Once
+
 	RestartFlag = make(chan any) // A channel flag to restart the server instance that launcher listens to (including cache)
 
 	validPrefixes = map[ConfigPrefix]bool{
@@ -582,24 +587,26 @@ func GetEnTranslator() ut.Translator {
 // along with printing out a warning to let them know they should update. Whether or not keys are mapped is
 // configured in docs/parameters.yaml using the `deprecated: true` and replacedby: `<list of new keys>` fields.
 func handleDeprecatedConfig() {
-	deprecatedMap := param.GetDeprecated()
-	for deprecated, replacement := range deprecatedMap {
-		if viper.IsSet(deprecated) {
-			if replacement[0] == "none" {
-				log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
-			} else {
-				for _, rep := range replacement {
-					if viper.IsSet(rep) {
-						log.Warningf("The configuration key '%s' is deprecated. The value from its replacement '%s' will be used instead, and the value of the deprecated configuration key '%s' will be ignored.", deprecated, rep, deprecated)
-					} else {
-						log.Warningf("The configuration key '%s' is deprecated. Please use '%s' instead. Will use the value of deprecated config key '%s' for the new config key '%s'.", deprecated, rep, deprecated, rep)
-						value := viper.Get(deprecated)
-						viper.Set(rep, value)
+	warnDeprecatedOnce.Do(func() {
+		deprecatedMap := param.GetDeprecated()
+		for deprecated, replacement := range deprecatedMap {
+			if viper.IsSet(deprecated) {
+				if replacement[0] == "none" {
+					log.Warningf("Deprecated configuration key %s is set. This is being removed in future release", deprecated)
+				} else {
+					for _, rep := range replacement {
+						if viper.IsSet(rep) {
+							log.Warningf("The configuration key '%s' is deprecated. The value from its replacement '%s' will be used instead, and the value of the deprecated configuration key '%s' will be ignored.", deprecated, rep, deprecated)
+						} else {
+							log.Warningf("The configuration key '%s' is deprecated. Please use '%s' instead. Will use the value of deprecated config key '%s' for the new config key '%s'.", deprecated, rep, deprecated, rep)
+							value := viper.Get(deprecated)
+							viper.Set(rep, value)
+						}
 					}
 				}
 			}
 		}
-	}
+	})
 }
 
 func setupTranslation() error {
@@ -984,33 +991,36 @@ func PrintClientConfig() error {
 // This function serves as a transitional step to help users migrate from IssuerKey to
 // IssuerKeysDirectory. It should be removed if the transition is done.
 func warnIssuerKey(v *viper.Viper) {
-	legacyKey := v.GetString(param.IssuerKey.GetName())
-	if legacyKey != "" {
-		if _, err := os.Stat(legacyKey); err == nil {
-			issuerKeyConfigBy := "default"
-			issuerKeysDirectoryConfigBy := "default"
-			changeExtension := ""
+	warnIssuerKeyOnce.Do(func() {
+		legacyKey := v.GetString(param.IssuerKey.GetName())
+		if legacyKey != "" {
 
-			configDir := v.GetString("ConfigDir")
-			if filepath.Join(configDir, "issuer.jwk") != param.IssuerKey.GetString() {
-				issuerKeyConfigBy = "custom"
-			}
-			if filepath.Join(configDir, "issuer-keys") != param.IssuerKeysDirectory.GetString() {
-				issuerKeysDirectoryConfigBy = "custom"
-			}
-			if !strings.HasSuffix(param.IssuerKey.GetString(), ".pem") {
-				changeExtension = "renamed to use '.pem' extension and "
-			}
+			if _, err := os.Stat(legacyKey); err == nil {
+				issuerKeyConfigBy := "default"
+				issuerKeysDirectoryConfigBy := "default"
+				changeExtension := ""
 
-			log.Errorf(
-				"File %q should be %smoved into directory %q. "+
-					"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). ",
-				param.IssuerKey.GetString(), changeExtension, param.IssuerKeysDirectory.GetString(),
-				param.IssuerKey.GetName(), param.IssuerKey.GetString(), issuerKeyConfigBy,
-				param.IssuerKeysDirectory.GetName(), param.IssuerKeysDirectory.GetString(), issuerKeysDirectoryConfigBy,
-			)
+				configDir := v.GetString("ConfigDir")
+				if filepath.Join(configDir, "issuer.jwk") != v.GetString(param.IssuerKey.GetName()) {
+					issuerKeyConfigBy = "custom"
+				}
+				if filepath.Join(configDir, "issuer-keys") != v.GetString(param.IssuerKeysDirectory.GetName()) {
+					issuerKeysDirectoryConfigBy = "custom"
+				}
+				if !strings.HasSuffix(v.GetString(param.IssuerKey.GetName()), ".pem") {
+					changeExtension = "renamed to use '.pem' extension and "
+				}
+
+				log.Errorf(
+					"File %q should be %smoved into directory %q. "+
+						"The %q parameter (currently set to %q via %s configuration) is being deprecated in favor of %q (currently set to %q via %s configuration). ",
+					v.GetString(param.IssuerKey.GetName()), changeExtension, v.GetString(param.IssuerKeysDirectory.GetName()),
+					param.IssuerKey.GetName(), param.IssuerKey.GetString(), issuerKeyConfigBy,
+					param.IssuerKeysDirectory.GetName(), v.GetString(param.IssuerKeysDirectory.GetName()), issuerKeysDirectoryConfigBy,
+				)
+			}
 		}
-	}
+	})
 }
 
 func SetServerDefaults(v *viper.Viper) error {
