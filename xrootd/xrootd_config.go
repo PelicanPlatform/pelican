@@ -765,7 +765,7 @@ func durationStrToSecondsHookFuncGenerator(structName, fieldName, configName str
 
 		duration, err := time.ParseDuration(durStr)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to parse '%s' of %s as a duration", configName, durStr)
+			return nil, errors.Wrapf(err, "failed to parse '%s' of %s as a duration", configName, durStr)
 		}
 
 		if validation != nil {
@@ -779,7 +779,7 @@ func durationStrToSecondsHookFuncGenerator(structName, fieldName, configName str
 
 func authRefreshIntervalValidation(duration time.Duration, durStr string) time.Duration {
 	if duration < 60*time.Second {
-		log.Warningf("'Xrootd.AuthRefreshInterval' of %s appears as less than 60s. Using fallback of 5m", durStr)
+		log.Warningf("'%s' of %s appears as less than 60s. Using fallback of 5m", param.Xrootd_AuthRefreshInterval.GetName(), durStr)
 		return time.Minute * 5
 	}
 	return duration
@@ -787,10 +787,10 @@ func authRefreshIntervalValidation(duration time.Duration, durStr string) time.D
 
 func evictionMonitoringIntervalValidation(duration time.Duration, durStr string) time.Duration {
 	if duration < 0*time.Second {
-		log.Warningf("'Cache.EvictionMonitoringInterval' of %s is a negative value. Using the absolute value.", durStr)
+		log.Warningf("'%s' of %s is a negative value. Using the absolute value.", param.Cache_EvictionMonitoringInterval.GetName(), durStr)
 		duration = -duration
 	} else if duration > 0*time.Second && duration < 5*time.Second {
-		log.Warningf("'Cache.EvictionMonitoringInterval' of %s appears as less than 5s. This is a very frequent interval and may cause performance issues", durStr)
+		log.Warningf("'%s' of %s appears as less than 5s. This is a very frequent interval and may cause performance issues", param.Cache_EvictionMonitoringInterval.GetName(), durStr)
 	}
 	return duration
 }
@@ -798,8 +798,8 @@ func evictionMonitoringIntervalValidation(duration time.Duration, durStr string)
 // A wrapper to combine multiple decoder hook functions for XRootD cfg unmarshalling
 func xrootdDecodeHook() mapstructure.DecodeHookFunc {
 	return mapstructure.ComposeDecodeHookFunc(
-		durationStrToSecondsHookFuncGenerator("XrootdOptions", "authrefreshinterval", "Xrootd.AuthRefreshInterval", authRefreshIntervalValidation),
-		durationStrToSecondsHookFuncGenerator("CacheConfig", "evictionmonitoringinterval", "Cache.EvictionMonitoringInterval", evictionMonitoringIntervalValidation),
+		durationStrToSecondsHookFuncGenerator("XrootdOptions", "authrefreshinterval", param.Xrootd_AuthRefreshInterval.GetName(), authRefreshIntervalValidation),
+		durationStrToSecondsHookFuncGenerator("CacheConfig", "evictionmonitoringinterval", param.Cache_EvictionMonitoringInterval.GetName(), evictionMonitoringIntervalValidation),
 		server_utils.OriginExportsDecoderHook(),
 	)
 }
