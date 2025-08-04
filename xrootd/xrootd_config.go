@@ -127,25 +127,27 @@ type (
 	}
 
 	CacheConfig struct {
-		UseCmsd             bool
-		EnablePrefetch      bool
-		EnableVoms          bool
-		CalculatedPort      string
-		HighWaterMark       string
-		LowWatermark        string
-		FilesBaseSize       string
-		FilesNominalSize    string
-		FilesMaxSize        string
-		ExportLocation      string
-		RunLocation         string
-		DataLocations       []string
-		MetaLocations       []string
-		NamespaceLocation   string
-		PSSOrigin           string
-		BlocksToPrefetch    int
-		Concurrency         int
-		LotmanCfg           LotmanCfg
-		EnableTLSClientAuth bool
+		UseCmsd                    bool
+		EnablePrefetch             bool
+		EnableVoms                 bool
+		CalculatedPort             string
+		HighWaterMark              string
+		LowWatermark               string
+		FilesBaseSize              string
+		FilesNominalSize           string
+		FilesMaxSize               string
+		ExportLocation             string
+		RunLocation                string
+		DataLocations              []string
+		MetaLocations              []string
+		NamespaceLocation          string
+		PSSOrigin                  string
+		BlocksToPrefetch           int
+		Concurrency                int
+		LotmanCfg                  LotmanCfg
+		EnableTLSClientAuth        bool
+		EvictionMonitoringInterval int
+		EvictionMonitoringMaxDepth int
 	}
 
 	XrootdOptions struct {
@@ -740,10 +742,10 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 // The default config has `Xrootd.AuthRefreshInterval: 5m`, which we need to convert
 // to an integer representation of seconds for our XRootD configuration. This hook
 // handles that conversion during unmarshalling, as well as some sanitization of user inputs.
-func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
+func durationStrToSecondsHookFuncGenerator(structName, fieldName, configName string, validation func(duration time.Duration, durStr string) time.Duration) mapstructure.DecodeHookFuncType {
 	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
 		// Filter out underlying data we don't want to risk manipulating
-		if t.Kind() != reflect.Struct || f.Kind() != reflect.Map || t.Name() != "XrootdOptions" {
+		if t.Kind() != reflect.Struct || f.Kind() != reflect.Map || t.Name() != structName {
 			return data, nil
 		}
 
@@ -753,9 +755,20 @@ func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
 			return nil, errors.New("data is not a map[string]interface{}")
 		}
 
-		durStr, ok := dataMap["authrefreshinterval"].(string)
+		uncastDur, ok := dataMap[fieldName]
 		if !ok {
-			return nil, errors.New("authrefreshinterval is not a string")
+			// If the key is not present, we don't need to do anything.
+			return data, nil
+		}
+
+		var durStr string
+		if _, isInt := uncastDur.(int); isInt {
+			durStr = strconv.Itoa(uncastDur.(int))
+		} else {
+			durStr, ok = uncastDur.(string)
+			if !ok {
+				return nil, errors.Errorf("%s is not a string or int", fieldName)
+			}
 		}
 
 		// Sanitize the input to guarantee we have a unit
@@ -768,29 +781,47 @@ func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
 			}
 		}
 		if !hasSuffix {
-			log.Warningf("'Xrootd.AuthRefreshInterval' does not have a time unit (s, m, h). Interpreting as seconds")
+			log.Warningf("'%s' does not have a time unit (s, m, h). Interpreting as seconds", configName)
 			durStr = durStr + "s"
 		}
 
 		duration, err := time.ParseDuration(durStr)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to parse 'Xrootd.AuthRefreshInterval' of %s as a duration", durStr)
+			return nil, errors.Wrapf(err, "failed to parse '%s' of %s as a duration", configName, durStr)
 		}
 
-		if duration < 60*time.Second {
-			log.Warningf("'Xrootd.AuthRefreshInterval' of %s appears as less than 60s. Using fallback of 5m", durStr)
-			duration = time.Minute * 5
+		if validation != nil {
+			duration = validation(duration, durStr)
 		}
 
-		dataMap["authrefreshinterval"] = int(duration.Seconds())
+		dataMap[fieldName] = int(duration.Seconds())
 		return data, nil
 	}
+}
+
+func authRefreshIntervalValidation(duration time.Duration, durStr string) time.Duration {
+	if duration < 60*time.Second {
+		log.Warningf("'%s' of %s appears as less than 60s. Using fallback of 5m", param.Xrootd_AuthRefreshInterval.GetName(), durStr)
+		return time.Minute * 5
+	}
+	return duration
+}
+
+func evictionMonitoringIntervalValidation(duration time.Duration, durStr string) time.Duration {
+	if duration < 0*time.Second {
+		log.Warningf("'%s' of %s is a negative value. Using the absolute value.", param.Cache_EvictionMonitoringInterval.GetName(), durStr)
+		duration = -duration
+	} else if duration > 0*time.Second && duration < 5*time.Second {
+		log.Warningf("'%s' of %s appears as less than 5s. This is a very frequent interval and may cause performance issues", param.Cache_EvictionMonitoringInterval.GetName(), durStr)
+	}
+	return duration
 }
 
 // A wrapper to combine multiple decoder hook functions for XRootD cfg unmarshalling
 func xrootdDecodeHook() mapstructure.DecodeHookFunc {
 	return mapstructure.ComposeDecodeHookFunc(
-		authRefreshStrToSecondsHookFunc(),
+		durationStrToSecondsHookFuncGenerator("XrootdOptions", "authrefreshinterval", param.Xrootd_AuthRefreshInterval.GetName(), authRefreshIntervalValidation),
+		durationStrToSecondsHookFuncGenerator("CacheConfig", "evictionmonitoringinterval", param.Cache_EvictionMonitoringInterval.GetName(), evictionMonitoringIntervalValidation),
 		server_utils.OriginExportsDecoderHook(),
 	)
 }
