@@ -2290,17 +2290,14 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 					if !bytes.Equal(checksumInfo.Value, computedValue) {
 						mismatchErr := &ChecksumMismatchError{
 							Info: ChecksumInfo{
-								Algorithm: checksumInfo.Algorithm,
+								Algorithm: checksum,
 								Value:     computedValue,
 							},
 							ServerValue: checksumInfo.Value,
 						}
-						if transfer.requireChecksum {
-							transferResults.Error = mismatchErr
-							log.WithFields(fields).Errorln(transferResults.Error)
-						} else {
-							log.WithFields(fields).Warnln(mismatchErr.Error() + " (not required, continuing)")
-						}
+						transferResults.Error = mismatchErr
+						log.WithFields(fields).Errorln(transferResults.Error)
+						break
 					} else {
 						successCtr++
 						log.WithFields(fields).Debugf("Checksum %s matches: %s",
@@ -3339,13 +3336,7 @@ Loop:
 			log.Errorln("Error fetching checksum:", err)
 			if transfer.requireChecksum {
 				transferResult.Error = errors.New("checksum is required but endpoint was not able to provide it")
-				attempt.Error = &ChecksumMismatchError{
-					Info: ChecksumInfo{
-						Algorithm: transfer.requestedChecksums[0],
-						Value:     hashes[0].(hash.Hash).Sum(nil),
-					},
-					ServerValue: nil,
-				}
+				attempt.Error = err
 			} else {
 				log.Warnln("Checksum is not required, but endpoint was not able to provide it. Continuing without verification.")
 			}
@@ -3374,21 +3365,15 @@ Loop:
 				if checksumInfo.Algorithm == checksum {
 					found = true
 					if !bytes.Equal(checksumInfo.Value, computedValue) {
-						mismatchErr := &ChecksumMismatchError{
+						transferResult.Error = &ChecksumMismatchError{
 							Info: ChecksumInfo{
 								Algorithm: checksum,
 								Value:     computedValue,
 							},
 							ServerValue: checksumInfo.Value,
 						}
-						if transfer.requireChecksum {
-							transferResult.Error = mismatchErr
-							log.WithFields(fields).Errorln(transferResult.Error)
-							attempt.Error = transferResult.Error
-							break
-						} else {
-							log.WithFields(fields).Warnln(mismatchErr.Error() + " (not required, continuing)")
-						}
+						log.WithFields(fields).Errorln(transferResult.Error)
+						break
 					} else {
 						successCtr++
 						log.WithFields(fields).Debugf("Checksum %s matches: %s",

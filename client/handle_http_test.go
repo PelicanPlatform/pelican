@@ -943,7 +943,9 @@ func TestChecksumIncorrectWhenNotRequired(t *testing.T) {
 	}
 	transferResult, err := downloadObject(transfer)
 	assert.NoError(t, err)
-	assert.NoError(t, transferResult.Error, "Should not error when requireChecksum is false")
+	// We should expect an error because even when the checksum is not required, we still want to verify that the checksum is correct.
+	// We wouldn't want the object downloaded to different than the original.
+	assert.Error(t, transferResult.Error, "Should error when requireChecksum is false")
 
 	// Checksum validation
 	assert.Equal(t, 1, len(transferResult.ServerChecksums), "Checksum count is %d but should be 1", len(transferResult.ServerChecksums))
