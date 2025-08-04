@@ -220,7 +220,7 @@ func TestSlowTransfers(t *testing.T) {
 	}
 
 	// Close the channel to allow the download to complete
-	channel <- true
+	close(channel)
 
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
@@ -307,7 +307,7 @@ func TestStoppedTransfer(t *testing.T) {
 	}
 
 	// Close the channel to allow the download to complete
-	channel <- true
+	close(channel)
 
 	// Make sure the errors are correct
 	assert.NotNil(t, err)
