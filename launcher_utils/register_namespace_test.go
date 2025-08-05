@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -69,7 +70,7 @@ func TestRegistration(t *testing.T) {
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
-	err = registry.InitializeDB()
+	err = database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
 	defer func() {
 		err := registry.ShutdownRegistryDB()
@@ -195,7 +196,7 @@ func TestMultiKeysRegistration(t *testing.T) {
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
-	err = registry.InitializeDB()
+	err = database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
 	defer func() {
 		err := registry.ShutdownRegistryDB()

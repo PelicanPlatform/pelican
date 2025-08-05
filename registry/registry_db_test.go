@@ -38,6 +38,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -858,7 +859,7 @@ func TestRegistryTopology(t *testing.T) {
 	viper.Set("Federation.TopologyNamespaceURL", svr.URL)
 	viper.Set("ConfigDir", t.TempDir())
 
-	err := InitializeDB()
+	err := database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
 	defer func() {
 		err := ShutdownRegistryDB()

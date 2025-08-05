@@ -40,6 +40,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -86,7 +87,7 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 	err := config.InitServer(ctx, server_structs.BrokerType)
 	require.NoError(t, err)
 
-	err = registry.InitializeDB()
+	err = database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
 
 	keyset, err := config.GetIssuerPublicJWKS()

@@ -20,7 +20,6 @@ package registry
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -68,8 +67,10 @@ https://www.alexedwards.net/blog/organising-database-access
 */
 var db *gorm.DB
 
-//go:embed migrations/*.sql
-var embedMigrations embed.FS
+// SetDB lets the database package pass on the already-opened ServerDatabase
+func SetDB(conn *gorm.DB) {
+	db = conn
+}
 
 func (st prefixType) String() string {
 	return string(st)
@@ -704,30 +705,6 @@ func getTopologyNamespaces() ([]*Topology, error) {
 		return nil, result.Error
 	}
 	return topology, nil
-}
-
-func InitializeDB() error {
-	dbPath := param.Registry_DbLocation.GetString()
-
-	tdb, err := server_utils.InitSQLiteDB(dbPath)
-	if err != nil {
-		return err
-	}
-
-	db = tdb
-
-	sqldb, err := db.DB()
-
-	if err != nil {
-		return errors.Wrapf(err, "Failed to get sql.DB from gorm DB: %s", dbPath)
-	}
-
-	// Run database migrations
-	if err := server_utils.MigrateDB(sqldb, embedMigrations); err != nil {
-		return errors.Wrap(err, "unable to migrate the database")
-	}
-
-	return nil
 }
 
 // Create a table in the registry to store namespace prefixes from topology

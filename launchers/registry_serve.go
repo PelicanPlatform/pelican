@@ -42,6 +42,8 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	if err != nil {
 		return errors.Wrap(err, "unable to initialize the server database")
 	}
+	// Pass the already-opened ServerDatabase to the registry package
+	registry.SetDB(database.ServerDatabase)
 
 	if param.Server_EnableUI.GetBool() {
 		registry.InitOptionsCache(ctx, egrp)
