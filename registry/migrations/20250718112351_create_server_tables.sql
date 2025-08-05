@@ -50,20 +50,12 @@ CREATE INDEX IF NOT EXISTS idx_services_namespace_id ON services(namespace_id);
 CREATE INDEX IF NOT EXISTS idx_endpoints_server_id ON endpoints(server_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_server_id ON contacts(server_id);
 
--- Create additional useful indexes
-CREATE INDEX IF NOT EXISTS idx_servers_name ON servers(name);
-CREATE INDEX IF NOT EXISTS idx_servers_origin ON servers(is_origin);
-CREATE INDEX IF NOT EXISTS idx_servers_cache ON servers(is_cache);
-
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
 
 -- Drop indexes
-DROP INDEX IF EXISTS idx_servers_cache;
-DROP INDEX IF EXISTS idx_servers_origin;
-DROP INDEX IF EXISTS idx_servers_name;
 DROP INDEX IF EXISTS idx_contacts_server_id;
 DROP INDEX IF EXISTS idx_endpoints_server_id;
 DROP INDEX IF EXISTS idx_services_namespace_id;
