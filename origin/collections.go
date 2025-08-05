@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/server_utils"
 
@@ -57,6 +58,83 @@ type AddCollectionMembersReq struct {
 
 type RemoveCollectionMembersReq struct {
 	Members []string `json:"members"`
+}
+
+type ListCollectionRes struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	OwnerID     string `json:"owner_id"`
+	Description string `json:"description"`
+	Visibility  string `json:"visibility"`
+	Namespace   string `json:"namespace"`
+}
+
+type GetCollectionRes struct {
+	ID          string                   `json:"id"`
+	Name        string                   `json:"name"`
+	OwnerID     string                   `json:"owner_id"`
+	Description string                   `json:"description"`
+	Visibility  string                   `json:"visibility"`
+	Namespace   string                   `json:"namespace"`
+	Members     []string                 `json:"members"`
+	ACLs        []database.CollectionACL `json:"acls"`
+	Metadata    map[string]string        `json:"metadata"`
+	CreatedAt   time.Time                `json:"created_at"`
+	UpdatedAt   time.Time                `json:"updated_at"`
+}
+
+func handleListCollections(ctx *gin.Context) {
+	authOption := token.AuthOption{
+		Sources: []token.TokenSource{token.Cookie, token.Header},
+		Issuers: []token.TokenIssuer{token.LocalIssuer, token.APITokenIssuer},
+		Scopes:  []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read},
+	}
+	status, ok, err := token.Verify(ctx, authOption)
+	if !ok {
+		ctx.JSON(status, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    err.Error(),
+		})
+		return
+	}
+
+	user, groups, err := web_ui.GetUserGroups(ctx)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to get user from context: %v", err),
+		})
+	}
+	if user == "" {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get user from context",
+		})
+		return
+	}
+
+	collections, err := database.ListCollections(database.ServerDatabase, user, groups)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Failed to list collections: %v", err),
+		})
+		return
+	}
+
+	res := make([]ListCollectionRes, 0)
+	for _, collection := range collections {
+		res = append(res, ListCollectionRes{
+			ID:          collection.ID,
+			Name:        collection.Name,
+			OwnerID:     collection.Owner,
+			Description: collection.Description,
+			Visibility:  string(collection.Visibility),
+			Namespace:   collection.Namespace,
+		})
+	}
+
+	ctx.JSON(http.StatusOK, res)
 }
 
 func handleCreateCollection(ctx *gin.Context) {
@@ -665,6 +743,10 @@ func handleGetCollection(ctx *gin.Context) {
 
 	coll, err := database.GetCollection(database.ServerDatabase, ctx.Param("id"), user, groups)
 	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "collection not found"})
+			return
+		}
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Failed to get collection: %v", err),
@@ -672,7 +754,30 @@ func handleGetCollection(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, coll)
+	metadata := make(map[string]string)
+	for _, meta := range coll.Metadata {
+		metadata[meta.Key] = meta.Value
+	}
+
+	members := make([]string, 0)
+	for _, member := range coll.Members {
+		members = append(members, member.ObjectURL)
+	}
+
+	res := GetCollectionRes{
+		ID:          coll.ID,
+		Name:        coll.Name,
+		OwnerID:     coll.Owner,
+		Description: coll.Description,
+		Visibility:  string(coll.Visibility),
+		Namespace:   coll.Namespace,
+		Members:     members,
+		ACLs:        coll.ACLs,
+		Metadata:    metadata,
+		CreatedAt:   coll.CreatedAt,
+		UpdatedAt:   coll.UpdatedAt,
+	}
+	ctx.JSON(http.StatusOK, res)
 }
 
 func handleDeleteCollection(ctx *gin.Context) {

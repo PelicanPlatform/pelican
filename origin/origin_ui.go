@@ -167,6 +167,7 @@ func RegisterOriginWebAPI(engine *gin.Engine) error {
 		originWebAPI.GET("/exports", web_ui.AuthHandler, web_ui.AdminAuthHandler, handleExports)
 
 		// Collections API
+		originWebAPI.GET("/collections", web_ui.AuthHandler, handleListCollections)
 		originWebAPI.POST("/collections", web_ui.AuthHandler, handleCreateCollection)
 		originWebAPI.PATCH("/collections/:id", web_ui.AuthHandler, handleUpdateCollection)
 		originWebAPI.DELETE("/collections/:id", web_ui.AuthHandler, handleDeleteCollection)

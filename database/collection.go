@@ -197,6 +197,41 @@ func CreateCollectionWithMetadata(db *gorm.DB, name, description, owner, namespa
 	return collection, nil
 }
 
+func ListCollections(db *gorm.DB, user string, groups []string) ([]Collection, error) {
+	collections := []Collection{}
+	// Every user is part of their own user group, ensure this is in the slice
+	userGroup := "user-" + user
+	if !slices.Contains(groups, userGroup) {
+		groups = append(groups, userGroup)
+	}
+	// First, get all public collections.
+	if result := db.Where("visibility = ?", VisibilityPublic).Find(&collections); result.Error != nil {
+		return nil, result.Error
+	}
+	// Then, get all collections for which the user has a read ACL.
+	var aclCollections []Collection
+	if result := db.
+		Joins("JOIN collection_acls ON collections.id = collection_acls.collection_id").
+		Where("collection_acls.group_id IN ? AND collection_acls.role IN ?", groups, ScopeToRole[token_scopes.Collection_Read]).
+		Find(&aclCollections); result.Error != nil {
+		return nil, result.Error
+	}
+	// Merge the two lists, avoiding duplicates.
+	for _, aclCol := range aclCollections {
+		found := false
+		for _, pubCol := range collections {
+			if aclCol.ID == pubCol.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			collections = append(collections, aclCol)
+		}
+	}
+	return collections, nil
+}
+
 func GetCollection(db *gorm.DB, id string, user string, groups []string) (*Collection, error) {
 	collection := &Collection{}
 	if result := db.Preload("Members").Preload("ACLs").Preload("Metadata").Where("id = ?", id).First(collection); result.Error != nil {
