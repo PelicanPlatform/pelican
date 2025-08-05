@@ -1,6 +1,7 @@
 package origin
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -291,10 +292,17 @@ func handleUpdateCollection(ctx *gin.Context) {
 
 	err = database.UpdateCollection(database.ServerDatabase, ctx.Param("id"), user, groups, req.Name, req.Description, visPtr)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to update collection: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to update collection: %v", err),
+			})
+		}
 		return
 	}
 
@@ -343,10 +351,17 @@ func handleRemoveCollectionMembers(ctx *gin.Context) {
 
 	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user, groups)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to remove collection members: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to remove collection members: %v", err),
+			})
+		}
 		return
 	}
 
@@ -395,10 +410,17 @@ func handleRemoveCollectionMember(ctx *gin.Context) {
 
 	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), []string{objectURL}, user, groups)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to remove collection member: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to remove collection member: %v", err),
+			})
+		}
 		return
 	}
 
@@ -459,10 +481,17 @@ func handleAddCollectionMembers(ctx *gin.Context) {
 
 	err = database.AddCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user, groups)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to add collection members: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to add collection members: %v", err),
+			})
+		}
 		return
 	}
 
@@ -533,10 +562,17 @@ func handleListCollectionMembers(ctx *gin.Context) {
 
 	members, err := database.GetCollectionMembers(database.ServerDatabase, ctx.Param("id"), user, groups, since, limit)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to list collection members: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to list collection members: %v", err),
+			})
+		}
 		return
 	}
 
@@ -575,10 +611,17 @@ func handleGetCollectionMetadata(ctx *gin.Context) {
 
 	metadata, err := database.GetCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get collection metadata: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to get collection metadata: %v", err),
+			})
+		}
 		return
 	}
 
@@ -650,10 +693,17 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 
 	err = database.UpsertCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, value)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to put collection metadata: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to put collection metadata: %v", err),
+			})
+		}
 		return
 	}
 
@@ -701,10 +751,17 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 
 	err = database.DeleteCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to delete collection metadata: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to delete collection metadata: %v", err),
+			})
+		}
 		return
 	}
 
@@ -743,7 +800,7 @@ func handleGetCollection(ctx *gin.Context) {
 
 	coll, err := database.GetCollection(database.ServerDatabase, ctx.Param("id"), user, groups)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{Status: server_structs.RespFailed, Msg: "collection not found"})
 			return
 		}
@@ -813,10 +870,17 @@ func handleDeleteCollection(ctx *gin.Context) {
 
 	err = database.DeleteCollection(database.ServerDatabase, ctx.Param("id"), user, groups)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to delete collection: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to delete collection: %v", err),
+			})
+		}
 		return
 	}
 
@@ -855,10 +919,17 @@ func handleGetCollectionAcls(ctx *gin.Context) {
 
 	acls, err := database.GetCollectionAcls(database.ServerDatabase, ctx.Param("id"), user, groups)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to get collection acls: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to get collection acls: %v", err),
+			})
+		}
 		return
 	}
 
@@ -924,10 +995,17 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 
 	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, req.ExpiresAt)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to grant collection acl: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to grant collection acl: %v", err),
+			})
+		}
 		return
 	}
 
@@ -1001,10 +1079,17 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 
 	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, principal, role)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to revoke collection acl: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "collection not found",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to revoke collection acl: %v", err),
+			})
+		}
 		return
 	}
 
@@ -1116,10 +1201,22 @@ func handleAddGroupMember(ctx *gin.Context) {
 
 	err = database.AddGroupMember(database.ServerDatabase, ctx.Param("id"), req.Member, user, groups)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to add group member: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "group not found",
+			})
+		} else if errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "you do not have permission to add members to this group",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to add group member: %v", err),
+			})
+		}
 		return
 	}
 
@@ -1161,10 +1258,22 @@ func handleRemoveGroupMember(ctx *gin.Context) {
 
 	err = database.RemoveGroupMember(database.ServerDatabase, ctx.Param("id"), member, user, groups)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
-			Status: server_structs.RespFailed,
-			Msg:    fmt.Sprintf("Failed to remove group member: %v", err),
-		})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "group or member not found",
+			})
+		} else if errors.Is(err, database.ErrForbidden) {
+			ctx.JSON(http.StatusForbidden, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "you do not have permission to remove members from this group",
+			})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    fmt.Sprintf("Failed to remove group member: %v", err),
+			})
+		}
 		return
 	}
 

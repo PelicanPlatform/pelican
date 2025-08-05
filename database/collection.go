@@ -3,6 +3,7 @@ package database
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -11,6 +12,10 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/pelicanplatform/pelican/token_scopes"
+)
+
+var (
+	ErrForbidden = errors.New("forbidden")
 )
 
 type Visibility string
@@ -321,6 +326,25 @@ func GrantCollectionAcl(db *gorm.DB, id, user string, groups []string, groupId s
 		return err
 	}
 
+	// Resolve the provided group identifier (which may be the internal slug returned
+	// by the create-group endpoint) to the human-readable group *name*.  The group
+	// *name* is what’s shipped in the `wlcg.groups` claim of the JWT and therefore
+	// what we should persist in the ACL for later comparisons during authorization.
+	var grp Group
+	if err := db.First(&grp, "id = ?", groupId).Error; err == nil {
+		// We found the group by its slug; switch to using the group name.
+		groupId = grp.Name
+	} else if errors.Is(err, gorm.ErrRecordNotFound) {
+		// It's possible the caller already provided the group *name*; try to look
+		// it up by name to verify it exists (and to ensure a consistent casing).
+		if err2 := db.First(&grp, "name = ?", groupId).Error; err2 == nil {
+			groupId = grp.Name // Adopt the canonical name from the DB.
+		} // else: leave groupId unchanged – we’ll trust the caller.
+	} else {
+		// Unexpected database error.
+		return err
+	}
+
 	return db.Transaction(func(tx *gorm.DB) error {
 		acl := CollectionACL{
 			CollectionID: id,
@@ -525,19 +549,17 @@ func validateACL(collection *Collection, user string, groups []string, scope tok
 		for _, group := range groups {
 			if acl.GroupID == group && slices.Contains(roles, acl.Role) {
 				if acl.ExpiresAt != nil && acl.ExpiresAt.Before(time.Now()) {
-					return fmt.Errorf("access denied. grant for group '%s' on collection '%s' has expired", group, collection.ID)
+					return ErrForbidden
 				}
 				return nil
 			}
 		}
 	}
 
-	return fmt.Errorf("access denied. user '%s' in groups %v does not have required scope '%s' for collection '%s'", user, groups, scope.String(), collection.ID)
+	return ErrForbidden
 }
 
 func CreateGroup(db *gorm.DB, name, description, createdBy string, groups []string) (*Group, error) {
-	// For now, let's say anyone can create a group.
-	// In the future, this might require a specific scope.
 	slug, err := generateSlug()
 	if err != nil {
 		return nil, err
@@ -558,8 +580,15 @@ func CreateGroup(db *gorm.DB, name, description, createdBy string, groups []stri
 }
 
 func AddGroupMember(db *gorm.DB, groupId, member, addedBy string, groups []string) error {
-	// For now, let's say anyone can add a member to any group.
-	// In the future, we would check if 'addedBy' has 'write' or 'owner' on the group.
+	var group Group
+	if err := db.First(&group, "id = ?", groupId).Error; err != nil {
+		return err
+	}
+
+	if group.CreatedBy != addedBy {
+		return ErrForbidden
+	}
+
 	groupMember := &GroupMember{
 		GroupID: groupId,
 		Member:  member,
@@ -572,8 +601,15 @@ func AddGroupMember(db *gorm.DB, groupId, member, addedBy string, groups []strin
 }
 
 func RemoveGroupMember(db *gorm.DB, groupId, member, removedBy string, groups []string) error {
-	// For now, let's say anyone can remove a member from any group.
-	// In the future, we would check if 'removedBy' has 'write' or 'owner' on the group.
+	var group Group
+	if err := db.First(&group, "id = ?", groupId).Error; err != nil {
+		return err
+	}
+
+	if group.CreatedBy != removedBy {
+		return ErrForbidden
+	}
+
 	if result := db.Where("group_id = ? AND member = ?", groupId, member).Delete(&GroupMember{}); result.Error != nil {
 		return result.Error
 	}

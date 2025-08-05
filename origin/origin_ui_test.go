@@ -416,7 +416,7 @@ func TestCollectionsAPI(t *testing.T) {
 		require.NoError(t, err)
 		req, err = http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
 		require.NoError(t, err)
-		createToken, err := generateTokenWithGroups(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create}, "test-user-owner", []string{groupName})
+		createToken, err := generateTokenWithGroups(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create, token_scopes.Collection_Delete}, "test-user-owner", []string{groupName})
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: createToken})
 		req.Header.Set("Content-Type", "application/json")
