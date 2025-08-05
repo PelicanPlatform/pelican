@@ -20,6 +20,7 @@ package main
 
 import (
 	"encoding/json"
+	"net/url"
 	"os"
 
 	"github.com/pkg/errors"
@@ -53,6 +54,7 @@ the client should fallback to discovered caches if all preferred caches fail.`)
 	flagSet.Lookup("cache-list-name").Hidden = true
 	flagSet.String("caches", "", "A JSON file containing the list of caches")
 	flagSet.String("transfer-stats", "", "A path to a file to write transfer statistics to")
+	flagSet.String("pack", "", "Package transfer using remote packing functionality (same as '?pack=' query). Options: auto, tar, tar.gz, tar.xz, zip. Default: auto when flag is provided without an explicit value")
 	objectCmd.AddCommand(getCmd)
 }
 
@@ -89,6 +91,26 @@ func getMain(cmd *cobra.Command, args []string) {
 	}
 	source := args[:len(args)-1]
 	dest := args[len(args)-1]
+
+	// Handle --pack flag by appending the appropriate query parameter to each source URL
+	packOption, _ := cmd.Flags().GetString("pack")
+	if cmd.Flags().Changed("pack") {
+		if packOption == "" {
+			packOption = "auto"
+		}
+		if _, err := client.GetBehavior(packOption); err != nil {
+			log.Errorln(err)
+			os.Exit(1)
+		}
+		for i, src := range source {
+			newSrc, err := addPackQuery(src, packOption)
+			if err != nil {
+				log.Errorln("Failed to process --pack option:", err)
+				os.Exit(1)
+			}
+			source[i] = newSrc
+		}
+	}
 
 	log.Debugln("Sources:", source)
 	log.Debugln("Destination:", dest)
@@ -162,4 +184,16 @@ func getMain(cmd *cobra.Command, args []string) {
 			log.Errorln("Failed to write transfer stats to file:", err)
 		}
 	}
+}
+
+// addPackQuery appends or updates the "pack" query parameter on the provided URL string.
+func addPackQuery(rawURL string, packOption string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("pack", packOption)
+	u.RawQuery = q.Encode()
+	return u.String(), nil
 }
