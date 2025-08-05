@@ -64,10 +64,21 @@ func InitSQLiteDB(dbPath string) (*gorm.DB, error) {
 }
 
 func MigrateDB(sqldb *sql.DB, migrationFS embed.FS, migrationPath string) error {
+	return MigrateServerSpecificDB(sqldb, migrationFS, migrationPath, "")
+}
+
+func MigrateServerSpecificDB(sqldb *sql.DB, migrationFS embed.FS, migrationPath string, tablePrefix string) error {
 	goose.SetBaseFS(migrationFS)
 
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		return err
+	}
+
+	// Set table prefix if provided (for server-type-specific migrations)
+	if tablePrefix != "" {
+		goose.SetTableName(tablePrefix + "_goose_db_version")
+	} else {
+		goose.SetTableName("goose_db_version") // Default table name
 	}
 
 	if err := goose.Up(sqldb, migrationPath); err != nil {

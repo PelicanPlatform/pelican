@@ -1,7 +1,10 @@
 package database
 
 import (
+	"database/sql"
 	"embed"
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -18,34 +21,246 @@ import (
 var ServerDatabase *gorm.DB
 
 //go:embed universal_migrations/*.sql
-var embedMigrations embed.FS
+var embedUniversalMigrations embed.FS
+
+//go:embed registry_migrations/*.sql
+var embedRegistryMigrations embed.FS
 
 type Counter struct {
 	Key   string `gorm:"primaryKey"`
 	Value int    `gorm:"not null;default:0"`
 }
 
-func InitServerDatabase() error {
+// Initialize a centralized server database and run universal and server-type-specific migrations
+func InitServerDatabase(serverType server_structs.ServerType) error {
+
 	dbPath := param.Server_DbLocation.GetString()
 	log.Debugln("Initializing server database: ", dbPath)
 
-	tdb, err := utils.InitSQLiteDB(dbPath)
-	if err != nil {
-		return err
-	}
-	ServerDatabase = tdb
+	// Initialize database connection if not already done
+	if ServerDatabase == nil {
+		tdb, err := utils.InitSQLiteDB(dbPath)
+		if err != nil {
+			return err
+		}
+		ServerDatabase = tdb
 
+		sqlDB, err := ServerDatabase.DB()
+		if err != nil {
+			return err
+		}
+
+		// Always run universal migrations first
+		if err := utils.MigrateDB(sqlDB, embedUniversalMigrations, "universal_migrations"); err != nil {
+			return err
+		}
+	}
+
+	// Apply server-type-specific migrations using goose's versioning
 	sqlDB, err := ServerDatabase.DB()
 	if err != nil {
 		return err
 	}
 
-	// run migrations
-	if err := utils.MigrateDB(sqlDB, embedMigrations, "universal_migrations"); err != nil {
-		return err
+	if err := runServerTypeMigrations(sqlDB, serverType); err != nil {
+		return errors.Wrapf(err, "failed to run migrations for server type %s", serverType.String())
+	}
+
+	// Data migration - this block could be removed after the Registry upgrade is complete
+	if serverType == server_structs.RegistryType {
+		// Run data migration from old registry.sqlite to new pelican.sqlite
+		if err := migrateFromLegacyRegistryDB(); err != nil {
+			log.Warnf("Legacy registry database data migration failed: %v", err)
+		}
+
+		// Migrate existing namespace data to server tables
+		if err := populateNewServerTables(); err != nil {
+			log.Errorf("Failed to populate the data for the new server tables: %v", err)
+			return errors.Wrap(err, "server data migration failed")
+		}
 	}
 
 	return nil
+}
+
+func runServerTypeMigrations(sqlDB *sql.DB, serverType server_structs.ServerType) error {
+	switch serverType {
+	case server_structs.RegistryType:
+		return utils.MigrateServerSpecificDB(sqlDB, embedRegistryMigrations, "registry_migrations", "registry")
+	default:
+		log.Debugf("No specific migrations for server type: %s", serverType.String())
+	}
+
+	return nil
+}
+
+// migrateFromLegacyRegistryDB copies data from old registry.sqlite to new pelican.sqlite
+func migrateFromLegacyRegistryDB() error {
+	// Get the old registry database path
+	legacyDbPath := param.Registry_DbLocation.GetString()
+	if legacyDbPath == "" {
+		return errors.New("Registry_DbLocation parameter is not set")
+	}
+
+	// Check if the legacy database file exists
+	if !fileExists(legacyDbPath) {
+		log.Debugf("Legacy registry database not found at %s, skipping migration", legacyDbPath)
+		return nil
+	}
+
+	// Get the current server database path
+	serverDbPath := param.Server_DbLocation.GetString()
+	if serverDbPath == "" {
+		return errors.New("Server_DbLocation parameter is not set")
+	}
+
+	// Check if we've already migrated (if namespace table has data)
+	var namespaceCount int64
+	if err := ServerDatabase.Model(&server_structs.Namespace{}).Count(&namespaceCount).Error; err != nil {
+		return errors.Wrap(err, "failed to check existing namespace data")
+	}
+
+	if namespaceCount > 0 {
+		log.Info("Namespace data already exists, skipping legacy database migration")
+		return nil
+	}
+
+	log.Infof("Migrating data from legacy registry database: %s -> %s", legacyDbPath, serverDbPath)
+
+	// Get the underlying SQL database connection
+	sqlDB, err := ServerDatabase.DB()
+	if err != nil {
+		return errors.Wrap(err, "failed to get SQL database connection")
+	}
+
+	// Attach the legacy database
+	attachSQL := fmt.Sprintf("ATTACH DATABASE '%s' AS legacy_registry", legacyDbPath)
+	if _, err := sqlDB.Exec(attachSQL); err != nil {
+		return errors.Wrapf(err, "failed to attach legacy database %s", legacyDbPath)
+	}
+	defer func() {
+		if _, err := sqlDB.Exec("DETACH DATABASE legacy_registry"); err != nil {
+			log.Errorf("Failed to detach legacy database: %v", err)
+		}
+	}()
+
+	// Copy namespace data
+	copyNamespaceSQL := `
+		INSERT OR IGNORE INTO namespace (id, prefix, pubkey, identity, admin_metadata, custom_fields) 
+		SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields 
+		FROM legacy_registry.namespace
+	`
+	result, err := sqlDB.Exec(copyNamespaceSQL)
+	if err != nil {
+		return errors.Wrap(err, "failed to copy namespace data")
+	}
+	namespaceRows, _ := result.RowsAffected()
+
+	// Copy topology data
+	copyTopologySQL := `
+		INSERT OR IGNORE INTO topology (id, prefix) 
+		SELECT id, prefix 
+		FROM legacy_registry.topology
+	`
+	result, err = sqlDB.Exec(copyTopologySQL)
+	if err != nil {
+		return errors.Wrap(err, "failed to copy topology data")
+	}
+	topologyRows, _ := result.RowsAffected()
+
+	log.Infof("Successfully migrated %d namespace records and %d topology records from legacy database",
+		namespaceRows, topologyRows)
+
+	return nil
+}
+
+// fileExists checks if a file exists
+func fileExists(path string) bool {
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+	return true
+}
+
+// Manual migration function for existing server data
+func populateNewServerTables() error {
+	// Find all server namespaces that haven't been migrated yet
+	var namespaces []server_structs.Namespace
+	err := ServerDatabase.Where("prefix LIKE ? OR prefix LIKE ?", "/origins/%", "/caches/%").Find(&namespaces).Error
+	if err != nil {
+		return errors.Wrap(err, "failed to fetch server namespaces")
+	}
+
+	// Check if any of these namespaces already have server entries
+	migratedCount := 0
+	for _, ns := range namespaces {
+		var serviceCount int64
+		if err := ServerDatabase.Model(&server_structs.Service{}).Where("namespace_id = ?", ns.ID).Count(&serviceCount).Error; err != nil {
+			return errors.Wrapf(err, "failed to check if namespace %d is already migrated", ns.ID)
+		}
+		if serviceCount > 0 {
+			migratedCount++
+		}
+	}
+
+	if migratedCount == len(namespaces) && len(namespaces) > 0 {
+		log.Info("All server namespaces have already been migrated")
+		return nil
+	}
+
+	if len(namespaces) == 0 {
+		log.Debug("No server namespaces found to migrate")
+		return nil
+	}
+
+	log.Infof("Found %d server namespaces, %d already migrated, migrating %d",
+		len(namespaces), migratedCount, len(namespaces)-migratedCount)
+
+	// Migrate remaining namespaces
+	return ServerDatabase.Transaction(func(tx *gorm.DB) error {
+		for _, ns := range namespaces {
+			// Skip if already migrated
+			var serviceCount int64
+			if err := tx.Model(&server_structs.Service{}).Where("namespace_id = ?", ns.ID).Count(&serviceCount).Error; err != nil {
+				return err
+			}
+			if serviceCount > 0 {
+				continue // Already migrated
+			}
+
+			// Check if site name exists
+			if ns.AdminMetadata.SiteName == "" {
+				log.Warnf("Namespace %d (%s) has no site name, skipping migration", ns.ID, ns.Prefix)
+				continue
+			}
+
+			// Determine server type
+			isOrigin := strings.HasPrefix(ns.Prefix, server_structs.OriginPrefix.String())
+			isCache := strings.HasPrefix(ns.Prefix, server_structs.CachePrefix.String())
+
+			// Create server
+			server := server_structs.Server{
+				Name:     ns.AdminMetadata.SiteName,
+				IsOrigin: isOrigin,
+				IsCache:  isCache,
+			}
+			if err := tx.Create(&server).Error; err != nil {
+				return errors.Wrapf(err, "failed to create server for namespace %d", ns.ID)
+			}
+
+			// Create service mapping
+			service := server_structs.Service{
+				ServerID:    server.ID,
+				NamespaceID: ns.ID,
+			}
+			if err := tx.Create(&service).Error; err != nil {
+				return errors.Wrapf(err, "failed to create service for namespace %d", ns.ID)
+			}
+
+			log.Infof("Migrated namespace %d (%s) -> server %s", ns.ID, ns.Prefix, server.ID)
+		}
+		return nil
+	})
 }
 
 func CreateCounter(key string, value int) error {
