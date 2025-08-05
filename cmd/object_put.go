@@ -55,6 +55,7 @@ func init() {
 	flagSet.Bool("require-checksum", false, "Require the server to return a checksum for the uploaded file (uses crc32c algorithm if no specific algorithm is specified)")
 	flagSet.String("checksums", "", "Verify files against a checksums manifest. The format is ALGORITHM:FILENAME")
 	flagSet.String("transfer-stats", "", "File to write transfer stats to")
+	flagSet.String("pack", "", "Package transfer using remote packing functionality (same as '?pack=' query). Options: auto, tar, tar.gz, tar.xz, zip. Default: auto when flag is provided without an explicit value")
 	objectCmd.AddCommand(putCmd)
 }
 
@@ -179,6 +180,24 @@ func putMain(cmd *cobra.Command, args []string) {
 	}
 	source := args[:len(args)-1]
 	dest := args[len(args)-1]
+
+	// Handle --pack flag by appending the appropriate query parameter to the destination URL
+	packOption, _ := cmd.Flags().GetString("pack")
+	if cmd.Flags().Changed("pack") {
+		if packOption == "" {
+			packOption = "auto"
+		}
+		if _, err := client.GetBehavior(packOption); err != nil {
+			log.Errorln(err)
+			os.Exit(1)
+		}
+		var err error
+		dest, err = addPackQuery(dest, packOption)
+		if err != nil {
+			log.Errorln("Failed to process --pack option:", err)
+			os.Exit(1)
+		}
+	}
 
 	checksumsFile, _ := cmd.Flags().GetString("checksums")
 	if checksumsFile != "" {
