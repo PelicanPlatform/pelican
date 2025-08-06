@@ -152,6 +152,7 @@ func TestGetAndPutAuth(t *testing.T) {
 			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			require.NoError(t, err)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadURL, false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -189,6 +190,7 @@ func TestGetAndPutAuth(t *testing.T) {
 			stats, err := os.Stat(filepath.Join(tempDir, fileName))
 			assert.NoError(t, err)
 			assert.NotNil(t, stats)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl.String(), false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -219,6 +221,7 @@ func TestGetAndPutAuth(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, len(transferResultsDownload), 1)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadURL, false, client.WithToken(tmpTkn)))
 		}
 	})
 
@@ -248,6 +251,7 @@ func TestGetAndPutAuth(t *testing.T) {
 			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			require.NoError(t, err)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadURL, false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -282,6 +286,7 @@ func TestGetAndPutAuth(t *testing.T) {
 			transferResultsDownload, err := client.DoGet(fed.Ctx, uploadUrl, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 	t.Cleanup(func() {
@@ -342,6 +347,7 @@ func TestCopyAuth(t *testing.T) {
 			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			assert.Equal(t, int64(17), transferResultsDownload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadURL, false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -378,6 +384,7 @@ func TestCopyAuth(t *testing.T) {
 			stats, err := os.Stat(filepath.Join(tempDir, fileName))
 			assert.NoError(t, err)
 			assert.NotNil(t, stats)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl.String(), false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -406,6 +413,7 @@ func TestCopyAuth(t *testing.T) {
 			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadURL, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadURL, false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 
@@ -440,6 +448,7 @@ func TestCopyAuth(t *testing.T) {
 			transferResultsDownload, err := client.DoCopy(fed.Ctx, uploadUrl, t.TempDir(), false, client.WithTokenLocation(tempToken.Name()))
 			assert.NoError(t, err)
 			assert.Equal(t, transferResultsDownload[0].TransferredBytes, transferResultsUpload[0].TransferredBytes)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, false, client.WithTokenLocation(tempToken.Name())))
 		}
 	})
 	t.Cleanup(func() {

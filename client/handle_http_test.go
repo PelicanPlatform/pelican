@@ -1026,6 +1026,11 @@ func TestChecksumPut(t *testing.T) {
 				w.Header().Set("Digest", "crc32c=977b8112")
 				w.WriteHeader(http.StatusOK)
 			}
+
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 		}))
 		defer svr.Close()
 		svrURL, err := url.Parse(svr.URL)
@@ -1041,6 +1046,14 @@ func TestChecksumPut(t *testing.T) {
 			job: &TransferJob{
 				requireChecksum:    true,
 				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
 			},
 			localPath: tempFile,
 			remoteURL: svrURL,
@@ -1084,6 +1097,10 @@ func TestChecksumPut(t *testing.T) {
 				w.Header().Set("Digest", "crc32c=977b8111") // Incorrect checksum; should be 977b8112
 				w.WriteHeader(http.StatusOK)
 			}
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 		}))
 		defer svr.Close()
 		svrURL, err := url.Parse(svr.URL)
@@ -1099,6 +1116,14 @@ func TestChecksumPut(t *testing.T) {
 			job: &TransferJob{
 				requireChecksum:    true,
 				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
 			},
 			localPath: tempFile,
 			remoteURL: svrURL,
@@ -1148,6 +1173,10 @@ func TestChecksumPut(t *testing.T) {
 				w.Header().Set("Digest", "md5=5eb63bbbe01eeed093cb22bb8f5acdc3")
 				w.WriteHeader(http.StatusOK)
 			}
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 		}))
 		defer svr.Close()
 		svrURL, err := url.Parse(svr.URL)
@@ -1163,6 +1192,14 @@ func TestChecksumPut(t *testing.T) {
 			job: &TransferJob{
 				requireChecksum:    true,
 				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
 			},
 			localPath: tempFile,
 			remoteURL: svrURL,
@@ -1211,6 +1248,10 @@ func TestChecksumPut(t *testing.T) {
 				w.Header().Set("Digest", "md5=5eb63bbbe01eeed093cb22bb8f5acdc3")
 				w.WriteHeader(http.StatusOK)
 			}
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 		}))
 		defer svr.Close()
 		svrURL, err := url.Parse(svr.URL)
@@ -1226,6 +1267,14 @@ func TestChecksumPut(t *testing.T) {
 			job: &TransferJob{
 				requireChecksum:    false, // Don't require checksum
 				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
 			},
 			localPath: tempFile,
 			remoteURL: svrURL,
@@ -1272,6 +1321,10 @@ func TestChecksumPut(t *testing.T) {
 				// No Digest header - server doesn't provide checksum
 				w.WriteHeader(http.StatusOK)
 			}
+			if r.Method == "PROPFIND" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
 		}))
 		defer svr.Close()
 		svrURL, err := url.Parse(svr.URL)
@@ -1287,6 +1340,14 @@ func TestChecksumPut(t *testing.T) {
 			job: &TransferJob{
 				requireChecksum:    true,
 				requestedChecksums: []ChecksumType{AlgCRC32C},
+				dirResp: server_structs.DirectorResponse{
+					ObjectServers: []*url.URL{svrURL},
+				},
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/testfile.txt",
+				},
 			},
 			localPath: tempFile,
 			remoteURL: svrURL,
@@ -1506,6 +1567,10 @@ func TestFailedUploadError(t *testing.T) {
 
 	shutdownChan := make(chan bool)
 	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PROPFIND" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		<-shutdownChan
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -1522,6 +1587,13 @@ func TestFailedUploadError(t *testing.T) {
 				Scheme: "pelican://",
 				Host:   svrURL.Host,
 				Path:   svrURL.Path + "/test.txt",
+			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					Namespace:      "/test",
+					RequireToken:   false,
+					CollectionsUrl: svrURL,
+				},
 			},
 		},
 		localPath: testfileLocation,
@@ -1568,6 +1640,10 @@ func TestFailedLargeUploadError(t *testing.T) {
 
 	shutdownChan := make(chan bool)
 	svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PROPFIND" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		<-shutdownChan
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -1584,6 +1660,13 @@ func TestFailedLargeUploadError(t *testing.T) {
 				Scheme: "pelican://",
 				Host:   svrURL.Host,
 				Path:   svrURL.Path + "/test.txt",
+			},
+			dirResp: server_structs.DirectorResponse{
+				XPelNsHdr: server_structs.XPelNs{
+					Namespace:      "/test",
+					RequireToken:   false,
+					CollectionsUrl: svrURL,
+				},
 			},
 		},
 		localPath: testfileLocation,
@@ -1860,4 +1943,212 @@ func TestTLSCertificateError(t *testing.T) {
 	case <-time.After(time.Second * 2):
 		t.Fatal("Timeout while waiting for response")
 	}
+}
+
+func TestPutOverwrite(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		"TLSSkipVerify": true,
+	})
+
+	t.Run("ObjectExists", func(t *testing.T) {
+		// Create a server that responds to WebDAV PROPFIND requests indicating the object exists
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PROPFIND" {
+				// Simulate existing object - return WebDAV response
+				w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+				w.WriteHeader(http.StatusMultiStatus)
+				response := `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response>
+    <D:href>/hello.txt</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:resourcetype/>
+        <D:getcontentlength>1024</D:getcontentlength>
+        <D:getlastmodified>Wed, 01 Jan 2024 00:00:00 GMT</D:getlastmodified>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>`
+				_, err := w.Write([]byte(response))
+				require.NoError(t, err)
+				return
+			}
+			if r.Method == "PUT" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}))
+		defer svr.Close()
+
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		// Create a token generator with a test token
+		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token.SetToken("test-token")
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/hello.txt",
+				},
+				dirResp: server_structs.DirectorResponse{
+					XPelNsHdr: server_structs.XPelNs{
+						Namespace:      "/test",
+						RequireToken:   true,
+						CollectionsUrl: svrURL,
+					},
+				},
+				token: token,
+			},
+			remoteURL: svrURL,
+			token:     token,
+		}
+
+		result, err := uploadObject(transfer)
+		require.Error(t, err)
+		require.Equal(t, "remote object already exists, upload aborted", result.Error.Error())
+	})
+
+	t.Run("ObjectDoesNotExist", func(t *testing.T) {
+		// Create a server that responds to WebDAV PROPFIND requests with 404 (object doesn't exist)
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PROPFIND" {
+				// Simulate non-existing object - return 404
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			if r.Method == "PUT" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}))
+		defer svr.Close()
+
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		// Create a token generator with a test token
+		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token.SetToken("test-token")
+
+		// Create a test file to upload
+		testData := []byte("test content")
+		fname := filepath.Join(t.TempDir(), "test.txt")
+		err = os.WriteFile(fname, testData, 0o644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/test.txt",
+				},
+				dirResp: server_structs.DirectorResponse{
+					XPelNsHdr: server_structs.XPelNs{
+						Namespace:      "/test",
+						RequireToken:   true,
+						CollectionsUrl: svrURL,
+					},
+				},
+				token: token,
+			},
+			remoteURL: svrURL,
+			localPath: fname,
+			token:     token,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+		}
+
+		result, err := uploadObject(transfer)
+		require.NoError(t, err)
+		require.NoError(t, result.Error) // Should succeed when object doesn't exist
+	})
+
+	t.Run("StatError", func(t *testing.T) {
+		// Create a server that returns an error on WebDAV PROPFIND requests
+		svr := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PROPFIND" {
+				// Simulate server error
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			if r.Method == "PUT" {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}))
+		defer svr.Close()
+
+		svrURL, err := url.Parse(svr.URL)
+		require.NoError(t, err)
+
+		// Create a token generator with a test token
+		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token.SetToken("test-token")
+
+		// Create a test file to upload
+		testData := []byte("test content")
+		fname := filepath.Join(t.TempDir(), "test.txt")
+		err = os.WriteFile(fname, testData, 0o644)
+		require.NoError(t, err)
+
+		transfer := &transferFile{
+			ctx: context.Background(),
+			job: &TransferJob{
+				remoteURL: &pelican_url.PelicanURL{
+					Scheme: "pelican://",
+					Host:   svrURL.Host,
+					Path:   svrURL.Path + "/hello.txt",
+				},
+				dirResp: server_structs.DirectorResponse{
+					XPelNsHdr: server_structs.XPelNs{
+						Namespace:      "/test",
+						RequireToken:   true,
+						CollectionsUrl: svrURL,
+					},
+				},
+				token: token,
+			},
+			remoteURL: svrURL,
+			localPath: fname,
+			token:     token,
+			attempts: []transferAttemptDetails{
+				{
+					Url: svrURL,
+				},
+			},
+		}
+
+		// Capture log warnings
+		var logBuf bytes.Buffer
+		origOut := log.StandardLogger().Out
+		log.SetOutput(&logBuf)
+		origLevel := log.GetLevel()
+		log.SetLevel(log.WarnLevel)
+		defer func() {
+			log.SetOutput(origOut)
+			log.SetLevel(origLevel)
+		}()
+
+		result, err := uploadObject(transfer)
+		require.NoError(t, err) // We should not get an error from the uploadObject call
+		require.NoError(t, result.Error)
+
+		// Ensure the expected warning was logged
+		assert.Contains(t, logBuf.String(), "Failed to check if object exists at the origin, proceeding with upload")
+	})
 }
