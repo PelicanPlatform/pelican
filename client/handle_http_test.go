@@ -2133,8 +2133,22 @@ func TestPutOverwrite(t *testing.T) {
 			},
 		}
 
+		// Capture log warnings
+		var logBuf bytes.Buffer
+		origOut := log.StandardLogger().Out
+		log.SetOutput(&logBuf)
+		origLevel := log.GetLevel()
+		log.SetLevel(log.WarnLevel)
+		defer func() {
+			log.SetOutput(origOut)
+			log.SetLevel(origLevel)
+		}()
+
 		result, err := uploadObject(transfer)
 		require.NoError(t, err) // We should not get an error from the uploadObject call
 		require.NoError(t, result.Error)
+
+		// Ensure the expected warning was logged
+		assert.Contains(t, logBuf.String(), "Failed to check if object exists at the origin, proceeding with upload")
 	})
 }
