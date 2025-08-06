@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/require"
@@ -1074,7 +1075,7 @@ func TestObjectDelete(t *testing.T) {
 		doesNotExistPath := fmt.Sprintf("pelican://%s%s/doesNotExist", discoveryUrl.Host, "/with-write")
 		err := client.DoDelete(fed.Ctx, doesNotExistPath, false, client.WithTokenLocation(tempToken.Name()))
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "404")
+		require.True(t, errors.Is(err, client.ErrObjectNotFound))
 	})
 
 	// Test deleting an existing object.
