@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/token_scopes"
 )
 
@@ -462,6 +464,23 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy stri
 	err := validateACL(collection, addedBy, groups, token_scopes.Collection_Modify)
 	if err != nil {
 		return err
+	}
+
+	// Enforce that each member belongs to the collection's namespace
+	namespace := collection.Namespace
+	for _, memberUrl := range members {
+		purl, err := pelican_url.Parse(memberUrl, []pelican_url.ParseOption{}, []pelican_url.DiscoveryOption{})
+		if err != nil {
+			return fmt.Errorf("failed to parse member URL '%s': %w", memberUrl, err)
+		}
+		path := purl.Path
+		if !strings.HasPrefix(path, namespace) {
+			return fmt.Errorf("object URL '%s' does not belong to collection namespace '%s'", memberUrl, namespace)
+		}
+		// If the namespace prefix matches but is followed by additional characters that don't begin with '/', reject as well (e.g., '/test10')
+		if len(path) > len(namespace) && path[len(namespace)] != '/' {
+			return fmt.Errorf("object URL '%s' does not belong to collection namespace '%s'", memberUrl, namespace)
+		}
 	}
 
 	records := make([]CollectionMember, 0, len(members))
