@@ -107,7 +107,9 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 
 	cache.LaunchFedTokManager(ctx, egrp, cacheServer)
 
-	metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)
+	if param.Cache_EnableEvictionMonitoring.GetBool() {
+		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)
+	}
 
 	concLimit := param.Cache_Concurrency.GetInt()
 	if concLimit > 0 {

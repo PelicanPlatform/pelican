@@ -1682,10 +1682,17 @@ type: filename
 default: $ConfigBase/cache-fed-token
 components: ["cache"]
 ---
+name: Cache.EnableEvictionMonitoring
+description: |+
+  Enable cache eviction monitoring.
+  The cache eviction monitoring data includes information like the total space available, the space used, and the space used by each namespace.
+type: bool
+default: true
+components: ["cache"]
+---
 name: Cache.EvictionMonitoringInterval
 description: |+
   The interval at which the eviction monitoring will be reported.
-  The cache eviction monitoring data includes information like the total space available, the space used, and the space used by each namespace.
   Valid values are 60, 300, 600, 900, 1800, 3600.
 type: duration
 default: 60s
