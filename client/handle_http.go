@@ -3662,9 +3662,21 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 			}
 		} else if job.job.xferType == transferTypePrestage && skipPrestage(newPath, job.job) {
 			log.Infoln("Skipping prestage of object", newPath, "as it already is at the cache")
-		} else if localPath := path.Join(job.job.localPath, localBase, info.Name()); job.job.xferType == transferTypeDownload && skipDownload(job.job.syncLevel, info, localPath) {
-			log.Infoln("Skipping download of object", newPath, "as it already exists at", localPath)
 		} else {
+			// Determine the correct local path.  If the user requested that the
+			// transfer be directed to the null device, then we always use
+			// os.DevNull as the target path; otherwise, construct the standard
+			// destination inside the requested directory.
+			targetPath := job.job.localPath
+			if targetPath != os.DevNull {
+				targetPath = path.Join(job.job.localPath, localBase, info.Name())
+			}
+
+			if job.job.xferType == transferTypeDownload && skipDownload(job.job.syncLevel, info, targetPath) {
+				log.Infoln("Skipping download of object", newPath, "as it already exists at", targetPath)
+				continue
+			}
+
 			job.job.activeXfer.Add(1)
 			select {
 			case <-job.job.ctx.Done():
@@ -3681,7 +3693,7 @@ func (te *TransferEngine) walkDirDownloadHelper(job *clientTransferJob, transfer
 					requestedChecksums: job.job.requestedChecksums,
 					requireChecksum:    job.job.requireChecksum,
 					packOption:         transfers[0].PackOption,
-					localPath:          localPath,
+					localPath:          targetPath,
 					xferType:           job.job.xferType,
 					token:              job.job.token,
 					attempts:           transfers,
