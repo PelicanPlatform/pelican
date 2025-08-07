@@ -1682,6 +1682,13 @@ type: filename
 default: $ConfigBase/cache-fed-token
 components: ["cache"]
 ---
+name: Cache.EnableEvictionMonitoring
+description: |+
+  Enable cache eviction monitoring.
+type: bool
+default: true
+components: ["cache"]
+---
 name: Cache.EvictionMonitoringInterval
 description: |+
   The interval at which the eviction monitoring will be reported.

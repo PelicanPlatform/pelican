@@ -70,6 +70,7 @@ Cache:
   HighWaterMark: 95
   BlocksToPrefetch: 0
   EnableTLSClientAuth: false
+  EnableEvictionMonitoring: true
 Lotman:
   EnabledPolicy: "fairshare"
   DefaultLotExpirationLifetime: "2016h"
