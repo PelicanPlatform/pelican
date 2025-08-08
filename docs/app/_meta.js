@@ -9,5 +9,6 @@ export default {
 	"monitoring-pelican-services": "Monitoring Pelican Services",
 	"advanced-usage": "Advanced Usage",
 	"faq": "FAQs and Troubleshooting",
-	"api-docs": "API Documentation"
+	"api-docs": "API Documentation",
+	"commands-reference": "Commands Reference"
 }
