@@ -168,3 +168,12 @@ func ListApiKeys(db *gorm.DB) ([]server_structs.ApiKey, error) {
 
 	return apiKeys, nil
 }
+
+func GetApiKeyCreator(db *gorm.DB, id string) (string, error) {
+	var apiKey server_structs.ApiKey
+	result := db.First(&apiKey, "id = ?", id)
+	if result.Error != nil {
+		return "", errors.Wrap(result.Error, "failed to get the API key creator")
+	}
+	return apiKey.CreatedBy, nil
+}
