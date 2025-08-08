@@ -98,9 +98,26 @@ func getCollectionByUUID(uuid string) (*GlobusCollection, error) {
 		return nil, err
 	}
 	if collection.RefreshToken != "" {
-		collection.RefreshToken, err = config.DecryptString(collection.RefreshToken)
+		var keyID string
+		var decrypted string
+		decrypted, keyID, err = config.DecryptString(collection.RefreshToken)
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to decrypt the refresh token")
+		}
+		collection.RefreshToken = decrypted
+
+		// Check if key rotation happened
+		currentIssuerKey, err := config.GetIssuerPrivateJWK()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get current issuer key")
+		}
+		if keyID != currentIssuerKey.KeyID() {
+			// Re-encrypt with the current key and update DB
+			newEncrypted, err := config.EncryptString(collection.RefreshToken)
+			if err == nil {
+				// Only update if re-encryption succeeded
+				db.Model(&GlobusCollection{}).Where("uuid = ?", uuid).Update("refresh_token", newEncrypted)
+			}
 		}
 	}
 	return &collection, nil
