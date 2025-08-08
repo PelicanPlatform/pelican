@@ -797,11 +797,17 @@ func createTransferError(err error) (transferError map[string]interface{}) {
 		developerData["Retryable"] = true
 		developerData["ErrorMessage"] = "Timeout"
 		transferError["ErrorType"] = "Contact"
+	} else if strings.Contains(errMsg, "download error after server response started") {
+		developerData["PelicanErrorCode"] = 6000
+		developerData["Retryable"] = true
+		developerData["ErrorMessage"] = "Origin read error during transfer"
+		developerData["ErrorType"] = "Transfer"
+		transferError["ErrorType"] = "Transfer"
 	} else {
 		developerData["PelicanErrorCode"] = 0
 		developerData["ErrorType"] = "Unprocessed"
 		developerData["Retryable"] = false
-		developerData["ErrorMessage"] = "Unprocessed (for now) error type"
+		developerData["ErrorMessage"] = "Unprocessed error type"
 	}
 	transferError["DeveloperData"] = developerData
 	return transferError
