@@ -94,6 +94,8 @@ func runServerTypeMigrations(sqlDB *sql.DB, serverType server_structs.ServerType
 	return nil
 }
 
+// The following snippet should be removed in the release after the Registry upgrade is complete
+// ///////////////////////////////Start//////////////////////////////////////////////
 // migrateFromLegacyRegistryDB copies data from old registry.sqlite to new pelican.sqlite
 func migrateFromLegacyRegistryDB() error {
 	// Get the old registry database path
@@ -182,7 +184,7 @@ func fileExists(path string) bool {
 	return true
 }
 
-// Manual migration function for existing server data
+// Populate new tables with the newly migrated data
 func populateNewServerTables() error {
 	// Find all server namespaces that haven't been migrated yet
 	var namespaces []server_structs.Namespace
@@ -228,10 +230,35 @@ func populateNewServerTables() error {
 				continue // Already migrated
 			}
 
-			// Check if site name exists
+			if ns.AdminMetadata.Status != server_structs.RegApproved {
+				continue // Skip if not approved
+			}
+
+			// Check if site name exists. If not, auto create it based on the prefix.
 			if ns.AdminMetadata.SiteName == "" {
-				log.Warnf("Namespace %d (%s) has no site name, skipping migration", ns.ID, ns.Prefix)
-				continue
+				// Strip the leading "/origins/" or "/caches/" from ns.Prefix
+				remaining := ""
+				if strings.HasPrefix(ns.Prefix, server_structs.OriginPrefix.String()) {
+					remaining = strings.TrimPrefix(ns.Prefix, server_structs.OriginPrefix.String())
+				} else if strings.HasPrefix(ns.Prefix, server_structs.CachePrefix.String()) {
+					remaining = strings.TrimPrefix(ns.Prefix, server_structs.CachePrefix.String())
+				}
+
+				// Check if the remaining string contains ".", if so, it is a URL
+				if strings.Contains(remaining, ".") {
+					// It's a URL, keep only the hostname (split by ":" and keep the first part)
+					colonIndex := strings.Index(remaining, ":")
+					if colonIndex != -1 {
+						ns.AdminMetadata.SiteName = remaining[:colonIndex]
+					} else {
+						ns.AdminMetadata.SiteName = remaining
+					}
+				} else {
+					// Not a URL, assign the remaining string to name
+					ns.AdminMetadata.SiteName = remaining
+				}
+
+				log.Warnf("Namespace %s has no site name, falling back to name %s", ns.Prefix, ns.AdminMetadata.SiteName)
 			}
 
 			// Determine server type
@@ -262,6 +289,8 @@ func populateNewServerTables() error {
 		return nil
 	})
 }
+
+/////////////////////////////////End//////////////////////////////////////////////
 
 func CreateCounter(key string, value int) error {
 	counter := Counter{
