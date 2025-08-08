@@ -2091,13 +2091,23 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		var info os.FileInfo
 		if info, err = os.Stat(localPath); err != nil {
 			if os.IsNotExist(err) {
-				directory := path.Dir(localPath)
-				if localPath != "" && os.IsPathSeparator(localPath[len(localPath)-1]) {
-					directory = localPath
-					localPath = path.Join(directory, path.Base(transfer.remoteURL.Path))
-				}
-				if err = os.MkdirAll(directory, 0700); err != nil {
-					return
+				// If we're unpacking, the destination must be a directory. Create it directly.
+				if transfer.packOption != "" {
+					if err = os.MkdirAll(localPath, 0700); err != nil {
+						return
+					}
+					if info, err = os.Stat(localPath); err != nil {
+						return
+					}
+				} else {
+					directory := path.Dir(localPath)
+					if localPath != "" && os.IsPathSeparator(localPath[len(localPath)-1]) {
+						directory = localPath
+						localPath = path.Join(directory, path.Base(transfer.remoteURL.Path))
+					}
+					if err = os.MkdirAll(directory, 0700); err != nil {
+						return
+					}
 				}
 			} else {
 				return
@@ -2108,7 +2118,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			if behavior, err = GetBehavior(transfer.packOption); err != nil {
 				return
 			}
-			if !info.IsDir() {
+			if info == nil || !info.IsDir() {
 				err = errors.New("destination path is not a directory; must be a directory for unpacking")
 				return
 			}
