@@ -32,9 +32,17 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
+//go:generate go run . generate-docs
 func main() {
 	logging.SetupLogBuffering()
 	defer logging.FlushLogs(false)
+	if len(os.Args) > 1 && os.Args[1] == "generate-docs" {
+		err := generateCLIDocs("docs/app/commands-reference")
+		if err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	err := handleCLI(os.Args)
 	if err != nil {
 		os.Exit(1)
