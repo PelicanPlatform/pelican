@@ -33,6 +33,7 @@ import (
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
@@ -41,7 +42,7 @@ func DirectorServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 	log.Info("Initializing Director GeoIP database...")
 	director.InitializeGeoIPDB(ctx)
 
-	if err := database.InitServerDatabase(); err != nil {
+	if err := database.InitServerDatabase(server_structs.DirectorType); err != nil {
 		return errors.Wrap(err, "failed to initialize server database")
 	}
 

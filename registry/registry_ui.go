@@ -870,6 +870,38 @@ func deleteNamespace(ctx *gin.Context) {
 		})
 }
 
+func listServersHandler(ctx *gin.Context) {
+	servers, err := listServers()
+	if err != nil {
+		log.Error(err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to list servers"})
+		return
+	}
+	ctx.JSON(http.StatusOK, servers)
+}
+
+func getServerHandler(ctx *gin.Context) {
+	idStr := ctx.Param("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid ID format. ID must a non-zero integer"})
+		return
+	}
+	server, err := getServerByID(idStr)
+	if err != nil {
+		log.Error(err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Failed to get server"})
+		return
+	}
+	ctx.JSON(http.StatusOK, server)
+}
+
 func listInstitutions(ctx *gin.Context) {
 	institutions := []registrationFieldOption{}
 	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
@@ -953,6 +985,11 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 		registryWebAPI.PATCH("/namespaces/:id/deny", web_ui.AuthHandler, web_ui.AdminAuthHandler, func(ctx *gin.Context) {
 			updateNamespaceStatus(ctx, server_structs.RegDenied)
 		})
+	}
+	{
+		registryWebAPI.GET("/servers", listServersHandler)
+		registryWebAPI.GET("/servers/:id", getServerHandler)
+		// If you want to CREATE/PUT/DELETE a server, just use the namespaces endpoint
 	}
 	{
 		registryWebAPI.GET("/topology", listTopologyNamespaces)
