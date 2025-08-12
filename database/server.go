@@ -101,7 +101,8 @@ func migrateFromLegacyRegistryDB() error {
 	// Get the old registry database path
 	legacyDbPath := param.Registry_DbLocation.GetString()
 	if legacyDbPath == "" {
-		return errors.New("Registry_DbLocation parameter is not set")
+		log.Debug("Registry_DbLocation parameter is not set, skipping migration")
+		return nil
 	}
 
 	// Check if the legacy database file exists
@@ -148,8 +149,8 @@ func migrateFromLegacyRegistryDB() error {
 
 	// Copy namespace data
 	copyNamespaceSQL := `
-		INSERT OR IGNORE INTO namespace (id, prefix, pubkey, identity, admin_metadata, custom_fields) 
-		SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields 
+		INSERT OR IGNORE INTO namespace (id, prefix, pubkey, identity, admin_metadata, custom_fields)
+		SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields
 		FROM legacy_registry.namespace
 	`
 	result, err := sqlDB.Exec(copyNamespaceSQL)
@@ -160,8 +161,8 @@ func migrateFromLegacyRegistryDB() error {
 
 	// Copy topology data
 	copyTopologySQL := `
-		INSERT OR IGNORE INTO topology (id, prefix) 
-		SELECT id, prefix 
+		INSERT OR IGNORE INTO topology (id, prefix)
+		SELECT id, prefix
 		FROM legacy_registry.topology
 	`
 	result, err = sqlDB.Exec(copyTopologySQL)
@@ -394,6 +395,8 @@ func ShutdownDB() error {
 	if err != nil {
 		log.Errorln("Failure when shutting down the database:", err)
 	}
+	// Set ServerDatabase to nil so that subsequent InitServerDatabase calls will reinitialize
+	ServerDatabase = nil
 	return err
 }
 

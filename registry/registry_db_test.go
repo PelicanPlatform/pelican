@@ -39,6 +39,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/database"
+	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -855,12 +856,14 @@ func TestRegistryTopology(t *testing.T) {
 	defer svr.Close()
 
 	registryDB := t.TempDir()
-	viper.Set("Registry.DbLocation", filepath.Join(registryDB, "test.sqlite"))
+	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(registryDB, "test.sqlite"))
 	viper.Set("Federation.TopologyNamespaceURL", svr.URL)
 	viper.Set("ConfigDir", t.TempDir())
 
 	err := database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
+	// Pass the already-opened ServerDatabase to this test
+	SetDB(database.ServerDatabase)
 	defer func() {
 		err := ShutdownRegistryDB()
 		assert.NoError(t, err)

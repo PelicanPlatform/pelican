@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS servers (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create services table (map the server to its namespace representation) 
+-- Create services table (map the server to its namespace representation)
 CREATE TABLE IF NOT EXISTS services (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     server_id TEXT NOT NULL,

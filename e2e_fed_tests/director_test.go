@@ -240,7 +240,7 @@ func TestDirectorFedTokenCacheAPI(t *testing.T) {
 
 			// Inject our "AllowedPrefixes" data into the registry database under
 			// the /caches/<registration name> namespace
-			dbLoc := param.Registry_DbLocation.GetString()
+			dbLoc := param.Server_DbLocation.GetString()
 			require.NotEmpty(t, dbLoc, "Failed to determine registry database location")
 			updateAllowedPrefixesForCache(t, dbLoc, registrationName, tc.allowedPrefixes)
 

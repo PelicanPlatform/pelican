@@ -48,7 +48,7 @@ func registryMockup(ctx context.Context, t *testing.T, testName string) *httptes
 
 	ikeyDir := filepath.Join(issuerTempDir, "issuer-keys")
 	viper.Set("IssuerKeysDirectory", ikeyDir)
-	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
+	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(issuerTempDir, "test.sql"))
 	viper.Set("Server.WebPort", 8444)
 	viper.Set("ConfigDir", tDir)
 
