@@ -883,15 +883,15 @@ func listServersHandler(ctx *gin.Context) {
 }
 
 func getServerHandler(ctx *gin.Context) {
-	idStr := ctx.Param("id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil || id <= 0 {
+	serverID := ctx.Param("id")
+	if serverID == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
-			Msg:    "Invalid ID format. ID must a non-zero integer"})
+			Msg:    "Invalid server ID. ID cannot be empty"})
 		return
 	}
-	server, err := getServerByID(idStr)
+
+	server, err := getServerByID(serverID)
 	if err != nil {
 		log.Error(err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -899,6 +899,15 @@ func getServerHandler(ctx *gin.Context) {
 			Msg:    "Failed to get server"})
 		return
 	}
+
+	// Check if server was found (empty ID indicates not found)
+	if server.ID == "" {
+		ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Server not found"})
+		return
+	}
+
 	ctx.JSON(http.StatusOK, server)
 }
 

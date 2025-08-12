@@ -50,6 +50,11 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 			return err
 		}
 
+		// Enable foreign key constraints for SQLite
+		if err := ServerDatabase.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+			return errors.Wrap(err, "failed to enable foreign key constraints")
+		}
+
 		// Always run universal migrations first
 		if err := utils.MigrateDB(sqlDB, embedUniversalMigrations, "universal_migrations"); err != nil {
 			return err

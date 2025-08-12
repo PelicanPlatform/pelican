@@ -42,18 +42,24 @@ func setupTestRegistryUIServerDB(t *testing.T) {
 	// Set database location using viper
 	viper.Set(param.Server_DbLocation.GetName(), dbPath)
 
+	// Clean up at the end of the test
+	t.Cleanup(func() {
+		// Reset the database connection
+		if database.ServerDatabase != nil {
+			sqlDB, err := database.ServerDatabase.DB()
+			if err == nil {
+				sqlDB.Close()
+			}
+			database.ServerDatabase = nil
+		}
+	})
+
 	// Initialize the server database
 	err := database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
 
 	// Set the database connection for the registry package
 	SetDB(database.ServerDatabase)
-}
-
-func teardownTestRegistryUIServerDB(t *testing.T) {
-	// Clean up
-	err := ShutdownRegistryDB()
-	require.NoError(t, err)
 }
 
 func createTestServerData(t *testing.T) []server_structs.Namespace {
@@ -95,7 +101,6 @@ func createTestServerData(t *testing.T) []server_structs.Namespace {
 
 func TestListServersHandler(t *testing.T) {
 	setupTestRegistryUIServerDB(t)
-	defer teardownTestRegistryUIServerDB(t)
 
 	_ = createTestServerData(t)
 
@@ -147,7 +152,6 @@ func TestListServersHandler(t *testing.T) {
 
 func TestGetServerHandler(t *testing.T) {
 	setupTestRegistryUIServerDB(t)
-	defer teardownTestRegistryUIServerDB(t)
 
 	testNamespaces := createTestServerData(t)
 
@@ -201,7 +205,6 @@ func TestGetServerHandler(t *testing.T) {
 
 func TestServerAPIResponseFormats(t *testing.T) {
 	setupTestRegistryUIServerDB(t)
-	defer teardownTestRegistryUIServerDB(t)
 
 	createTestServerData(t)
 
@@ -271,7 +274,6 @@ func TestServerAPIResponseFormats(t *testing.T) {
 
 func TestServerEndpointValidation(t *testing.T) {
 	setupTestRegistryUIServerDB(t)
-	defer teardownTestRegistryUIServerDB(t)
 
 	// Set up Gin router
 	gin.SetMode(gin.TestMode)
@@ -279,8 +281,9 @@ func TestServerEndpointValidation(t *testing.T) {
 	router.GET("/servers/:id", getServerHandler)
 
 	t.Run("InvalidServerIDFormat", func(t *testing.T) {
-		// Test with various invalid ID formats
-		invalidIDs := []string{
+		// Test with various server ID formats - they will all be treated as valid format
+		// but non-existent servers, so should return 404 "Server not found"
+		testIDs := []string{
 			"123",         // Too short
 			"abcdefghijk", // Too long
 			"ABC1234",     // Contains uppercase
@@ -288,19 +291,20 @@ func TestServerEndpointValidation(t *testing.T) {
 			"",            // Empty
 		}
 
-		for _, invalidID := range invalidIDs {
-			req, _ := http.NewRequest("GET", "/servers/"+invalidID, nil)
+		for _, testID := range testIDs {
+			req, _ := http.NewRequest("GET", "/servers/"+testID, nil)
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 
-			// Should return not found for invalid IDs
-			assert.Equal(t, http.StatusNotFound, w.Code)
+			// Should return 404 for non-existent servers
+			assert.Equal(t, http.StatusNotFound, w.Code, "ID: %s should return 404", testID)
 
 			if w.Code == http.StatusNotFound && len(w.Body.Bytes()) > 0 {
 				var response server_structs.SimpleApiResp
 				err := json.Unmarshal(w.Body.Bytes(), &response)
 				if err == nil {
 					assert.Equal(t, server_structs.RespFailed, response.Status)
+					assert.Contains(t, response.Msg, "Server not found")
 				}
 			}
 		}
@@ -309,7 +313,6 @@ func TestServerEndpointValidation(t *testing.T) {
 
 func TestServerAPIErrorHandling(t *testing.T) {
 	setupTestRegistryUIServerDB(t)
-	defer teardownTestRegistryUIServerDB(t)
 
 	// Set up Gin router
 	gin.SetMode(gin.TestMode)
@@ -319,8 +322,12 @@ func TestServerAPIErrorHandling(t *testing.T) {
 
 	t.Run("DatabaseConnectionError", func(t *testing.T) {
 		// Close the database connection to simulate error
-		err := ShutdownRegistryDB()
-		require.NoError(t, err)
+		if database.ServerDatabase != nil {
+			sqlDB, err := database.ServerDatabase.DB()
+			if err == nil {
+				sqlDB.Close()
+			}
+		}
 
 		req, _ := http.NewRequest("GET", "/servers", nil)
 		w := httptest.NewRecorder()
@@ -329,7 +336,7 @@ func TestServerAPIErrorHandling(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 
 		var response server_structs.SimpleApiResp
-		err = json.Unmarshal(w.Body.Bytes(), &response)
+		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 		assert.Equal(t, server_structs.RespFailed, response.Status)
 		assert.Contains(t, response.Msg, "Failed to list servers")
@@ -338,7 +345,6 @@ func TestServerAPIErrorHandling(t *testing.T) {
 
 func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 	setupTestRegistryUIServerDB(t)
-	defer teardownTestRegistryUIServerDB(t)
 
 	// Set up Gin router
 	gin.SetMode(gin.TestMode)

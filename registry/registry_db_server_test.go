@@ -39,18 +39,24 @@ func setupTestRegistryServerDB(t *testing.T) {
 	// Set database location using viper
 	viper.Set(param.Server_DbLocation.GetName(), dbPath)
 
+	// Clean up at the end of the test
+	t.Cleanup(func() {
+		// Reset the database connection
+		if database.ServerDatabase != nil {
+			sqlDB, err := database.ServerDatabase.DB()
+			if err == nil {
+				sqlDB.Close()
+			}
+			database.ServerDatabase = nil
+		}
+	})
+
 	// Initialize the server database
 	err := database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
 
 	// Set the database connection for the registry package
 	SetDB(database.ServerDatabase)
-}
-
-func teardownTestRegistryServerDB(t *testing.T) {
-	// Clean up
-	err := ShutdownRegistryDB()
-	require.NoError(t, err)
 }
 
 func createTestNamespaces(t *testing.T) []server_structs.Namespace {
@@ -110,7 +116,6 @@ func createTestNamespaces(t *testing.T) []server_structs.Namespace {
 
 func TestServerNamespaceOperations(t *testing.T) {
 	setupTestRegistryServerDB(t)
-	defer teardownTestRegistryServerDB(t)
 
 	testNamespaces := createTestNamespaces(t)
 
@@ -175,7 +180,6 @@ func TestServerNamespaceOperations(t *testing.T) {
 
 func TestAddNamespaceCreatesServers(t *testing.T) {
 	setupTestRegistryServerDB(t)
-	defer teardownTestRegistryServerDB(t)
 
 	t.Run("AddOriginServer", func(t *testing.T) {
 		ns := server_structs.Namespace{
@@ -285,7 +289,6 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 
 func TestUpdateNamespaceWithServerTables(t *testing.T) {
 	setupTestRegistryServerDB(t)
-	defer teardownTestRegistryServerDB(t)
 
 	// Create initial namespace
 	ns := server_structs.Namespace{
@@ -333,7 +336,6 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 
 func TestServerTableConstraints(t *testing.T) {
 	setupTestRegistryServerDB(t)
-	defer teardownTestRegistryServerDB(t)
 
 	t.Run("ServerNameUniqueness", func(t *testing.T) {
 		// Create first namespace
@@ -401,7 +403,6 @@ func TestServerTableConstraints(t *testing.T) {
 
 func TestServerTableCascadeDelete(t *testing.T) {
 	setupTestRegistryServerDB(t)
-	defer teardownTestRegistryServerDB(t)
 
 	// Create a namespace which will create a server
 	ns := server_structs.Namespace{
