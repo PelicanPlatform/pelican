@@ -408,23 +408,31 @@ func LaunchModules(ctx context.Context, modules server_structs.ServerType) (serv
 		_ = config.RestartFlag
 		log.Debug("Will shutdown process on signal")
 		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-		select {
-		case sig := <-sigs:
-			log.Warningf("Received signal %v; will shutdown process", sig)
-			// Graceful shutdown if received SIGTERM
-			if sig == syscall.SIGTERM {
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
+		for {
+			select {
+			case sig := <-sigs:
+				if sig == syscall.SIGHUP {
+					log.Warning("Received SIGHUP; will restart process")
+					handleGracefulShutdown(ctx, modules, servers)
+					shutdownCancel()
+					return ErrRestart
+				}
+				log.Warningf("Received signal %v; will shutdown process", sig)
+				// Graceful shutdown if received SIGTERM
+				if sig == syscall.SIGTERM {
+					handleGracefulShutdown(ctx, modules, servers)
+				}
+				shutdownCancel()
+				return ErrExitOnSignal
+			case <-config.RestartFlag:
+				log.Warningf("Received restart request; will restart the process")
 				handleGracefulShutdown(ctx, modules, servers)
+				shutdownCancel()
+				return ErrRestart
+			case <-ctx.Done():
+				return nil
 			}
-			shutdownCancel()
-			return ErrExitOnSignal
-		case <-config.RestartFlag:
-			log.Warningf("Received restart request; will restart the process")
-			handleGracefulShutdown(ctx, modules, servers)
-			shutdownCancel()
-			return ErrRestart
-		case <-ctx.Done():
-			return nil
 		}
 	})
 
