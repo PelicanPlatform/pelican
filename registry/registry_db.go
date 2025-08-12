@@ -230,14 +230,6 @@ func getNamespaceStatusById(id int) (server_structs.RegistrationStatus, error) {
 	return result.AdminMetadata.Status, nil
 }
 
-func getServerStatusByID(serverID string) (server_structs.RegistrationStatus, error) {
-	var nsID int
-	if err := db.Select("namespace_id").Where("server_id = ?", serverID).First(&nsID).Error; err != nil {
-		return server_structs.RegUnknown, errors.Wrap(err, "failed to find namespace id by server id")
-	}
-	return getNamespaceStatusById(nsID)
-}
-
 // Retrieve combined server and namespace data by server ID
 func getServerByID(serverID string) (*server_structs.ServerNamespace, error) {
 	var result server_structs.ServerNamespace
