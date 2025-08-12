@@ -213,7 +213,7 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 	}
 
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGHUP)
 	cases := make([]reflect.SelectCase, len(daemons)+2)
 	for idx, daemon := range daemons {
 		cases[idx].Dir = reflect.SelectRecv
