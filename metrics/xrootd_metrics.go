@@ -359,6 +359,35 @@ type (
 		lastSysSeconds  float64
 		lastUpdateTime  time.Time
 	}
+
+	XrdCurlPrefetchStats struct {
+		Count     float64 `json:"count"`
+		Expired   float64 `json:"expired"`
+		Failed    float64 `json:"failed"`
+		ReadsHit  float64 `json:"reads_hit"`
+		ReadsMiss float64 `json:"reads_miss"`
+		BytesUsed float64 `json:"bytes_used"`
+	}
+
+	XrdCurlFileStats struct {
+		Prefetch XrdCurlPrefetchStats `json:"prefetch"`
+	}
+
+	XrdCurlQueueStats struct {
+		Produced float64 `json:"produced"`
+		Consumed float64 `json:"consumed"`
+		Pending  float64 `json:"pending"`
+		Rejected float64 `json:"rejected"`
+	}
+
+	XrdCurlStats struct {
+		Event   string             `json:"event"`
+		Start   float64            `json:"start"`
+		Now     float64            `json:"now"`
+		File    XrdCurlFileStats   `json:"file"`
+		Workers map[string]float64 `json:"workers"`
+		Queues  XrdCurlQueueStats  `json:"queues"`
+	}
 )
 
 // XrdXrootdMonFileHdr
@@ -2135,5 +2164,18 @@ func handleThrottlePacket(blobs [][]byte) error {
 		ServerActiveIO.Set(float64(throttleGS.IOActive))
 		ServerIOWaitTime.Add(waitTimeInc)
 	}
+	return nil
+}
+
+// When XRootD v6 is released, these stats will be available over the g-stream
+// Until then the stats are consumed from Cache.ClientStatisticsLocation
+// This function should be called with the contents of the file / udp packet
+func handleXrdcurlstatsPacket(stats []byte) error {
+	var xrdCurlStats XrdCurlStats
+	if err := json.Unmarshal(stats, &xrdCurlStats); err != nil {
+		return errors.Wrap(err, "failed to unmarshal xrdcurlstats packet")
+	}
+
+	log.Tracef("XrdCurlStats: %v", xrdCurlStats)
 	return nil
 }

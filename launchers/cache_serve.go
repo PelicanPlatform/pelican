@@ -111,6 +111,8 @@ func CacheServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group, m
 		metrics.LaunchXrootdCacheEvictionMonitoring(ctx, egrp)
 	}
 
+	metrics.LaunchXrdCurlStatsMonitoring(ctx, egrp)
+
 	concLimit := param.Cache_Concurrency.GetInt()
 	if concLimit > 0 {
 		server_utils.LaunchConcurrencyMonitoring(ctx, egrp, cacheServer.GetServerType())
