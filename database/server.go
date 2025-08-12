@@ -266,14 +266,33 @@ func populateNewServerTables() error {
 			isOrigin := strings.HasPrefix(ns.Prefix, server_structs.OriginPrefix.String())
 			isCache := strings.HasPrefix(ns.Prefix, server_structs.CachePrefix.String())
 
-			// Create server
-			server := server_structs.Server{
-				Name:     ns.AdminMetadata.SiteName,
-				IsOrigin: isOrigin,
-				IsCache:  isCache,
-			}
-			if err := tx.Create(&server).Error; err != nil {
-				return errors.Wrapf(err, "failed to create server for namespace %d", ns.ID)
+			// Check if a server with this name already exists
+			var server server_structs.Server
+			err := tx.Where("name = ?", ns.AdminMetadata.SiteName).First(&server).Error
+			if err == gorm.ErrRecordNotFound {
+				// No existing server, create a new one
+				server = server_structs.Server{
+					Name:     ns.AdminMetadata.SiteName,
+					IsOrigin: isOrigin,
+					IsCache:  isCache,
+				}
+				if err := tx.Create(&server).Error; err != nil {
+					return errors.Wrapf(err, "failed to create server for namespace %d", ns.ID)
+				}
+			} else if err != nil {
+				return errors.Wrapf(err, "failed to check for existing server with name %s", ns.AdminMetadata.SiteName)
+			} else {
+				// Server exists, update its services (a server can be both an origin and a cache)
+				if isOrigin {
+					server.IsOrigin = true
+				}
+				if isCache {
+					server.IsCache = true
+				}
+
+				if err := tx.Save(&server).Error; err != nil {
+					return errors.Wrapf(err, "failed to update server services for %s", ns.AdminMetadata.SiteName)
+				}
 			}
 
 			// Create service mapping
