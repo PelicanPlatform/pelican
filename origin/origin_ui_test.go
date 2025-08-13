@@ -486,7 +486,7 @@ func TestCollectionsAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusNotFound, recorder.Code)
 
-		// 8. A user in the group can update the collection
+		// 8. A user in the group (with the modify role) can update the collection
 		updatedDesc = "group update"
 		updateReq = UpdateCollectionReq{Description: &updatedDesc}
 		body, err = json.Marshal(updateReq)
