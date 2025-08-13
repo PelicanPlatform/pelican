@@ -153,6 +153,7 @@ type (
 		ScitokensConfig        string
 		Mount                  string
 		LocalMonitoringPort    int
+		HttpMaxDelay           int
 	}
 
 	ServerConfig struct {
@@ -722,10 +723,10 @@ func LaunchXrootdMaintenance(ctx context.Context, server server_structs.XRootDSe
 // The default config has `Xrootd.AuthRefreshInterval: 5m`, which we need to convert
 // to an integer representation of seconds for our XRootD configuration. This hook
 // handles that conversion during unmarshalling, as well as some sanitization of user inputs.
-func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
+func durationStrToSecondsHookFuncGenerator(structName, fieldName, configName string, validation func(duration time.Duration, durStr string) time.Duration) mapstructure.DecodeHookFuncType {
 	return func(f reflect.Type, t reflect.Type, data interface{}) (interface{}, error) {
 		// Filter out underlying data we don't want to risk manipulating
-		if t.Kind() != reflect.Struct || f.Kind() != reflect.Map || t.Name() != "XrootdOptions" {
+		if t.Kind() != reflect.Struct || f.Kind() != reflect.Map || t.Name() != structName {
 			return data, nil
 		}
 
@@ -735,9 +736,20 @@ func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
 			return nil, errors.New("data is not a map[string]interface{}")
 		}
 
-		durStr, ok := dataMap["authrefreshinterval"].(string)
+		uncastDur, ok := dataMap[fieldName]
 		if !ok {
-			return nil, errors.New("authrefreshinterval is not a string")
+			// If the key is not present, we don't need to do anything.
+			return data, nil
+		}
+
+		var durStr string
+		if _, isInt := uncastDur.(int); isInt {
+			durStr = strconv.Itoa(uncastDur.(int))
+		} else {
+			durStr, ok = uncastDur.(string)
+			if !ok {
+				return nil, errors.Errorf("%s is not a string or int", fieldName)
+			}
 		}
 
 		// Sanitize the input to guarantee we have a unit
@@ -750,29 +762,64 @@ func authRefreshStrToSecondsHookFunc() mapstructure.DecodeHookFuncType {
 			}
 		}
 		if !hasSuffix {
-			log.Warningf("'Xrootd.AuthRefreshInterval' does not have a time unit (s, m, h). Interpreting as seconds")
+			log.Warningf("'%s' does not have a time unit (s, m, h). Interpreting as seconds", configName)
 			durStr = durStr + "s"
 		}
 
 		duration, err := time.ParseDuration(durStr)
 		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to parse 'Xrootd.AuthRefreshInterval' of %s as a duration", durStr)
+			return nil, errors.Wrapf(err, "failed to parse '%s' of %s as a duration", configName, durStr)
 		}
 
-		if duration < 60*time.Second {
-			log.Warningf("'Xrootd.AuthRefreshInterval' of %s appears as less than 60s. Using fallback of 5m", durStr)
-			duration = time.Minute * 5
+		if validation != nil {
+			duration = validation(duration, durStr)
 		}
 
-		dataMap["authrefreshinterval"] = int(duration.Seconds())
+		dataMap[fieldName] = int(duration.Seconds())
 		return data, nil
 	}
+}
+
+func authRefreshIntervalValidation(duration time.Duration, durStr string) time.Duration {
+	if duration < 60*time.Second {
+		log.Warningf("'%s' of %s appears as less than 60s. Using fallback of 5m", param.Xrootd_AuthRefreshInterval.GetName(), durStr)
+		return time.Minute * 5
+	}
+	return duration
+}
+
+func httpMaxDelayValidation(duration time.Duration, durStr string) time.Duration {
+	// Normalize to whole seconds; XRootD expects seconds granularity
+	if duration%time.Second != 0 {
+		duration = duration.Round(time.Second)
+		if duration == 0 && durStr != "0" {
+			// Round could bring small positive values to 0s; avoid that
+			duration = 1 * time.Second
+		}
+	}
+
+	// Disallow non-positive and too-small values; fallback to 9s (our default)
+	if duration <= 0 {
+		log.Warningf("'%s' of %s is not positive. Using fallback of 9s", param.Xrootd_HttpMaxDelay.GetName(), durStr)
+		return 9 * time.Second
+	}
+	if duration < 3*time.Second {
+		log.Warningf("'%s' of %s appears as less than 3s. Using fallback of 9s", param.Xrootd_HttpMaxDelay.GetName(), durStr)
+		return 9 * time.Second
+	}
+
+	// Warn for unusually large values that can cause server-side backlogs
+	if duration > 1*time.Minute {
+		log.Warningf("'%s' of %s is very large and may cause server-side backlogs; consider a small value such as 9s-12s", param.Xrootd_HttpMaxDelay.GetName(), durStr)
+	}
+	return duration
 }
 
 // A wrapper to combine multiple decoder hook functions for XRootD cfg unmarshalling
 func xrootdDecodeHook() mapstructure.DecodeHookFunc {
 	return mapstructure.ComposeDecodeHookFunc(
-		authRefreshStrToSecondsHookFunc(),
+		durationStrToSecondsHookFuncGenerator("XrootdOptions", "authrefreshinterval", param.Xrootd_AuthRefreshInterval.GetName(), authRefreshIntervalValidation),
+		durationStrToSecondsHookFuncGenerator("XrootdOptions", "httpmaxdelay", param.Xrootd_HttpMaxDelay.GetName(), httpMaxDelayValidation),
 		server_utils.OriginExportsDecoderHook(),
 	)
 }
