@@ -364,6 +364,7 @@ type Config struct {
 		DetailedMonitoringHost string `mapstructure:"detailedmonitoringhost" yaml:"DetailedMonitoringHost"`
 		DetailedMonitoringPort int `mapstructure:"detailedmonitoringport" yaml:"DetailedMonitoringPort"`
 		EnableLocalMonitoring bool `mapstructure:"enablelocalmonitoring" yaml:"EnableLocalMonitoring"`
+		HttpMaxDelay time.Duration `mapstructure:"httpmaxdelay" yaml:"HttpMaxDelay"`
 		LocalMonitoringHost string `mapstructure:"localmonitoringhost" yaml:"LocalMonitoringHost"`
 		MacaroonsKeyFile string `mapstructure:"macaroonskeyfile" yaml:"MacaroonsKeyFile"`
 		ManagerHost string `mapstructure:"managerhost" yaml:"ManagerHost"`
@@ -723,6 +724,7 @@ type configWithType struct {
 		DetailedMonitoringHost struct { Type string; Value string }
 		DetailedMonitoringPort struct { Type string; Value int }
 		EnableLocalMonitoring struct { Type string; Value bool }
+		HttpMaxDelay struct { Type string; Value time.Duration }
 		LocalMonitoringHost struct { Type string; Value string }
 		MacaroonsKeyFile struct { Type string; Value string }
 		ManagerHost struct { Type string; Value string }
