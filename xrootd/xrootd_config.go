@@ -167,6 +167,7 @@ type (
 		ScitokensConfig        string
 		Mount                  string
 		LocalMonitoringPort    int
+		HttpMaxDelay           int
 	}
 
 	ServerConfig struct {
@@ -817,10 +818,38 @@ func evictionMonitoringIntervalValidation(duration time.Duration, durStr string)
 	return duration
 }
 
+func httpMaxDelayValidation(duration time.Duration, durStr string) time.Duration {
+	// Normalize to whole seconds; XRootD expects seconds granularity
+	if duration%time.Second != 0 {
+		duration = duration.Round(time.Second)
+		if duration == 0 && durStr != "0" {
+			// Round could bring small positive values to 0s; avoid that
+			duration = 1 * time.Second
+		}
+	}
+
+	// Disallow non-positive and too-small values; fallback to 9s (our default)
+	if duration <= 0 {
+		log.Warningf("'%s' of %s is not positive. Using fallback of 9s", param.Xrootd_HttpMaxDelay.GetName(), durStr)
+		return 9 * time.Second
+	}
+	if duration < 3*time.Second {
+		log.Warningf("'%s' of %s appears as less than 3s. Using fallback of 9s", param.Xrootd_HttpMaxDelay.GetName(), durStr)
+		return 9 * time.Second
+	}
+
+	// Warn for unusually large values that can cause server-side backlogs
+	if duration > 1*time.Minute {
+		log.Warningf("'%s' of %s is very large and may cause server-side backlogs; consider a small value such as 9s-12s", param.Xrootd_HttpMaxDelay.GetName(), durStr)
+	}
+	return duration
+}
+
 // A wrapper to combine multiple decoder hook functions for XRootD cfg unmarshalling
 func xrootdDecodeHook() mapstructure.DecodeHookFunc {
 	return mapstructure.ComposeDecodeHookFunc(
 		durationStrToSecondsHookFuncGenerator("XrootdOptions", "authrefreshinterval", param.Xrootd_AuthRefreshInterval.GetName(), authRefreshIntervalValidation),
+		durationStrToSecondsHookFuncGenerator("XrootdOptions", "httpmaxdelay", param.Xrootd_HttpMaxDelay.GetName(), httpMaxDelayValidation),
 		durationStrToSecondsHookFuncGenerator("CacheConfig", "evictionmonitoringinterval", param.Cache_EvictionMonitoringInterval.GetName(), evictionMonitoringIntervalValidation),
 		server_utils.OriginExportsDecoderHook(),
 	)
