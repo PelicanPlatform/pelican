@@ -76,7 +76,7 @@ func TestCollectionsAPI(t *testing.T) {
 	ctx, cancel, egrp := test_utils.TestContext(context.Background(), t)
 	defer func() {
 		if err := egrp.Wait(); err != nil {
-			fmt.Println("Failure when shutting down service:", err)
+			t.Logf("Failure when shutting down service: %s", err)
 			os.Exit(1)
 		}
 	}()
