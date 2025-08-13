@@ -2959,6 +2959,7 @@ description: |+
     - 12s: client times out first; the server stops retrying shortly after, reducing load.
 type: duration
 default: 9s
+hidden: true
 components: ["origin", "cache"]
 ---
 ############################
