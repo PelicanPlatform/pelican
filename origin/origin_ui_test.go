@@ -390,7 +390,7 @@ func TestCollectionsAPI(t *testing.T) {
 		createGroupReq := map[string]string{"name": groupName, "description": "test group"}
 		body, err := json.Marshal(createGroupReq)
 		require.NoError(t, err)
-		req, err := http.NewRequest("POST", "/api/v1.0/origin_ui/groups", bytes.NewReader(body))
+		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
 
 		adminToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "admin")

@@ -604,6 +604,10 @@ func configureCommonEndpoints(engine *gin.Engine) error {
 		downtimeAPI.DELETE("/:uuid", AuthHandler, AdminAuthHandler, HandleDeleteDowntime)
 	}
 
+	engine.POST("/api/v1.0/groups", AuthHandler, AdminAuthHandler, handleCreateGroup)
+	engine.POST("/api/v1.0/groups/:id/members", AuthHandler, AdminAuthHandler, handleAddGroupMember)
+	engine.DELETE("/api/v1.0/groups/:id/members", AuthHandler, AdminAuthHandler, handleRemoveGroupMember)
+
 	return nil
 }
 

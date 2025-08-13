@@ -182,11 +182,6 @@ func RegisterOriginWebAPI(engine *gin.Engine) error {
 		originWebAPI.GET("/collections/:id/acl", web_ui.AuthHandler, handleGetCollectionAcls)
 		originWebAPI.POST("/collections/:id/acl", web_ui.AuthHandler, handleGrantCollectionAcl)
 		originWebAPI.DELETE("/collections/:id/acl", web_ui.AuthHandler, handleRevokeCollectionAcl)
-
-		// Group Management (Related to Collections)
-		originWebAPI.POST("/groups", web_ui.AuthHandler, handleCreateGroup)
-		originWebAPI.POST("/groups/:id/members", web_ui.AuthHandler, handleAddGroupMember)
-		originWebAPI.DELETE("/groups/:id/members", web_ui.AuthHandler, handleRemoveGroupMember)
 	}
 
 	// Globus backend specific. Config other origin routes above this line
