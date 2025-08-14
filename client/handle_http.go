@@ -78,6 +78,9 @@ var (
 
 	// Indicates the origin responded too slowly after the cache tried to download from it
 	CacheTimedOutReadingFromOrigin = errors.New("cache timed out waiting on origin")
+
+	// ErrObjectNotFound is returned when the requested remote object does not exist.
+	ErrObjectNotFound = errors.New("remote object not found")
 )
 
 type (
@@ -3107,6 +3110,24 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	xferErrors := NewTransferErrors()
 	transferResult.job = transfer.job
 
+	// Check if the remote object already exists using statHttp
+	// If the job is recursive, we skip this check as the check is already performed in walkDirUpload
+	// If the job is not recursive, we check if the object exists at the origin
+	if transfer.remoteURL != nil && transfer.job != nil && transfer.job.syncLevel != SyncNone && !transfer.job.recursive {
+		remoteUrl, dirResp, token := transfer.job.remoteURL, transfer.job.dirResp, transfer.job.token
+		_, statErr := statHttp(remoteUrl, dirResp, token)
+		if statErr == nil {
+			// Object exists, abort upload
+			transferResult.Error = errors.New("remote object already exists, upload aborted")
+			return transferResult, transferResult.Error
+		} else if !errors.Is(statErr, ErrObjectNotFound) {
+			// We encountered an unexpected error while checking for object existence.
+			// Log a warning but proceed with the upload; the upload itself may still succeed.
+			log.Warningln("Failed to check if object exists at the origin, proceeding with upload:", statErr)
+		}
+		// If statErr indicates the object was not found, proceed with upload
+	}
+
 	var sizer Sizer = &ConstantSizer{size: 0}
 	var uploaded int64 = 0
 	if transfer.callback != nil {
@@ -3883,7 +3904,7 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 	info, err := client.Stat(remotePath)
 	if err != nil {
 		if gowebdav.IsErrNotFound(err) {
-			return errors.Wrapf(err, "cannot remove remote path %s: no such object or collection", remotePath)
+			return errors.Wrapf(ErrObjectNotFound, "cannot remove remote path %s: no such object or collection", remotePath)
 		}
 		return errors.Wrap(err, "failed to check object existence")
 	}
@@ -3986,7 +4007,7 @@ func statHttp(dest *pelican_url.PelicanURL, dirResp server_structs.DirectorRespo
 					resultsChan <- statResults{FileInfo{}, err}
 					return
 				} else if gowebdav.IsErrNotFound(err) {
-					err = errors.Wrapf(err, "object %s not found at the endpoint %s", dest.String(), endpoint.String())
+					err = errors.Wrapf(ErrObjectNotFound, "object %s not found at the endpoint %s", dest.String(), endpoint.String())
 					resultsChan <- statResults{FileInfo{}, err}
 					return
 				}
