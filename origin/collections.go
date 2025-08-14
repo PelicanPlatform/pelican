@@ -1045,25 +1045,16 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	var principal, roleStr string
-
-	if ctx.Request.Method == "DELETE" && ctx.Request.Header.Get("Content-Type") == "application/json" {
-		var req RevokeAclReq
-		if err := ctx.ShouldBindJSON(&req); err != nil {
-			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
-				Status: server_structs.RespFailed,
-				Msg:    fmt.Sprintf("Invalid request body: %v", err),
-			})
-			return
-		}
-		principal = req.GroupID
-		roleStr = req.Role
-	} else {
-		principal = ctx.Query("group_id")
-		roleStr = ctx.Query("role")
+	var req RevokeAclReq
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    fmt.Sprintf("Invalid request body: %v", err),
+		})
+		return
 	}
 
-	if principal == "" || roleStr == "" {
+	if req.GroupID == "" || req.Role == "" {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    "GroupID and role are required",
@@ -1071,7 +1062,7 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	role := database.AclRole(roleStr)
+	role := database.AclRole(req.Role)
 	if role != database.AclRoleRead && role != database.AclRoleWrite && role != database.AclRoleOwner {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -1097,7 +1088,7 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 
 	isAdmin, _ := web_ui.CheckAdmin(user)
 
-	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, principal, role, isAdmin)
+	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
