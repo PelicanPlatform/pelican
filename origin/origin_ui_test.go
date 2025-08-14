@@ -485,7 +485,7 @@ func TestCollectionsAPI(t *testing.T) {
 		router.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusNoContent, recorder.Code)
 
-		// 9. Grant the group owner access to the collection
+		// 9. Grant owner access to the group
 		grantAclReq = map[string]string{"group_id": groupID, "role": "owner"}
 		body, err = json.Marshal(grantAclReq)
 		require.NoError(t, err)
