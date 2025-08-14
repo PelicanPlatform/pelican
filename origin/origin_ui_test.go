@@ -34,7 +34,7 @@ var (
 	router         *gin.Engine
 )
 
-func generateToken(ctx context.Context, scopes []token_scopes.TokenScope, subject string) (string, error) {
+func generateToken(ctx context.Context, scopes []token_scopes.TokenScope, subject string, groups ...string) (string, error) {
 	fedInfo, err := config.GetFederation(ctx)
 	if err != nil {
 		return "", err
@@ -45,25 +45,9 @@ func generateToken(ctx context.Context, scopes []token_scopes.TokenScope, subjec
 	tk.Lifetime = 5 * time.Minute
 	tk.AddAudiences(fedInfo.DiscoveryEndpoint)
 	tk.AddScopes(scopes...)
-	tok, err := tk.CreateToken()
-	if err != nil {
-		return "", err
+	if len(groups) > 0 {
+		tk.AddGroups(groups...)
 	}
-	return tok, nil
-}
-
-func generateTokenWithGroups(ctx context.Context, scopes []token_scopes.TokenScope, subject string, groups []string) (string, error) {
-	fedInfo, err := config.GetFederation(ctx)
-	if err != nil {
-		return "", err
-	}
-	tk := token.NewWLCGToken()
-	tk.Issuer = fedInfo.DiscoveryEndpoint
-	tk.Subject = subject
-	tk.Lifetime = 5 * time.Minute
-	tk.AddAudiences(fedInfo.DiscoveryEndpoint)
-	tk.AddScopes(scopes...)
-	tk.AddGroups(groups...)
 	tok, err := tk.CreateToken()
 	if err != nil {
 		return "", err
@@ -416,7 +400,7 @@ func TestCollectionsAPI(t *testing.T) {
 		require.NoError(t, err)
 		req, err = http.NewRequest("POST", "/api/v1.0/origin_ui/collections", bytes.NewReader(body))
 		require.NoError(t, err)
-		createToken, err := generateTokenWithGroups(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create, token_scopes.Collection_Delete}, "test-user-owner", []string{groupName})
+		createToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Create, token_scopes.Collection_Delete}, "test-user-owner", groupName)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: createToken})
 		req.Header.Set("Content-Type", "application/json")
@@ -442,7 +426,7 @@ func TestCollectionsAPI(t *testing.T) {
 		require.Equal(t, http.StatusNoContent, recorder.Code)
 
 		// 4. A user not in the group cannot read the collection
-		rogueToken, err := generateTokenWithGroups(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read}, "rogue-user", []string{"some-other-group"})
+		rogueToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read}, "rogue-user", "some-other-group")
 		require.NoError(t, err)
 		req, err = http.NewRequest("GET", "/api/v1.0/origin_ui/collections/"+collectionID, nil)
 		require.NoError(t, err)
@@ -452,7 +436,7 @@ func TestCollectionsAPI(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, recorder.Code)
 
 		// 5. A user in the group can read the collection
-		groupToken, err := generateTokenWithGroups(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read}, "group-user", []string{groupName})
+		groupToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Read}, "group-user", groupName)
 		require.NoError(t, err)
 		req, err = http.NewRequest("GET", "/api/v1.0/origin_ui/collections/"+collectionID, nil)
 		require.NoError(t, err)
@@ -493,7 +477,7 @@ func TestCollectionsAPI(t *testing.T) {
 		require.NoError(t, err)
 		req, err = http.NewRequest("PATCH", "/api/v1.0/origin_ui/collections/"+collectionID, bytes.NewReader(body))
 		require.NoError(t, err)
-		groupWriteToken, err := generateTokenWithGroups(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Modify}, "group-user-write", []string{groupName})
+		groupWriteToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Modify}, "group-user-write", groupName)
 		require.NoError(t, err)
 		req.AddCookie(&http.Cookie{Name: "login", Value: groupWriteToken})
 		req.Header.Set("Content-Type", "application/json")
@@ -522,7 +506,7 @@ func TestCollectionsAPI(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, recorder.Code)
 
 		// 11. A user in the group can delete the collection
-		groupOwnerToken, err := generateTokenWithGroups(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Delete}, "group-user-owner", []string{groupName})
+		groupOwnerToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access, token_scopes.Collection_Delete}, "group-user-owner", groupName)
 		require.NoError(t, err)
 		req, err = http.NewRequest("DELETE", "/api/v1.0/origin_ui/collections/"+collectionID, nil)
 		require.NoError(t, err)
