@@ -257,7 +257,6 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 
 	t.Run("incomplete-registration", func(t *testing.T) {
 		resetNamespaceDB(t)
-		server_utils.ResetTestState()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{
 			RegistryEndpoint: "https://registry.org",
@@ -295,7 +294,6 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 
 	t.Run("complete-registration", func(t *testing.T) {
 		resetNamespaceDB(t)
-		server_utils.ResetTestState()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{
 			RegistryEndpoint: "https://registry.org",
@@ -341,7 +339,6 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 
 	t.Run("multiple-complete-registrations", func(t *testing.T) {
 		resetNamespaceDB(t)
-		server_utils.ResetTestState()
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{
 			RegistryEndpoint: "https://registry.org",

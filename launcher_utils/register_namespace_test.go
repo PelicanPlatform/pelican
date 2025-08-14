@@ -73,8 +73,6 @@ func TestRegistration(t *testing.T) {
 
 	err = database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
-	// Pass the already-opened ServerDatabase as the Registry database
-	registry.SetDB(database.ServerDatabase)
 
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()
@@ -198,8 +196,6 @@ func TestMultiKeysRegistration(t *testing.T) {
 
 	err = database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
-	// Pass the already-opened ServerDatabase as the Registry database
-	registry.SetDB(database.ServerDatabase)
 
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()

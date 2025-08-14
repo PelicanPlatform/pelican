@@ -807,7 +807,6 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("missing-institution-returns-400", func(t *testing.T) {
-		server_utils.ResetTestState()
 		viper.Set("Registry.Institutions", []map[string]string{{"name": "Mock School", "id": "123"}})
 		resetNamespaceDB(t)
 		jwks, err := test_utils.GenerateJWKS()
@@ -827,7 +826,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
 		assert.Contains(t, string(body), "Validation for Institution failed:")
-		server_utils.ResetTestState()
+		config.ResetConfig()
 	})
 
 	t.Run("invalid-prefix-returns-400", func(t *testing.T) {
@@ -916,7 +915,6 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("key-chaining-failure-returns-400", func(t *testing.T) {
-		server_utils.ResetTestState()
 		viper.Set("Registry.RequireKeyChaining", true)
 		resetNamespaceDB(t)
 
@@ -943,7 +941,7 @@ func TestCreateNamespace(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
 		assert.Contains(t, string(body), "Cannot register a namespace that is suffixed or prefixed by an already-registered namespace unless the incoming public key matches a registered key")
-		server_utils.ResetTestState()
+		config.ResetConfig()
 	})
 
 	t.Run("inst-failure-returns-400", func(t *testing.T) {
@@ -1096,7 +1094,7 @@ func TestCreateNamespace(t *testing.T) {
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
 		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
-		server_utils.ResetTestState()
+		config.ResetConfig()
 	})
 
 	t.Run("osdf-topology-same-prefix-request-gives-200", func(t *testing.T) {
@@ -1138,7 +1136,7 @@ func TestCreateNamespace(t *testing.T) {
 		assert.Equal(t, "admin", nss[0].AdminMetadata.UserID)
 		assert.Equal(t, server_structs.RegPending, nss[0].AdminMetadata.Status)
 		assert.NotEqual(t, time.Time{}, nss[0].AdminMetadata.CreatedAt)
-		server_utils.ResetTestState()
+		config.ResetConfig()
 	})
 }
 

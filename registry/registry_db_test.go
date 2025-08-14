@@ -46,7 +46,7 @@ import (
 )
 
 func migrateTopologyTestTable() error {
-	err := db.AutoMigrate(&Topology{})
+	err := database.ServerDatabase.AutoMigrate(&Topology{})
 	if err != nil {
 		return fmt.Errorf("failed to migrate topology table: %v", err)
 	}
@@ -55,33 +55,52 @@ func migrateTopologyTestTable() error {
 
 func setupMockRegistryDB(t *testing.T) {
 	mockDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	db = mockDB
+	database.ServerDatabase = mockDB
 	require.NoError(t, err, "Error setting up mock namespace DB")
-	err = db.AutoMigrate(&server_structs.Namespace{})
-	require.NoError(t, err, "Failed to migrate DB for namespace table")
-	err = migrateTopologyTestTable()
-	require.NoError(t, err, "Error creating topology table")
+
+	// Enable foreign key constraints for SQLite
+	err = database.ServerDatabase.Exec("PRAGMA foreign_keys = ON").Error
+	require.NoError(t, err, "Error enabling foreign key constraints")
+
+	err = database.ServerDatabase.AutoMigrate(
+		&server_structs.Namespace{},
+		&Topology{},
+		&server_structs.Server{},
+		&server_structs.Service{},
+		&server_structs.Contact{},
+		&server_structs.Endpoint{},
+	)
+	require.NoError(t, err, "Failed to migrate DB tables")
 }
 
 func resetNamespaceDB(t *testing.T) {
-	err := db.Where("1 = 1").Delete(&server_structs.Namespace{}).Error
-	require.NoError(t, err, "Error resetting namespace DB")
-	err = db.Where("1 = 1").Delete(&Topology{}).Error
-	require.NoError(t, err, "Error resetting topology DB")
+	tablesToClear := map[string]interface{}{
+		"namespace": &server_structs.Namespace{},
+		"topology":  &Topology{},
+		"server":    &server_structs.Server{},
+		"service":   &server_structs.Service{},
+		"contact":   &server_structs.Contact{},
+		"endpoint":  &server_structs.Endpoint{},
+	}
+
+	for name, model := range tablesToClear {
+		err := database.ServerDatabase.Where("1 = 1").Delete(model).Error
+		require.NoError(t, err, "Error resetting %s DB", name)
+	}
 }
 
 func teardownMockNamespaceDB(t *testing.T) {
-	err := ShutdownRegistryDB()
+	err := database.ShutdownDB()
 	require.NoError(t, err, "Error tearing down mock namespace DB")
 }
 
 func insertMockDBData(nss []server_structs.Namespace) error {
-	return db.Create(&nss).Error
+	return database.ServerDatabase.Create(&nss).Error
 }
 
 func getLastNamespaceId() (int, error) {
 	var namespace server_structs.Namespace
-	result := db.Select("id").Order("id DESC").First(&namespace)
+	result := database.ServerDatabase.Select("id").Order("id DESC").First(&namespace)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return 0, errors.New("Empty database table.")
@@ -862,10 +881,8 @@ func TestRegistryTopology(t *testing.T) {
 
 	err := database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
-	// Pass the already-opened ServerDatabase to this test
-	SetDB(database.ServerDatabase)
 	defer func() {
-		err := ShutdownRegistryDB()
+		err := database.ShutdownDB()
 		assert.NoError(t, err)
 	}()
 

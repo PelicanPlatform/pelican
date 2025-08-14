@@ -51,13 +51,11 @@ import (
 	"github.com/pelicanplatform/pelican/classads"
 	"github.com/pelicanplatform/pelican/client"
 	"github.com/pelicanplatform/pelican/config"
-	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/director"
 	"github.com/pelicanplatform/pelican/fed_test_utils"
 	"github.com/pelicanplatform/pelican/launchers"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/pelican_url"
-	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
 	"github.com/pelicanplatform/pelican/test_utils"
@@ -204,9 +202,6 @@ func (f *FedTest) Spinup() {
 
 	err = config.InitServer(ctx, modules)
 	require.NoError(f.T, err)
-
-	// Set the registry database connection after the server database is initialized
-	registry.SetDB(database.ServerDatabase)
 
 	viper.Set("Registry.RequireOriginApproval", false)
 	viper.Set("Registry.RequireCacheApproval", false)

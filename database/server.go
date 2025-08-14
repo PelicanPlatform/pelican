@@ -37,36 +37,28 @@ func InitServerDatabase(serverType server_structs.ServerType) error {
 	dbPath := param.Server_DbLocation.GetString()
 	log.Debugln("Initializing server database: ", dbPath)
 
-	// Initialize database connection if not already done
-	if ServerDatabase == nil {
-		tdb, err := utils.InitSQLiteDB(dbPath)
-		if err != nil {
-			return err
-		}
-		ServerDatabase = tdb
+	tdb, err := utils.InitSQLiteDB(dbPath)
+	if err != nil {
+		return err
+	}
+	ServerDatabase = tdb
 
-		sqlDB, err := ServerDatabase.DB()
-		if err != nil {
-			return err
-		}
-
-		// Enable foreign key constraints for SQLite
-		if err := ServerDatabase.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
-			return errors.Wrap(err, "failed to enable foreign key constraints")
-		}
-
-		// Always run universal migrations first
-		if err := utils.MigrateDB(sqlDB, embedUniversalMigrations, "universal_migrations"); err != nil {
-			return err
-		}
+	// Enable foreign key constraints for SQLite
+	if err := ServerDatabase.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+		return errors.Wrap(err, "failed to enable foreign key constraints")
 	}
 
-	// Apply server-type-specific migrations using goose's versioning
 	sqlDB, err := ServerDatabase.DB()
 	if err != nil {
 		return err
 	}
 
+	// Always run universal migrations first
+	if err := utils.MigrateDB(sqlDB, embedUniversalMigrations, "universal_migrations"); err != nil {
+		return err
+	}
+
+	// Apply server-type-specific migrations
 	if err := runServerTypeMigrations(sqlDB, serverType); err != nil {
 		return errors.Wrapf(err, "failed to run migrations for server type %s", serverType.String())
 	}
@@ -419,8 +411,6 @@ func ShutdownDB() error {
 	if err != nil {
 		log.Errorln("Failure when shutting down the database:", err)
 	}
-	// Set ServerDatabase to nil so that subsequent InitServerDatabase calls will reinitialize
-	ServerDatabase = nil
 	return err
 }
 

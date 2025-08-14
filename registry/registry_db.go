@@ -31,6 +31,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -58,19 +59,8 @@ const (
 )
 
 /*
-Declare the DB handle as an unexported global so that all
-functions in the package can access it without having to
-pass it around. This simplifies the HTTP handlers, and
-the handle is already thread-safe! The approach being used
-is based off of 1.b from
-https://www.alexedwards.net/blog/organising-database-access
+The database was declared as a global variable in the database package
 */
-var db *gorm.DB
-
-// SetDB lets the database package pass on the already-opened ServerDatabase
-func SetDB(conn *gorm.DB) {
-	db = conn
-}
 
 func (st prefixType) String() string {
 	return string(st)
@@ -95,7 +85,7 @@ func GetTopoPrefixString(topoNss []Topology) (result string) {
 func namespaceExistsByPrefix(prefix string) (bool, error) {
 	var count int64
 
-	err := db.Model(&server_structs.Namespace{}).Where("prefix = ?", prefix).Count(&count).Error
+	err := database.ServerDatabase.Model(&server_structs.Namespace{}).Where("prefix = ?", prefix).Count(&count).Error
 	if err != nil {
 		return false, err
 	}
@@ -106,7 +96,7 @@ func namespaceExistsByPrefix(prefix string) (bool, error) {
 func topologyNamespaceExistsByPrefix(prefix string) (bool, error) {
 	var count int64
 
-	err := db.Model(&Topology{}).Where("prefix = ?", prefix).Count(&count).Error
+	err := database.ServerDatabase.Model(&Topology{}).Where("prefix = ?", prefix).Count(&count).Error
 	if err != nil {
 		return false, err
 	}
@@ -121,7 +111,7 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 		UNION
 		SELECT prefix FROM topology WHERE (prefix || '/') LIKE (? || '/%')
 		`
-		err = db.Raw(topoSuperSubQuery, prefix, prefix).Scan(&topoNss).Error
+		err = database.ServerDatabase.Raw(topoSuperSubQuery, prefix, prefix).Scan(&topoNss).Error
 		if err != nil {
 			return
 		}
@@ -135,7 +125,7 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 	// eg if /foo is already registered, this will be true for an incoming /foo/bar because
 	// /foo is logically above /foo/bar (according to my logic, anyway)
 	superspaceQuery := `SELECT prefix FROM namespace WHERE (?) LIKE (prefix || '/%')`
-	err = db.Raw(superspaceQuery, prefix).Scan(&superspaces).Error
+	err = database.ServerDatabase.Raw(superspaceQuery, prefix).Scan(&superspaces).Error
 	if err != nil {
 		return
 	}
@@ -144,7 +134,7 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 	// eg if /foo/bar is already registered, this will be true for an incoming /foo because
 	// /foo/bar is logically below /foo
 	subspaceQuery := `SELECT prefix FROM namespace WHERE (prefix) LIKE (? || '/%')`
-	err = db.Raw(subspaceQuery, prefix).Scan(&subspaces).Error
+	err = database.ServerDatabase.Raw(subspaceQuery, prefix).Scan(&subspaces).Error
 	if err != nil {
 		return
 	}
@@ -154,7 +144,7 @@ func namespaceSupSubChecks(prefix string) (superspaces []string, subspaces []str
 
 func namespaceExistsById(id int) (bool, error) {
 	var namespaces []server_structs.Namespace
-	result := db.Limit(1).Find(&namespaces, id)
+	result := database.ServerDatabase.Limit(1).Find(&namespaces, id)
 	if result.Error != nil {
 		return false, result.Error
 	} else {
@@ -164,7 +154,7 @@ func namespaceExistsById(id int) (bool, error) {
 
 func namespaceBelongsToUserId(id int, userId string) (bool, error) {
 	var result server_structs.Namespace
-	err := db.First(&result, "id = ?", id).Error
+	err := database.ServerDatabase.First(&result, "id = ?", id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, fmt.Errorf("Namespace with id = %d does not exists", id)
 	} else if err != nil {
@@ -175,7 +165,7 @@ func namespaceBelongsToUserId(id int, userId string) (bool, error) {
 
 func getNamespaceJwksById(id int) (jwk.Set, error) {
 	var result server_structs.Namespace
-	err := db.Select("pubkey").Where("id = ?", id).Last(&result).Error
+	err := database.ServerDatabase.Select("pubkey").Where("id = ?", id).Last(&result).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("namespace with id %d not found in database", id)
 	} else if err != nil {
@@ -197,7 +187,7 @@ func getNamespaceJwksByPrefix(prefix string) (jwk.Set, *server_structs.AdminMeta
 		return nil, nil, errors.New("Invalid prefix. Prefix must not be empty")
 	}
 	var result server_structs.Namespace
-	err := db.Select("pubkey", "admin_metadata").Where("prefix = ?", prefix).Last(&result).Error
+	err := database.ServerDatabase.Select("pubkey", "admin_metadata").Where("prefix = ?", prefix).Last(&result).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil, fmt.Errorf("namespace with prefix %q not found in database", prefix)
 	} else if err != nil {
@@ -217,7 +207,7 @@ func getNamespaceStatusById(id int) (server_structs.RegistrationStatus, error) {
 		return "", errors.New("Invalid id. id must be a positive integer")
 	}
 	var result server_structs.Namespace
-	query := db.Select("admin_metadata").Where("id = ?", id).Last(&result)
+	query := database.ServerDatabase.Select("admin_metadata").Where("id = ?", id).Last(&result)
 	err := query.Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return server_structs.RegUnknown, fmt.Errorf("namespace with id %d not found in database", id)
@@ -244,7 +234,7 @@ func getServerByID(serverID string) (*server_structs.ServerNamespace, error) {
 		WHERE s.id = ?
 	`
 
-	if err := db.Raw(query, serverID).Scan(&result).Error; err != nil {
+	if err := database.ServerDatabase.Raw(query, serverID).Scan(&result).Error; err != nil {
 		return nil, errors.Wrapf(err, "failed to get server namespace for server ID: %s", serverID)
 	}
 
@@ -265,7 +255,7 @@ func getServerByNamespaceID(namespaceID int) (*server_structs.ServerNamespace, e
 		WHERE n.id = ?
 	`
 
-	if err := db.Raw(query, namespaceID).Scan(&result).Error; err != nil {
+	if err := database.ServerDatabase.Raw(query, namespaceID).Scan(&result).Error; err != nil {
 		return nil, errors.Wrapf(err, "failed to get server namespace for namespace ID: %d", namespaceID)
 	}
 
@@ -286,7 +276,7 @@ func listServers() ([]server_structs.ServerNamespace, error) {
 		ORDER BY s.id ASC
 	`
 
-	if err := db.Raw(query).Scan(&results).Error; err != nil {
+	if err := database.ServerDatabase.Raw(query).Scan(&results).Error; err != nil {
 		return nil, errors.Wrap(err, "failed to retrieve all servers from the database")
 	}
 
@@ -298,7 +288,7 @@ func getNamespaceById(id int) (*server_structs.Namespace, error) {
 		return nil, errors.New("Invalid id. id must be a positive number")
 	}
 	ns := server_structs.Namespace{}
-	err := db.Last(&ns, id).Error
+	err := database.ServerDatabase.Last(&ns, id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("namespace with id %d not found in database", id)
 	} else if err != nil {
@@ -324,7 +314,7 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 		return nil, errors.New("invalid prefix. Prefix must not be empty")
 	}
 	ns := server_structs.Namespace{}
-	err := db.Where("prefix = ? ", prefix).Last(&ns).Error
+	err := database.ServerDatabase.Where("prefix = ? ", prefix).Last(&ns).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("namespace with id %q not found in database", prefix)
 	} else if err != nil {
@@ -353,7 +343,7 @@ func getNamespaceByPrefix(prefix string) (*server_structs.Namespace, error) {
 func getAllowedPrefixesForCaches() (map[string][]string, error) {
 	var namespaces []server_structs.Namespace
 
-	err := db.Where("prefix LIKE ?", "/caches/%").Find(&namespaces).Error
+	err := database.ServerDatabase.Where("prefix LIKE ?", "/caches/%").Find(&namespaces).Error
 	if err != nil {
 		return nil, err
 	}
@@ -433,7 +423,7 @@ func getNamespacesByFilter(filterNs server_structs.Namespace, pType prefixType, 
 	query += " ORDER BY id ASC"
 
 	namespacesIn := []server_structs.Namespace{}
-	if err := db.Raw(query).Scan(&namespacesIn).Error; err != nil {
+	if err := database.ServerDatabase.Raw(query).Scan(&namespacesIn).Error; err != nil {
 		return nil, err
 	}
 
@@ -497,7 +487,7 @@ func AddNamespace(ns *server_structs.Namespace) error {
 
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
-	return db.Transaction(func(tx *gorm.DB) error {
+	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
 		// Save the namespace first
 		if err := tx.Save(&ns).Error; err != nil {
 			return errors.Wrapf(err, "failed to save namespace: %s", ns.AdminMetadata.SiteName)
@@ -587,7 +577,7 @@ func updateNamespace(ns *server_structs.Namespace) error {
 
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
-	return db.Transaction(func(tx *gorm.DB) error {
+	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
 		// Update the namespace first
 		if err := tx.Save(ns).Error; err != nil {
 			return errors.Wrapf(err, "failed to update namespace: %s", ns.AdminMetadata.SiteName)
@@ -640,7 +630,7 @@ func updateNamespaceStatusById(id int, status server_structs.RegistrationStatus,
 		return errors.Wrap(err, "Error marshaling admin metadata")
 	}
 
-	return db.Model(ns).Where("id = ?", id).Update("admin_metadata", string(adminMetadataByte)).Error
+	return database.ServerDatabase.Model(ns).Where("id = ?", id).Update("admin_metadata", string(adminMetadataByte)).Error
 }
 
 func setNamespacePubKey(prefix string, pubkeyDbString string) error {
@@ -651,7 +641,7 @@ func setNamespacePubKey(prefix string, pubkeyDbString string) error {
 		return errors.New("invalid pubkeyDbString. pubkeyDbString must not be empty")
 	}
 	ns := server_structs.Namespace{}
-	return db.Model(ns).Where("prefix = ? ", prefix).Update("pubkey", pubkeyDbString).Error
+	return database.ServerDatabase.Model(ns).Where("prefix = ? ", prefix).Update("pubkey", pubkeyDbString).Error
 }
 
 func deleteNamespaceByID(id int) error {
@@ -663,7 +653,7 @@ func deleteNamespaceByID(id int) error {
 
 	// Wrap all database operations in a transaction
 	// If any operation fails, all changes are reverted. No partial records left.
-	return db.Transaction(func(tx *gorm.DB) error {
+	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
 		// If this is a server registration, we need to delete from the server tables
 		isOrigin := strings.HasPrefix(ns.Prefix, server_structs.OriginPrefix.String())
 		isCache := strings.HasPrefix(ns.Prefix, server_structs.CachePrefix.String())
@@ -696,12 +686,12 @@ func deleteNamespaceByID(id int) error {
 
 func deleteNamespaceByPrefix(prefix string) error {
 	// GORM by default uses transaction for write operations
-	return db.Where("prefix = ?", prefix).Delete(&server_structs.Namespace{}).Error
+	return database.ServerDatabase.Where("prefix = ?", prefix).Delete(&server_structs.Namespace{}).Error
 }
 
 func getAllNamespaces() ([]*server_structs.Namespace, error) {
 	var namespaces []*server_structs.Namespace
-	if result := db.Order("id ASC").Find(&namespaces); result.Error != nil {
+	if result := database.ServerDatabase.Order("id ASC").Find(&namespaces); result.Error != nil {
 		return nil, result.Error
 	}
 
@@ -722,7 +712,7 @@ func getAllNamespaces() ([]*server_structs.Namespace, error) {
 // Get all namespaces from the topology
 func getTopologyNamespaces() ([]*Topology, error) {
 	var topology []*Topology
-	if result := db.Order("id ASC").Find(&topology); result.Error != nil {
+	if result := database.ServerDatabase.Order("id ASC").Find(&topology); result.Error != nil {
 		return nil, result.Error
 	}
 	return topology, nil
@@ -737,7 +727,7 @@ func PopulateTopology(ctx context.Context) error {
 	// First get all that are in the table. At time of writing, this is ~57 entries,
 	// and that number should be monotonically decreasing. We're safe to load into mem.
 	var topologies []Topology
-	if err := db.Model(&Topology{}).Select("prefix").Find(&topologies).Error; err != nil {
+	if err := database.ServerDatabase.Model(&Topology{}).Select("prefix").Find(&topologies).Error; err != nil {
 		return err
 	}
 
@@ -779,7 +769,7 @@ func PopulateTopology(ctx context.Context) error {
 		toAddTopo = append(toAddTopo, Topology{Prefix: prefix})
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("prefix IN ?", toDelete).Delete(&Topology{}).Error; err != nil {
 			return err
 		}
@@ -802,8 +792,4 @@ func PeriodicTopologyReload(ctx context.Context) {
 				err)
 		}
 	}
-}
-
-func ShutdownRegistryDB() error {
-	return server_utils.ShutdownDB(db)
 }

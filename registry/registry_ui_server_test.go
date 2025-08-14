@@ -22,45 +22,16 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/database"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/server_utils"
 )
-
-func setupTestRegistryUIServerDB(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_registry_ui.sqlite")
-
-	// Set database location using viper
-	viper.Set(param.Server_DbLocation.GetName(), dbPath)
-
-	// Clean up at the end of the test
-	t.Cleanup(func() {
-		// Reset the database connection
-		if database.ServerDatabase != nil {
-			sqlDB, err := database.ServerDatabase.DB()
-			if err == nil {
-				sqlDB.Close()
-			}
-			database.ServerDatabase = nil
-		}
-	})
-
-	// Initialize the server database
-	err := database.InitServerDatabase(server_structs.RegistryType)
-	require.NoError(t, err)
-
-	// Set the database connection for the registry package
-	SetDB(database.ServerDatabase)
-}
 
 func createTestServerData(t *testing.T) []server_structs.Namespace {
 	testNamespaces := []server_structs.Namespace{
@@ -100,7 +71,11 @@ func createTestServerData(t *testing.T) []server_structs.Namespace {
 }
 
 func TestListServersHandler(t *testing.T) {
-	setupTestRegistryUIServerDB(t)
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+
+	setupMockRegistryDB(t)
 
 	_ = createTestServerData(t)
 
@@ -151,7 +126,10 @@ func TestListServersHandler(t *testing.T) {
 }
 
 func TestGetServerHandler(t *testing.T) {
-	setupTestRegistryUIServerDB(t)
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+	setupMockRegistryDB(t)
 
 	testNamespaces := createTestServerData(t)
 
@@ -204,7 +182,10 @@ func TestGetServerHandler(t *testing.T) {
 }
 
 func TestServerAPIResponseFormats(t *testing.T) {
-	setupTestRegistryUIServerDB(t)
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+	setupMockRegistryDB(t)
 
 	createTestServerData(t)
 
@@ -273,7 +254,10 @@ func TestServerAPIResponseFormats(t *testing.T) {
 }
 
 func TestServerEndpointValidation(t *testing.T) {
-	setupTestRegistryUIServerDB(t)
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+	setupMockRegistryDB(t)
 
 	// Set up Gin router
 	gin.SetMode(gin.TestMode)
@@ -312,7 +296,10 @@ func TestServerEndpointValidation(t *testing.T) {
 }
 
 func TestServerAPIErrorHandling(t *testing.T) {
-	setupTestRegistryUIServerDB(t)
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+	setupMockRegistryDB(t)
 
 	// Set up Gin router
 	gin.SetMode(gin.TestMode)
@@ -344,7 +331,10 @@ func TestServerAPIErrorHandling(t *testing.T) {
 }
 
 func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
-	setupTestRegistryUIServerDB(t)
+	t.Cleanup(func() {
+		server_utils.ResetTestState()
+	})
+	setupMockRegistryDB(t)
 
 	// Set up Gin router
 	gin.SetMode(gin.TestMode)

@@ -89,8 +89,6 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 
 	err = database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
-	// Use the already-opened ServerDatabase as the Registry database
-	registry.SetDB(database.ServerDatabase)
 
 	keyset, err := config.GetIssuerPublicJWKS()
 	require.NoError(t, err)
@@ -177,7 +175,7 @@ func TestBroker(t *testing.T) {
 
 	egrp.Go(func() error {
 		<-ctx.Done()
-		return registry.ShutdownRegistryDB()
+		return database.ShutdownDB()
 	})
 
 	// Run the web engine, wait for it to be online.
@@ -294,7 +292,7 @@ func TestRetrieveTimeout(t *testing.T) {
 
 	egrp.Go(func() error {
 		<-ctx.Done()
-		return registry.ShutdownRegistryDB()
+		return database.ShutdownDB()
 	})
 
 	// Run the web engine, wait for it to be online.

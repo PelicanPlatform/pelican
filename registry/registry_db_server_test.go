@@ -19,45 +19,15 @@
 package registry
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/database"
-	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 )
-
-func setupTestRegistryServerDB(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_registry.sqlite")
-
-	// Set database location using viper
-	viper.Set(param.Server_DbLocation.GetName(), dbPath)
-
-	// Clean up at the end of the test
-	t.Cleanup(func() {
-		// Reset the database connection
-		if database.ServerDatabase != nil {
-			sqlDB, err := database.ServerDatabase.DB()
-			if err == nil {
-				sqlDB.Close()
-			}
-			database.ServerDatabase = nil
-		}
-	})
-
-	// Initialize the server database
-	err := database.InitServerDatabase(server_structs.RegistryType)
-	require.NoError(t, err)
-
-	// Set the database connection for the registry package
-	SetDB(database.ServerDatabase)
-}
 
 func createTestNamespaces(t *testing.T) []server_structs.Namespace {
 	testNamespaces := []server_structs.Namespace{
@@ -115,7 +85,8 @@ func createTestNamespaces(t *testing.T) []server_structs.Namespace {
 }
 
 func TestServerNamespaceOperations(t *testing.T) {
-	setupTestRegistryServerDB(t)
+	setupMockRegistryDB(t)
+	defer database.ShutdownDB()
 
 	testNamespaces := createTestNamespaces(t)
 
@@ -179,7 +150,8 @@ func TestServerNamespaceOperations(t *testing.T) {
 }
 
 func TestAddNamespaceCreatesServers(t *testing.T) {
-	setupTestRegistryServerDB(t)
+	setupMockRegistryDB(t)
+	defer database.ShutdownDB()
 
 	t.Run("AddOriginServer", func(t *testing.T) {
 		ns := server_structs.Namespace{
@@ -288,7 +260,8 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 }
 
 func TestUpdateNamespaceWithServerTables(t *testing.T) {
-	setupTestRegistryServerDB(t)
+	setupMockRegistryDB(t)
+	defer database.ShutdownDB()
 
 	// Create initial namespace
 	ns := server_structs.Namespace{
@@ -335,7 +308,8 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 }
 
 func TestServerTableConstraints(t *testing.T) {
-	setupTestRegistryServerDB(t)
+	setupMockRegistryDB(t)
+	defer database.ShutdownDB()
 
 	t.Run("ServerNameUniqueness", func(t *testing.T) {
 		// Create first namespace
@@ -402,7 +376,8 @@ func TestServerTableConstraints(t *testing.T) {
 }
 
 func TestServerTableCascadeDelete(t *testing.T) {
-	setupTestRegistryServerDB(t)
+	setupMockRegistryDB(t)
+	defer database.ShutdownDB()
 
 	// Create a namespace which will create a server
 	ns := server_structs.Namespace{

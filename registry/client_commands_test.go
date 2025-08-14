@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -105,7 +106,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 
 	svr := registryMockup(ctx, t, "serveregistry")
 	defer func() {
-		err := ShutdownRegistryDB()
+		err := database.ShutdownDB()
 		assert.NoError(t, err)
 		svr.CloseClientConnections()
 		svr.Close()
@@ -187,7 +188,7 @@ func TestNamespaceRegisteredPubKeyUpdate(t *testing.T) {
 
 	svr := registryMockup(ctx, t, "pub-key-update")
 	defer func() {
-		err := ShutdownRegistryDB()
+		err := database.ShutdownDB()
 		assert.NoError(t, err)
 		svr.CloseClientConnections()
 		svr.Close()
@@ -267,7 +268,7 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 
 	svr := registryMockup(ctx, t, "MultiPubKeysRegisteredOnNamespace")
 	defer func() {
-		err := ShutdownRegistryDB()
+		err := database.ShutdownDB()
 		assert.NoError(t, err)
 		svr.CloseClientConnections()
 		svr.Close()
@@ -388,7 +389,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	require.NoError(t, err)
 
 	defer func() {
-		err := ShutdownRegistryDB()
+		err := database.ShutdownDB()
 		assert.NoError(t, err)
 		registrySvr.CloseClientConnections()
 		registrySvr.Close()
@@ -481,7 +482,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 
 	registrySvr := registryMockup(ctx, t, "keychaining")
 	defer func() {
-		err := ShutdownRegistryDB()
+		err := database.ShutdownDB()
 		assert.NoError(t, err)
 		registrySvr.CloseClientConnections()
 		registrySvr.Close()
