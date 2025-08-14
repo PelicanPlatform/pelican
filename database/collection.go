@@ -317,15 +317,17 @@ func GetCollectionAcls(db *gorm.DB, id, user string, groups []string) ([]Collect
 	return collection.ACLs, nil
 }
 
-func GrantCollectionAcl(db *gorm.DB, id, user string, groups []string, groupId string, role AclRole, expiresAt *time.Time) error {
+func GrantCollectionAcl(db *gorm.DB, id, user string, groups []string, groupId string, role AclRole, expiresAt *time.Time, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	err := validateACL(collection, user, groups, token_scopes.Collection_Delete)
-	if err != nil {
-		return err
+	if !isAdmin {
+		err := validateACL(collection, user, groups, token_scopes.Collection_Delete)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Resolve the provided group identifier (which may be the internal slug returned
@@ -363,15 +365,17 @@ func GrantCollectionAcl(db *gorm.DB, id, user string, groups []string, groupId s
 	})
 }
 
-func RevokeCollectionAcl(db *gorm.DB, id, user string, groups []string, groupId string, role AclRole) error {
+func RevokeCollectionAcl(db *gorm.DB, id, user string, groups []string, groupId string, role AclRole, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	err := validateACL(collection, user, groups, token_scopes.Collection_Delete)
-	if err != nil {
-		return err
+	if !isAdmin {
+		err := validateACL(collection, user, groups, token_scopes.Collection_Delete)
+		if err != nil {
+			return err
+		}
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -382,15 +386,17 @@ func RevokeCollectionAcl(db *gorm.DB, id, user string, groups []string, groupId 
 	})
 }
 
-func UpsertCollectionMetadata(db *gorm.DB, id, user string, groups []string, key, value string) error {
+func UpsertCollectionMetadata(db *gorm.DB, id, user string, groups []string, key, value string, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
-	if err != nil {
-		return err
+	if !isAdmin {
+		err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
+		if err != nil {
+			return err
+		}
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -407,15 +413,17 @@ func UpsertCollectionMetadata(db *gorm.DB, id, user string, groups []string, key
 	})
 }
 
-func DeleteCollectionMetadata(db *gorm.DB, id, user string, groups []string, key string) error {
+func DeleteCollectionMetadata(db *gorm.DB, id, user string, groups []string, key string, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
-	if err != nil {
-		return err
+	if !isAdmin {
+		err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
+		if err != nil {
+			return err
+		}
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -426,15 +434,17 @@ func DeleteCollectionMetadata(db *gorm.DB, id, user string, groups []string, key
 	})
 }
 
-func UpdateCollection(db *gorm.DB, id, user string, groups []string, name, description *string, visibility *Visibility) error {
+func UpdateCollection(db *gorm.DB, id, user string, groups []string, name, description *string, visibility *Visibility, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
-	if err != nil {
-		return err
+	if !isAdmin {
+		err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
+		if err != nil {
+			return err
+		}
 	}
 
 	updates := make(map[string]interface{})
@@ -455,15 +465,17 @@ func UpdateCollection(db *gorm.DB, id, user string, groups []string, name, descr
 	return db.Model(&Collection{}).Where("id = ?", id).Updates(updates).Error
 }
 
-func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy string, groups []string) error {
+func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy string, groups []string, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	err := validateACL(collection, addedBy, groups, token_scopes.Collection_Modify)
-	if err != nil {
-		return err
+	if !isAdmin {
+		err := validateACL(collection, addedBy, groups, token_scopes.Collection_Modify)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Enforce that each member belongs to the collection's namespace
@@ -491,7 +503,7 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy stri
 			AddedBy:      addedBy,
 		})
 	}
-	err = db.Transaction(func(tx *gorm.DB) error {
+	err := db.Transaction(func(tx *gorm.DB) error {
 		if result := tx.Create(&records); result.Error != nil {
 			return result.Error
 		}
@@ -503,15 +515,17 @@ func AddCollectionMembers(db *gorm.DB, id string, members []string, addedBy stri
 	return nil
 }
 
-func RemoveCollectionMembers(db *gorm.DB, id string, members []string, user string, groups []string) error {
+func RemoveCollectionMembers(db *gorm.DB, id string, members []string, user string, groups []string, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
-	if err != nil {
-		return err
+	if !isAdmin {
+		err := validateACL(collection, user, groups, token_scopes.Collection_Modify)
+		if err != nil {
+			return err
+		}
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -522,15 +536,17 @@ func RemoveCollectionMembers(db *gorm.DB, id string, members []string, user stri
 	})
 }
 
-func DeleteCollection(db *gorm.DB, id string, owner string, groups []string) error {
+func DeleteCollection(db *gorm.DB, id string, owner string, groups []string, isAdmin bool) error {
 	collection := &Collection{}
 	if result := db.Preload("ACLs").Where("id = ?", id).First(collection); result.Error != nil {
 		return result.Error
 	}
 
-	err := validateACL(collection, owner, groups, token_scopes.Collection_Delete)
-	if err != nil {
-		return err
+	if !isAdmin {
+		err := validateACL(collection, owner, groups, token_scopes.Collection_Delete)
+		if err != nil {
+			return err
+		}
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {

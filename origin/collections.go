@@ -272,6 +272,8 @@ func handleUpdateCollection(ctx *gin.Context) {
 		return
 	}
 
+	isAdmin, _ := web_ui.CheckAdmin(user)
+
 	var visibility database.Visibility
 	if req.Visibility != nil {
 		v := database.Visibility(strings.ToLower(*req.Visibility))
@@ -290,7 +292,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 		visPtr = &visibility
 	}
 
-	err = database.UpdateCollection(database.ServerDatabase, ctx.Param("id"), user, groups, req.Name, req.Description, visPtr)
+	err = database.UpdateCollection(database.ServerDatabase, ctx.Param("id"), user, groups, req.Name, req.Description, visPtr, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -349,7 +351,9 @@ func handleRemoveCollectionMembers(ctx *gin.Context) {
 		return
 	}
 
-	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user, groups)
+	isAdmin, _ := web_ui.CheckAdmin(user)
+
+	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user, groups, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -408,7 +412,9 @@ func handleRemoveCollectionMember(ctx *gin.Context) {
 		return
 	}
 
-	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), []string{objectURL}, user, groups)
+	isAdmin, _ := web_ui.CheckAdmin(user)
+
+	err = database.RemoveCollectionMembers(database.ServerDatabase, ctx.Param("id"), []string{objectURL}, user, groups, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -479,7 +485,9 @@ func handleAddCollectionMembers(ctx *gin.Context) {
 		return
 	}
 
-	err = database.AddCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user, groups)
+	isAdmin, _ := web_ui.CheckAdmin(user)
+
+	err = database.AddCollectionMembers(database.ServerDatabase, ctx.Param("id"), req.Members, user, groups, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -691,7 +699,9 @@ func handlePutCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	err = database.UpsertCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, value)
+	isAdmin, _ := web_ui.CheckAdmin(user)
+
+	err = database.UpsertCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, value, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -749,7 +759,9 @@ func handleDeleteCollectionMetadata(ctx *gin.Context) {
 		return
 	}
 
-	err = database.DeleteCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key)
+	isAdmin, _ := web_ui.CheckAdmin(user)
+
+	err = database.DeleteCollectionMetadata(database.ServerDatabase, ctx.Param("id"), user, groups, key, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -860,6 +872,7 @@ func handleDeleteCollection(ctx *gin.Context) {
 		})
 		return
 	}
+
 	if user == "" {
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -868,7 +881,10 @@ func handleDeleteCollection(ctx *gin.Context) {
 		return
 	}
 
-	err = database.DeleteCollection(database.ServerDatabase, ctx.Param("id"), user, groups)
+	// we will use this check to determine if we can bypass the collection owner check
+	isAdmin, _ := web_ui.CheckAdmin(user)
+
+	err = database.DeleteCollection(database.ServerDatabase, ctx.Param("id"), user, groups, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -993,7 +1009,9 @@ func handleGrantCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, req.ExpiresAt)
+	isAdmin, _ := web_ui.CheckAdmin(user)
+
+	err = database.GrantCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, req.GroupID, role, req.ExpiresAt, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
@@ -1077,7 +1095,9 @@ func handleRevokeCollectionAcl(ctx *gin.Context) {
 		return
 	}
 
-	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, principal, role)
+	isAdmin, _ := web_ui.CheckAdmin(user)
+
+	err = database.RevokeCollectionAcl(database.ServerDatabase, ctx.Param("id"), user, groups, principal, role, isAdmin)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, database.ErrForbidden) {
 			ctx.JSON(http.StatusNotFound, server_structs.SimpleApiResp{
