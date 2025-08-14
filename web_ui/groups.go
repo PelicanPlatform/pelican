@@ -66,6 +66,13 @@ func handleCreateGroup(ctx *gin.Context) {
 
 	group, err := database.CreateGroup(database.ServerDatabase, req.Name, req.Description, user, nil)
 	if err != nil {
+		if errors.Is(err, database.ErrReservedGroupPrefix) {
+			ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+				Status: server_structs.RespFailed,
+				Msg:    "Group name cannot start with 'user-'",
+			})
+			return
+		}
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
 			Msg:    fmt.Sprintf("Failed to create group: %v", err),

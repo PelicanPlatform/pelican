@@ -18,6 +18,9 @@ import (
 
 var (
 	ErrForbidden = errors.New("forbidden")
+	// ErrReservedGroupPrefix indicates a requested group name collides with the
+	// reserved prefix used for automatically managed personal groups.
+	ErrReservedGroupPrefix = errors.New("reserved group name prefix 'user-'")
 )
 
 type Visibility string
@@ -598,6 +601,11 @@ func CreateGroup(db *gorm.DB, name, description, createdBy string, groups []stri
 	slug, err := generateSlug()
 	if err != nil {
 		return nil, err
+	}
+
+	// Disallow creating groups that start with the reserved personal-group prefix.
+	if strings.HasPrefix(name, "user-") {
+		return nil, ErrReservedGroupPrefix
 	}
 
 	group := &Group{
