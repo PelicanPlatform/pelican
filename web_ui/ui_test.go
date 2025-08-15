@@ -918,4 +918,45 @@ func TestGroupManagementAPI(t *testing.T) {
 		route.ServeHTTP(recorder, req)
 		assert.Equal(t, http.StatusNoContent, recorder.Code)
 	})
+
+	t.Run("test-regular-user-can-create-group", func(t *testing.T) {
+		// Test that a regular (non-admin) user can create a group
+		groupName := "test-regular-user-group"
+		createGroupReq := map[string]string{"name": groupName, "description": "test group by regular user"}
+		body, err := json.Marshal(createGroupReq)
+		require.NoError(t, err)
+
+		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
+		require.NoError(t, err)
+
+		// Use a regular user token (not admin)
+		regularUserToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder := httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusCreated, recorder.Code)
+
+		var createGroupResp map[string]string
+		err = json.NewDecoder(recorder.Body).Decode(&createGroupResp)
+		require.NoError(t, err)
+		groupID := createGroupResp["id"]
+		require.NotEmpty(t, groupID)
+
+		// Verify the regular user can manage their own group
+		addMemberReq := map[string]string{"member": "new-member"}
+		body, err = json.Marshal(addMemberReq)
+		require.NoError(t, err)
+
+		req, err = http.NewRequest("POST", "/api/v1.0/groups/"+groupID+"/members", bytes.NewReader(body))
+		require.NoError(t, err)
+		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
+		req.Header.Set("Content-Type", "application/json")
+
+		recorder = httptest.NewRecorder()
+		route.ServeHTTP(recorder, req)
+		assert.Equal(t, http.StatusNoContent, recorder.Code)
+	})
 }

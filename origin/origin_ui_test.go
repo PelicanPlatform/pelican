@@ -378,9 +378,9 @@ func TestCollectionsAPI(t *testing.T) {
 		req, err := http.NewRequest("POST", "/api/v1.0/groups", bytes.NewReader(body))
 		require.NoError(t, err)
 
-		adminToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "admin")
+		regularUserToken, err := generateToken(ctx, []token_scopes.TokenScope{token_scopes.WebUi_Access}, "regular-user")
 		require.NoError(t, err)
-		req.AddCookie(&http.Cookie{Name: "login", Value: adminToken})
+		req.AddCookie(&http.Cookie{Name: "login", Value: regularUserToken})
 		req.Header.Set("Content-Type", "application/json")
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, req)
