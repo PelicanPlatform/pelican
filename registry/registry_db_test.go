@@ -73,7 +73,7 @@ func setupMockRegistryDB(t *testing.T) {
 	require.NoError(t, err, "Failed to migrate DB tables")
 }
 
-func resetNamespaceDB(t *testing.T) {
+func resetMockRegistryDB(t *testing.T) {
 	tablesToClear := map[string]interface{}{
 		"namespace": &server_structs.Namespace{},
 		"topology":  &Topology{},
@@ -89,9 +89,9 @@ func resetNamespaceDB(t *testing.T) {
 	}
 }
 
-func teardownMockNamespaceDB(t *testing.T) {
+func teardownMockRegistryDB(t *testing.T) {
 	err := database.ShutdownDB()
-	require.NoError(t, err, "Error tearing down mock namespace DB")
+	require.NoError(t, err, "Error tearing down mock Registry DB")
 }
 
 func insertMockDBData(nss []server_structs.Namespace) error {
@@ -205,7 +205,7 @@ var (
 
 func TestGetNamespaceById(t *testing.T) {
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	t.Run("return-error-with-empty-db", func(t *testing.T) {
 		_, err := getNamespaceById(1)
@@ -221,7 +221,7 @@ func TestGetNamespaceById(t *testing.T) {
 	})
 
 	t.Run("return-namespace-with-correct-id", func(t *testing.T) {
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 		mockNs := mockNamespace("/test", "", "", server_structs.AdminMetadata{UserID: "foo"})
 		mockNs.CustomFields = mockCustomFields
 		err := insertMockDBData([]server_structs.Namespace{mockNs})
@@ -239,7 +239,7 @@ func TestGetNamespaceById(t *testing.T) {
 	t.Run("return-error-with-id-dne", func(t *testing.T) {
 		err := insertMockDBData(mockNssWithNamespaces)
 		require.NoError(t, err)
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 		_, err = getNamespaceById(100)
 		assert.Error(t, err)
 	})
@@ -247,7 +247,7 @@ func TestGetNamespaceById(t *testing.T) {
 
 func TestGetNamespaceStatusById(t *testing.T) {
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	t.Run("invalid-id", func(t *testing.T) {
 		_, err := getNamespaceStatusById(0)
@@ -256,13 +256,13 @@ func TestGetNamespaceStatusById(t *testing.T) {
 	})
 
 	t.Run("db-query-error", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		_, err := getNamespaceStatusById(1)
 		require.Error(t, err)
 	})
 
 	t.Run("valid-id-empty-admin-metadata", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		err := insertMockDBData([]server_structs.Namespace{mockNamespace("/foo", "", "", server_structs.AdminMetadata{})})
 		require.NoError(t, err)
 		lastId, err := getLastNamespaceId()
@@ -273,7 +273,7 @@ func TestGetNamespaceStatusById(t *testing.T) {
 	})
 
 	t.Run("valid-id-non-empty-admin-metadata", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		err := insertMockDBData([]server_structs.Namespace{mockNamespace("/foo", "", "", server_structs.AdminMetadata{Status: server_structs.RegApproved})})
 		require.NoError(t, err)
 		lastId, err := getLastNamespaceId()
@@ -286,10 +286,10 @@ func TestGetNamespaceStatusById(t *testing.T) {
 
 func TestAddNamespace(t *testing.T) {
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	t.Run("set-default-fields", func(t *testing.T) {
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone"})
 		err := AddNamespace(&mockNs)
 		require.NoError(t, err)
@@ -305,7 +305,7 @@ func TestAddNamespace(t *testing.T) {
 	})
 
 	t.Run("override-restricted-fields", func(t *testing.T) {
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 		mockCreateAt := time.Now().Add(time.Hour * 10)
 		mockUpdatedAt := time.Now().Add(time.Minute * 20)
 		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone", CreatedAt: mockCreateAt, UpdatedAt: mockUpdatedAt})
@@ -326,7 +326,7 @@ func TestAddNamespace(t *testing.T) {
 	})
 
 	t.Run("insert-data-integrity", func(t *testing.T) {
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 		mockNs := mockNamespace(
 			"/test",
 			"pubkey",
@@ -355,17 +355,17 @@ func TestAddNamespace(t *testing.T) {
 
 func TestUpdateNamespace(t *testing.T) {
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	t.Run("update-on-dne-entry-returns-error", func(t *testing.T) {
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 		mockNs := mockNamespace("/test", "", "", server_structs.AdminMetadata{})
 		err := updateNamespace(&mockNs)
 		assert.Error(t, err)
 	})
 
 	t.Run("update-preserve-internal-fields", func(t *testing.T) {
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 		mockNs := mockNamespace("/test", "", "", server_structs.AdminMetadata{UserID: "foo"})
 		err := insertMockDBData([]server_structs.Namespace{mockNs})
 		require.NoError(t, err)
@@ -399,9 +399,9 @@ func TestUpdateNamespace(t *testing.T) {
 
 func TestUpdateNamespaceStatusById(t *testing.T) {
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 	t.Run("return-error-if-id-dne", func(t *testing.T) {
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 		err := insertMockDBData(mockNssWithNamespaces)
 		require.NoError(t, err)
 		err = updateNamespaceStatusById(100, server_structs.RegApproved, "random")
@@ -409,7 +409,7 @@ func TestUpdateNamespaceStatusById(t *testing.T) {
 	})
 
 	t.Run("return-error-if-invalid-approver-userId", func(t *testing.T) {
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 
 		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone"})
 		err := insertMockDBData([]server_structs.Namespace{mockNs})
@@ -423,7 +423,7 @@ func TestUpdateNamespaceStatusById(t *testing.T) {
 	})
 
 	t.Run("update-status-with-valid-input-for-approval", func(t *testing.T) {
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 
 		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone"})
 		err := insertMockDBData([]server_structs.Namespace{mockNs})
@@ -444,7 +444,7 @@ func TestUpdateNamespaceStatusById(t *testing.T) {
 	})
 
 	t.Run("deny-does-not-modify-approval-fields", func(t *testing.T) {
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 
 		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone"})
 		err := insertMockDBData([]server_structs.Namespace{mockNs})
@@ -471,7 +471,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 	defer cancel()
 
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	t.Run("return-error-for-unsupported-operations", func(t *testing.T) {
 		filterNsID := server_structs.Namespace{
@@ -502,7 +502,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 		require.Error(t, err, "Should return error for filtering against unsupported field PubKey")
 
 		// Now, for AdminMetadata filters to work, we need to have a valid object
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		err = insertMockDBData([]server_structs.Namespace{{
 			Prefix: "/bar",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -546,7 +546,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 
 	t.Run("filter-by-prefix-type", func(t *testing.T) {
 		// Assuming mock data and insertMockDBData function exist
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		err := insertMockDBData(mockNssWithMixed)
 		require.NoError(t, err)
 
@@ -568,7 +568,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 	})
 
 	t.Run("filter-by-admin-metadata", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		err := insertMockDBData([]server_structs.Namespace{{
 			Prefix: "/bar",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -649,7 +649,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 	})
 
 	t.Run("multiple-AND-match", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		err := insertMockDBData([]server_structs.Namespace{{
 			Prefix: "/bar",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -677,7 +677,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 	})
 
 	t.Run("fully-match", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockNs := server_structs.Namespace{
 			Prefix: "/bar",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -700,7 +700,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 	})
 
 	t.Run("no-match", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockNs := server_structs.Namespace{
 			Prefix: "/bar",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -724,7 +724,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 	})
 
 	t.Run("empty-db-returns-empty-results", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 
 		filterNs := server_structs.Namespace{}
 		namespaces, err := getNamespacesByFilter(filterNs, "", false)
@@ -733,7 +733,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 	})
 
 	t.Run("filter-legacy-result", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockLeg := server_structs.Namespace{
 			Prefix: "/legacy/1",
 		}
@@ -774,7 +774,7 @@ func TestGetNamespacesByFilter(t *testing.T) {
 // from cache hostnames to allowed prefixes.
 func TestGetAllowedPrefixesForCaches(t *testing.T) {
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	mockCache1 := mockNamespace("/caches/cache1", "pubkey", "identity", server_structs.AdminMetadata{})
 	err := insertMockDBData([]server_structs.Namespace{mockCache1})
@@ -812,16 +812,16 @@ func TestGetAllowedPrefixesForCaches(t *testing.T) {
 
 func TestGetNamespaceJwksByPrefix(t *testing.T) {
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	t.Run("db-query-error", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		_, _, err := getNamespaceJwksByPrefix("/")
 		require.Error(t, err)
 	})
 
 	t.Run("valid-prefix-empty-admin-metadata", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockJwks := jwk.NewSet()
 		jwksByte, err := json.Marshal(mockJwks)
 		require.NoError(t, err)
@@ -834,7 +834,7 @@ func TestGetNamespaceJwksByPrefix(t *testing.T) {
 	})
 
 	t.Run("valid-prefix-non-empty-admin-metadata", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockJwks := jwk.NewSet()
 		jwksByte, err := json.Marshal(mockJwks)
 		require.NoError(t, err)

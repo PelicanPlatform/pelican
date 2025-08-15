@@ -220,7 +220,7 @@ func getNamespaceStatusById(id int) (server_structs.RegistrationStatus, error) {
 	return result.AdminMetadata.Status, nil
 }
 
-// Retrieve combined server and namespace data by server ID
+// Retrieve the details of a server by server ID
 func getServerByID(serverID string) (*server_structs.ServerNamespace, error) {
 	var result server_structs.ServerNamespace
 

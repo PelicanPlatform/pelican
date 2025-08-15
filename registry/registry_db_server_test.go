@@ -86,7 +86,7 @@ func createTestNamespaces(t *testing.T) []server_structs.Namespace {
 
 func TestServerNamespaceOperations(t *testing.T) {
 	setupMockRegistryDB(t)
-	defer database.ShutdownDB()
+	defer teardownMockRegistryDB(t)
 
 	testNamespaces := createTestNamespaces(t)
 
@@ -151,7 +151,7 @@ func TestServerNamespaceOperations(t *testing.T) {
 
 func TestAddNamespaceCreatesServers(t *testing.T) {
 	setupMockRegistryDB(t)
-	defer database.ShutdownDB()
+	defer teardownMockRegistryDB(t)
 
 	t.Run("AddOriginServer", func(t *testing.T) {
 		ns := server_structs.Namespace{
@@ -261,7 +261,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 
 func TestUpdateNamespaceWithServerTables(t *testing.T) {
 	setupMockRegistryDB(t)
-	defer database.ShutdownDB()
+	defer teardownMockRegistryDB(t)
 
 	// Create initial namespace
 	ns := server_structs.Namespace{
@@ -309,7 +309,7 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 
 func TestServerTableConstraints(t *testing.T) {
 	setupMockRegistryDB(t)
-	defer database.ShutdownDB()
+	defer teardownMockRegistryDB(t)
 
 	t.Run("ServerNameUniqueness", func(t *testing.T) {
 		// Create first namespace
@@ -377,7 +377,7 @@ func TestServerTableConstraints(t *testing.T) {
 
 func TestServerTableCascadeDelete(t *testing.T) {
 	setupMockRegistryDB(t)
-	defer database.ShutdownDB()
+	defer teardownMockRegistryDB(t)
 
 	// Create a namespace which will create a server
 	ns := server_structs.Namespace{

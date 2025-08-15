@@ -204,8 +204,8 @@ func TestValidateKeyChaining(t *testing.T) {
 	server_utils.ResetTestState()
 	setupMockRegistryDB(t)
 	defer func() {
-		resetNamespaceDB(t)
-		teardownMockNamespaceDB(t)
+		resetMockRegistryDB(t)
+		teardownMockRegistryDB(t)
 		server_utils.ResetTestState()
 	}()
 

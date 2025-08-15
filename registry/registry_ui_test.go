@@ -64,7 +64,7 @@ func TestListNamespaces(t *testing.T) {
 
 	// Initialize the mock database
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	viper.Set("Server.WebPort", 0)
 	viper.Set("Server.ExternalWebUrl", "https://mock-server.com")
@@ -191,7 +191,7 @@ func TestListNamespaces(t *testing.T) {
 				}
 			}
 			defer func() {
-				resetNamespaceDB(t)
+				resetMockRegistryDB(t)
 			}()
 
 			// Create a request to the endpoint
@@ -222,7 +222,7 @@ func TestListNamespaces(t *testing.T) {
 	mockLegacyNs := server_structs.Namespace{Prefix: "/legacy/1"}
 
 	t.Run("filter-legacy-out", func(t *testing.T) {
-		t.Cleanup(func() { resetNamespaceDB(t) })
+		t.Cleanup(func() { resetMockRegistryDB(t) })
 		err := insertMockDBData(append(mockNssWithMixed, mockLegacyNs))
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -245,7 +245,7 @@ func TestListNamespaces(t *testing.T) {
 	})
 
 	t.Run("ask-for-legacy-full-query-param", func(t *testing.T) {
-		t.Cleanup(func() { resetNamespaceDB(t) })
+		t.Cleanup(func() { resetMockRegistryDB(t) })
 		err := insertMockDBData(append(mockNssWithMixed, mockLegacyNs))
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -268,7 +268,7 @@ func TestListNamespaces(t *testing.T) {
 	})
 
 	t.Run("ask-for-legacy-short-query-param", func(t *testing.T) {
-		t.Cleanup(func() { resetNamespaceDB(t) })
+		t.Cleanup(func() { resetMockRegistryDB(t) })
 		err := insertMockDBData(append(mockNssWithMixed, mockLegacyNs))
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -291,7 +291,7 @@ func TestListNamespaces(t *testing.T) {
 	})
 
 	t.Run("ask-for-legacy-as-public", func(t *testing.T) {
-		t.Cleanup(func() { resetNamespaceDB(t) })
+		t.Cleanup(func() { resetMockRegistryDB(t) })
 		err := insertMockDBData(append(mockNssWithMixed, mockLegacyNs))
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -319,7 +319,7 @@ func TestListNamespacesForUser(t *testing.T) {
 
 	// Initialize the mock database
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	mockUserNss := func() []server_structs.Namespace {
 		return []server_structs.Namespace{
@@ -372,7 +372,7 @@ func TestListNamespacesForUser(t *testing.T) {
 				require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
 			}
 			defer func() {
-				resetNamespaceDB(t)
+				resetMockRegistryDB(t)
 			}()
 
 			// Create a request to the endpoint
@@ -411,7 +411,7 @@ func TestGetNamespace(t *testing.T) {
 
 	// Initialize the mock database
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	mockUserNs := mockNamespace("/mockUser", "", "", server_structs.AdminMetadata{UserID: "mockUser"})
 
@@ -486,7 +486,7 @@ func TestGetNamespace(t *testing.T) {
 				err := insertMockDBData(mockNssWithMixed)
 				require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
 			}
-			defer resetNamespaceDB(t)
+			defer resetMockRegistryDB(t)
 
 			finalId := tc.requestId
 			if tc.validID {
@@ -540,7 +540,7 @@ func TestGetNamespaceJWKS(t *testing.T) {
 	}
 	// Initialize the mock database
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	router := gin.Default()
 
@@ -602,7 +602,7 @@ func TestGetNamespaceJWKS(t *testing.T) {
 				}
 
 			}
-			defer resetNamespaceDB(t)
+			defer resetMockRegistryDB(t)
 
 			// Create a request to the endpoint
 			w := httptest.NewRecorder()
@@ -627,7 +627,7 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 
 	// Initialize the mock database
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	mockUserNs := mockNamespace("/mockUser", "", "", server_structs.AdminMetadata{UserID: "mockUser"})
 
@@ -673,7 +673,7 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 		t.Run(tc.description, func(t *testing.T) {
 			err := insertMockDBData([]server_structs.Namespace{mockUserNs})
 			require.NoErrorf(t, err, "Failed to set up mock data: %v", err)
-			defer resetNamespaceDB(t)
+			defer resetMockRegistryDB(t)
 
 			router := gin.Default()
 			router.PATCH("/test/:id/approve", func(ctx *gin.Context) {
@@ -735,7 +735,7 @@ func TestCreateNamespace(t *testing.T) {
 
 	// Initialize the mock database
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	router := gin.Default()
 	router.POST("/namespaces", func(ctx *gin.Context) {
@@ -744,7 +744,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("no-user-returns-401", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 
 		router := gin.Default()
 		router.POST("/namespaces", func(ctx *gin.Context) {
@@ -758,7 +758,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("empty-request-returns-400", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 
 		// Create a request to the endpoint
 		w := httptest.NewRecorder()
@@ -772,7 +772,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("missing-prefix-returns-400", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 
 		mockEmptyNs := server_structs.Namespace{}
 		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
@@ -790,7 +790,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("missing-public-key-returns-400", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockEmptyNs := server_structs.Namespace{Prefix: "/test"} // Missing public key
 		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
 		require.NoError(t, err)
@@ -808,7 +808,7 @@ func TestCreateNamespace(t *testing.T) {
 
 	t.Run("missing-institution-returns-400", func(t *testing.T) {
 		viper.Set("Registry.Institutions", []map[string]string{{"name": "Mock School", "id": "123"}})
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		jwks, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
@@ -830,7 +830,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("invalid-prefix-returns-400", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 
 		mockEmptyNs := server_structs.Namespace{Prefix: "/", Pubkey: "badKey", AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockEmptyNsBytes, err := json.Marshal(mockEmptyNs)
@@ -848,10 +848,10 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("existing-prefix-returns-400", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		err := insertMockDBData([]server_structs.Namespace{{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: server_structs.AdminMetadata{Status: server_structs.RegPending}}})
 		require.NoError(t, err)
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 
 		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockNsBytes, err := json.Marshal(mockNs)
@@ -869,7 +869,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("bad-pubkey-returns-400", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 
 		mockNs := server_structs.Namespace{Prefix: "/foo", Pubkey: "badKey", AdminMetadata: server_structs.AdminMetadata{Institution: "001"}}
 		mockNsBytes, err := json.Marshal(mockNs)
@@ -887,14 +887,14 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("duplicated-key-returns-400", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		err = insertMockDBData([]server_structs.Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Status: server_structs.RegPending}}})
 		require.NoError(t, err)
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 
 		diffPubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -916,14 +916,14 @@ func TestCreateNamespace(t *testing.T) {
 
 	t.Run("key-chaining-failure-returns-400", func(t *testing.T) {
 		viper.Set("Registry.RequireKeyChaining", true)
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
 		err = insertMockDBData([]server_structs.Namespace{{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Status: server_structs.RegPending}}})
 		require.NoError(t, err)
-		defer resetNamespaceDB(t)
+		defer resetMockRegistryDB(t)
 
 		diffPubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
@@ -945,7 +945,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("inst-failure-returns-400", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
@@ -968,7 +968,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("valid-request-gives-200", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
@@ -999,7 +999,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("valid-request-w/-custom-fields-gives-200", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		defer func() {
 			customRegFieldsConfigs = []customRegFieldsConfig{}
 		}()
@@ -1056,7 +1056,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("osdf-topology-subspace-request-gives-200", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		require.NoError(t, err)
@@ -1098,7 +1098,7 @@ func TestCreateNamespace(t *testing.T) {
 	})
 
 	t.Run("osdf-topology-same-prefix-request-gives-200", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 
 		_, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		require.NoError(t, err)
@@ -1151,7 +1151,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 	// Initialize the mock database
 	setupMockRegistryDB(t)
-	defer teardownMockNamespaceDB(t)
+	defer teardownMockRegistryDB(t)
 
 	router := gin.Default()
 	router.PUT("/namespaces/:id", func(ctx *gin.Context) {
@@ -1201,7 +1201,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 	})
 
 	t.Run("valid-request-but-ns-dne-returns-404", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
@@ -1224,7 +1224,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 	})
 
 	t.Run("valid-request-not-owner-gives-403", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
@@ -1254,7 +1254,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 	})
 
 	t.Run("reg-user-cant-change-after-approv", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
@@ -1292,7 +1292,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 	})
 
 	t.Run("reg-user-success-change", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
@@ -1337,7 +1337,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 	})
 
 	t.Run("admin-can-change-anybody", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 		mockInsts := []registrationFieldOption{{ID: "1000"}}
 		viper.Set("Registry.Institutions", mockInsts)
 
