@@ -40,6 +40,10 @@ const (
 	Broker_Retrieve TokenScope = "broker.retrieve"
 	Broker_Callback TokenScope = "broker.callback"
 	Localcache_Purge TokenScope = "localcache.purge"
+	Collection_Create TokenScope = "collection.create"
+	Collection_Read TokenScope = "collection.read"
+	Collection_Modify TokenScope = "collection.modify"
+	Collection_Delete TokenScope = "collection.delete"
 
 	// WLCG Scopes
 	Wlcg_Storage_Read TokenScope = "storage.read"
