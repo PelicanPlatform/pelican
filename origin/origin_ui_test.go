@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -69,7 +68,7 @@ func TestCollectionsAPI(t *testing.T) {
 	//set a temporary password file:
 	tempFile, err := os.CreateTemp("", "web-ui-passwd")
 	if err != nil {
-		fmt.Println("Failed to setup web-ui-passwd file")
+		t.Log("Failed to setup web-ui-passwd file")
 		os.Exit(1)
 	}
 	tempPasswdFile = tempFile
@@ -80,7 +79,7 @@ func TestCollectionsAPI(t *testing.T) {
 	//Make a testing issuer.jwk file to get a cookie
 	tempJWKDir, err := os.MkdirTemp("", "tempDir")
 	if err != nil {
-		fmt.Println("Error making temp jwk dir")
+		t.Log("Error making temp jwk dir")
 		os.Exit(1)
 	}
 	//Override viper default for testing
@@ -89,7 +88,7 @@ func TestCollectionsAPI(t *testing.T) {
 	// Ensure we load up the default configs.
 	dirname, err := os.MkdirTemp("", "tmpDir")
 	if err != nil {
-		fmt.Println("Error making temp config dir")
+		t.Log("Error making temp config dir")
 		os.Exit(1)
 	}
 	viper.Set("ConfigDir", dirname)
@@ -117,14 +116,14 @@ func TestCollectionsAPI(t *testing.T) {
 	})
 
 	if err := config.InitServer(ctx, server_structs.OriginType); err != nil {
-		fmt.Println("Failed to configure the test module")
+		t.Log("Failed to configure the test module")
 		os.Exit(1)
 	}
 
 	//Get keys
 	_, err = config.GetIssuerPublicJWKS()
 	if err != nil {
-		fmt.Println("Error issuing jwks")
+		t.Log("Error issuing jwks")
 		os.Exit(1)
 	}
 	router = gin.Default()
@@ -132,7 +131,7 @@ func TestCollectionsAPI(t *testing.T) {
 	//Configure Web API
 	err = web_ui.ConfigureServerWebAPI(ctx, router, egrp)
 	if err != nil {
-		fmt.Println("Error configuring web UI")
+		t.Log("Error configuring web UI")
 		os.Exit(1)
 	}
 	err = RegisterOriginWebAPI(router)
