@@ -31,19 +31,14 @@ import (
 	"github.com/pelicanplatform/pelican/metrics"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
+	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/web_ui"
 )
 
 func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group) error {
 	log.Info("Initializing the namespace registry's database...")
 
-	// Initialize the registry's sqlite database
-	err := registry.InitializeDB()
-	if err != nil {
-		return errors.Wrap(err, "unable to initialize the namespace registry database")
-	}
-
-	err = database.InitServerDatabase()
+	err := database.InitServerDatabase(server_structs.RegistryType)
 	if err != nil {
 		return errors.Wrap(err, "unable to initialize the server database")
 	}
@@ -84,7 +79,7 @@ func RegistryServe(ctx context.Context, engine *gin.Engine, egrp *errgroup.Group
 
 	egrp.Go(func() error {
 		<-ctx.Done()
-		return registry.ShutdownRegistryDB()
+		return database.ShutdownDB()
 	})
 
 	return nil

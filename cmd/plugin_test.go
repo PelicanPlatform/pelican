@@ -192,7 +192,7 @@ func (f *FedTest) Spinup() {
 	viper.Set("Origin.EnableWrites", true)
 	viper.Set("TLSSkipVerify", true)
 	viper.Set("Server.EnableUI", false)
-	viper.Set("Registry.DbLocation", filepath.Join(f.T.TempDir(), "ns-registry.sqlite"))
+	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(f.T.TempDir(), "ns-registry.sqlite"))
 	viper.Set("Origin.Port", 0)
 	viper.Set("Server.WebPort", 0)
 	viper.Set("Origin.RunLocation", tmpPath)
