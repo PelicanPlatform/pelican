@@ -154,6 +154,32 @@ func TestRecursiveUploadsAndDownloads(t *testing.T) {
 		}
 	})
 
+	t.Run("testRecursiveDownloadToDevNull", func(t *testing.T) {
+		oldPref, err := config.SetPreferredPrefix(config.PelicanPrefix)
+		require.NoError(t, err)
+		defer func() {
+			_, err := config.SetPreferredPrefix(oldPref)
+			require.NoError(t, err)
+		}()
+
+		for _, export := range fed.Exports {
+			tempPath := tempDir
+			dirName := filepath.Base(tempPath)
+			uploadUrl := fmt.Sprintf("pelican://%s%s/%s/%s", discoveryUrl.Host,
+				export.FederationPrefix, "osdf_osdf", dirName)
+
+			// Upload the file with PUT
+			transferDetailsUpload, err := client.DoPut(fed.Ctx, tempDir, uploadUrl, true, client.WithTokenLocation(tempToken.Name()))
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsUpload)
+
+			transferDetailsDownload, err := client.DoGet(fed.Ctx, uploadUrl, os.DevNull, true, client.WithTokenLocation(tempToken.Name()))
+			require.NoError(t, err)
+			verifySuccessfulTransfer(t, transferDetailsDownload)
+			require.NoError(t, client.DoDelete(fed.Ctx, uploadUrl, true, client.WithTokenLocation(tempToken.Name())))
+		}
+	})
+
 	t.Run("testOsdfRecursiveGetAndPutOsdfURL", func(t *testing.T) {
 		oldPref, err := config.SetPreferredPrefix(config.OsdfPrefix)
 		defer func() {
