@@ -30,6 +30,7 @@ import (
 
 	_ "github.com/glebarez/sqlite"
 	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/cache"
@@ -83,4 +84,42 @@ func TestCacheFedTokMaint(t *testing.T) {
 			return
 		}
 	}
+}
+
+// Validate CacheServe behavior: if Cache.Url has an existing port, it is preserved
+func TestCacheServe_PreservesExistingPort(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Set Cache.Url to include an existing port
+	viper.Set(param.Cache_Url.GetName(), "https://example.com:8442")
+
+	// Launch the federation (starts CacheServe among others)
+	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
+
+	// After startup, Cache.Url should remain with the original port
+	finalURL := viper.GetString(param.Cache_Url.GetName())
+	finalPort := viper.GetInt(param.Cache_Port.GetName())
+
+	assert.Equal(t, "https://example.com:8442", finalURL, "Cache.Url should preserve existing port")
+	assert.NotEqual(t, 0, finalPort, "Cache.Port should be set by CacheServe")
+}
+
+// Validate CacheServe behavior: if Cache.Url lacks a port, one is added
+func TestCacheServe_AddsPortWhenMissing(t *testing.T) {
+	server_utils.ResetTestState()
+	defer server_utils.ResetTestState()
+
+	// Ensure Cache.Url has no explicit port
+	viper.Set(param.Cache_Url.GetName(), "https://example.com")
+
+	// Launch the federation (starts CacheServe among others)
+	_ = fed_test_utils.NewFedTest(t, bothPubNamespaces)
+
+	// After startup, Cache.Url should include a port
+	finalURL := viper.GetString(param.Cache_Url.GetName())
+	finalPort := viper.GetInt(param.Cache_Port.GetName())
+
+	assert.NotEqual(t, 0, finalPort, "Cache.Port should be set by CacheServe")
+	assert.Contains(t, finalURL, ":", "Cache.Url should include a port")
 }
