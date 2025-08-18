@@ -153,11 +153,9 @@ type Server struct {
 
 // Service maps a server to its registration
 type Service struct {
-	ID             int       `json:"id" post:"exclude" gorm:"primaryKey"`
-	ServerID       string    `json:"server_id" validate:"required" gorm:"index"`
-	RegistrationID int       `json:"registration_id" validate:"required" gorm:"index"`
-	CreatedAt      time.Time `json:"created_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
-	UpdatedAt      time.Time `json:"updated_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
+	ID             int    `json:"id" post:"exclude" gorm:"primaryKey"`
+	ServerID       string `json:"server_id" validate:"required" gorm:"index"`
+	RegistrationID int    `json:"registration_id" validate:"required" gorm:"index"`
 
 	// Foreign key relationships
 	Server       Server       `json:"server" gorm:"foreignKey:ServerID;references:ID;constraint:OnDelete:CASCADE"`
