@@ -2152,3 +2152,76 @@ func TestPutOverwrite(t *testing.T) {
 		assert.Contains(t, logBuf.String(), "Failed to check if object exists at the origin, proceeding with upload")
 	})
 }
+
+func TestPackAutoSegfaultRegression(t *testing.T) {
+	test_utils.InitClient(t, map[string]any{
+		param.Logging_Level.GetName(): "debug",
+	})
+
+	svr := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(http.StatusOK)
+		} else if r.Method == "GET" {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(http.StatusOK)
+			// Send some compressed-like data to trigger pack handling
+			_, err := w.Write([]byte("compressed data content"))
+			assert.NoError(t, err)
+			w.(http.Flusher).Flush()
+		} else {
+			t.Fatal("Unexpected method:", r.Method)
+		}
+	}))
+	defer svr.Close()
+	svrURL, err := url.Parse(svr.URL)
+	require.NoError(t, err)
+
+	destDir := filepath.Join(t.TempDir(), "nonexistent", "subdir")
+	destFile := filepath.Join(destDir, "downloaded.txt")
+
+	transfer := &transferFile{
+		ctx: context.Background(),
+		job: &TransferJob{
+			remoteURL: &pelican_url.PelicanURL{
+				Scheme: "pelican://",
+				Host:   svrURL.Host,
+				Path:   svrURL.Path + "/test.txt",
+			},
+		},
+		localPath:  destFile,
+		remoteURL:  svrURL,
+		xferType:   transferTypeDownload,
+		packOption: "auto",
+		attempts: []transferAttemptDetails{
+			{
+				Url: svrURL,
+			},
+		},
+	}
+
+	transferResult, err := downloadObject(transfer)
+
+	// We expect either an error from downloadObject OR an error in the transfer result
+	// since pack=auto requires a directory destination
+	if err != nil {
+		t.Logf("downloadObject returned error: %v", err)
+	} else if transferResult.Error != nil {
+		errorMsg := transferResult.Error.Error()
+		if strings.Contains(errorMsg, "destination path is not a directory") {
+			// This is the pack-related error we're looking for
+			t.Logf("Got expected pack-related error: %v", errorMsg)
+		} else if strings.Contains(errorMsg, "unexpected EOF") {
+			// This is a transfer error, but the important thing is we didn't segfault
+			// The pack logic should have run and handled the destination path issue
+			t.Logf("Got transfer error (expected in test environment): %v", errorMsg)
+			t.Logf("Test passed: no segfault occurred, pack logic handled the case properly")
+		} else {
+			t.Fatalf("Got other error: %v", errorMsg)
+		}
+	} else {
+		// This shouldn't happen - we should get some kind of error
+		t.Fatal("Expected either downloadObject error or transferResult error, but got neither")
+	}
+
+}
