@@ -127,7 +127,7 @@ func TestRegistration(t *testing.T) {
 	require.Equal(t, 200, resp.StatusCode)
 
 	// Test new key is the same one we registered.
-	entries := []server_structs.Namespace{}
+	entries := []server_structs.Registration{}
 	err = json.Unmarshal(body, &entries)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(entries))
@@ -281,7 +281,7 @@ func TestMultiKeysRegistration(t *testing.T) {
 	require.Equal(t, 200, resp.StatusCode)
 
 	// Test new key is the same one we registered.
-	entries := []server_structs.Namespace{}
+	entries := []server_structs.Registration{}
 	err = json.Unmarshal(body, &entries)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(entries))

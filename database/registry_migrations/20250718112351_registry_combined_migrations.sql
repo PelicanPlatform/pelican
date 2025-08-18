@@ -1,8 +1,8 @@
 -- +goose Up
 -- +goose StatementBegin
 
--- Create initial namespace and topology tables (from 20240212192712)
-CREATE TABLE IF NOT EXISTS namespace (
+-- Create initial registrations and topology tables (from 20240212192712)
+CREATE TABLE IF NOT EXISTS registrations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   prefix TEXT NOT NULL UNIQUE,
   pubkey TEXT NOT NULL,
@@ -27,15 +27,15 @@ CREATE TABLE IF NOT EXISTS servers (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create services table (map the server to its namespace representation)
+-- Create services table (map the server to its registration representation)
 CREATE TABLE IF NOT EXISTS services (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     server_id TEXT NOT NULL,
-    namespace_id INTEGER NOT NULL,
+    registration_id INTEGER NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE,
-    FOREIGN KEY (namespace_id) REFERENCES namespace(id) ON DELETE CASCADE
+    FOREIGN KEY (registration_id) REFERENCES registrations(id) ON DELETE CASCADE
 );
 
 -- Create endpoints (network address) table
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS contacts (
 
 -- Create indexes for better query performance on server_id lookups
 CREATE INDEX IF NOT EXISTS idx_services_server_id ON services(server_id);
-CREATE INDEX IF NOT EXISTS idx_services_namespace_id ON services(namespace_id);
+CREATE INDEX IF NOT EXISTS idx_services_registration_id ON services(registration_id);
 CREATE INDEX IF NOT EXISTS idx_endpoints_server_id ON endpoints(server_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_server_id ON contacts(server_id);
 
@@ -75,7 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_contacts_server_id ON contacts(server_id);
 -- Drop indexes first
 DROP INDEX IF EXISTS idx_contacts_server_id;
 DROP INDEX IF EXISTS idx_endpoints_server_id;
-DROP INDEX IF EXISTS idx_services_namespace_id;
+DROP INDEX IF EXISTS idx_services_registration_id;
 DROP INDEX IF EXISTS idx_services_server_id;
 
 -- Drop tables in reverse dependency order
@@ -86,6 +86,6 @@ DROP TABLE IF EXISTS servers;
 
 -- Drop initial tables
 DROP TABLE IF EXISTS topology;
-DROP TABLE IF EXISTS namespace;
+DROP TABLE IF EXISTS registrations;
 
 -- +goose StatementEnd

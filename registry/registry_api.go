@@ -16,7 +16,7 @@ import (
 
 func getCountofFederationNamespacesByStatus(status server_structs.RegistrationStatus) (int, error) {
 	// filter by approved, denied, pending
-	filterNs := server_structs.Namespace{
+	filterNs := server_structs.Registration{
 		AdminMetadata: server_structs.AdminMetadata{
 			Status: status,
 		},

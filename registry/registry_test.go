@@ -66,7 +66,7 @@ func TestHandleWildcard(t *testing.T) {
 	t.Run("match-prefix-returns-namespace-if-exists", func(t *testing.T) {
 		setupMockRegistryDB(t)
 		defer teardownMockRegistryDB(t)
-		err := insertMockDBData([]server_structs.Namespace{{Prefix: "/foo/bar", AdminMetadata: server_structs.AdminMetadata{SiteName: "site foo"}}})
+		err := insertMockDBData([]server_structs.Registration{{Prefix: "/foo/bar", AdminMetadata: server_structs.AdminMetadata{SiteName: "site foo"}}})
 		require.NoError(t, err)
 
 		req, _ := http.NewRequest("GET", "/registry/foo/bar", nil)
@@ -78,7 +78,7 @@ func TestHandleWildcard(t *testing.T) {
 
 		bytes, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
-		ns := server_structs.Namespace{}
+		ns := server_structs.Registration{}
 		err = json.Unmarshal(bytes, &ns)
 		require.NoError(t, err)
 		assert.Equal(t, "site foo", ns.AdminMetadata.SiteName)
@@ -94,7 +94,7 @@ func TestHandleWildcard(t *testing.T) {
 		mockJWKS := jwk.NewSet()
 		mockJWKSBytes, err := json.Marshal(mockJWKS)
 		require.NoError(t, err)
-		err = insertMockDBData([]server_structs.Namespace{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes)}})
+		err = insertMockDBData([]server_structs.Registration{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes)}})
 		require.NoError(t, err)
 		mockNs, err := getNamespaceByPrefix(mockPrefix)
 
@@ -175,7 +175,7 @@ func TestHandleWildcard(t *testing.T) {
 			if tc.IsApproved {
 				mockStatus = server_structs.RegApproved
 			}
-			err = insertMockDBData([]server_structs.Namespace{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes), AdminMetadata: server_structs.AdminMetadata{Status: mockStatus}}})
+			err = insertMockDBData([]server_structs.Registration{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes), AdminMetadata: server_structs.AdminMetadata{Status: mockStatus}}})
 			require.NoError(t, err)
 			mockNs, err := getNamespaceByPrefix(mockPrefix)
 
@@ -266,7 +266,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		// Institution and UserId are empty
-		err = insertMockDBData([]server_structs.Namespace{mockNamespace("/incomplete-prefix", mockJWKS, "", server_structs.AdminMetadata{})})
+		err = insertMockDBData([]server_structs.Registration{mockNamespace("/incomplete-prefix", mockJWKS, "", server_structs.AdminMetadata{})})
 		require.NoError(t, err)
 
 		r := httptest.NewRecorder()
@@ -303,7 +303,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		require.NoError(t, err)
 		// Institution and UserId are empty
 		err = insertMockDBData(
-			[]server_structs.Namespace{
+			[]server_structs.Registration{
 				mockNamespace(
 					"/complete-prefix",
 					mockJWKS,
@@ -348,7 +348,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		require.NoError(t, err)
 		// Institution and UserId are empty
 		err = insertMockDBData(
-			[]server_structs.Namespace{
+			[]server_structs.Registration{
 				mockNamespace(
 					"/complete-prefix-1",
 					mockJWKS,

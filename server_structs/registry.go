@@ -57,7 +57,9 @@ type AdminMetadata struct {
 	UpdatedAt             time.Time          `json:"updated_at" post:"exclude"`
 }
 
-type Namespace struct {
+// Registration contains server (origin or cache) registrations and namespace registrations in Registry.
+// It was renamed from Namespace to avoid confusion with the namespace concept.
+type Registration struct {
 	ID            int                    `json:"id" post:"exclude" gorm:"primaryKey"`
 	Prefix        string                 `json:"prefix" validate:"required"`
 	Pubkey        string                 `json:"pubkey" validate:"required" description:"Pubkey is your Pelican server public key in JWKS form"`
@@ -130,8 +132,8 @@ func (a AdminMetadata) Equal(b AdminMetadata) bool {
 		a.UpdatedAt.Equal(b.UpdatedAt)
 }
 
-func (Namespace) TableName() string {
-	return "namespace"
+func (Registration) TableName() string {
+	return "registrations"
 }
 
 func IsValidRegStatus(s string) bool {
@@ -149,17 +151,17 @@ type Server struct {
 	UpdatedAt time.Time `json:"updated_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
 }
 
-// Service maps a server to its namespace representation
+// Service maps a server to its registration
 type Service struct {
-	ID          int       `json:"id" post:"exclude" gorm:"primaryKey"`
-	ServerID    string    `json:"server_id" validate:"required" gorm:"index"`
-	NamespaceID int       `json:"namespace_id" validate:"required" gorm:"index"`
-	CreatedAt   time.Time `json:"created_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
-	UpdatedAt   time.Time `json:"updated_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
+	ID             int       `json:"id" post:"exclude" gorm:"primaryKey"`
+	ServerID       string    `json:"server_id" validate:"required" gorm:"index"`
+	RegistrationID int       `json:"registration_id" validate:"required" gorm:"index"`
+	CreatedAt      time.Time `json:"created_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt      time.Time `json:"updated_at" post:"exclude" gorm:"default:CURRENT_TIMESTAMP"`
 
 	// Foreign key relationships
-	Server    Server    `json:"server" gorm:"foreignKey:ServerID;references:ID;constraint:OnDelete:CASCADE"`
-	Namespace Namespace `json:"namespace" gorm:"foreignKey:NamespaceID;references:ID;constraint:OnDelete:CASCADE"`
+	Server       Server       `json:"server" gorm:"foreignKey:ServerID;references:ID;constraint:OnDelete:CASCADE"`
+	Registration Registration `json:"registration" gorm:"foreignKey:RegistrationID;references:ID;constraint:OnDelete:CASCADE"`
 }
 
 // Endpoint represents a network address for a server
@@ -204,8 +206,8 @@ func (Contact) TableName() string {
 	return "contacts"
 }
 
-// ServerNamespace combines Server and Namespace structs with flattened fields
-type ServerNamespace struct {
+// ServerRegistration combines Server and Registration structs with flattened fields
+type ServerRegistration struct {
 	// Server fields
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
@@ -215,8 +217,8 @@ type ServerNamespace struct {
 	CreatedAt time.Time `json:"-" post:"exclude"`
 	UpdatedAt time.Time `json:"-" post:"exclude"`
 
-	// Namespace fields (ID renamed to NsID to avoid conflict)
-	NsID          int                    `json:"-" post:"exclude"`
+	// Registration fields (ID renamed to RegID to avoid conflict)
+	RegID         int                    `json:"-" post:"exclude"`
 	Prefix        string                 `json:"prefix"`
 	Pubkey        string                 `json:"-"`
 	Identity      string                 `json:"identity" post:"exclude"`

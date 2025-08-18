@@ -176,7 +176,7 @@ func keyIsRegistered(privkey jwk.Key, registryUrlStr string, prefix string) (key
 		}
 	}
 
-	var ns *server_structs.Namespace
+	var ns *server_structs.Registration
 	err = json.Unmarshal(OSDFBody, &ns)
 	if err != nil {
 		log.Error(fmt.Sprintf("Failed unmarshal namespace from response: %v, body: %v, response code: %v, URL: %v", err, OSDFBody, resp.StatusCode, registryUrl))

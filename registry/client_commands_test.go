@@ -147,7 +147,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		require.Equal(t, http.StatusOK, res.StatusCode)
 		data, err := io.ReadAll(res.Body)
 		require.NoError(t, err)
-		ns := server_structs.Namespace{}
+		ns := server_structs.Registration{}
 		err = json.Unmarshal(data, &ns)
 		require.NoError(t, err)
 		assert.Equal(t, ns.AdminMetadata.SiteName, "mock_site_name")

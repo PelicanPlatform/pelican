@@ -318,7 +318,7 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		return false, nil, sysErr
 	}
 
-	var ns server_structs.Namespace
+	var ns server_structs.Registration
 	ns.Prefix = data.Prefix
 
 	pubkeyData, err := json.Marshal(data.Pubkey)

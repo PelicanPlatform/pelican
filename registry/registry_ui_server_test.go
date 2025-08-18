@@ -33,8 +33,8 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 )
 
-func createTestServerData(t *testing.T) []server_structs.Namespace {
-	testNamespaces := []server_structs.Namespace{
+func createTestServerData(t *testing.T) []server_structs.Registration {
+	testNamespaces := []server_structs.Registration{
 		{
 			Prefix:   "/origins/test-origin-api.edu",
 			Pubkey:   "test-pubkey-1",
@@ -91,7 +91,7 @@ func TestListServersHandler(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var servers []server_structs.ServerNamespace
+		var servers []server_structs.ServerRegistration
 		err := json.Unmarshal(w.Body.Bytes(), &servers)
 		require.NoError(t, err)
 		assert.Len(t, servers, 2)
@@ -109,7 +109,7 @@ func TestListServersHandler(t *testing.T) {
 		require.NoError(t, err)
 		err = database.ServerDatabase.Exec("DELETE FROM servers").Error
 		require.NoError(t, err)
-		err = database.ServerDatabase.Exec("DELETE FROM namespace").Error
+		err = database.ServerDatabase.Exec("DELETE FROM registrations").Error
 		require.NoError(t, err)
 
 		req, _ := http.NewRequest("GET", "/servers", nil)
@@ -118,7 +118,7 @@ func TestListServersHandler(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var servers []server_structs.ServerNamespace
+		var servers []server_structs.ServerRegistration
 		err = json.Unmarshal(w.Body.Bytes(), &servers)
 		require.NoError(t, err)
 		assert.Len(t, servers, 0)
@@ -134,7 +134,7 @@ func TestGetServerHandler(t *testing.T) {
 	testNamespaces := createTestServerData(t)
 
 	// Get the server ID from the first namespace
-	server, err := getServerByNamespaceID(testNamespaces[0].ID)
+	server, err := getServerByRegistrationID(testNamespaces[0].ID)
 	require.NoError(t, err)
 
 	// Set up Gin router
@@ -149,7 +149,7 @@ func TestGetServerHandler(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Code)
 
-		var returnedServer server_structs.ServerNamespace
+		var returnedServer server_structs.ServerRegistration
 		err := json.Unmarshal(w.Body.Bytes(), &returnedServer)
 		require.NoError(t, err)
 		assert.Equal(t, server.ID, returnedServer.ID)
@@ -203,7 +203,7 @@ func TestServerAPIResponseFormats(t *testing.T) {
 		assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 
 		// Parse response to verify JSON structure
-		var servers []server_structs.ServerNamespace
+		var servers []server_structs.ServerRegistration
 		err := json.Unmarshal(w.Body.Bytes(), &servers)
 		require.NoError(t, err)
 		require.Len(t, servers, 2)
@@ -229,12 +229,12 @@ func TestServerAPIResponseFormats(t *testing.T) {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
-		var servers []server_structs.ServerNamespace
+		var servers []server_structs.ServerRegistration
 		err := json.Unmarshal(w.Body.Bytes(), &servers)
 		require.NoError(t, err)
 
 		// Find origin and cache servers
-		var originServer, cacheServer *server_structs.ServerNamespace
+		var originServer, cacheServer *server_structs.ServerRegistration
 		for i := range servers {
 			if servers[i].IsOrigin && !servers[i].IsCache {
 				originServer = &servers[i]
@@ -347,13 +347,13 @@ func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
-		var initialServers []server_structs.ServerNamespace
+		var initialServers []server_structs.ServerRegistration
 		err := json.Unmarshal(w.Body.Bytes(), &initialServers)
 		require.NoError(t, err)
 		initialCount := len(initialServers)
 
 		// Add a new namespace
-		ns := server_structs.Namespace{
+		ns := server_structs.Registration{
 			Prefix: "/origins/integration-test.edu",
 			Pubkey: "integration-test-pubkey",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -370,13 +370,13 @@ func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 		w = httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
-		var newServers []server_structs.ServerNamespace
+		var newServers []server_structs.ServerRegistration
 		err = json.Unmarshal(w.Body.Bytes(), &newServers)
 		require.NoError(t, err)
 		assert.Len(t, newServers, initialCount+1)
 
 		// Verify the new server exists
-		var foundServer *server_structs.ServerNamespace
+		var foundServer *server_structs.ServerRegistration
 		for i := range newServers {
 			if newServers[i].Name == "integration-test.edu" {
 				foundServer = &newServers[i]
@@ -390,7 +390,7 @@ func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 
 	t.Run("ServerUpdatedWhenNamespaceUpdated", func(t *testing.T) {
 		// Create initial namespace
-		ns := server_structs.Namespace{
+		ns := server_structs.Registration{
 			Prefix: "/origins/update-integration.edu",
 			Pubkey: "update-test-pubkey",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -404,7 +404,7 @@ func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 		require.NoError(t, err)
 
 		// Get initial server state
-		initialServer, err := getServerByNamespaceID(ns.ID)
+		initialServer, err := getServerByRegistrationID(ns.ID)
 		require.NoError(t, err)
 
 		// Update the namespace
@@ -418,11 +418,11 @@ func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 
-		var servers []server_structs.ServerNamespace
+		var servers []server_structs.ServerRegistration
 		err = json.Unmarshal(w.Body.Bytes(), &servers)
 		require.NoError(t, err)
 
-		var updatedServer *server_structs.ServerNamespace
+		var updatedServer *server_structs.ServerRegistration
 		for i := range servers {
 			if servers[i].ID == initialServer.ID {
 				updatedServer = &servers[i]

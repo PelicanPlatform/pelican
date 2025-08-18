@@ -82,7 +82,7 @@ const (
 
 func init() {
 	registrationFields = make([]registrationField, 0)
-	registrationFields = append(registrationFields, populateRegistrationFields("", server_structs.Namespace{})...)
+	registrationFields = append(registrationFields, populateRegistrationFields("", server_structs.Registration{})...)
 }
 
 // Populate registrationFields array to provide available namespace registration fields
@@ -226,7 +226,7 @@ func listNamespaces(ctx *gin.Context) {
 		return
 	}
 
-	filterNs := server_structs.Namespace{}
+	filterNs := server_structs.Registration{}
 
 	// For authenticated users, it returns all namespaces.
 	// For unauthenticated users, it returns namespaces with AdminMetadata.Status = Approved
@@ -277,7 +277,7 @@ func listNamespacesForUser(ctx *gin.Context) {
 		return
 	}
 
-	filterNs := server_structs.Namespace{AdminMetadata: server_structs.AdminMetadata{UserID: user}}
+	filterNs := server_structs.Registration{AdminMetadata: server_structs.AdminMetadata{UserID: user}}
 
 	if queryParams.Status != "" {
 		if server_structs.IsValidRegStatus(queryParams.Status) {
@@ -353,7 +353,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 	}
 
-	ns := server_structs.Namespace{}
+	ns := server_structs.Registration{}
 	if ctx.ShouldBindJSON(&ns) != nil {
 		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,

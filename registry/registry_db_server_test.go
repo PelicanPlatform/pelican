@@ -29,8 +29,8 @@ import (
 	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-func createTestNamespaces(t *testing.T) []server_structs.Namespace {
-	testNamespaces := []server_structs.Namespace{
+func createTestNamespaces(t *testing.T) []server_structs.Registration {
+	testNamespaces := []server_structs.Registration{
 		{
 			Prefix:   "/origins/test-origin-1.edu",
 			Pubkey:   "test-pubkey-1",
@@ -90,8 +90,8 @@ func TestServerNamespaceOperations(t *testing.T) {
 
 	testNamespaces := createTestNamespaces(t)
 
-	t.Run("GetServerByNamespaceID", func(t *testing.T) {
-		server, err := getServerByNamespaceID(testNamespaces[0].ID)
+	t.Run("getServerByRegistrationID", func(t *testing.T) {
+		server, err := getServerByRegistrationID(testNamespaces[0].ID)
 		require.NoError(t, err)
 		require.NotNil(t, server)
 		assert.Equal(t, "test-origin-1.edu", server.Name)
@@ -103,7 +103,7 @@ func TestServerNamespaceOperations(t *testing.T) {
 
 	t.Run("GetServerByID", func(t *testing.T) {
 		// First get the server ID
-		serverByNs, err := getServerByNamespaceID(testNamespaces[0].ID)
+		serverByNs, err := getServerByRegistrationID(testNamespaces[0].ID)
 		require.NoError(t, err)
 
 		// Now get by server ID
@@ -135,7 +135,7 @@ func TestServerNamespaceOperations(t *testing.T) {
 	})
 
 	t.Run("GetServerByNonExistentNamespaceID", func(t *testing.T) {
-		server, err := getServerByNamespaceID(999)
+		server, err := getServerByRegistrationID(999)
 		require.NoError(t, err) // The function doesn't return an error for non-existent records
 		// Instead, it returns a server with empty ID
 		assert.Empty(t, server.ID)
@@ -154,7 +154,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 	defer teardownMockRegistryDB(t)
 
 	t.Run("AddOriginServer", func(t *testing.T) {
-		ns := server_structs.Namespace{
+		ns := server_structs.Registration{
 			Prefix: "/origins/new-origin.edu",
 			Pubkey: "test-pubkey",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -168,7 +168,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify server was created
-		server, err := getServerByNamespaceID(ns.ID)
+		server, err := getServerByRegistrationID(ns.ID)
 		require.NoError(t, err)
 		assert.True(t, server.IsOrigin)
 		assert.False(t, server.IsCache)
@@ -176,7 +176,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 	})
 
 	t.Run("AddCacheServer", func(t *testing.T) {
-		ns := server_structs.Namespace{
+		ns := server_structs.Registration{
 			Prefix: "/caches/new-cache.edu",
 			Pubkey: "test-pubkey",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -190,7 +190,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify server was created
-		server, err := getServerByNamespaceID(ns.ID)
+		server, err := getServerByRegistrationID(ns.ID)
 		require.NoError(t, err)
 		assert.False(t, server.IsOrigin)
 		assert.True(t, server.IsCache)
@@ -199,7 +199,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 
 	t.Run("AddDualServerType", func(t *testing.T) {
 		// Create first namespace as origin
-		originNs := server_structs.Namespace{
+		originNs := server_structs.Registration{
 			Prefix: "/origins/dual-server.edu",
 			Pubkey: "test-pubkey",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -213,7 +213,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create second namespace as cache for same server
-		cacheNs := server_structs.Namespace{
+		cacheNs := server_structs.Registration{
 			Prefix: "/caches/dual-server.edu",
 			Pubkey: "test-pubkey",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -227,19 +227,19 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify server has both origin and cache capabilities
-		server, err := getServerByNamespaceID(originNs.ID)
+		server, err := getServerByRegistrationID(originNs.ID)
 		require.NoError(t, err)
 		assert.True(t, server.IsOrigin)
 		assert.True(t, server.IsCache)
 
 		// Verify both namespaces map to same server
-		server2, err := getServerByNamespaceID(cacheNs.ID)
+		server2, err := getServerByRegistrationID(cacheNs.ID)
 		require.NoError(t, err)
 		assert.Equal(t, server.ID, server2.ID)
 	})
 
 	t.Run("SkipNonServerNamespace", func(t *testing.T) {
-		ns := server_structs.Namespace{
+		ns := server_structs.Registration{
 			Prefix: "/regular/namespace",
 			Pubkey: "test-pubkey",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -253,7 +253,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 		require.NoError(t, err) // Should not error, just skip
 
 		// Verify no server was created
-		server, err := getServerByNamespaceID(ns.ID)
+		server, err := getServerByRegistrationID(ns.ID)
 		require.NoError(t, err)    // Function doesn't error for non-existent records
 		assert.Empty(t, server.ID) // But returns empty server
 	})
@@ -264,7 +264,7 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 	defer teardownMockRegistryDB(t)
 
 	// Create initial namespace
-	ns := server_structs.Namespace{
+	ns := server_structs.Registration{
 		Prefix: "/origins/update-test.edu",
 		Pubkey: "test-pubkey",
 		AdminMetadata: server_structs.AdminMetadata{
@@ -286,7 +286,7 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify server was updated
-		server, err := getServerByNamespaceID(ns.ID)
+		server, err := getServerByRegistrationID(ns.ID)
 		require.NoError(t, err)
 		assert.Equal(t, "updated-test.edu", server.Name)
 		assert.Equal(t, "Updated description", server.AdminMetadata.Description)
@@ -300,7 +300,7 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify server flags were updated
-		server, err := getServerByNamespaceID(ns.ID)
+		server, err := getServerByRegistrationID(ns.ID)
 		require.NoError(t, err)
 		assert.False(t, server.IsOrigin)
 		assert.True(t, server.IsCache)
@@ -313,7 +313,7 @@ func TestServerTableConstraints(t *testing.T) {
 
 	t.Run("ServerNameUniqueness", func(t *testing.T) {
 		// Create first namespace
-		ns1 := server_structs.Namespace{
+		ns1 := server_structs.Registration{
 			Prefix: "/origins/unique-server.edu",
 			Pubkey: "test-pubkey-1",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -326,7 +326,7 @@ func TestServerTableConstraints(t *testing.T) {
 		require.NoError(t, err)
 
 		// Try to create another namespace with same site name but different prefix
-		ns2 := server_structs.Namespace{
+		ns2 := server_structs.Registration{
 			Prefix: "/caches/unique-server.edu", // Different prefix but same site name
 			Pubkey: "test-pubkey-2",
 			AdminMetadata: server_structs.AdminMetadata{
@@ -341,7 +341,7 @@ func TestServerTableConstraints(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify the server has both capabilities
-		server, err := getServerByNamespaceID(ns1.ID)
+		server, err := getServerByRegistrationID(ns1.ID)
 		require.NoError(t, err)
 		assert.True(t, server.IsOrigin)
 		assert.True(t, server.IsCache)
@@ -350,8 +350,8 @@ func TestServerTableConstraints(t *testing.T) {
 	t.Run("ForeignKeyConstraints", func(t *testing.T) {
 		// Try to create service with non-existent namespace ID
 		service := server_structs.Service{
-			ServerID:    "test123",
-			NamespaceID: 999, // Non-existent namespace
+			ServerID:       "test123",
+			RegistrationID: 999, // Non-existent namespace
 		}
 		err := database.ServerDatabase.Create(&service).Error
 		assert.Error(t, err) // Should fail due to foreign key constraint
@@ -380,7 +380,7 @@ func TestServerTableCascadeDelete(t *testing.T) {
 	defer teardownMockRegistryDB(t)
 
 	// Create a namespace which will create a server
-	ns := server_structs.Namespace{
+	ns := server_structs.Registration{
 		Prefix: "/origins/cascade-test.edu",
 		Pubkey: "test-pubkey",
 		AdminMetadata: server_structs.AdminMetadata{
@@ -394,7 +394,7 @@ func TestServerTableCascadeDelete(t *testing.T) {
 	require.NoError(t, err)
 
 	// Get the server to create related records
-	server, err := getServerByNamespaceID(ns.ID)
+	server, err := getServerByRegistrationID(ns.ID)
 	require.NoError(t, err)
 
 	// Create related records

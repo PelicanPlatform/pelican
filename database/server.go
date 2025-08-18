@@ -114,14 +114,14 @@ func migrateFromLegacyRegistryDB() error {
 		return errors.New("Server_DbLocation parameter is not set")
 	}
 
-	// Check if we've already migrated (if namespace table has data)
-	var namespaceCount int64
-	if err := ServerDatabase.Model(&server_structs.Namespace{}).Count(&namespaceCount).Error; err != nil {
-		return errors.Wrap(err, "failed to check existing namespace data")
+	// Check if we've already migrated (if registrations table has data)
+	var registrationCount int64
+	if err := ServerDatabase.Model(&server_structs.Registration{}).Count(&registrationCount).Error; err != nil {
+		return errors.Wrap(err, "failed to check existing registration data")
 	}
 
-	if namespaceCount > 0 {
-		log.Info("Namespace data already exists, skipping legacy database migration")
+	if registrationCount > 0 {
+		log.Info("Registration data already exists, skipping legacy database migration")
 		return nil
 	}
 
@@ -144,9 +144,9 @@ func migrateFromLegacyRegistryDB() error {
 		}
 	}()
 
-	// Copy namespace data
+	// Copy the data from the namespace table into the registrations table
 	copyNamespaceSQL := `
-		INSERT OR IGNORE INTO namespace (id, prefix, pubkey, identity, admin_metadata, custom_fields)
+		INSERT OR IGNORE INTO registrations (id, prefix, pubkey, identity, admin_metadata, custom_fields)
 		SELECT id, prefix, pubkey, identity, admin_metadata, custom_fields
 		FROM legacy_registry.namespace
 	`
@@ -168,7 +168,7 @@ func migrateFromLegacyRegistryDB() error {
 	}
 	topologyRows, _ := result.RowsAffected()
 
-	log.Infof("Successfully migrated %d namespace records and %d topology records from legacy database",
+	log.Infof("Successfully migrated %d registration records and %d topology records from legacy database",
 		namespaceRows, topologyRows)
 
 	return nil
@@ -185,7 +185,7 @@ func fileExists(path string) bool {
 // Populate new tables with the newly migrated data
 func populateNewServerTables() error {
 	// Find all server namespaces that haven't been migrated yet
-	var namespaces []server_structs.Namespace
+	var namespaces []server_structs.Registration
 	err := ServerDatabase.Where("prefix LIKE ? OR prefix LIKE ?", "/origins/%", "/caches/%").Find(&namespaces).Error
 	if err != nil {
 		return errors.Wrap(err, "failed to fetch server namespaces")
@@ -195,7 +195,7 @@ func populateNewServerTables() error {
 	migratedCount := 0
 	for _, ns := range namespaces {
 		var serviceCount int64
-		if err := ServerDatabase.Model(&server_structs.Service{}).Where("namespace_id = ?", ns.ID).Count(&serviceCount).Error; err != nil {
+		if err := ServerDatabase.Model(&server_structs.Service{}).Where("registration_id = ?", ns.ID).Count(&serviceCount).Error; err != nil {
 			return errors.Wrapf(err, "failed to check if namespace %d is already migrated", ns.ID)
 		}
 		if serviceCount > 0 {
@@ -221,7 +221,7 @@ func populateNewServerTables() error {
 		for _, ns := range namespaces {
 			// Skip if already migrated
 			var serviceCount int64
-			if err := tx.Model(&server_structs.Service{}).Where("namespace_id = ?", ns.ID).Count(&serviceCount).Error; err != nil {
+			if err := tx.Model(&server_structs.Service{}).Where("registration_id = ?", ns.ID).Count(&serviceCount).Error; err != nil {
 				return err
 			}
 			if serviceCount > 0 {
@@ -294,14 +294,14 @@ func populateNewServerTables() error {
 
 			// Create service mapping
 			service := server_structs.Service{
-				ServerID:    server.ID,
-				NamespaceID: ns.ID,
+				ServerID:       server.ID,
+				RegistrationID: ns.ID,
 			}
 			if err := tx.Create(&service).Error; err != nil {
-				return errors.Wrapf(err, "failed to create service for namespace %d", ns.ID)
+				return errors.Wrapf(err, "failed to create service for registration %d", ns.ID)
 			}
 
-			log.Infof("Migrated namespace %d (%s) -> server %s", ns.ID, ns.Prefix, server.ID)
+			log.Infof("Migrated registration %d (%s) -> server %s", ns.ID, ns.Prefix, server.ID)
 		}
 		return nil
 	})
