@@ -39,7 +39,7 @@ func TestBearerAuthenticator_Authorize(t *testing.T) {
 	}))
 	defer server.Close()
 
-	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false, false)
 	token.SetToken("some_token_1234_abc")
 	authenticator := &bearerAuthenticator{token: token}
 	client := &http.Client{}
@@ -57,7 +57,7 @@ func TestBearerAuthenticator_Authorize(t *testing.T) {
 }
 
 func TestBearerAuthenticator_Verify(t *testing.T) {
-	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := NewTokenGenerator(nil, nil, config.TokenSharedRead, false, false)
 	token.SetToken("some_token_1234_abc")
 	authenticator := &bearerAuthenticator{token: token}
 	client := &http.Client{}

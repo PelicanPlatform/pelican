@@ -108,13 +108,15 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_st
 
 	var storageScope string
 	if opts.Operation == config.TokenSharedWrite || opts.Operation == config.TokenWrite {
-		storageScope = "storage.create:"
+		storageScope = "storage.create:" + pathCleaned
 	} else if opts.Operation == config.TokenDelete {
-		storageScope = "storage.modify:"
+		storageScope = "storage.modify:" + pathCleaned
+		if opts.Recursive {
+			storageScope += " storage.read:" + pathCleaned
+		}
 	} else {
-		storageScope = "storage.read:"
+		storageScope = "storage.read:" + pathCleaned
 	}
-	storageScope += pathCleaned
 	log.Debugln("Requesting a credential with the following scope:", storageScope)
 
 	oauth2Config := Config{

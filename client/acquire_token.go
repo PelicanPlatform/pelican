@@ -69,6 +69,7 @@ type (
 		TokenLocation string
 		TokenName     string
 		Operation     config.TokenOperation
+		Recursive     bool
 		EnableAcquire bool
 		Token         atomic.Pointer[tokenInfo]
 		Iterator      *tokenContentIterator
@@ -84,12 +85,13 @@ type (
 	}
 )
 
-func NewTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
+func NewTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool, recursive bool) *tokenGenerator {
 	return &tokenGenerator{
 		DirResp:       dirResp,
 		Destination:   dest,
 		Operation:     operation,
 		EnableAcquire: enableAcquire,
+		Recursive:     recursive,
 		Sync:          new(singleflight.Group),
 	}
 }
@@ -312,6 +314,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 
 	opts := config.TokenGenerationOpts{
 		Operation: tg.Operation,
+		Recursive: tg.Recursive,
 	}
 
 	if tg.Iterator == nil {
@@ -345,7 +348,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 	}
 
 	if tg.EnableAcquire && tg.Destination != nil && tg.DirResp != nil {
-		opts := config.TokenGenerationOpts{Operation: tg.Operation}
+		opts := config.TokenGenerationOpts{Operation: tg.Operation, Recursive: tg.Recursive}
 		var contents string
 		contents, err = AcquireToken(tg.Destination.GetRawUrl(), *tg.DirResp, opts)
 		if err == nil && contents != "" {
