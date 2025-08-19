@@ -23,7 +23,7 @@ func getCountofFederationNamespacesByStatus(status server_structs.RegistrationSt
 	}
 
 	// prefixForNamespace allows us to get all namespaces that are not prefixed by /origins/ or /caches/
-	namespaces, err := getNamespacesByFilter(filterNs, prefixForNamespace, false)
+	namespaces, err := getRegistrationsByFilter(filterNs, prefixForNamespace, false)
 	if err != nil {
 		return 0, err
 	}

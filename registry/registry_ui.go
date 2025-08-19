@@ -244,7 +244,7 @@ func listNamespaces(ctx *gin.Context) {
 		filterNs.AdminMetadata.Status = server_structs.RegApproved
 	}
 
-	namespaces, err := getNamespacesByFilter(filterNs, prefixType(queryParams.PrefixType), queryParams.Legacy)
+	namespaces, err := getRegistrationsByFilter(filterNs, prefixType(queryParams.PrefixType), queryParams.Legacy)
 	if err != nil {
 		log.Error("Failed to get namespaces by prefix type: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -289,7 +289,7 @@ func listNamespacesForUser(ctx *gin.Context) {
 		}
 	}
 
-	namespaces, err := getNamespacesByFilter(filterNs, "", false)
+	namespaces, err := getRegistrationsByFilter(filterNs, "", false)
 	if err != nil {
 		log.Error("Error getting namespaces for user ", user)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -378,7 +378,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 
 	if !isUpdate {
 		// Check if prefix exists before doing anything else. Skip check if it's update operation
-		exists, err := namespaceExistsByPrefix(ns.Prefix)
+		exists, err := registrationExistsByPrefix(ns.Prefix)
 		if err != nil {
 			log.Errorf("Failed to check if namespace already exists: %v", err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -480,7 +480,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			})
 			return
 		}
-		if err := AddNamespace(&ns); err != nil {
+		if err := AddRegistration(&ns); err != nil {
 			log.Errorf("Failed to insert namespace with id %d. %v", ns.ID, err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -502,7 +502,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 	} else { // Update
 		// First check if the namespace exists
-		exists, err := namespaceExistsById(ns.ID)
+		exists, err := registrationExistsById(ns.ID)
 		if err != nil {
 			log.Error("Failed to get namespace by ID:", err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -522,7 +522,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		belongsTo := false
 
 		if !isAdmin { // Not admin, need to check if the namespace belongs to the user
-			belongsTo, err = namespaceBelongsToUserId(ns.ID, user)
+			belongsTo, err = registrationBelongsToUserId(ns.ID, user)
 			if err != nil {
 				log.Error("Error checking if namespace belongs to the user: ", err)
 				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -543,7 +543,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 					return
 				}
 			}
-			existingStatus, err := getNamespaceStatusById(ns.ID)
+			existingStatus, err := getRegistrationStatusById(ns.ID)
 			if err != nil {
 				log.Error("Error checking namespace status: ", err)
 				ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -626,7 +626,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 		}
 
 		// If the user has privilege to update, go ahead
-		if err := updateNamespace(&ns); err != nil {
+		if err := updateRegistration(&ns); err != nil {
 			log.Errorf("Failed to update namespace with id %d. %v", ns.ID, err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
@@ -652,7 +652,7 @@ func getNamespace(ctx *gin.Context) {
 			Msg:    "Invalid ID format. ID must a non-zero integer"})
 		return
 	}
-	exists, err := namespaceExistsById(id)
+	exists, err := registrationExistsById(id)
 	if err != nil {
 		log.Error("Error checking if namespace exists: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -672,7 +672,7 @@ func getNamespace(ctx *gin.Context) {
 	belongsTo := false
 
 	if !isAdmin { // Not admin, need to check if the namespace belongs to the user
-		belongsTo, err = namespaceBelongsToUserId(id, user)
+		belongsTo, err = registrationBelongsToUserId(id, user)
 		if err != nil {
 			log.Error("Error checking if namespace belongs to the user: ", err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -695,7 +695,7 @@ func getNamespace(ctx *gin.Context) {
 		}
 	}
 
-	ns, err := getNamespaceById(id)
+	ns, err := getRegistrationById(id)
 	if err != nil {
 		log.Error("Error getting namespace: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -755,7 +755,7 @@ func updateNamespaceStatus(ctx *gin.Context, status server_structs.RegistrationS
 			Msg:    "Invalid ID format. ID must a non-zero integer"})
 		return
 	}
-	exists, err := namespaceExistsById(id)
+	exists, err := registrationExistsById(id)
 	if err != nil {
 		log.Error("Error checking if namespace exists: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -771,7 +771,7 @@ func updateNamespaceStatus(ctx *gin.Context, status server_structs.RegistrationS
 		return
 	}
 
-	if err = updateNamespaceStatusById(id, status, user); err != nil {
+	if err = updateRegistrationStatusById(id, status, user); err != nil {
 		log.Error("Error updating namespace status by ID:", id, " to status:", status)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 			Status: server_structs.RespFailed,
@@ -795,7 +795,7 @@ func getNamespaceJWKS(ctx *gin.Context) {
 			Msg:    "Invalid ID format. ID must a non-zero integer"})
 		return
 	}
-	found, err := namespaceExistsById(id)
+	found, err := registrationExistsById(id)
 	if err != nil {
 		log.Errorf("Failed to check if namespace exists with id %d. %v", id, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -809,7 +809,7 @@ func getNamespaceJWKS(ctx *gin.Context) {
 			Msg:    "Namespace not found"})
 		return
 	}
-	jwks, err := getNamespaceJwksById(id)
+	jwks, err := getRegistrationJwksById(id)
 	if err != nil {
 		log.Errorf("Failed to get namespace jwks by id %d. %v", id, err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -841,7 +841,7 @@ func deleteNamespace(ctx *gin.Context) {
 			Msg:    "Invalid ID format. ID must a non-zero integer"})
 		return
 	}
-	exists, err := namespaceExistsById(id)
+	exists, err := registrationExistsById(id)
 	if err != nil {
 		log.Error("Error checking if namespace exists: ", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
@@ -856,7 +856,7 @@ func deleteNamespace(ctx *gin.Context) {
 			Msg:    "Namespace not found"})
 		return
 	}
-	err = deleteNamespaceByID(id)
+	err = deleteRegistrationByID(id)
 	if err != nil {
 		log.Errorf("Error deleting the namespace: %v", err)
 		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{

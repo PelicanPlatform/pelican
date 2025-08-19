@@ -77,7 +77,7 @@ func createTestNamespaces(t *testing.T) []server_structs.Registration {
 
 	// Add namespaces which will automatically create servers
 	for i := range testNamespaces {
-		err := AddNamespace(&testNamespaces[i])
+		err := AddRegistration(&testNamespaces[i])
 		require.NoError(t, err)
 	}
 
@@ -165,7 +165,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 			},
 		}
 
-		err := AddNamespace(&ns)
+		err := AddRegistration(&ns)
 		require.NoError(t, err)
 
 		// Verify server was created
@@ -187,7 +187,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 			},
 		}
 
-		err := AddNamespace(&ns)
+		err := AddRegistration(&ns)
 		require.NoError(t, err)
 
 		// Verify server was created
@@ -210,7 +210,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 			},
 		}
 
-		err := AddNamespace(&originNs)
+		err := AddRegistration(&originNs)
 		require.NoError(t, err)
 
 		// Create second namespace as cache for same server
@@ -224,7 +224,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 			},
 		}
 
-		err = AddNamespace(&cacheNs)
+		err = AddRegistration(&cacheNs)
 		require.NoError(t, err)
 
 		// Verify server has both origin and cache capabilities
@@ -250,7 +250,7 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 			},
 		}
 
-		err := AddNamespace(&ns)
+		err := AddRegistration(&ns)
 		require.NoError(t, err) // Should not error, just skip
 
 		// Verify no server was created
@@ -275,7 +275,7 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 		},
 	}
 
-	err := AddNamespace(&ns)
+	err := AddRegistration(&ns)
 	require.NoError(t, err)
 
 	t.Run("UpdateNamespaceAndServer", func(t *testing.T) {
@@ -283,7 +283,7 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 		ns.AdminMetadata.SiteName = "updated-test.edu"
 		ns.AdminMetadata.Description = "Updated description"
 
-		err := updateNamespace(&ns)
+		err := updateRegistration(&ns)
 		require.NoError(t, err)
 
 		// Verify server was updated
@@ -298,7 +298,7 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 		// Change to cache prefix (this would normally not happen in practice)
 		ns.Prefix = "/caches/updated-test.edu"
 
-		err := updateNamespace(&ns)
+		err := updateRegistration(&ns)
 		require.NoError(t, err)
 
 		// Verify server flags were updated
@@ -324,7 +324,7 @@ func TestServerTableConstraints(t *testing.T) {
 				Status:      server_structs.RegApproved,
 			},
 		}
-		err := AddNamespace(&ns1)
+		err := AddRegistration(&ns1)
 		require.NoError(t, err)
 
 		// Try to create another namespace with same site name but different prefix
@@ -339,7 +339,7 @@ func TestServerTableConstraints(t *testing.T) {
 		}
 
 		// This should succeed and update the existing server to be both origin and cache
-		err = AddNamespace(&ns2)
+		err = AddRegistration(&ns2)
 		require.NoError(t, err)
 
 		// Verify the server has both capabilities
@@ -392,7 +392,7 @@ func TestServerTableCascadeDelete(t *testing.T) {
 		},
 	}
 
-	err := AddNamespace(&ns)
+	err := AddRegistration(&ns)
 	require.NoError(t, err)
 
 	// Get the server to create related records
@@ -455,7 +455,7 @@ func TestServerWithMultipleServices(t *testing.T) {
 				Status:      server_structs.RegApproved,
 			},
 		}
-		err := AddNamespace(&originReg)
+		err := AddRegistration(&originReg)
 		require.NoError(t, err, "Failed to add origin namespace")
 
 		// Create a cache registration for the same server
@@ -469,7 +469,7 @@ func TestServerWithMultipleServices(t *testing.T) {
 				Status:      server_structs.RegApproved,
 			},
 		}
-		err = AddNamespace(&cacheReg)
+		err = AddRegistration(&cacheReg)
 		require.NoError(t, err, "Failed to add cache namespace")
 
 		// Verify only one server was created (since they have the same site name)

@@ -710,7 +710,7 @@ func TestUpdateNamespaceStatus(t *testing.T) {
 				if tc.validID {
 					intId, err := strconv.Atoi(finalId)
 					require.NoError(t, err)
-					ns, err := getNamespaceById(intId)
+					ns, err := getRegistrationById(intId)
 					require.NoError(t, err)
 					assert.True(t, ns.AdminMetadata.Status == server_structs.RegApproved)
 					assert.NotEqual(t, time.Time{}, ns.AdminMetadata.ApprovedAt)
@@ -989,7 +989,7 @@ func TestCreateNamespace(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 		assert.JSONEq(t, `{"msg":"Prefix /foo successfully registered", "status":"success"}`, string(body))
 
-		nss, err := getAllNamespaces()
+		nss, err := getAllRegistrations()
 		require.NoError(t, err)
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/foo", nss[0].Prefix)
@@ -1046,7 +1046,7 @@ func TestCreateNamespace(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 		assert.JSONEq(t, `{"msg":"Prefix /foo successfully registered", "status":"success"}`, string(body))
 
-		nss, err := getAllNamespaces()
+		nss, err := getAllRegistrations()
 		require.NoError(t, err)
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/foo", nss[0].Prefix)
@@ -1087,7 +1087,7 @@ func TestCreateNamespace(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 		assert.JSONEq(t, `{"msg":"Prefix /topo/foo/bar successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: /topo/foo. The registry admin will review your request and approve your namespace if this is expected.", "status":"success"}`, string(body))
 
-		nss, err := getAllNamespaces()
+		nss, err := getAllRegistrations()
 		require.NoError(t, err)
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/topo/foo/bar", nss[0].Prefix)
@@ -1129,7 +1129,7 @@ func TestCreateNamespace(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 		assert.JSONEq(t, `{"msg":"Prefix /topo/foo successfully registered. Note that there is an existing superspace or subspace of the namespace in the OSDF topology: /topo/foo. The registry admin will review your request and approve your namespace if this is expected.", "status":"success"}`, string(body))
 
-		nss, err := getAllNamespaces()
+		nss, err := getAllRegistrations()
 		require.NoError(t, err)
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/topo/foo", nss[0].Prefix)
@@ -1329,7 +1329,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 
-		nss, err := getAllNamespaces()
+		nss, err := getAllRegistrations()
 		require.NoError(t, err)
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/foo", nss[0].Prefix)
@@ -1383,7 +1383,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 
-		nss, err := getAllNamespaces()
+		nss, err := getAllRegistrations()
 		require.NoError(t, err)
 		require.Equal(t, 1, len(nss))
 		assert.Equal(t, "/foo", nss[0].Prefix)

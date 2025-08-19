@@ -96,7 +96,7 @@ func TestHandleWildcard(t *testing.T) {
 		require.NoError(t, err)
 		err = insertMockDBData([]server_structs.Registration{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes)}})
 		require.NoError(t, err)
-		mockNs, err := getNamespaceByPrefix(mockPrefix)
+		mockNs, err := getRegistrationByPrefix(mockPrefix)
 
 		require.NoError(t, err)
 		require.NotNil(t, mockNs)
@@ -177,7 +177,7 @@ func TestHandleWildcard(t *testing.T) {
 			}
 			err = insertMockDBData([]server_structs.Registration{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes), AdminMetadata: server_structs.AdminMetadata{Status: mockStatus}}})
 			require.NoError(t, err)
-			mockNs, err := getNamespaceByPrefix(mockPrefix)
+			mockNs, err := getRegistrationByPrefix(mockPrefix)
 
 			require.NoError(t, err)
 			require.NotNil(t, mockNs)

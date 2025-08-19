@@ -63,7 +63,7 @@ func createTestServerData(t *testing.T) []server_structs.Registration {
 
 	// Add namespaces which will automatically create servers
 	for i := range testNamespaces {
-		err := AddNamespace(&testNamespaces[i])
+		err := AddRegistration(&testNamespaces[i])
 		require.NoError(t, err)
 	}
 
@@ -366,7 +366,7 @@ func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 				Status:      server_structs.RegApproved,
 			},
 		}
-		err = AddNamespace(&ns)
+		err = AddRegistration(&ns)
 		require.NoError(t, err)
 
 		// Check that server count increased
@@ -405,7 +405,7 @@ func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 				Status:      server_structs.RegApproved,
 			},
 		}
-		err := AddNamespace(&ns)
+		err := AddRegistration(&ns)
 		require.NoError(t, err)
 
 		// Get initial server state
@@ -415,7 +415,7 @@ func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 		// Update the namespace
 		ns.AdminMetadata.SiteName = "updated-integration.edu"
 		ns.AdminMetadata.Description = "Updated description"
-		err = updateNamespace(&ns)
+		err = updateRegistration(&ns)
 		require.NoError(t, err)
 
 		// Verify server was updated via API

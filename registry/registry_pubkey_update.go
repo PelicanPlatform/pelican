@@ -71,7 +71,7 @@ func updateNsKeySignChallengeInit(data *RegisteredPrefixUpdate) (map[string]inte
 
 	registeredKeysOnNs := make(map[string]string)
 	for _, prefix := range data.Prefixes {
-		existingNs, err := getNamespaceByPrefix(prefix)
+		existingNs, err := getRegistrationByPrefix(prefix)
 		if err != nil {
 			log.Errorf("Namespace %s not exists: %v", prefix, err)
 			return nil, errors.Wrapf(err, "Server encountered an error retrieving namespace %s", prefix)
@@ -157,7 +157,7 @@ func updateNsKeySignChallengeCommit(data *RegisteredPrefixUpdate) (map[string]in
 
 			// We ensure the prefix exists in registry db via updateNsKeySignChallengeInit function
 
-			existingNs, err := getNamespaceByPrefix(prefix)
+			existingNs, err := getRegistrationByPrefix(prefix)
 			if err != nil {
 				log.Errorf("Failed to get existing namespace to update: %v", err)
 				return nil, errors.Wrap(err, "Server encountered an error getting existing namespace to update")
@@ -215,7 +215,7 @@ func updateNsKeySignChallengeCommit(data *RegisteredPrefixUpdate) (map[string]in
 				log.Infof("The public key of prefix %s hasn't changed -- nothing to update!", prefix)
 				return returnMsg, nil
 			} else {
-				err = setNamespacePubKey(prefix, string(data.AllPubkeys))
+				err = setRegistrationPubKey(prefix, string(data.AllPubkeys))
 				log.Debugf("New public keys %s just replaced the old ones: %s", string(data.AllPubkeys), existingNs.Pubkey)
 				if err != nil {
 					log.Errorf("Failed to update the public key of namespace %s: %v", prefix, err)

@@ -318,9 +318,9 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 	jwksStr := string(jwksBytes)
 
 	// Test functionality of a namespace registered with multi public keys [p2,p4]
-	err = setNamespacePubKey(prefix, jwksStr) // set the registered public keys to [p2,p4]
+	err = setRegistrationPubKey(prefix, jwksStr) // set the registered public keys to [p2,p4]
 	require.NoError(t, err)
-	ns, err := getNamespaceByPrefix(prefix)
+	ns, err := getRegistrationByPrefix(prefix)
 	require.NoError(t, err)
 	require.Equal(t, jwksStr, ns.Pubkey)
 
@@ -331,7 +331,7 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 	// => should update Registry to [p1,p2,p3] (complete overwrite)
 	err = NamespacesPubKeyUpdate(privKey3, []string{prefix}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
 	require.NoError(t, err)
-	ns, err = getNamespaceByPrefix(prefix)
+	ns, err = getRegistrationByPrefix(prefix)
 	require.NoError(t, err)
 
 	expectedJwks := jwk.NewSet()
