@@ -99,8 +99,9 @@ func TestListServersHandler(t *testing.T) {
 		// Verify response structure
 		assert.NotEmpty(t, servers[0].ID)
 		assert.NotEmpty(t, servers[0].Name)
-		assert.NotEmpty(t, servers[0].Prefix)
-		assert.NotEmpty(t, servers[0].AdminMetadata.Institution)
+		require.Len(t, servers[0].Registration, 1, "Expected exactly one registration for server 0")
+		assert.NotEmpty(t, servers[0].Registration[0].Prefix)
+		assert.NotEmpty(t, servers[0].Registration[0].AdminMetadata.Institution)
 	})
 
 	t.Run("EmptyServersListReturnsEmptyArray", func(t *testing.T) {
@@ -154,7 +155,9 @@ func TestGetServerHandler(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, server.ID, returnedServer.ID)
 		assert.Equal(t, server.Name, returnedServer.Name)
-		assert.Equal(t, server.Prefix, returnedServer.Prefix)
+		require.Len(t, server.Registration, 1, "Expected exactly one registration for server")
+		require.Len(t, returnedServer.Registration, 1, "Expected exactly one registration for returnedServer")
+		assert.Equal(t, server.Registration[0].Prefix, returnedServer.Registration[0].Prefix)
 	})
 
 	t.Run("GetNonExistentServer", func(t *testing.T) {
@@ -212,13 +215,14 @@ func TestServerAPIResponseFormats(t *testing.T) {
 		server := servers[0]
 		assert.NotEmpty(t, server.ID)
 		assert.NotEmpty(t, server.Name)
-		assert.NotEmpty(t, server.Prefix)
+		require.Len(t, server.Registration, 1, "Expected exactly one registration")
+		assert.NotEmpty(t, server.Registration[0].Prefix)
 		assert.True(t, server.IsOrigin || server.IsCache)
 
 		// Verify AdminMetadata is properly serialized
-		assert.NotEmpty(t, server.AdminMetadata.Institution)
-		assert.NotEmpty(t, server.AdminMetadata.SiteName)
-		assert.Equal(t, server_structs.RegApproved, server.AdminMetadata.Status)
+		assert.NotEmpty(t, server.Registration[0].AdminMetadata.Institution)
+		assert.NotEmpty(t, server.Registration[0].AdminMetadata.SiteName)
+		assert.Equal(t, server_structs.RegApproved, server.Registration[0].AdminMetadata.Status)
 
 		// Verify timestamps are excluded (should be zero values in JSON)
 		assert.True(t, server.CreatedAt.IsZero() || !server.CreatedAt.IsZero()) // Either is acceptable for test
@@ -385,7 +389,8 @@ func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 		}
 		require.NotNil(t, foundServer, "New server should be created")
 		assert.True(t, foundServer.IsOrigin)
-		assert.Equal(t, "/origins/integration-test.edu", foundServer.Prefix)
+		require.Len(t, foundServer.Registration, 1, "Expected exactly one registration")
+		assert.Equal(t, "/origins/integration-test.edu", foundServer.Registration[0].Prefix)
 	})
 
 	t.Run("ServerUpdatedWhenNamespaceUpdated", func(t *testing.T) {
@@ -431,6 +436,7 @@ func TestServerIntegrationWithNamespaceOperations(t *testing.T) {
 		}
 		require.NotNil(t, updatedServer, "Updated server should still exist")
 		assert.Equal(t, "updated-integration.edu", updatedServer.Name)
-		assert.Equal(t, "Updated description", updatedServer.AdminMetadata.Description)
+		require.Len(t, updatedServer.Registration, 1, "Expected exactly one registration")
+		assert.Equal(t, "Updated description", updatedServer.Registration[0].AdminMetadata.Description)
 	})
 }

@@ -204,7 +204,9 @@ func (Contact) TableName() string {
 	return "contacts"
 }
 
-// ServerRegistration combines Server and Registration structs with flattened fields
+// ServerRegistration combines Server and Registration structs
+// Usually one server has one registration, but in the future, one server can
+// have two registrations (origin and cache)
 type ServerRegistration struct {
 	// Server fields
 	ID        string    `json:"id"`
@@ -215,13 +217,8 @@ type ServerRegistration struct {
 	CreatedAt time.Time `json:"-" post:"exclude"`
 	UpdatedAt time.Time `json:"-" post:"exclude"`
 
-	// Registration fields (ID renamed to RegID to avoid conflict)
-	RegID         int                    `json:"-" post:"exclude"`
-	Prefix        string                 `json:"prefix"`
-	Pubkey        string                 `json:"-"`
-	Identity      string                 `json:"identity" post:"exclude"`
-	AdminMetadata AdminMetadata          `json:"admin_metadata" gorm:"serializer:json"`
-	CustomFields  map[string]interface{} `json:"-" gorm:"serializer:json"`
+	// Registration list
+	Registration []Registration `json:"registration"`
 }
 
 // BeforeCreate GORM hook to auto-generate Server ID

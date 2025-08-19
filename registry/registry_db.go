@@ -222,62 +222,100 @@ func getNamespaceStatusById(id int) (server_structs.RegistrationStatus, error) {
 
 // Retrieve the details of a server by server ID
 func getServerByID(serverID string) (*server_structs.ServerRegistration, error) {
-	var result server_structs.ServerRegistration
-
-	query := `
-		SELECT
-			s.id, s.name, s.is_origin, s.is_cache, s.note, s.created_at, s.updated_at,
-			n.id as ns_id, n.prefix, n.pubkey, n.identity, n.admin_metadata, n.custom_fields
-		FROM services srv
-		JOIN servers s ON srv.server_id = s.id
-		JOIN registrations n ON srv.registration_id = n.id
-		WHERE s.id = ?
-	`
-
-	if err := database.ServerDatabase.Raw(query, serverID).Scan(&result).Error; err != nil {
-		return nil, errors.Wrapf(err, "failed to get server namespace for server ID: %s", serverID)
+	var server server_structs.Server
+	if err := database.ServerDatabase.Where("id = ?", serverID).First(&server).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Return empty server instead of error for non-existent records
+			return &server_structs.ServerRegistration{}, nil
+		}
+		return nil, errors.Wrapf(err, "failed to get server by ID: %s", serverID)
 	}
 
-	return &result, nil
+	var services []server_structs.Service
+	if err := database.ServerDatabase.Where("server_id = ?", serverID).Preload("Registration").Find(&services).Error; err != nil {
+		return nil, errors.Wrapf(err, "failed to get services for server ID: %s", serverID)
+	}
+
+	result := &server_structs.ServerRegistration{
+		ID:        server.ID,
+		Name:      server.Name,
+		IsOrigin:  server.IsOrigin,
+		IsCache:   server.IsCache,
+		Note:      server.Note,
+		CreatedAt: server.CreatedAt,
+		UpdatedAt: server.UpdatedAt,
+	}
+
+	for _, service := range services {
+		result.Registration = append(result.Registration, service.Registration)
+	}
+
+	return result, nil
 }
 
 // Retrieve the details of a server by its registration's ID
 func getServerByRegistrationID(registrationID int) (*server_structs.ServerRegistration, error) {
-	var result server_structs.ServerRegistration
-
-	query := `
-		SELECT
-			s.id, s.name, s.is_origin, s.is_cache, s.note, s.created_at, s.updated_at,
-			n.id as ns_id, n.prefix, n.pubkey, n.identity, n.admin_metadata, n.custom_fields
-		FROM services srv
-		JOIN servers s ON srv.server_id = s.id
-		JOIN registrations n ON srv.registration_id = n.id
-		WHERE n.id = ?
-	`
-
-	if err := database.ServerDatabase.Raw(query, registrationID).Scan(&result).Error; err != nil {
-		return nil, errors.Wrapf(err, "failed to get server namespace for namespace ID: %d", registrationID)
+	var service server_structs.Service
+	if err := database.ServerDatabase.Where("registration_id = ?", registrationID).Preload("Server").Preload("Registration").First(&service).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Return empty server instead of error for non-existent records
+			return &server_structs.ServerRegistration{}, nil
+		}
+		return nil, errors.Wrapf(err, "failed to get service for registration ID: %d", registrationID)
 	}
 
-	return &result, nil
+	// Get all services for this server to get complete registration list
+	var allServices []server_structs.Service
+	if err := database.ServerDatabase.Where("server_id = ?", service.ServerID).Preload("Registration").Find(&allServices).Error; err != nil {
+		return nil, errors.Wrapf(err, "failed to get all services for server ID: %s", service.ServerID)
+	}
+
+	result := &server_structs.ServerRegistration{
+		ID:        service.Server.ID,
+		Name:      service.Server.Name,
+		IsOrigin:  service.Server.IsOrigin,
+		IsCache:   service.Server.IsCache,
+		Note:      service.Server.Note,
+		CreatedAt: service.Server.CreatedAt,
+		UpdatedAt: service.Server.UpdatedAt,
+	}
+
+	for _, svc := range allServices {
+		result.Registration = append(result.Registration, svc.Registration)
+	}
+
+	return result, nil
 }
 
 // Get the complete info of all servers
 func listServers() ([]server_structs.ServerRegistration, error) {
+	var servers []server_structs.Server
+	if err := database.ServerDatabase.Order("id ASC").Find(&servers).Error; err != nil {
+		return nil, errors.Wrap(err, "failed to retrieve servers from the database")
+	}
+
 	var results []server_structs.ServerRegistration
+	for _, server := range servers {
+		var services []server_structs.Service
+		if err := database.ServerDatabase.Where("server_id = ?", server.ID).Preload("Registration").Find(&services).Error; err != nil {
+			return nil, errors.Wrapf(err, "failed to get services for server ID: %s", server.ID)
+		}
 
-	query := `
-		SELECT
-			s.id, s.name, s.is_origin, s.is_cache, s.note, s.created_at, s.updated_at,
-			n.id as ns_id, n.prefix, n.pubkey, n.identity, n.admin_metadata, n.custom_fields
-		FROM services srv
-		JOIN servers s ON srv.server_id = s.id
-		JOIN registrations n ON srv.registration_id = n.id
-		ORDER BY s.id ASC
-	`
+		serverReg := server_structs.ServerRegistration{
+			ID:        server.ID,
+			Name:      server.Name,
+			IsOrigin:  server.IsOrigin,
+			IsCache:   server.IsCache,
+			Note:      server.Note,
+			CreatedAt: server.CreatedAt,
+			UpdatedAt: server.UpdatedAt,
+		}
 
-	if err := database.ServerDatabase.Raw(query).Scan(&results).Error; err != nil {
-		return nil, errors.Wrap(err, "failed to retrieve all servers from the database")
+		for _, service := range services {
+			serverReg.Registration = append(serverReg.Registration, service.Registration)
+		}
+
+		results = append(results, serverReg)
 	}
 
 	return results, nil
@@ -670,10 +708,12 @@ func deleteServerByID(id string) error {
 		if err != nil {
 			return errors.Wrap(err, "failed to delete server")
 		}
-		// Delete the registration corresponding to the server separately
-		err = tx.Delete(&server_structs.Registration{}, serverRegistration.RegID).Error
-		if err != nil {
-			return errors.Wrapf(err, "failed to delete the registration corresponding to the server: %s", serverRegistration.Prefix)
+		// Delete all registrations corresponding to the server separately
+		for _, registration := range serverRegistration.Registration {
+			err = tx.Delete(&server_structs.Registration{}, registration.ID).Error
+			if err != nil {
+				return errors.Wrapf(err, "failed to delete the registration corresponding to the server: %s", registration.Prefix)
+			}
 		}
 		return nil
 	})

@@ -97,8 +97,9 @@ func TestServerNamespaceOperations(t *testing.T) {
 		assert.Equal(t, "test-origin-1.edu", server.Name)
 		assert.True(t, server.IsOrigin)
 		assert.False(t, server.IsCache)
-		assert.Equal(t, "/origins/test-origin-1.edu", server.Prefix)
-		assert.Equal(t, "Test University 1", server.AdminMetadata.Institution)
+		require.Len(t, server.Registration, 1, "Expected exactly one registration")
+		assert.Equal(t, "/origins/test-origin-1.edu", server.Registration[0].Prefix)
+		assert.Equal(t, "Test University 1", server.Registration[0].AdminMetadata.Institution)
 	})
 
 	t.Run("GetServerByID", func(t *testing.T) {
@@ -289,7 +290,8 @@ func TestUpdateNamespaceWithServerTables(t *testing.T) {
 		server, err := getServerByRegistrationID(ns.ID)
 		require.NoError(t, err)
 		assert.Equal(t, "updated-test.edu", server.Name)
-		assert.Equal(t, "Updated description", server.AdminMetadata.Description)
+		require.Len(t, server.Registration, 1, "Expected exactly one registration")
+		assert.Equal(t, "Updated description", server.Registration[0].AdminMetadata.Description)
 	})
 
 	t.Run("UpdateServerTypeFlags", func(t *testing.T) {
@@ -432,5 +434,113 @@ func TestServerTableCascadeDelete(t *testing.T) {
 		err = database.ServerDatabase.Model(&server_structs.Contact{}).Where("server_id = ?", server.ID).Count(&contactCount).Error
 		require.NoError(t, err)
 		assert.Equal(t, int64(0), contactCount)
+	})
+}
+
+func TestServerWithMultipleServices(t *testing.T) {
+	setupMockRegistryDB(t)
+	defer teardownMockRegistryDB(t)
+
+	t.Run("ServerWithBothOriginAndCacheServices", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		// Create an origin registration for a server
+		originReg := server_structs.Registration{
+			Prefix: "/origins/dual-service.edu",
+			Pubkey: "origin-pubkey",
+			AdminMetadata: server_structs.AdminMetadata{
+				UserID:      "testuser",
+				SiteName:    "dual-service.edu",
+				Institution: "Test University",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err := AddNamespace(&originReg)
+		require.NoError(t, err, "Failed to add origin namespace")
+
+		// Create a cache registration for the same server
+		cacheReg := server_structs.Registration{
+			Prefix: "/caches/dual-service.edu",
+			Pubkey: "cache-pubkey",
+			AdminMetadata: server_structs.AdminMetadata{
+				UserID:      "testuser",
+				SiteName:    "dual-service.edu", // Same site name
+				Institution: "Test University",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = AddNamespace(&cacheReg)
+		require.NoError(t, err, "Failed to add cache namespace")
+
+		// Verify only one server was created (since they have the same site name)
+		var serverCount int64
+		err = database.ServerDatabase.Model(&server_structs.Server{}).Count(&serverCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), serverCount, "Expected exactly one server for both services")
+
+		// Verify the server has both origin and cache flags set
+		var server server_structs.Server
+		err = database.ServerDatabase.Where("name = ?", "dual-service.edu").First(&server).Error
+		require.NoError(t, err)
+		assert.True(t, server.IsOrigin, "Server should be marked as origin")
+		assert.True(t, server.IsCache, "Server should be marked as cache")
+
+		// Verify two services were created
+		var serviceCount int64
+		err = database.ServerDatabase.Model(&server_structs.Service{}).Where("server_id = ?", server.ID).Count(&serviceCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), serviceCount, "Expected exactly two services for the server")
+
+		// Test getServerByID returns both registrations
+		serverReg, err := getServerByID(server.ID)
+		require.NoError(t, err)
+		require.NotNil(t, serverReg)
+		assert.Equal(t, server.ID, serverReg.ID)
+		assert.Equal(t, "dual-service.edu", serverReg.Name)
+		assert.True(t, serverReg.IsOrigin)
+		assert.True(t, serverReg.IsCache)
+
+		// Verify both registrations are present
+		require.Len(t, serverReg.Registration, 2, "Expected exactly two registrations")
+
+		// Sort registrations by prefix for consistent testing
+		registrations := serverReg.Registration
+		if registrations[0].Prefix > registrations[1].Prefix {
+			registrations[0], registrations[1] = registrations[1], registrations[0]
+		}
+
+		// Verify cache registration (comes first alphabetically)
+		assert.Equal(t, "/caches/dual-service.edu", registrations[0].Prefix)
+		assert.Equal(t, "cache-pubkey", registrations[0].Pubkey)
+		assert.Equal(t, "Test University", registrations[0].AdminMetadata.Institution)
+
+		// Verify origin registration
+		assert.Equal(t, "/origins/dual-service.edu", registrations[1].Prefix)
+		assert.Equal(t, "origin-pubkey", registrations[1].Pubkey)
+		assert.Equal(t, "Test University", registrations[1].AdminMetadata.Institution)
+
+		// Test getServerByRegistrationID works for both registrations
+		originServer, err := getServerByRegistrationID(originReg.ID)
+		require.NoError(t, err)
+		require.Len(t, originServer.Registration, 2, "Expected both registrations when querying by origin ID")
+
+		cacheServer, err := getServerByRegistrationID(cacheReg.ID)
+		require.NoError(t, err)
+		require.Len(t, cacheServer.Registration, 2, "Expected both registrations when querying by cache ID")
+
+		// Both should return the same server
+		assert.Equal(t, originServer.ID, cacheServer.ID)
+		assert.Equal(t, serverReg.ID, originServer.ID)
+
+		// Test listServers includes both registrations
+		servers, err := listServers()
+		require.NoError(t, err)
+		require.Len(t, servers, 1, "Expected exactly one server in list")
+
+		listedServer := servers[0]
+		assert.Equal(t, server.ID, listedServer.ID)
+		assert.True(t, listedServer.IsOrigin)
+		assert.True(t, listedServer.IsCache)
+		require.Len(t, listedServer.Registration, 2, "Listed server should have both registrations")
 	})
 }
