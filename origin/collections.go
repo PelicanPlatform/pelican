@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -17,7 +15,6 @@ import (
 	"github.com/pelicanplatform/pelican/server_utils"
 
 	"github.com/pelicanplatform/pelican/database"
-	"github.com/pelicanplatform/pelican/pelican_url"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/token"
 	"github.com/pelicanplatform/pelican/token_scopes"
@@ -311,6 +308,7 @@ func handleUpdateCollection(ctx *gin.Context) {
 	ctx.Status(http.StatusNoContent)
 }
 
+/*
 func handleRemoveCollectionMembers(ctx *gin.Context) {
 	authOption := token.AuthOption{
 		Sources: []token.TokenSource{token.Cookie, token.Header},
@@ -586,6 +584,7 @@ func handleListCollectionMembers(ctx *gin.Context) {
 
 	ctx.JSON(http.StatusOK, members)
 }
+*/
 
 func handleGetCollectionMetadata(ctx *gin.Context) {
 	authOption := token.AuthOption{
