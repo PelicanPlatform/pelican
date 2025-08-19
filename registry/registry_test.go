@@ -52,7 +52,7 @@ func TestHandleWildcard(t *testing.T) {
 
 	t.Run("match-prefix-returns-404-for-prefix-dne", func(t *testing.T) {
 		setupMockRegistryDB(t)
-		defer teardownMockNamespaceDB(t)
+		defer teardownMockRegistryDB(t)
 
 		req, _ := http.NewRequest("GET", "/registry/no-match", nil)
 		w := httptest.NewRecorder()
@@ -65,8 +65,8 @@ func TestHandleWildcard(t *testing.T) {
 
 	t.Run("match-prefix-returns-namespace-if-exists", func(t *testing.T) {
 		setupMockRegistryDB(t)
-		defer teardownMockNamespaceDB(t)
-		err := insertMockDBData([]server_structs.Namespace{{Prefix: "/foo/bar", AdminMetadata: server_structs.AdminMetadata{SiteName: "site foo"}}})
+		defer teardownMockRegistryDB(t)
+		err := insertMockDBData([]server_structs.Registration{{Prefix: "/foo/bar", AdminMetadata: server_structs.AdminMetadata{SiteName: "site foo"}}})
 		require.NoError(t, err)
 
 		req, _ := http.NewRequest("GET", "/registry/foo/bar", nil)
@@ -78,7 +78,7 @@ func TestHandleWildcard(t *testing.T) {
 
 		bytes, err := io.ReadAll(w.Result().Body)
 		require.NoError(t, err)
-		ns := server_structs.Namespace{}
+		ns := server_structs.Registration{}
 		err = json.Unmarshal(bytes, &ns)
 		require.NoError(t, err)
 		assert.Equal(t, "site foo", ns.AdminMetadata.SiteName)
@@ -89,14 +89,14 @@ func TestHandleWildcard(t *testing.T) {
 		mockPrefix := "/testnamespace/foo"
 
 		setupMockRegistryDB(t)
-		defer teardownMockNamespaceDB(t)
+		defer teardownMockRegistryDB(t)
 
 		mockJWKS := jwk.NewSet()
 		mockJWKSBytes, err := json.Marshal(mockJWKS)
 		require.NoError(t, err)
-		err = insertMockDBData([]server_structs.Namespace{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes)}})
+		err = insertMockDBData([]server_structs.Registration{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes)}})
 		require.NoError(t, err)
-		mockNs, err := getNamespaceByPrefix(mockPrefix)
+		mockNs, err := getRegistrationByPrefix(mockPrefix)
 
 		require.NoError(t, err)
 		require.NotNil(t, mockNs)
@@ -165,7 +165,7 @@ func TestHandleWildcard(t *testing.T) {
 			}
 
 			setupMockRegistryDB(t)
-			defer teardownMockNamespaceDB(t)
+			defer teardownMockRegistryDB(t)
 
 			mockJWKS := jwk.NewSet()
 			mockJWKSBytes, err := json.Marshal(mockJWKS)
@@ -175,9 +175,9 @@ func TestHandleWildcard(t *testing.T) {
 			if tc.IsApproved {
 				mockStatus = server_structs.RegApproved
 			}
-			err = insertMockDBData([]server_structs.Namespace{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes), AdminMetadata: server_structs.AdminMetadata{Status: mockStatus}}})
+			err = insertMockDBData([]server_structs.Registration{{Prefix: mockPrefix, Pubkey: string(mockJWKSBytes), AdminMetadata: server_structs.AdminMetadata{Status: mockStatus}}})
 			require.NoError(t, err)
-			mockNs, err := getNamespaceByPrefix(mockPrefix)
+			mockNs, err := getRegistrationByPrefix(mockPrefix)
 
 			require.NoError(t, err)
 			require.NotNil(t, mockNs)
@@ -230,7 +230,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 	})
 
 	t.Run("request-prefix-dne", func(t *testing.T) {
-		resetNamespaceDB(t)
+		resetMockRegistryDB(t)
 
 		r := httptest.NewRecorder()
 		reqBody := server_structs.CheckNamespaceCompleteReq{Prefixes: []string{"/prefix-dne"}}
@@ -256,8 +256,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 	})
 
 	t.Run("incomplete-registration", func(t *testing.T) {
-		resetNamespaceDB(t)
-		server_utils.ResetTestState()
+		resetMockRegistryDB(t)
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{
 			RegistryEndpoint: "https://registry.org",
@@ -267,7 +266,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		// Institution and UserId are empty
-		err = insertMockDBData([]server_structs.Namespace{mockNamespace("/incomplete-prefix", mockJWKS, "", server_structs.AdminMetadata{})})
+		err = insertMockDBData([]server_structs.Registration{mockNamespace("/incomplete-prefix", mockJWKS, "", server_structs.AdminMetadata{})})
 		require.NoError(t, err)
 
 		r := httptest.NewRecorder()
@@ -294,8 +293,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 	})
 
 	t.Run("complete-registration", func(t *testing.T) {
-		resetNamespaceDB(t)
-		server_utils.ResetTestState()
+		resetMockRegistryDB(t)
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{
 			RegistryEndpoint: "https://registry.org",
@@ -305,7 +303,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		require.NoError(t, err)
 		// Institution and UserId are empty
 		err = insertMockDBData(
-			[]server_structs.Namespace{
+			[]server_structs.Registration{
 				mockNamespace(
 					"/complete-prefix",
 					mockJWKS,
@@ -340,8 +338,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 	})
 
 	t.Run("multiple-complete-registrations", func(t *testing.T) {
-		resetNamespaceDB(t)
-		server_utils.ResetTestState()
+		resetMockRegistryDB(t)
 		config.ResetFederationForTest()
 		config.SetFederation(pelican_url.FederationDiscovery{
 			RegistryEndpoint: "https://registry.org",
@@ -351,7 +348,7 @@ func TestCheckNamespaceCompleteHandler(t *testing.T) {
 		require.NoError(t, err)
 		// Institution and UserId are empty
 		err = insertMockDBData(
-			[]server_structs.Namespace{
+			[]server_structs.Registration{
 				mockNamespace(
 					"/complete-prefix-1",
 					mockJWKS,

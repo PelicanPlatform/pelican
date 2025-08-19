@@ -63,7 +63,7 @@ func getSitenameFromReg(ctx context.Context, prefix string) (sitename string, er
 	if err != nil {
 		return
 	}
-	ns := server_structs.Namespace{}
+	ns := server_structs.Registration{}
 	err = json.Unmarshal(res, &ns)
 	if err != nil {
 		return

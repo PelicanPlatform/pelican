@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/registry"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -52,7 +53,7 @@ func TestRegistration(t *testing.T) {
 	// Use a temp os directory to better control the deletion of the directory.
 	// Fixes issue on Windows where we are trying to delete a file in use so this
 	// better waits for the file/process to be shut down before deletion
-	tempConfigDir, err := os.MkdirTemp("", "test")
+	tempConfigDir, err := os.MkdirTemp("", "test-*")
 	assert.NoError(t, err)
 	defer os.RemoveAll(tempConfigDir)
 
@@ -65,16 +66,13 @@ func TestRegistration(t *testing.T) {
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
 	viper.Set(param.IssuerKeysDirectory.GetName(), keysDir)
 
-	viper.Set("Registry.DbLocation", filepath.Join(tempConfigDir, "test.sql"))
+	viper.Set(param.Registry_DbLocation.GetName(), "")
+	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(tempConfigDir, "test.sql"))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
-	err = registry.InitializeDB()
+	err = database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
-	defer func() {
-		err := registry.ShutdownRegistryDB()
-		assert.NoError(t, err)
-	}()
 
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()
@@ -129,10 +127,10 @@ func TestRegistration(t *testing.T) {
 	require.Equal(t, 200, resp.StatusCode)
 
 	// Test new key is the same one we registered.
-	entries := []server_structs.Namespace{}
+	entries := []server_structs.Registration{}
 	err = json.Unmarshal(body, &entries)
 	require.NoError(t, err)
-	require.Equal(t, len(entries), 1)
+	require.Equal(t, 1, len(entries))
 	assert.Equal(t, entries[0].Prefix, "/test123")
 	keySet, err := jwk.Parse([]byte(entries[0].Pubkey))
 	require.NoError(t, err)
@@ -191,16 +189,13 @@ func TestMultiKeysRegistration(t *testing.T) {
 	keysDir := filepath.Join(tempConfigDir, "issuer-keys")
 	viper.Set(param.IssuerKeysDirectory.GetName(), keysDir)
 
-	viper.Set("Registry.DbLocation", filepath.Join(tempConfigDir, "test.sql"))
+	viper.Set(param.Registry_DbLocation.GetName(), "")
+	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(tempConfigDir, "test.sql"))
 	err = config.InitServer(ctx, server_structs.OriginType)
 	require.NoError(t, err)
 
-	err = registry.InitializeDB()
+	err = database.InitServerDatabase(server_structs.RegistryType)
 	require.NoError(t, err)
-	defer func() {
-		err := registry.ShutdownRegistryDB()
-		assert.NoError(t, err)
-	}()
 
 	gin.SetMode(gin.TestMode)
 	engine := gin.Default()
@@ -286,10 +281,10 @@ func TestMultiKeysRegistration(t *testing.T) {
 	require.Equal(t, 200, resp.StatusCode)
 
 	// Test new key is the same one we registered.
-	entries := []server_structs.Namespace{}
+	entries := []server_structs.Registration{}
 	err = json.Unmarshal(body, &entries)
 	require.NoError(t, err)
-	require.Equal(t, len(entries), 1)
+	require.Equal(t, 1, len(entries))
 	assert.Equal(t, entries[0].Prefix, "/test123")
 	keySet, err := jwk.Parse([]byte(entries[0].Pubkey))
 	require.NoError(t, err)

@@ -143,7 +143,7 @@ func updateAllowedPrefixesForCache(t *testing.T, dbPath string, cacheHost string
 		_ = server_utils.ShutdownDB(db)
 	}()
 
-	var namespace server_structs.Namespace
+	var namespace server_structs.Registration
 	result := db.Where("prefix = ?", "/caches/"+cacheHost).First(&namespace)
 	require.NoError(t, result.Error, "Failed to find namespace for host %s: %v", cacheHost, result.Error)
 
@@ -152,7 +152,7 @@ func updateAllowedPrefixesForCache(t *testing.T, dbPath string, cacheHost string
 	}
 	namespace.CustomFields["AllowedPrefixes"] = allowedPrefixes
 
-	result = db.Model(&namespace).Updates(server_structs.Namespace{
+	result = db.Model(&namespace).Updates(server_structs.Registration{
 		CustomFields: namespace.CustomFields,
 	})
 	require.NoError(t, result.Error, "Failed to update namespace for host %s: %v", cacheHost, result.Error)
@@ -240,7 +240,7 @@ func TestDirectorFedTokenCacheAPI(t *testing.T) {
 
 			// Inject our "AllowedPrefixes" data into the registry database under
 			// the /caches/<registration name> namespace
-			dbLoc := param.Registry_DbLocation.GetString()
+			dbLoc := param.Server_DbLocation.GetString()
 			require.NotEmpty(t, dbLoc, "Failed to determine registry database location")
 			updateAllowedPrefixesForCache(t, dbLoc, registrationName, tc.allowedPrefixes)
 

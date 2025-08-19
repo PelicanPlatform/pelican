@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
 	"github.com/pelicanplatform/pelican/server_utils"
@@ -48,7 +49,7 @@ func registryMockup(ctx context.Context, t *testing.T, testName string) *httptes
 
 	ikeyDir := filepath.Join(issuerTempDir, "issuer-keys")
 	viper.Set("IssuerKeysDirectory", ikeyDir)
-	viper.Set("Registry.DbLocation", filepath.Join(issuerTempDir, "test.sql"))
+	viper.Set(param.Server_DbLocation.GetName(), filepath.Join(issuerTempDir, "test.sql"))
 	viper.Set("Server.WebPort", 8444)
 	viper.Set("ConfigDir", tDir)
 
@@ -105,7 +106,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 
 	svr := registryMockup(ctx, t, "serveregistry")
 	defer func() {
-		err := ShutdownRegistryDB()
+		err := database.ShutdownDB()
 		assert.NoError(t, err)
 		svr.CloseClientConnections()
 		svr.Close()
@@ -146,7 +147,7 @@ func TestServeNamespaceRegistry(t *testing.T) {
 		require.Equal(t, http.StatusOK, res.StatusCode)
 		data, err := io.ReadAll(res.Body)
 		require.NoError(t, err)
-		ns := server_structs.Namespace{}
+		ns := server_structs.Registration{}
 		err = json.Unmarshal(data, &ns)
 		require.NoError(t, err)
 		assert.Equal(t, ns.AdminMetadata.SiteName, "mock_site_name")
@@ -187,7 +188,7 @@ func TestNamespaceRegisteredPubKeyUpdate(t *testing.T) {
 
 	svr := registryMockup(ctx, t, "pub-key-update")
 	defer func() {
-		err := ShutdownRegistryDB()
+		err := database.ShutdownDB()
 		assert.NoError(t, err)
 		svr.CloseClientConnections()
 		svr.Close()
@@ -267,7 +268,7 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 
 	svr := registryMockup(ctx, t, "MultiPubKeysRegisteredOnNamespace")
 	defer func() {
-		err := ShutdownRegistryDB()
+		err := database.ShutdownDB()
 		assert.NoError(t, err)
 		svr.CloseClientConnections()
 		svr.Close()
@@ -317,9 +318,9 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 	jwksStr := string(jwksBytes)
 
 	// Test functionality of a namespace registered with multi public keys [p2,p4]
-	err = setNamespacePubKey(prefix, jwksStr) // set the registered public keys to [p2,p4]
+	err = setRegistrationPubKey(prefix, jwksStr) // set the registered public keys to [p2,p4]
 	require.NoError(t, err)
-	ns, err := getNamespaceByPrefix(prefix)
+	ns, err := getRegistrationByPrefix(prefix)
 	require.NoError(t, err)
 	require.Equal(t, jwksStr, ns.Pubkey)
 
@@ -330,7 +331,7 @@ func TestMultiPubKeysRegisteredOnNamespace(t *testing.T) {
 	// => should update Registry to [p1,p2,p3] (complete overwrite)
 	err = NamespacesPubKeyUpdate(privKey3, []string{prefix}, "mock_site_name", svr.URL+"/api/v1.0/registry/updateNamespacesPubKey")
 	require.NoError(t, err)
-	ns, err = getNamespaceByPrefix(prefix)
+	ns, err = getRegistrationByPrefix(prefix)
 	require.NoError(t, err)
 
 	expectedJwks := jwk.NewSet()
@@ -388,7 +389,7 @@ func TestRegistryKeyChainingOSDF(t *testing.T) {
 	require.NoError(t, err)
 
 	defer func() {
-		err := ShutdownRegistryDB()
+		err := database.ShutdownDB()
 		assert.NoError(t, err)
 		registrySvr.CloseClientConnections()
 		registrySvr.Close()
@@ -481,7 +482,7 @@ func TestRegistryKeyChaining(t *testing.T) {
 
 	registrySvr := registryMockup(ctx, t, "keychaining")
 	defer func() {
-		err := ShutdownRegistryDB()
+		err := database.ShutdownDB()
 		assert.NoError(t, err)
 		registrySvr.CloseClientConnections()
 		registrySvr.Close()

@@ -204,8 +204,8 @@ func TestValidateKeyChaining(t *testing.T) {
 	server_utils.ResetTestState()
 	setupMockRegistryDB(t)
 	defer func() {
-		resetNamespaceDB(t)
-		teardownMockNamespaceDB(t)
+		resetMockRegistryDB(t)
+		teardownMockRegistryDB(t)
 		server_utils.ResetTestState()
 	}()
 
@@ -237,7 +237,7 @@ func TestValidateKeyChaining(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, jwkMockNew)
 
-	err = insertMockDBData([]server_structs.Namespace{
+	err = insertMockDBData([]server_structs.Registration{
 		mockNamespace("/foo", jwksStrFoo, "", server_structs.AdminMetadata{}),
 		mockNamespace("/bar", jwksStrBar, "", server_structs.AdminMetadata{}),
 		mockNamespace("/cache/randomCache", jwksStrCache, "", server_structs.AdminMetadata{}),

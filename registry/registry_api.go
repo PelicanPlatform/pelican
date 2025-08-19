@@ -16,14 +16,14 @@ import (
 
 func getCountofFederationNamespacesByStatus(status server_structs.RegistrationStatus) (int, error) {
 	// filter by approved, denied, pending
-	filterNs := server_structs.Namespace{
+	filterNs := server_structs.Registration{
 		AdminMetadata: server_structs.AdminMetadata{
 			Status: status,
 		},
 	}
 
 	// prefixForNamespace allows us to get all namespaces that are not prefixed by /origins/ or /caches/
-	namespaces, err := getNamespacesByFilter(filterNs, prefixForNamespace, false)
+	namespaces, err := getRegistrationsByFilter(filterNs, prefixForNamespace, false)
 	if err != nil {
 		return 0, err
 	}
