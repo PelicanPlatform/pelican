@@ -793,6 +793,411 @@ definitions:
         format: int64
         description: Timestamp of last update in milliseconds since epoch (UTC)
         example: 1741152221331
+  Collection:
+    type: object
+    properties:
+      id:
+        type: string
+        description: Unique identifier for the collection
+        example: "481c756c"
+      name:
+        type: string
+        description: Name of the collection
+        example: "My Research Data"
+      description:
+        type: string
+        description: Description of the collection
+        example: "Collection of research data files"
+      owner:
+        type: string
+        description: The owner of the collection
+        example: "user@example.com"
+      namespace:
+        type: string
+        description: The namespace prefix this collection belongs to
+        example: "/research/data"
+      visibility:
+        type: string
+        description: Visibility of the collection
+        enum:
+          - private
+          - public
+        example: "private"
+      created_at:
+        type: string
+        format: date-time
+        description: When the collection was created
+        example: "2024-01-15T10:30:00Z"
+      updated_at:
+        type: string
+        format: date-time
+        description: When the collection was last updated
+        example: "2024-01-15T10:30:00Z"
+      members:
+        type: array
+        items:
+          $ref: "#/definitions/CollectionMember"
+        description: List of collection members
+      acls:
+        type: array
+        items:
+          $ref: "#/definitions/CollectionACL"
+        description: List of access control entries
+      metadata:
+        type: array
+        items:
+          $ref: "#/definitions/CollectionMetadata"
+        description: List of metadata key-value pairs
+  CollectionMember:
+    type: object
+    properties:
+      collection_id:
+        type: string
+        description: ID of the collection
+        example: "481c756c"
+      object_url:
+        type: string
+        description: Full pelican:// URL of the object
+        example: "pelican://origin.example.com/research/data/file1.txt"
+      added_by:
+        type: string
+        description: User who added this member
+        example: "user@example.com"
+      added_at:
+        type: string
+        format: date-time
+        description: When the member was added
+        example: "2024-01-15T10:30:00Z"
+  CollectionACL:
+    type: object
+    properties:
+      collection_id:
+        type: string
+        description: ID of the collection
+        example: "481c756c"
+      group_id:
+        type: string
+        description: ID or name of the group
+        example: "research-team"
+      role:
+        type: string
+        description: Role granted to the group
+        enum:
+          - read
+          - write
+          - owner
+        example: "read"
+      granted_by:
+        type: string
+        description: User who granted this ACL
+        example: "admin@example.com"
+      granted_at:
+        type: string
+        format: date-time
+        description: When the ACL was granted
+        example: "2024-01-15T10:30:00Z"
+      expires_at:
+        type: string
+        format: date-time
+        description: When the ACL expires (optional)
+        example: "2024-12-31T23:59:59Z"
+  CollectionMetadata:
+    type: object
+    properties:
+      collection_id:
+        type: string
+        description: ID of the collection
+        example: "481c756c"
+      key:
+        type: string
+        description: Metadata key
+        example: "project"
+      value:
+        type: string
+        description: Metadata value
+        example: "Climate Research"
+  Group:
+    type: object
+    properties:
+      id:
+        type: string
+        description: Unique identifier for the group
+        example: "abc12345"
+      name:
+        type: string
+        description: Name of the group
+        example: "research-team"
+      description:
+        type: string
+        description: Description of the group
+        example: "Team working on climate research"
+      created_by:
+        type: string
+        description: User who created the group
+        example: "admin@example.com"
+      created_at:
+        type: string
+        format: date-time
+        description: When the group was created
+        example: "2024-01-15T10:30:00Z"
+      members:
+        type: array
+        items:
+          $ref: "#/definitions/GroupMember"
+        description: List of group members
+  GroupMember:
+    type: object
+    properties:
+      group_id:
+        type: string
+        description: ID of the group
+        example: "abc12345"
+      member:
+        type: string
+        description: Member identifier
+        example: "user@example.com"
+      added_by:
+        type: string
+        description: User who added this member
+        example: "admin@example.com"
+      added_at:
+        type: string
+        format: date-time
+        description: When the member was added
+        example: "2024-01-15T10:30:00Z"
+  CreateCollectionRequest:
+    type: object
+    required:
+      - name
+      - namespace
+    properties:
+      name:
+        type: string
+        description: Name of the collection
+        example: "My Research Data"
+      description:
+        type: string
+        description: Description of the collection
+        example: "Collection of research data files"
+      visibility:
+        type: string
+        description: Visibility of the collection
+        enum:
+          - private
+          - public
+        default: "private"
+        example: "private"
+      metadata:
+        type: object
+        additionalProperties:
+          type: string
+        description: Key-value pairs of metadata
+        example:
+          project: "Climate Research"
+          department: "Environmental Science"
+      namespace:
+        type: string
+        description: The namespace prefix this collection belongs to
+        example: "/research/data"
+  UpdateCollectionRequest:
+    type: object
+    properties:
+      name:
+        type: string
+        description: New name for the collection
+        example: "Updated Research Data"
+      description:
+        type: string
+        description: New description for the collection
+        example: "Updated collection description"
+      visibility:
+        type: string
+        description: New visibility for the collection
+        enum:
+          - private
+          - public
+        example: "public"
+  AddCollectionMembersRequest:
+    type: object
+    required:
+      - members
+    properties:
+      members:
+        type: array
+        items:
+          type: string
+        description: List of pelican:// URLs to add as members
+        example: ["pelican://origin.example.com/research/data/file1.txt"]
+  RemoveCollectionMembersRequest:
+    type: object
+    required:
+      - members
+    properties:
+      members:
+        type: array
+        items:
+          type: string
+        description: List of pelican:// URLs to remove as members
+        example: ["pelican://origin.example.com/research/data/file1.txt"]
+  GrantACLRequest:
+    type: object
+    required:
+      - group_id
+      - role
+    properties:
+      group_id:
+        type: string
+        description: ID or name of the group to grant access to
+        example: "research-team"
+      role:
+        type: string
+        description: Role to grant
+        enum:
+          - read
+          - write
+          - owner
+        example: "read"
+      expires_at:
+        type: string
+        format: date-time
+        description: When the ACL expires (optional)
+        example: "2024-12-31T23:59:59Z"
+  RevokeACLRequest:
+    type: object
+    required:
+      - group_id
+      - role
+    properties:
+      group_id:
+        type: string
+        description: ID or name of the group to revoke access from
+        example: "research-team"
+      role:
+        type: string
+        description: Role to revoke
+        enum:
+          - read
+          - write
+          - owner
+        example: "read"
+  CreateGroupRequest:
+    type: object
+    required:
+      - name
+    properties:
+      name:
+        type: string
+        description: Name of the group
+        example: "research-team"
+      description:
+        type: string
+        description: Description of the group
+        example: "Team working on climate research"
+  AddGroupMemberRequest:
+    type: object
+    required:
+      - member
+    properties:
+      member:
+        type: string
+        description: Member identifier to add
+        example: "user@example.com"
+  ListCollectionResponse:
+    type: object
+    properties:
+      id:
+        type: string
+        description: Unique identifier for the collection
+        example: "481c756c"
+      name:
+        type: string
+        description: Name of the collection
+        example: "My Research Data"
+      owner_id:
+        type: string
+        description: The owner of the collection
+        example: "user@example.com"
+      description:
+        type: string
+        description: Description of the collection
+        example: "Collection of research data files"
+      visibility:
+        type: string
+        description: Visibility of the collection
+        enum:
+          - private
+          - public
+        example: "private"
+      namespace:
+        type: string
+        description: The namespace prefix this collection belongs to
+        example: "/research/data"
+  GetCollectionResponse:
+    type: object
+    properties:
+      id:
+        type: string
+        description: Unique identifier for the collection
+        example: "481c756c"
+      name:
+        type: string
+        description: Name of the collection
+        example: "My Research Data"
+      owner_id:
+        type: string
+        description: The owner of the collection
+        example: "user@example.com"
+      description:
+        type: string
+        description: Description of the collection
+        example: "Collection of research data files"
+      visibility:
+        type: string
+        description: Visibility of the collection
+        enum:
+          - private
+          - public
+        example: "private"
+      namespace:
+        type: string
+        description: The namespace prefix this collection belongs to
+        example: "/research/data"
+      members:
+        type: array
+        items:
+          type: string
+        description: List of pelican:// URLs that are members of this collection
+        example: ["pelican://origin.example.com/research/data/file1.txt"]
+      acls:
+        type: array
+        items:
+          $ref: "#/definitions/CollectionACL"
+        description: List of access control entries
+      metadata:
+        type: object
+        additionalProperties:
+          type: string
+        description: Key-value pairs of metadata
+        example:
+          project: "Climate Research"
+          department: "Environmental Science"
+      created_at:
+        type: string
+        format: date-time
+        description: When the collection was created
+        example: "2024-01-15T10:30:00Z"
+      updated_at:
+        type: string
+        format: date-time
+        description: When the collection was last updated
+        example: "2024-01-15T10:30:00Z"
+  MetadataValue:
+    type: object
+    properties:
+      value:
+        type: string
+        description: The metadata value
+        example: "Climate Research"
 
 tags:
   - name: auth
@@ -811,6 +1216,10 @@ tags:
     description: APIs for the Origin server Web UI
   - name: cache_ui
     description: APIs for the Cache server Web UI
+  - name: collections
+    description: APIs for managing collections of objects
+  - name: groups
+    description: APIs for managing user groups
 paths:
   /health:
     get:
@@ -2748,6 +3157,666 @@ paths:
             $ref: "#/definitions/ErrorModelV2"
         "404":
           description: Downtime entry not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+
+  # Collection Management APIs
+  /origin_ui/collections:
+    get:
+      tags:
+        - collections
+      summary: List collections accessible to the authenticated user
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/ListCollectionResponse"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    post:
+      tags:
+        - collections
+      summary: Create a new collection
+      description: "`Authentication Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: collection
+          description: The collection data to create
+          required: true
+          schema:
+            $ref: "#/definitions/CreateCollectionRequest"
+      responses:
+        "201":
+          description: Collection created successfully
+          schema:
+            $ref: "#/definitions/Collection"
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/collections/{id}:
+    get:
+      tags:
+        - collections
+      summary: Get a specific collection by ID
+      description: "`Authentication Required`"
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection to retrieve
+          required: true
+          type: string
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/GetCollectionResponse"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    patch:
+      tags:
+        - collections
+      summary: Update a collection
+      description: "`Authentication Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection to update
+          required: true
+          type: string
+        - in: body
+          name: collection
+          description: The collection data to update
+          required: true
+          schema:
+            $ref: "#/definitions/UpdateCollectionRequest"
+      responses:
+        "204":
+          description: Collection updated successfully
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - collections
+      summary: Delete a collection
+      description: "`Authentication Required`"
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection to delete
+          required: true
+          type: string
+      produces:
+        - application/json
+      responses:
+        "204":
+          description: Collection deleted successfully
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/collections/{id}/members:
+    get:
+      tags:
+        - collections
+      summary: List collection members
+      description: "`Authentication Required`"
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection
+          required: true
+          type: string
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/CollectionMember"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    post:
+      tags:
+        - collections
+      summary: Add members to a collection
+      description: "`Authentication Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection
+          required: true
+          type: string
+        - in: body
+          name: members
+          description: The members to add
+          required: true
+          schema:
+            $ref: "#/definitions/AddCollectionMembersRequest"
+      responses:
+        "204":
+          description: Members added successfully
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - collections
+      summary: Remove members from a collection
+      description: "`Authentication Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection
+          required: true
+          type: string
+        - in: body
+          name: members
+          description: The members to remove
+          required: true
+          schema:
+            $ref: "#/definitions/RemoveCollectionMembersRequest"
+      responses:
+        "204":
+          description: Members removed successfully
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/collections/{id}/members/{encoded_object_url}:
+    delete:
+      tags:
+        - collections
+      summary: Remove a specific member from a collection
+      description: "`Authentication Required`"
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection
+          required: true
+          type: string
+        - name: encoded_object_url
+          in: path
+          description: URL-encoded pelican:// URL of the object to remove
+          required: true
+          type: string
+      produces:
+        - application/json
+      responses:
+        "204":
+          description: Member removed successfully
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection or member not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/collections/{id}/metadata:
+    get:
+      tags:
+        - collections
+      summary: Get collection metadata
+      description: "`Authentication Required`"
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection
+          required: true
+          type: string
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+            additionalProperties:
+              type: string
+            description: Key-value pairs of metadata
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/collections/{id}/metadata/{key}:
+    put:
+      tags:
+        - collections
+      summary: Set collection metadata key-value pair
+      description: "`Authentication Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection
+          required: true
+          type: string
+        - name: key
+          in: path
+          description: Metadata key
+          required: true
+          type: string
+        - in: body
+          name: value
+          description: The metadata value
+          required: true
+          schema:
+            $ref: "#/definitions/MetadataValue"
+      responses:
+        "204":
+          description: Metadata set successfully
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - collections
+      summary: Delete collection metadata key-value pair
+      description: "`Authentication Required`"
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection
+          required: true
+          type: string
+        - name: key
+          in: path
+          description: Metadata key to delete
+          required: true
+          type: string
+      produces:
+        - application/json
+      responses:
+        "204":
+          description: Metadata deleted successfully
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /origin_ui/collections/{id}/acl:
+    get:
+      tags:
+        - collections
+      summary: Get collection access control list
+      description: "`Authentication Required`"
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection
+          required: true
+          type: string
+      produces:
+        - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: "#/definitions/CollectionACL"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    post:
+      tags:
+        - collections
+      summary: Grant access to a collection
+      description: "`Authentication Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection
+          required: true
+          type: string
+        - in: body
+          name: acl
+          description: The access control entry to grant
+          required: true
+          schema:
+            $ref: "#/definitions/GrantACLRequest"
+      responses:
+        "204":
+          description: Access granted successfully
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - collections
+      summary: Revoke access from a collection
+      description: "`Authentication Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the collection
+          required: true
+          type: string
+        - in: body
+          name: acl
+          description: The access control entry to revoke
+          required: true
+          schema:
+            $ref: "#/definitions/RevokeACLRequest"
+      responses:
+        "204":
+          description: Access revoked successfully
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Collection not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+
+  # Group Management APIs
+  /groups:
+    post:
+      tags:
+        - groups
+      summary: Create a new group
+      description: "`Authentication Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: group
+          description: The group data to create
+          required: true
+          schema:
+            $ref: "#/definitions/CreateGroupRequest"
+      responses:
+        "201":
+          description: Group created successfully
+          schema:
+            $ref: "#/definitions/Group"
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+  /groups/{id}/members:
+    post:
+      tags:
+        - groups
+      summary: Add a member to a group
+      description: "`Authentication Required`"
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the group
+          required: true
+          type: string
+        - in: body
+          name: member
+          description: The member to add
+          required: true
+          schema:
+            $ref: "#/definitions/AddGroupMemberRequest"
+      responses:
+        "204":
+          description: Member added successfully
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Forbidden - only group creator can add members
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Group not found
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "500":
+          description: Internal server error
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+    delete:
+      tags:
+        - groups
+      summary: Remove a member from a group
+      description: "`Authentication Required`"
+      produces:
+        - application/json
+      parameters:
+        - name: id
+          in: path
+          description: ID of the group
+          required: true
+          type: string
+        - name: member
+          in: query
+          description: Member identifier to remove
+          required: true
+          type: string
+      responses:
+        "204":
+          description: Member removed successfully
+        "400":
+          description: Bad request
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "401":
+          description: Authentication required
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "403":
+          description: Forbidden - only group creator can remove members
+          schema:
+            $ref: "#/definitions/ErrorModelV2"
+        "404":
+          description: Group or member not found
           schema:
             $ref: "#/definitions/ErrorModelV2"
         "500":
