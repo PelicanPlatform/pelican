@@ -911,6 +911,29 @@ func getServerHandler(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, server)
 }
 
+func deleteServerHandler(ctx *gin.Context) {
+	serverID := ctx.Param("id")
+	if serverID == "" {
+		ctx.JSON(http.StatusBadRequest, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Invalid server ID. ID cannot be empty"})
+		return
+	}
+
+	err := deleteServerByID(serverID)
+	if err != nil {
+		log.Errorf("Error deleting the server: %v", err)
+		ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
+			Status: server_structs.RespFailed,
+			Msg:    "Error deleting the server"})
+	}
+	ctx.JSON(http.StatusOK,
+		server_structs.SimpleApiResp{
+			Status: server_structs.RespOK,
+			Msg:    "success",
+		})
+}
+
 func listInstitutions(ctx *gin.Context) {
 	institutions := []registrationFieldOption{}
 	if err := param.Registry_Institutions.Unmarshal(&institutions); err != nil {
@@ -998,7 +1021,8 @@ func RegisterRegistryWebAPI(router *gin.RouterGroup) error {
 	{
 		registryWebAPI.GET("/servers", listServersHandler)
 		registryWebAPI.GET("/servers/:id", getServerHandler)
-		// If you want to CREATE/PUT/DELETE a server, just use the namespaces endpoint
+		registryWebAPI.DELETE("/servers/:id", web_ui.AuthHandler, web_ui.AdminAuthHandler, deleteServerHandler)
+		// If you want to CREATE/PUT a server, just use the namespaces endpoint
 	}
 	{
 		registryWebAPI.GET("/topology", listTopologyNamespaces)

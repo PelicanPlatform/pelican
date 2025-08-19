@@ -644,49 +644,40 @@ func setNamespacePubKey(prefix string, pubkeyDbString string) error {
 	return database.ServerDatabase.Model(ns).Where("prefix = ? ", prefix).Update("pubkey", pubkeyDbString).Error
 }
 
+// Note: If this is a server registration, the foreign key constraint applied on the DB will
+// remove the corresponding entry in the “services” table, while the entry in “servers” table
+// remains - that server might have other services, and we still want to keep other server info
 func deleteNamespaceByID(id int) error {
-	// First get the namespace to check if it's a server
-	ns, err := getNamespaceById(id)
-	if err != nil {
-		return errors.Wrap(err, "failed to get namespace by ID")
-	}
-
-	// Wrap all database operations in a transaction
-	// If any operation fails, all changes are reverted. No partial records left.
-	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
-		// If this is a server registration, we need to delete from the server tables
-		isOrigin := strings.HasPrefix(ns.Prefix, server_structs.OriginPrefix.String())
-		isCache := strings.HasPrefix(ns.Prefix, server_structs.CachePrefix.String())
-		if isOrigin || isCache {
-			// Find the existing server via service mapping
-			var service server_structs.Service
-			if err := tx.Where("registration_id = ?", ns.ID).First(&service).Error; err != nil {
-				return errors.Wrapf(err, "failed to find service for %s", ns.AdminMetadata.SiteName)
-			}
-
-			// Delete the service entry first (foreign key constraint)
-			if err := tx.Delete(&service).Error; err != nil {
-				return errors.Wrapf(err, "failed to delete service for %s", ns.AdminMetadata.SiteName)
-			}
-
-			// Delete the server entry
-			if err := tx.Delete(&server_structs.Server{}, service.ServerID).Error; err != nil {
-				return errors.Wrapf(err, "failed to delete server for %s", ns.AdminMetadata.SiteName)
-			}
-		}
-
-		// Finally delete the namespace
-		if err := tx.Delete(&server_structs.Registration{}, id).Error; err != nil {
-			return errors.Wrapf(err, "failed to delete %s", ns.AdminMetadata.SiteName)
-		}
-
-		return nil
-	})
+	return database.ServerDatabase.Delete(&server_structs.Registration{}, id).Error
 }
 
 func deleteNamespaceByPrefix(prefix string) error {
 	// GORM by default uses transaction for write operations
 	return database.ServerDatabase.Where("prefix = ?", prefix).Delete(&server_structs.Registration{}).Error
+}
+
+func deleteServerByID(id string) error {
+	// Wrap all database operations in a transaction
+	// If any operation fails, all changes are reverted. No partial records left.
+	return database.ServerDatabase.Transaction(func(tx *gorm.DB) error {
+		serverRegistration, err := getServerByID(id)
+		if err != nil {
+			return errors.Wrap(err, "failed to get server by ID")
+		}
+		// Because of the foreign key constraints applied on the DB,
+		// All entries with matching server_id in "services", "endpoints", "contacts" tables will be deleted automatically
+		err = tx.Delete(&server_structs.Server{}, id).Error
+		if err != nil {
+			return errors.Wrap(err, "failed to delete server")
+		}
+		// Delete the registration corresponding to the server separately
+		err = tx.Delete(&server_structs.Registration{}, serverRegistration.RegID).Error
+		if err != nil {
+			return errors.Wrapf(err, "failed to delete the registration corresponding to the server: %s", serverRegistration.Prefix)
+		}
+		return nil
+	})
+
 }
 
 func getAllNamespaces() ([]*server_structs.Registration, error) {
