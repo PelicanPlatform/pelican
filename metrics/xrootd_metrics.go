@@ -1823,12 +1823,15 @@ func HandleSummaryPacket(packet []byte) error {
 }
 
 func updateCounter[T int | uint | float32 | float64](new T, old T, counter prometheus.Counter) T {
-	incBy := math.Max(0, float64(new-old))
-	counter.Add(incBy)
-	if new < old {
-		return old
+	incBy := float64(new - old)
+	if incBy < 0 {
+		// If the new value is less than the old value, it is likely that the service has been restarted.
+		// In this case, we should report the new value as the increment.
+		incBy = float64(new)
 	}
-
+	if incBy > 0 {
+		counter.Add(incBy)
+	}
 	return new
 }
 
@@ -1892,6 +1895,8 @@ func handleS3CacheStats(blobs [][]byte) error {
 
 		lastS3CacheStats.BypassS = updateCounter(s3fileStats.BypassS, lastS3CacheStats.BypassS, S3CacheRequestSeconds.WithLabelValues("bypass"))
 		lastS3CacheStats.FetchS = updateCounter(s3fileStats.FetchS, lastS3CacheStats.FetchS, S3CacheRequestSeconds.WithLabelValues("fetch"))
+		// Found and processed the last valid event, so we are done
+		break
 	}
 	return nil
 }
@@ -2080,6 +2085,8 @@ func handleOSSStats(blobs [][]byte) error {
 		lastOssStats.SlowChmods = updateCounter(ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodCounter)
 		lastOssStats.SlowOpens = updateCounter(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter)
 		lastOssStats.SlowRenames = updateCounter(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter)
+		// Found and processed the last valid event, so we are done
+		break
 	}
 
 	return nil
