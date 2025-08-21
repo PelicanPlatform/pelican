@@ -239,6 +239,10 @@ func LaunchDaemons(ctx context.Context, launchers []Launcher, egrp *errgroup.Gro
 					log.Warnf("Received SIGTERM, pausing the signal forwarding to daemons for %s", param.Xrootd_ShutdownTimeout.GetDuration().String())
 					time.Sleep(param.Xrootd_ShutdownTimeout.GetDuration())
 				}
+				if sys_sig == syscall.SIGHUP {
+					log.Warnf("Received SIGHUP, reloading the daemons for %s", param.Xrootd_ShutdownTimeout.GetDuration().String())
+					time.Sleep(param.Xrootd_ShutdownTimeout.GetDuration())
+				}
 				log.Warnf("Forwarding signal %v to daemons\n", sys_sig)
 				var lastErr error
 				for idx := range daemons {
