@@ -80,7 +80,23 @@ func generateTestFile() (string, error) {
 	selfTestPath := filepath.Join(basePath, selfTestDir)
 	_, err := os.Stat(selfTestPath)
 	if err != nil {
-		return "", errors.Wrap(err, "self-test directory does not exist at "+selfTestPath)
+		if errors.Is(err, os.ErrNotExist) {
+			uid, err := config.GetDaemonUID()
+			if err != nil {
+				return "", err
+			}
+
+			gid, err := config.GetDaemonGID()
+			if err != nil {
+				return "", err
+			}
+
+			if err := config.MkdirAll(selfTestPath, 0750, uid, gid); err != nil {
+				return "", errors.Wrap(err, "failed to create self-test directory")
+			}
+		} else {
+			return "", errors.Wrap(err, "failed to stat self-test directory")
+		}
 	}
 	uid, err := config.GetDaemonUID()
 	if err != nil {
@@ -172,6 +188,14 @@ func generateTestFileViaPlugin() (string, error) {
 	user, err := config.GetPelicanUser()
 	if err != nil {
 		return "", errors.Wrap(err, "failed to get user")
+	}
+
+	// Make sure the self-test directory exists.
+	// This is also done in InitSelfTestDir, but we repeat it here to be robust.
+	basePath := param.Cache_NamespaceLocation.GetString()
+	selfTestPath := filepath.Join(basePath, selfTestDir)
+	if err := os.MkdirAll(selfTestPath, 0750); err != nil {
+		return "", errors.Wrap(err, "failed to create self-test directory")
 	}
 
 	// Create a temp directory own by pelican user to bypass privilege restrictions, named "birthplace"
