@@ -2946,6 +2946,22 @@ type: duration
 default: 1m
 components: ["origin", "cache"]
 ---
+name: Xrootd.HttpMaxDelay
+description: |+
+  Configures the maximum amount of time the XRootD HTTP layer will continue internal retries
+  when a file open fails. XRootD retries every 3s until this limit is reached; once exceeded,
+  the request fails (typically with HTTP 500 / Internal Error).
+
+  The historical behavior is to retry for up to an hour, which can create server-side backlogs
+  when clients have much shorter timeouts. Set this to a small duration to avoid queue buildup.
+  With a 10s client timeout, common choices are:
+    - 9s: client likely still receives an HTTP 500 response before its own timeout.
+    - 12s: client times out first; the server stops retrying shortly after, reducing load.
+type: duration
+default: 9s
+hidden: true
+components: ["origin", "cache"]
+---
 ############################
 # Monitoring-level configs #
 ############################
