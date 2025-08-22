@@ -1045,6 +1045,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Xrootd_MacaroonsKeyFile.GetName(), filepath.Join(configDir, "macaroons-secret"))
 	v.SetDefault(param.Xrootd_ShutdownTimeout.GetName(), 1*time.Minute)
 	v.SetDefault(param.Xrootd_HttpMaxDelay.GetName(), "9s")
+	v.SetDefault(param.Xrootd_MaxThreads.GetName(), 20000)
 	v.SetDefault(param.Cache_EvictionMonitoringInterval.GetName(), 60)
 	v.SetDefault(param.Cache_EvictionMonitoringMaxDepth.GetName(), 1)
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
