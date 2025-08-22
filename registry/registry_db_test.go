@@ -290,7 +290,7 @@ func TestAddNamespace(t *testing.T) {
 
 	t.Run("set-default-fields", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
-		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone"})
+		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone", SiteName: "test-site-name"})
 		err := AddRegistration(&mockNs)
 		require.NoError(t, err)
 		got, err := getAllRegistrations()
@@ -308,7 +308,7 @@ func TestAddNamespace(t *testing.T) {
 		defer resetMockRegistryDB(t)
 		mockCreateAt := time.Now().Add(time.Hour * 10)
 		mockUpdatedAt := time.Now().Add(time.Minute * 20)
-		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone", CreatedAt: mockCreateAt, UpdatedAt: mockUpdatedAt})
+		mockNs := mockNamespace("/test", "pubkey", "identity", server_structs.AdminMetadata{UserID: "someone", CreatedAt: mockCreateAt, UpdatedAt: mockUpdatedAt, SiteName: "test-site-name"})
 		err := AddRegistration(&mockNs)
 		require.NoError(t, err)
 		got, err := getAllRegistrations()
@@ -908,11 +908,13 @@ func TestRegistryTopology(t *testing.T) {
 
 	// Add a test namespace so we can test that checkExists still works
 	ns := server_structs.Registration{
-		ID:            0,
-		Prefix:        "/regular/foo",
-		Pubkey:        "",
-		Identity:      "",
-		AdminMetadata: server_structs.AdminMetadata{},
+		ID:       0,
+		Prefix:   "/regular/foo",
+		Pubkey:   "",
+		Identity: "",
+		AdminMetadata: server_structs.AdminMetadata{
+			SiteName: "test-sitename",
+		},
 	}
 	err = AddRegistration(&ns)
 	require.NoError(t, err)

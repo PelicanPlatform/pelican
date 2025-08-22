@@ -100,6 +100,9 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 		Prefix:   "/caches/" + param.Server_Hostname.GetString(),
 		Pubkey:   string(keysetBytes),
 		Identity: "test_data",
+		AdminMetadata: server_structs.AdminMetadata{
+			SiteName: "Test-Site-Name",
+		},
 	})
 	require.NoError(t, err)
 	err = registry.AddRegistration(&server_structs.Registration{
@@ -107,6 +110,9 @@ func Setup(t *testing.T, ctx context.Context, egrp *errgroup.Group) {
 		Prefix:   "/foo",
 		Pubkey:   string(keysetBytes),
 		Identity: "test_data",
+		AdminMetadata: server_structs.AdminMetadata{
+			SiteName: "Test-Site-Name",
+		},
 	})
 	require.NoError(t, err)
 

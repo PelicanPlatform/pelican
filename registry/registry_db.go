@@ -513,6 +513,9 @@ func getRegistrationsByFilter(filterNs server_structs.Registration, pType prefix
 }
 
 func AddRegistration(ns *server_structs.Registration) error {
+	if ns.AdminMetadata.SiteName == "" {
+		return errors.New("Site Name is required")
+	}
 	// Adding default values to the field. Note that you need to pass other fields
 	// including user_id before this function
 	ns.AdminMetadata.CreatedAt = time.Now()
