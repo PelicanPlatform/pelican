@@ -975,7 +975,7 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
-		mockNs := server_structs.Registration{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Registration{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "test-site-name"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -1030,7 +1030,7 @@ func TestCreateNamespace(t *testing.T) {
 		mockNs := server_structs.Registration{
 			Prefix:        "/foo",
 			Pubkey:        pubKeyStr,
-			AdminMetadata: server_structs.AdminMetadata{Institution: "1000"},
+			AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "test-site-name"},
 			CustomFields:  customFieldsVals,
 		}
 		mockNsBytes, err := json.Marshal(mockNs)
@@ -1073,7 +1073,7 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
-		mockNs := server_structs.Registration{Prefix: "/topo/foo/bar", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Registration{Prefix: "/topo/foo/bar", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "test-site-name"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -1115,7 +1115,7 @@ func TestCreateNamespace(t *testing.T) {
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
-		mockNs := server_structs.Registration{Prefix: "/topo/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Registration{Prefix: "/topo/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "test-site-name"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -1208,7 +1208,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
-		mockNs := server_structs.Registration{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000"}}
+		mockNs := server_structs.Registration{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", SiteName: "test-site-name"}}
 		mockNsBytes, err := json.Marshal(mockNs)
 		require.NoError(t, err)
 		// Create a request to the endpoint
@@ -1231,7 +1231,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 		pubKeyStr, err := test_utils.GenerateJWKS()
 		require.NoError(t, err)
 
-		mockNs := server_structs.Registration{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", UserID: "notYourNs"}}
+		mockNs := server_structs.Registration{Prefix: "/foo", Pubkey: pubKeyStr, AdminMetadata: server_structs.AdminMetadata{Institution: "1000", UserID: "notYourNs", SiteName: "test-site-name"}}
 
 		err = insertMockDBData([]server_structs.Registration{mockNs})
 		require.NoError(t, err)
@@ -1268,6 +1268,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 				Institution: "1000",
 				UserID:      "mockUser",                 // same as currently sign-in user
 				Status:      server_structs.RegApproved, // but it's approved
+				SiteName:    "test-site-name",
 			},
 		}
 
@@ -1307,6 +1308,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 				Institution: "1000",
 				UserID:      "mockUser",                // same as currently sign-in user
 				Status:      server_structs.RegPending, // but it's approved
+				SiteName:    "test-site-name",
 			},
 		}
 
@@ -1352,6 +1354,7 @@ func TestUpdateNamespaceHandler(t *testing.T) {
 				Institution: "1000",
 				UserID:      "mockUser",                 // same as currently sign-in user
 				Status:      server_structs.RegApproved, // but it's approved
+				SiteName:    "test-site-name",
 			},
 		}
 
