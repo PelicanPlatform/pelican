@@ -48,6 +48,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/pelicanplatform/pelican/config"
 	"github.com/pelicanplatform/pelican/oauth2"
@@ -207,6 +208,52 @@ func verifySignature(payload []byte, signature []byte, publicKey *ecdsa.PublicKe
 	return ecdsa.VerifyASN1(publicKey, hash[:], signature)
 }
 
+// When a request wants to register a new service (Origin/Cache) on an existing server,
+// we need to verify they are allowed to do so by checking if the signature they present can be verified by the existing server's keyset
+func verifyServerOwnership(existingServer *server_structs.ServerRegistration, data *registrationData) (bool, error) {
+	if existingServer == nil || len(existingServer.Registration) == 0 {
+		return false, errors.New("no existing registrations to verify against")
+	}
+
+	// Parse existing server's public key
+	// When one server has multiple services, they all share the same public key(s), so we just need to check the first registration
+	existingKeySet, err := jwk.ParseString(existingServer.Registration[0].Pubkey)
+	if err != nil {
+		return false, err
+	}
+
+	// If the signature in the request could be verified by any of the keys in the existing server's keyset,
+	// then we consider whoever send this request is the owner of the existing server
+	clientPayload := []byte(data.ClientNonce + data.ServerNonce)
+	clientSignature, err := hex.DecodeString(data.ClientSignature)
+	if err != nil {
+		return false, err
+	}
+
+	// Iterate through all keys in the server's keyset recorded in Registry to find one that can verify the client signature
+	for i := 0; i < existingKeySet.Len(); i++ {
+		key, exists := existingKeySet.Key(i)
+		if !exists {
+			continue
+		}
+		var rawkey interface{}
+		if err := key.Raw(&rawkey); err != nil {
+			return false, err
+		}
+		ecdsaKey, ok := rawkey.(*ecdsa.PublicKey)
+		if !ok {
+			continue
+		}
+
+		verified := verifySignature(clientPayload, clientSignature, ecdsaKey)
+
+		if verified {
+			return true, nil // Stop iteration
+		}
+	}
+	return false, nil
+}
+
 // Generate server nonce for key-sign challenge
 func keySignChallengeInit(data *registrationData) (map[string]interface{}, error) {
 	serverNonce, err := generateNonce()
@@ -306,6 +353,28 @@ func keySignChallengeCommit(ctx *gin.Context, data *registrationData) (bool, map
 		}
 		log.Infof("Skipping registration of prefix %s because it's already registered.", data.Prefix)
 		return false, returnMsg, nil
+	}
+
+	// For a server registration attempt, check if the site name is duplicated
+	isOrigin := strings.HasPrefix(data.Prefix, server_structs.OriginPrefix.String())
+	isCache := strings.HasPrefix(data.Prefix, server_structs.CachePrefix.String())
+	if isOrigin || isCache {
+		existingServer, err := getServerByName(strings.TrimSpace(data.SiteName))
+		if err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return false, nil, errors.Wrapf(err, "failed to check for existing server %q", data.SiteName)
+			}
+			// Record not found, continue with registration
+		} else if existingServer != nil && existingServer.ID != "" {
+			// Server exists, verify ownership
+			verified, err := verifyServerOwnership(existingServer, data)
+			if err != nil {
+				return false, nil, errors.Wrapf(err, "Failed to verify server ownership for %s", data.SiteName)
+			}
+			if !verified {
+				return false, nil, permissionDeniedError{Message: fmt.Sprintf("unable to verify you own the registered server %q", data.SiteName)}
+			}
+		}
 	}
 
 	inTopo, topoNss, valErr, sysErr := validateKeyChaining(data.Prefix, key)

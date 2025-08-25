@@ -287,6 +287,38 @@ func getServerByRegistrationID(registrationID int) (*server_structs.ServerRegist
 	return result, nil
 }
 
+// Retrieve the details of a server by server name
+func getServerByName(serverName string) (*server_structs.ServerRegistration, error) {
+	var server server_structs.Server
+	if err := database.ServerDatabase.Where("name = ?", serverName).First(&server).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, gorm.ErrRecordNotFound
+		}
+		return nil, errors.Wrapf(err, "failed to get server by name: %s", serverName)
+	}
+
+	var services []server_structs.Service
+	if err := database.ServerDatabase.Where("server_id = ?", server.ID).Preload("Registration").Find(&services).Error; err != nil {
+		return nil, errors.Wrapf(err, "failed to get services for server name: %s", serverName)
+	}
+
+	result := &server_structs.ServerRegistration{
+		ID:        server.ID,
+		Name:      server.Name,
+		IsOrigin:  server.IsOrigin,
+		IsCache:   server.IsCache,
+		Note:      server.Note,
+		CreatedAt: server.CreatedAt,
+		UpdatedAt: server.UpdatedAt,
+	}
+
+	for _, service := range services {
+		result.Registration = append(result.Registration, service.Registration)
+	}
+
+	return result, nil
+}
+
 // Get the complete info of all servers
 func listServers() ([]server_structs.ServerRegistration, error) {
 	var servers []server_structs.Server
@@ -513,6 +545,9 @@ func getRegistrationsByFilter(filterNs server_structs.Registration, pType prefix
 }
 
 func AddRegistration(ns *server_structs.Registration) error {
+	if ns.AdminMetadata.SiteName == "" {
+		return errors.New("Site Name is required")
+	}
 	// Adding default values to the field. Note that you need to pass other fields
 	// including user_id before this function
 	ns.AdminMetadata.CreatedAt = time.Now()
@@ -560,7 +595,29 @@ func AddRegistration(ns *server_structs.Registration) error {
 			} else if err != nil {
 				return errors.Wrapf(err, "failed to check for existing server: %s", ns.AdminMetadata.SiteName)
 			} else {
-				// Server exists, update its services (a server can be both an origin and a cache)
+				// If there's an existing server with the same name owned by the same entity,
+				// update its services (a server can be both an origin and a cache).
+				// We consider they belong to the same entity if they have the same public key(s)
+
+				// Get the first registration for this server to compare public keys
+				// Because if multiple services registered to the same server, they all have the same public keys
+				var existingService server_structs.Service
+				if err := tx.Where("server_id = ?", existingServer.ID).Preload("Registration").First(&existingService).Error; err != nil {
+					return errors.Wrapf(err, "failed to get existing service for server: %s", ns.AdminMetadata.SiteName)
+				}
+
+				existingPubkeySet, err := jwk.ParseString(existingService.Registration.Pubkey)
+				if err != nil {
+					return errors.Wrapf(err, "failed to parse existing server's pubkey as a jwks: %s", ns.AdminMetadata.SiteName)
+				}
+				inputPubkeySet, err := jwk.ParseString(ns.Pubkey)
+				if err != nil {
+					return errors.Wrapf(err, "failed to parse input registration's pubkey as a jwks: %s", ns.AdminMetadata.SiteName)
+				}
+
+				if !compareJwks(existingPubkeySet, inputPubkeySet) {
+					return errors.Errorf("A server with the name %q already exists. Please choose a different server name or prove you have ownership of this server.", ns.AdminMetadata.SiteName)
+				}
 				if isOrigin {
 					existingServer.IsOrigin = true
 				}
