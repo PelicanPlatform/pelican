@@ -89,6 +89,7 @@ type (
 
 	TokenGenerationOpts struct {
 		Operation TokenOperation
+		Recursive bool
 	}
 
 	ContextKey string

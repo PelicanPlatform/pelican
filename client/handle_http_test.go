@@ -481,7 +481,7 @@ func TestSortAttempts(t *testing.T) {
 
 	defer cancel()
 
-	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false, false)
 	token.SetToken("aaa")
 	size, results := sortAttempts(ctx, "/path", []transferAttemptDetails{attempt1, attempt2, attempt3}, token)
 	assert.Equal(t, int64(42), size)
@@ -1525,7 +1525,7 @@ func TestHeadRequestWithDownloadToken(t *testing.T) {
 	svrURL, err := url.Parse(svr.URL)
 	require.NoError(t, err)
 
-	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false)
+	token := newTokenGenerator(nil, nil, config.TokenSharedRead, false, false)
 	token.SetToken("test-token")
 	transfer := &transferFile{
 		ctx: context.Background(),
@@ -1987,7 +1987,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false, false)
 		token.SetToken("test-token")
 
 		transfer := &transferFile{
@@ -2036,7 +2036,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
@@ -2097,7 +2097,7 @@ func TestPutOverwrite(t *testing.T) {
 		require.NoError(t, err)
 
 		// Create a token generator with a test token
-		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false)
+		token := newTokenGenerator(nil, nil, config.TokenSharedWrite, false, false)
 		token.SetToken("test-token")
 
 		// Create a test file to upload
