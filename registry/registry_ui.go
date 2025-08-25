@@ -484,7 +484,7 @@ func createUpdateNamespace(ctx *gin.Context, isUpdate bool) {
 			log.Errorf("Failed to insert namespace with id %d. %v", ns.ID, err)
 			ctx.JSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
 				Status: server_structs.RespFailed,
-				Msg:    "Fail to insert namespace"})
+				Msg:    fmt.Sprintf("New registration failed. %s", err.Error())})
 			return
 		}
 		if inTopo {
