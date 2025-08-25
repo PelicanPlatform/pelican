@@ -229,20 +229,24 @@ func verifyServerOwnership(existingServer *server_structs.ServerRegistration, da
 	if err != nil {
 		return false, err
 	}
-	ctx := context.Background()
-	it := existingKeySet.Iterate(ctx)
-	for it.Next(ctx) {
-		pair := it.Pair()
-		key, ok := pair.Value.(jwk.Key)
-		if !ok {
+
+	// Use direct key access instead of iterator since iterator isn't finding any keys
+	for i := 0; i < existingKeySet.Len(); i++ {
+		key, exists := existingKeySet.Key(i)
+		if !exists {
 			continue
 		}
 		var rawkey interface{}
 		if err := key.Raw(&rawkey); err != nil {
 			return false, err
 		}
+		ecdsaKey, ok := rawkey.(*ecdsa.PublicKey)
+		if !ok {
+			continue
+		}
 
-		verified := verifySignature(clientPayload, clientSignature, (rawkey).(*ecdsa.PublicKey))
+		verified := verifySignature(clientPayload, clientSignature, ecdsaKey)
+
 		if verified {
 			return true, nil // Stop iteration
 		}
