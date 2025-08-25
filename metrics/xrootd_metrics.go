@@ -334,17 +334,23 @@ type (
 	}
 
 	SummaryStat struct {
-		Id         SummaryStatType    `xml:"id,attr"`
-		Total      int                `xml:"tot"`
-		In         int                `xml:"in"`
-		Out        int                `xml:"out"`
-		Threads    int                `xml:"threads"`
-		Idle       int                `xml:"idle"`
-		Paths      SummaryPath        `xml:"paths"` // For Oss Summary Data
-		Store      SummaryCacheStore  `xml:"store"`
-		Memory     SummaryCacheMemory `xml:"mem"`
-		ProcSystem ProcTimes          `xml:"sys"`
-		ProcUser   ProcTimes          `xml:"usr"`
+		Id                 SummaryStatType    `xml:"id,attr"`
+		Total              int                `xml:"tot"`
+		In                 int                `xml:"in"`
+		Out                int                `xml:"out"`
+		Threads            int                `xml:"threads"`
+		Idle               int                `xml:"idle"`
+		Queued             int                `xml:"inq"`
+		Jobs               int                `xml:"jobs"`
+		LongestQueue       int                `xml:"maxinq"`
+		ThreadCreations    int                `xml:"tcr"`
+		ThreadDestructions int                `xml:"tde"`
+		ThreadLimitReached int                `xml:"tlimr"`
+		Paths              SummaryPath        `xml:"paths"` // For Oss Summary Data
+		Store              SummaryCacheStore  `xml:"store"`
+		Memory             SummaryCacheMemory `xml:"mem"`
+		ProcSystem         ProcTimes          `xml:"sys"`
+		ProcUser           ProcTimes          `xml:"usr"`
 	}
 
 	SummaryStatistics struct {
@@ -437,6 +443,36 @@ var (
 		Name: "xrootd_sched_thread_count",
 		Help: "Number of scheduler threads",
 	}, []string{"state"})
+
+	ThreadCreations = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_sched_thread_creations",
+		Help: "Number of scheduler thread creations",
+	})
+
+	ThreadDestructions = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_sched_thread_destructions",
+		Help: "Number of scheduler thread destructions",
+	})
+
+	ThreadLimitReached = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_sched_thread_limit_reached",
+		Help: "Number of scheduler thread limit reached",
+	})
+
+	Jobs = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_sched_jobs",
+		Help: "Number of scheduler jobs requiring a thread",
+	})
+
+	LongestQueue = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_sched_longest_queue",
+		Help: "Length of the longest run-queue",
+	})
+
+	Queued = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_sched_queued",
+		Help: "Number of jobs queued",
+	})
 
 	// TODO: Remove this metric (the line directly below)
 	// The renamed metric was added in v7.16
@@ -1748,6 +1784,16 @@ func HandleSummaryPacket(packet []byte) error {
 			Threads.With(prometheus.Labels{"state": "idle"}).Set(float64(stat.Idle))
 			Threads.With(prometheus.Labels{"state": "running"}).Set(float64(stat.Threads -
 				stat.Idle))
+
+			Queued.Set(float64(stat.Queued))
+			LongestQueue.Set(float64(stat.LongestQueue))
+			Jobs.Set(float64(stat.Jobs))
+			ThreadCreations.Add(float64(stat.ThreadCreations - lastStats.ThreadCreations))
+			ThreadDestructions.Add(float64(stat.ThreadDestructions - lastStats.ThreadDestructions))
+			ThreadLimitReached.Add(float64(stat.ThreadLimitReached - lastStats.ThreadLimitReached))
+			lastStats.ThreadCreations = stat.ThreadCreations
+			lastStats.ThreadDestructions = stat.ThreadDestructions
+			lastStats.ThreadLimitReached = stat.ThreadLimitReached
 		case OssStat: // Oss stat should only appear on origin servers
 			for _, pathStat := range stat.Paths.Stats {
 				noQuoteLp := strings.Replace(pathStat.Lp, "\"", "", 2)
