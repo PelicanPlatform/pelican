@@ -27,6 +27,7 @@ import (
 
 	"github.com/pelicanplatform/pelican/database"
 	"github.com/pelicanplatform/pelican/server_structs"
+	"github.com/pelicanplatform/pelican/test_utils"
 )
 
 func createTestNamespaces(t *testing.T) []server_structs.Registration {
@@ -199,10 +200,14 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 	})
 
 	t.Run("AddDualServerType", func(t *testing.T) {
+		// Generate a proper JWKS for the dual server test
+		dualServerJWKS, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
 		// Create first namespace as origin
 		originNs := server_structs.Registration{
 			Prefix: "/origins/dual-server.edu",
-			Pubkey: "test-pubkey",
+			Pubkey: dualServerJWKS,
 			AdminMetadata: server_structs.AdminMetadata{
 				SiteName:    "dual-server.edu",
 				Institution: "Dual University",
@@ -210,13 +215,13 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 			},
 		}
 
-		err := AddRegistration(&originNs)
+		err = AddRegistration(&originNs)
 		require.NoError(t, err)
 
 		// Create second namespace as cache for same server
 		cacheNs := server_structs.Registration{
 			Prefix: "/caches/dual-server.edu",
-			Pubkey: "test-pubkey",
+			Pubkey: dualServerJWKS, // Same JWKS since it's the same server
 			AdminMetadata: server_structs.AdminMetadata{
 				SiteName:    "dual-server.edu",
 				Institution: "Dual University",
@@ -257,6 +262,28 @@ func TestAddNamespaceCreatesServers(t *testing.T) {
 		server, err := getServerByRegistrationID(ns.ID)
 		require.NoError(t, err)    // Function doesn't error for non-existent records
 		assert.Empty(t, server.ID) // But returns empty server
+	})
+
+	t.Run("EmptySiteNameShouldFail", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		testJWKS, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// Try to create registration with empty site name
+		reg := server_structs.Registration{
+			Prefix: "/origins/empty-sitename.edu",
+			Pubkey: testJWKS,
+			AdminMetadata: server_structs.AdminMetadata{
+				UserID:      "testuser",
+				SiteName:    "", // Empty site name
+				Institution: "Test University",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = AddRegistration(&reg)
+		assert.Error(t, err, "Should fail with empty site name")
+		assert.Contains(t, err.Error(), "Site Name is required", "Error should mention site name requirement")
 	})
 }
 
@@ -314,23 +341,27 @@ func TestServerTableConstraints(t *testing.T) {
 	defer teardownMockRegistryDB(t)
 
 	t.Run("ServerNameUniqueness", func(t *testing.T) {
+		// Generate a proper JWKS for the unique server test
+		uniqueServerJWKS, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
 		// Create first namespace
 		ns1 := server_structs.Registration{
 			Prefix: "/origins/unique-server.edu",
-			Pubkey: "test-pubkey-1",
+			Pubkey: uniqueServerJWKS,
 			AdminMetadata: server_structs.AdminMetadata{
 				SiteName:    "unique-server.edu",
 				Institution: "Test University",
 				Status:      server_structs.RegApproved,
 			},
 		}
-		err := AddRegistration(&ns1)
+		err = AddRegistration(&ns1)
 		require.NoError(t, err)
 
 		// Try to create another namespace with same site name but different prefix
 		ns2 := server_structs.Registration{
 			Prefix: "/caches/unique-server.edu", // Different prefix but same site name
-			Pubkey: "test-pubkey-2",
+			Pubkey: uniqueServerJWKS,            // Same JWKS since it's the same server
 			AdminMetadata: server_structs.AdminMetadata{
 				SiteName:    "unique-server.edu", // Same site name
 				Institution: "Test University",
@@ -441,13 +472,16 @@ func TestServerWithMultipleServices(t *testing.T) {
 	setupMockRegistryDB(t)
 	defer teardownMockRegistryDB(t)
 
-	t.Run("ServerWithBothOriginAndCacheServices", func(t *testing.T) {
+	t.Run("ServerWithBothOriginAndCacheWithSameName", func(t *testing.T) {
 		defer resetMockRegistryDB(t)
+
+		testJWKS, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
 
 		// Create an origin registration for a server
 		originReg := server_structs.Registration{
 			Prefix: "/origins/dual-service.edu",
-			Pubkey: "origin-pubkey",
+			Pubkey: testJWKS,
 			AdminMetadata: server_structs.AdminMetadata{
 				UserID:      "testuser",
 				SiteName:    "dual-service.edu",
@@ -455,13 +489,13 @@ func TestServerWithMultipleServices(t *testing.T) {
 				Status:      server_structs.RegApproved,
 			},
 		}
-		err := AddRegistration(&originReg)
+		err = AddRegistration(&originReg)
 		require.NoError(t, err, "Failed to add origin namespace")
 
 		// Create a cache registration for the same server
 		cacheReg := server_structs.Registration{
 			Prefix: "/caches/dual-service.edu",
-			Pubkey: "cache-pubkey",
+			Pubkey: testJWKS, // Same pubkey since it's the same server
 			AdminMetadata: server_structs.AdminMetadata{
 				UserID:      "testuser",
 				SiteName:    "dual-service.edu", // Same site name
@@ -511,12 +545,12 @@ func TestServerWithMultipleServices(t *testing.T) {
 
 		// Verify cache registration (comes first alphabetically)
 		assert.Equal(t, "/caches/dual-service.edu", registrations[0].Prefix)
-		assert.Equal(t, "cache-pubkey", registrations[0].Pubkey)
+		assert.Equal(t, testJWKS, registrations[0].Pubkey)
 		assert.Equal(t, "Test University", registrations[0].AdminMetadata.Institution)
 
 		// Verify origin registration
 		assert.Equal(t, "/origins/dual-service.edu", registrations[1].Prefix)
-		assert.Equal(t, "origin-pubkey", registrations[1].Pubkey)
+		assert.Equal(t, testJWKS, registrations[1].Pubkey)
 		assert.Equal(t, "Test University", registrations[1].AdminMetadata.Institution)
 
 		// Test getServerByRegistrationID works for both registrations
@@ -542,5 +576,109 @@ func TestServerWithMultipleServices(t *testing.T) {
 		assert.True(t, listedServer.IsOrigin)
 		assert.True(t, listedServer.IsCache)
 		require.Len(t, listedServer.Registration, 2, "Listed server should have both registrations")
+	})
+
+	t.Run("DifferentPublicKeysForSameServerName", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		// Generate two different JWKS
+		firstJWKS, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		secondJWKS, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// Create first registration
+		firstReg := server_structs.Registration{
+			Prefix: "/origins/conflicted-server.edu",
+			Pubkey: firstJWKS,
+			AdminMetadata: server_structs.AdminMetadata{
+				UserID:      "user1",
+				SiteName:    "conflicted-server.edu",
+				Institution: "Test University",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = AddRegistration(&firstReg)
+		require.NoError(t, err, "First registration should succeed")
+
+		// Try to create second registration with same site name but different pubkey
+		secondReg := server_structs.Registration{
+			Prefix: "/caches/conflicted-server.edu",
+			Pubkey: secondJWKS, // Different pubkey
+			AdminMetadata: server_structs.AdminMetadata{
+				UserID:      "user2",                 // Different user
+				SiteName:    "conflicted-server.edu", // Same site name
+				Institution: "Test University",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = AddRegistration(&secondReg)
+		assert.Error(t, err, "Should fail when trying to register same server name with different pubkey")
+		assert.Contains(t, err.Error(), "already exists", "Error should mention server already exists")
+	})
+
+	t.Run("MultipleServersWithDifferentNames", func(t *testing.T) {
+		defer resetMockRegistryDB(t)
+
+		jwks1, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+		jwks2, err := test_utils.GenerateJWKS()
+		require.NoError(t, err)
+
+		// Create first server
+		server1Reg := server_structs.Registration{
+			Prefix: "/origins/server1.edu",
+			Pubkey: jwks1,
+			AdminMetadata: server_structs.AdminMetadata{
+				UserID:      "user1",
+				SiteName:    "server1.edu",
+				Institution: "University 1",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = AddRegistration(&server1Reg)
+		require.NoError(t, err, "First server registration should succeed")
+
+		// Create second server with different name
+		server2Reg := server_structs.Registration{
+			Prefix: "/caches/server2.edu",
+			Pubkey: jwks2,
+			AdminMetadata: server_structs.AdminMetadata{
+				UserID:      "user2",
+				SiteName:    "server2.edu", // Different site name
+				Institution: "University 2",
+				Status:      server_structs.RegApproved,
+			},
+		}
+		err = AddRegistration(&server2Reg)
+		require.NoError(t, err, "Second server registration should succeed")
+
+		// Verify two servers were created
+		var serverCount int64
+		err = database.ServerDatabase.Model(&server_structs.Server{}).Count(&serverCount).Error
+		require.NoError(t, err)
+		assert.Equal(t, int64(2), serverCount, "Expected exactly two servers")
+
+		// Verify servers have correct flags
+		var servers []server_structs.Server
+		err = database.ServerDatabase.Find(&servers).Error
+		require.NoError(t, err)
+		require.Len(t, servers, 2)
+
+		// Find each server and verify flags
+		var server1, server2 server_structs.Server
+		for _, s := range servers {
+			if s.Name == "server1.edu" {
+				server1 = s
+			} else if s.Name == "server2.edu" {
+				server2 = s
+			}
+		}
+
+		assert.True(t, server1.IsOrigin, "Server1 should be marked as origin")
+		assert.False(t, server1.IsCache, "Server1 should not be marked as cache")
+
+		assert.False(t, server2.IsOrigin, "Server2 should not be marked as origin")
+		assert.True(t, server2.IsCache, "Server2 should be marked as cache")
 	})
 }
