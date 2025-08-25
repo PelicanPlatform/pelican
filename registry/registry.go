@@ -230,7 +230,7 @@ func verifyServerOwnership(existingServer *server_structs.ServerRegistration, da
 		return false, err
 	}
 
-	// Use direct key access instead of iterator since iterator isn't finding any keys
+	// Iterate through all keys in the server's keyset recorded in Registry to find one that can verify the client signature
 	for i := 0; i < existingKeySet.Len(); i++ {
 		key, exists := existingKeySet.Key(i)
 		if !exists {
