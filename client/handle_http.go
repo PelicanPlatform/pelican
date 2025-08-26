@@ -1298,7 +1298,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypeDownload,
 		uuid:           id,
 		project:        project,
-		token:          NewTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire, recursive),
+		token:          NewTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
 	}
 	if upload {
 		tj.xferType = transferTypeUpload
@@ -1420,7 +1420,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypePrestage,
 		uuid:           id,
 		project:        project,
-		token:          NewTokenGenerator(&copyUrl, nil, config.TokenSharedRead, !tc.skipAcquire, false),
+		token:          NewTokenGenerator(&copyUrl, nil, config.TokenSharedRead, !tc.skipAcquire),
 	}
 	if tc.token != "" {
 		tj.token.SetToken(tc.token)
@@ -1518,7 +1518,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	}
 
 	var prefObjServers []*url.URL
-	token := NewTokenGenerator(pelicanURL, nil, config.TokenSharedRead, true, false)
+	token := NewTokenGenerator(pelicanURL, nil, config.TokenSharedRead, true)
 	if tc.token != "" {
 		token.SetToken(tc.token)
 	}

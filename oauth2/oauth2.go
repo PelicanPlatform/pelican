@@ -102,21 +102,21 @@ func AcquireToken(issuerUrl string, entry *config.PrefixEntry, dirResp server_st
 	pathCleaned = path.Dir(pathCleaned)
 
 	// Potentially increase the coarseness of the token
-	if opts.Operation != config.TokenSharedWrite && opts.Operation != config.TokenSharedRead && dirResp.XPelTokGenHdr.MaxScopeDepth > 0 {
+	if !opts.Operation.IsEnabled(config.TokenSharedWrite) && !opts.Operation.IsEnabled(config.TokenSharedRead) && dirResp.XPelTokGenHdr.MaxScopeDepth > 0 {
 		pathCleaned = trimPath(pathCleaned, (int)((dirResp.XPelTokGenHdr.MaxScopeDepth)))
 	}
 
-	var storageScope string
-	if opts.Operation == config.TokenSharedWrite || opts.Operation == config.TokenWrite {
-		storageScope = "storage.create:" + pathCleaned
-	} else if opts.Operation == config.TokenDelete {
-		storageScope = "storage.modify:" + pathCleaned
-		if opts.Recursive {
-			storageScope += " storage.read:" + pathCleaned
-		}
-	} else {
-		storageScope = "storage.read:" + pathCleaned
+	storageScopes := []string{}
+	if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
+		storageScopes = append(storageScopes, "storage.create:"+pathCleaned)
 	}
+	if opts.Operation.IsEnabled(config.TokenDelete) {
+		storageScopes = append(storageScopes, "storage.modify:"+pathCleaned)
+	}
+	if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) || opts.Operation.IsEnabled(config.TokenList) {
+		storageScopes = append(storageScopes, "storage.read:"+pathCleaned)
+	}
+	storageScope := strings.Join(storageScopes, " ")
 	log.Debugln("Requesting a credential with the following scope:", storageScope)
 
 	oauth2Config := Config{

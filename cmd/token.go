@@ -422,7 +422,7 @@ func fetchToken(cmd *cobra.Command, args []string) error {
 	modify, _ := cmd.Flags().GetBool("modify")
 	read, _ := cmd.Flags().GetBool("read")
 
-	var oper config.TokenOperation
+	var oper config.Operation
 	var method string
 	if read {
 		oper = config.TokenRead
@@ -442,7 +442,7 @@ func fetchToken(cmd *cobra.Command, args []string) error {
 		return errors.Wrapf(err, "failed to get director info for %s", pUrl.String())
 	}
 
-	tokenGenerator := client.NewTokenGenerator(pUrl, &dirResp, oper, true, false)
+	tokenGenerator := client.NewTokenGenerator(pUrl, &dirResp, oper, true)
 	tokenContents, err := tokenGenerator.Get()
 	if err != nil {
 		return errors.Wrap(err, "failed to fetch token")

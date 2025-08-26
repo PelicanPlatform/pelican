@@ -165,7 +165,7 @@ func TestGetToken(t *testing.T) {
 
 	// ENVs to test: BEARER_TOKEN, BEARER_TOKEN_FILE, XDG_RUNTIME_DIR/bt_u<uid>, TOKEN, _CONDOR_CREDS/scitoken.use, .condor_creds/scitokens.use
 	os.Setenv("BEARER_TOKEN", "bearer_token_contents")
-	token := NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false, false)
+	token := NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	tokenContents, err := token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, "bearer_token_contents", tokenContents)
@@ -179,7 +179,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("BEARER_TOKEN_FILE", bearer_token_file)
-	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false, false)
+	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -192,7 +192,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("XDG_RUNTIME_DIR", tmpDir)
-	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false, false)
+	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -205,7 +205,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("TOKEN", bearer_token_file)
-	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false, false)
+	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -218,7 +218,7 @@ func TestGetToken(t *testing.T) {
 	err = os.WriteFile(bearer_token_file, tmpFile, 0644)
 	assert.NoError(t, err)
 	os.Setenv("_CONDOR_CREDS", tmpDir)
-	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false, false)
+	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -239,7 +239,7 @@ func TestGetToken(t *testing.T) {
 			Namespace: "/user/ligo/frames",
 		},
 	}
-	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false, false)
+	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -255,7 +255,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	pUrl, err = pelican_url.Parse("renamed.handle1+osdf:///user/ligo/frames", nil, nil)
 	assert.NoError(t, err)
-	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false, false)
+	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -271,7 +271,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	pUrl.RawScheme = "renamed.handle2+osdf"
 	assert.NoError(t, err)
-	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false, false)
+	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -287,7 +287,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	pUrl.RawScheme = "renamed.handle3+osdf"
 	assert.NoError(t, err)
-	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false, false)
+	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -303,7 +303,7 @@ func TestGetToken(t *testing.T) {
 	os.Setenv("_CONDOR_CREDS", tmpDir)
 	pUrl, err = pelican_url.Parse("osdf:///user/ligo/frames", nil, nil)
 	assert.NoError(t, err)
-	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false, false)
+	token = NewTokenGenerator(pUrl, &ligoDirResp, config.TokenSharedRead, false)
 	token.SetTokenName("renamed")
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
@@ -322,7 +322,7 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 	err = os.Chdir(tmpDir)
 	assert.NoError(t, err)
-	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false, false)
+	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	tokenContents, err = token.Get()
 	assert.NoError(t, err)
 	assert.Equal(t, token_contents, tokenContents)
@@ -330,7 +330,7 @@ func TestGetToken(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Check that we haven't regressed on our error messages
-	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false, false)
+	token = NewTokenGenerator(pUrl, &dirResp, config.TokenSharedWrite, false)
 	_, err = token.Get()
 	assert.EqualError(t, err, "credential is required for osdf:///user/ligo/frames but was not discovered")
 }
