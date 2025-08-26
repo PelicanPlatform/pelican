@@ -170,7 +170,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 
 	var requestedChecksums []ChecksumType
 
-	token := newTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true, false)
+	token := newTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -389,7 +389,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	}
 
 	// Get our token if needed
-	token := newTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true, false)
+	token := newTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
 	collectionsOverride := ""
 	for _, option := range options {
 		switch option.Ident() {
@@ -452,7 +452,12 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 		return err
 	}
 
-	token := newTokenGenerator(pUrl, &dirResp, config.TokenDelete, true, recursive)
+	operation := config.TokenDelete
+	if recursive {
+		operation.Set(config.TokenList)
+	}
+
+	token := newTokenGenerator(pUrl, &dirResp, operation, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
