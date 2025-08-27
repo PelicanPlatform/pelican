@@ -49,7 +49,7 @@ func (b *bearerAuth) AddAuthenticator(key string, fn gowebdav.AuthFactory) {
 // Authorize the current request
 func (b *bearerAuthenticator) Authorize(c *http.Client, rq *http.Request, path string) error {
 	if b.token != nil {
-		if tokenContents, err := b.token.get(); err == nil && tokenContents != "" {
+		if tokenContents, err := b.token.Get(); err == nil && tokenContents != "" {
 			rq.Header.Add("Authorization", "Bearer "+tokenContents) //set the header with the token
 		}
 	}
