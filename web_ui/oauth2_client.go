@@ -168,19 +168,8 @@ func handleOAuthLogin(ctx *gin.Context) {
 // Given a user name, return the list of groups they belong to
 func generateGroupInfo(user string) (groups []string, err error) {
 	// Currently, only file-based and internal lookup is supported
-	if param.Issuer_GroupSource.GetString() != "file" || param.Issuer_GroupFile.GetString() != "internal" {
+	if param.Issuer_GroupSource.GetString() != "file" && param.Issuer_GroupFile.GetString() != "internal" {
 		return
-	}
-	if param.Issuer_GroupFile.GetString() == "internal" {
-		groupList, err := database.GetMemberGroups(database.ServerDatabase, user)
-		if err != nil {
-			return nil, err
-		}
-		groups = make([]string, 0, len(groupList))
-		for _, group := range groupList {
-			groups = append(groups, group.Name)
-		}
-		return groups, nil
 	}
 	groupFile := param.Issuer_GroupFile.GetString()
 	if groupFile == "" {
@@ -258,10 +247,25 @@ func generateUserGroupInfo(userInfo map[string]interface{}, idToken map[string]i
 				}
 			}
 		}
-	} else {
+	} else if param.Issuer_GroupSource.GetString() == "file" {
 		groups, err = generateGroupInfo(user)
+		if err != nil {
+			return "", nil, err
+		}
+		return user, groups, nil
+	} else if param.Issuer_GroupSource.GetString() == "internal" {
+		log.Debugf("Getting groups for user %s", user)
+		groupList, err := database.GetMemberGroups(database.ServerDatabase, user)
+		if err != nil {
+			return "", nil, err
+		}
+		groups = make([]string, 0, len(groupList))
+		for _, group := range groupList {
+			groups = append(groups, group.Name)
+		}
+		log.Debugf("Groups for user %s: %v", user, groups)
 	}
-	return
+	return user, groups, nil
 }
 
 // Handle the callback request when the user is successfully authenticated.

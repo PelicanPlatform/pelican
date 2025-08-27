@@ -661,11 +661,12 @@ func RemoveGroupMember(db *gorm.DB, groupId, member, removedBy string, groups []
 
 func GetMemberGroups(db *gorm.DB, user string) ([]Group, error) {
 	groups := []Group{}
-	if result := db.Model(&Group{}).
+	result := db.Model(&Group{}).
 		Joins("JOIN group_members ON groups.id = group_members.group_id").
 		Where("group_members.member = ?", user).
 		Select("groups.id, groups.name").
-		Find(&groups); result.Error != nil {
+		Find(&groups)
+	if result.Error != nil {
 		return nil, result.Error
 	}
 	return groups, nil
