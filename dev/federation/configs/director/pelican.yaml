@@ -1,0 +1,10 @@
+TLSSkipVerify: true
+Logging:
+  Level: debug
+Federation:
+  DiscoveryUrl: "https://localhost:80"
+Director:
+  DBLocation: /etc/pelican
+Server:
+  WebPort: 8400
+  HostName: "localhost"
