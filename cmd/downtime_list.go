@@ -62,7 +62,6 @@ func init() {
 
 	// Optional Flags
 	flags.String("status", "incomplete", "Filter downtimes by status ('incomplete' shows active/future, 'all' shows all history)")
-	flags.StringP("output", "o", "table", "Output format (table, json, yaml)")
 
 	// Add list command to the downtime group
 	downtimeCmd.AddCommand(downtimeListCmd)
@@ -81,7 +80,6 @@ func listDowntime(cmd *cobra.Command, args []string) error {
 
 	// Get additional flag Values
 	statusFilter, _ := cmd.Flags().GetString("status")
-	outputFormat, _ := cmd.Flags().GetString("output")
 
 	// Basic validation of the input
 	targetURL, err := constructDowntimeApiURL(serverURLStr)
@@ -92,11 +90,6 @@ func listDowntime(cmd *cobra.Command, args []string) error {
 	statusFilter = strings.ToLower(statusFilter)
 	if statusFilter != "incomplete" && statusFilter != "all" {
 		return errors.New("Invalid status filter: must be 'incomplete' or 'all'")
-	}
-
-	outputFormat = strings.ToLower(outputFormat)
-	if outputFormat != "table" && outputFormat != "json" && outputFormat != "yaml" {
-		return errors.New("Invalid output format: must be 'table', 'json', or 'yaml'")
 	}
 
 	tok, err := fetchOrGenerateWebAPIAdminToken(serverURLStr, tokenLocation)
@@ -148,6 +141,12 @@ func listDowntime(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "Failed to parse JSON response from server")
 	}
 
+	// Use JSON format if global --json flag is set, otherwise use YAML format
+	outputFormat := "yaml"
+	if jsonFlag, _ := cmd.Root().PersistentFlags().GetBool("json"); jsonFlag {
+		outputFormat = "json"
+	}
+
 	// Format and Print Output
 	if err := printDowntimes(downtimes, outputFormat); err != nil {
 		return errors.Wrap(err, "Failed to format or print output")
@@ -163,7 +162,7 @@ func printDowntimes(downtimes []server_structs.Downtime, format string) error {
 		return nil
 	}
 
-	// Sort by start time for consistent table output
+	// Sort by start time for consistent output
 	sort.Slice(downtimes, func(i, j int) bool {
 		return downtimes[i].StartTime < downtimes[j].StartTime
 	})
