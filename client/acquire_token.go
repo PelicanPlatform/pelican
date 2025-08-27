@@ -68,7 +68,7 @@ type (
 		Destination   *pelican_url.PelicanURL
 		TokenLocation string
 		TokenName     string
-		Operation     config.TokenOperation
+		Operation     config.Operation
 		EnableAcquire bool
 		Token         atomic.Pointer[tokenInfo]
 		Iterator      *tokenContentIterator
@@ -84,7 +84,7 @@ type (
 	}
 )
 
-func newTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
+func newTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.Operation, enableAcquire bool) *tokenGenerator {
 	return &tokenGenerator{
 		DirResp:       dirResp,
 		Destination:   dest,
@@ -473,14 +473,13 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 		for _, scope := range strings.Split(scopes, " ") {
 			scope_info := strings.Split(scope, ":")
 			var scopeOK bool
-			switch opts.Operation {
-			case config.TokenWrite, config.TokenSharedWrite:
+			if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
 				scopeOK = (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create")
-			case config.TokenDelete:
+			} else if opts.Operation.IsEnabled(config.TokenDelete) {
 				scopeOK = (scope_info[0] == "storage.modify")
-			case config.TokenRead, config.TokenSharedRead:
+			} else if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) {
 				scopeOK = (scope_info[0] == "storage.read")
-			default:
+			} else {
 				scopeOK = false
 			}
 			if !scopeOK {
@@ -492,7 +491,7 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 				break
 			}
 			// Shared URLs must have exact matches; otherwise, prefix matching is acceptable.
-			if ((opts.Operation == config.TokenSharedWrite || opts.Operation == config.TokenSharedRead) && (targetResource == scope_info[1])) ||
+			if ((opts.Operation.IsEnabled(config.TokenSharedWrite) || opts.Operation.IsEnabled(config.TokenSharedRead)) && (targetResource == scope_info[1])) ||
 				strings.HasPrefix(targetResource, scope_info[1]) {
 				acceptableScope = true
 				break
@@ -828,16 +827,40 @@ func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse
 	tc.Issuer = issuer
 	tc.Lifetime = time.Hour
 	tc.Subject = "client_token"
-	ts := token_scopes.Wlcg_Storage_Read
-	if opts.Operation == config.TokenSharedWrite {
-		ts = token_scopes.Wlcg_Storage_Modify
+	scopes := []token_scopes.ResourceScope{}
+	if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) {
+		if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
+			scopes = append(scopes, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, after))
+		} else {
+			err = errors.New("Destination resource not inside director-provided namespace")
+			return
+		}
 	}
-	if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
-		tc.AddResourceScopes(token_scopes.NewResourceScope(ts, after))
-	} else {
-		err = errors.New("Destination resource not inside director-provided namespace")
-		return
+	if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
+		if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
+			scopes = append(scopes, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Create, after))
+		} else {
+			err = errors.New("Destination resource not inside director-provided namespace")
+			return
+		}
 	}
+	if opts.Operation.IsEnabled(config.TokenDelete) {
+		if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
+			scopes = append(scopes, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, after))
+		} else {
+			err = errors.New("Destination resource not inside director-provided namespace")
+			return
+		}
+	}
+	if opts.Operation.IsEnabled(config.TokenList) {
+		if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
+			scopes = append(scopes, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, after))
+		} else {
+			err = errors.New("Destination resource not inside director-provided namespace")
+			return
+		}
+	}
+	tc.AddResourceScopes(scopes...)
 
 	err = key.Set("kid", keyId)
 	if err != nil {

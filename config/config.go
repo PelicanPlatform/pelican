@@ -85,10 +85,10 @@ type (
 		} `yaml:"OSDF"`
 	}
 
-	TokenOperation int
+	Operation int
 
 	TokenGenerationOpts struct {
-		Operation TokenOperation
+		Operation Operation
 	}
 
 	ContextKey string
@@ -110,12 +110,33 @@ const (
 )
 
 const (
-	TokenWrite TokenOperation = iota
+	TokenWrite Operation = 1 << iota
 	TokenRead
 	TokenSharedWrite
 	TokenSharedRead
 	TokenDelete
+	TokenList
 )
+
+// Set sets a new operation to the Operation instance
+func (o *Operation) Set(newOp Operation) {
+	*o |= newOp
+}
+
+// IsEnabled checks if a testOp is in the Operation instance
+func (o Operation) IsEnabled(testOp Operation) bool {
+	return o&testOp == testOp
+}
+
+// Clear all values in an operation
+func (o *Operation) Clear() {
+	*o = Operation(0)
+}
+
+// Create a new, empty operation
+func NewOperation() Operation {
+	return Operation(0)
+}
 
 var (
 	// Some of the unit tests probe behavior specific to OSDF vs Pelican.  Hence,
