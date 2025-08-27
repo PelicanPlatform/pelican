@@ -25,13 +25,13 @@ Before using the Pelican client to interact with objects from your federation, t
 All object paths in a federation begin with a preceding `/`, and no relative paths are allowed. Here is the example URL we used in the [Quick Start Guide](../getting-started/accessing-data.mdx#federations):
 
 ```bash copy
-/ospool/uc-shared/public/OSG-Staff/validation/test.txt
+/pelicanplatform/test/hello-world.txt
 ```
 
 This is the full object path that we will be using in examples below.
 
 ### Tokens and JWT
-Some namespace prefixes are public, like `/ospool/uc-shared/public`, while others are protected (i.e. they require authorization). Objects in public namespaces can be downloaded by anybody, but downloading objects from protected namespaces requires you prove to the origin supporting that namespace that you are allowed to access the object. In Pelican, this is done using signed JSON Web Tokens, or *JWT*s for short. In many cases, these tokens can be generated automatically.
+Some namespace prefixes are public, like `/pelicanplatform/`, while others are protected (i.e. they require authorization). Objects in public namespaces can be downloaded by anybody, but downloading objects from protected namespaces requires you prove to the origin supporting that namespace that you are allowed to access the object. In Pelican, this is done using signed JSON Web Tokens, or *JWT*s for short. In many cases, these tokens can be generated automatically.
 
 ### The Different Pelican URL Schemes
 When running client commands with a request URL, there are two different URL schemes a user can use: `pelican` and `osdf`. This page uses examples with the `pelican://` URL scheme. Below is a description of the two URL schemes and what to expect when they are used:
@@ -72,15 +72,15 @@ pelican object get pelican://<federation-url></namespace-prefix></path/to/file> 
 You can try this yourself by getting the public file that was mentioned earlier from the OSDF. Using the `object get` sub command, and providing the federation URL for the OSDF:
 
 ```bash copy
-pelican object get pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-testfile.txt
+pelican object get pelican://osg-htc.org/pelicanplatform/test/hello-world.txt downloaded-testfile.txt
 ```
 
-This command will download the object `/OSG-Staff/validation/test.txt` from the OSDF's `/ospool/uc-shared/public/` namespace and save it in your local directory with the name `downloaded-testfile.txt`.
+This command will download the object `test/hello-world.txt` from the OSDF's `/pelicanplatform/` namespace and save it in your current working directory with the name `downloaded-testfile.txt`.
 
 More specifically, it breaks into these components:
-- Federation URL: `osg-htc.org`
-- Namespace: `/ospool/uc-shared/public/`
-- Object name: `OSG-Staff/validation/test.txt`
+- Federation hostname: `osg-htc.org`
+- Namespace: `/pelicanplatform/`
+- Object name: `test/hello-world.txt`
 - Destination: `downloaded-testfile.txt`
 
 
@@ -250,7 +250,7 @@ The Pelican binary can change its behavior depending on what it is named. This f
 When the name of the Pelican binary begins with `osdf`, Pelican will assume that all objects are coming from the OSDF which allows it to make several assumptions. The most immediate effect for users is that you no longer need to specify a federation URL, ONLY with no URL scheme or an `osdf:///` URL scheme. The command to download a public file from above can then be simplified to:
 
 ```bash copy
-osdf object copy /ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-testfile.txt
+osdf object copy /pelicanplatform/test/hello-world.txt downloaded-testfile.txt
 ```
 
 >**Note:** When using client commands with the OSDF binary, be careful when using it with `pelican://` URL schemes. When using the `pelican://` URL scheme, you are still required to provide a federation URL no matter what binary name you are using.
