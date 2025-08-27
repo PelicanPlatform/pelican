@@ -57,10 +57,24 @@ var (
 		Example: "To create a read/write token for /some/namespace/path in OSDF: " +
 			"pelican token create --read --write pelican://osg-htc.org/some/namespace/path",
 	}
+
+	tokenFetchCmd = &cobra.Command{
+		Use:   "fetch",
+		Short: "Fetch a token",
+		RunE:  fetchToken,
+		Args:  cobra.ExactArgs(1),
+		Example: "To fetch a token for /some/namespace/path in OSDF: " +
+			"pelican token fetch pelican://osg-htc.org/some/namespace/path",
+		Hidden: true,
+	}
 )
 
 func init() {
 	tokenCmd.AddCommand(tokenCreateCmd)
+	tokenCmd.AddCommand(tokenFetchCmd)
+
+	// Token fetch capabilities
+	tokenFetchCmd.Flags().BoolP("write", "w", false, "Fetch a token with the ability to write to or modify the specified resource. ")
 
 	// Token capabilities
 	tokenCreateCmd.Flags().BoolP("read", "r", false, "Create a token with the ability to read the specified resource")
@@ -368,5 +382,46 @@ func createToken(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println(tok)
+	return nil
+}
+
+func fetchToken(cmd *cobra.Command, args []string) error {
+	err := config.InitClient()
+	if err != nil {
+		log.Warningf("Unable to initialize client config, token fetch may not work: %v", err)
+	}
+
+	rawUrl := args[0]
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pUrl, pUrlErr := client.ParseRemoteAsPUrl(ctx, rawUrl)
+	if pUrlErr != nil {
+		return errors.Errorf("failed to parse Pelican URL: %v", pUrlErr)
+	}
+
+	// Determine whether to fetch a write token
+	write, _ := cmd.Flags().GetBool("write")
+
+	var oper config.TokenOperation
+	oper = config.TokenRead
+	method := http.MethodGet
+
+	if write {
+		oper = config.TokenWrite
+		method = http.MethodPut
+	}
+
+	dirResp, err := client.GetDirectorInfoForPath(ctx, pUrl, method, "")
+	if err != nil {
+		return errors.Wrapf(err, "failed to get director info for %s", pUrl.String())
+	}
+
+	tokenGenerator := client.NewTokenGenerator(pUrl, &dirResp, oper, true)
+	tokenContents, err := tokenGenerator.Get()
+	if err != nil || tokenContents == "" {
+		return errors.Wrap(err, "failed to fetch token")
+	}
+
+	fmt.Println(tokenContents)
 	return nil
 }
