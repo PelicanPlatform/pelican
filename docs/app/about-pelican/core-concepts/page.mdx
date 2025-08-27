@@ -25,13 +25,13 @@ to the object within that federation (there is the potential that some objects r
 the OSDF’s federation hostname is `osg-htc.org`, an example path to an object in the federation is:
 
 ```bash copy
-/ospool/uc-shared/public/OSG-Staff/validation/test.txt
+/pelicanplatform/test/hello-world.txt
 ```
 
 Combining these two pieces of information, we say the the **object's URL** is:
 
 ```bash copy
-pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt
+pelican://osg-htc.org/pelicanplatform/test/hello-world.txt
 ```
 
 ### Namespace or Federation Prefixes
@@ -41,6 +41,7 @@ Each origin supports one or more *namespace prefixes*, which are analogous to th
 Below is an example of a full Pelican object name:
 
 ```bash
+# Note -- this is an example and the object is not expected to exist
 pelican://osg-htc.org/demo/testfile.txt
 ```
 
@@ -56,11 +57,11 @@ over what happens in the directory, including the ability to delegate the creati
 Starting with a full Pelican URL object  name can make it tricky to determine where the actual namespace prefix ends and the underlying object name (as understood by the
 Origin's configured data repository) begins. For example, this test object has a deeply-nested path:
 ```bash copy
-pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt
+pelican://osg-htc.org/pelicanplatform/test/hello-world.txt
 ```
 
-In this example, the namespace prefix happens to be `/ospool/uc-shared/public/`, and this is hosted by a posix origin that exports a directory tree containing
-`/OSG-Staff/validation/test.txt`.
+In this example, the namespace prefix happens to be /pelicanplatform/`, and this is hosted by a POSIX Origin that exports a directory tree containing
+`test/hello-world.txt`.
 
 In most cases, users don't need to know the namespace/object name split for the objects they'd like to interact with -- knowing the full pelican URL is generally sufficient.
 However, understanding this becomes more important for those who want to federate their own data by hosting an Origin, or for some types of troubleshooting. Pelican provides
@@ -72,10 +73,10 @@ which should list all prefixes registered in the federation. Using the search ba
 be filtered for you.
 
 Another way to get this information is by interacting with the federation Directly using an HTTP client like curl. The following command is an example of a valid request to and
-response from the OSDF Director for the `pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt` object:
+response from the OSDF Director for the `pelican://osg-htc.org/pelicanplatform/test/hello-world.txt` object:
 ```bash
-$ curl -v https://osdf-director.osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt
-> GET /ospool/uc-shared/public/OSG-Staff/validation/test.txt HTTP/2
+$ curl -v https://osdf-director.osg-htc.org/pelicanplatform/test/hello-world.txt
+> GET /pelicanplatform/test/hello-world.txt HTTP/2
 > Host: osdf-director.osg-htc.org
 > user-agent: curl/7.76.1
 > accept: */*
@@ -83,14 +84,15 @@ $ curl -v https://osdf-director.osg-htc.org/ospool/uc-shared/public/OSG-Staff/va
 < HTTP/2 307
 < content-type: text/html; charset=utf-8
 < date: Thu, 19 Dec 2024 21:12:35 GMT
-< link: <https://osdf-uw-cache.svc.osg-htc.org:8443/ospool/uc-shared/public/OSG-Staff/validation/test.txt>; rel="duplicate"; pri=1; depth=3
-< location: https://osdf-uw-cache.svc.osg-htc.org:8443/ospool/uc-shared/public/OSG-Staff/validation/test.txt
+< link: <https://osdf-uw-cache.svc.osg-htc.org:8443/pelicanplatform/test/hello-world.txt>; rel="duplicate"; pri=1; depth=3
+< location: https://osdf-uw-cache.svc.osg-htc.org:8443/pelicanplatform/test/hello-world.txt
 < x-pelican-authorization: issuer=https://osg-htc.org/ospool
-< x-pelican-namespace: namespace=/ospool/uc-shared/public, require-token=false, collections-url=https://pelican-osdf-public.tempest.uchicago.edu:8443
-< x-pelican-token-generation: issuer=https://osg-htc.org/ospool, max-scope-depth=3, strategy=OAuth2, base-path=/ospool/uc-shared/public
-< content-length: 132
+< x-pelican-namespace: namespace=/pelicanplatform, require-token=false, collections-url=https://pelicanplatform-origin.osdf-prod.chtc.io:8443
+< x-pelican-token-generation: issuer=https://osg-htc.org/ospool, max-scope-depth=3, strategy=OAuth2
+< x-pelican-jobid: d07c5925-8a39-4a2d-890c-404fca7a21dc
+< content-length: 115
 <
-<a href="https://osdf-uw-cache.svc.osg-htc.org:8443/ospool/uc-shared/public/OSG-Staff/validation/test.txt">Temporary Redirect</a>.
+<a href="https://osdf-uw-cache.svc.osg-htc.org:8443/pelicanplatform/test/hello-world.txt">Temporary Redirect</a>.
 ```
 
 Note that the `X-Pelican-Namespace` header has a "namespace" attribute explaining which portion of the path is the registered namespace.
