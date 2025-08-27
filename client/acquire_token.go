@@ -84,7 +84,7 @@ type (
 	}
 )
 
-func newTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
+func NewTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
 	return &tokenGenerator{
 		DirResp:       dirResp,
 		Destination:   dest,
@@ -373,7 +373,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 // Return the token contents associated with the generator
 //
 // Thread-safe
-func (tg *tokenGenerator) get() (token string, err error) {
+func (tg *tokenGenerator) Get() (token string, err error) {
 	// First, see if the existing token is valid
 	info := tg.Token.Load()
 	if info != nil && time.Until(info.Expiry) > 0 && info.Contents != "" {
