@@ -41,6 +41,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwt"
 
 	"github.com/pelicanplatform/pelican/config"
+	"github.com/pelicanplatform/pelican/database"
 	pelican_oauth2 "github.com/pelicanplatform/pelican/oauth2"
 	"github.com/pelicanplatform/pelican/param"
 	"github.com/pelicanplatform/pelican/server_structs"
@@ -166,9 +167,20 @@ func handleOAuthLogin(ctx *gin.Context) {
 
 // Given a user name, return the list of groups they belong to
 func generateGroupInfo(user string) (groups []string, err error) {
-	// Currently, only file-based lookup is supported
-	if param.Issuer_GroupSource.GetString() != "file" {
+	// Currently, only file-based and internal lookup is supported
+	if param.Issuer_GroupSource.GetString() != "file" || param.Issuer_GroupFile.GetString() != "internal" {
 		return
+	}
+	if param.Issuer_GroupFile.GetString() == "internal" {
+		groupList, err := database.GetMemberGroups(database.ServerDatabase, user)
+		if err != nil {
+			return nil, err
+		}
+		groups = make([]string, 0, len(groupList))
+		for _, group := range groupList {
+			groups = append(groups, group.Name)
+		}
+		return groups, nil
 	}
 	groupFile := param.Issuer_GroupFile.GetString()
 	if groupFile == "" {
