@@ -36,6 +36,11 @@ func configSummary(cmd *cobra.Command, args []string) {
 	defaultConfigMap := initClientAndServerConfig(defaultConfig)
 	currentConfigMap := initClientAndServerConfig(viper.GetViper())
 
+	// Use JSON format if either global --json flag is set or subcommand flag --format=json is specified
+	if jsonFlag, _ := cmd.Root().PersistentFlags().GetBool("json"); jsonFlag {
+		format = "json"
+	}
+
 	if diff := compareStructsAsym(currentConfigMap, defaultConfigMap); diff != nil {
 		printConfig(diff, format)
 	}
