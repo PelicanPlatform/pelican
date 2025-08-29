@@ -1724,7 +1724,7 @@ description: |+
   The XRootD process will periodically write JSON-formatted statistics to the specified file, which can be read by external monitoring (e.g., `jq`).
   Leave unset to disable.
 type: filename
-default: none
+default: /tmp/xrootd.stats
 components: ["cache"]
 ---
 ############################
