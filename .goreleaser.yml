@@ -465,7 +465,6 @@ nfpms:
           - "xrootd-server >= 1:5.8.2"
           - "xrootd-scitokens"
           - "xrootd-voms"
-          - "xrdcl-pelican >= 1.5.1"
       deb:
         provides:
           - "pelican-origin (= 7)"
@@ -477,5 +476,4 @@ nfpms:
           - "xrootd-server (>= 5.8.2)"
           - "xrootd-scitokens-plugins"
           - "xrootd-voms-plugins"
-          - "xrdcl-pelican (>= 1.5.1)"
   # end package pelican-server
