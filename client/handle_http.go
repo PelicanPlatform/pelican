@@ -3253,6 +3253,16 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 		transferResult.Error = err
 		return transferResult, err
 	}
+
+	// Hint upload size
+	// Only do this for non-zero size files and not for pack uploads
+	// Because with compressed files, we don't know the decompressed size
+	if nonZeroSize && pack == "" {
+		query := request.URL.Query()
+		query.Add("oss.asize", strconv.FormatInt(fileInfo.Size(), 10))
+		request.URL.RawQuery = query.Encode()
+	}
+
 	// Set the authorization header as well as other headers
 	var tokenContents string
 	if transfer.token != nil {
