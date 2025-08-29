@@ -375,6 +375,7 @@ type Config struct {
 		ManagerHost string `mapstructure:"managerhost" yaml:"ManagerHost"`
 		ManagerPort int `mapstructure:"managerport" yaml:"ManagerPort"`
 		MaxStartupWait time.Duration `mapstructure:"maxstartupwait" yaml:"MaxStartupWait"`
+		MaxThreads int `mapstructure:"maxthreads" yaml:"MaxThreads"`
 		Mount string `mapstructure:"mount" yaml:"Mount"`
 		Port int `mapstructure:"port" yaml:"Port"`
 		RobotsTxtFile string `mapstructure:"robotstxtfile" yaml:"RobotsTxtFile"`
@@ -740,6 +741,7 @@ type configWithType struct {
 		ManagerHost struct { Type string; Value string }
 		ManagerPort struct { Type string; Value int }
 		MaxStartupWait struct { Type string; Value time.Duration }
+		MaxThreads struct { Type string; Value int }
 		Mount struct { Type string; Value string }
 		Port struct { Type string; Value int }
 		RobotsTxtFile struct { Type string; Value string }

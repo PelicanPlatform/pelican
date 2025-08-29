@@ -2962,6 +2962,14 @@ default: 9s
 hidden: true
 components: ["origin", "cache"]
 ---
+name: Xrootd.MaxThreads
+description: |+
+  The maximum number of threads that XRootD will use. See the XRootD [documentation](https://xrootd.web.cern.ch/doc/dev6/xrd_config.htm#_sched) for more information.
+type: int
+default: 20000
+components: ["origin", "cache"]
+hidden: true
+---
 ############################
 # Monitoring-level configs #
 ############################

@@ -168,6 +168,7 @@ type (
 		Mount                  string
 		LocalMonitoringPort    int
 		HttpMaxDelay           int
+		MaxThreads             int
 	}
 
 	ServerConfig struct {
