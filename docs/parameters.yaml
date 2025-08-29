@@ -651,6 +651,10 @@ description: |+
   - IssuerUrls: A list of URLs that token requests to the federation prefix can use as issuers. These issuer URLs are used
       to craft the Origin's Scitokens configuration file. If unset, the Origin will fall back to its own external web URL and
       assume its server keys are also used for minting data access tokens.
+
+      When clients need to bootstrap access tokens using OAuth2 flows, they'll use the first URL in this list for bootstrapping.
+      If no URLs are provided but a defined namespace capability for the export requires tokens (`Reads`, `Writes`), the derived
+      value from `${Server.IssuerUrl}` will be used.
   - Capabilities: A list of the capabilities the origin is willing to support for the given export. Capabilities include:
       ["Reads", "PublicReads", "Writes", "Listings", "DirectReads"]
       where each of these has the same effect as the corresponding "Origin.Enable*" configuration, except scoped to the
