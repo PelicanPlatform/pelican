@@ -151,6 +151,11 @@ func makeUnprivilegedXrootdLauncher(daemonName string, xrootdRun string, configP
 		}
 		result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANFEDERATIONMETADATATIMEOUT="+param.Cache_DefaultCacheTimeout.GetDuration().String())
 		result.ExtraEnv = append(result.ExtraEnv, "XRD_PELICANDEFAULTHEADERTIMEOUT="+param.Cache_DefaultCacheTimeout.GetDuration().String())
+
+		// Enable client-side curl statistics if configured
+		if statsPath := param.Cache_ClientStatisticsLocation.GetString(); statsPath != "" {
+			result.ExtraEnv = append(result.ExtraEnv, "XRD_CURLSTATISTICSLOCATION="+statsPath)
+		}
 		// Pass through the advanced Pelican cache control features; meant for unit tests of xrdcl-pelican
 		// Purposely allowing these to override the ones from the Pelican config file
 		for _, envVar := range os.Environ() {
