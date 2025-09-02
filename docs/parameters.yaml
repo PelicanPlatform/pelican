@@ -1714,6 +1714,23 @@ type: int
 default: 1
 components: ["cache"]
 ---
+name: Cache.ClientStatisticsLocation
+description: |+
+  If set, Pelican will pass this path to the XRootD cache process via the `XRD_CURLSTATISTICSLOCATION` environment variable to enable client-side curl statistics in `xrdcl-pelican` (v1.5.0+).
+
+  Example:
+
+  ```yaml
+  Cache:
+    ClientStatisticsLocation: "${Cache.RunLocation}/xrootd.stats"
+  ```
+
+  The XRootD process will periodically write JSON-formatted statistics to the specified file, which can be read by external monitoring (e.g., `jq`).
+  Leave unset to disable.
+type: filename
+default: /tmp/xrootd.stats
+components: ["cache"]
+---
 ############################
 #  Director-level configs  #
 ############################

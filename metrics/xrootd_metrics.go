@@ -359,6 +359,35 @@ type (
 		lastSysSeconds  float64
 		lastUpdateTime  time.Time
 	}
+
+	XrdCurlPrefetchStats struct {
+		Count     float64 `json:"count"`
+		Expired   float64 `json:"expired"`
+		Failed    float64 `json:"failed"`
+		ReadsHit  float64 `json:"reads_hit"`
+		ReadsMiss float64 `json:"reads_miss"`
+		BytesUsed float64 `json:"bytes_used"`
+	}
+
+	XrdCurlFileStats struct {
+		Prefetch XrdCurlPrefetchStats `json:"prefetch"`
+	}
+
+	XrdCurlQueueStats struct {
+		Produced float64 `json:"produced"`
+		Consumed float64 `json:"consumed"`
+		Pending  float64 `json:"pending"`
+		Rejected float64 `json:"rejected"`
+	}
+
+	XrdCurlStats struct {
+		Event   string            `json:"event"`
+		Start   float64           `json:"start"`
+		Now     float64           `json:"now"`
+		File    XrdCurlFileStats  `json:"file"`
+		Workers json.RawMessage   `json:"workers"`
+		Queues  XrdCurlQueueStats `json:"queues"`
+	}
 )
 
 // XrdXrootdMonFileHdr
@@ -810,9 +839,80 @@ var (
 		Help: "Total time spent in S3 requests.",
 	}, []string{"type"})
 
+	// Xrdcl Caching/Prefetching client statistics
+	XrdclFilePrefetchCount = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_prefetch_count_total",
+		Help: "Total number of prefetches started.",
+	})
+	XrdclFilePrefetchExpired = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_prefetch_expired_total",
+		Help: "Total number of prefetches that expired.",
+	})
+	XrdclFilePrefetchFailed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_prefetch_failed_total",
+		Help: "Total number of prefetches that failed.",
+	})
+	XrdclFilePrefetchReadsHit = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_prefetch_reads_hit_total",
+		Help: "Total number of successful reads from prefetch buffer.",
+	})
+	XrdclFilePrefetchReadsMiss = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_prefetch_reads_miss_total",
+		Help: "Total number of reads that missed the prefetch buffer.",
+	})
+	XrdclFilePrefetchBytesUsed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_prefetch_bytes_used_total",
+		Help: "Total number of bytes served from prefetch.",
+	})
+	XrdclQueueProduced = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_queue_produced_total",
+		Help: "Total number of HTTP requests placed into the queue.",
+	})
+	XrdclQueueConsumed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_queue_consumed_total",
+		Help: "Total number of HTTP requests read from the queue.",
+	})
+	XrdclQueuePending = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_xrdcl_queue_pending",
+		Help: "Number of pending HTTP requests in the queue.",
+	})
+	XrdclQueueRejected = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_queue_rejected_total",
+		Help: "Total number of HTTP requests rejected due to overload.",
+	})
+	XrdclWorkerOldestOp = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_xrdcl_worker_oldest_op_timestamp_seconds",
+		Help: "Timestamp of the oldest operation in any of the worker threads.",
+	})
+	XrdclWorkerOldestCycle = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "xrootd_xrdcl_worker_oldest_cycle_timestamp_seconds",
+		Help: "Timestamp of the oldest event loop completion in any of the worker threads.",
+	})
+	XrdclHTTPRequests = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_http_requests_total",
+		Help: "Statistics about HTTP requests.",
+	}, []string{"verb", "status", "type"})
+	XrdclHTTPRequestDuration = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_http_request_duration_seconds_total",
+		Help: "Total duration of HTTP requests.",
+	}, []string{"verb", "status", "type"})
+	XrdclHTTPBytes = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_http_bytes_total",
+		Help: "Bytes transferred for HTTP requests.",
+	}, []string{"verb", "status"})
+	XrdclConncall = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "xrootd_xrdcl_conncall_total",
+		Help: "Statistics about connection calls.",
+	}, []string{"type"})
+
 	lastStats        SummaryStat
 	lastOssStats     OSSStatsGs
 	lastS3CacheStats OssS3CacheGs
+	lastXrdCurlStats struct {
+		File    XrdCurlFileStats
+		Queues  XrdCurlQueueStats
+		Workers map[string]float64
+	}
 
 	procState = processUtilizationState{}
 
@@ -1794,12 +1894,15 @@ func HandleSummaryPacket(packet []byte) error {
 }
 
 func updateCounter[T int | uint | float32 | float64](new T, old T, counter prometheus.Counter) T {
-	incBy := math.Max(0, float64(new-old))
-	counter.Add(incBy)
-	if new < old {
-		return old
+	incBy := float64(new - old)
+	if incBy < 0 {
+		// If the new value is less than the old value, it is likely that the service has been restarted.
+		// In this case, we should report the new value as the increment.
+		incBy = float64(new)
 	}
-
+	if incBy > 0 {
+		counter.Add(incBy)
+	}
 	return new
 }
 
@@ -1863,6 +1966,8 @@ func handleS3CacheStats(blobs [][]byte) error {
 
 		lastS3CacheStats.BypassS = updateCounter(s3fileStats.BypassS, lastS3CacheStats.BypassS, S3CacheRequestSeconds.WithLabelValues("bypass"))
 		lastS3CacheStats.FetchS = updateCounter(s3fileStats.FetchS, lastS3CacheStats.FetchS, S3CacheRequestSeconds.WithLabelValues("fetch"))
+		// Found and processed the last valid event, so we are done
+		break
 	}
 	return nil
 }
@@ -2051,6 +2156,8 @@ func handleOSSStats(blobs [][]byte) error {
 		lastOssStats.SlowChmods = updateCounter(ossStats.SlowChmods, lastOssStats.SlowChmods, OssSlowChmodCounter)
 		lastOssStats.SlowOpens = updateCounter(ossStats.SlowOpens, lastOssStats.SlowOpens, OssSlowOpensCounter)
 		lastOssStats.SlowRenames = updateCounter(ossStats.SlowRenames, lastOssStats.SlowRenames, OssSlowRenamesCounter)
+		// Found and processed the last valid event, so we are done
+		break
 	}
 
 	return nil
@@ -2135,5 +2242,108 @@ func handleThrottlePacket(blobs [][]byte) error {
 		ServerActiveIO.Set(float64(throttleGS.IOActive))
 		ServerIOWaitTime.Add(waitTimeInc)
 	}
+	return nil
+}
+
+// When XRootD v6 is released, these stats will be available over the g-stream
+// Until then the stats are consumed from Cache.ClientStatisticsLocation
+// This function should be called with the contents of the file / udp packet
+func handleXrdcurlstatsPacket(stats []byte) error {
+	var xrdCurlStats XrdCurlStats
+	if err := json.Unmarshal(stats, &xrdCurlStats); err != nil {
+		return errors.Wrap(err, "failed to unmarshal xrdcurlstats packet")
+	}
+
+	log.Tracef("XrdCurlStats: %v", xrdCurlStats)
+
+	// File prefetch stats
+	lastXrdCurlStats.File.Prefetch.Count = updateCounter(xrdCurlStats.File.Prefetch.Count, lastXrdCurlStats.File.Prefetch.Count, XrdclFilePrefetchCount)
+	lastXrdCurlStats.File.Prefetch.Expired = updateCounter(xrdCurlStats.File.Prefetch.Expired, lastXrdCurlStats.File.Prefetch.Expired, XrdclFilePrefetchExpired)
+	lastXrdCurlStats.File.Prefetch.Failed = updateCounter(xrdCurlStats.File.Prefetch.Failed, lastXrdCurlStats.File.Prefetch.Failed, XrdclFilePrefetchFailed)
+	lastXrdCurlStats.File.Prefetch.ReadsHit = updateCounter(xrdCurlStats.File.Prefetch.ReadsHit, lastXrdCurlStats.File.Prefetch.ReadsHit, XrdclFilePrefetchReadsHit)
+	lastXrdCurlStats.File.Prefetch.ReadsMiss = updateCounter(xrdCurlStats.File.Prefetch.ReadsMiss, lastXrdCurlStats.File.Prefetch.ReadsMiss, XrdclFilePrefetchReadsMiss)
+	lastXrdCurlStats.File.Prefetch.BytesUsed = updateCounter(xrdCurlStats.File.Prefetch.BytesUsed, lastXrdCurlStats.File.Prefetch.BytesUsed, XrdclFilePrefetchBytesUsed)
+
+	// Queue stats
+	lastXrdCurlStats.Queues.Produced = updateCounter(xrdCurlStats.Queues.Produced, lastXrdCurlStats.Queues.Produced, XrdclQueueProduced)
+	lastXrdCurlStats.Queues.Consumed = updateCounter(xrdCurlStats.Queues.Consumed, lastXrdCurlStats.Queues.Consumed, XrdclQueueConsumed)
+	XrdclQueuePending.Set(xrdCurlStats.Queues.Pending)
+	lastXrdCurlStats.Queues.Rejected = updateCounter(xrdCurlStats.Queues.Rejected, lastXrdCurlStats.Queues.Rejected, XrdclQueueRejected)
+
+	// Worker stats
+	var workers map[string]float64
+	if err := json.Unmarshal(xrdCurlStats.Workers, &workers); err != nil {
+		return errors.Wrap(err, "failed to unmarshal xrdcurlstats workers")
+	}
+
+	if lastXrdCurlStats.Workers == nil {
+		lastXrdCurlStats.Workers = make(map[string]float64)
+	}
+
+	for key, value := range workers {
+		if key == "oldest_op" {
+			XrdclWorkerOldestOp.Set(value)
+			continue
+		}
+		if key == "oldest_cycle" {
+			XrdclWorkerOldestCycle.Set(value)
+			continue
+		}
+
+		// Update counters using deltas
+		oldValue := lastXrdCurlStats.Workers[key]
+		incBy := value - oldValue
+		if incBy < 0 {
+			incBy = value
+		}
+		lastXrdCurlStats.Workers[key] = value
+
+		if incBy <= 0 {
+			continue
+		}
+
+		if strings.HasPrefix(key, "http_") {
+			parts := strings.SplitN(key, "_", 4)
+			if len(parts) == 3 { // http_VERB_field
+				verb, field := parts[1], parts[2]
+				switch field {
+				case "started":
+					XrdclHTTPRequests.WithLabelValues(verb, "", "started").Add(incBy)
+				case "error":
+					XrdclHTTPRequests.WithLabelValues(verb, "", "error").Add(incBy)
+				case "timeout":
+					XrdclHTTPRequests.WithLabelValues(verb, "", "timeout").Add(incBy)
+				case "preheaderduration":
+					XrdclHTTPRequestDuration.WithLabelValues(verb, "", "preheader").Add(incBy)
+				}
+			} else if len(parts) == 4 { // http_VERB_STATUS_field
+				verb, status, field := parts[1], parts[2], parts[3]
+				switch field {
+				case "duration":
+					XrdclHTTPRequestDuration.WithLabelValues(verb, status, "duration").Add(incBy)
+				case "pauseduration":
+					XrdclHTTPRequestDuration.WithLabelValues(verb, status, "pause_duration").Add(incBy)
+				case "bytes":
+					XrdclHTTPBytes.WithLabelValues(verb, status).Add(incBy)
+				case "finished":
+					XrdclHTTPRequests.WithLabelValues(verb, status, "finished").Add(incBy)
+				case "servertimeout":
+					XrdclHTTPRequests.WithLabelValues(verb, status, "server_timeout").Add(incBy)
+				case "clienttimeout":
+					XrdclHTTPRequests.WithLabelValues(verb, status, "client_timeout").Add(incBy)
+				}
+			}
+		} else if strings.HasPrefix(key, "conncall_") {
+			parts := strings.Split(key, "_")
+			if len(parts) == 2 {
+				fieldType := parts[1]
+				switch fieldType {
+				case "error", "started", "success", "timeout":
+					XrdclConncall.WithLabelValues(fieldType).Add(incBy)
+				}
+			}
+		}
+	}
+
 	return nil
 }

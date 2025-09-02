@@ -1047,6 +1047,7 @@ func SetServerDefaults(v *viper.Viper) error {
 	v.SetDefault(param.Xrootd_HttpMaxDelay.GetName(), "9s")
 	v.SetDefault(param.Cache_EvictionMonitoringInterval.GetName(), 60)
 	v.SetDefault(param.Cache_EvictionMonitoringMaxDepth.GetName(), 1)
+	v.SetDefault(param.Cache_ClientStatisticsLocation.GetName(), filepath.Join(param.Cache_RunLocation.GetString(), "xrootd.stats"))
 	v.SetDefault(param.IssuerKey.GetName(), filepath.Join(configDir, "issuer.jwk"))
 	v.SetDefault(param.IssuerKeysDirectory.GetName(), filepath.Join(configDir, "issuer-keys"))
 	v.SetDefault(param.Server_UIPasswordFile.GetName(), filepath.Join(configDir, "server-web-passwd"))
