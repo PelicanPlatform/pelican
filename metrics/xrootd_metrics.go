@@ -456,7 +456,7 @@ var (
 
 	ThreadLimitReached = promauto.NewCounter(prometheus.CounterOpts{
 		Name: "xrootd_sched_thread_limit_reached",
-		Help: "Number of scheduler thread limit reached",
+		Help: "Number of times the scheduler thread limit has been reached",
 	})
 
 	Jobs = promauto.NewGauge(prometheus.GaugeOpts{
@@ -465,7 +465,7 @@ var (
 	})
 
 	LongestQueue = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "xrootd_sched_longest_queue",
+		Name: "xrootd_sched_queue_longest_length",
 		Help: "Length of the longest run-queue",
 	})
 
