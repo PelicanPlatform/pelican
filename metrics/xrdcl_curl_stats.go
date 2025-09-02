@@ -17,7 +17,7 @@ import (
 // When XRootD v6 is released, this function should be removed along with Cache.ClientStatisticsLocation
 func LaunchXrdCurlStatsMonitoring(ctx context.Context, egrp *errgroup.Group) {
 	egrp.Go(func() error {
-		ticker := time.NewTicker(time.Second * 30)
+		ticker := time.NewTicker(time.Second * 5)
 		defer ticker.Stop()
 
 		for {
