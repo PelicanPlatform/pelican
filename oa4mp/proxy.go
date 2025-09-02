@@ -129,6 +129,16 @@ func calculateAllowedScopes(user string, groupsList []string) ([]string, []strin
 						scope = "storage.create"
 					case "modify":
 						scope = "storage.modify"
+					case "collection_read":
+						scope = "collection.read"
+					case "collection_write":
+						scope = "collection.modify"
+					case "collection_create":
+						scope = "collection.create"
+					case "collection_modify":
+						scope = "collection.modify"
+					case "collection_delete":
+						scope = "collection.delete"
 					default:
 						scope = action
 					}
@@ -150,6 +160,16 @@ func calculateAllowedScopes(user string, groupsList []string) ([]string, []strin
 					scope = "storage.create"
 				case "modify":
 					scope = "storage.modify"
+				case "collection_read":
+					scope = "collection.read"
+				case "collection_write":
+					scope = "collection.modify"
+				case "collection_create":
+					scope = "collection.create"
+				case "collection_modify":
+					scope = "collection.modify"
+				case "collection_delete":
+					scope = "collection.delete"
 				default:
 					scope = action
 				}
