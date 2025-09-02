@@ -888,9 +888,17 @@ components: ["origin"]
 ---
 name: Origin.Concurrency
 description: |+
-  This value represents the maximum number of connections to an Origin for XRootD throttling.
-  When this value is set, it enables the XRootD throttling plugin and will set the maximum
-  number of connections to this value.
+  This value represents the maximum number of permitted IO operations in-progress per second.
+  When this value is set, it enables the [XRootD throttling plugin's](https://github.com/xrootd/xrootd/tree/master/src/XrdThrottle)
+  'concurrency' throttle directive.
+
+  For example, if there are two simultaneous read requests and each takes 1 second to complete,
+  the concurrency is 2. Setting a concurrency limit of 1 would cause one of the requests to be
+  delayed until the other completes.
+
+  For POSIX Origins, this value should be approximately:
+  - (HDDs) ~2x the number of underlying disks
+  - (NVMe/SSDs) ~10x the number of cores available to the Origin
 type: int
 default: none
 components: ["origin"]
@@ -1591,9 +1599,17 @@ components: ["cache"]
 ---
 name: Cache.Concurrency
 description: |+
-  This value represents the maximum number of connections to a cache for XRootD throttling.
-  When this value is set, it enables the XRootD throttling plugin and will set the maximum
-  number of connections to this value.
+  This value represents the maximum number of permitted IO operations in-progress per second.
+  When this value is set, it enables the [XRootD throttling plugin's](https://github.com/xrootd/xrootd/tree/master/src/XrdThrottle)
+  'concurrency' throttle directive.
+
+  For example, if there are two simultaneous read requests and each takes 1 second to complete,
+  the concurrency is 2. Setting a concurrency limit of 1 would cause one of the requests to be
+  delayed until the other completes.
+
+  For Caches, this value should be approximately:
+  - (HDDs) ~2x the number of underlying disks
+  - (NVMe/SSDs) ~10x the number of cores available to the Cache
 type: int
 default: none
 components: ["cache"]
