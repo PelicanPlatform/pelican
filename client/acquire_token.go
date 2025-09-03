@@ -475,7 +475,7 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 			var scopeOK bool
 			switch opts.Operation {
 			case config.TokenWrite, config.TokenSharedWrite:
-				scopeOK = (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create")
+				scopeOK = (scope_info[0] == "storage.create")
 			case config.TokenDelete:
 				scopeOK = (scope_info[0] == "storage.modify")
 			case config.TokenRead, config.TokenSharedRead:
@@ -830,6 +830,8 @@ func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse
 	tc.Subject = "client_token"
 	ts := token_scopes.Wlcg_Storage_Read
 	if opts.Operation == config.TokenSharedWrite {
+		ts = token_scopes.Wlcg_Storage_Create
+	} else if opts.Operation == config.TokenDelete {
 		ts = token_scopes.Wlcg_Storage_Modify
 	}
 	if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
