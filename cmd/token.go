@@ -50,7 +50,7 @@ var (
 	}
 
 	tokenCreateCmd = &cobra.Command{
-		Use:   "create",
+		Use:   "create --read|-r | --write|-w | --modify|-m | --stage|-s <pelican-url>",
 		Short: "Create a token",
 		RunE:  createToken,
 		Args:  cobra.ExactArgs(1),
@@ -59,7 +59,7 @@ var (
 	}
 
 	tokenFetchCmd = &cobra.Command{
-		Use:   "fetch",
+		Use:   "fetch --write|-w | --modify|-m <pelican-url>",
 		Short: "Fetch a token",
 		RunE:  fetchToken,
 		Args:  cobra.ExactArgs(1),
@@ -75,6 +75,7 @@ func init() {
 
 	// Token fetch capabilities
 	tokenFetchCmd.Flags().BoolP("write", "w", false, "Fetch a token with the ability to write to or modify the specified resource. ")
+	tokenFetchCmd.Flags().BoolP("modify", "m", false, "Fetch a token with the ability to modify or delete the specified resource. ")
 
 	// Token capabilities
 	tokenCreateCmd.Flags().BoolP("read", "r", false, "Create a token with the ability to read the specified resource")
@@ -385,10 +386,11 @@ func createToken(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// Fetch a token for a given Pelican URL using the TokenGenerator
 func fetchToken(cmd *cobra.Command, args []string) error {
 	err := config.InitClient()
 	if err != nil {
-		log.Warningf("Unable to initialize client config, token fetch may not work: %v", err)
+		return errors.Wrapf(err, "unable to initialize client config")
 	}
 
 	rawUrl := args[0]
@@ -396,11 +398,12 @@ func fetchToken(cmd *cobra.Command, args []string) error {
 	defer cancel()
 	pUrl, pUrlErr := client.ParseRemoteAsPUrl(ctx, rawUrl)
 	if pUrlErr != nil {
-		return errors.Errorf("failed to parse Pelican URL: %v", pUrlErr)
+		return errors.Wrapf(pUrlErr, "failed to parse Pelican URL")
 	}
 
 	// Determine whether to fetch a write token
 	write, _ := cmd.Flags().GetBool("write")
+	modify, _ := cmd.Flags().GetBool("modify")
 
 	var oper config.TokenOperation
 	oper = config.TokenRead
@@ -408,6 +411,11 @@ func fetchToken(cmd *cobra.Command, args []string) error {
 
 	if write {
 		oper = config.TokenWrite
+		method = http.MethodPut
+	}
+	if modify {
+		log.Debugln("Fetching a token with the ability to modify or delete the specified resource")
+		oper = config.TokenDelete
 		method = http.MethodPut
 	}
 
@@ -418,8 +426,11 @@ func fetchToken(cmd *cobra.Command, args []string) error {
 
 	tokenGenerator := client.NewTokenGenerator(pUrl, &dirResp, oper, true)
 	tokenContents, err := tokenGenerator.Get()
-	if err != nil || tokenContents == "" {
+	if err != nil {
 		return errors.Wrap(err, "failed to fetch token")
+	}
+	if tokenContents == "" {
+		return errors.New("retrieved token is empty")
 	}
 
 	fmt.Println(tokenContents)
