@@ -414,7 +414,6 @@ func fetchToken(cmd *cobra.Command, args []string) error {
 		method = http.MethodPut
 	}
 	if modify {
-		log.Debugln("Fetching a token with the ability to modify or delete the specified resource")
 		oper = config.TokenDelete
 		method = http.MethodPut
 	}
