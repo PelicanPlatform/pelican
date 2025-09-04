@@ -37,20 +37,20 @@ We can break down the components of this command before you try it yourself:
 Now it is time for you to get your first object from a federation. Before getting your first object, be sure you are in a directory/location where you want to download this test file. To get the object, run the command below:
 
 ```bash copy
-pelican object get pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-test.txt
+pelican object get pelican://osg-htc.org/pelicanplatform/test/hello-world.txt downloaded-test.txt
 ```
 
->**Note:** with pelican:// URLs like the one above, it is important to include the correct number of slashes (`/`). This is because pelican URLs rely on the hostname being the federation URL therefore, they must only contain two slashes after `pelican`. For more information, visit the [Pelican Client Usage](../getting-data-with-pelican/client.mdx#the-different-pelican-url-schemes) page
+>**Note:** with pelican:// URLs like the one above, it is important to include the correct number of slashes (`/`). This is because pelican URLs rely on the hostname being the federation URL therefore, they must only contain two slashes after `pelican`. For more information, visit the [Pelican Client Usage](../getting-data-with-pelican/client.mdx#the-different-pelican-url-schemes) page.
 
 You should see a progress bar output and eventually a file named `downloaded-test.txt` within your local directory:
 
 ```bash
-$ pelican object get pelican://osg-htc.org/ospool/uc-shared/public/OSG-Staff/validation/test.txt downloaded-test.txt
-downloaded-test.txt 14.00 b / 14.00 b [==============================================================================] Done!
+$ pelican object get pelican://osg-htc.org/pelicanplatform/test/hello-world.txt downloaded-test.txt
+downloaded-test.txt 27.00 b / 27.00 b [==============================================================================] Done!
 $ ls
 downloaded-test.txt
 $ cat downloaded-test.txt
-Hello, World!
+If you are seeing this message, getting an object from OSDF was successful.
 ```
 
 ## Where to Go from Here
