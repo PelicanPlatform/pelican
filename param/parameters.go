@@ -352,6 +352,7 @@ var (
 	Transport_MaxIdleConns = IntParam{"Transport.MaxIdleConns"}
 	Xrootd_DetailedMonitoringPort = IntParam{"Xrootd.DetailedMonitoringPort"}
 	Xrootd_ManagerPort = IntParam{"Xrootd.ManagerPort"}
+	Xrootd_MaxThreads = IntParam{"Xrootd.MaxThreads"}
 	Xrootd_Port = IntParam{"Xrootd.Port"}
 	Xrootd_SummaryMonitoringPort = IntParam{"Xrootd.SummaryMonitoringPort"}
 )
