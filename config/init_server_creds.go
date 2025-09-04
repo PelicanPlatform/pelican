@@ -980,7 +980,11 @@ func GenerateSessionSecret() error {
 		}
 	}
 
-	secret, err := GetSecret()
+	currentIssuerKey, err := GetIssuerPrivateJWK()
+	if err != nil {
+		return errors.Wrap(err, "failed to get the current issuer key")
+	}
+	secret, err := GetSecret(currentIssuerKey)
 	if err != nil {
 		return errors.Wrap(err, "failed to get the secret")
 	}
