@@ -307,6 +307,8 @@ nfpms:
     release: 1
     section: default
     priority: extra
+    scripts:
+      postinstall: "scripts/postinstall-plugin.sh"
     dependencies:
       - pelican
     provides:
