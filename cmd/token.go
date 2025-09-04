@@ -50,7 +50,7 @@ var (
 	}
 
 	tokenCreateCmd = &cobra.Command{
-		Use:   "create --read|-r | --write|-w | --modify|-m | --stage|-s <pelican-url>",
+		Use:   "create <pelican-url>",
 		Short: "Create a token",
 		RunE:  createToken,
 		Args:  cobra.ExactArgs(1),
@@ -59,12 +59,13 @@ var (
 	}
 
 	tokenFetchCmd = &cobra.Command{
-		Use:   "fetch --write|-w | --modify|-m <pelican-url>",
+		Use:   "fetch <pelican-url>",
 		Short: "Fetch a token",
 		RunE:  fetchToken,
 		Args:  cobra.ExactArgs(1),
-		Example: "To fetch a token for /some/namespace/path in OSDF: " +
-			"pelican token fetch pelican://osg-htc.org/some/namespace/path",
+		Example: "To fetch a write token for /some/namespace/path in OSDF: " +
+			"pelican token fetch --write pelican://osg-htc.org/some/namespace/path " +
+			"ensure that only one of --read, --write, or --modify is specified",
 		Hidden: true,
 	}
 )
@@ -73,15 +74,11 @@ func init() {
 	tokenCmd.AddCommand(tokenCreateCmd)
 	tokenCmd.AddCommand(tokenFetchCmd)
 
-	// Token fetch capabilities
-	tokenFetchCmd.Flags().BoolP("write", "w", false, "Fetch a token with the ability to write to or modify the specified resource. ")
-	tokenFetchCmd.Flags().BoolP("modify", "m", false, "Fetch a token with the ability to modify or delete the specified resource. ")
-
 	// Token capabilities
-	tokenCreateCmd.Flags().BoolP("read", "r", false, "Create a token with the ability to read the specified resource")
-	tokenCreateCmd.Flags().BoolP("write", "w", false, "Create a token with the ability to write to the specified resource. "+
-		"Does not grant the ability to overwrite/modify existing resources")
-	tokenCreateCmd.Flags().BoolP("modify", "m", false, "Create a token with the ability to modify/delete the specified resource.")
+	tokenCmd.Flags().BoolP("read", "r", false, "Create or fetch a token with the ability to read the specified resource")
+	tokenCmd.Flags().BoolP("write", "w", false, "Create or fetch a token with the ability to write to the specified resource")
+	tokenCmd.Flags().BoolP("modify", "m", false, "Create or fetch a token with the ability to modify or delete the specified resource")
+
 	tokenCreateCmd.Flags().BoolP("stage", "s", false, "Create a token with the ability to stage the specified resource.")
 	tokenCreateCmd.Flags().String("scope-path", "", "Specify the path to use when creating the token's scopes. This should generally be "+
 		"the object path without the namespace prefix.")
@@ -386,7 +383,10 @@ func createToken(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// Fetch a token for a given Pelican URL using the TokenGenerator
+// Fetch a token for a given Pelican URL using the TokenGenerator.
+// Tokens are first fetched from the client's on-disk token cache,
+// and if none are available an OAuth2 flow is initiated against the
+// discovered issuer
 func fetchToken(cmd *cobra.Command, args []string) error {
 	err := config.InitClient()
 	if err != nil {
@@ -404,18 +404,31 @@ func fetchToken(cmd *cobra.Command, args []string) error {
 	// Determine whether to fetch a write token
 	write, _ := cmd.Flags().GetBool("write")
 	modify, _ := cmd.Flags().GetBool("modify")
+	read, _ := cmd.Flags().GetBool("read")
 
 	var oper config.TokenOperation
-	oper = config.TokenRead
-	method := http.MethodGet
-
+	var method string
+	count := 0
+	if read {
+		oper = config.TokenRead
+		method = http.MethodGet
+		count++
+	}
 	if write {
 		oper = config.TokenWrite
 		method = http.MethodPut
+		count++
 	}
 	if modify {
 		oper = config.TokenDelete
 		method = http.MethodPut
+		count++
+	}
+
+	if count == 0 {
+		return errors.New("no scope specified, please specify only one of --read, --write, or --modify")
+	} else if count > 1 {
+		return errors.New("multiple scopes specified, please specify only one of --read, --write, or --modify")
 	}
 
 	dirResp, err := client.GetDirectorInfoForPath(ctx, pUrl, method, "")
