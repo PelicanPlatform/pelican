@@ -223,7 +223,6 @@ func oa4mpProxy(ctx *gin.Context) {
 		if groupsList == nil {
 			groupsList = make([]string, 0)
 		}
-		log.Debugln("groupsList", groupsList)
 		// WORKAROUND: OA4MP 5.4.x does not provide a mechanism to pass data through headers (the
 		// existing mechanism only works with the authorization code grant, not the device authorization
 		// grant).  Therefore, all the data we want passed we stuff into the username (which *is* copied
@@ -234,8 +233,6 @@ func oa4mpProxy(ctx *gin.Context) {
 		allowedScopes, matchedGroups := calculateAllowedScopes(user, groupsList)
 		userInfo["g"] = matchedGroups
 		userInfo["s"] = allowedScopes
-		log.Debugln("allowedScopes", allowedScopes)
-		log.Debugln("matchedGroups", matchedGroups)
 		userBytes, err := json.Marshal(userInfo)
 		if err != nil {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, server_structs.SimpleApiResp{
