@@ -269,6 +269,16 @@ func ConfigureOA4MP() (launcher daemon.Launcher, err error) {
 				scope_actions = append(scope_actions, "storage.create")
 			case "modify":
 				scope_actions = append(scope_actions, "storage.modify")
+			case "collection_read":
+				scope_actions = append(scope_actions, "collection.read")
+			case "collection_write":
+				scope_actions = append(scope_actions, "collection.modify")
+			case "collection_create":
+				scope_actions = append(scope_actions, "collection.create")
+			case "collection_modify":
+				scope_actions = append(scope_actions, "collection.modify")
+			case "collection_delete":
+				scope_actions = append(scope_actions, "collection.delete")
 			default:
 				scope_actions = append(scope_actions, scope)
 			}
