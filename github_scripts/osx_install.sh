@@ -54,7 +54,7 @@ ninja
 ninja install
 popd
 
-git clone --branch v1.5.3 https://github.com/PelicanPlatform/xrdcl-pelican.git
+git clone --branch v1.5.4 https://github.com/PelicanPlatform/xrdcl-pelican.git
 pushd xrdcl-pelican
 mkdir build
 cd build
