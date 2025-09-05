@@ -19,6 +19,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -42,13 +43,21 @@ var (
 	}
 )
 
-func printConfig() {
+// printConfig prints the credential configuration file in either JSON or YAML format
+// based on the useJSON flag.
+// Note: JSON explicitly includes null/empty fields, while YAML does not.
+func printConfig(useJSON bool) {
 	config, err := config.GetCredentialConfigContents()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to get credential configuration contents:", err)
 		os.Exit(1)
 	}
-	config_b, err := yaml.Marshal(&config)
+	var config_b []byte
+	if useJSON {
+		config_b, err = json.MarshalIndent(&config, "", "  ")
+	} else {
+		config_b, err = yaml.Marshal(&config)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Failed to convert object to YAML:", err)
 		os.Exit(1)
@@ -63,7 +72,7 @@ func addConfigSubcommands(configCmd *cobra.Command) {
 		Short: "Print the credential configuration file",
 		Long:  "Print the credential configuration file",
 		Run: func(cmd *cobra.Command, args []string) {
-			printConfig()
+			printConfig(outputJSON)
 		},
 	})
 
