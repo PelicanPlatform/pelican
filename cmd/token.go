@@ -70,14 +70,25 @@ var (
 	}
 )
 
+var (
+	readFlag   bool
+	writeFlag  bool
+	modifyFlag bool
+)
+
+func addScopeFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolVarP(&readFlag, "read", "r", false, "Create or fetch a token with the ability to read the specified resource")
+	cmd.Flags().BoolVarP(&writeFlag, "write", "w", false, "Create or fetch a token with the ability to write to the specified resource")
+	cmd.Flags().BoolVarP(&modifyFlag, "modify", "m", false, "Create or fetch a token with the ability to modify or delete the specified resource")
+}
+
 func init() {
 	tokenCmd.AddCommand(tokenCreateCmd)
 	tokenCmd.AddCommand(tokenFetchCmd)
 
 	// Token capabilities
-	tokenCmd.Flags().BoolP("read", "r", false, "Create or fetch a token with the ability to read the specified resource")
-	tokenCmd.Flags().BoolP("write", "w", false, "Create or fetch a token with the ability to write to the specified resource")
-	tokenCmd.Flags().BoolP("modify", "m", false, "Create or fetch a token with the ability to modify or delete the specified resource")
+	addScopeFlags(tokenCreateCmd)
+	addScopeFlags(tokenFetchCmd)
 
 	tokenCreateCmd.Flags().BoolP("stage", "s", false, "Create a token with the ability to stage the specified resource.")
 	tokenCreateCmd.Flags().String("scope-path", "", "Specify the path to use when creating the token's scopes. This should generally be "+
