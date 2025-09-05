@@ -84,7 +84,7 @@ type (
 	}
 )
 
-func newTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
+func NewTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
 	return &tokenGenerator{
 		DirResp:       dirResp,
 		Destination:   dest,
@@ -373,7 +373,7 @@ func (tg *tokenGenerator) getToken() (token interface{}, err error) {
 // Return the token contents associated with the generator
 //
 // Thread-safe
-func (tg *tokenGenerator) get() (token string, err error) {
+func (tg *tokenGenerator) Get() (token string, err error) {
 	// First, see if the existing token is valid
 	info := tg.Token.Load()
 	if info != nil && time.Until(info.Expiry) > 0 && info.Contents != "" {
@@ -475,7 +475,7 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 			var scopeOK bool
 			switch opts.Operation {
 			case config.TokenWrite, config.TokenSharedWrite:
-				scopeOK = (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create")
+				scopeOK = (scope_info[0] == "storage.create")
 			case config.TokenDelete:
 				scopeOK = (scope_info[0] == "storage.modify")
 			case config.TokenRead, config.TokenSharedRead:
@@ -830,6 +830,8 @@ func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse
 	tc.Subject = "client_token"
 	ts := token_scopes.Wlcg_Storage_Read
 	if opts.Operation == config.TokenSharedWrite {
+		ts = token_scopes.Wlcg_Storage_Create
+	} else if opts.Operation == config.TokenDelete {
 		ts = token_scopes.Wlcg_Storage_Modify
 	}
 	if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
