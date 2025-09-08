@@ -437,7 +437,6 @@ func fetchToken(cmd *cobra.Command, args []string) error {
 		method = http.MethodPut
 	}
 
-
 	dirResp, err := client.GetDirectorInfoForPath(ctx, pUrl, method, "")
 	if err != nil {
 		return errors.Wrapf(err, "failed to get director info for %s", pUrl.String())
