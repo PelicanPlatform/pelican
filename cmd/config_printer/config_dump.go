@@ -25,5 +25,11 @@ import (
 
 func configDump(cmd *cobra.Command, args []string) {
 	currentConfig := initClientAndServerConfig(viper.GetViper())
+
+	// Use JSON format if either global --json flag is set or subcommand flag --format=json is specified
+	if jsonFlag, _ := cmd.Root().PersistentFlags().GetBool("json"); jsonFlag {
+		format = "json"
+	}
+
 	printConfig(currentConfig, format)
 }
