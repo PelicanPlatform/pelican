@@ -422,7 +422,7 @@ func fetchToken(cmd *cobra.Command, args []string) error {
 	modify, _ := cmd.Flags().GetBool("modify")
 	read, _ := cmd.Flags().GetBool("read")
 
-	var oper config.Operation
+	var oper config.TokenOperation
 	var method string
 	if read {
 		oper = config.TokenRead

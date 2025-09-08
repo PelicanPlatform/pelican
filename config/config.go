@@ -85,10 +85,10 @@ type (
 		} `yaml:"OSDF"`
 	}
 
-	Operation int
+	TokenOperation int
 
 	TokenGenerationOpts struct {
-		Operation Operation
+		Operation TokenOperation
 	}
 
 	ContextKey string
@@ -110,7 +110,7 @@ const (
 )
 
 const (
-	TokenWrite Operation = 1 << iota
+	TokenWrite TokenOperation = 1 << iota
 	TokenRead
 	TokenSharedWrite
 	TokenSharedRead
@@ -119,23 +119,23 @@ const (
 )
 
 // Set sets a new operation to the Operation instance
-func (o *Operation) Set(newOp Operation) {
+func (o *TokenOperation) Set(newOp TokenOperation) {
 	*o |= newOp
 }
 
 // IsEnabled checks if a testOp is in the Operation instance
-func (o Operation) IsEnabled(testOp Operation) bool {
+func (o TokenOperation) IsEnabled(testOp TokenOperation) bool {
 	return o&testOp == testOp
 }
 
 // Clear all values in an operation
-func (o *Operation) Clear() {
-	*o = Operation(0)
+func (o *TokenOperation) Clear() {
+	*o = TokenOperation(0)
 }
 
 // Create a new, empty operation
-func NewOperation() Operation {
-	return Operation(0)
+func NewOperation() TokenOperation {
+	return TokenOperation(0)
 }
 
 var (

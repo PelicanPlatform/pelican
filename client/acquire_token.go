@@ -68,7 +68,7 @@ type (
 		Destination   *pelican_url.PelicanURL
 		TokenLocation string
 		TokenName     string
-		Operation     config.Operation
+		Operation     config.TokenOperation
 		EnableAcquire bool
 		Token         atomic.Pointer[tokenInfo]
 		Iterator      *tokenContentIterator
@@ -84,7 +84,7 @@ type (
 	}
 )
 
-func NewTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.Operation, enableAcquire bool) *tokenGenerator {
+func NewTokenGenerator(dest *pelican_url.PelicanURL, dirResp *server_structs.DirectorResponse, operation config.TokenOperation, enableAcquire bool) *tokenGenerator {
 	return &tokenGenerator{
 		DirResp:       dirResp,
 		Destination:   dest,
