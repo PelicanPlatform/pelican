@@ -72,6 +72,8 @@ jobs:
     - name: Test macOS
       if: runner.os == 'macOS'
       run: |
+        mkdir -p web_ui/frontend/out
+        touch web_ui/frontend/out/placeholder
         make web-build
         #go test -timeout 15m -coverpkg=./director -covermode=count -coverprofile=coverage.out ./director -run TestStatMemory
         go test -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./... -skip TestStatMemory
@@ -83,6 +85,8 @@ jobs:
         GOMODCACHE: D:\gomodcache
         GOTMPDIR: D:\gotmp
       run: |
+        mkdir -p web_ui/frontend/out
+        echo. > web_ui/frontend/out/placeholder
         make web-build
         go test -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
     - name: Run GoReleaser for macOS
