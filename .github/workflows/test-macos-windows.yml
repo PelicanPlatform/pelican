@@ -86,7 +86,7 @@ jobs:
         GOTMPDIR: D:\gotmp
       run: |
         mkdir -p web_ui/frontend/out
-        echo. > web_ui/frontend/out/placeholder
+        New-Item -Path web_ui/frontend/out/placeholder -ItemType File -Force
         make web-build
         go test -p=4 -timeout 15m -coverpkg=./... -covermode=count -coverprofile=coverage.out ./...
     - name: Run GoReleaser for macOS
