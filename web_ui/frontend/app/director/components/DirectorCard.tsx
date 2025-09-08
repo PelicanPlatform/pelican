@@ -13,6 +13,7 @@ import {
   AlertDispatchContext,
   AlertReducerAction,
 } from '@/components/AlertProvider';
+import serverHasError from '@/helpers/serverHasError';
 
 export interface DirectorCardProps {
   server: ServerGeneral;
@@ -48,10 +49,10 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
             transition: 'background-color 0.3s',
             '&:hover': {
               borderColor:
-                server.healthStatus === 'Error' ? red[400] : grey[200],
+                serverHasError(server) ? red[400] : grey[200],
             },
             borderColor:
-              server.healthStatus === 'Error' ? red[100] : 'secondary.main',
+              serverHasError(server) ? red[100] : 'secondary.main',
             p: 1,
           }}
           onClick={async () => {

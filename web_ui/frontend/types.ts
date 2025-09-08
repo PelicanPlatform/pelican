@@ -48,6 +48,7 @@ interface ServerBase {
   filteredType: string;
   fromTopology: boolean;
   healthStatus: string;
+  serverStatus: 'shuttingdown' | 'critical' | 'degraded' | 'warning' | 'okay' | 'unknown'
   ioLoad: number;
 }
 
