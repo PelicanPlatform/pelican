@@ -54,7 +54,7 @@ export const CapabilitiesChip = ({
         overflow: 'hidden',
       }}
     >
-      <Typography variant={'body2'}>{name}</Typography>
+      <Typography variant={'body2'}>{CAPABILITY_LABEL_MAP[name] || name}</Typography>
       <Box display={'flex'}>
         {value ? <Check fontSize='small' /> : <Clear fontSize='small' />}
       </Box>
@@ -72,3 +72,11 @@ export const CapabilityChipStyle = {
   border: '1px 1px solid black',
   backgroundColor: green[300],
 };
+
+const CAPABILITY_LABEL_MAP: Record<string, string> = {
+  "PublicRead": "PublicReads",
+  "Read": "Reads",
+  "Write": "Writes",
+  "Listing": "Listings",
+  "FallBackRead": "DirectReads",
+}
