@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,9 +14,26 @@ import (
 	"golang.org/x/text/language"
 )
 
+// copied from generate/next_generator.go
+func GenPlaceholderPathForNext() {
+	dir := "../web_ui/frontend/out"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Fatalf("error: %v", err)
+	}
+
+	filePath := filepath.Join(dir, "placeholder")
+
+	file, err := os.Create(filePath)
+	if err != nil {
+		log.Fatalf("error: %v", err)
+	}
+	file.Close()
+}
+
 // generateCLIDocs creates per-command docs under the given directory. If the path
 // is relative, it is resolved against the repository root (directory containing go.mod).
 func generateCLIDocs(outputDir string) error {
+	GenPlaceholderPathForNext()
 	resolvedDir, err := resolveOutputPath(outputDir)
 	if err != nil {
 		return err
