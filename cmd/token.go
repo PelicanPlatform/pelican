@@ -64,8 +64,8 @@ var (
 		RunE:  fetchToken,
 		Args:  cobra.ExactArgs(1),
 		Example: "To fetch a write token for /some/namespace/path in OSDF: " +
-			"pelican token fetch --write pelican://osg-htc.org/some/namespace/path " +
-			"ensure that only one of --read, --write, or --modify is specified",
+			"pelican token fetch --write pelican://osg-htc.org/some/namespace/path." + "\n" +
+			"Ensure that only one of --read, --write, or --modify is specified.",
 		Hidden: true,
 	}
 )
@@ -77,9 +77,10 @@ var (
 )
 
 func addScopeFlags(cmd *cobra.Command) {
-	cmd.Flags().BoolVarP(&readFlag, "read", "r", false, "Create or fetch a token with the ability to read the specified resource")
-	cmd.Flags().BoolVarP(&writeFlag, "write", "w", false, "Create or fetch a token with the ability to write to the specified resource")
-	cmd.Flags().BoolVarP(&modifyFlag, "modify", "m", false, "Create or fetch a token with the ability to modify or delete the specified resource")
+	cmd.Flags().BoolVarP(&readFlag, "read", "r", false, "Indicate the requested token should provide the ability to read the specified resource.")
+	cmd.Flags().BoolVarP(&writeFlag, "write", "w", false, "Indicate the requested token should provide the ability to create/write the specified resource. "+
+		"Does not grant the ability to overwrite/modify existing resources.")
+	cmd.Flags().BoolVarP(&modifyFlag, "modify", "m", false, "Indicate the requested token should provide the ability to modify/delete the specified resource.")
 }
 
 func init() {
@@ -90,7 +91,11 @@ func init() {
 	addScopeFlags(tokenCreateCmd)
 	addScopeFlags(tokenFetchCmd)
 
-	tokenCreateCmd.Flags().BoolP("stage", "s", false, "Create a token with the ability to stage the specified resource.")
+	// Token fetch requires exactly one of read, write or modify
+	tokenFetchCmd.MarkFlagsMutuallyExclusive("read", "write", "modify")
+	tokenFetchCmd.MarkFlagsOneRequired("read", "write", "modify")
+
+	tokenCreateCmd.Flags().BoolP("stage", "s", false, "Indicate the requested token should provide the ability to stage the specified resource.")
 	tokenCreateCmd.Flags().String("scope-path", "", "Specify the path to use when creating the token's scopes. This should generally be "+
 		"the object path without the namespace prefix.")
 
@@ -419,28 +424,19 @@ func fetchToken(cmd *cobra.Command, args []string) error {
 
 	var oper config.TokenOperation
 	var method string
-	count := 0
 	if read {
 		oper = config.TokenRead
 		method = http.MethodGet
-		count++
 	}
 	if write {
 		oper = config.TokenWrite
 		method = http.MethodPut
-		count++
 	}
 	if modify {
 		oper = config.TokenDelete
 		method = http.MethodPut
-		count++
 	}
 
-	if count == 0 {
-		return errors.New("no scope specified, please specify only one of --read, --write, or --modify")
-	} else if count > 1 {
-		return errors.New("multiple scopes specified, please specify only one of --read, --write, or --modify")
-	}
 
 	dirResp, err := client.GetDirectorInfoForPath(ctx, pUrl, method, "")
 	if err != nil {
