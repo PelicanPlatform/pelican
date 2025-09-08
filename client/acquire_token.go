@@ -828,36 +828,28 @@ func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse
 	tc.Lifetime = time.Hour
 	tc.Subject = "client_token"
 	scopes := []token_scopes.ResourceScope{}
-	if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) {
-		if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
-			scopes = append(scopes, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, after))
-		} else {
-			err = errors.New("Destination resource not inside director-provided namespace")
-			return
-		}
+	base := path.Clean(dirResp.XPelNsHdr.Namespace)
+	dest := path.Clean(destination.Path)
+
+	after, found := strings.CutPrefix(dest, base)
+	if !found {
+		err = errors.New("Destination resource not inside director-provided namespace")
+		return
 	}
-	if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
-		if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
-			scopes = append(scopes, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Create, after))
-		} else {
-			err = errors.New("Destination resource not inside director-provided namespace")
-			return
-		}
+
+	ops := []struct {
+		enabled bool
+		scope   token_scopes.TokenScope
+	}{
+		{opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead), token_scopes.Wlcg_Storage_Read},
+		{opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite), token_scopes.Wlcg_Storage_Create},
+		{opts.Operation.IsEnabled(config.TokenDelete), token_scopes.Wlcg_Storage_Modify},
+		{opts.Operation.IsEnabled(config.TokenList), token_scopes.Wlcg_Storage_Read},
 	}
-	if opts.Operation.IsEnabled(config.TokenDelete) {
-		if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
-			scopes = append(scopes, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Modify, after))
-		} else {
-			err = errors.New("Destination resource not inside director-provided namespace")
-			return
-		}
-	}
-	if opts.Operation.IsEnabled(config.TokenList) {
-		if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
-			scopes = append(scopes, token_scopes.NewResourceScope(token_scopes.Wlcg_Storage_Read, after))
-		} else {
-			err = errors.New("Destination resource not inside director-provided namespace")
-			return
+
+	for _, op := range ops {
+		if op.enabled {
+			scopes = append(scopes, token_scopes.NewResourceScope(op.scope, after))
 		}
 	}
 	tc.AddResourceScopes(scopes...)
