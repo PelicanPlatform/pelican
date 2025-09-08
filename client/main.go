@@ -170,7 +170,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 
 	var requestedChecksums []ChecksumType
 
-	token := newTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
+	token := NewTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -186,7 +186,7 @@ func DoStat(ctx context.Context, destination string, options ...TransferOption) 
 
 	var tokenContents string
 	if dirResp.XPelNsHdr.RequireToken {
-		tokenContents, err = token.get()
+		tokenContents, err = token.Get()
 		if err != nil || tokenContents == "" {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
@@ -389,7 +389,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	}
 
 	// Get our token if needed
-	token := newTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
+	token := NewTokenGenerator(pUrl, &dirResp, config.TokenSharedRead, true)
 	collectionsOverride := ""
 	for _, option := range options {
 		switch option.Ident() {
@@ -405,7 +405,7 @@ func DoList(ctx context.Context, remoteObject string, options ...TransferOption)
 	}
 
 	if dirResp.XPelNsHdr.RequireToken {
-		tokenContents, err := token.get()
+		tokenContents, err := token.Get()
 		if err != nil || tokenContents == "" {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
@@ -452,7 +452,7 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 		return err
 	}
 
-	token := newTokenGenerator(pUrl, &dirResp, config.TokenDelete, true)
+	token := NewTokenGenerator(pUrl, &dirResp, config.TokenDelete, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
@@ -464,7 +464,7 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 		}
 	}
 
-	tokenContents, err := token.get()
+	tokenContents, err := token.Get()
 	if err != nil || tokenContents == "" {
 		return errors.Wrap(err, "failed to retrieve token for delete operation")
 	}

@@ -50,24 +50,52 @@ var (
 	}
 
 	tokenCreateCmd = &cobra.Command{
-		Use:   "create",
+		Use:   "create <pelican-url>",
 		Short: "Create a token",
 		RunE:  createToken,
 		Args:  cobra.ExactArgs(1),
 		Example: "To create a read/write token for /some/namespace/path in OSDF: " +
 			"pelican token create --read --write pelican://osg-htc.org/some/namespace/path",
 	}
+
+	tokenFetchCmd = &cobra.Command{
+		Use:   "fetch <pelican-url>",
+		Short: "Fetch a token",
+		RunE:  fetchToken,
+		Args:  cobra.ExactArgs(1),
+		Example: "To fetch a write token for /some/namespace/path in OSDF: " +
+			"pelican token fetch --write pelican://osg-htc.org/some/namespace/path." + "\n" +
+			"Ensure that only one of --read, --write, or --modify is specified.",
+		Hidden: true,
+	}
 )
+
+var (
+	readFlag   bool
+	writeFlag  bool
+	modifyFlag bool
+)
+
+func addScopeFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolVarP(&readFlag, "read", "r", false, "Indicate the requested token should provide the ability to read the specified resource.")
+	cmd.Flags().BoolVarP(&writeFlag, "write", "w", false, "Indicate the requested token should provide the ability to create/write the specified resource. "+
+		"Does not grant the ability to overwrite/modify existing resources.")
+	cmd.Flags().BoolVarP(&modifyFlag, "modify", "m", false, "Indicate the requested token should provide the ability to modify/delete the specified resource.")
+}
 
 func init() {
 	tokenCmd.AddCommand(tokenCreateCmd)
+	tokenCmd.AddCommand(tokenFetchCmd)
 
 	// Token capabilities
-	tokenCreateCmd.Flags().BoolP("read", "r", false, "Create a token with the ability to read the specified resource")
-	tokenCreateCmd.Flags().BoolP("write", "w", false, "Create a token with the ability to write to the specified resource. "+
-		"Does not grant the ability to overwrite/modify existing resources")
-	tokenCreateCmd.Flags().BoolP("modify", "m", false, "Create a token with the ability to modify/delete the specified resource.")
-	tokenCreateCmd.Flags().BoolP("stage", "s", false, "Create a token with the ability to stage the specified resource.")
+	addScopeFlags(tokenCreateCmd)
+	addScopeFlags(tokenFetchCmd)
+
+	// Token fetch requires exactly one of read, write or modify
+	tokenFetchCmd.MarkFlagsMutuallyExclusive("read", "write", "modify")
+	tokenFetchCmd.MarkFlagsOneRequired("read", "write", "modify")
+
+	tokenCreateCmd.Flags().BoolP("stage", "s", false, "Indicate the requested token should provide the ability to stage the specified resource.")
 	tokenCreateCmd.Flags().String("scope-path", "", "Specify the path to use when creating the token's scopes. This should generally be "+
 		"the object path without the namespace prefix.")
 
@@ -80,7 +108,7 @@ func init() {
 	tokenCreateCmd.Flags().StringArray("raw-claim", []string{}, "Set claims to be added to the token. Format: <claim_key>=<claim_value>. ")
 	tokenCreateCmd.Flags().StringArray("raw-scope", []string{}, "Set non-typical values for the token's 'scope' claim. Scopes should be space-separated, e.g. "+
 		"'storage.read:/ storage.create:/'.")
-	tokenCreateCmd.Flags().StringP("profile", "p", "wlcg", "Create a token with a specific JWT profile. Accepted values are scitokens2 and wlcg")
+	tokenCreateCmd.Flags().StringP("profile", "p", "wlcg", "Create a token with a specific JWT profile. Accepted values are scitokens2 and wlcg.")
 	tokenCreateCmd.Flags().StringP("private-key", "k", "", fmt.Sprintf("Path to the private key used to sign the token. If not provided, Pelican will look for "+
 		"the private key in the default location pointed to by the '%s' config parameter.", param.IssuerKeysDirectory.GetName()))
 }
@@ -368,5 +396,61 @@ func createToken(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println(tok)
+	return nil
+}
+
+// Fetch a token for a given Pelican URL using the TokenGenerator.
+// Tokens are first fetched from the client's on-disk token cache,
+// and if none are available an OAuth2 flow is initiated against the
+// discovered issuer
+func fetchToken(cmd *cobra.Command, args []string) error {
+	err := config.InitClient()
+	if err != nil {
+		return errors.Wrapf(err, "unable to initialize client config")
+	}
+
+	rawUrl := args[0]
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pUrl, pUrlErr := client.ParseRemoteAsPUrl(ctx, rawUrl)
+	if pUrlErr != nil {
+		return errors.Wrapf(pUrlErr, "failed to parse Pelican URL")
+	}
+
+	// Determine whether to fetch a write token
+	write, _ := cmd.Flags().GetBool("write")
+	modify, _ := cmd.Flags().GetBool("modify")
+	read, _ := cmd.Flags().GetBool("read")
+
+	var oper config.TokenOperation
+	var method string
+	if read {
+		oper = config.TokenRead
+		method = http.MethodGet
+	}
+	if write {
+		oper = config.TokenWrite
+		method = http.MethodPut
+	}
+	if modify {
+		oper = config.TokenDelete
+		method = http.MethodPut
+	}
+
+	dirResp, err := client.GetDirectorInfoForPath(ctx, pUrl, method, "")
+	if err != nil {
+		return errors.Wrapf(err, "failed to get director info for %s", pUrl.String())
+	}
+
+	tokenGenerator := client.NewTokenGenerator(pUrl, &dirResp, oper, true)
+	tokenContents, err := tokenGenerator.Get()
+	if err != nil {
+		return errors.Wrap(err, "failed to fetch token")
+	}
+	if tokenContents == "" {
+		return errors.New("retrieved token is empty")
+	}
+
+	fmt.Println(tokenContents)
 	return nil
 }

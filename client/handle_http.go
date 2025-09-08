@@ -1298,7 +1298,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypeDownload,
 		uuid:           id,
 		project:        project,
-		token:          newTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
+		token:          NewTokenGenerator(&copyUrl, nil, operation, !tc.skipAcquire),
 	}
 	if upload {
 		tj.xferType = transferTypeUpload
@@ -1353,7 +1353,7 @@ func (tc *TransferClient) NewTransferJob(ctx context.Context, remoteUrl *url.URL
 	tj.token.DirResp = &dirResp
 
 	if upload || dirResp.XPelNsHdr.RequireToken {
-		contents, err := tj.token.get()
+		contents, err := tj.token.Get()
 		if err != nil || contents == "" {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
@@ -1420,7 +1420,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 		xferType:       transferTypePrestage,
 		uuid:           id,
 		project:        project,
-		token:          newTokenGenerator(&copyUrl, nil, config.TokenSharedRead, !tc.skipAcquire),
+		token:          NewTokenGenerator(&copyUrl, nil, config.TokenSharedRead, !tc.skipAcquire),
 	}
 	if tc.token != "" {
 		tj.token.SetToken(tc.token)
@@ -1460,7 +1460,7 @@ func (tc *TransferClient) NewPrestageJob(ctx context.Context, remoteUrl *url.URL
 
 	log.Debugln("Dir resp:", dirResp.XPelNsHdr)
 	if dirResp.XPelNsHdr.RequireToken {
-		contents, err := tj.token.get()
+		contents, err := tj.token.Get()
 		if err != nil || contents == "" {
 			return nil, errors.Wrap(err, "failed to get token for transfer")
 		}
@@ -1518,7 +1518,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 	}
 
 	var prefObjServers []*url.URL
-	token := newTokenGenerator(pelicanURL, nil, config.TokenSharedRead, true)
+	token := NewTokenGenerator(pelicanURL, nil, config.TokenSharedRead, true)
 	if tc.token != "" {
 		token.SetToken(tc.token)
 	}
@@ -1554,7 +1554,7 @@ func (tc *TransferClient) CacheInfo(ctx context.Context, remoteUrl *url.URL, opt
 
 	if dirResp.XPelNsHdr.RequireToken {
 		var contents string
-		contents, err = token.get()
+		contents, err = token.Get()
 		if err != nil || contents == "" {
 			err = errors.Wrap(err, "failed to get token for cache info query")
 			return
@@ -2182,7 +2182,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 		transferStartTime = time.Now() // Update start time for this attempt
 		tokenContents := ""
 		if transfer.token != nil {
-			tokenContents, _ = transfer.token.get()
+			tokenContents, _ = transfer.token.Get()
 		}
 		attemptDownloaded, timeToFirstByte, cacheAge, serverVersion, err := downloadHTTP(
 			ctx, transfer.engine, transfer.callback, transferEndpoint, localPath, fileWriter, downloaded, size, tokenContents, transfer.project,
@@ -2266,7 +2266,7 @@ func downloadObject(transfer *transferFile) (transferResults TransferResults, er
 			ctx := context.WithValue(transfer.ctx, logFields("fields"), fields)
 			tokenContents := ""
 			if transfer.token != nil {
-				tokenContents, _ = transfer.token.get()
+				tokenContents, _ = transfer.token.Get()
 			}
 			if checksums, err := fetchChecksum(ctx, transfer.requestedChecksums, url, tokenContents, transfer.project); err == nil {
 				transferResults.ServerChecksums = checksums
@@ -3266,7 +3266,7 @@ func uploadObject(transfer *transferFile) (transferResult TransferResults, err e
 	// Set the authorization header as well as other headers
 	var tokenContents string
 	if transfer.token != nil {
-		if tokenContents, err = transfer.token.get(); tokenContents != "" && err == nil {
+		if tokenContents, err = transfer.token.Get(); tokenContents != "" && err == nil {
 			request.Header.Set("Authorization", "Bearer "+tokenContents)
 		}
 	}
@@ -3902,7 +3902,7 @@ func deleteHttp(ctx context.Context, remoteUrl *pelican_url.PelicanURL, recursiv
 		if err != nil {
 			return fmt.Errorf("failed to create HTTP DELETE request: %w", err)
 		}
-		tokenContents, err := token.get()
+		tokenContents, err := token.Get()
 		if err != nil || tokenContents == "" {
 			return errors.Wrap(err, "failed to get token for transfer")
 		}
@@ -4100,7 +4100,7 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 	}
 	headRequest.Header.Set("Range", "0-0")
 	if token != nil {
-		if tokenContents, err := token.get(); err == nil && tokenContents != "" {
+		if tokenContents, err := token.Get(); err == nil && tokenContents != "" {
 			headRequest.Header.Set("Authorization", "Bearer "+tokenContents)
 		}
 	}
@@ -4155,7 +4155,7 @@ func objectCached(ctx context.Context, objectUrl *url.URL, token *tokenGenerator
 		return
 	}
 	if token != nil {
-		if tokenContents, err := token.get(); err == nil && tokenContents != "" {
+		if tokenContents, err := token.Get(); err == nil && tokenContents != "" {
 			headRequest.Header.Set("Authorization", "Bearer "+tokenContents)
 		}
 	}
