@@ -71,10 +71,19 @@ func (t TestType) String() string {
 	return string(t)
 }
 
-func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
+// This function returns two tokens, one with the federation issuer and one with the external web url
+// This is because we have old origins that expect the external web url of the director and new ones that expect the federation issuer
+// So downstream we will make two requests, one with the federation issuer and one with the external web url
+func (t TestFileTransferImpl) generateFileTestScitoken(useFederationIssuer bool) (string, error) {
 	// The origin/cache server is using the federation issuer to verify the token
 	// See server_utils/monitor.go:HandleDirectorTestResponse
 	issuerUrl := param.Federation_DiscoveryUrl.GetString()
+	if !useFederationIssuer {
+		issuerUrl = param.Server_ExternalWebUrl.GetString()
+	}
+
+	// This branch is only hit in the the origin self monitoring
+	// See xrootd/self_monitor.go:doSelfMonitorOrigin
 	if t.issuerUrl != "" { // Get from param if it's not empty
 		issuerUrl = t.issuerUrl
 	}
@@ -97,10 +106,30 @@ func (t TestFileTransferImpl) generateFileTestScitoken() (string, error) {
 	return tok, nil
 }
 
+func doRequestWithToken(ctx context.Context, url string, tkn string, method string, requestBody string) (resp *http.Response, body string, err error) {
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer([]byte(requestBody)))
+	if err != nil {
+		return nil, "", errors.Wrap(err, "Failed to create POST request for monitoring upload")
+	}
+	req.Header.Set("Authorization", "Bearer "+tkn)
+	client := http.Client{Transport: config.GetTransport()}
+	resp, err = client.Do(req)
+	if err != nil {
+		return nil, "", errors.Wrap(err, "Failed to start request for test file upload")
+	}
+	defer resp.Body.Close()
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", errors.Wrap(err, "Failed to read response body from test file upload")
+	}
+
+	return resp, string(bodyBytes), nil
+}
+
 // Private function to upload a test file to the `baseUrl` of an exported xrootd file directory
 // the test file content is based on the `testType` attribute
 func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string) (string, error) {
-	tkn, err := t.generateFileTestScitoken()
+	tkn, err := t.generateFileTestScitoken(true)
 	if err != nil {
 		return "", errors.Wrap(err, "Failed to create a token for test file transfer")
 	}
@@ -112,23 +141,25 @@ func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string
 	// /pelican/monitoring/<selfTest|directorTest>/<self-test|director-test>-YYYY-MM-DDTHH:MM:SSZ.txt
 	uploadURL = uploadURL.JoinPath(path.Join(t.testFilePath, t.testType.String()+"-"+time.Now().Format(time.RFC3339)+".txt"))
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, uploadURL.String(), bytes.NewBuffer([]byte(t.testBody)))
+	// First try with the federation issuer token
+	resp, _, err := doRequestWithToken(ctx, uploadURL.String(), tkn, http.MethodPut, t.testBody)
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to create POST request for monitoring upload")
+		return "", errors.Wrap(err, "Failed to upload test file")
 	}
-
-	req.Header.Set("Authorization", "Bearer "+tkn)
-
-	client := http.Client{Transport: config.GetTransport()}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", errors.Wrap(err, "Failed to start request for test file upload")
-	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode > 299 {
-		return "", errors.Errorf("Error response %v from test file upload: %v", resp.StatusCode, resp.Status)
+		// If the response is not successful, try with the external web url token
+		tkn, err = t.generateFileTestScitoken(false)
+		if err != nil {
+			return "", errors.Wrap(err, "Failed to create a token for test file transfer upload")
+		}
+		resp, _, err = doRequestWithToken(ctx, uploadURL.String(), tkn, http.MethodPut, t.testBody)
+		if err != nil {
+			return "", errors.Wrap(err, "Failed to upload test file")
+		}
+		if resp.StatusCode > 299 {
+			return "", errors.Errorf("Error response %v from test file upload: %v", resp.StatusCode, resp.Status)
+		}
 	}
 
 	return uploadURL.String(), nil
@@ -137,35 +168,36 @@ func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string
 // Private function to download a file from downloadUrl and make sure it matches the test file
 // content based on the `testBody` attribute
 func (t TestFileTransferImpl) downloadTestfile(ctx context.Context, downloadUrl string) error {
-	tkn, err := t.generateFileTestScitoken()
+	tkn, err := t.generateFileTestScitoken(true)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create a token for test file transfer download")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadUrl, nil)
+	resp, responseBody, err := doRequestWithToken(ctx, downloadUrl, tkn, http.MethodGet, "")
 	if err != nil {
-		return errors.Wrap(err, "Failed to create GET request for test file transfer download")
+		return errors.Wrap(err, "Failed to download test file")
 	}
-	req.Header.Set("Authorization", "Bearer "+tkn)
 
-	client := http.Client{Transport: config.GetTransport()}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return errors.Wrap(err, "Failed to start request for test file transfer download")
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return errors.Wrap(err, "Failed to get response body from test file transfer download")
-	}
-	if string(body) != t.testBody {
-		return errors.Errorf("Contents of test file transfer body do not match upload: %v", string(body))
-	}
+	// We first check the response code to see if the request was successful
+	// If it wasn't we retry with the external web url token
 
 	if resp.StatusCode > 299 {
-		return errors.Errorf("Error response %v from test file transfer download: %v", resp.StatusCode, resp.Status)
+		// If the response is not successful, try with the external web url token
+		tkn, err = t.generateFileTestScitoken(false)
+		if err != nil {
+			return errors.Wrap(err, "Failed to create a token for test file transfer download")
+		}
+		resp, responseBody, err = doRequestWithToken(ctx, downloadUrl, tkn, http.MethodGet, "")
+		if err != nil {
+			return errors.Wrap(err, "Failed to download test file")
+		}
+		if resp.StatusCode > 299 {
+			return errors.Errorf("Error response %v from test file transfer download: %v", resp.StatusCode, resp.Status)
+		}
+	}
+
+	if responseBody != t.testBody {
+		return errors.Errorf("Contents of test file transfer body do not match upload: %v", string(responseBody))
 	}
 
 	return nil
@@ -173,26 +205,29 @@ func (t TestFileTransferImpl) downloadTestfile(ctx context.Context, downloadUrl 
 
 // Private function to delete a test file from `fileUrl`
 func (t TestFileTransferImpl) deleteTestfile(ctx context.Context, fileUrl string) error {
-	tkn, err := t.generateFileTestScitoken()
+	tkn, err := t.generateFileTestScitoken(true)
 	if err != nil {
 		return errors.Wrap(err, "Failed to create a token for the test file transfer deletion")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, fileUrl, nil)
+	resp, _, err := doRequestWithToken(ctx, fileUrl, tkn, http.MethodDelete, "")
 	if err != nil {
 		return errors.Wrap(err, "Failed to create DELETE request for test file transfer deletion")
 	}
-	req.Header.Set("Authorization", "Bearer "+tkn)
-
-	client := http.Client{Transport: config.GetTransport()}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return errors.Wrap(err, "Failed to start request for test file transfer deletion")
-	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode > 299 {
+		// If the response is not successful, try with the external web url token
+		tkn, err = t.generateFileTestScitoken(false)
+		if err != nil {
+			return errors.Wrap(err, "Failed to create a token for test file transfer deletion")
+		}
+		resp, _, err = doRequestWithToken(ctx, fileUrl, tkn, http.MethodDelete, "")
+		if err != nil {
+			return errors.Wrap(err, "Failed to delete test file")
+		}
+		if resp.StatusCode > 299 {
+			return errors.Errorf("Error response %v from test file transfer deletion: %v", resp.StatusCode, resp.Status)
+		}
 		return errors.Errorf("Error response %v from test file transfer deletion: %v", resp.StatusCode, resp.Status)
 	}
 
