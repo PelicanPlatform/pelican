@@ -9,10 +9,13 @@ import {
   Typography,
 } from '@mui/material';
 import React, { useContext, useState } from 'react';
+import { DateTime } from 'luxon'
 import DowntimeIcon from './DowntimeIcon';
 import { Edit } from '@mui/icons-material';
 import { DowntimeEditDispatchContext } from '@/components/Downtime/DowntimeEditContext';
 import { DowntimeGet } from '@/types';
+import extendPrefix from '@/helpers/extendPrefix';
+import isRecent from '@/components/Downtime/isRecent';
 
 interface GeneralDowntimeCardProps {
   downtime: DowntimeGet;
@@ -37,6 +40,10 @@ const DowntimeCard = ({
   const [hovered, setHovered] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
+  const {type, adjustedPrefix} = extendPrefix(downtime.serverName)
+
+  const updatedRecently = isRecent(DateTime.fromMillis(downtime.updatedAt));
+
   return (
     <Box
       onMouseEnter={() => setHovered(true)}
@@ -52,11 +59,10 @@ const DowntimeCard = ({
           flexDirection: 'row',
           justifyContent: 'space-between',
           border: 'solid #ececec 1px',
-          borderRadius: 2,
-          p: 1,
+          borderRadius: 2
         }}
       >
-        <Box width={'100%'}>
+        <Box width={'100%'} sx={{bgcolor: updatedRecently ? '#fff4e5' : 'inherit'}} p={1}>
           <Grid container>
             <Grid size={12}>
               <Box display={'flex'} flexDirection={'row'} alignItems={'center'}>
@@ -72,7 +78,7 @@ const DowntimeCard = ({
                 <Box flexGrow={1}>
                   {federationLevel && (
                     <Typography variant={'subtitle2'}>
-                      {downtime.serverName}
+                      {adjustedPrefix || downtime.serverName}
                     </Typography>
                   )}
                   <Typography variant={'subtitle2'}>
