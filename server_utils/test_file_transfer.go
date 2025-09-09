@@ -88,7 +88,7 @@ func (t TestFileTransferImpl) generateFileTestScitoken(useFederationIssuer bool)
 		issuerUrl = t.issuerUrl
 	}
 	if issuerUrl == "" { // if both are empty, then error
-		return "", errors.New("Failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
+		return "", errors.New("failed to create token: Invalid iss, Server_ExternalWebUrl is empty")
 	}
 
 	fTestTokenCfg := token.NewWLCGToken()
@@ -110,18 +110,18 @@ func (t TestFileTransferImpl) generateFileTestScitoken(useFederationIssuer bool)
 func doRequestWithToken(ctx context.Context, url string, tkn string, method string, requestBody string) (resp *http.Response, body string, err error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer([]byte(requestBody)))
 	if err != nil {
-		return nil, "", errors.Wrap(err, "Failed to create POST request for monitoring upload")
+		return nil, "", errors.Wrap(err, "failed to create POST request for monitoring upload")
 	}
 	req.Header.Set("Authorization", "Bearer "+tkn)
 	client := http.Client{Transport: config.GetTransport()}
 	resp, err = client.Do(req)
 	if err != nil {
-		return nil, "", errors.Wrap(err, "Failed to start request for test file upload")
+		return nil, "", errors.Wrap(err, "failed to start request for test file upload")
 	}
 	defer resp.Body.Close()
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, "", errors.Wrap(err, "Failed to read response body from test file upload")
+		return nil, "", errors.Wrap(err, "failed to read response body from test file upload")
 	}
 
 	return resp, string(bodyBytes), nil
@@ -132,12 +132,12 @@ func doRequestWithToken(ctx context.Context, url string, tkn string, method stri
 func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string) (string, error) {
 	tkn, err := t.generateFileTestScitoken(true)
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to create a token for test file transfer")
+		return "", errors.Wrap(err, "failed to create a token for test file transfer")
 	}
 
 	uploadURL, err := url.Parse(baseUrl)
 	if err != nil {
-		return "", errors.Wrap(err, "The baseUrl is not parseable as a URL")
+		return "", errors.Wrap(err, "the baseUrl is not parseable as a URL")
 	}
 	// /pelican/monitoring/<selfTest|directorTest>/<self-test|director-test>-YYYY-MM-DDTHH:MM:SSZ.txt
 	uploadURL = uploadURL.JoinPath(path.Join(t.testFilePath, t.testType.String()+"-"+time.Now().Format(time.RFC3339)+".txt"))
@@ -145,21 +145,21 @@ func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string
 	// First try with the federation issuer token
 	resp, _, err := doRequestWithToken(ctx, uploadURL.String(), tkn, http.MethodPut, t.testBody)
 	if err != nil {
-		return "", errors.Wrap(err, "Failed to upload test file")
+		return "", errors.Wrap(err, "failed to upload test file")
 	}
 
 	if resp.StatusCode > 299 {
 		// If the response is not successful, try with the external web url token
 		tkn, err = t.generateFileTestScitoken(false)
 		if err != nil {
-			return "", errors.Wrap(err, "Failed to create a token for test file transfer upload")
+			return "", errors.Wrap(err, "failed to create a token for test file transfer upload")
 		}
 		resp, _, err = doRequestWithToken(ctx, uploadURL.String(), tkn, http.MethodPut, t.testBody)
 		if err != nil {
-			return "", errors.Wrap(err, "Failed to upload test file")
+			return "", errors.Wrap(err, "failed to upload test file")
 		}
 		if resp.StatusCode > 299 {
-			return "", errors.Errorf("Error response %v from test file upload: %v", resp.StatusCode, resp.Status)
+			return "", errors.Errorf("error response %v from test file upload: %v", resp.StatusCode, resp.Status)
 		}
 	}
 
@@ -171,12 +171,12 @@ func (t TestFileTransferImpl) uploadTestfile(ctx context.Context, baseUrl string
 func (t TestFileTransferImpl) downloadTestfile(ctx context.Context, downloadUrl string) error {
 	tkn, err := t.generateFileTestScitoken(true)
 	if err != nil {
-		return errors.Wrap(err, "Failed to create a token for test file transfer download")
+		return errors.Wrap(err, "failed to create a token for test file transfer download")
 	}
 
 	resp, responseBody, err := doRequestWithToken(ctx, downloadUrl, tkn, http.MethodGet, "")
 	if err != nil {
-		return errors.Wrap(err, "Failed to download test file")
+		return errors.Wrap(err, "failed to download test file")
 	}
 
 	// We first check the response code to see if the request was successful
@@ -186,19 +186,19 @@ func (t TestFileTransferImpl) downloadTestfile(ctx context.Context, downloadUrl 
 		// If the response is not successful, try with the external web url token
 		tkn, err = t.generateFileTestScitoken(false)
 		if err != nil {
-			return errors.Wrap(err, "Failed to create a token for test file transfer download")
+			return errors.Wrap(err, "failed to create a token for test file transfer download")
 		}
 		resp, responseBody, err = doRequestWithToken(ctx, downloadUrl, tkn, http.MethodGet, "")
 		if err != nil {
-			return errors.Wrap(err, "Failed to download test file")
+			return errors.Wrap(err, "failed to download test file")
 		}
 		if resp.StatusCode > 299 {
-			return errors.Errorf("Error response %v from test file transfer download: %v", resp.StatusCode, resp.Status)
+			return errors.Errorf("error response %v from test file transfer download: %v", resp.StatusCode, resp.Status)
 		}
 	}
 
 	if responseBody != t.testBody {
-		return errors.Errorf("Contents of test file transfer body do not match upload: %v", string(responseBody))
+		return errors.Errorf("contents of test file transfer body do not match upload: %v", string(responseBody))
 	}
 
 	return nil
@@ -208,26 +208,26 @@ func (t TestFileTransferImpl) downloadTestfile(ctx context.Context, downloadUrl 
 func (t TestFileTransferImpl) deleteTestfile(ctx context.Context, fileUrl string) error {
 	tkn, err := t.generateFileTestScitoken(true)
 	if err != nil {
-		return errors.Wrap(err, "Failed to create a token for the test file transfer deletion")
+		return errors.Wrap(err, "failed to create a token for the test file transfer deletion")
 	}
 
 	resp, _, err := doRequestWithToken(ctx, fileUrl, tkn, http.MethodDelete, "")
 	if err != nil {
-		return errors.Wrap(err, "Failed to create DELETE request for test file transfer deletion")
+		return errors.Wrap(err, "failed to create DELETE request for test file transfer deletion")
 	}
 
 	if resp.StatusCode > 299 {
 		// If the response is not successful, try with the external web url token
 		tkn, err = t.generateFileTestScitoken(false)
 		if err != nil {
-			return errors.Wrap(err, "Failed to create a token for test file transfer deletion")
+			return errors.Wrap(err, "failed to create a token for test file transfer deletion")
 		}
 		resp, _, err = doRequestWithToken(ctx, fileUrl, tkn, http.MethodDelete, "")
 		if err != nil {
-			return errors.Wrap(err, "Failed to delete test file")
+			return errors.Wrap(err, "failed to delete test file")
 		}
 		if resp.StatusCode > 299 {
-			return errors.Errorf("Error response %v from test file transfer deletion: %v", resp.StatusCode, resp.Status)
+			return errors.Errorf("error response %v from test file transfer deletion: %v", resp.StatusCode, resp.Status)
 		}
 	}
 
@@ -257,20 +257,20 @@ func (t TestFileTransferImpl) RunTests(ctx context.Context, baseUrl, audienceUrl
 		t.testBody = DirectorTestBody
 		t.testFilePath = path.Join(MonitoringBaseNs, "directorTest")
 	} else {
-		return false, errors.New("Unsupported testType: " + testType.String())
+		return false, errors.New("unsupported testType: " + testType.String())
 	}
 
 	downloadUrl, err := t.uploadTestfile(ctx, baseUrl)
 	if err != nil {
-		return false, errors.Wrap(err, "Test file transfer failed during upload")
+		return false, errors.Wrap(err, "test file transfer failed during upload")
 	}
 	err = t.downloadTestfile(ctx, downloadUrl)
 	if err != nil {
-		return false, errors.Wrap(err, "Test file transfer failed during download")
+		return false, errors.Wrap(err, "test file transfer failed during download")
 	}
 	err = t.deleteTestfile(ctx, downloadUrl)
 	if err != nil {
-		return false, errors.Wrap(err, "Test file transfer failed during delete")
+		return false, errors.Wrap(err, "test file transfer failed during delete")
 	}
 	return true, nil
 }
@@ -292,12 +292,12 @@ func (t TestFileTransferImpl) TestCacheDownload(ctx context.Context, cacheUrl, i
 
 	downloadUrl, err := url.JoinPath(cacheUrl, filePath)
 	if err != nil {
-		return false, errors.Wrap(err, "Unable to crete download URL")
+		return false, errors.Wrap(err, "unable to crete download URL")
 	}
 
 	err = t.downloadTestfile(ctx, downloadUrl)
 	if err != nil {
-		return false, errors.Wrap(err, "Test file transfer failed during download")
+		return false, errors.Wrap(err, "test file transfer failed during download")
 	}
 
 	return true, nil
