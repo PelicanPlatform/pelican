@@ -12,7 +12,7 @@ import {
 import { DateTimePicker } from '@mui/x-date-pickers';
 import { mutate } from 'swr';
 import { DateTime } from 'luxon';
-import { Dispatch, useContext, useMemo, useState } from 'react';
+import { Dispatch, useContext, useEffect, useMemo, useState } from 'react';
 import {
   DowntimeClass,
   DowntimeGet,
@@ -36,6 +36,7 @@ import {
 import { Delete } from '@mui/icons-material';
 import FormHelperText from '@mui/material/FormHelperText';
 import getUtcOffsetString from '@/helpers/getUtcOffsetString';
+import { defaultDowntime } from '@/components/Downtime/constant';
 
 interface DowntimeFormProps {
   downtime:
@@ -53,15 +54,34 @@ const DowntimeForm = ({
 
   const id = 'id' in inputDowntime ? inputDowntime.id : undefined;
 
-  const [downtime, setDowntime] = useState<DowntimePost>({
-    startTime: inputDowntime?.startTime || Date.now(),
-    endTime: inputDowntime?.endTime || Date.now(),
-    description: '',
-    severity: defaultDowntime.severity,
-    class: defaultDowntime.class,
+  const [downtime, setDowntime] = useState<DowntimeRegistryPost>({
+    ...defaultDowntime,
+    ...inputDowntime,
   });
 
   const endless = useMemo(() => downtime.endTime === -1, [downtime.endTime]);
+
+  // Keep the downtime class updated based on the 24 hours requirement
+  useEffect(() => {
+    if(DateTime.fromMillis(downtime.startTime) < DateTime.now().plus({hours: 24})){
+      // If the start time is less than 24 hours from now, we need to set the class to unscheduled
+      if(downtime.class !== 'UNSCHEDULED'){
+        setDowntime({...downtime, class: 'UNSCHEDULED'});
+      }
+    } else {
+      // If the start time is more than 24 hours from now, we need to
+      if(downtime.class !== 'SCHEDULED'){
+        setDowntime({...downtime, class: 'SCHEDULED'});
+      }
+    }
+  }, [downtime, setDowntime]);
+
+  // If the starttime is updated, before the endtime, adjust the endtime to be 1 day after the starttime
+  useEffect(() => {
+    if(downtime.endTime !== -1 && DateTime.fromMillis(downtime.endTime) <= DateTime.fromMillis(downtime.startTime)){
+      setDowntime({...downtime, endTime: DateTime.fromMillis(downtime.startTime).plus({days: 1}).toMillis()});
+    }
+  }, [downtime, setDowntime]);
 
   return (
     <Box>
@@ -124,34 +144,6 @@ const DowntimeForm = ({
             ))}
           </Select>
           <FormHelperText>How much of the resource is affected</FormHelperText>
-        </FormControl>
-      </Box>
-      <Box mt={2}>
-        <FormControl fullWidth>
-          <InputLabel id='class'>Scheduled</InputLabel>
-          <Select
-            variant={'outlined'}
-            labelId={'class'}
-            label={'Scheduled'}
-            value={downtime?.class}
-            onChange={(e) =>
-              setDowntime({
-                ...downtime,
-                class: e.target.value as DowntimeClass,
-              })
-            }
-          >
-            {DowntimeClasses.map((downtimeClass) => (
-              <MenuItem key={downtimeClass} value={downtimeClass}>
-                {downtimeClass}
-              </MenuItem>
-            ))}
-          </Select>
-          <FormHelperText>
-            SCHEDULED - Registered at least 24 hours in advance
-            <br />
-            UNSCHEDULED - Registered less than 24 hours in advance
-          </FormHelperText>
         </FormControl>
       </Box>
       <Box pt={2}>
@@ -233,11 +225,6 @@ const submitDowntime = async (
       dispatch
     );
   }
-};
-
-const defaultDowntime = {
-  severity: 'Outage (completely inaccessible)' as DowntimeSeverity,
-  class: 'SCHEDULED' as DowntimeClass,
 };
 
 export default DowntimeForm;

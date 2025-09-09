@@ -33,13 +33,12 @@ const ServerDowntimePage = () => {
     }
   }, [setDowntime]);
 
-  const { data } = useApiSWR<DowntimeGet[]>(
+  const { data: downtimes } = useApiSWR<DowntimeGet[]>(
     'Failed to fetch downtimes',
     ServerDowntimeKey,
     getDowntime
   );
-
-  const downtimes = sortDowntimes(data || [])
+  const sortedDowntimes = sortDowntimes(downtimes || [])
 
   return (
     <>
@@ -48,9 +47,9 @@ const ServerDowntimePage = () => {
           <Grid item xs={12} lg={12}>
             <EditDowntimePageHeader />
             <Box my={2}>
-              <DowntimeCalendar data={data} />
+              <DowntimeCalendar data={downtimes} />
             </Box>
-            <RegistryDowntimeList data={downtimes} />
+            <RegistryDowntimeList data={sortedDowntimes} />
           </Grid>
         </Grid>
       </Box>
