@@ -1,0 +1,44 @@
+---
+title: Pelican Config Dump
+---
+
+## pelican config dump
+
+Dump all configuration parameters
+
+### Synopsis
+
+The 'dump' command outputs all current configuration parameters and their values to the console. This includes default values that have not been explicitly set.
+
+```
+pelican config dump [flags]
+```
+
+### Examples
+
+```
+# Dump all configuration parameters
+pelican config dump
+```
+
+### Options
+
+```
+  -o, --format string   Output format (yaml or json) (default "yaml")
+  -h, --help            help for dump
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican config](/commands-reference/pelican/config/)	 - View and search for configuration parameters

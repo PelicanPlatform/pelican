@@ -1,0 +1,39 @@
+---
+title: Pelican Object Put
+---
+
+## pelican object put
+
+Send a file to a Pelican federation
+
+```
+pelican object put {source ...} {destination} [flags]
+```
+
+### Options
+
+```
+      --checksum-algorithm string   Checksum algorithm to use for upload and validation
+      --checksums string            Verify files against a checksums manifest. The format is ALGORITHM:FILENAME
+  -h, --help                        help for put
+      --pack string                 Package transfer using remote packing functionality (same as '?pack=' query). Options: auto, tar, tar.gz, tar.xz, zip. Default: auto when flag is provided without an explicit value
+  -r, --recursive                   Recursively upload a collection.  Forces methods to only be http to get the freshest collection contents
+      --require-checksum            Require the server to return a checksum for the uploaded file (uses crc32c algorithm if no specific algorithm is specified)
+  -t, --token string                Token file to use for transfer
+      --transfer-stats string       File to write transfer stats to
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican object](/commands-reference/pelican/object/)	 - Interact with objects in the federation
