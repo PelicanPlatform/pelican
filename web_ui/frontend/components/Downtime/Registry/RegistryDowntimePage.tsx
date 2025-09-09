@@ -15,6 +15,7 @@ import useApiSWR from '@/hooks/useApiSWR';
 import { DowntimeGet } from '@/types';
 import { ServerDowntimeKey } from '@/components/Downtime';
 import { getDowntime } from '@/helpers/api';
+import sortDowntimes from '@/components/Downtime/sortDowntimes';
 
 const ServerDowntimePage = () => {
   const setDowntime = useContext(DowntimeEditDispatchContext);
@@ -38,6 +39,8 @@ const ServerDowntimePage = () => {
     getDowntime
   );
 
+  const downtimes = sortDowntimes(data || [])
+
   return (
     <>
       <Box>
@@ -52,7 +55,7 @@ const ServerDowntimePage = () => {
             <Box my={2}>
               <DowntimeCalendar data={data} />
             </Box>
-            <RegistryDowntimeList data={data} />
+            <RegistryDowntimeList data={downtimes} />
           </Grid>
         </Grid>
       </Box>
