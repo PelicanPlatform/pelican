@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra/doc"
@@ -43,13 +42,16 @@ func generateCLIDocs(outputDir string) error {
 		return err
 	}
 
+	docPathRoot := filepath.Base(outputDir)
+
 	// Generate a markdown file per command, with custom file names and content wrapper
 	linkHandler := func(name string) string {
 		// Cobra passes names like "pelican_serve.md"; strip root prefix but keep underscores so we can group by tokens
 		base := strings.TrimSuffix(name, filepath.Ext(name))
-		base = strings.TrimPrefix(base, "pelican_")
-		base = strings.TrimPrefix(base, "pelican-")
-		return base + ".mdx"
+		path := strings.ReplaceAll(base, "_", "/")
+		// Must be an absolute path from the site root
+		result := fmt.Sprintf("/%s/%s/", docPathRoot, path)
+		return result
 	}
 
 	filePrepender := func(filename string) string {
@@ -76,11 +78,6 @@ func generateCLIDocs(outputDir string) error {
 
 	// Group by command tokens: e.g., object/get -> object/get/page.mdx
 	if err := enforceAppRouterLayout(resolvedDir); err != nil {
-		return err
-	}
-
-	// Ensure a landing page exists (Nextra v3 app dir expects page.mdx)
-	if _, err := writeIndexPage(resolvedDir); err != nil {
 		return err
 	}
 
@@ -139,69 +136,6 @@ func enforceAppRouterLayout(dir string) error {
 		dst := filepath.Join(targetDir, "page.mdx")
 		_ = os.Remove(dst)
 		if err := os.Rename(src, dst); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// writeIndexPage creates a page.mdx that links to all generated command pages and returns the list of slugs (top-level groups).
-func writeIndexPage(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	var groups []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if fileExists(filepath.Join(dir, e.Name(), "page.mdx")) {
-			groups = append(groups, e.Name())
-		}
-	}
-	sort.Strings(groups)
-
-	var b strings.Builder
-	b.WriteString("---\ntitle: Commands Reference\n---\n\n")
-	b.WriteString("The following CLI commands are available.\n\n")
-	for _, group := range groups {
-		groupTitle := cases.Title(language.English).String(strings.ReplaceAll(strings.ReplaceAll(group, "-", " "), "_", " "))
-		b.WriteString(fmt.Sprintf("- [%s](./%s/)\n", groupTitle, group))
-		// List children recursively
-		if err := writeNestedList(&b, filepath.Join(dir, group), "  ", fmt.Sprintf("./%s/", group)); err != nil {
-			return nil, err
-		}
-	}
-	b.WriteString("\n")
-
-	if err := os.WriteFile(filepath.Join(dir, "page.mdx"), []byte(b.String()), 0o644); err != nil {
-		return nil, err
-	}
-	return groups, nil
-}
-
-func writeNestedList(b *strings.Builder, currentDir string, indent string, baseHref string) error {
-	entries, err := os.ReadDir(currentDir)
-	if err != nil {
-		return err
-	}
-	var children []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if fileExists(filepath.Join(currentDir, e.Name(), "page.mdx")) {
-			children = append(children, e.Name())
-		}
-	}
-	sort.Strings(children)
-	for _, child := range children {
-		childTitle := cases.Title(language.English).String(strings.ReplaceAll(strings.ReplaceAll(child, "-", " "), "_", " "))
-		b.WriteString(fmt.Sprintf("%s- [%s](%s%s/)\n", indent, childTitle, baseHref, child))
-		// Recurse further
-		if err := writeNestedList(b, filepath.Join(currentDir, child), indent+"  ", baseHref+child+"/"); err != nil {
 			return err
 		}
 	}
