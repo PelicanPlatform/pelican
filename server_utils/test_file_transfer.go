@@ -114,7 +114,7 @@ func doRequestWithToken(ctx context.Context, url string, tkn string, method stri
 	}
 	req.Header.Set("Authorization", "Bearer "+tkn)
 	req.Header.Set("User-Agent", "pelican-director/"+config.GetVersion())
-	client := http.Client{Transport: config.GetTransport()}
+	client := config.GetClient()
 	resp, err = client.Do(req)
 	if err != nil {
 		return nil, "", errors.Wrap(err, "failed to start request for test file upload")
