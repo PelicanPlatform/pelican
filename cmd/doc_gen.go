@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -78,6 +79,10 @@ func generateCLIDocs(outputDir string) error {
 
 	// Group by command tokens: e.g., object/get -> object/get/page.mdx
 	if err := enforceAppRouterLayout(resolvedDir); err != nil {
+		return err
+	}
+
+	if err := postProcessMdxFiles(resolvedDir); err != nil {
 		return err
 	}
 
@@ -191,4 +196,43 @@ func fileExists(path string) bool {
 		return false
 	}
 	return !info.IsDir()
+}
+
+func postProcessMdxFiles(dir string) error {
+	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".mdx") {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+
+			if len(content) == 0 {
+				return nil
+			}
+
+			// Trim trailing spaces on each line
+			lines := strings.Split(string(content), "\n")
+			for i, line := range lines {
+				lines[i] = strings.TrimRight(line, " \t")
+			}
+			fullContent := strings.Join(lines, "\n")
+
+			// Ensure single newline at EOF
+			fullContent = strings.TrimRight(fullContent, "\n") + "\n"
+
+			if string(content) != fullContent {
+				info, err := d.Info()
+				if err != nil {
+					return err
+				}
+				if err := os.WriteFile(path, []byte(fullContent), info.Mode()); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
