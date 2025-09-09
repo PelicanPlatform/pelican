@@ -40,7 +40,7 @@ import (
 type (
 	TestType         string
 	TestFileTransfer interface {
-		generateFileTestScitoken(audienceUrl string) (string, error)
+		generateFileTestScitoken(useFederationIssuer bool) (string, error)
 		uploadTestfile(ctx context.Context, baseUrl string, testType TestType) (string, error)
 		downloadTestfile(ctx context.Context, downloadUrl string) error
 		deleteTestfile(ctx context.Context, fileUrl string) error
@@ -71,7 +71,7 @@ func (t TestType) String() string {
 	return string(t)
 }
 
-// This function returns two tokens, one with the federation issuer and one with the external web url
+// This function returns a token with the federation issuer or the external web url based on the `useFederationIssuer` parameter
 // This is because we have old origins that expect the external web url of the director and new ones that expect the federation issuer
 // So downstream we will make two requests, one with the federation issuer and one with the external web url
 func (t TestFileTransferImpl) generateFileTestScitoken(useFederationIssuer bool) (string, error) {
@@ -106,6 +106,7 @@ func (t TestFileTransferImpl) generateFileTestScitoken(useFederationIssuer bool)
 	return tok, nil
 }
 
+// Generic function to make a request with a token
 func doRequestWithToken(ctx context.Context, url string, tkn string, method string, requestBody string) (resp *http.Response, body string, err error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer([]byte(requestBody)))
 	if err != nil {
@@ -228,7 +229,6 @@ func (t TestFileTransferImpl) deleteTestfile(ctx context.Context, fileUrl string
 		if resp.StatusCode > 299 {
 			return errors.Errorf("Error response %v from test file transfer deletion: %v", resp.StatusCode, resp.Status)
 		}
-		return errors.Errorf("Error response %v from test file transfer deletion: %v", resp.StatusCode, resp.Status)
 	}
 
 	return nil
