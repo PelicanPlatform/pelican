@@ -1,0 +1,37 @@
+---
+title: Pelican Plugin Stage
+---
+
+## pelican plugin stage
+
+Run pelican CLI to stage files as a HTCSS shadow plugin
+
+```
+pelican plugin stage [flags]
+```
+
+### Options
+
+```
+  -h, --help                   help for stage
+      --hook                   Implement the HTCondor hook behavior
+  -m, --mount string           Prefix corresponding to the local mount point of the origin
+  -o, --origin-prefix string   Prefix corresponding to the local origin
+  -s, --shadow-prefix string   Prefix corresponding to the shadow origin
+  -t, --token string           Token file to use for reading and/or writing
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican plugin](/commands-reference/pelican/plugin/)	 - Plugin management for HTCSS

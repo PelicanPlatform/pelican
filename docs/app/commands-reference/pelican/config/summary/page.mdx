@@ -1,0 +1,44 @@
+---
+title: Pelican Config Summary
+---
+
+## pelican config summary
+
+Print config parameters that differ from default values
+
+### Synopsis
+
+The 'summary' command outputs configuration parameters whose values differ from their default settings.
+
+```
+pelican config summary [flags]
+```
+
+### Examples
+
+```
+# Show configuration parameters that are set differently from their default values
+pelican config summary
+```
+
+### Options
+
+```
+  -o, --format string   Output format (yaml or json) (default "yaml")
+  -h, --help            help for summary
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican config](/commands-reference/pelican/config/)	 - View and search for configuration parameters

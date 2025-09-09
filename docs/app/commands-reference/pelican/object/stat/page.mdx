@@ -1,0 +1,34 @@
+---
+title: Pelican Object Stat
+---
+
+## pelican object stat
+
+Stat objects in a namespace from a federation
+
+```
+pelican object stat {object} [flags]
+```
+
+### Options
+
+```
+      --checksums stringArray   Checksums to request from the server.  Known values are: md5, crc32c, crc32, sha
+  -h, --help                    help for stat
+  -j, --json                    Print results in JSON format
+  -t, --token string            Token file to use for transfer
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican object](/commands-reference/pelican/object/)	 - Interact with objects in the federation

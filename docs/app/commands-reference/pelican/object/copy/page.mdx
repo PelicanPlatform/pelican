@@ -1,0 +1,38 @@
+---
+title: Pelican Object Copy
+---
+
+## pelican object copy
+
+Copy a file to/from a Pelican federation
+
+```
+pelican object copy {source ...} {destination} [flags]
+```
+
+### Options
+
+```
+  -c, --cache string     A comma-separated list of preferred caches to try for the transfer, where a "+" in the list indicates
+                         the client should fallback to discovered caches if all preferred caches fail.
+      --caches string    A JSON file containing the list of caches
+  -h, --help             help for copy
+      --methods string   Comma separated list of methods to try, in order (default "http")
+  -r, --recursive        Recursively copy a collection.  Forces methods to only be http to get the freshest collection contents
+  -t, --token string     Token file to use for transfer
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican object](/commands-reference/pelican/object/)	 - Interact with objects in the federation

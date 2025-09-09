@@ -1,0 +1,39 @@
+---
+title: Pelican Object Get
+---
+
+## pelican object get
+
+Get a file from a Pelican federation
+
+```
+pelican object get {source ...} {destination} [flags]
+```
+
+### Options
+
+```
+  -c, --cache string            A comma-separated list of preferred caches to try for the transfer, where a "+" in the list indicates
+                                the client should fallback to discovered caches if all preferred caches fail.
+      --caches string           A JSON file containing the list of caches
+  -h, --help                    help for get
+      --pack string             Package transfer using remote packing functionality (same as '?pack=' query). Options: auto, tar, tar.gz, tar.xz, zip. Default: auto when flag is provided without an explicit value
+  -r, --recursive               Recursively download a collection.  Forces methods to only be http to get the freshest collection contents
+  -t, --token string            Token file to use for transfer
+      --transfer-stats string   A path to a file to write transfer statistics to
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican object](/commands-reference/pelican/object/)	 - Interact with objects in the federation
