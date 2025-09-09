@@ -123,7 +123,7 @@ const ServerUnknownDowntimeForm = ({
           }
           value={
             servers.filter((x) => x.prefix == downtime.serverName)[0] ||
-            servers[0]
+            null
           }
           onChange={(e, v) => {
             if (!v) return;
