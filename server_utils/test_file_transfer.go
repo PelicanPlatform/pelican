@@ -113,6 +113,7 @@ func doRequestWithToken(ctx context.Context, url string, tkn string, method stri
 		return nil, "", errors.Wrap(err, "failed to create POST request for monitoring upload")
 	}
 	req.Header.Set("Authorization", "Bearer "+tkn)
+	req.Header.Set("User-Agent", "pelican-director/"+config.GetVersion())
 	client := http.Client{Transport: config.GetTransport()}
 	resp, err = client.Do(req)
 	if err != nil {
