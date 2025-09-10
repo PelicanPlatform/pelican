@@ -258,7 +258,7 @@ func TestHandlePacket(t *testing.T) {
 				threadCreations: 10,
 				expectedMetric: `
 # HELP xrootd_sched_thread_creations Number of scheduler thread creations
-# TYPE xrootd_sched_thread_creations gauge
+# TYPE xrootd_sched_thread_creations counter
 xrootd_sched_thread_creations 10
 `,
 			},
@@ -267,8 +267,8 @@ xrootd_sched_thread_creations 10
 				threadCreations: 5,
 				expectedMetric: `
 # HELP xrootd_sched_thread_creations Number of scheduler thread creations
-# TYPE xrootd_sched_thread_creations gauge
-xrootd_sched_thread_creations 5
+# TYPE xrootd_sched_thread_creations counter
+xrootd_sched_thread_creations 10
 `,
 			},
 		}
