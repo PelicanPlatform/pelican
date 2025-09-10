@@ -420,6 +420,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 	}()
 	defer close(results)
 
+	resultsChan := tc.Results()
 	jobMap := make(map[string]PluginTransfer)
 	var recursive bool
 	var tj *client.TransferJob
@@ -466,7 +467,7 @@ func runPluginWorker(ctx context.Context, upload bool, workChan <-chan PluginTra
 				failTransfer(transfer.url.String(), transfer.localFile, results, upload, err)
 				return err
 			}
-		case result, ok := <-tc.Results():
+		case result, ok := <-resultsChan:
 			if !ok {
 				log.Debugln("Client has no more results")
 				// Check to be sure we did not have a lookup error
