@@ -473,7 +473,9 @@ var (
 		Help: "Number of scheduler threads",
 	}, []string{"state"})
 
-	ThreadCreations = promauto.NewCounter(prometheus.CounterOpts{
+	// Unlink thread destructions this metric is not monotonic so we need to use a gauge
+	// See https://github.com/xrootd/xrootd/blob/f1de2038e0c5c10990769f5b7ff82200cc8c3d56/src/Xrd/XrdScheduler.cc#L700
+	ThreadCreations = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "xrootd_sched_thread_creations",
 		Help: "Number of scheduler thread creations",
 	})
@@ -1888,10 +1890,9 @@ func HandleSummaryPacket(packet []byte) error {
 			Queued.Set(float64(stat.Queued))
 			LongestQueue.Set(float64(stat.LongestQueue))
 			Jobs.Set(float64(stat.Jobs))
-			ThreadCreations.Add(float64(stat.ThreadCreations - lastStats.ThreadCreations))
+			ThreadCreations.Set(float64(stat.ThreadCreations))
 			ThreadDestructions.Add(float64(stat.ThreadDestructions - lastStats.ThreadDestructions))
 			ThreadLimitReached.Add(float64(stat.ThreadLimitReached - lastStats.ThreadLimitReached))
-			lastStats.ThreadCreations = stat.ThreadCreations
 			lastStats.ThreadDestructions = stat.ThreadDestructions
 			lastStats.ThreadLimitReached = stat.ThreadLimitReached
 		case OssStat: // Oss stat should only appear on origin servers
