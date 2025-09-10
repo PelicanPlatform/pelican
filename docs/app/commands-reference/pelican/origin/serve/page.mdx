@@ -1,0 +1,44 @@
+---
+title: Pelican Origin Serve
+---
+
+## pelican origin serve
+
+Start the origin service
+
+```
+pelican origin serve [flags]
+```
+
+### Options
+
+```
+      --bucket-access-keyfile string   Specify a filepath to use for configuring the bucket's access key.
+      --bucket-secret-keyfile string   Specify a filepath to use for configuring the bucket's access key.
+  -h, --help                           help for serve
+      --http-service-url string        Specify the http(s) service-url. Only used when an origin is launched in https/globus modes.
+      --http-tokenfile string          Specify a filepath to use for configuring the http(s) token. See documentation for details.
+  -m, --mode string                    Set the mode for the origin service (default is 'posix'). Supported modes are 'posix', 's3, 'https', 'globus' and 'xroot'. (default "posix")
+  -p, --port uint16                    Set the port at which the web server should be accessible
+      --region string                  Specify the S3 region. Only used when an origin is launched in S3 mode.
+      --service-url string             Specify the S3 service-url. Only used when an origin is launched in S3 mode.
+      --url-style string               Specify the S3 url-style. Only used when an origin is launched in S3 mode, and can be either 'path' (default) or 'virtual.
+  -v, --volume strings                 Setting the volume to /SRC:/DEST will export the contents of /SRC as /DEST in the Pelican federation
+      --writeable                      Allow/disable writing to the origin (default true)
+      --xroot-service-url string       When configured in xroot mode, specifies the hostname and port of the upstream xroot server (not to be mistaken with the current server's hostname).
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican origin](/commands-reference/pelican/origin/)	 - Operate a Pelican origin service

@@ -1,0 +1,42 @@
+---
+title: Pelican Downtime List
+---
+
+## pelican downtime list
+
+List server's scheduled downtime periods
+
+### Synopsis
+
+List scheduled downtime periods for a Pelican server (Origin/Cache).
+  Requires an administrative token for the server.
+  Shows active and future downtimes ('incomplete') by default.
+
+```
+pelican downtime list [flags]
+```
+
+### Options
+
+```
+  -h, --help            help for list
+  -o, --output string   Output format (table, json, yaml) (default "table")
+      --status string   Filter downtimes by status ('incomplete' shows active/future, 'all' shows all history) (default "incomplete")
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       Web URL of the Pelican server (e.g. https://my-origin.com:8447)
+  -t, --token string        Path to the admin token file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican downtime](/commands-reference/pelican/downtime/)	 - Manage server's own downtime periods

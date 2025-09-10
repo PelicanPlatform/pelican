@@ -1,0 +1,38 @@
+---
+title: Pelican Downtime Create
+---
+
+## pelican downtime create
+
+Create a new downtime period for the server
+
+### Synopsis
+
+Interactively prompt for downtime fields and send a POST request to create a new downtime period.
+
+```
+pelican downtime create [flags]
+```
+
+### Options
+
+```
+  -h, --help   help for create
+```
+
+### Options inherited from parent commands
+
+```
+      --config string       config file (default is $HOME/.config/pelican/pelican.yaml)
+  -d, --debug               Enable debug logs
+  -f, --federation string   Pelican federation to utilize
+      --json                output results in JSON format
+  -L, --log string          Specified log output file
+  -s, --server string       Web URL of the Pelican server (e.g. https://my-origin.com:8447)
+  -t, --token string        Path to the admin token file
+      --version             Print the version and exit
+```
+
+### SEE ALSO
+
+* [pelican downtime](/commands-reference/pelican/downtime/)	 - Manage server's own downtime periods
