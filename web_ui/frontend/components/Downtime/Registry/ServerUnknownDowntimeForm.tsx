@@ -14,16 +14,8 @@ import { DateTimePicker } from '@mui/x-date-pickers';
 import { mutate } from 'swr';
 import { DateTime } from 'luxon';
 import { Dispatch, useContext, useEffect, useMemo, useState } from 'react';
-import {
-  DowntimeClass,
-  DowntimeGet,
-  DowntimeRegistryPost,
-  DowntimeSeverity,
-} from '@/types';
-import {
-  DowntimeSeverities,
-  ServerDowntimeKey,
-} from '@/components/Downtime';
+import { DowntimeGet, DowntimeRegistryPost, DowntimeSeverity } from '@/types';
+import { DowntimeSeverities, ServerDowntimeKey } from '@/components/Downtime';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import { alertOnError } from '@/helpers/util';
@@ -93,23 +85,35 @@ const ServerUnknownDowntimeForm = ({
 
   // Keep the downtime class updated based on the 24 hours requirement
   useEffect(() => {
-    if(DateTime.fromMillis(downtime.startTime) < DateTime.now().plus({hours: 24})){
+    if (
+      DateTime.fromMillis(downtime.startTime) <
+      DateTime.now().plus({ hours: 24 })
+    ) {
       // If the start time is less than 24 hours from now, we need to set the class to unscheduled
-      if(downtime.class !== 'UNSCHEDULED'){
-        setDowntime({...downtime, class: 'UNSCHEDULED'});
+      if (downtime.class !== 'UNSCHEDULED') {
+        setDowntime({ ...downtime, class: 'UNSCHEDULED' });
       }
     } else {
       // If the start time is more than 24 hours from now, we need to
-      if(downtime.class !== 'SCHEDULED'){
-        setDowntime({...downtime, class: 'SCHEDULED'});
+      if (downtime.class !== 'SCHEDULED') {
+        setDowntime({ ...downtime, class: 'SCHEDULED' });
       }
     }
   }, [downtime, setDowntime]);
 
   // If the starttime is updated, before the endtime, adjust the endtime to be 1 day after the starttime
   useEffect(() => {
-    if(downtime.endTime !== -1 && DateTime.fromMillis(downtime.endTime) <= DateTime.fromMillis(downtime.startTime)){
-      setDowntime({...downtime, endTime: DateTime.fromMillis(downtime.startTime).plus({days: 1}).toMillis()});
+    if (
+      downtime.endTime !== -1 &&
+      DateTime.fromMillis(downtime.endTime) <=
+        DateTime.fromMillis(downtime.startTime)
+    ) {
+      setDowntime({
+        ...downtime,
+        endTime: DateTime.fromMillis(downtime.startTime)
+          .plus({ days: 1 })
+          .toMillis(),
+      });
     }
   }, [downtime, setDowntime]);
 
@@ -123,8 +127,7 @@ const ServerUnknownDowntimeForm = ({
             servers?.adjustedPrefix === value?.adjustedPrefix
           }
           value={
-            servers.filter((x) => x.prefix == downtime.serverName)[0] ||
-            null
+            servers.filter((x) => x.prefix == downtime.serverName)[0] || null
           }
           onChange={(e, v) => {
             if (!v) return;

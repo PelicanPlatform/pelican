@@ -8,8 +8,7 @@ import extendPrefix from '@/helpers/extendPrefix';
 const extendNamespace = (
   namespace: Omit<RegistryNamespace, 'type' | 'adjustedPrefix'>
 ): RegistryNamespace => {
-
-  const {type, adjustedPrefix} = extendPrefix(namespace.prefix);
+  const { type, adjustedPrefix } = extendPrefix(namespace.prefix);
   return {
     ...namespace,
     type,

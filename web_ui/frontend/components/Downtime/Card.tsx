@@ -1,4 +1,5 @@
 import {
+  Badge,
   Box,
   Collapse,
   Divider,
@@ -7,10 +8,9 @@ import {
   Paper,
   Tooltip,
   Typography,
-  Badge
 } from '@mui/material';
 import React, { useContext, useState } from 'react';
-import { DateTime } from 'luxon'
+import { DateTime } from 'luxon';
 import DowntimeIcon from './DowntimeIcon';
 import { Edit } from '@mui/icons-material';
 import { DowntimeEditDispatchContext } from '@/components/Downtime/DowntimeEditContext';
@@ -41,7 +41,7 @@ const DowntimeCard = ({
   const [hovered, setHovered] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  const {type, adjustedPrefix} = extendPrefix(downtime.serverName)
+  const { type, adjustedPrefix } = extendPrefix(downtime.serverName);
 
   const updatedRecently = isRecent(DateTime.fromMillis(downtime.updatedAt));
 
@@ -51,11 +51,7 @@ const DowntimeCard = ({
       onMouseLeave={() => setHovered(false)}
       onClick={() => setExpanded(!expanded)}
     >
-      <Badge
-        color={'success'}
-        invisible={!updatedRecently}
-        badgeContent={' '}
-      >
+      <Badge color={'success'} invisible={!updatedRecently} badgeContent={' '}>
         <Paper
           elevation={hovered ? 3 : 1}
           sx={{
@@ -68,13 +64,17 @@ const DowntimeCard = ({
             borderRadius: 2,
             position: 'relative',
             overflow: 'hidden',
-            p: 1
+            p: 1,
           }}
         >
           <Box width={'100%'}>
             <Grid container>
               <Grid size={12}>
-                <Box display={'flex'} flexDirection={'row'} alignItems={'center'}>
+                <Box
+                  display={'flex'}
+                  flexDirection={'row'}
+                  alignItems={'center'}
+                >
                   <Box pr={1}>
                     <Tooltip title={downtime.severity}>
                       <DowntimeIcon

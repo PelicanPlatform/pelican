@@ -38,7 +38,7 @@ const ServerDowntimePage = () => {
     ServerDowntimeKey,
     getDowntime
   );
-  const sortedDowntimes = sortDowntimes(downtimes || [])
+  const sortedDowntimes = sortDowntimes(downtimes || []);
 
   return (
     <>

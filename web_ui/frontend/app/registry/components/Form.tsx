@@ -3,8 +3,8 @@ import React, {
   Dispatch,
   SetStateAction,
   useContext,
-  useState,
   useEffect,
+  useState,
 } from 'react';
 import useSWR from 'swr';
 
@@ -74,11 +74,9 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
   // Auto-fill in the security contact if no security contact and request came from Origin
   const { data: user } = useSWR('getUser', getUser);
   useEffect(() => {
-
     // If there is a fromUrl param then it came from the Origin
     // We can assume this user is likely to be the security contact
-    const fromUrl = (new URL(window.location.href)).searchParams.get("fromUrl");
-
+    const fromUrl = new URL(window.location.href).searchParams.get('fromUrl');
 
     if (
       fromUrl &&

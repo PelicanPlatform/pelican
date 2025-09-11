@@ -6,25 +6,23 @@ import { RegistryNamespace } from '@/index';
  */
 const extendPrefix = (
   prefix: string
-): {type: RegistryNamespace['type'], adjustedPrefix: string } => {
-
+): { type: RegistryNamespace['type']; adjustedPrefix: string } => {
   if (prefix.startsWith('/caches/')) {
     return {
-      type: "cache",
+      type: 'cache',
       adjustedPrefix: prefix.replace('/caches/', ''),
-    }
-
+    };
   } else if (prefix.startsWith('/origins/')) {
     return {
       type: 'origin',
       adjustedPrefix: prefix.replace('/origins/', ''),
-    }
+    };
   }
 
   return {
     type: 'namespace',
     adjustedPrefix: prefix,
-  }
+  };
 };
 
 export default extendPrefix;

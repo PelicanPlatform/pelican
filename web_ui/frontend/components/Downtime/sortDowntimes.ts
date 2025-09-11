@@ -7,7 +7,7 @@ const sortDowntimes = (downtimes: DowntimeGet[]) => {
   return downtimes.sort((a, b) => {
     return scoreDowntime(b) - scoreDowntime(a);
   });
-}
+};
 
 /**
  * Score function to determine order
@@ -15,9 +15,9 @@ const sortDowntimes = (downtimes: DowntimeGet[]) => {
  * @param downtime
  */
 const scoreDowntime = (downtime: DowntimeGet): number => {
-  const recentlyUpdated = isRecent(DateTime.fromMillis(downtime.updatedAt))
+  const recentlyUpdated = isRecent(DateTime.fromMillis(downtime.updatedAt));
   const score = recentlyUpdated ? 100000000000000 : 0;
   return score + downtime.startTime;
-}
+};
 
 export default sortDowntimes;
