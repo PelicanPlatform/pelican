@@ -25,8 +25,14 @@ export const DirectorDropdown = ({
               name={'In Downtime'}
               value={server.filtered ? 'True' : 'False'}
             />
-            <InformationSpan name={'Server Status'} value={server.serverStatus} />
-            <InformationSpan name={'XRootD Health Test'} value={server.healthStatus} />
+            <InformationSpan
+              name={'Server Status'}
+              value={server.serverStatus}
+            />
+            <InformationSpan
+              name={'XRootD Health Test'}
+              value={server.healthStatus}
+            />
             <InformationSpan name={'URL'} value={server.url} />
             <InformationSpan
               name={'Longitude'}
