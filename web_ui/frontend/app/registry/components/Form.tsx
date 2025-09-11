@@ -1,10 +1,21 @@
 import { Alert, Box, Button } from '@mui/material';
-import React, { Dispatch, SetStateAction, useContext, useEffect, useState, } from 'react';
+import React, {
+  Dispatch,
+  SetStateAction,
+  useContext,
+  useEffect,
+  useState,
+} from 'react';
 import useSWR from 'swr';
 
 import { RegistryNamespace } from '@/index';
 import CustomRegistrationField from '@/app/registry/components/CustomRegistrationField/index';
-import { calculateKeys, deleteKey, getValue, populateKey, } from '@/app/registry/components/util';
+import {
+  calculateKeys,
+  deleteKey,
+  getValue,
+  populateKey,
+} from '@/app/registry/components/util';
 import { CustomRegistrationFieldProps } from './CustomRegistrationField';
 import { alertOnError } from '@/helpers/util';
 import { optionsNamespaceRegistrationFields } from '@/helpers/api';
