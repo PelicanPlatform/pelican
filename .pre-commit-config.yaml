@@ -47,3 +47,11 @@ repos:
     hooks:
     -   id: shellcheck
         args: [--severity=warning]
+-   repo: local
+    hooks:
+      -   id: npm-format-fix
+          name: Run npm format:fix on web_ui/frontend changes
+          entry: bash -c "cd web_ui/frontend && npm run format:fix"
+          language: system
+          files: web_ui/frontend/.*
+          pass_filenames: false
