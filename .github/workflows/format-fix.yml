@@ -1,0 +1,58 @@
+name: Format and Push
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          persist-credentials: false # Needed so as not to use the default GITHUB_TOKEN
+
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.LINT_APP_ID }}
+          private-key: ${{ secrets.LINT_APP_PRIVATE_KEY }}
+
+      - name: Get GitHub App User ID
+        id: get-user-id
+        run: echo "user-id=$(gh api \"/users/${{ steps.app-token.outputs.app-slug }}[bot]\" --jq .id)" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+      - name: Set up git user
+        run: |
+          git config --global user.name '${{ steps.app-token.outputs.app-slug }}[bot]'
+          git config --global user.email '${{ steps.get-user-id.outputs.user-id }}+${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com'
+
+      - name: Set remote URL
+        run: git remote set-url origin "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/${{ github.repository }}.git"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web_ui/frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web_ui/frontend
+        run: npm ci
+
+      - name: Run format:fix
+        working-directory: web_ui/frontend
+        run: npm run format:fix
+
+      - name: Commit and push changes
+        run: |
+          if [[ $(git status --porcelain) ]]; then
+            git add .
+            git commit -m 'Run Prettier via GitHub Actions'
+            git push origin HEAD:${{ github.head_ref }}
+          fi
