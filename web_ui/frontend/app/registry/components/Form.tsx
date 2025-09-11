@@ -1,21 +1,10 @@
 import { Alert, Box, Button } from '@mui/material';
-import React, {
-  Dispatch,
-  SetStateAction,
-  useContext,
-  useState,
-  useEffect,
-} from 'react';
+import React, { Dispatch, SetStateAction, useContext, useEffect, useState, } from 'react';
 import useSWR from 'swr';
 
 import { RegistryNamespace } from '@/index';
 import CustomRegistrationField from '@/app/registry/components/CustomRegistrationField/index';
-import {
-  calculateKeys,
-  deleteKey,
-  getValue,
-  populateKey,
-} from '@/app/registry/components/util';
+import { calculateKeys, deleteKey, getValue, populateKey, } from '@/app/registry/components/util';
 import { CustomRegistrationFieldProps } from './CustomRegistrationField';
 import { alertOnError } from '@/helpers/util';
 import { optionsNamespaceRegistrationFields } from '@/helpers/api';
@@ -74,11 +63,9 @@ const Form = ({ namespace, onSubmit }: FormProps) => {
   // Auto-fill in the security contact if no security contact and request came from Origin
   const { data: user } = useSWR('getUser', getUser);
   useEffect(() => {
-
     // If there is a fromUrl param then it came from the Origin
     // We can assume this user is likely to be the security contact
-    const fromUrl = (new URL(window.location.href)).searchParams.get("fromUrl");
-
+    const fromUrl = new URL(window.location.href).searchParams.get('fromUrl');
 
     if (
       fromUrl &&
