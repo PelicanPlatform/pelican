@@ -19,25 +19,16 @@
 package director
 
 import (
-	"cmp"
 	"context"
-	"fmt"
-	"math/rand"
-	"net"
 	"net/http"
 	"net/netip"
 	"path"
-	"slices"
-	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jellydator/ttlcache/v3"
 	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/pelicanplatform/pelican/features"
@@ -49,31 +40,13 @@ import (
 )
 
 type (
-	SwapMap struct {
-		Weight float64
-		Index  int
-	}
-
-	SwapMaps []SwapMap
-
-	Coordinate struct {
-		Lat  float64 `mapstructure:"lat"`
-		Long float64 `mapstructure:"long"`
-	}
-
-	GeoIPOverride struct {
-		IP         string     `mapstructure:"IP"`
-		Coordinate Coordinate `mapstructure:"Coordinate"`
-	}
-
-	GeoNetOverride struct {
-		IPNet      net.IPNet
-		Coordinate Coordinate
-	}
-
-	geoIPError struct {
-		labels   prometheus.Labels
-		errorMsg string
+	// Holds all the stuff, minus a few globals, needed to perform a given sort
+	// alg that aren't a part of the server ads themselves.
+	SortContext struct {
+		Ctx             context.Context
+		ClientAddr      netip.Addr
+		AvailabilityMap map[string]bool
+		RedirectInfo    *server_structs.RedirectInfo
 	}
 
 	// A function type for filtering ads -- given a request and an ad, it should
@@ -84,244 +57,11 @@ type (
 	AdPredicate func(ctx *gin.Context, ad copyAd) bool
 )
 
-func (e geoIPError) Error() string {
-	return e.errorMsg
-}
-
-var (
-	// Stores the unmarshalled GeoIP override config in a form that's efficient to test
-	geoNetOverrides []GeoNetOverride
-
-	// Stores a mapping of client IPs that have been randomly assigned a coordinate
-	clientIpCache = ttlcache.New(ttlcache.WithTTL[netip.Addr, Coordinate](20*time.Minute),
-		ttlcache.WithDisableTouchOnHit[netip.Addr, Coordinate](),
-	)
-)
-
-// Constants for the director sorting algorithm
+// Constants for director sorting algorithms
 const (
-	sourceServerAdsLimit     = 6    // Number of servers under consideration
-	distanceHalvingThreshold = 10   // Threshold where the distance havling factor kicks in, in miles
-	distanceHalvingFactor    = 200  // Halving distance for the GeoIP weight, in miles
-	objAvailabilityFactor    = 2    // Multiplier for knowing whether an object is present
-	loadHalvingThreshold     = 10.0 // Threshold where the load havling factor kicks in
-	loadHalvingFactor        = 4.0  // Halving interval for load
-
-	// A rough lat/long bounding box for the contiguous US. We might eventually make this box
-	// a configurable value, but for now it's hardcoded
-	usLatMin  = 30.0
-	usLatMax  = 50.0
-	usLongMin = -125.0
-	usLongMax = -65.0
+	sourceWorkingSetSize = 15 // Number of servers we consider after first GeoIP sort in adaptive method
+	sourceServerAdsLimit = 6  // Number of servers sent to the client after all sorting operations complete
 )
-
-func (me SwapMaps) Len() int {
-	return len(me)
-}
-
-func (me SwapMaps) Less(left, right int) bool {
-	return me[left].Weight < me[right].Weight
-}
-
-func (me SwapMaps) Swap(left, right int) {
-	me[left], me[right] = me[right], me[left]
-}
-
-// Unmarshal any configured GeoIP overrides.
-// Malformed IPs and CIDRs are logged but not returned as errors.
-func unmarshalOverrides() error {
-	var geoIPOverrides []GeoIPOverride
-
-	// Ensure that we're starting with an empty slice.
-	geoNetOverrides = nil
-
-	if err := param.GeoIPOverrides.Unmarshal(&geoIPOverrides); err != nil {
-		return err
-	}
-
-	for _, override := range geoIPOverrides {
-		var ipNet *net.IPNet
-
-		if _, parsedNet, err := net.ParseCIDR(override.IP); err == nil {
-			ipNet = parsedNet
-		} else if ip := net.ParseIP(override.IP); ip != nil {
-			if ip4 := ip.To4(); ip4 != nil {
-				ipNet = &net.IPNet{IP: ip4, Mask: net.CIDRMask(32, 32)}
-			} else if ip16 := ip.To16(); ip16 != nil {
-				ipNet = &net.IPNet{IP: ip16, Mask: net.CIDRMask(128, 128)}
-			}
-		}
-
-		if ipNet == nil {
-			// Log the error, and continue looking for good configuration.
-			log.Warningf("Failed to parse configured GeoIPOverride address (%s). Unable to use for GeoIP resolution!", override.IP)
-			continue
-		}
-		geoNetOverrides = append(geoNetOverrides, GeoNetOverride{IPNet: *ipNet, Coordinate: override.Coordinate})
-	}
-	return nil
-}
-
-// Check for any pre-configured IP-to-lat/long overrides. If the passed address
-// matches an override IP (either directly or via CIDR masking), then we use the
-// configured lat/long from the override instead of relying on MaxMind.
-// NOTE: We don't return an error because if checkOverrides encounters an issue,
-// we still have GeoIP to fall back on.
-func checkOverrides(addr net.IP) (coordinate *Coordinate) {
-	// Unmarshal the GeoIP override config if we haven't already done so.
-	if geoNetOverrides == nil {
-		err := unmarshalOverrides()
-		if err != nil {
-			log.Warningf("Error while unmarshalling GeoIP overrides: %v", err)
-			return nil
-		}
-	}
-	for _, override := range geoNetOverrides {
-		if override.IPNet.Contains(addr) {
-			return &override.Coordinate
-		}
-	}
-	return nil
-}
-
-func setProjectLabel(ctx context.Context, labels *prometheus.Labels) {
-	project, ok := ctx.Value(ProjectContextKey{}).(string)
-	if !ok || project == "" {
-		(*labels)["proj"] = "unknown"
-	} else {
-		(*labels)["proj"] = project
-	}
-}
-
-func getLatLong(addr netip.Addr) (lat float64, long float64, radius uint16, err error) {
-	ip := net.IP(addr.AsSlice())
-	override := checkOverrides(ip)
-	if override != nil {
-		log.Infof("Overriding Geolocation of detected IP (%s) to lat:long %f:%f based on configured overrides", ip.String(), (override.Lat), override.Long)
-		return override.Lat, override.Long, 0, nil
-	}
-
-	labels := prometheus.Labels{
-		"network": "",
-		"source":  "",
-		"proj":    "", // this will be set in the setProjectLabel function
-	}
-
-	network, ok := utils.ApplyIPMask(addr.String())
-	if !ok {
-		log.Warningf("Failed to apply IP mask to address %s", ip.String())
-		labels["network"] = "unknown"
-	} else {
-		labels["network"] = network
-	}
-
-	reader := maxMindReader.Load()
-	if reader == nil {
-		labels["source"] = "server"
-		err = geoIPError{labels: labels, errorMsg: "No GeoIP database is available"}
-		return
-	}
-	record, err := reader.City(ip)
-	if err != nil {
-		labels["source"] = "server"
-		err = geoIPError{labels: labels, errorMsg: err.Error()}
-		return
-	}
-	lat = record.Location.Latitude
-	long = record.Location.Longitude
-	radius = record.Location.AccuracyRadius
-	// If the lat/long results in null _before_ we've had a chance to potentially set it to null, log a warning.
-	// There's likely a problem with the GeoIP database or the IP address. Usually this just means the IP address
-	// comes from a private range.
-	if lat == 0 && long == 0 {
-		errMsg := fmt.Sprintf("GeoIP Resolution of the address %s resulted in the null lat/long. This will result in random server sorting.", ip.String())
-		log.Warning(errMsg)
-		labels["source"] = "client"
-		err = geoIPError{labels: labels, errorMsg: errMsg}
-	}
-
-	// MaxMind provides an accuracy radius in kilometers. When it actually has no clue how to resolve a valid, public
-	// IP, it sets the radius to 1000. If we get a radius of 900 or more (probably even much less than this...), we
-	// should be very suspicious of the data, and mark it as appearing at the null lat/long (and provide a warning in
-	// the Director), which also triggers random weighting in our sort algorithms.
-	if radius >= 900 {
-		errMsg := fmt.Sprintf("GeoIP resolution of the address %s resulted in a suspiciously large accuracy radius of %d km. "+
-			"This will be treated as GeoIP resolution failure and result in random server sorting. Setting lat/long to null.", ip.String(), radius)
-		log.Warning(errMsg)
-		lat = 0
-		long = 0
-		labels["source"] = "client"
-		err = geoIPError{labels: labels, errorMsg: errMsg}
-	}
-
-	return
-}
-
-// Given a bounding box, assign a random coordinate within that box.
-func assignRandBoundedCoord(minLat, maxLat, minLong, maxLong float64) (lat, long float64) {
-	lat = rand.Float64()*(maxLat-minLat) + minLat
-	long = rand.Float64()*(maxLong-minLong) + minLong
-	return
-}
-
-// Given a client address, attempt to get the lat/long of the client. If the address is invalid or
-// the lat/long is not resolvable, assign a random location in the contiguous US.
-func getClientLatLong(addr netip.Addr, redirectInfo *server_structs.RedirectInfo) (coord Coordinate, err error) {
-	if !addr.IsValid() {
-		log.Warningf("Unable to sort servers based on client-server distance. Invalid client IP address: %s", addr.String())
-		coord.Lat, coord.Long = assignRandBoundedCoord(usLatMin, usLatMax, usLongMin, usLongMax)
-		cached, exists := clientIpCache.GetOrSet(addr, coord)
-		if exists {
-			log.Warningf("Using randomly-assigned lat/long for unresolved client IP %s: %f, %f.  This assignment will be cached for %v.", addr.String(), cached.Value().Lat, cached.Value().Long, time.Until(cached.ExpiresAt()))
-		} else {
-			log.Warningf("Assigning random location in the contiguous US to lat/long %f, %f. This assignment will be cached for 20 minutes.", coord.Lat, coord.Long)
-		}
-		coord = cached.Value()
-		redirectInfo.ClientInfo.Lat = coord.Lat
-		redirectInfo.ClientInfo.Lon = coord.Long
-		redirectInfo.ClientInfo.FromTTLCache = exists
-		redirectInfo.ClientInfo.Resolved = false
-		redirectInfo.ClientInfo.GeoIpRadiusKm = 0 // 0 indicates no radius, i.e. an error
-		return
-	}
-
-	coord.Lat, coord.Long, redirectInfo.ClientInfo.GeoIpRadiusKm, err = getLatLong(addr)
-	if err != nil || (coord.Lat == 0 && coord.Long == 0) {
-		if err != nil {
-			log.Warningf("Error while getting the client IP address: %v", err)
-		}
-		coord.Lat, coord.Long = assignRandBoundedCoord(usLatMin, usLatMax, usLongMin, usLongMax)
-		cached, exists := clientIpCache.GetOrSet(addr, coord)
-		if exists {
-			log.Warningf("Using randomly-assigned lat/long for client IP %s: %f, %f. This assignment will be cached for %v.", addr.String(), cached.Value().Lat, cached.Value().Long, time.Until(cached.ExpiresAt()))
-		} else {
-			log.Warningf("Client IP %s has been re-assigned a random location in the contiguous US to lat/long %f, %f. This assignment will be cached for 20 minutes.", addr.String(), coord.Lat, coord.Long)
-		}
-		coord = cached.Value()
-		redirectInfo.ClientInfo.Lat = coord.Lat
-		redirectInfo.ClientInfo.Lon = coord.Long
-		redirectInfo.ClientInfo.FromTTLCache = exists
-		redirectInfo.ClientInfo.Resolved = false
-		redirectInfo.ClientInfo.GeoIpRadiusKm = 0 // 0 indicates no radius, i.e. an error
-		return
-	}
-
-	redirectInfo.ClientInfo.FromTTLCache = false
-	redirectInfo.ClientInfo.Resolved = true
-	redirectInfo.ClientInfo.Lat = coord.Lat
-	redirectInfo.ClientInfo.Lon = coord.Long
-
-	return
-}
-
-// Any time we end up with a random distance, we flip the weights negative. When this happens,
-// we want a multiplier that should double a servers rank to multiply the weight by 0.5, not 2.0
-func invertWeightIfNeeded(isRand bool, weight float64) float64 {
-	if isRand {
-		return 1 / weight
-	}
-	return weight
-}
 
 // The all-in-one method to sort serverAds based on the Director.CacheSortMethod configuration parameter
 //   - distance: sort serverAds by the distance between the geolocation of the servers and the client
@@ -330,9 +70,10 @@ func invertWeightIfNeeded(isRand bool, weight float64) float64 {
 //   - random: sort serverAds randomly
 //   - adaptive:  sort serverAds based on rules discussed here: https://github.com/PelicanPlatform/pelican/discussions/1198
 //
-// Note that if the client has invalid IP address or MaxMind is unable to get the coordinates out of
-// the client IP, any distance-related steps are skipped. If the sort method is "distance", then
-// the serverAds are randomly sorted.
+// Note that if the client IP isn't overridden and MaxMind cannot resolve accurate coordinates for it, the client's
+// coordinate is randomly assigned within the contiguous US and cached for re-use. This means that distance-based sorts
+// will be effectively random the first time, but subsequent requests within a short time period will still likely
+// generate cache hits.
 func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_structs.ServerAd, availabilityMap map[string]bool, redirectInfo *server_structs.RedirectInfo) ([]server_structs.ServerAd, error) {
 	// Each entry in weights will map a priority to an index in the original ads slice.
 	// A larger weight is a higher priority.

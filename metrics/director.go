@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -111,17 +111,30 @@ var (
 		Help: "The total number of redirects the director issued.",
 	}, []string{"destination", "status_code", "version", "network"})
 
-	// TODO: Remove this metric (the line directly below)
-	// The renamed metric was added in v7.16
+	// TODO: Remove these two metrics (the lines directly below)
+	// They're no longer being tracked because they were split into separate client/server metrics
+	// (see PelicanDirectorMaxMind{Server,Client}ErrorsTotal) because the error conditions are
+	// now different and generated under different internal processes.
 	PelicanDirectorGeoIPErrors = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_geoip_errors",
-		Help: "The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database",
+		Help: "[Deprecated] The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database",
 	}, []string{"network", "source", "proj"})
 
 	PelicanDirectorGeoIPErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_geoip_errors_total",
-		Help: "The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database",
+		Help: "[Deprecated -- split into separate client/server metrics (pelican_director_maxmind_{server,client}_errors_total)] The total number of errors encountered trying to resolve coordinates using the GeoIP MaxMind database",
 	}, []string{"network", "source", "proj"})
+
+	// The next two metrics replace the previous two deprecated GeoIP error metrics
+	PelicanDirectorMaxMindServerErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_maxmind_server_errors_total",
+		Help: "The total number of errors encountered trying to resolve server coordinates using the GeoIP MaxMind database",
+	}, []string{"network", "server_name"})
+
+	PelicanDirectorMaxMindClientErrorsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "pelican_director_maxmind_client_errors_total",
+		Help: "The total number of errors encountered trying to resolve client coordinates using the GeoIP MaxMind database",
+	}, []string{"network", "project"})
 
 	PelicanDirectorRejectedAdvertisements = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "pelican_director_rejected_advertisements",

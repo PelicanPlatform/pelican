@@ -3,7 +3,7 @@ module github.com/pelicanplatform/pelican
 // Unpublish Go package as we are not intended to allow users us import our packages for now
 retract [v1.0.0, v1.0.5]
 
-go 1.24.0
+go 1.24
 
 toolchain go1.24.7
 
@@ -28,7 +28,7 @@ require (
 	github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f
 	github.com/oklog/run v1.1.0
 	github.com/opensciencegrid/xrootd-monitoring-shoveler v1.3.0
-	github.com/oschwald/geoip2-golang v1.9.0
+	github.com/oschwald/geoip2-golang/v2 v2.0.0-beta.4
 	github.com/pkg/errors v0.9.1
 	github.com/pressly/goose/v3 v3.18.0
 	github.com/prometheus/client_golang v1.17.0
@@ -82,6 +82,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/muesli/termenv v0.15.3-0.20240618155329-98d742f6907a // indirect
+	github.com/oschwald/maxminddb-golang/v2 v2.0.0-beta.9 // indirect
 	github.com/redis/go-redis/v9 v9.0.2 // indirect
 	github.com/sagikazarmark/locafero v0.6.0 // indirect
 	github.com/sethvargo/go-retry v0.2.4 // indirect
@@ -92,7 +93,7 @@ require (
 	go.opentelemetry.io/collector/pdata v1.0.0-rcv0016 // indirect
 	go.opentelemetry.io/collector/semconv v0.87.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20241223144023-3abc09e42ca8 // indirect
 	google.golang.org/grpc v1.67.3 // indirect
 	modernc.org/sqlite v1.28.0 // indirect
@@ -166,7 +167,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
-	github.com/oschwald/maxminddb-golang v1.11.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
