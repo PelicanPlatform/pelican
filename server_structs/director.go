@@ -421,7 +421,7 @@ const (
 )
 
 const (
-	// SortType for sorting the server ads
+	// SortType for server ad sorting algorithms
 	DistanceType        SortType = "distance"
 	DistanceAndLoadType SortType = "distanceAndLoad"
 	RandomType          SortType = "random"
@@ -431,6 +431,10 @@ const (
 	AdAfterTrue    AdAfter = 1 // The ad was generated after the compared one
 	AdAfterUnknown AdAfter = 2 // One of the ads in the comparison is missing necessary attributes to determine when it was generated
 )
+
+func (st SortType) String() string {
+	return string(st)
+}
 
 func IsValidStrategy(strategy string) bool {
 	switch StrategyType(strategy) {

@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -19,137 +19,93 @@
 package director
 
 import (
-	"math"
+	"cmp"
+	"fmt"
 	"math/rand"
+	"slices"
+
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-const earthRadiusToMilesFactor = 3960
-
-// Mathematical function, not implementation, came from
-// http://www.johndcook.com/python_longitude_latitude.html
-// Returned values are not actual distances, but is relative to earth's radius
-func distanceOnSphere(lat1 float64, long1 float64, lat2 float64, long2 float64) float64 {
-
-	if (lat1 == lat2) && (long1 == long2) {
-		return 0.0
+type (
+	// Struct that lets us map a weight to the index of the server ad it came from
+	SwapMap struct {
+		Weight float64
+		Index  int
 	}
 
-	// Convert latitude and longitude to
-	// spherical coordinates in radians.
-	degrees_to_radians := math.Pi / 180.0
+	SwapMaps []SwapMap
 
-	// phi = 90 - latitude
-	phi1 := (90.0 - lat1) * degrees_to_radians
-	phi2 := (90.0 - lat2) * degrees_to_radians
+	weightError struct {
+		NegIdxs []int
+	}
+)
 
-	// theta = longitude
-	theta1 := long1 * degrees_to_radians
-	theta2 := long2 * degrees_to_radians
 
-	// Compute spherical distance from spherical coordinates.
 
-	// For two locations in spherical coordinates
-	// (1, theta, phi) and (1, theta, phi)
-	// cosine( arc length ) =
-	//    sin phi sin phi' cos(theta-theta') + cos phi cos phi'
-	// distance = rho * arc length
 
-	cos := (math.Sin(phi1)*math.Sin(phi2)*math.Cos(theta1-theta2) +
-		math.Cos(phi1)*math.Cos(phi2))
-	arc := math.Acos(cos)
 
-	return arc
+const (
+	// Various constants used in weight calculations
+	distanceHalvingFactor = 200  // Halving distance for the GeoIP weight, in miles
+	objAvailabilityFactor = 2.0  // Multiplier for knowing whether an object is present
+	loadHalvingThreshold  = 10.0 // Threshold where the load halving factor kicks in
+	loadHalvingFactor     = 4.0  // Halving interval for load
+)
+
+func (me SwapMaps) Len() int {
+	return len(me)
 }
 
-// Create a weight between [0,1] that indicates a priority. The returned weight is directly correlated
-// with priority (higher weight is higher priority is lower distance)
-//
-// Is realD set to true, then return the distance between the two coordinates in miles
-func distanceWeight(lat1 float64, long1 float64, lat2 float64, long2 float64, realD bool) (weight float64, isRand bool) {
-	// If either coordinate is sitting at null island, return a random weight
-	isRand = false
-	if (lat1 == 0.0 && long1 == 0.0) || (lat2 == 0.0 && long2 == 0.0) {
-		isRand = true
-		weight = rand.Float64() // technically this returns [0,1)
-	} else if realD {
-		weight = distanceOnSphere(lat1, long1, lat2, long2) * earthRadiusToMilesFactor
-	} else {
-		weight = 1 - (distanceOnSphere(lat1, long1, lat2, long2) / math.Pi)
+func (me SwapMaps) Less(left, right int) bool {
+	return me[left].Weight < me[right].Weight
+}
+
+func (me SwapMaps) Swap(left, right int) {
+	me[left], me[right] = me[right], me[left]
+}
+
+// Given a swap map, filter out any entries with zero or negative weights,
+// returning the indices of any entries with negative weights -- these constitute
+// errors and can be used by calling functions to determine which server ads
+// are generating illegal weights.
+func (me *SwapMaps) FilterZeroAndNegWeights() (negWeightIdxs []int) {
+	nonZeros := 0
+	for _, s := range *me {
+		if s.Weight > 0 {
+			(*me)[nonZeros] = s
+			nonZeros++
+		} else if s.Weight < 0 {
+			negWeightIdxs = append(negWeightIdxs, s.Index)
+		}
 	}
+	*me = (*me)[:nonZeros]
+
 	return
 }
 
-// Given the input value, return a weight [0, 1.0] based on the gated havling of the base weight 1.0.
-//   - If the input value is between 0.0 and the threshold, return 1.0.
-//   - If the input value is above the threshold, the weight decreases by half for every halvingFactor units of the input value
-func gatedHalvingMultiplier(val float64, threshold float64, halvingFactor float64) float64 {
-	if halvingFactor == 0 || threshold == 0 {
-		return 1.0
-	}
-	if val >= 0.0 && val <= threshold {
-		return 1.0
-	} else {
-		// multiplier decreases by half for every havlvingFactor units of the value for value above the threshold
-		base := math.Max(1, (math.Floor((val-threshold)/halvingFactor))*2)
-		multiplier := 1.0 / base
-		return multiplier
-	}
-}
-
-// Given a map of ranges and an index, remove the range at the index and shift the rest of the ranges
-// to the left. Assumes incoming ranges are all positive values.
-func removeAndRerange(wSum *float64, ranges map[int][]float64, index int) {
-	shiftVal := ranges[index][1] - ranges[index][0]
-	*wSum -= shiftVal
-	delete(ranges, index)
-	for i := range ranges {
-		if i > index {
-			ranges[i][0] -= shiftVal
-			ranges[i][1] -= shiftVal
-		}
-	}
-}
-
-// Given a SwapMaps struct, generate the ranges for each weight and the total weight sum.
-func generateRanges(sm SwapMaps) (wSum float64, ranges map[int][]float64) {
-	wSum = 0.0
-	ranges = make(map[int][]float64, len(sm))
-	// Some incoming weights may be negative, indicating they should be sorted at the end of the list.
-	// However, this adaptive sort algorithm assumes positive weights because of the way it stochastically
-	// grabs values from ranges. To handle this, we'll normalize the negative weights by making positive and
-	// dividing by the smallest non-negative weight from the swap maps. This guarantees negative weights always
-	// have a smaller range than positive weights, and more heavily negative weights have smaller ranges than
-	// less negative weights.
-	var minWeight float64 = math.Inf(1)
-	foundNonNegative := false
-	for _, val := range sm {
-		if val.Weight >= 0 && val.Weight < minWeight {
-			minWeight = val.Weight
-			foundNonNegative = true
-		}
-	}
-	if !foundNonNegative {
-		// Handle the case where all weights are negative
-		minWeight = 1.0
+// Given a SwapMaps, sort it in descending order by weight
+// Function named with "sm" prefix to avoid confusion with sort methods
+// on server ads.
+func (sm *SwapMaps) smSortDescending() *weightError {
+	if len(*sm) == 0 {
+		return nil
 	}
 
-	// Calculate the ranges for each weight, and the total weight sum
-	for idx, val := range sm {
-		// Guarantee that any negative weights are turned into a positive range,
-		// where the more negative weights correspond to smaller ranges.
-		if val.Weight < 0 {
-			val.Weight = -1 * minWeight / (val.Weight - 1) // subtract by one to guarantee abs(denominator) > 1
-		}
-		if idx == 0 {
-			ranges[idx] = []float64{0.0, val.Weight}
-		} else {
-			prev := ranges[idx-1][1]
-			ranges[idx] = []float64{prev, prev + val.Weight}
-		}
-		wSum += val.Weight
-	}
+	// Perform a zero/neg weight filter before we sort
+	negWeightIdxs := sm.FilterZeroAndNegWeights()
 
-	return
+	slices.SortStableFunc(*sm, func(a, b SwapMap) int {
+		return cmp.Compare(b.Weight, a.Weight)
+	})
+
+	if len(negWeightIdxs) > 0 {
+		return &weightError{NegIdxs: negWeightIdxs}
+	}
+	return nil
 }
 
 // Given a SwapMaps struct, stochasticlly sort the weights based on the following procedure:
@@ -162,29 +118,123 @@ func generateRanges(sm SwapMaps) (wSum float64, ranges map[int][]float64) {
 //
 //  4. Remove the range corresponding to the selected weight and re-calculate the ranges.
 //
-//  5. Repeat step 2-4 to select a the rest weights
+//  5. Repeat step 2-4 to select the rest weights
 //
-// Returns the sorted list of SwapMap.Index
-// You may specify the maxOut argument to limit the output.
-func stochasticSort(sm SwapMaps, maxOut int) (candidates []int) {
-	if maxOut <= 0 || maxOut > len(sm) {
-		maxOut = len(sm)
+// NOTE: Assumes all weights are non-negative and remove any that aren't.
+// Function named with "sm" prefix to avoid confusion with sort methods
+// on server ads.
+func (sms *SwapMaps) smSortStochastic() *weightError {
+	if len(*sms) == 0 {
+		return nil
 	}
 
-	wSum, ranges := generateRanges(sm)
+	// Perform a zero/neg weight filter before we sort
+	negWeightIdxs := sms.FilterZeroAndNegWeights()
 
-	for len(candidates) < maxOut {
+	n := len(*sms)
+	for i := 0; i < n-1; i++ {
+		// Compute the sum of weights for the remaining unsorted part
+		var wSum float64
+		for j := i; j < n; j++ {
+			wSum += (*sms)[j].Weight
+		}
+
+		// Pick a random number in [0, wSum)
 		ranNum := rand.Float64() * wSum
-		for idx, r := range ranges {
-			if ranNum >= r[0] && ranNum < r[1] {
-				removeAndRerange(&wSum, ranges, idx)
-
-				// Here, we append Index of the SwapMaps[idx] as that's the
-				// true index to sort
-				candidates = append(candidates, sm[idx].Index)
+		var acc float64
+		var pick int
+		for j := i; j < n; j++ {
+			acc += (*sms)[j].Weight
+			if ranNum < acc {
+				pick = j
 				break
 			}
 		}
+		// Swap the picked element to the current position
+		(*sms)[i], (*sms)[pick] = (*sms)[pick], (*sms)[i]
 	}
-	return
+
+	if len(negWeightIdxs) > 0 {
+		return &weightError{NegIdxs: negWeightIdxs}
+	}
+
+	return nil
+}
+
+// Given a sort algorithm and a SwapMaps that apply to the indeces of a slice of server ads,
+// return a new slice of server ads sorted by the weights in the SwapMaps.
+func (sm SwapMaps) GetSortedAds(ads []server_structs.ServerAd, sType smSortType) []server_structs.ServerAd {
+	switch sType {
+	case smSortDescending:
+		if weightError := sm.smSortDescending(); weightError != nil {
+			log.Errorf("Error during descending sort: %s; these servers have been filtered for this request", weightError.Error(ads))
+		}
+	case smSortStochastic:
+		if weightError := sm.smSortStochastic(); weightError != nil {
+			log.Errorf("Error during stochastic sort: %s; these servers have been filtered for this request", weightError.Error(ads))
+		}
+	}
+
+	result := make([]server_structs.ServerAd, len(sm)) // len(sm) <= len(ads) because we may have filtered out some ads with bad weights
+	for i, w := range sm {
+		result[i] = ads[w.Index]
+	}
+	return result
+}
+
+/////////////////////
+// SORT ALGORITHMS //
+/////////////////////
+
+/*
+	These sort algorithms are end-to-end sort algorithms for slices of server ads.
+
+	They each take an input slice of server ads and a SortContext (which holds other
+	algorithm inputs) and return a slice of server ads sorted according to the algorithm.
+	They should not modify the input slice.
+*/
+
+type SortAlgorithm interface {
+	Sort(sAds []server_structs.ServerAd, sCtx SortContext) ([]server_structs.ServerAd, error)
+	Type() server_structs.SortType
+	String() string
+}
+
+type smSortType int
+
+const (
+	smSortDescending smSortType = iota
+	smSortStochastic
+)
+
+// Sort a list of ServerAds with the following rule:
+//   - if a ServerAds has FromTopology = true, then it will be moved to the end of the list
+//   - if two ServerAds has the SAME FromTopology value (both true or false), then break tie them by name
+func sortServerAdsByTopo(ads []*server_structs.Advertisement) {
+	slices.SortStableFunc(ads, func(a, b *server_structs.Advertisement) int {
+		if a.FromTopology && !b.FromTopology {
+			return 1
+		} else if !a.FromTopology && b.FromTopology {
+			return -1
+		} else {
+			return cmp.Compare(a.Name, b.Name)
+		}
+	})
+}
+
+// Stable-sort the given serveAds in-place given the availMap, where the key of the map is serverAd.Url.String()
+// and the value is a bool suggesting if the server has the object requested.
+//
+// Smaller index in the sorted array means higher priority
+func sortServerAdsByAvailability(ads []server_structs.ServerAd, availMap map[string]bool) {
+	slices.SortStableFunc(ads, func(a, b server_structs.ServerAd) int {
+		if !availMap[a.URL.String()] && availMap[b.URL.String()] {
+			return 1
+		} else if availMap[a.URL.String()] && !availMap[b.URL.String()] {
+			return -1
+		} else {
+			// Preserve original ordering
+			return 0
+		}
+	})
 }

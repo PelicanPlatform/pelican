@@ -68,177 +68,62 @@ const (
 //   - distanceAndLoad: sort serverAds by the distance with gated halving factor (see details in the adaptive method)
 //     and the server IO load
 //   - random: sort serverAds randomly
-//   - adaptive:  sort serverAds based on rules discussed here: https://github.com/PelicanPlatform/pelican/discussions/1198
+//   - adaptive:  sort serverAds based on rules discussed in these places:
+//       - https://github.com/PelicanPlatform/pelican/discussions/1198
+//       - https://docs.google.com/document/d/1w-1oUhFTN6QN_PfQ5qbS7uf8Su3K8q6MZD3TGLKTHB8/edit?tab=t.0
 //
 // Note that if the client IP isn't overridden and MaxMind cannot resolve accurate coordinates for it, the client's
 // coordinate is randomly assigned within the contiguous US and cached for re-use. This means that distance-based sorts
 // will be effectively random the first time, but subsequent requests within a short time period will still likely
 // generate cache hits.
 func sortServerAds(ctx context.Context, clientAddr netip.Addr, ads []server_structs.ServerAd, availabilityMap map[string]bool, redirectInfo *server_structs.RedirectInfo) ([]server_structs.ServerAd, error) {
-	// Each entry in weights will map a priority to an index in the original ads slice.
-	// A larger weight is a higher priority.
-	weights := make(SwapMaps, len(ads))
-	sortMethod := param.Director_CacheSortMethod.GetString()
-	redirectInfo.DirectorSortMethod = sortMethod
-	// This will handle the case where the client address is invalid or the lat/long is not resolvable.
-	clientCoord, err := getClientLatLong(clientAddr, redirectInfo)
+	sortMethod := server_structs.SortType(param.Director_CacheSortMethod.GetString())
+	redirectInfo.DirectorSortMethod = sortMethod.String()
+	redirectInfo.ClientInfo.IpAddr = clientAddr.String()
+
+	sortContext := SortContext{
+		Ctx:             ctx,
+		ClientAddr:      clientAddr,
+		AvailabilityMap: availabilityMap,
+		RedirectInfo:    redirectInfo,
+	}
+	var sortAlg SortAlgorithm
+	switch sortMethod {
+	case server_structs.DistanceType:
+		sortAlg = &DistanceSort{}
+	case server_structs.DistanceAndLoadType: // currently a place holder for distance (per our parameters.yaml docs)
+		sortAlg = &DistanceSort{}
+	case server_structs.AdaptiveType:
+		sortAlg = &AdaptiveSort{}
+	case server_structs.RandomType:
+		sortAlg = &RandomSort{}
+	default:
+		// Never say never, but this should never get hit because we validate the value on Director startup.
+		// The only real way to get here is through writing bad unit tests.
+		return nil, errors.Errorf("invalid sort method '%s' set in %s", param.Director_CacheSortMethod.GetString(), param.Director_CacheSortMethod.GetName())
+	}
+
+	sortedAds, err := sortAlg.Sort(ads, sortContext)
 	if err != nil {
-		// If it is a geoIP error, then we get the labels and increment the error counter
-		// Otherwise we log the error and continue
-		if geoIPError, ok := err.(geoIPError); ok {
-			labels := geoIPError.labels
-			setProjectLabel(ctx, &labels)
-			// TODO: Remove this metric (the line directly below)
-			// The renamed metric was added in v7.16
-			metrics.PelicanDirectorGeoIPErrors.With(labels).Inc()
-			metrics.PelicanDirectorGeoIPErrorsTotal.With(labels).Inc()
-		}
-		log.Warningf("Error while getting the client IP address: %v", err)
-	}
-
-	// For each ad, we apply the configured sort method to determine a priority weight.
-	for idx, ad := range ads {
-		redirectInfo.ServersInfo[ad.URL.String()] = &server_structs.ServerRedirectInfo{
-			Lat:          ad.Latitude,
-			Lon:          ad.Longitude,
-			LoadWeight:   ad.IOLoad,
-			StatusWeight: ad.StatusWeight,
-			HasObject:    "unknown",
-		}
-
-		switch server_structs.SortType(sortMethod) {
-		case server_structs.DistanceType:
-			// If either client or ad coordinates are null, the underlying distanceWeight function will return a random weight
-			weight, isRand := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, false)
-			if isRand {
-				// Guarantee randomly-weighted servers are sorted to the bottom
-				weights[idx] = SwapMap{0 - weight, idx}
-			} else {
-				weights[idx] = SwapMap{weight, idx}
-			}
-		case server_structs.DistanceAndLoadType:
-			weight := 1.0
-			// Distance weight
-			distance, isRand := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
-			if isRand {
-				// In distanceAndLoad/adaptive modes, pin random distance weights to the range [-0.475, -0.525)] in an attempt
-				// to make sure the weights from availability/load overpower the random distance weights while
-				// still having a stochastic element. We do this instead of ignoring the distance weight entirely, because
-				// it's possible load information and or availability information is not available for all servers.
-				weight = 0 - (0.475+rand.Float64())*(0.05)
-			} else {
-				dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
-				weight *= dWeighted
-			}
-
-			// Load weight
-			lWeighted := gatedHalvingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
-			weight *= invertWeightIfNeeded(isRand, lWeighted)
-			weights[idx] = SwapMap{weight, idx}
-		case server_structs.AdaptiveType:
-			weight := 1.0
-			// Distance weight
-			distance, isRand := distanceWeight(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude, true)
-			if isRand {
-				weight = 0 - (0.475+rand.Float64())*(0.05)
-			} else {
-				dWeighted := gatedHalvingMultiplier(distance, distanceHalvingThreshold, distanceHalvingFactor)
-				weight *= dWeighted
-			}
-
-			// Availability weight
-			if availabilityMap == nil {
-				weight *= 1.0
-			} else if hasObj, ok := availabilityMap[ad.URL.String()]; ok && hasObj {
-				weight *= invertWeightIfNeeded(isRand, 2.0)
-				redirectInfo.ServersInfo[ad.URL.String()].HasObject = "true"
-			} else if !ok {
-				weight *= 1.0
-			} else { // ok but does not have the object
-				weight *= invertWeightIfNeeded(isRand, 0.5)
-				redirectInfo.ServersInfo[ad.URL.String()].HasObject = "false"
-			}
-
-			// IO Load weight
-			lWeighted := gatedHalvingMultiplier(ad.IOLoad, loadHalvingThreshold, loadHalvingFactor)
-			weight *= invertWeightIfNeeded(isRand, lWeighted)
-
-			// Status weight
-			if ad.StatusWeight > 0 { // older Origins/Caches may not have a status weight
-				weight *= ad.StatusWeight
-			}
-
-			weights[idx] = SwapMap{weight, idx}
-		case server_structs.RandomType:
-			weights[idx] = SwapMap{rand.Float64(), idx}
-		default:
-			// Never say never, but this should never get hit because we validate the value on startup.
-			// The only real way to get here is through writing unit tests.
-			return nil, errors.Errorf("Invalid sort method '%s' set in Director.CacheSortMethod.", param.Director_CacheSortMethod.GetString())
-		}
-	}
-
-	if sortMethod == string(server_structs.AdaptiveType) {
-		candidates := stochasticSort(weights, serverResLimit)
-		resultAds := []server_structs.ServerAd{}
-		for _, cidx := range candidates[:min(len(candidates), serverResLimit)] {
-			resultAds = append(resultAds, ads[cidx])
-		}
-
-		// When Justin was refactoring the Director's matchmaking code for https://github.com/PelicanPlatform/pelican/issues/2041
-		// he noticed that sortServerAdsByAvailability was called for all adaptive sorts directly in redirectToCache after
-		// we got back the slice of sorted ads from `sortServerAds`. It didn't make sense to call two sort functions at that level
-		// when `sortServerAds` is already supposed to be a one-stop shop, so he moved `sortServerAdsByAvailability` into this function.
-		// However, he then began to wonder why we do all this weighting stuff based on availability only to immediately toss the results
-		// and sort by availability... Figuring out what's going on here should be a followup.
-		// TODO: Revisit this
-		sortServerAdsByAvailability(resultAds, availabilityMap)
-
-		return resultAds, nil
-	} else {
-		// Larger weight = higher priority, so we reverse the sort (which would otherwise default to ascending)
-		sort.Sort(sort.Reverse(weights))
-		resultAds := make([]server_structs.ServerAd, len(ads))
-		for idx, weight := range weights {
-			resultAds[idx] = ads[weight.Index]
-		}
-		return resultAds, nil
-	}
-}
-
-// Sort a list of ServerAds with the following rule:
-//   - if a ServerAds has FromTopology = true, then it will be moved to the end of the list
-//   - if two ServerAds has the SAME FromTopology value (both true or false), then break tie them by name
-//
-// TODO: remove the return statement as slices.SortStableFunc sorts the slice in-place
-func sortServerAdsByTopo(ads []*server_structs.Advertisement) []*server_structs.Advertisement {
-	slices.SortStableFunc(ads, func(a, b *server_structs.Advertisement) int {
-		if a.FromTopology && !b.FromTopology {
-			return 1
-		} else if !a.FromTopology && b.FromTopology {
-			return -1
+		// Use fallbacks that are less likely to produce errors (Distance, then Random)
+		var fallbackMethod server_structs.SortType
+		if sortMethod != server_structs.DistanceType && sortMethod != server_structs.RandomType {
+			fallbackMethod = server_structs.DistanceType
+			sortAlg = &DistanceSort{}
+		} else if sortMethod != server_structs.RandomType {
+			fallbackMethod = server_structs.RandomType
+			sortAlg = &RandomSort{}
 		} else {
-			return cmp.Compare(a.Name, b.Name)
+			return nil, errors.Wrapf(err, "failed to sort server ads using %s", sortMethod.String())
 		}
-	})
-	return ads
-}
 
-// Stable-sort the given serveAds in-place given the avaiMap, where the key of the map is serverAd.Url.String()
-// and the value is a bool suggesting if the server has the object requested.
-//
-// Smaller index in the sorted array means higher priority
-func sortServerAdsByAvailability(ads []server_structs.ServerAd, avaiMap map[string]bool) {
-	slices.SortStableFunc(ads, func(a, b server_structs.ServerAd) int {
-		if !avaiMap[a.URL.String()] && avaiMap[b.URL.String()] {
-			return 1
-		} else if avaiMap[a.URL.String()] && !avaiMap[b.URL.String()] {
-			return -1
-		} else {
-			// Preserve original ordering
-			return 0
+		sortedAds, err = sortAlg.Sort(ads, sortContext)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to sort server ads using both %s and fallback %s algorithms", sortMethod.String(), fallbackMethod.String())
 		}
-	})
+	}
+
+	return truncateAds(sortedAds, sourceServerAdsLimit), nil
 }
 
 // Given a request path and a slice of namespace ads, pick the namespace ad whose
@@ -301,10 +186,10 @@ func getAdsForPath(reqPath string) (oAds []copyAd, cAds []copyAd) {
 	}
 
 	// Move topo sorted ads to the end of our slice
-	topoSortedAds := sortServerAdsByTopo(ads)
+	sortServerAdsByTopo(ads)
 
 	var bestFedPrefix string
-	for _, ad := range topoSortedAds {
+	for _, ad := range ads {
 		// Skip over any ads that are filtered out or marked in downtime
 		if filtered, fType := checkFilter(ad.Name); filtered {
 			log.Tracef("Skipping '%s' server '%s' as it's in the filtered server list with type %s", ad.Type, ad.Name, fType)

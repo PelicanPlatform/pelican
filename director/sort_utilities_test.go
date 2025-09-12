@@ -219,6 +219,134 @@ func TestAngularDistanceOnSphere(t *testing.T) {
 	}
 }
 
+func TestThresholdedExponentialHalvingMultiplier(t *testing.T) {
+	testCases := []struct {
+		name          string
+		val           float64
+		threshold     float64
+		halvingFactor float64
+		expected      float64
+	}{
+		{
+			name:          "value below threshold",
+			val:           5.0,
+			threshold:     10.0,
+			halvingFactor: 20.0,
+			expected:      1.0,
+		},
+		{
+			name:          "value at threshold",
+			val:           10.0,
+			threshold:     10.0,
+			halvingFactor: 20.0,
+			expected:      1.0,
+		},
+		{
+			name:          "value one halving factor above threshold",
+			val:           30.0,
+			threshold:     10.0,
+			halvingFactor: 20.0,
+			expected:      0.5,
+		},
+		{
+			name:          "value two halving factors above threshold",
+			val:           50.0,
+			threshold:     10.0,
+			halvingFactor: 20.0,
+			expected:      0.25,
+		},
+		{
+			name:          "negative threshold",
+			val:           5.0,
+			threshold:     -10.0,
+			halvingFactor: 20.0,
+			expected:      1.0,
+		},
+		{
+			name:          "zero halving factor",
+			val:           30.0,
+			threshold:     10.0,
+			halvingFactor: 0.0,
+			expected:      1.0,
+		},
+		{
+			name:          "negative halving factor",
+			val:           30.0,
+			threshold:     10.0,
+			halvingFactor: -20.0,
+			expected:      1.0,
+		},
+		{
+			name:          "negative value",
+			val:           -5.0,
+			threshold:     10.0,
+			halvingFactor: 20.0,
+			expected:      1.0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := thresholdedExponentialHalvingMultiplier(tc.val, tc.threshold, tc.halvingFactor)
+			assert.InDelta(t, tc.expected, result, 0.0001)
+		})
+	}
+}
+
+func TestTruncateAds(t *testing.T) {
+	ad1 := server_structs.ServerAd{}
+	ad1.Initialize("ad1")
+	ad2 := server_structs.ServerAd{}
+	ad2.Initialize("ad2")
+	ad3 := server_structs.ServerAd{}
+	ad3.Initialize("ad3")
+
+	testCases := []struct {
+		name     string
+		ads      []server_structs.ServerAd
+		maxAds   int
+		expected []server_structs.ServerAd
+	}{
+		{
+			name:     "fewer ads than max",
+			ads:      []server_structs.ServerAd{ad1, ad2},
+			maxAds:   5,
+			expected: []server_structs.ServerAd{ad1, ad2},
+		},
+		{
+			name:     "equal number of ads and max",
+			ads:      []server_structs.ServerAd{ad1, ad2, ad3},
+			maxAds:   3,
+			expected: []server_structs.ServerAd{ad1, ad2, ad3},
+		},
+		{
+			name:     "more ads than max",
+			ads:      []server_structs.ServerAd{ad1, ad2, ad3},
+			maxAds:   2,
+			expected: []server_structs.ServerAd{ad1, ad2},
+		},
+		{
+			name:     "max ads is zero",
+			ads:      []server_structs.ServerAd{ad1, ad2, ad3},
+			maxAds:   0,
+			expected: []server_structs.ServerAd{ad1, ad2, ad3},
+		},
+		{
+			name:     "max ads is negative",
+			ads:      []server_structs.ServerAd{ad1, ad2, ad3},
+			maxAds:   -1,
+			expected: []server_structs.ServerAd{ad1, ad2, ad3},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := truncateAds(tc.ads, tc.maxAds)
+			assert.EqualValues(t, tc.expected, result)
+		})
+	}
+}
+
 func TestAssignRandBoundedCoord(t *testing.T) {
 	// Because of the test's randomness, do it a few times to increase the likelihood of catching errors
 	for range 10 {
