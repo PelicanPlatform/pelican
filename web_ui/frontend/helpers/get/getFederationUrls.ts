@@ -1,6 +1,8 @@
 import { getObjectValue } from '@/helpers/util';
 import { getConfig } from '@/helpers/api';
 import { WellKnownConfiguration } from '@/types';
+import { Config } from '@/components/configuration';
+
 
 /**
  * Get federation URLs
