@@ -110,3 +110,9 @@ export interface GetToken extends BaseToken {
   id: string;
   createdBy: string;
 }
+
+export interface WellKnownConfiguration {
+  director_endpoint: string;
+  namespace_registration_endpoint: string;
+  jwks_uri: string;
+}
