@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 2024, Pelican Project, Morgridge Institute for Research
+ * Copyright (C) 2025, Pelican Project, Morgridge Institute for Research
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you
  * may not use this file except in compliance with the License.  You may
@@ -19,254 +19,519 @@
 package director
 
 import (
+	"context"
 	"math"
+	"net/netip"
+	"net/url"
+	"slices"
 	"testing"
 
+	"github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/pelicanplatform/pelican/server_structs"
 )
 
-func TestDistanceWeight(t *testing.T) {
-	// Some basic values to test and ensure it returns miles, not radian
-	d, isRand := distanceWeight(43.0753, -89.4114, 43.0753, -89.4114, true)
-	assert.False(t, isRand)
-	assert.Equal(t, 0.0, d)
-
-	d, isRand = distanceWeight(42.0753, -89.4114, 43.0753, -89.4114, true)
-	assert.False(t, isRand)
-	assert.Equal(t, 69.0, math.Round(d))
-
-	d, isRand = distanceWeight(43.0753, -90.4114, 43.0753, -89.4114, true)
-	assert.False(t, isRand)
-	assert.Equal(t, 50.0, math.Round(d))
-
-	// Test passing null lat long
-	_, isRand = distanceWeight(0, 0, 0, 0, true)
-	assert.True(t, isRand)
-
-	_, isRand = distanceWeight(42.0753, -89.4114, 0, 0, true)
-	assert.True(t, isRand)
-
-	_, isRand = distanceWeight(0, 0, 43.0753, -89.4114, true)
-	assert.True(t, isRand)
-
-	// Make sure a 0 in both is not mistaken for null
-	_, isRand = distanceWeight(43.0753, 0, 0, -89.4114, true)
-	assert.False(t, isRand)
-}
-
-func TestGatedHalvingMultiplier(t *testing.T) {
-	// return 1.0 if the havlvingFactor is zero
-	assert.Equal(t, 1.0, gatedHalvingMultiplier(1.0, 10.0, 0.0))
-	// return 1.0 if the threshold is zero
-	assert.Equal(t, 1.0, gatedHalvingMultiplier(10.0, 0.0, 0.0))
-
-	// return 1.0 if load < threshold
-	assert.Equal(t, 1.0, gatedHalvingMultiplier(1.0, 10.0, 4.0))
-	assert.Equal(t, 1.0, gatedHalvingMultiplier(10.0, 10.0, 4.0))
-
-	// return 1.0 if threshold <= load < threshold + havlvingFactor
-	assert.Equal(t, 1.0, gatedHalvingMultiplier(10.1, 10.0, 4.0))
-	assert.Equal(t, 1.0, gatedHalvingMultiplier(13.9, 10.0, 4.0))
-
-	// return half if load >= threshold + havlvingFactor
-	assert.Equal(t, 0.5, gatedHalvingMultiplier(14, 10.0, 4.0))
-
-	// return 1/4 if load >= threshold + 2* havlvingFactor
-	assert.Equal(t, 0.25, gatedHalvingMultiplier(18, 10.0, 4.0))
-}
-
-// Given a set of ranges, test that the correct index is removed
-// and the remaining ranges are shifted to the left.
-func TestRemoveAndRerange(t *testing.T) {
-	tests := []struct {
-		name           string
-		wSum           float64
-		ranges         map[int][]float64
-		index          int
-		expectedWSum   float64
-		expectedRanges map[int][]float64
+func TestFilterZeroAndNegWeights(t *testing.T) {
+	testCases := []struct {
+		name            string
+		input           SwapMaps
+		expectedLen     int
+		expectedErrIdxs []int
 	}{
 		{
-			name: "Remove middle range",
-			wSum: 10.0,
-			ranges: map[int][]float64{
-				0: {0.0, 2.0},
-				1: {2.0, 5.0},
-				2: {5.0, 10.0},
+			name: "all positive weights",
+			input: SwapMaps{
+				{Index: 0, Weight: 1.0},
+				{Index: 1, Weight: 2.0},
+				{Index: 2, Weight: 3.0},
 			},
-			index:        1,
-			expectedWSum: 7.0,
-			expectedRanges: map[int][]float64{
-				0: {0.0, 2.0},
-				2: {2.0, 7.0},
-			},
+			expectedLen: 3,
 		},
 		{
-			name: "Remove first range",
-			wSum: 10.0,
-			ranges: map[int][]float64{
-				0: {0.0, 2.0},
-				1: {2.0, 5.0},
-				2: {5.0, 10.0},
+			name: "some zero weights",
+			input: SwapMaps{
+				{Index: 0, Weight: 0.0},
+				{Index: 1, Weight: 2.0},
+				{Index: 2, Weight: 0.0},
 			},
-			index:        0,
-			expectedWSum: 8.0,
-			expectedRanges: map[int][]float64{
-				1: {0.0, 3.0},
-				2: {3.0, 8.0},
-			},
+			expectedLen: 1,
+			// No error indices because no zero weights
 		},
 		{
-			name: "Remove last range",
-			wSum: 10.0,
-			ranges: map[int][]float64{
-				0: {0.0, 2.0},
-				1: {2.0, 5.0},
-				2: {5.0, 10.0},
+			name: "some negative weights",
+			input: SwapMaps{
+				{Index: 0, Weight: -1.0},
+				{Index: 1, Weight: 2.0},
+				{Index: 2, Weight: -3.0},
 			},
-			index:        2,
-			expectedWSum: 5.0,
-			expectedRanges: map[int][]float64{
-				0: {0.0, 2.0},
-				1: {2.0, 5.0},
-			},
+			expectedLen:     1,
+			expectedErrIdxs: []int{0, 2},
 		},
 		{
-			name: "Remove only range",
-			wSum: 2.0,
-			ranges: map[int][]float64{
-				0: {0.0, 2.0},
+			name: "mixed zero and negative weights",
+			input: SwapMaps{
+				{Index: 0, Weight: -1.0},
+				{Index: 1, Weight: 0.0},
+				{Index: 2, Weight: 3.0},
+				{Index: 3, Weight: -0.5},
+				{Index: 4, Weight: 0.0},
 			},
-			index:          0,
-			expectedWSum:   0.0,
-			expectedRanges: map[int][]float64{},
+			expectedLen:     1,
+			expectedErrIdxs: []int{0, 3},
+		},
+		{
+			name: "all zero and negative weights",
+			input: SwapMaps{
+				{Index: 0, Weight: 0.0},
+				{Index: 1, Weight: -2.0},
+				{Index: 2, Weight: 0.0},
+			},
+			expectedLen:     0,
+			expectedErrIdxs: []int{1},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			removeAndRerange(&tt.wSum, tt.ranges, tt.index)
-			assert.Equal(t, tt.expectedWSum, tt.wSum)
-			assert.Equal(t, tt.expectedRanges, tt.ranges)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			negIdxs := tc.input.FilterZeroAndNegWeights()
+			assert.Equal(t, tc.expectedLen, len(tc.input), "filtered length does not match expected")
+			assert.EqualValues(t, tc.expectedErrIdxs, negIdxs, "negative weight indices do not match expected")
 		})
 	}
 }
 
-// Given a list of swap maps, test that the correct ranges are generated
-// This test assumes that negative values are normalized to positive values
-// using the scheme described in the function.
-func TestGenerateRanges(t *testing.T) {
-	tests := []struct {
+func TestSwapMapsSortDescending(t *testing.T) {
+	// Test that SortDescending correctly sorts SwapMaps in descending order by weight,
+	// and filters out any entries with zero or negative weights. The return for the method
+	// should indicate which indices had negative weights.
+	testCases := []struct {
 		name           string
-		sm             SwapMaps
-		expectedWSum   float64
-		expectedRanges map[int][]float64
+		input          SwapMaps
+		expected       SwapMaps
+		expectedErrIdx []int
 	}{
 		{
-			name: "Positive weights",
-			sm: SwapMaps{
-				0: {Index: 0, Weight: 2.0},
-				1: {Index: 1, Weight: 3.0},
-				2: {Index: 2, Weight: 5.0},
+			name: "already sorted descending",
+			input: SwapMaps{
+				{Index: 0, Weight: 5.0},
+				{Index: 1, Weight: 3.0},
+				{Index: 2, Weight: 1.0},
 			},
-			expectedWSum: 10.0,
-			expectedRanges: map[int][]float64{
-				0: {0.0, 2.0},
-				1: {2.0, 5.0},
-				2: {5.0, 10.0},
-			},
-		},
-		{
-			// When all weights are negative, we normalize using 1.0 as the numerator
-			name: "Negative weights",
-			sm: SwapMaps{
-				0: {Index: 0, Weight: -2.0}, // converts to -1 / (-2 - 1) = 0.3333
-				1: {Index: 1, Weight: -3.0}, // converts to -1 / (-3 - 1) = 0.25
-				2: {Index: 2, Weight: -5.0}, // converts to -1 / (-5 - 1) = 0.1667
-			},
-			expectedWSum: 0.75,
-			expectedRanges: map[int][]float64{
-				0: {0.0, 0.3333},
-				1: {0.3333, 0.5833},
-				2: {0.5833, 0.75},
+			expected: SwapMaps{
+				{Index: 0, Weight: 5.0},
+				{Index: 1, Weight: 3.0},
+				{Index: 2, Weight: 1.0},
 			},
 		},
 		{
-			name: "Mixed weights",
-			sm: SwapMaps{
-				0: {Index: 0, Weight: -2.0}, // converts to -3 / (-2 - 1) = 1
-				1: {Index: 1, Weight: 3.0},
-				2: {Index: 2, Weight: -5.0}, // converts to -3 / (-5 - 1) = 0.5
+			name: "unsorted",
+			input: SwapMaps{
+				{Index: 0, Weight: 1.0},
+				{Index: 1, Weight: 5.0},
+				{Index: 2, Weight: 3.0},
 			},
-			expectedWSum: 4.5,
-			expectedRanges: map[int][]float64{
-				0: {0.0, 1.0},
-				1: {1.0, 4.0},
-				2: {4.0, 4.5},
-			},
-		},
-		{
-			name: "Single weight",
-			sm: SwapMaps{
-				0: {Index: 0, Weight: 2.0},
-			},
-			expectedWSum: 2.0,
-			expectedRanges: map[int][]float64{
-				0: {0.0, 2.0},
+			expected: SwapMaps{
+				{Index: 1, Weight: 5.0},
+				{Index: 2, Weight: 3.0},
+				{Index: 0, Weight: 1.0},
 			},
 		},
 		{
-			name: "Zero weight",
-			sm: SwapMaps{
-				0: {Index: 0, Weight: 0.0},
+			name: "with negative weights",
+			input: SwapMaps{
+				{Index: 0, Weight: -1.0},
+				{Index: 1, Weight: 3.0},
+				{Index: 2, Weight: -5.0},
 			},
-			expectedWSum: 0.0,
-			expectedRanges: map[int][]float64{
-				0: {0.0, 0.0},
+			expected: SwapMaps{
+				{Index: 1, Weight: 3.0},
+			},
+			expectedErrIdx: []int{0, 2},
+		},
+		{
+			name: "with 0 weights",
+			input: SwapMaps{
+				{Index: 0, Weight: 0},
+				{Index: 1, Weight: 3.0},
+				{Index: 2, Weight: 5.0},
+			},
+			expected: SwapMaps{
+				{Index: 2, Weight: 5.0},
+				{Index: 1, Weight: 3.0},
+			},
+		},
+		{
+			name: "with equal weights",
+			input: SwapMaps{
+				{Index: 0, Weight: 2.0},
+				{Index: 1, Weight: 3.0},
+				{Index: 2, Weight: 3.0},
+			},
+			expected: SwapMaps{
+				{Index: 1, Weight: 3.0},
+				{Index: 2, Weight: 3.0},
+				{Index: 0, Weight: 2.0},
 			},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			wSum, ranges := generateRanges(tt.sm)
-			assert.InDelta(t, tt.expectedWSum, wSum, 0.0001) // InDelta to get around float precision
-			for key, val := range ranges {
-				assert.InDeltaSlice(t, tt.expectedRanges[key], val, 0.0001)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			weightError := tc.input.smSortDescending()
+			assert.EqualValues(t, tc.expected, tc.input, "sorted result does not match expected")
+			if len(tc.expectedErrIdx) == 0 {
+				assert.Nil(t, weightError, "expected no weight error, but got one")
+			} else {
+				assert.NotNil(t, weightError, "expected weight error, but got nil")
+				assert.ElementsMatch(t, tc.expectedErrIdx, weightError.NegIdxs, "weight error indices do not match expected")
 			}
 		})
 	}
 }
 
-func TestStochasticSort(t *testing.T) {
-	mockSwapMaps := SwapMaps{
-		{Weight: 0.2, Index: 2},
-		{Weight: 0.1, Index: 1},
-		{Weight: 0.4, Index: 6},
-		{Weight: 0.05, Index: 3},
-		{Weight: 10.5, Index: 4},
-		{Weight: 8, Index: 5},
-		{Weight: 2.1, Index: 0},
-		{Weight: -0.9, Index: 7},
+func TestSwapMapsSortStochastic(t *testing.T) {
+	// This test's strategy is to run the stochastic sort ~1000 times for each input,
+	// and to assert correctness based on the statistical distribution of results.
+	// For each index in the input, we record how often it appears at each position
+	// in the output. We then check that:
+	// 1) Only indices with positive weights appear in the output (zero and negative
+	//    weights should be filtered out).
+	// 2) Each index appears most often (mode) at the position expected based on its weight
+	//    relative to the others.
+	//    For example, if index A has the highest weight, it should appear most often
+	//    at position 0; if index B has the second highest weight, it should appear
+	//    most often at position 1; and so on.
+	testCases := []struct {
+		name           string
+		input          SwapMaps
+		expectedIdxMap map[int]int // expected "mode" position for each index
+		expectedErrIdx []int       // Indices that should produce weight errors
+	}{
+		{
+			name: "all positive weights",
+			input: SwapMaps{
+				{Weight: 50, Index: 0},
+				{Weight: 100, Index: 1},
+				{Weight: 25, Index: 2},
+			},
+			expectedIdxMap: map[int]int{
+				1: 0, // Index 1 should most often end up first
+				0: 1,
+				2: 2,
+			},
+		},
+		{
+			name: "mixed positive, zero, negative",
+			input: SwapMaps{
+				{Weight: 0, Index: 0},
+				{Weight: 50, Index: 1},
+				{Weight: -2, Index: 2},
+				{Weight: 10, Index: 3},
+			},
+			expectedIdxMap: map[int]int{
+				1: 0, // Index 1 should most often be first
+				3: 1, // Index 3 should most often be second
+				// 0 and 2 should be filtered out
+			},
+			expectedErrIdx: []int{2},
+		},
+		{
+			name: "all zero and negative weights",
+			input: SwapMaps{
+				{Weight: 0, Index: 0},
+				{Weight: -1, Index: 1},
+				{Weight: 0, Index: 2},
+			},
+			expectedIdxMap: map[int]int{}, // none should remain
+			expectedErrIdx: []int{1},
+		},
+		{
+			name: "one positive, rest zero/negative",
+			input: SwapMaps{
+				{Weight: 0, Index: 0},
+				{Weight: 15, Index: 1},
+				{Weight: -5, Index: 2},
+			},
+			expectedIdxMap: map[int]int{
+				1: 0, // Only index 1 should remain, always at position 0
+			},
+			expectedErrIdx: []int{2},
+		},
 	}
-	t.Run("non-positive-maxOut-returns-all", func(t *testing.T) {
-		c := stochasticSort(mockSwapMaps, 0)
-		assert.Len(t, c, len(mockSwapMaps))
 
-		c = stochasticSort(mockSwapMaps, -1)
-		assert.Len(t, c, len(mockSwapMaps))
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Store which indices appear with what frequency at each position after sorting
+			counts := make(map[int]map[int]int)
 
-		c = stochasticSort(mockSwapMaps, -10)
-		assert.Len(t, c, len(mockSwapMaps))
-	})
+			// Run the stochastic sort many times to gather statistics
+			for range 5000 {
+				cp := make(SwapMaps, len(tc.input))
+				copy(cp, tc.input)
+				weightError := cp.smSortStochastic()
+				if weightError != nil {
+					if len(tc.expectedErrIdx) == 0 {
+						t.Errorf("unexpected weight error: %+v", weightError)
+					} else {
+						if !assert.ElementsMatch(t, tc.expectedErrIdx, weightError.NegIdxs, "weight error indices do not match expected") {
+							t.Logf("got weight error: %+v", weightError)
+						}
+					}
+				} else {
+					if len(tc.expectedErrIdx) != 0 {
+						t.Errorf("expected weight error for indices %v, but got none", tc.expectedErrIdx)
+					}
+				}
 
-	t.Run("maxOut-greater-than-length-returns-len-of-sm", func(t *testing.T) {
-		c := stochasticSort(mockSwapMaps, len(mockSwapMaps)+1)
-		assert.Len(t, c, len(mockSwapMaps))
-	})
+				// Record positions of each index in this sorted result
+				for pos, sm := range cp {
+					if counts[sm.Index] == nil {
+						counts[sm.Index] = make(map[int]int)
+					}
+					counts[sm.Index][pos]++
+				}
+			}
 
-	t.Run("maxOut-returns-correctly", func(t *testing.T) {
-		c := stochasticSort(mockSwapMaps, 3)
-		assert.Len(t, c, 3)
-	})
+			// Check that only expected indices remain
+			for idx := range counts {
+				if _, ok := tc.expectedIdxMap[idx]; !ok {
+					t.Errorf("unexpected index %d found after sort (should have been filtered out)", idx)
+				}
+			}
+			for idx := range tc.expectedIdxMap {
+				if _, ok := counts[idx]; !ok {
+					t.Errorf("expected index %d to remain after sort, but it was missing", idx)
+				}
+			}
+
+			// Check mode position for each expected index
+			for idx, freqMap := range counts {
+				modePos, maxCount := -1, -1
+				for pos, cnt := range freqMap {
+					if cnt > maxCount {
+						modePos, maxCount = pos, cnt
+					}
+				}
+				expected, ok := tc.expectedIdxMap[idx]
+				if !ok {
+					continue // already checked above
+				}
+				if modePos != expected {
+					t.Errorf("index %d: expected mode position %d, got %d (distribution=%v)", idx, expected, modePos, freqMap)
+				}
+			}
+		})
+	}
+}
+
+func TestGetSortedAds(t *testing.T) {
+	// Here we only test expected order of ads for descending sort to avoid dealing
+	// with probability distributions in stochastic sort.
+	// The SortDescending and SortStochastic methods are tested separately, so all
+	// that remains to be covered is that a sorted SwapMaps correctly reorders
+	// the ads slice, and that weight errors are logged as expected.
+
+	ad1 := server_structs.ServerAd{URL: url.URL{Scheme: "http", Host: "ad1"}}
+	ad1.Initialize("ad1")
+	ad2 := server_structs.ServerAd{URL: url.URL{Scheme: "http", Host: "ad2"}}
+	ad2.Initialize("ad2")
+	ad3 := server_structs.ServerAd{URL: url.URL{Scheme: "http", Host: "ad3"}}
+	ad3.Initialize("ad3")
+
+	testCases := []struct {
+		name              string
+		ads               []server_structs.ServerAd
+		swapMaps          SwapMaps
+		sortType          smSortType
+		expectedOrder     []string // expected order of ad URLs after sorting
+		expectLoggedError bool
+	}{
+		{
+			name: "descending sort without errors",
+			ads:  []server_structs.ServerAd{ad1, ad2, ad3},
+			swapMaps: SwapMaps{
+				{Index: 0, Weight: 10.0},
+				{Index: 1, Weight: 20.0},
+				{Index: 2, Weight: 15.0},
+			},
+			sortType:      smSortDescending,
+			expectedOrder: []string{"ad2", "ad3", "ad1"},
+		},
+		{
+			name: "descending sort with negative weights triggers error log",
+			ads:  []server_structs.ServerAd{ad1, ad2, ad3},
+			swapMaps: SwapMaps{
+				{Index: 0, Weight: -5.0},
+				{Index: 1, Weight: 20.0},
+				{Index: 2, Weight: 5.0},
+			},
+			sortType:          smSortDescending,
+			expectedOrder:     []string{"ad2", "ad3"},
+			expectLoggedError: true,
+		},
+		{
+			name: "descending sort with 0 weight does not trigger error log",
+			ads:  []server_structs.ServerAd{ad1, ad2, ad3},
+			swapMaps: SwapMaps{
+				{Index: 0, Weight: 0.0},
+				{Index: 1, Weight: 20.0},
+				{Index: 2, Weight: 5.0},
+			},
+			sortType:          smSortDescending,
+			expectedOrder:     []string{"ad2", "ad3"},
+			expectLoggedError: false,
+		},
+
+		// For adaptive sort, we won't assert a specific order, but we'll
+		// still check that error conditions generate logs as expected
+		{
+			name: "adaptive sort with positive weights",
+			ads:  []server_structs.ServerAd{ad1, ad2, ad3},
+			swapMaps: SwapMaps{
+				{Index: 0, Weight: 10.0},
+				{Index: 1, Weight: 50.0},
+				{Index: 2, Weight: 15.0},
+			},
+			sortType:          smSortStochastic,
+			expectLoggedError: false,
+		},
+		{
+			name: "adaptive sort with mixed weights",
+			ads:  []server_structs.ServerAd{ad1, ad2, ad3},
+			swapMaps: SwapMaps{
+				{Index: 0, Weight: 10.0},
+				{Index: 1, Weight: -5.0},
+				{Index: 2, Weight: 15.0},
+			},
+			sortType:          smSortStochastic,
+			expectLoggedError: true,
+		},
+		{
+			name: "adaptive sort with zero weights",
+			ads:  []server_structs.ServerAd{ad1, ad2, ad3},
+			swapMaps: SwapMaps{
+				{Index: 0, Weight: 0.0},
+				{Index: 1, Weight: 5.0},
+				{Index: 2, Weight: 15.0},
+			},
+			sortType:          smSortStochastic,
+			expectLoggedError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Set up logrus test logger and hook
+			// Initialize the logger and add a test hook
+			hook := test.NewGlobal()
+			logrus.SetLevel(logrus.WarnLevel)
+
+			sortedAds := tc.swapMaps.GetSortedAds(tc.ads, tc.sortType)
+
+			// Check the order of sorted ads
+			if len(tc.expectedOrder) > 0 && len(sortedAds) != len(tc.expectedOrder) {
+				t.Fatalf("expected %d ads after sorting, got %d", len(tc.expectedOrder), len(sortedAds))
+			}
+			for i, expectedName := range tc.expectedOrder {
+				if sortedAds[i].Name != expectedName {
+					t.Errorf("at position %d: expected ad named %s, got %s", i, expectedName, sortedAds[i].Name)
+				}
+			}
+
+			// Check for error log if expected
+			errorEntries := hook.Entries
+			if tc.expectLoggedError {
+				found := false
+				for _, entry := range errorEntries {
+					if entry.Level == logrus.ErrorLevel {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected error log, but none was found")
+				}
+			} else {
+				for _, entry := range errorEntries {
+					if entry.Level == logrus.ErrorLevel {
+						t.Errorf("unexpected error log: %s", entry.Message)
+					}
+				}
+			}
+		})
+	}
+}
+
+
+
+func TestSortServerAdsByTopo(t *testing.T) {
+	mock1 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: true,
+		},
+	}
+	mock1.ServerAd.Initialize("alpha")
+	mock2 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: true,
+		},
+	}
+	mock2.ServerAd.Initialize("bravo")
+	mock3 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: true,
+		},
+	}
+	mock3.ServerAd.Initialize("charlie")
+	mock4 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: false,
+		},
+	}
+	mock4.ServerAd.Initialize("alpha")
+	mock5 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: false,
+		},
+	}
+	mock5.ServerAd.Initialize("bravo")
+	mock6 := server_structs.Advertisement{
+		ServerAd: server_structs.ServerAd{
+			FromTopology: false,
+		},
+	}
+	mock6.ServerAd.Initialize("charlie")
+
+	inputList := []*server_structs.Advertisement{&mock6, &mock1, &mock2, &mock4, &mock5, &mock3}
+	expectedList := []*server_structs.Advertisement{&mock4, &mock5, &mock6, &mock1, &mock2, &mock3}
+
+	sortServerAdsByTopo(inputList)
+
+	assert.EqualValues(t, expectedList, inputList)
+}
+
+func TestSortServerAdsByAvailability(t *testing.T) {
+	firstUrl := url.URL{Host: "first.org", Scheme: "https"}
+	secondUrl := url.URL{Host: "second.org", Scheme: "https"}
+	thirdUrl := url.URL{Host: "third.org", Scheme: "https"}
+	fourthUrl := url.URL{Host: "fourth.org", Scheme: "https"}
+
+	firstServer := server_structs.ServerAd{URL: firstUrl}
+	secondServer := server_structs.ServerAd{URL: secondUrl}
+	thirdServer := server_structs.ServerAd{URL: thirdUrl}
+	fourthServer := server_structs.ServerAd{URL: fourthUrl}
+
+	randomOrder := []server_structs.ServerAd{thirdServer, firstServer, fourthServer, secondServer}
+	expected := []server_structs.ServerAd{firstServer, secondServer, thirdServer, fourthServer}
+	avaiMap := map[string]bool{}
+	avaiMap[firstUrl.String()] = true
+	avaiMap[secondUrl.String()] = true
+	avaiMap[thirdUrl.String()] = false
+	avaiMap[fourthUrl.String()] = false
+
+	sortServerAdsByAvailability(randomOrder, avaiMap)
+	assert.EqualValues(t, expected, randomOrder)
 }

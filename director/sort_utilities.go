@@ -201,6 +201,39 @@ func angularDistanceOnSphere(lat1 float64, long1 float64, lat2 float64, long2 fl
 	return arc
 }
 
+// Apply a thresholded exponential halving multiplier to a value:
+// 1; 0 <= val <= threshold
+// 2 ^ (-(val-threshold)/halvingFactor); val > threshold
+// If any invalid parameters are provided (negative threshold/halving factor, etc), 1.0 is returned.
+func thresholdedExponentialHalvingMultiplier(val float64, threshold float64, halvingFactor float64) float64 {
+	if halvingFactor <= 0 {
+		return 1.0
+	}
+
+	if threshold < 0 {
+		return 1.0
+	}
+
+	// this also handles nevative values, since they will always be <= threshold
+	if val <= threshold {
+		return 1.0
+	}
+
+	return math.Pow(2.0, -1.0*((val-threshold)/halvingFactor))
+}
+
+// Given a slice of ads, truncate it to the specified limit. A limit of 0 or less means no truncation.
+func truncateAds(ads []server_structs.ServerAd, limit int) []server_structs.ServerAd {
+	if limit <= 0 {
+		return ads
+	}
+
+	if len(ads) > limit {
+		return ads[:limit]
+	}
+	return ads
+}
+
 // Given a bounding box, assign a random coordinate within that box.
 func assignRandBoundedCoord(minLat, maxLat, minLong, maxLong float64) (lat, long float64) {
 	lat = rand.Float64()*(maxLat-minLat) + minLat
