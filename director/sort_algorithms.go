@@ -182,7 +182,7 @@ func (sms *SwapMaps) smSortStochastic() *weightError {
 	return nil
 }
 
-// Given a sort algorithm and a SwapMaps that apply to the indeces of a slice of server ads,
+// Given a sort algorithm and a SwapMaps that apply to the indices of a slice of server ads,
 // return a new slice of server ads sorted by the weights in the SwapMaps.
 func (sm SwapMaps) GetSortedAds(ads []server_structs.ServerAd, sType smSortType) []server_structs.ServerAd {
 	switch sType {
@@ -326,6 +326,187 @@ const (
 	smSortDescending smSortType = iota
 	smSortStochastic
 )
+
+// A simple sort that randomizes the order of the server ads.
+type RandomSort struct{}
+
+func (rs *RandomSort) Type() server_structs.SortType {
+	return server_structs.RandomType
+}
+func (rs *RandomSort) String() string {
+	return string(server_structs.RandomType)
+}
+
+// RandomSort doesn't actually use the SortContext, but it's part of the interface
+func (rs *RandomSort) Sort(sAds []server_structs.ServerAd, _ SortContext) ([]server_structs.ServerAd, error) {
+	copyAds := make([]server_structs.ServerAd, len(sAds))
+	copy(copyAds, sAds)
+	// Shuffle the copy, not the original
+	rand.Shuffle(len(copyAds), func(i, j int) {
+		copyAds[i], copyAds[j] = copyAds[j], copyAds[i]
+	})
+	return copyAds, nil
+}
+
+// Sort server ads according to client/server distance.
+// If the client's location is not known, a bounded random client location is used.
+// If a server's location is not known, the median distance of all known servers is imputed.
+// This has the effect of placing servers with unknown location in the middle of the sorted list.
+type DistanceSort struct{}
+
+func (rs *DistanceSort) Type() server_structs.SortType {
+	return server_structs.DistanceType
+}
+func (rs *DistanceSort) String() string {
+	return string(server_structs.DistanceType)
+}
+func (ds *DistanceSort) Sort(sAds []server_structs.ServerAd, sCtx SortContext) ([]server_structs.ServerAd, error) {
+	// getClientCoordinate is guaranteed to give us _some_ coordinate, even if it's random.
+	clientCoord := getClientCoordinate(sCtx.Ctx, sCtx.ClientAddr)
+	sCtx.RedirectInfo.ClientInfo.Coordinate = clientCoord
+
+	dWeights := computeWeights(sAds, func(_ int, ad server_structs.ServerAd) (float64, bool) {
+		return distanceWeightFn(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude)
+	})
+
+	sCtx.RedirectInfo.ServersInfo = make(map[string]*server_structs.ServerRedirectInfo)
+	for idx, w := range dWeights {
+		// populate the RedirectInfo
+		thisServer := &server_structs.ServerRedirectInfo{}
+		thisServer.RedirectWeights.DistanceWeight = w.Weight
+		thisServer.Coordinate = sAds[idx].Coordinate
+		url := sAds[idx].URL.String()
+		sCtx.RedirectInfo.ServersInfo[url] = thisServer
+	}
+
+	return dWeights.GetSortedAds(sAds, smSortDescending), nil
+}
+
+// An adaptive sort that combines multiple factors: distance, IO load, status weight, and availability.
+// See:
+//   - https://github.com/PelicanPlatform/pelican/discussions/1198
+//   - https://docs.google.com/document/d/1w-1oUhFTN6QN_PfQ5qbS7uf8Su3K8q6MZD3TGLKTHB8/edit?tab=t.0
+type AdaptiveSort struct{}
+
+func (rs *AdaptiveSort) Type() server_structs.SortType {
+	return server_structs.AdaptiveType
+}
+func (rs *AdaptiveSort) String() string {
+	return string(server_structs.AdaptiveType)
+}
+func (as *AdaptiveSort) Sort(sAds []server_structs.ServerAd, sCtx SortContext) ([]server_structs.ServerAd, error) {
+	clientCoord := getClientCoordinate(sCtx.Ctx, sCtx.ClientAddr)
+	sCtx.RedirectInfo.ClientInfo.Coordinate = clientCoord
+
+	// Helper function to template computing weights and storing them
+	// in the appropriate field of the adaptiveSortServerWeights struct.
+	applyWeights := func(
+		label string,
+		sAds []server_structs.ServerAd,
+		serverWeights []*server_structs.RedirectWeights,
+		weightFn func(int, server_structs.ServerAd) (float64, bool),
+
+		// Once weights are generated, this function applies them to the appropriate field
+		// in the server weights struct
+		applyFn func(wStruct *server_structs.RedirectWeights, w float64),
+	) error {
+		weights := computeWeights(sAds, weightFn)
+
+		if len(weights) != len(serverWeights) {
+			return fmt.Errorf("calculating %s weights: got %d, expected %d",
+				label, len(weights), len(serverWeights))
+		}
+
+		for _, w := range weights {
+			if w.Index >= len(serverWeights) {
+				return fmt.Errorf("calculating %s weights: index %d out of range [0,%d]",
+					label, w.Index, len(serverWeights)-1)
+			}
+
+			// Apply the weight to the appropriate field of the serverWeights struct
+			applyFn(serverWeights[w.Index], w.Weight)
+		}
+		return nil
+	}
+
+	// Sort first by distance -- we'll only keep the top sourceWorkingSetSize ads
+	// from this sort to use for the rest of the algorithm
+	dWeights := computeWeights(sAds, func(_ int, ad server_structs.ServerAd) (float64, bool) {
+		return distanceWeightFn(clientCoord.Lat, clientCoord.Long, ad.Latitude, ad.Longitude)
+	})
+
+	dWeights.smSortDescending()
+
+	// Shrink down to the working set size
+	shrinkTo := min(sourceWorkingSetSize, len(dWeights))
+	dWeights = dWeights[:shrinkTo]
+	workingSet := dWeights.GetSortedAds(sAds, smSortDescending)
+
+	// build aligned weights slice
+	serverWeights := make([]*server_structs.RedirectWeights, len(workingSet))
+	for i := range workingSet {
+		serverWeights[i] = &server_structs.RedirectWeights{
+			DistanceWeight: dWeights[i].Weight,
+		}
+	}
+
+	// NOTE: The following three goroutines all write to different fields of the same
+	// serverWeights slice, so there should be no race conditions. If you need to add a
+	// new goroutine that writes to serverWeights, be very careful to ensure it doesn't
+	// write to the same fields as another goroutine.
+	errGrp, _ := errgroup.WithContext(sCtx.Ctx)
+
+	// ioLoad weights
+	errGrp.Go(func() error {
+		return applyWeights("ioLoad", workingSet, serverWeights,
+			func(_ int, ad server_structs.ServerAd) (float64, bool) {
+				return ioLoadWeightFn(ad.IOLoad)
+			},
+			func(sw *server_structs.RedirectWeights, w float64) { sw.IOLoadWeight = w },
+		)
+	})
+
+	// status weights
+	errGrp.Go(func() error {
+		return applyWeights("status", workingSet, serverWeights,
+			func(_ int, ad server_structs.ServerAd) (float64, bool) {
+				return statusWeightFn(ad.StatusWeight)
+			},
+			func(sw *server_structs.RedirectWeights, w float64) { sw.StatusWeight = w },
+		)
+	})
+
+	// availability weights
+	errGrp.Go(func() error {
+		return applyWeights("availability", workingSet, serverWeights,
+			func(_ int, ad server_structs.ServerAd) (float64, bool) {
+				return availabilityWeightFn(ad, sCtx.AvailabilityMap, objAvailabilityFactor)
+			},
+			func(sw *server_structs.RedirectWeights, w float64) { sw.AvailabilityWeight = w },
+		)
+	})
+
+	if err := errGrp.Wait(); err != nil {
+		return nil, err
+	}
+
+	// Final weights from each raw weight
+	sCtx.RedirectInfo.ServersInfo = make(map[string]*server_structs.ServerRedirectInfo)
+	finalWeights := make(SwapMaps, len(workingSet))
+	for idx, weights := range serverWeights {
+		finalWeight := weights.DistanceWeight * weights.IOLoadWeight * weights.StatusWeight * weights.AvailabilityWeight
+		finalWeights[idx] = SwapMap{finalWeight, idx}
+
+		// populate the RedirectInfo
+		thisServer := &server_structs.ServerRedirectInfo{}
+		thisServer.RedirectWeights = *weights
+		thisServer.Coordinate = workingSet[idx].Coordinate
+		url := workingSet[idx].URL.String()
+		sCtx.RedirectInfo.ServersInfo[url] = thisServer
+	}
+
+	return finalWeights.GetSortedAds(workingSet, smSortStochastic), nil
+}
 
 ///////////////////////////
 // OTHER MISC SORT STUFF //

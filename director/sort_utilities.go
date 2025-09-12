@@ -234,6 +234,57 @@ func truncateAds(ads []server_structs.ServerAd, limit int) []server_structs.Serv
 	return ads
 }
 
+// Given a slice of float64 values, return the median (half above, half below).
+func getMedian(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := slices.Clone(values)
+	slices.Sort(sorted)
+	mid := len(sorted) / 2
+	if len(sorted)%2 == 0 {
+		return (sorted[mid-1] + sorted[mid]) / 2
+	} else {
+		return sorted[mid]
+	}
+}
+
+// Compute weights for a list of server ads using the provided weight function.
+// Whenever a weight is not computable, the median of the computable weights is imputed for the server.
+// If no weights are computable, 1.0 is used as the median so as not to impute a value of 0.0, which would
+// effectively remove the server from consideration.
+//
+// Each input weightFn returns a weight and a bool indicating whether the weight is valid, letting us define
+// both how a weight is computed and what constitutes validity differently for different weight types
+func computeWeights(ads []server_structs.ServerAd, weightFn func(int, server_structs.ServerAd) (float64, bool)) SwapMaps {
+	valid := []float64{} // holds onto assignable weights
+	nullIdxs := []int{}  // for tracking which indices need median imputation
+	weights := make(SwapMaps, len(ads))
+
+	for idx, ad := range ads {
+		if w, ok := weightFn(idx, ad); ok {
+			valid = append(valid, w)
+			weights[idx] = SwapMap{Weight: w, Index: idx}
+		} else {
+			nullIdxs = append(nullIdxs, idx)
+		}
+	}
+
+	// Impute median for nulls
+	// If there are no valid weights, we use 1.0 as the median so as not to remove the remaining
+	// ads from consideration
+	if len(nullIdxs) > 0 { // guard to avoid doing the median sort/calculation if not needed
+		median := getMedian(valid)
+		if len(valid) == 0 {
+			median = 1.0
+		}
+		for _, idx := range nullIdxs {
+			weights[idx] = SwapMap{Weight: median, Index: idx}
+		}
+	}
+	return weights
+}
+
 // Given a bounding box, assign a random coordinate within that box.
 func assignRandBoundedCoord(minLat, maxLat, minLong, maxLong float64) (lat, long float64) {
 	lat = rand.Float64()*(maxLat-minLat) + minLat

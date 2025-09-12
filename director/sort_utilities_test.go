@@ -347,6 +347,141 @@ func TestTruncateAds(t *testing.T) {
 	}
 }
 
+func TestGetMedian(t *testing.T) {
+	testCases := []struct {
+		name     string
+		values   []float64
+		expected float64
+	}{
+		{
+			name:     "odd number of values",
+			values:   []float64{1.0, 3.0, 2.0},
+			expected: 2.0,
+		},
+		{
+			name:     "even number of values",
+			values:   []float64{1.0, 4.0, 2.0, 3.0},
+			expected: 2.5,
+		},
+		{
+			name:     "single value",
+			values:   []float64{42.0},
+			expected: 42.0,
+		},
+		{
+			name:     "empty slice",
+			values:   []float64{},
+			expected: 0.0,
+		},
+		{
+			name:     "negative values",
+			values:   []float64{-1.0, -3.0, -2.0},
+			expected: -2.0,
+		},
+		{
+			// The function calling `getMedian` should never receive negative
+			// weights because we only pass it positive, valid weights. Regardless,
+			// we test that the function computes the median correctly anyway.
+			name:     "mixed values",
+			values:   []float64{-1.0, 1.0, 0.0},
+			expected: 0.0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := getMedian(tc.values)
+			assert.Equal(t, tc.expected, result)
+		})
+	}
+}
+
+func TestComputeWeights(t *testing.T) {
+	ad1 := server_structs.ServerAd{}
+	ad1.Initialize("ad1")
+	ad2 := server_structs.ServerAd{}
+	ad2.Initialize("ad2")
+	ad3 := server_structs.ServerAd{}
+	ad3.Initialize("ad3")
+
+	testCases := []struct {
+		name            string
+		ads             []server_structs.ServerAd
+		weightFn        func(int, server_structs.ServerAd) (float64, bool)
+		expectedWeights SwapMaps
+	}{
+		{
+			name: "all valid weights",
+			ads:  []server_structs.ServerAd{ad1, ad2, ad3},
+			weightFn: func(idx int, ad server_structs.ServerAd) (float64, bool) {
+				return float64(idx + 1), true
+			},
+			expectedWeights: SwapMaps{
+				{Weight: 1.0, Index: 0},
+				{Weight: 2.0, Index: 1},
+				{Weight: 3.0, Index: 2},
+			},
+		},
+		{
+			name: "invalid weight with even number of valid weights",
+			ads:  []server_structs.ServerAd{ad1, ad2, ad3},
+			weightFn: func(idx int, ad server_structs.ServerAd) (float64, bool) {
+				if idx == 0 {
+					return 0.0, false
+				}
+				return float64(idx + 1), true
+			},
+			expectedWeights: SwapMaps{
+				{Weight: 2.5, Index: 0}, // median of 2.0 and 3.0
+				{Weight: 2.0, Index: 1},
+				{Weight: 3.0, Index: 2},
+			},
+		},
+		{
+			name: "invalid weight with odd number of valid weights",
+			ads:  []server_structs.ServerAd{ad1, ad2},
+			weightFn: func(idx int, ad server_structs.ServerAd) (float64, bool) {
+				if idx == 0 {
+					return 0.0, false
+				}
+				return float64(idx + 1), true
+			},
+			expectedWeights: SwapMaps{
+				{Weight: 2.0, Index: 0},
+				{Weight: 2.0, Index: 1}, // Should use this value
+			},
+		},
+		{
+			name: "all invalid weights",
+			ads:  []server_structs.ServerAd{ad1, ad2, ad3},
+			weightFn: func(idx int, ad server_structs.ServerAd) (float64, bool) {
+				return 0.0, false
+			},
+			expectedWeights: SwapMaps{
+				{Weight: 1.0, Index: 0}, // fallback to 1.0
+				{Weight: 1.0, Index: 1},
+				{Weight: 1.0, Index: 2},
+			},
+		},
+		{
+			name: "no ads",
+			ads:  []server_structs.ServerAd{},
+			weightFn: func(idx int, ad server_structs.ServerAd) (float64, bool) {
+				return float64(idx + 1), true
+			},
+			expectedWeights: SwapMaps{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := computeWeights(tc.ads, tc.weightFn)
+			assert.Equal(t, len(tc.expectedWeights), len(result))
+			assert.Equal(t, tc.expectedWeights, result)
+		})
+	}
+}
+
 func TestAssignRandBoundedCoord(t *testing.T) {
 	// Because of the test's randomness, do it a few times to increase the likelihood of catching errors
 	for range 10 {
