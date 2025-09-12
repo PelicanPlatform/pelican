@@ -757,21 +757,28 @@ func cacheNotFromTopoIfPubReads() AdPredicate {
 	}
 }
 
+// If the cache is in an error state, we shouldn't send traffic to it.
+func cacheNotInErrorState() AdPredicate {
+	return func(ctx *gin.Context, ad copyAd) bool {
+		return metrics.ParseHealthStatus(ad.ServerAd.Status) > metrics.StatusCritical
+	}
+}
+
 // classifyAds is a generic helper to classify ads into groups in a single pass.
-// It first applies the common predicate (for example, topology) to every ad.
+// It first applies the common predicates (for example, topology, err state) to every ad.
 // Then, for each ad that passes the common check, it tests a list of group predicates.
 // If the ad passes all predicates for a given group, it is added to that group.
 // Here, we use it to split caches into "supported" and "unknown" groups.
 func filterCaches(
 	ctx *gin.Context,
 	ads []copyAd,
-	commonPred AdPredicate,
+	commonPreds []AdPredicate,
 	supportedPreds []AdPredicate,
 	unknownPreds []AdPredicate,
 ) (supported, unknown []copyAd) {
 	for _, ad := range ads {
-		// Apply common predicate.
-		if !commonPred(ctx, ad) {
+		// Apply common predicates.
+		if !allPredicatesPass(ctx, ad, commonPreds...) {
 			continue
 		}
 		// Check supported group.
@@ -830,14 +837,14 @@ func getSortedAds(ctx *gin.Context, requestId uuid.UUID) (sortedOrigins, sortedC
 
 	// Now use predicate filtering against caches. This is more nuanced than origins,
 	// and the predicates are broken into three groups:
-	// 1. Common predicate: every cache no matter what must pass this.
-	// 2. Supported predicates: if the cache passes the common predicate, we can mark whether we know it supports a feature
+	// 1. Common predicatse: every cache no matter what must pass this to be considered.
+	// 2. Supported predicates: if the cache passes the common predicate, we can mark whether we know it supports a feature.
 	// 3. Unknown predicates: if the cache passes the common predicate but we don't know if it supports a feature, we can
 	//    mark it as unknown.
-	commonPredicate := cacheNotFromTopoIfPubReads()
+	commonPredicates := []AdPredicate{cacheNotInErrorState(), cacheNotFromTopoIfPubReads()}
 	supportedPredicates := []AdPredicate{cacheSupportsFeature(requiredFeatures)}
 	unknownPredicates := []AdPredicate{cacheMightSupportFeature(requiredFeatures)}
-	sortedCaches, unknownCaches := filterCaches(ctx, cacheAds, commonPredicate, supportedPredicates, unknownPredicates)
+	sortedCaches, unknownCaches := filterCaches(ctx, cacheAds, commonPredicates, supportedPredicates, unknownPredicates)
 
 	// Avoid sorting any slices we don't need to
 	shouldSortOrigins := isOriginRequest(ctx)
