@@ -296,7 +296,9 @@ func ConfigFilteredServers() {
 }
 
 // Start a goroutine to query director's Prometheus endpoint for origin/cache server I/O stats
-// and save the value to the corresponding serverAd
+// and save the value to the corresponding serverAd.
+// If ever we cannot determine the I/O stat, we set the IOLoad to -1 to indicate unknown state.
+// The IOLoad value is used by the director to determine the best server to route a client request to.
 func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
 	serverIOQueryLoop := func(ctx context.Context) error {
 		tick := time.NewTicker(15 * time.Second)
@@ -314,14 +316,22 @@ func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
 				// We are interested in the derivative/rate of the total server IO over the past 5min
 				query := `rate(xrootd_server_io_total{job="origin_cache_servers"}[5m])`
 				queryResult, err := server_utils.QueryMyPrometheus(ddlCtx, query)
-				if err != nil {
-					log.Debugf("Failed to update IO stat: querying Prometheus responded with an error: %v", err)
+				if err != nil || queryResult.ResultType != "vector" {
+					// If the query failed or returned the wrong type, set IOLoad=-1 for all servers
+					for _, item := range serverAds.Items() {
+						item.Value().SetIOLoad(-1)
+					}
+					if err != nil {
+						log.Debugf("Failed to update IO stat: querying Prometheus responded with an error: %v", err)
+					} else {
+						log.Debugf("Failed to update IO stat: Prometheus response returns %s type, expected a vector", queryResult.ResultType)
+					}
 					continue
 				}
-				if queryResult.ResultType != "vector" {
-					log.Debugf("Failed to update IO stat: Prometheus response returns %s type, expected a vector", queryResult.ResultType)
-					continue
-				}
+
+				// Track which servers were updated -- any that exist in the server ad cache
+				// but that don't produce an update here will have their IOLoad set to -1
+				updated := make(map[string]struct{})
 				for _, result := range queryResult.Result {
 					serverUrlRaw, ok := result.Metric["server_url"]
 					if !ok {
@@ -333,27 +343,37 @@ func LaunchServerIOQuery(ctx context.Context, egrp *errgroup.Group) {
 						log.Debugf("Failed to update IO stat: Prometheus query response contains invalid server_url: %#v", result)
 						continue
 					}
+
+					// NOTE: We may reach this spot if the server previously succeeded in advertising, but starts to fail
+					// while still remaining resoponsive to the Prometheus queries fired by this routine. Because of this,
+					// we MUST disable the touch on hit behavior of the cache or the ads may never expire while the server
+					// is still running.
+					serverAd := serverAds.Get(serverUrl, ttlcache.WithDisableTouchOnHit[string, *server_structs.Advertisement]())
+					if serverAd == nil {
+						log.Debugf("Failed to update IO stat for server %s: server does not exist in the director", serverUrl)
+						continue
+					}
+
 					ioDerivStr := result.Values[0].Value
 					if ioDerivStr == "" {
-						log.Debugf("Skipped updating IO stat for server %s: Prometheus query responded with empty I/O value: %#v", serverUrl, result)
+						log.Debugf("Cannot set IO stat for server %s: Prometheus query responded with empty I/O value: %#v", serverUrl, result)
 						continue
-					} else {
-						ioDeriv, err := strconv.ParseFloat(ioDerivStr, 64)
-						if err != nil {
-							log.Debugf("Failed to update IO stat for server %s: failed to convert Prometheus response to a float number: %s", serverUrl, ioDerivStr)
-							continue
-						}
+					}
 
-						// NOTE: We may reach this spot if the server previously succeeded in advertising, but starts to fail
-						// while still remaining resoponsive to the Prometheus queries fired by this routine. Because of this,
-						// we MUST disable the touch on hit behavior of the cache or the ads may never expire while the server
-						// is still running.
-						serverAd := serverAds.Get(serverUrl, ttlcache.WithDisableTouchOnHit[string, *server_structs.Advertisement]())
-						if serverAd == nil {
-							log.Debugf("Failed to update IO stat for server %s: server does not exist in the director", serverUrl)
-							continue
-						}
-						serverAd.Value().SetIOLoad(ioDeriv)
+					ioDeriv, err := strconv.ParseFloat(ioDerivStr, 64)
+					if err != nil {
+						log.Debugf("Failed to update IO stat for server %s: failed to convert Prometheus response to a float number: %s", serverUrl, ioDerivStr)
+						continue
+					}
+
+					serverAd.Value().SetIOLoad(ioDeriv)
+					updated[serverAd.Key()] = struct{}{}
+				}
+
+				// Set IOLoad=-1 for any server not updated in this round
+				for _, item := range serverAds.Items() {
+					if _, ok := updated[item.Key()]; !ok {
+						item.Value().SetIOLoad(-1)
 					}
 				}
 				log.Debugf("Successfully updated server IO stat. Received %d updates.", len(queryResult.Result))
