@@ -473,14 +473,13 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 		for _, scope := range strings.Split(scopes, " ") {
 			scope_info := strings.Split(scope, ":")
 			var scopeOK bool
-			switch opts.Operation {
-			case config.TokenWrite, config.TokenSharedWrite:
-				scopeOK = (scope_info[0] == "storage.create")
-			case config.TokenDelete:
+			if opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite) {
+				scopeOK = (scope_info[0] == "storage.modify" || scope_info[0] == "storage.create")
+			} else if opts.Operation.IsEnabled(config.TokenDelete) {
 				scopeOK = (scope_info[0] == "storage.modify")
-			case config.TokenRead, config.TokenSharedRead:
+			} else if opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead) {
 				scopeOK = (scope_info[0] == "storage.read")
-			default:
+			} else {
 				scopeOK = false
 			}
 			if !scopeOK {
@@ -492,7 +491,7 @@ func tokenIsAcceptable(jwtSerialized string, objectName string, dirResp server_s
 				break
 			}
 			// Shared URLs must have exact matches; otherwise, prefix matching is acceptable.
-			if ((opts.Operation == config.TokenSharedWrite || opts.Operation == config.TokenSharedRead) && (targetResource == scope_info[1])) ||
+			if ((opts.Operation.IsEnabled(config.TokenSharedWrite) || opts.Operation.IsEnabled(config.TokenSharedRead)) && (targetResource == scope_info[1])) ||
 				strings.HasPrefix(targetResource, scope_info[1]) {
 				acceptableScope = true
 				break
@@ -828,18 +827,32 @@ func generateToken(destination *url.URL, dirResp server_structs.DirectorResponse
 	tc.Issuer = issuer
 	tc.Lifetime = time.Hour
 	tc.Subject = "client_token"
-	ts := token_scopes.Wlcg_Storage_Read
-	if opts.Operation == config.TokenSharedWrite {
-		ts = token_scopes.Wlcg_Storage_Create
-	} else if opts.Operation == config.TokenDelete {
-		ts = token_scopes.Wlcg_Storage_Modify
-	}
-	if after, found := strings.CutPrefix(path.Clean(destination.Path), path.Clean(dirResp.XPelNsHdr.Namespace)); found {
-		tc.AddResourceScopes(token_scopes.NewResourceScope(ts, after))
-	} else {
+	scopes := []token_scopes.ResourceScope{}
+	base := path.Clean(dirResp.XPelNsHdr.Namespace)
+	dest := path.Clean(destination.Path)
+
+	after, found := strings.CutPrefix(dest, base)
+	if !found {
 		err = errors.New("Destination resource not inside director-provided namespace")
 		return
 	}
+
+	ops := []struct {
+		enabled bool
+		scope   token_scopes.TokenScope
+	}{
+		{opts.Operation.IsEnabled(config.TokenRead) || opts.Operation.IsEnabled(config.TokenSharedRead), token_scopes.Wlcg_Storage_Read},
+		{opts.Operation.IsEnabled(config.TokenWrite) || opts.Operation.IsEnabled(config.TokenSharedWrite), token_scopes.Wlcg_Storage_Create},
+		{opts.Operation.IsEnabled(config.TokenDelete), token_scopes.Wlcg_Storage_Modify},
+		{opts.Operation.IsEnabled(config.TokenList), token_scopes.Wlcg_Storage_Read},
+	}
+
+	for _, op := range ops {
+		if op.enabled {
+			scopes = append(scopes, token_scopes.NewResourceScope(op.scope, after))
+		}
+	}
+	tc.AddResourceScopes(scopes...)
 
 	err = key.Set("kid", keyId)
 	if err != nil {

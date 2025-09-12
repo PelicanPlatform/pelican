@@ -452,7 +452,12 @@ func DoDelete(ctx context.Context, remoteDestination string, recursive bool, opt
 		return err
 	}
 
-	token := NewTokenGenerator(pUrl, &dirResp, config.TokenDelete, true)
+	operation := config.TokenDelete
+	if recursive {
+		operation.Set(config.TokenList)
+	}
+
+	token := NewTokenGenerator(pUrl, &dirResp, operation, true)
 	for _, option := range options {
 		switch option.Ident() {
 		case identTransferOptionTokenLocation{}:
