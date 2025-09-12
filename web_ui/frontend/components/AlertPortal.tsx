@@ -39,7 +39,7 @@ export const AlertPortal = ({
         <Alert
           onClose={autoHideDuration ? undefined : onClose}
           severity={alertProps?.severity}
-          sx={{ width: '100%' }}
+          sx={{ width: '100%', maxWidth: { xs: '100vw', sm: '70vw' } }}
         >
           {title && <AlertTitle>{title}</AlertTitle>}
           {message}
