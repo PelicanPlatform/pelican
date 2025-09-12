@@ -36,9 +36,9 @@ jobs:
 
       # We still run this so that we can get the nice hint of gofmt issues inline
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v6
         with:
-          version: v2.4.0
+          version: latest
 
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
