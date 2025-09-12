@@ -1,4 +1,4 @@
-import React, { useContext, useState, useEffect, useCallback } from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { Box, IconButton, Paper, Tooltip, Typography } from '@mui/material';
 import { grey, red } from '@mui/material/colors';
 import { User } from '@/index';
@@ -13,6 +13,7 @@ import {
   AlertDispatchContext,
   AlertReducerAction,
 } from '@/components/AlertProvider';
+import serverHasError from '@/helpers/serverHasError';
 
 export interface DirectorCardProps {
   server: ServerGeneral;
@@ -47,11 +48,9 @@ export const DirectorCard = ({ server, authenticated }: DirectorCardProps) => {
             borderRadius: '4px',
             transition: 'background-color 0.3s',
             '&:hover': {
-              borderColor:
-                server.healthStatus === 'Error' ? red[400] : grey[200],
+              borderColor: serverHasError(server) ? red[400] : grey[200],
             },
-            borderColor:
-              server.healthStatus === 'Error' ? red[100] : 'secondary.main',
+            borderColor: serverHasError(server) ? red[100] : 'secondary.main',
             p: 1,
           }}
           onClick={async () => {

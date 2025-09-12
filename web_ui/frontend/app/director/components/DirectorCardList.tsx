@@ -15,7 +15,7 @@ import semver from 'semver';
 import { DirectorCard, DirectorCardProps } from './';
 import { BooleanToggleButton, CardList } from '@/components';
 import useFuse from '@/helpers/useFuse';
-import { ServerGeneral } from '@/types';
+import serverHasError from '@/helpers/serverHasError';
 
 interface DirectorCardListProps {
   data: Partial<DirectorCardProps>[];
@@ -153,9 +153,5 @@ export function DirectorCardList({ data, cardProps }: DirectorCardListProps) {
     </Box>
   );
 }
-
-const serverHasError = (server?: ServerGeneral) => {
-  return server?.healthStatus === 'Error';
-};
 
 export default DirectorCardList;
