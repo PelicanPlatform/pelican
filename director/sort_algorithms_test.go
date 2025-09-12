@@ -465,6 +465,206 @@ func TestGetSortedAds(t *testing.T) {
 	}
 }
 
+func TestDistanceWeightFn(t *testing.T) {
+	testCases := []struct {
+		name          string
+		clientCoord   server_structs.Coordinate
+		serverCoord   server_structs.Coordinate
+		weightValid   bool
+		expectedValue float64
+	}{
+		{
+			name:          "same coordinates",
+			clientCoord:   server_structs.Coordinate{Lat: 40.0, Long: -75.0},
+			serverCoord:   server_structs.Coordinate{Lat: 40.0, Long: -75.0},
+			weightValid:   true,
+			expectedValue: 1.0,
+		},
+		{
+			name:          "different coordinates",
+			clientCoord:   server_structs.Coordinate{Lat: 40.0, Long: -75.0},
+			serverCoord:   server_structs.Coordinate{Lat: 41.0, Long: -76.0},
+			weightValid:   true,
+			expectedValue: 0.740, // Approximate expected value (calculated distance w/ external tool and plugged into formula)
+		},
+		{
+			name:        "invalid client coord",
+			clientCoord: server_structs.Coordinate{Lat: 0, Long: 0},
+			serverCoord: server_structs.Coordinate{Lat: 41.0, Long: -76.0},
+			weightValid: false,
+		},
+		{
+			name:        "invalid server coord",
+			clientCoord: server_structs.Coordinate{Lat: 40.0, Long: -75.0},
+			serverCoord: server_structs.Coordinate{Lat: 0, Long: 0},
+			weightValid: false,
+		},
+		// No actual test for negative inner weight because it's currently impossible
+		// and meant only as a guard against future code changes.
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			weight, valid := distanceWeightFn(tc.clientCoord.Lat, tc.clientCoord.Long, tc.serverCoord.Lat, tc.serverCoord.Long)
+			if tc.weightValid {
+				assert.True(t, valid, "expected weight to be valid")
+				assert.InDelta(t, tc.expectedValue, weight, 0.001, "weight value does not match expected")
+			} else {
+				assert.False(t, valid, "expected weight to be invalid")
+			}
+		})
+	}
+}
+
+func TestIOLoadWeightFn(t *testing.T) {
+	testCases := []struct {
+		name          string
+		load          float64
+		weightValid   bool
+		expectedValue float64
+	}{
+		{
+			name:          "zero load",
+			load:          0.0,
+			weightValid:   true,
+			expectedValue: 1.0,
+		},
+		{
+			name:          "below threshold",
+			load:          9.0,
+			weightValid:   true,
+			expectedValue: 1.0,
+		},
+		{
+			name:          "at threshold",
+			load:          10.0,
+			weightValid:   true,
+			expectedValue: 1.0,
+		},
+		{
+			name:          "one halving factor above threshold",
+			load:          14.0,
+			weightValid:   true,
+			expectedValue: 0.5,
+		},
+		{
+			name:          "extremely high load causes underflow",
+			load:          float64(1e12),
+			weightValid:   true,
+			expectedValue: 0.0,
+		},
+		{
+			name:        "negative load is invalid",
+			load:        -5.0,
+			weightValid: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			weight, valid := ioLoadWeightFn(tc.load)
+			if tc.weightValid {
+				assert.True(t, valid, "expected weight to be valid")
+				assert.Equal(t, tc.expectedValue, weight, "weight value does not match expected")
+			} else {
+				assert.False(t, valid, "expected weight to be invalid")
+			}
+		})
+	}
+}
+
+func TestStatusWeightFn(t *testing.T) {
+	testCases := []struct {
+		name            string
+		statusWeightRaw float64
+		weightValid     bool
+		expectedValue   float64
+	}{
+		{
+			name:            "raw status weight in valid range",
+			statusWeightRaw: 0.5,
+			weightValid:     true,
+			expectedValue:   0.5,
+		},
+		{
+			name:            "raw status weight beyond lower range",
+			statusWeightRaw: 0.0,
+			weightValid:     false,
+		},
+		{
+			name:            "raw status weight beyond upper range",
+			statusWeightRaw: 1.5,
+			weightValid:     false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			weight, valid := statusWeightFn(tc.statusWeightRaw)
+			if tc.weightValid {
+				assert.True(t, valid, "expected weight to be valid")
+				// The status weight function is the identity function within the valid range
+				assert.Equal(t, tc.statusWeightRaw, weight, "weight value does not match expected")
+			} else {
+				assert.False(t, valid, "expected weight to be invalid")
+			}
+
+		})
+	}
+}
+
+func TestAvailabilityWeightFn(t *testing.T) {
+	sAd := server_structs.ServerAd{}
+	sAd.Initialize("ad1")
+
+	testCases := []struct {
+		name           string
+		availMap       map[string]bool
+		sAd            server_structs.ServerAd
+		weightValid    bool
+		expectedWeight float64
+	}{
+		{
+			name:           "object available at server",
+			availMap:       map[string]bool{sAd.Name: true},
+			sAd:            sAd,
+			weightValid:    true,
+			expectedWeight: 2.0,
+		},
+		{
+			name:           "object not available at server",
+			availMap:       map[string]bool{sAd.Name: false},
+			sAd:            sAd,
+			weightValid:    true,
+			expectedWeight: 0.5,
+		},
+		{
+			name:        "server not in availability map",
+			availMap:    map[string]bool{},
+			sAd:         sAd,
+			weightValid: false,
+		},
+		{
+			name:           "nil availability map",
+			availMap:       nil,
+			sAd:            sAd,
+			weightValid:    true,
+			expectedWeight: 1.0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			weight, valid := availabilityWeightFn(tc.sAd, tc.availMap, 2)
+			if tc.weightValid {
+				assert.True(t, valid, "expected weight to be valid")
+				assert.Equal(t, tc.expectedWeight, weight, "weight value does not match expected")
+			} else {
+				assert.False(t, valid, "expected weight to be invalid")
+			}
+		})
+	}
+}
 
 
 func TestSortServerAdsByTopo(t *testing.T) {

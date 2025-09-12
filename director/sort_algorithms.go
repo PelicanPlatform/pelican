@@ -44,9 +44,30 @@ type (
 	}
 )
 
+// An error type that indicates which server ads generated negative weights,
+// used with various sort algorithms implemented on SwapMaps. The returned
+// indices are used to determine which server ads are generating illegal weights.
+func (we weightError) Error(sAds []server_structs.ServerAd) string {
+	if len(we.NegIdxs) == 0 {
+		return ""
+	}
 
+	if len(sAds) == 0 {
+		return "Some servers generated negative weights, but no server ads were provided to identify them"
+	}
 
+	// Look up which server ads generated negative SM weights and log the error
+	serverUrls := []string{}
+	for _, idx := range we.NegIdxs {
+		if idx >= 0 && idx < len(sAds) {
+			serverUrls = append(serverUrls, sAds[idx].URL.String())
+		} else {
+			serverUrls = append(serverUrls, fmt.Sprintf("index %d out of range [0,%d]", idx, len(sAds)-1))
+		}
+	}
 
+	return fmt.Sprintf("The following servers generated negative weights, which should not be possible and indicates an internal bug: %v", serverUrls)
+}
 
 const (
 	// Various constants used in weight calculations
@@ -182,6 +203,105 @@ func (sm SwapMaps) GetSortedAds(ads []server_structs.ServerAd, sType smSortType)
 	return result
 }
 
+/////////////////////////
+// WEIGHT CALCULATIONS //
+/////////////////////////
+
+/*
+	Each weight fn should return two values -- a float64 weight and a bool indicating
+	whether the weight float should be considered valid. If the bool is false, some
+	input to the weight function was invalid (e.g. negative load, missing coordinates)
+	and the weight should be ignored. A weight fn should never return a negative weight.
+
+	These weight fns are then called in `computeWeights`, which has the extra task of
+	imputing median values for missing data.
+*/
+
+// Get an exponential decay weight based on the distance between two coordinates.
+// The weight starts at 1.0 for zero distance and halves every halvingFactor miles by
+// using the formula: weight = 2^(-d/hf) where d is the distance and hf is the halving factor.
+func distanceWeight(lat1 float64, long1 float64, lat2 float64, long2 float64) (weight float64) {
+	return thresholdedExponentialHalvingMultiplier(angularDistanceOnSphere(lat1, long1, lat2, long2)*earthRadiusToMilesFactor, 0, distanceHalvingFactor)
+}
+
+// Returns a distance-based weight (larger = better).
+// Returns ok=false if server coordinates are missing.
+// The input client coordinate should always be valid because getClientCoordinate
+// always returns something, but we still check it.
+func distanceWeightFn(clientLat, clientLon, serverLat, serverLon float64) (float64, bool) {
+	if serverLat == 0 && serverLon == 0 {
+		return 0, false
+	}
+
+	if clientLat == 0 && clientLon == 0 {
+		return 0, false
+	}
+
+	w := distanceWeight(clientLat, clientLon, serverLat, serverLon)
+	if w < 0 { // guard against negative weights
+		return 0, false
+	}
+	return w, true
+}
+
+// Converts server IO load into a weight (larger = better).
+// Weights start at 1.0 up until the threshold is reached, then halve every halvingFactor units of load.
+//
+// Note: Not currently known whether these input values are upper-bounded, which could cause an
+// underflow that results in a zero weight. This is probably okay because we wouldn't want to send
+// anyone to that server anyway.
+func ioLoadWeight(load float64) (weight float64) {
+	return thresholdedExponentialHalvingMultiplier(load, loadHalvingThreshold, loadHalvingFactor)
+}
+
+// Converts server IO load into a weight (larger = better).
+// Returns ok=false if load is invalid.
+func ioLoadWeightFn(load float64) (float64, bool) {
+	if load < 0 {
+		return 0, false
+	}
+	w := ioLoadWeight(load)
+	if w < 0 { // guard against negative weights
+		return 0, false
+	}
+
+	return w, true
+}
+
+// Uses the server’s status weight field directly, if valid (0–1 range).
+// Returns ok=false if status weight is outside valid range.
+func statusWeightFn(sw float64) (float64, bool) {
+	if sw <= 0 || sw > 1 {
+		return 0, false
+	}
+	return sw, true
+}
+
+// Calculates availability weight based on the availability map.
+// Returns ok=false if the map has no entry for this server so median imputation can happen
+func availabilityWeightFn(ad server_structs.ServerAd, availMap map[string]bool, availFactor float64) (float64, bool) {
+	if availFactor <= 0 { // invalid factor
+		return 0, false
+	}
+	if availMap == nil {
+		// no information for _any_ objects --> neutral weights for all
+		return 1.0, true
+	}
+
+	avail, ok := availMap[ad.Name]
+	if !ok {
+		return 0, false
+	}
+	if avail {
+		return availFactor, true
+	}
+	return 1 / availFactor, true
+}
+
+/////////////////////////////
+// END WEIGHT CALCULATIONS //
+/////////////////////////////
+
 /////////////////////
 // SORT ALGORITHMS //
 /////////////////////
@@ -206,6 +326,10 @@ const (
 	smSortDescending smSortType = iota
 	smSortStochastic
 )
+
+///////////////////////////
+// OTHER MISC SORT STUFF //
+///////////////////////////
 
 // Sort a list of ServerAds with the following rule:
 //   - if a ServerAds has FromTopology = true, then it will be moved to the end of the list

@@ -256,11 +256,16 @@ type (
 		IpAddr     string `json:"ipAddr"`
 	}
 
+	RedirectWeights struct {
+		DistanceWeight     float64 `json:"distanceWeight"`
+		IOLoadWeight       float64 `json:"ioLoadWeight"`
+		StatusWeight       float64 `json:"statusWeight"`
+		AvailabilityWeight float64 `json:"availabilityWeight"`
+	}
+
 	ServerRedirectInfo struct {
-		HasObject    string  `json:"hasObject"`
-		LoadWeight   float64 `json:"loadWeight"`
-		StatusWeight float64 `json:"statusWeight"` // The current EWMA-derived weight for this server's status, populated by the Director
 		Coordinate      Coordinate
+		RedirectWeights RedirectWeights
 	}
 
 	RedirectInfo struct {
