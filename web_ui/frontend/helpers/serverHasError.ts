@@ -3,7 +3,7 @@ import { ServerGeneral } from '@/types';
 const serverHasError = (server?: ServerGeneral) => {
   return (
     server?.healthStatus === 'Error' ||
-    ['shuttingdown', 'critical', 'degraded', 'warning'].includes(
+    ['shutting down', 'critical', 'degraded', 'warning'].includes(
       server?.serverStatus || ''
     )
   );

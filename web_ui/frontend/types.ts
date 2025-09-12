@@ -49,11 +49,11 @@ interface ServerBase {
   fromTopology: boolean;
   healthStatus: string;
   serverStatus:
-    | 'shuttingdown'
+    | 'shutting down'
     | 'critical'
     | 'degraded'
     | 'warning'
-    | 'okay'
+    | 'ok'
     | 'unknown';
   ioLoad: number;
 }
