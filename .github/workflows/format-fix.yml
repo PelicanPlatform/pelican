@@ -1,11 +1,11 @@
-name: Format and Push
+name: Format and Push Web UI
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
 
 jobs:
-  format:
+  format_web_ui:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
