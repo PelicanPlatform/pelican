@@ -211,10 +211,10 @@ func WaitUntilWorking(ctx context.Context, method, reqUrl, server string, expect
 			msg := fmt.Sprintf("url %s didn't respond with the expected status code %d within the timeout of %s (%s)",
 				reqUrl, expectedStatus, param.Server_StartupTimeout.GetDuration().String(), param.Server_StartupTimeout.GetName())
 			if lastStatusErr != nil {
-				return errors.Wrapf(lastStatusErr, msg)
+				return errors.Wrap(lastStatusErr, msg)
 			}
 			if lastConnErr != nil {
-				return errors.Wrapf(lastConnErr, msg)
+				return errors.Wrap(lastConnErr, msg)
 			}
 			return errors.Wrap(ctx.Err(), msg) // context was canceled or deadline exceeded
 		}
