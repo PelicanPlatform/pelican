@@ -24,17 +24,22 @@ repos:
     hooks:
     -   id: trailing-whitespace
         exclude: github_scripts/pelican_protocol.patch
+        stages: [manual]
     -   id: end-of-file-fixer
+        stages: [manual]
     -   id: check-yaml
         # Multi-documents are yaml files with multiple --- separating blocks, like
         # in our docs/parameters.yaml. We need this argument so those parse.
         args: [--allow-multiple-documents]
+        stages: [manual]
     -   id: check-added-large-files
         args: ['--maxkb=1024']
+        stages: [commit]
 -   repo: https://github.com/golangci/golangci-lint
     rev: v1.64.8
     hooks:
     -   id: golangci-lint
+        stages: [push]
 -   repo: https://github.com/crate-ci/typos
     rev: v1.28.2
     hooks:
@@ -42,8 +47,10 @@ repos:
         # Override the default arguments, which include writing back all
         # suggested changes. We don't want false positives to mangle files.
         args: [--force-exclude, --sort]
+        stages: [push]
 -   repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.10.0.1
     hooks:
     -   id: shellcheck
         args: [--severity=warning]
+        stages: [push]
